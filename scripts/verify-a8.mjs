@@ -3,7 +3,7 @@
  * A8 gate: a broken row id must fail dump-config verification.
  * Mutates the sandbox coding patch, asserts verify fails, restores the file.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -19,7 +19,15 @@ if (resolve(HOME).toLowerCase() === resolve(REAL).toLowerCase()) {
 }
 
 function dshBin() {
-  return join(process.env.APPDATA || "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+  const win = process.env.APPDATA
+    ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
+    : "";
+  if (win && existsSync(win)) return win;
+  const probe = spawnSync("npm", ["root", "-g"], { encoding: "utf8", shell: true });
+  const root = (probe.stdout || "").trim();
+  const candidate = join(root, "@deepseek-ai", "dsh", "lib", "bin.js");
+  if (existsSync(candidate)) return candidate;
+  throw new Error("dsh CLI not found");
 }
 
 function dump() {
