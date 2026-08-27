@@ -45,7 +45,11 @@ export function runDsh(
   const timeoutMs = options.timeoutMs ?? 180_000;
   return new Promise((resolvePromise, reject) => {
     const child = spawnNode([dshBin(), ...args], {
-      env: { ...process.env, DSH_HOME: dshHome },
+      env: {
+        ...process.env,
+        DSH_HOME: dshHome,
+        npm_config_ignore_workspace_root_check: "true",
+      },
       windowsHide: true,
     });
     let stdout = "";
