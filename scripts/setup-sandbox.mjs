@@ -29,11 +29,15 @@ function run(args) {
   const result = spawnSync(process.execPath, [dshBin(), ...args], {
     env: { ...process.env, DSH_HOME: HOME },
     encoding: "utf8",
+    timeout: 180_000,
   });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.status !== 0) {
-    throw new Error(`dsh ${args.join(" ")} failed:\n${result.stderr || result.stdout}`);
+    const detail = [result.stderr, result.stdout, result.error?.message].filter(Boolean).join("\n");
+    throw new Error(`dsh ${args.join(" ")} failed (${result.status}):\n${detail}`);
   }
-  return result.stdout;
+  return result.stdout || "";
 }
 
 function version() {

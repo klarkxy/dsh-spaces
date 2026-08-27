@@ -11,6 +11,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -19,7 +22,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: Install DSH CLI
-        run: npm install -g pnpm @deepseek-ai/dsh@0.1.1-rc.2
+        run: |
+          pnpm --version
+          npm install -g @deepseek-ai/dsh@0.1.1-rc.2
+          dsh --version
       - name: Setup sandbox profiles
         run: node scripts/setup-sandbox.mjs
       - name: Isolation gate
