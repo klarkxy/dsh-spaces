@@ -13,7 +13,7 @@
  * Never points DSH_HOME at the user's real ~/.dsh.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -131,21 +131,15 @@ function cleanData(home) {
 }
 
 function dshBin() {
-  const npmRoot =
-    process.env.APPDATA && process.platform === "win32"
-      ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
-      : join(
-          dirname(process.execPath),
-          "..",
-          "lib",
-          "node_modules",
-          "@deepseek-ai",
-          "dsh",
-          "lib",
-          "bin.js",
-        );
-  if (existsSync(npmRoot)) return npmRoot;
-  return "dsh";
+  const win = process.env.APPDATA
+    ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
+    : "";
+  if (win && existsSync(win)) return win;
+  const probe = spawnSync("npm", ["root", "-g"], { encoding: "utf8", shell: true });
+  const root = (probe.stdout || "").trim();
+  const candidate = join(root, "@deepseek-ai", "dsh", "lib", "bin.js");
+  if (existsSync(candidate)) return candidate;
+  throw new Error("dsh CLI not found; install @deepseek-ai/dsh globally");
 }
 
 function spawnProfile(home, profile, logDir) {
@@ -192,6 +186,9 @@ function spawnProfile(home, profile, logDir) {
   child.on("error", (err) => {
     writeFileSync(logPath, `\nspawn error: ${err.stack || err}\n`, { flag: "a" });
   });
+  if (!child.pid) {
+    throw new Error(`failed to spawn ${profile.name}; see ${logPath}`);
+  }
   return { child, logPath, pid: child.pid };
 }
 
