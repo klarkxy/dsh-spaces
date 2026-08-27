@@ -5,14 +5,21 @@
  * restarts coding, asserts web and writing still answer.
  */
 
-import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOME = resolve(__dirname, "../.sandbox/dsh-home");
+const args = process.argv.slice(2);
+let homeArg;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--home") homeArg = args[++i];
+  else if (args[i].startsWith("--home=")) homeArg = args[i].slice("--home=".length);
+}
+const HOME = resolve(homeArg || join(__dirname, "../.sandbox/dsh-home"));
 const REAL = join(process.env.USERPROFILE || process.env.HOME || "", ".dsh");
 const HOST = "127.0.0.1";
 const PROFILES = [
@@ -22,7 +29,15 @@ const PROFILES = [
 ];
 
 function dshBin() {
-  return join(process.env.APPDATA || "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+  const win = process.env.APPDATA
+    ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
+    : "";
+  if (win && existsSync(win)) return win;
+  const probe = spawnSync("npm", ["root", "-g"], { encoding: "utf8", shell: true });
+  const root = (probe.stdout || "").trim();
+  const candidate = join(root, "@deepseek-ai", "dsh", "lib", "bin.js");
+  if (existsSync(candidate)) return candidate;
+  throw new Error("dsh CLI not found");
 }
 
 function info(m) {
