@@ -1,0 +1,86 @@
+#!/usr/bin/env node
+/**
+ * Create sandbox profiles for CI / local isolation runs.
+ * Never points DSH_HOME at the real ~/.dsh.
+ */
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const HOME = resolve(process.argv[2] || join(REPO, ".sandbox", "dsh-home"));
+const REAL = join(homedir(), ".dsh");
+
+function dshBin() {
+  const win = process.env.APPDATA
+    ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
+    : "";
+  if (win && existsSync(win)) return win;
+  const probe = spawnSync("npm", ["root", "-g"], { encoding: "utf8", shell: true });
+  const root = (probe.stdout || "").trim();
+  const candidate = join(root, "@deepseek-ai", "dsh", "lib", "bin.js");
+  if (existsSync(candidate)) return candidate;
+  throw new Error("dsh CLI not found; install @deepseek-ai/dsh globally");
+}
+
+function run(args) {
+  const result = spawnSync(process.execPath, [dshBin(), ...args], {
+    env: { ...process.env, DSH_HOME: HOME },
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(`dsh ${args.join(" ")} failed:\n${result.stderr || result.stdout}`);
+  }
+  return result.stdout;
+}
+
+function version() {
+  const text = run(["--version"]);
+  const match = text.match(/(\d+\.\d+\.\d+(?:-[\w.]+)?)/);
+  if (!match) throw new Error(`could not parse dsh version: ${text}`);
+  return match[1];
+}
+
+function writePatch(name) {
+  const path = join(HOME, "profiles", name, "cordis.patch.yml");
+  writeFileSync(
+    path,
+    `# DSH Spaces workbench isolation: dual-root overlay.
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('hub/${name}/sessions')
+- id: storage-json
+  config:
+    root: !!js dshHomePath('hub/${name}/storages')
+`,
+    "utf8",
+  );
+}
+
+function main() {
+  if (resolve(HOME).toLowerCase() === resolve(REAL).toLowerCase()) {
+    throw new Error("refusing real ~/.dsh");
+  }
+  mkdirSync(HOME, { recursive: true });
+  console.log(`INFO  sandbox ${HOME}`);
+  run(["--profile", "web", "--dump-config"]);
+  const ver = version();
+  for (const name of ["coding", "writing"]) {
+    const dir = join(HOME, "profiles", name);
+    if (!existsSync(join(dir, "package.json"))) {
+      console.log(`INFO  creating ${name} with dsh-web-app@${ver}`);
+      run(["plugin", "--profile", name, "add", `@deepseek-ai/dsh-web-app@${ver}`]);
+    }
+    writePatch(name);
+    const dump = run(["--profile", name, "--dump-config"]);
+    if (!dump.includes(`hub/${name}/sessions`) || !dump.includes(`hub/${name}/storages`)) {
+      throw new Error(`${name} dump-config did not pick up hub roots`);
+    }
+    console.log(`INFO  ${name} patched`);
+  }
+  console.log("SETUP SANDBOX: OK");
+}
+
+main();
