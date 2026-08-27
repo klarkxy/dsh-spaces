@@ -139,7 +139,7 @@
 - [x] 3.4 启动超时、端口探活失败、进程崩溃的用户可见错误提示 + 一键重启
 - [x] 3.5 设置页：DSH_HOME 路径、端口范围、退出行为
 - [x] 3.6 阶段 0 脚本接入 GitHub Actions（Windows runner 起步），作为发布门
-- **阶段 3 出口判据 = 验收 A1–A10 全部通过 + CI 绿**（workflow 已写；远端绿需推仓库）
+- **阶段 3 出口判据 = 验收 A1–A10 全部通过 + CI 绿**（Windows runner；`dsh plugin` 需要全局 pnpm）
 
 ---
 
@@ -148,8 +148,8 @@
 - [x] 4.1 electron-builder 三平台打包配置；electron-updater 在打包后检查 GitHub Releases
 - [x] 4.2 README 中英双语：一句话定位、竞品差异表、安全设计说明（web 零写入/备份/无遥测）
 - [x] 4.3 MIT LICENSE、CONTRIBUTING.md
-- [ ] 4.4 建 GitHub 仓库 `dsh-spaces`，topics：`deepseek-harness` `dsh` `desktop-app` `electron` `profile-manager`
-- [ ] 4.5 发 v0.1.0
+- [x] 4.4 建 GitHub 仓库 `dsh-spaces`，topics：`deepseek-harness` `dsh` `desktop-app` `electron` `profile-manager`
+- [x] 4.5 发 v0.1.0
 
 ---
 
