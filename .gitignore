@@ -1,0 +1,55 @@
+# Isolation sandbox — never commit live DSH_HOME data
+.sandbox/
+
+# Dependencies
+node_modules/
+dist/
+out/
+release/
+
+# Logs / OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Electron
+*.asar
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+dist/
+out/
+release/
+
+# Logs / OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Electron
+*.asar
