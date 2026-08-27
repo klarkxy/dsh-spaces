@@ -27,7 +27,12 @@ function dshBin() {
 
 function run(args) {
   const result = spawnSync(process.execPath, [dshBin(), ...args], {
-    env: { ...process.env, DSH_HOME: HOME },
+    env: {
+      ...process.env,
+      DSH_HOME: HOME,
+      // Official profiles are themselves pnpm workspaces; pnpm 9 refuses `add` without -w.
+      npm_config_ignore_workspace_root_check: "true",
+    },
     encoding: "utf8",
     timeout: 180_000,
   });
