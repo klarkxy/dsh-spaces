@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import type {
+  CliEnsureStatus,
   CreateProgress,
   HubSettings,
   OnboardingScan,
+  PackageSource,
   PluginQueueSnapshot,
   PresetIcon,
   ProfileRecord,
 } from "@shared/types";
+import { inferPackageSource } from "@shared/types";
+import { CliSetup } from "./components/CliSetup";
 import { CreateWizard } from "./components/CreateWizard";
 import { DeleteDialog } from "./components/DeleteDialog";
 import { IconDialog, RenameDialog } from "./components/MetaDialogs";
@@ -28,6 +32,11 @@ export default function App() {
   const [dshHome, setDshHome] = useState("");
   const [progress, setProgress] = useState<CreateProgress | null>(null);
   const [queue, setQueue] = useState<PluginQueueSnapshot>({ pending: 0 });
+  const [cli, setCli] = useState<CliEnsureStatus>({
+    state: "idle",
+    message: "Node, pnpm, and the DSH CLI will be installed into app data.",
+  });
+  const [packageSource, setPackageSource] = useState<PackageSource>(inferPackageSource());
   const [tip, setTip] = useState<{ text: string; top: number } | null>(null);
 
   const refresh = async () => {
@@ -38,30 +47,52 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
+    const loadHub = async () => {
+      const [home, onboarding, hubSettings, snap] = await Promise.all([
+        window.dshSpaces.getDshHome(),
+        window.dshSpaces.getOnboarding(),
+        window.dshSpaces.getSettings(),
+        window.dshSpaces.getPluginQueue(),
+      ]);
+      if (cancelled) return;
+      setDshHome(home);
+      setScan(onboarding);
+      setSettings(hubSettings);
+      setQueue(snap);
+      if (!onboarding.onboarded) setOverlay("onboarding");
+      await refresh();
+    };
+    const finishRuntime = async (bin: string) => {
+      if (cancelled) return;
+      setCli({ state: "ready", message: bin });
+      await loadHub();
+    };
+    const bootstrap = async () => {
       try {
-        const [home, onboarding, hubSettings, snap] = await Promise.all([
-          window.dshSpaces.getDshHome(),
-          window.dshSpaces.getOnboarding(),
+        const [initialCli, runtime, hubSettings] = await Promise.all([
+          window.dshSpaces.getCliStatus(),
+          window.dshSpaces.getRuntimeStatus(),
           window.dshSpaces.getSettings(),
-          window.dshSpaces.getPluginQueue(),
         ]);
         if (cancelled) return;
-        setDshHome(home);
-        setScan(onboarding);
+        setCli(initialCli);
+        setPackageSource(runtime.packageSource || hubSettings.packageSource);
         setSettings(hubSettings);
-        setQueue(snap);
-        if (!onboarding.onboarded) setOverlay("onboarding");
-        await refresh();
+        if (runtime.node && runtime.pnpm && runtime.cli) {
+          const bin = await window.dshSpaces.ensureCli(runtime.packageSource);
+          await finishRuntime(bin);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }
-    })();
+    };
     const offStatus = window.dshSpaces.onStatus(() => {
       void refresh();
     });
     const offProgress = window.dshSpaces.onCreateProgress((payload) => setProgress(payload));
     const offQueue = window.dshSpaces.onPluginQueue((payload) => setQueue(payload));
+    const offCli = window.dshSpaces.onCliStatus((payload) => setCli(payload));
+    void bootstrap();
     const offUi = window.dshSpaces.onUiCommand((payload) => {
       if (payload.type === "error" && payload.message) setError(payload.message);
       if (payload.type === "rename" && payload.name) {
@@ -82,11 +113,13 @@ export default function App() {
       offStatus();
       offProgress();
       offQueue();
+      offCli();
       offUi();
     };
   }, []);
 
-  const overlayOpen = overlay !== null;
+  const cliBusy = cli.state !== "ready";
+  const overlayOpen = overlay !== null || cliBusy;
   useEffect(() => {
     void window.dshSpaces.setOverlayOpen(overlayOpen);
   }, [overlayOpen]);
@@ -170,7 +203,38 @@ export default function App() {
             </div>
           </div>
         ) : null}
-        {overlay === "onboarding" && scan ? (
+        {cliBusy ? (
+          <CliSetup
+            status={cli}
+            packageSource={packageSource}
+            onPackageSource={setPackageSource}
+            onInstall={(source) => {
+              setError("");
+              setPackageSource(source);
+              setCli({ state: "installing", step: "node", message: "Starting…" });
+              void window.dshSpaces
+                .ensureCli(source)
+                .then(async (bin) => {
+                  setCli({ state: "ready", message: bin });
+                  const [home, onboarding, hubSettings, snap] = await Promise.all([
+                    window.dshSpaces.getDshHome(),
+                    window.dshSpaces.getOnboarding(),
+                    window.dshSpaces.getSettings(),
+                    window.dshSpaces.getPluginQueue(),
+                  ]);
+                  setDshHome(home);
+                  setScan(onboarding);
+                  setSettings(hubSettings);
+                  setQueue(snap);
+                  if (!onboarding.onboarded) setOverlay("onboarding");
+                  await refresh();
+                })
+                .catch((err: unknown) => {
+                  setError(err instanceof Error ? err.message : String(err));
+                });
+            }}
+          />
+        ) : overlay === "onboarding" && scan ? (
           <Onboarding
             scan={scan}
             busy={Boolean(busy)}

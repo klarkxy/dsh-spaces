@@ -1,52 +1,285 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { execSync, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { join } from "node:path";
-import type { PluginQueueSnapshot } from "../shared/types";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../shared/types";
+import { npmRegistry } from "./package-source";
+import {
+  currentPackageSource,
+  ensureNode,
+  ensurePnpm,
+  nodeExecutable,
+  npmCliJs,
+  pnpmCjs,
+  runProcess,
+  runtimeProbe,
+  setPackageSource,
+  toolchainEnv,
+} from "./toolchain";
+
+export const DSH_CLI_SPEC = "@deepseek-ai/dsh@0.1.1-rc.2";
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 let cachedBin: string | undefined;
+let managedPrefixOverride: string | undefined;
+let ensuring: Promise<string> | undefined;
+let cliStatus: CliEnsureStatus = {
+  state: "idle",
+  message: "Node, pnpm, and the DSH CLI will be installed into app data.",
+};
+const cliListeners = new Set<(status: CliEnsureStatus) => void>();
 
-export function dshBin(): string {
-  if (cachedBin) return cachedBin;
-  const candidates: string[] = [];
-  if (process.platform === "win32" && process.env.APPDATA) {
-    candidates.push(join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
-  }
-  try {
-    const root = execSync("npm root -g", { encoding: "utf8" }).trim();
-    candidates.push(join(root, "@deepseek-ai", "dsh", "lib", "bin.js"));
-  } catch {
-    /* ignore */
-  }
-  const found = candidates.find((path) => existsSync(path));
-  if (!found) {
-    throw new Error("dsh CLI not found. Install @deepseek-ai/dsh globally and retry.");
-  }
-  cachedBin = found;
-  return cachedBin;
+function binUnder(nodeModulesRoot: string): string {
+  return join(nodeModulesRoot, "@deepseek-ai", "dsh", "lib", "bin.js");
 }
 
-/** Electron's process.execPath is the app binary; force Node mode so dsh actually runs. */
+export function setManagedCliPrefix(prefix: string): void {
+  managedPrefixOverride = resolve(prefix);
+}
+
+export function managedCliPrefix(): string {
+  if (process.env.DSH_SPACES_CLI) return resolve(process.env.DSH_SPACES_CLI);
+  if (managedPrefixOverride) return managedPrefixOverride;
+  if (process.env.APPDATA) return join(process.env.APPDATA, "dsh-spaces", "dsh-cli");
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support", "dsh-spaces", "dsh-cli");
+  }
+  return join(homedir(), ".config", "dsh-spaces", "dsh-cli");
+}
+
+export function dshBinCandidates(options: {
+  managedPrefix?: string;
+  appData?: string;
+  npmGlobalRoot?: string;
+} = {}): string[] {
+  const prefix = options.managedPrefix ?? managedCliPrefix();
+  const appData = options.appData ?? process.env.APPDATA;
+  const candidates: string[] = [binUnder(join(prefix, "node_modules"))];
+  if (appData) {
+    candidates.push(binUnder(join(appData, "npm", "node_modules")));
+  }
+  if (options.npmGlobalRoot) {
+    candidates.push(binUnder(options.npmGlobalRoot));
+  }
+  return candidates;
+}
+
+function probeNpmGlobalRoot(): string | undefined {
+  try {
+    const root = execSync("npm root -g", {
+      encoding: "utf8",
+      timeout: 15_000,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return root || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function findDshBin(): string | undefined {
+  if (cachedBin && existsSync(cachedBin)) return cachedBin;
+  const candidates = dshBinCandidates({ npmGlobalRoot: probeNpmGlobalRoot() });
+  const found = candidates.find((path) => existsSync(path));
+  if (found) cachedBin = found;
+  return found;
+}
+
+export function resetDshBinCache(): void {
+  cachedBin = undefined;
+  ensuring = undefined;
+}
+
+function setCliStatus(next: CliEnsureStatus): void {
+  cliStatus = next;
+  for (const listener of cliListeners) listener(cliStatus);
+}
+
+export function cliStatusSnapshot(): CliEnsureStatus {
+  return cliStatus;
+}
+
+export function onCliStatus(listener: (status: CliEnsureStatus) => void): () => void {
+  cliListeners.add(listener);
+  return () => cliListeners.delete(listener);
+}
+
+export function dshBin(): string {
+  const found = findDshBin();
+  if (!found) {
+    throw new Error("dsh CLI not found. It is installed automatically on first launch.");
+  }
+  return found;
+}
+
+async function runManagedInstall(
+  argsForPnpm: string[],
+  argsForNpm: string[],
+  onLine: (line: string) => void,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const node = nodeExecutable();
+  if (!node) throw new Error("Managed Node is not installed");
+  const pnpmJs = pnpmCjs();
+  if (pnpmJs) {
+    return runProcess(node, [pnpmJs, ...argsForPnpm], { onLine, timeoutMs: INSTALL_TIMEOUT_MS });
+  }
+  const npmJs = npmCliJs();
+  if (npmJs) {
+    return runProcess(node, [npmJs, ...argsForNpm], { onLine, timeoutMs: INSTALL_TIMEOUT_MS });
+  }
+  throw new Error("Neither pnpm nor npm is available in the managed toolchain");
+}
+
+async function installManagedCli(): Promise<string> {
+  const prefix = managedCliPrefix();
+  const bin = binUnder(join(prefix, "node_modules"));
+  mkdirSync(prefix, { recursive: true });
+  writeFileSync(join(prefix, ".npmrc"), `registry=${npmRegistry(currentPackageSource())}\n`, "utf8");
+  writeFileSync(
+    join(prefix, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "dsh-spaces-cli",
+        private: true,
+        description: "Managed DSH CLI install for DSH Spaces",
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  const onLine = (line: string) => {
+    setCliStatus({ state: "installing", step: "cli", message: line.slice(0, 200) });
+  };
+
+  setCliStatus({
+    state: "installing",
+    step: "cli",
+    message: `Installing ${DSH_CLI_SPEC}…`,
+  });
+  console.log(`dsh-cli: installing ${DSH_CLI_SPEC} into ${prefix}`);
+  try {
+    const result = await runManagedInstall(
+      ["add", "--dir", prefix, DSH_CLI_SPEC],
+      ["install", "--prefix", prefix, "--no-fund", "--no-audit", "--loglevel", "notice", DSH_CLI_SPEC],
+      onLine,
+    );
+    if (existsSync(bin)) return bin;
+    throw new Error((result.stderr || result.stdout).slice(0, 800) || `install exited ${result.code}`);
+  } catch (err) {
+    if (existsSync(bin)) return bin;
+    throw err;
+  }
+}
+
+async function doEnsure(): Promise<string> {
+  setCliStatus({ state: "checking", message: "Looking for DSH CLI…" });
+  const existing = findDshBin();
+  if (existing) {
+    setCliStatus({ state: "ready", message: existing });
+    return existing;
+  }
+  setCliStatus({
+    state: "installing",
+    message: `Installing ${DSH_CLI_SPEC}…`,
+  });
+  try {
+    const bin = await installManagedCli();
+    cachedBin = bin;
+    setCliStatus({ state: "ready", message: bin });
+    return bin;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setCliStatus({ state: "error", message });
+    throw err;
+  }
+}
+
+export function ensureDshCli(): Promise<string> {
+  const existing = findDshBin();
+  if (existing) {
+    if (cliStatus.state !== "ready") {
+      setCliStatus({ state: "ready", message: existing });
+    }
+    return Promise.resolve(existing);
+  }
+  if (!ensuring) {
+    ensuring = doEnsure().finally(() => {
+      ensuring = undefined;
+    });
+  }
+  return ensuring;
+}
+
+export function getRuntimeStatus(): RuntimeStatus {
+  const probe = runtimeProbe();
+  return { ...probe, cli: Boolean(findDshBin()) };
+}
+
+let ensuringRuntime: Promise<string> | undefined;
+
+export function ensureRuntime(source?: PackageSource): Promise<string> {
+  if (!ensuringRuntime) {
+    ensuringRuntime = doEnsureRuntime(source).finally(() => {
+      ensuringRuntime = undefined;
+    });
+  }
+  return ensuringRuntime;
+}
+
+async function doEnsureRuntime(source?: PackageSource): Promise<string> {
+  try {
+    if (source) setPackageSource(source);
+    const existing = findDshBin();
+    if (existing && nodeExecutable() && pnpmCjs()) {
+      setCliStatus({ state: "ready", message: existing });
+      return existing;
+    }
+    setCliStatus({ state: "installing", step: "node", message: `Installing Node…` });
+    await ensureNode((line) => {
+      setCliStatus({ state: "installing", step: "node", message: line.slice(0, 200) });
+    });
+    setCliStatus({ state: "installing", step: "pnpm", message: "Installing pnpm…" });
+    await ensurePnpm((line) => {
+      setCliStatus({ state: "installing", step: "pnpm", message: line.slice(0, 200) });
+    });
+    setCliStatus({ state: "installing", step: "cli", message: `Installing ${DSH_CLI_SPEC}…` });
+    const bin = await ensureDshCli();
+    setCliStatus({ state: "ready", message: bin });
+    return bin;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setCliStatus({ state: "error", message });
+    throw err;
+  }
+}
+
+/** Prefer the managed Node; fall back to Electron-as-Node only if Node is not installed yet. */
 export function spawnNode(args: string[], options: SpawnOptions = {}): ChildProcess {
-  return spawn(process.execPath, args, {
+  const managed = nodeExecutable();
+  const exe = managed ?? process.execPath;
+  const usingElectron = !managed;
+  const env = toolchainEnv({ ...(options.env as Record<string, string | undefined> | undefined) });
+  if (usingElectron) env.ELECTRON_RUN_AS_NODE = "1";
+  else delete env.ELECTRON_RUN_AS_NODE;
+  return spawn(exe, args, {
     ...options,
-    env: {
-      ...process.env,
-      ...options.env,
-      ELECTRON_RUN_AS_NODE: "1",
-    },
+    env,
   });
 }
 
-export function runDsh(
+export async function runDsh(
   dshHome: string,
   args: string[],
   options: { timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const timeoutMs = options.timeoutMs ?? 180_000;
+  const bin = await ensureDshCli();
   return new Promise((resolvePromise, reject) => {
-    const child = spawnNode([dshBin(), ...args], {
+    const child = spawnNode([bin, ...args], {
       env: {
-        ...process.env,
         DSH_HOME: dshHome,
         npm_config_ignore_workspace_root_check: "true",
       },

@@ -1,8 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_HUB_SETTINGS, type HubSettings } from "../shared/types";
+import {
+  DEFAULT_HUB_SETTINGS,
+  inferPackageSource,
+  type HubSettings,
+  type PackageSource,
+} from "../shared/types";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
+
+function parsePackageSource(value: unknown): PackageSource {
+  if (value === "china" || value === "official") return value;
+  return inferPackageSource();
+}
 
 export function settingsPath(dshHome: string): string {
   return join(dshHome, "hub", "settings.json");
@@ -20,6 +30,7 @@ export function readSettings(dshHome: string): HubSettings {
       portStart,
       portEnd: portEnd >= portStart ? portEnd : portStart,
       quitBehavior: parsed.quitBehavior === "keep" ? "keep" : "stop",
+      packageSource: parsePackageSource(parsed.packageSource),
     };
   } catch {
     return { ...DEFAULT_HUB_SETTINGS };
@@ -38,6 +49,7 @@ export function writeSettings(dshHome: string, settings: HubSettings): HubSettin
     portStart: Math.floor(settings.portStart),
     portEnd: Math.floor(settings.portEnd),
     quitBehavior: settings.quitBehavior === "keep" ? "keep" : "stop",
+    packageSource: parsePackageSource(settings.packageSource),
   };
   atomicWrite(settingsPath(dshHome), `${JSON.stringify(next, null, 2)}\n`);
   return next;
