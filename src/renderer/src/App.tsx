@@ -17,6 +17,7 @@ import { IconDialog, RenameDialog } from "./components/MetaDialogs";
 import { Onboarding } from "./components/Onboarding";
 import { Rail } from "./components/Rail";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { TitleBar } from "./components/TitleBar";
 
 type OverlayKind = "create" | "settings" | "rename" | "icon" | "delete" | "onboarding" | null;
 
@@ -145,8 +146,17 @@ export default function App() {
   const overlayProfile = profiles.find((p) => p.name === target);
 
   return (
-    <div className="flex h-full">
-      <Rail
+    <div className="flex h-full flex-col">
+      <TitleBar
+        busy={busy}
+        queueText={
+          queue.pending > 0 && overlay !== "settings"
+            ? `Plugin queue ${queue.pending}${queue.current ? `: ${queue.current}` : ""}`
+            : undefined
+        }
+      />
+      <div className="flex min-h-0 flex-1">
+        <Rail
         profiles={profiles}
         selected={selected}
         onSelect={(name) => {
@@ -164,27 +174,18 @@ export default function App() {
           if (!profile) setTip(null);
           else setTip({ text: profile.meta.displayName, top });
         }}
-      />
-      <main className="relative flex-1 bg-[#313338]">
+        />
+        <main className="relative flex-1 bg-[#313338]">
         {tip ? (
           <div
-            className="pointer-events-none absolute left-3 z-20 rounded bg-zinc-950 px-3 py-1.5 text-sm shadow-lg"
+            className="pointer-events-none fixed left-[84px] z-20 rounded bg-zinc-950 px-3 py-1.5 text-sm shadow-lg"
             style={{ top: Math.max(12, tip.top - 8) }}
           >
             {tip.text}
           </div>
         ) : null}
-        {busy ? (
-          <p className="pointer-events-none absolute top-3 left-4 z-20 text-sm text-amber-200">{busy}…</p>
-        ) : null}
-        {queue.pending > 0 && overlay !== "settings" ? (
-          <p className="pointer-events-none absolute top-3 right-4 z-20 text-sm text-amber-200">
-            Plugin queue {queue.pending}
-            {queue.current ? `: ${queue.current}` : ""}
-          </p>
-        ) : null}
         {error && !overlay ? (
-          <p className="pointer-events-none absolute top-10 left-4 z-20 max-w-[480px] text-sm text-red-300">
+          <p className="pointer-events-none absolute top-4 left-4 z-20 max-w-[480px] text-sm text-red-300">
             {error}
           </p>
         ) : null}
@@ -316,7 +317,8 @@ export default function App() {
             }
           />
         ) : null}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

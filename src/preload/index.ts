@@ -40,6 +40,16 @@ const api = {
   showProfileMenu: (name: string): Promise<void> => ipcRenderer.invoke("showProfileMenu", name),
   setOverlayOpen: (open: boolean): Promise<void> => ipcRenderer.invoke("setOverlayOpen", open),
   setRailGutter: (width: number): Promise<void> => ipcRenderer.invoke("setRailGutter", width),
+  platform: process.platform,
+  windowMinimize: (): Promise<void> => ipcRenderer.invoke("windowMinimize"),
+  windowToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke("windowToggleMaximize"),
+  windowClose: (): Promise<void> => ipcRenderer.invoke("windowClose"),
+  windowIsMaximized: (): Promise<boolean> => ipcRenderer.invoke("windowIsMaximized"),
+  onWindowMaximized: (listener: (maximized: boolean) => void): (() => void) => {
+    const handler = (_event: unknown, maximized: boolean) => listener(maximized);
+    ipcRenderer.on("window-maximized", handler);
+    return () => ipcRenderer.off("window-maximized", handler);
+  },
   onStatus: (
     listener: (payload: { name: string; status: ProfileStatus; port?: number; error?: string }) => void,
   ): (() => void) => {

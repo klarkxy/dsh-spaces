@@ -44,6 +44,7 @@ function preloadPath(): string {
 }
 
 function createWindow(): BrowserWindow {
+  const isMac = process.platform === "darwin";
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -51,6 +52,10 @@ function createWindow(): BrowserWindow {
     minHeight: 560,
     title: "DSH Spaces",
     backgroundColor: "#1e1f22",
+    frame: isMac,
+    titleBarStyle: isMac ? "hiddenInset" : undefined,
+    trafficLightPosition: isMac ? { x: 12, y: 8 } : undefined,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
@@ -58,6 +63,14 @@ function createWindow(): BrowserWindow {
       sandbox: false,
     },
   });
+
+  if (!isMac) win.setMenuBarVisibility(false);
+
+  const sendMaximized = () => {
+    win.webContents.send("window-maximized", win.isMaximized());
+  };
+  win.on("maximize", sendMaximized);
+  win.on("unmaximize", sendMaximized);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -244,6 +257,22 @@ function registerIpc(): void {
   });
   ipcMain.handle("setRailGutter", (_event, width: number) => {
     views?.setGutter(width);
+  });
+  ipcMain.handle("windowMinimize", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.handle("windowToggleMaximize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return false;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+    return win.isMaximized();
+  });
+  ipcMain.handle("windowClose", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+  ipcMain.handle("windowIsMaximized", (event) => {
+    return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
   });
 }
 
