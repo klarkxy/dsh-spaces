@@ -1,6 +1,7 @@
 import { BrowserWindow, WebContentsView } from "electron";
+import { RAIL_WIDTH, TITLEBAR_HEIGHT } from "../shared/layout";
 
-export const RAIL_WIDTH = 72;
+export { RAIL_WIDTH, TITLEBAR_HEIGHT };
 
 export class ViewManager {
   private readonly views = new Map<string, WebContentsView>();
@@ -56,9 +57,9 @@ export class ViewManager {
       if (visible) {
         child.setBounds({
           x: inset,
-          y: 0,
+          y: TITLEBAR_HEIGHT,
           width: Math.max(0, bounds.width - inset),
-          height: bounds.height,
+          height: Math.max(0, bounds.height - TITLEBAR_HEIGHT),
         });
       }
     }

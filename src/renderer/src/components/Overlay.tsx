@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TITLEBAR_HEIGHT } from "@shared/layout";
 
 export function Overlay({
   children,
@@ -8,7 +9,10 @@ export function Overlay({
   onBackdrop?: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60">
+    <div
+      className="fixed right-0 bottom-0 left-0 z-30 flex items-center justify-center bg-black/60"
+      style={{ top: TITLEBAR_HEIGHT }}
+    >
       <button
         type="button"
         aria-label="Close"

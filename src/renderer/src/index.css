@@ -12,3 +12,13 @@ body,
     system-ui,
     sans-serif;
 }
+
+.app-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
