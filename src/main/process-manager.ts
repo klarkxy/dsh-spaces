@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createConnection, createServer } from "node:net";
 import type { ProfileStatus } from "../shared/types";
-import { dshBin, spawnNode } from "./dsh-cli";
+import { ensureDshCli, spawnNode } from "./dsh-cli";
 import { PatchWriter, PatchVerifyError } from "./patch-writer";
 
 export type StatusListener = (
@@ -181,14 +181,15 @@ export class ProcessManager {
       }
     }
 
+    const bin = await ensureDshCli();
     const used = new Set([...this.instances.values()].map((item) => item.port));
     const port = await pickFreePort(this.portStart, this.portEnd, used);
     this.emit(name, "starting", { port });
 
     const child = spawnNode(
-      [dshBin(), "--profile", name, "--no-open", "--host", "127.0.0.1", "--port", String(port)],
+      [bin, "--profile", name, "--no-open", "--host", "127.0.0.1", "--port", String(port)],
       {
-        env: { ...process.env, DSH_HOME: this.dshHome },
+        env: { DSH_HOME: this.dshHome },
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       },

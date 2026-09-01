@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  CliEnsureStatus,
   CreateProgress,
   HubSettings,
   OnboardingScan,
+  PackageSource,
   PluginQueueSnapshot,
   ProfileRecord,
   ProfileStatus,
+  RuntimeStatus,
   SpaceMeta,
 } from "../shared/types";
 
@@ -18,6 +21,9 @@ const api = {
   saveSettings: (settings: HubSettings): Promise<HubSettings> =>
     ipcRenderer.invoke("saveSettings", settings),
   getPluginQueue: (): Promise<PluginQueueSnapshot> => ipcRenderer.invoke("getPluginQueue"),
+  getCliStatus: (): Promise<CliEnsureStatus> => ipcRenderer.invoke("getCliStatus"),
+  getRuntimeStatus: (): Promise<RuntimeStatus> => ipcRenderer.invoke("getRuntimeStatus"),
+  ensureCli: (source?: PackageSource): Promise<string> => ipcRenderer.invoke("ensureCli", source),
   startProfile: (name: string): Promise<{ port: number }> => ipcRenderer.invoke("startProfile", name),
   stopProfile: (name: string): Promise<void> => ipcRenderer.invoke("stopProfile", name),
   restartProfile: (name: string): Promise<{ port: number }> => ipcRenderer.invoke("restartProfile", name),
@@ -53,6 +59,11 @@ const api = {
     const handler = (_event: unknown, payload: PluginQueueSnapshot) => listener(payload);
     ipcRenderer.on("plugin-queue", handler);
     return () => ipcRenderer.off("plugin-queue", handler);
+  },
+  onCliStatus: (listener: (payload: CliEnsureStatus) => void): (() => void) => {
+    const handler = (_event: unknown, payload: CliEnsureStatus) => listener(payload);
+    ipcRenderer.on("cli-status", handler);
+    return () => ipcRenderer.off("cli-status", handler);
   },
   onUiCommand: (
     listener: (payload: { type: string; name?: string; message?: string }) => void,

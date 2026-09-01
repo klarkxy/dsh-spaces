@@ -29,10 +29,14 @@ export interface SpacesFile {
 
 export type QuitBehavior = "stop" | "keep";
 
+/** npm/Node download origin. China uses npmmirror; official uses npmjs + nodejs.org. */
+export type PackageSource = "china" | "official";
+
 export interface HubSettings {
   portStart: number;
   portEnd: number;
   quitBehavior: QuitBehavior;
+  packageSource: PackageSource;
 }
 
 export interface OnboardingProfile {
@@ -59,6 +63,23 @@ export interface PluginQueueSnapshot {
   current?: string;
 }
 
+export type CliEnsureState = "idle" | "checking" | "installing" | "ready" | "error";
+
+export type CliEnsureStep = "node" | "pnpm" | "cli";
+
+export interface CliEnsureStatus {
+  state: CliEnsureState;
+  message: string;
+  step?: CliEnsureStep;
+}
+
+export interface RuntimeStatus {
+  node: boolean;
+  pnpm: boolean;
+  cli: boolean;
+  packageSource: PackageSource;
+}
+
 export const RESERVED_PROFILE_NAMES = ["web", "hub", "headless", "node_modules"] as const;
 
 export const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
@@ -82,6 +103,12 @@ export const DEFAULT_HUB_SETTINGS: HubSettings = {
   portStart: 3100,
   portEnd: 3199,
   quitBehavior: "stop",
+  packageSource: inferPackageSource(),
 };
+
+export function inferPackageSource(locale?: string): PackageSource {
+  const value = locale ?? Intl.DateTimeFormat().resolvedOptions().locale;
+  return /^zh([-_]|$)/i.test(value) ? "china" : "official";
+}
 
 export const ONBOARDING_NOTICE = "你的历史聊天统一由 web 维护，工作台从全新会话开始";

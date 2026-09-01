@@ -1,11 +1,20 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HubSettings, SpaceMeta } from "../shared/types";
+import type { HubSettings, PackageSource, SpaceMeta } from "../shared/types";
 import { createProfile } from "./create-profile";
 import { resolveDshHome } from "./dsh-home";
-import { onPluginQueue, pluginQueueSnapshot } from "./dsh-cli";
+import {
+  cliStatusSnapshot,
+  ensureRuntime,
+  getRuntimeStatus,
+  onCliStatus,
+  onPluginQueue,
+  pluginQueueSnapshot,
+  setManagedCliPrefix,
+} from "./dsh-cli";
 import { readSettings, writeSettings } from "./hub-settings";
+import { setPackageSource, setToolchainRoot } from "./toolchain";
 import { confirmOnboarding } from "./onboarding";
 import { PatchWriter } from "./patch-writer";
 import { ProcessManager } from "./process-manager";
@@ -160,9 +169,17 @@ function registerIpc(): void {
   ipcMain.handle("saveSettings", (_event, next: HubSettings) => {
     currentSettings = writeSettings(dshHome, next);
     processes.setPortRange(currentSettings.portStart, currentSettings.portEnd);
+    setPackageSource(currentSettings.packageSource);
     return currentSettings;
   });
   ipcMain.handle("getPluginQueue", () => pluginQueueSnapshot());
+  ipcMain.handle("getCliStatus", () => cliStatusSnapshot());
+  ipcMain.handle("getRuntimeStatus", () => getRuntimeStatus());
+  ipcMain.handle("ensureCli", (_event, source?: PackageSource) => {
+    const next = source ?? currentSettings.packageSource;
+    currentSettings = writeSettings(dshHome, { ...currentSettings, packageSource: next });
+    return ensureRuntime(next);
+  });
   ipcMain.handle("startProfile", async (_event, name: string) => startAndShow(name));
   ipcMain.handle("stopProfile", async (_event, name: string) => {
     views?.destroy(name);
@@ -238,11 +255,16 @@ processes.onStatus((name, status, extra) => {
 });
 
 onPluginQueue((snap) => broadcast("plugin-queue", snap));
+onCliStatus((status) => broadcast("cli-status", status));
 
 void app.whenReady().then(async () => {
+  setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));
+  setToolchainRoot(join(app.getPath("userData"), "toolchain"));
+  setPackageSource(currentSettings.packageSource);
   registerIpc();
   if (process.env.DSH_SPACES_SMOKE === "1") {
     try {
+      await ensureRuntime(currentSettings.packageSource);
       await smokeLifecycle(processes);
       console.log("SMOKE: PASS");
       quitting = true;

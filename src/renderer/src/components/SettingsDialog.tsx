@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { HubSettings } from "@shared/types";
+import type { HubSettings, PackageSource } from "@shared/types";
 import { Card, Overlay } from "./Overlay";
 
 export function SettingsDialog({
@@ -20,6 +20,7 @@ export function SettingsDialog({
   const [portStart, setPortStart] = useState(String(initial.portStart));
   const [portEnd, setPortEnd] = useState(String(initial.portEnd));
   const [quitBehavior, setQuitBehavior] = useState(initial.quitBehavior);
+  const [packageSource, setPackageSource] = useState<PackageSource>(initial.packageSource);
 
   return (
     <Overlay onBackdrop={onCancel}>
@@ -48,6 +49,18 @@ export function SettingsDialog({
             />
           </label>
         </div>
+        <label className="mt-4 block text-xs text-white/50">Package source</label>
+        <select
+          className="mt-1 w-full rounded bg-black/40 px-3 py-2 text-sm"
+          value={packageSource}
+          onChange={(event) => setPackageSource(event.target.value as PackageSource)}
+        >
+          <option value="china">China — npmmirror.com</option>
+          <option value="official">Official — npmjs.org / nodejs.org</option>
+        </select>
+        <p className="mt-1 text-xs text-white/40">
+          Used for plugin installs and runtime updates. Does not reinstall Node.
+        </p>
         <label className="mt-4 block text-xs text-white/50">On quit</label>
         <select
           className="mt-1 w-full rounded bg-black/40 px-3 py-2 text-sm"
@@ -76,6 +89,7 @@ export function SettingsDialog({
                 portStart: Number(portStart),
                 portEnd: Number(portEnd),
                 quitBehavior,
+                packageSource,
               })
             }
           >

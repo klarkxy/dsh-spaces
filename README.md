@@ -32,8 +32,8 @@ Official DSH profiles isolate the plugin stack, not sessions or workspace groups
 
 ## Requirements
 
-- Node 22+ (24 recommended)
-- Global DSH CLI (`npm i -g @deepseek-ai/dsh@0.1.1-rc.2` or matching)
+- Node 22+ (24 recommended) for contributing; the app also installs a managed Node, pnpm, and DSH CLI on first launch
+- Package source is selectable: China (npmmirror) or official (npmjs / nodejs.org)
 - Pin `@deepseek-ai/dsh-web-app` to the **same version as the CLI**. npm `latest` may still point at a broken `0.0.1-rc.1`.
 
 ## Develop
