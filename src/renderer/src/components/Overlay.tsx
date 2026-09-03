@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { TITLEBAR_HEIGHT } from "@shared/layout";
+import { useI18n } from "../i18n";
 
 export function Overlay({
   children,
@@ -8,14 +9,15 @@ export function Overlay({
   children: ReactNode;
   onBackdrop?: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
-      className="fixed right-0 bottom-0 left-0 z-30 flex items-center justify-center bg-black/60"
-      style={{ top: TITLEBAR_HEIGHT }}
+      className="fixed right-0 bottom-0 left-0 z-30 flex items-center justify-center"
+      style={{ top: TITLEBAR_HEIGHT, background: "var(--bg-overlay)" }}
     >
       <button
         type="button"
-        aria-label="Close"
+        aria-label={t("common.close")}
         className="absolute inset-0 cursor-default"
         onClick={onBackdrop}
       />
@@ -24,9 +26,20 @@ export function Overlay({
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = "",
+  wide = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  wide?: boolean;
+}) {
   return (
-    <div className={`w-[420px] max-w-[calc(100vw-96px)] rounded-xl bg-[#2b2d31] p-5 shadow-xl ${className}`}>
+    <div
+      className={`${wide ? "flex h-[min(720px,calc(100vh-96px))] w-[840px] flex-col" : "w-[420px]"} max-w-[calc(100vw-96px)] rounded-xl p-5 shadow-xl ${className}`}
+      style={{ background: "var(--bg-card)", color: "var(--text)", border: "1px solid var(--border)" }}
+    >
       {children}
     </div>
   );

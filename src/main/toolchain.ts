@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { spawn, type ChildProcess } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { t } from "../shared/i18n";
 import type { PackageSource, RuntimeStatus } from "../shared/types";
 import { inferPackageSource } from "../shared/types";
 import { atomicWrite } from "./atomic";
@@ -214,9 +215,15 @@ async function downloadFile(url: string, dest: string, onLine?: (line: string) =
     { onLine, timeoutMs: DOWNLOAD_TIMEOUT_MS, env: process.env },
   );
   if (result.code !== 0) {
-    throw new Error(`download failed (${result.code}): ${(result.stderr || result.stdout).slice(0, 400)}\n${url}`);
+    throw new Error(
+      t("errors.downloadFailed", {
+        code: result.code,
+        detail: (result.stderr || result.stdout).slice(0, 400),
+        url,
+      }),
+    );
   }
-  if (!existsSync(dest)) throw new Error(`download produced no file: ${url}`);
+  if (!existsSync(dest)) throw new Error(t("errors.downloadEmpty", { url }));
 }
 
 async function extractArchiveAsync(archive: string, dest: string): Promise<void> {
@@ -226,7 +233,12 @@ async function extractArchiveAsync(archive: string, dest: string): Promise<void>
     env: process.env,
   });
   if (result.code !== 0) {
-    throw new Error(`tar extract failed (${result.code}): ${(result.stderr || result.stdout).slice(0, 400)}`);
+    throw new Error(
+      t("errors.extractFailed", {
+        code: result.code,
+        detail: (result.stderr || result.stdout).slice(0, 400),
+      }),
+    );
   }
 }
 
@@ -258,17 +270,17 @@ export async function ensureNode(onLine?: (line: string) => void): Promise<strin
   const archive = nodeArchiveName();
   const url = nodeDownloadUrl(source);
   const zip = join(tmpdir(), archive);
-  onLine?.(`Downloading Node ${NODE_VERSION}…`);
+  onLine?.(t("cli.downloadingNode", { version: NODE_VERSION }));
   if (!existsSync(zip)) {
     await downloadFile(url, zip, onLine);
   }
   const dest = join(root, "node");
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
-  onLine?.("Extracting Node…");
+  onLine?.(t("cli.extractingNode"));
   await extractArchiveAsync(zip, dest);
   const node = nodeExecutable();
-  if (!node) throw new Error(`Node extract failed; expected binary under ${dest}`);
+  if (!node) throw new Error(t("errors.nodeExtractFailed", { dest }));
   writeToolchainConfig({ nodeVersion: NODE_VERSION, packageSource: source });
   writeNpmrc(source);
   return node;
@@ -277,16 +289,16 @@ export async function ensureNode(onLine?: (line: string) => void): Promise<strin
 export async function ensurePnpm(onLine?: (line: string) => void): Promise<string> {
   const existing = pnpmCjs();
   const node = nodeExecutable();
-  if (!node) throw new Error("Node is not installed");
+  if (!node) throw new Error(t("errors.nodeMissing"));
   if (existing) {
     writePnpmShim(node, existing);
     return existing;
   }
   const npmJs = npmCliJs();
-  if (!npmJs) throw new Error("Bundled npm not found next to managed Node");
+  if (!npmJs) throw new Error(t("errors.npmMissing"));
   const prefix = join(toolchainRoot(), "pnpm");
   mkdirSync(prefix, { recursive: true });
-  onLine?.(`Installing pnpm ${PNPM_VERSION}…`);
+  onLine?.(t("cli.installingPnpmVersion", { version: PNPM_VERSION }));
   const result = await runProcess(
     node,
     [npmJs, "install", "--prefix", prefix, "--no-fund", "--no-audit", `pnpm@${PNPM_VERSION}`],
@@ -295,7 +307,10 @@ export async function ensurePnpm(onLine?: (line: string) => void): Promise<strin
   const pnpmJs = pnpmCjs();
   if (!pnpmJs) {
     throw new Error(
-      `pnpm install failed (${result.code}): ${(result.stderr || result.stdout).slice(0, 800)}`,
+      t("errors.pnpmInstallFailed", {
+        code: result.code,
+        detail: (result.stderr || result.stdout).slice(0, 800),
+      }),
     );
   }
   writePnpmShim(node, pnpmJs);

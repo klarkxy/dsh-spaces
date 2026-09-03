@@ -3,6 +3,7 @@ import type {
   CliEnsureStatus,
   CreateProgress,
   HubSettings,
+  LocalePreference,
   OnboardingScan,
   PackageSource,
   PluginQueueSnapshot,
@@ -18,15 +19,21 @@ import { Onboarding } from "./components/Onboarding";
 import { Rail } from "./components/Rail";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TitleBar } from "./components/TitleBar";
+import { useI18n } from "./i18n";
+import { useTheme } from "./theme";
 
 type OverlayKind = "create" | "settings" | "rename" | "icon" | "delete" | "onboarding" | null;
 
 export default function App() {
+  const { t, preference, setPreference } = useI18n();
+  const { setPreference: setThemePreference } = useTheme();
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [overlay, setOverlay] = useState<OverlayKind>(null);
+  const [settingsTab, setSettingsTab] = useState<"general" | "plugins">("general");
+  const [pluginSpace, setPluginSpace] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const [scan, setScan] = useState<OnboardingScan | null>(null);
   const [settings, setSettings] = useState<HubSettings | null>(null);
@@ -35,10 +42,9 @@ export default function App() {
   const [queue, setQueue] = useState<PluginQueueSnapshot>({ pending: 0 });
   const [cli, setCli] = useState<CliEnsureStatus>({
     state: "idle",
-    message: "Node, pnpm, and the DSH CLI will be installed into app data.",
+    message: "",
   });
   const [packageSource, setPackageSource] = useState<PackageSource>(inferPackageSource());
-  const [tip, setTip] = useState<{ text: string; top: number } | null>(null);
 
   const refresh = async () => {
     const next = await window.dshSpaces.listProfiles();
@@ -59,6 +65,8 @@ export default function App() {
       setDshHome(home);
       setScan(onboarding);
       setSettings(hubSettings);
+      setPreference(hubSettings.locale);
+      setThemePreference(hubSettings.theme);
       setQueue(snap);
       if (!onboarding.onboarded) setOverlay("onboarding");
       await refresh();
@@ -79,6 +87,8 @@ export default function App() {
         setCli(initialCli);
         setPackageSource(runtime.packageSource || hubSettings.packageSource);
         setSettings(hubSettings);
+        setPreference(hubSettings.locale);
+        setThemePreference(hubSettings.theme);
         if (runtime.node && runtime.pnpm && runtime.cli) {
           const bin = await window.dshSpaces.ensureCli(runtime.packageSource);
           await finishRuntime(bin);
@@ -108,6 +118,11 @@ export default function App() {
         setTarget(payload.name);
         setOverlay("delete");
       }
+      if (payload.type === "plugins" && payload.name) {
+        setPluginSpace(payload.name);
+        setSettingsTab("plugins");
+        setOverlay("settings");
+      }
     });
     return () => {
       cancelled = true;
@@ -125,10 +140,6 @@ export default function App() {
     void window.dshSpaces.setOverlayOpen(overlayOpen);
   }, [overlayOpen]);
 
-  useEffect(() => {
-    void window.dshSpaces.setRailGutter(tip ? 188 : 0);
-  }, [tip]);
-
   const run = async (label: string, action: () => Promise<unknown>) => {
     setBusy(label);
     setError("");
@@ -142,6 +153,12 @@ export default function App() {
     }
   };
 
+  const persistLocale = (next: LocalePreference) => {
+    setPreference(next);
+    if (!settings) return;
+    void window.dshSpaces.saveSettings({ ...settings, locale: next }).then(setSettings);
+  };
+
   const current = profiles.find((p) => p.name === selected);
   const overlayProfile = profiles.find((p) => p.name === target);
 
@@ -151,7 +168,9 @@ export default function App() {
         busy={busy}
         queueText={
           queue.pending > 0 && overlay !== "settings"
-            ? `Plugin queue ${queue.pending}${queue.current ? `: ${queue.current}` : ""}`
+            ? queue.current
+              ? t("titleBar.pluginQueueCurrent", { count: queue.pending, current: queue.current })
+              : t("titleBar.pluginQueue", { count: queue.pending })
             : undefined
         }
       />
@@ -161,45 +180,51 @@ export default function App() {
         selected={selected}
         onSelect={(name) => {
           setSelected(name);
-          void run(`select ${name}`, () => window.dshSpaces.selectProfile(name));
+          void run(t("busy.select", { name }), () => window.dshSpaces.selectProfile(name));
         }}
         onCreate={() => {
           setProgress(null);
           setOverlay("create");
         }}
-        onSettings={() => setOverlay("settings")}
+        onSettings={() => {
+          setPluginSpace(null);
+          setSettingsTab("general");
+          setOverlay("settings");
+        }}
         onMenu={(name) => void window.dshSpaces.showProfileMenu(name)}
-        onReorder={(names) => void run("reorder", () => window.dshSpaces.reorderProfiles(names))}
+        onReorder={(names) => void run(t("busy.reorder"), () => window.dshSpaces.reorderProfiles(names))}
         onHover={(profile, top) => {
-          if (!profile) setTip(null);
-          else setTip({ text: profile.meta.displayName, top });
+          if (!profile) void window.dshSpaces.hideRailTip();
+          else void window.dshSpaces.showRailTip(profile.meta.displayName, top);
         }}
         />
-        <main className="relative flex-1 bg-[#313338]">
-        {tip ? (
-          <div
-            className="pointer-events-none fixed left-[84px] z-20 rounded bg-zinc-950 px-3 py-1.5 text-sm shadow-lg"
-            style={{ top: Math.max(12, tip.top - 8) }}
-          >
-            {tip.text}
-          </div>
-        ) : null}
+        <main className="relative flex-1" style={{ background: "var(--bg-main)" }}>
         {error && !overlay ? (
-          <p className="pointer-events-none absolute top-4 left-4 z-20 max-w-[480px] text-sm text-red-300">
+          <p className="pointer-events-none absolute top-4 left-4 z-20 max-w-[480px] text-sm text-red-500">
             {error}
           </p>
         ) : null}
         {current?.status === "crashed" ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center">
-            <div className="w-[360px] rounded-xl bg-[#2b2d31] p-5">
-              <h2 className="text-lg font-semibold">Crashed</h2>
-              <p className="mt-2 text-sm text-white/65">{current.lastError || "The profile process stopped."}</p>
+            <div
+              className="w-[360px] rounded-xl p-5"
+              style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
+            >
+              <h2 className="text-lg font-semibold">{t("crash.title")}</h2>
+              <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+                {current.lastError || t("crash.fallback")}
+              </p>
               <button
                 type="button"
-                className="mt-4 rounded bg-[#5865f2] px-3 py-1.5 text-sm"
-                onClick={() => void run(`restart ${current.name}`, () => window.dshSpaces.restartProfile(current.name))}
+                className="mt-4 rounded px-3 py-1.5 text-sm text-white"
+                style={{ background: "var(--accent)" }}
+                onClick={() =>
+                  void run(t("busy.restart", { name: current.name }), () =>
+                    window.dshSpaces.restartProfile(current.name),
+                  )
+                }
               >
-                Restart
+                {t("crash.restart")}
               </button>
             </div>
           </div>
@@ -208,11 +233,13 @@ export default function App() {
           <CliSetup
             status={cli}
             packageSource={packageSource}
+            locale={settings?.locale ?? preference}
             onPackageSource={setPackageSource}
+            onLocale={persistLocale}
             onInstall={(source) => {
               setError("");
               setPackageSource(source);
-              setCli({ state: "installing", step: "node", message: "Starting…" });
+              setCli({ state: "installing", step: "node", message: t("cli.starting") });
               void window.dshSpaces
                 .ensureCli(source)
                 .then(async (bin) => {
@@ -226,6 +253,8 @@ export default function App() {
                   setDshHome(home);
                   setScan(onboarding);
                   setSettings(hubSettings);
+                  setPreference(hubSettings.locale);
+                  setThemePreference(hubSettings.theme);
                   setQueue(snap);
                   if (!onboarding.onboarded) setOverlay("onboarding");
                   await refresh();
@@ -240,8 +269,10 @@ export default function App() {
             scan={scan}
             busy={Boolean(busy)}
             error={error}
+            locale={settings?.locale ?? preference}
+            onLocale={persistLocale}
             onConfirm={() =>
-              void run("onboarding", async () => {
+              void run(t("busy.onboarding"), async () => {
                 const next = await window.dshSpaces.confirmOnboarding();
                 setScan(next);
                 setOverlay(null);
@@ -256,7 +287,7 @@ export default function App() {
             progress={progress}
             onCancel={() => setOverlay(null)}
             onSubmit={(name, displayName, icon) =>
-              void run(`create ${name}`, async () => {
+              void run(t("busy.create", { name }), async () => {
                 await window.dshSpaces.createProfile(name, displayName, icon);
                 setOverlay(null);
                 setSelected(name);
@@ -268,15 +299,23 @@ export default function App() {
           <SettingsDialog
             initial={settings}
             dshHome={dshHome}
+            profiles={profiles}
+            selected={pluginSpace ?? selected}
+            initialTab={settingsTab}
             pluginPending={queue.pending}
             pluginCurrent={queue.current}
             onCancel={() => setOverlay(null)}
             onSave={(next) =>
-              void run("save settings", async () => {
+              void run(t("busy.saveSettings"), async () => {
                 const saved = await window.dshSpaces.saveSettings(next);
                 setSettings(saved);
+                setPreference(saved.locale);
+                setThemePreference(saved.theme);
                 setOverlay(null);
               })
+            }
+            onRestart={(name) =>
+              void run(t("busy.restart", { name }), () => window.dshSpaces.restartProfile(name))
             }
           />
         ) : null}
@@ -285,7 +324,7 @@ export default function App() {
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
             onSave={(displayName) =>
-              void run("rename", async () => {
+              void run(t("busy.rename"), async () => {
                 await window.dshSpaces.updateMeta(overlayProfile.name, { displayName });
                 setOverlay(null);
               })
@@ -297,7 +336,7 @@ export default function App() {
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
             onSave={(icon: PresetIcon | undefined) =>
-              void run("icon", async () => {
+              void run(t("busy.icon"), async () => {
                 await window.dshSpaces.updateMeta(overlayProfile.name, { icon: icon ?? "" });
                 setOverlay(null);
               })
@@ -309,7 +348,7 @@ export default function App() {
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
             onConfirm={(deleteOfficial) =>
-              void run("delete", async () => {
+              void run(t("busy.delete"), async () => {
                 await window.dshSpaces.deleteProfile(overlayProfile.name, { deleteOfficial });
                 if (selected === overlayProfile.name) setSelected(null);
                 setOverlay(null);

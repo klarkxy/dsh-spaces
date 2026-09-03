@@ -1,3 +1,4 @@
+import { t } from "../shared/i18n";
 import type { CreateProgress } from "../shared/types";
 import { addWebApp } from "./dsh-cli";
 import { PatchWriter } from "./patch-writer";
@@ -12,15 +13,15 @@ export async function createProfile(
   onProgress?: (progress: CreateProgress) => void,
 ): Promise<void> {
   const emit = (step: CreateProgress["step"], message: string) => onProgress?.({ step, message });
-  emit("validate", "Validating name…");
+  emit("validate", t("create.progressValidate"));
   registry.validateNewName(name);
-  emit("plugin", "Installing @deepseek-ai/dsh-web-app (queued)…");
+  emit("plugin", t("create.progressPlugin"));
   await addWebApp(dshHome, name);
-  emit("patch", "Writing dual-root isolation patch…");
+  emit("patch", t("create.progressPatch"));
   patchWriter.ensureWorkbenchPatch(name);
-  emit("verify", "Verifying dump-config…");
+  emit("verify", t("create.progressVerify"));
   await patchWriter.verify(name);
-  emit("meta", "Saving space metadata…");
+  emit("meta", t("create.progressMeta"));
   registry.updateMeta(name, {
     displayName: displayName?.trim() || name,
     order: 1000,

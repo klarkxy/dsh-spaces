@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { t } from "../shared/i18n";
 import type { OnboardingProfile, OnboardingScan, ProfileKind, ProfileRecord, SpaceMeta, SpacesFile } from "../shared/types";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../shared/types";
 import { atomicWrite } from "./atomic";
@@ -31,7 +32,7 @@ export class ProfileRegistry {
     }
     const parsed = JSON.parse(readFileSync(path, "utf8")) as SpacesFile;
     if (parsed.version !== 1) {
-      throw new Error(`unsupported spaces.json version: ${String(parsed.version)}`);
+      throw new Error(t("errors.unsupportedSpacesVersion", { version: String(parsed.version) }));
     }
     return {
       version: 1,
@@ -153,7 +154,7 @@ export class ProfileRegistry {
 
   removeHubData(name: string): void {
     if (name === "web") {
-      throw new Error("refusing to delete web hub data");
+      throw new Error(t("errors.refuseDeleteWebHub"));
     }
     const dir = this.hubDataDir(name);
     if (existsSync(dir)) {
@@ -163,7 +164,7 @@ export class ProfileRegistry {
 
   removeOfficialProfile(name: string): void {
     if (name === "web") {
-      throw new Error("refusing to delete the web profile");
+      throw new Error(t("errors.refuseDeleteWebProfile"));
     }
     const dir = join(this.profilesDir(), name);
     if (existsSync(dir)) {
@@ -177,13 +178,13 @@ export class ProfileRegistry {
 
   validateNewName(name: string): void {
     if (!PROFILE_NAME_RE.test(name)) {
-      throw new Error("name must match ^[a-z0-9][a-z0-9-]{0,38}$");
+      throw new Error(t("errors.nameInvalid"));
     }
     if ((RESERVED_PROFILE_NAMES as readonly string[]).includes(name)) {
-      throw new Error(`${name} is reserved`);
+      throw new Error(t("errors.nameReserved", { name }));
     }
     if (this.has(name)) {
-      throw new Error(`profile ${name} already exists`);
+      throw new Error(t("errors.profileExists", { name }));
     }
   }
 

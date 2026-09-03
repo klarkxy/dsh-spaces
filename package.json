@@ -21,7 +21,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "tsx --test tests/profile-registry.test.ts tests/patch-writer.test.ts tests/write-paths.test.ts tests/dsh-cli.test.ts tests/package-source.test.ts tests/toolchain.test.ts",
+    "test": "tsx --test tests/profile-registry.test.ts tests/patch-writer.test.ts tests/write-paths.test.ts tests/dsh-cli.test.ts tests/package-source.test.ts tests/toolchain.test.ts tests/i18n.test.ts tests/plugin-catalog.test.ts tests/plugin-ops.test.ts",
     "validate:isolation": "node scripts/validate-isolation.mjs --clean",
     "validate:lifecycle": "node scripts/verify-lifecycle.mjs",
     "validate:a8": "node scripts/verify-a8.mjs",

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
+import { t } from "../shared/i18n";
 import { atomicWrite } from "./atomic";
 import { runDsh } from "./dsh-cli";
 
@@ -36,11 +37,11 @@ export class PatchWriter {
 
   ensureWorkbenchPatch(name: string): void {
     if (name === "web") {
-      throw new PatchForbiddenError("web is sacred: refusing to write cordis.patch.yml");
+      throw new PatchForbiddenError(t("errors.webSacred"));
     }
     const path = this.patchPath(name);
     if (!existsSync(path)) {
-      throw new Error(`missing ${path}`);
+      throw new Error(t("errors.missingPatch", { path }));
     }
     const original = readFileSync(path, "utf8");
     const stamp = new Date().toISOString().replaceAll(":", "").replaceAll(".", "");
@@ -87,19 +88,19 @@ export function assertDumpPatched(dump: string, name: string): void {
   const expectedSession = `dshHomePath('hub/${name}/sessions')`;
   const expectedStorage = `dshHomePath('hub/${name}/storages')`;
   if (!sessionRoot) {
-    throw new PatchVerifyError(`missing row ${SESSION_ROW_ID} in dump-config for ${name}`);
+    throw new PatchVerifyError(t("errors.missingDumpRow", { id: SESSION_ROW_ID, name }));
   }
   if (!storageRoot) {
-    throw new PatchVerifyError(`missing row ${STORAGE_ROW_ID} in dump-config for ${name}`);
+    throw new PatchVerifyError(t("errors.missingDumpRow", { id: STORAGE_ROW_ID, name }));
   }
   if (!sessionRoot.includes(`hub/${name}/sessions`) && !sessionRoot.includes(expectedSession)) {
     throw new PatchVerifyError(
-      `${SESSION_ROW_ID} root is ${sessionRoot}, expected hub/${name}/sessions`,
+      t("errors.dumpRootMismatch", { id: SESSION_ROW_ID, actual: sessionRoot, name, kind: "sessions" }),
     );
   }
   if (!storageRoot.includes(`hub/${name}/storages`) && !storageRoot.includes(expectedStorage)) {
     throw new PatchVerifyError(
-      `${STORAGE_ROW_ID} root is ${storageRoot}, expected hub/${name}/storages`,
+      t("errors.dumpRootMismatch", { id: STORAGE_ROW_ID, actual: storageRoot, name, kind: "storages" }),
     );
   }
 }
@@ -108,7 +109,7 @@ export async function dumpConfig(dshHome: string, name: string): Promise<string>
   return runDsh(dshHome, ["--profile", name, "--dump-config"], { timeoutMs: 30_000 }).then(
     ({ stdout, stderr, code }) => {
       if (code !== 0) {
-        throw new PatchVerifyError(`dump-config exited ${code}: ${stderr.slice(0, 400)}`);
+        throw new PatchVerifyError(t("errors.dumpConfigFailed", { code, detail: stderr.slice(0, 400) }));
       }
       return stdout;
     },

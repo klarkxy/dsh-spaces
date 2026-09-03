@@ -32,11 +32,77 @@ export type QuitBehavior = "stop" | "keep";
 /** npm/Node download origin. China uses npmmirror; official uses npmjs + nodejs.org. */
 export type PackageSource = "china" | "official";
 
+/** UI language. `system` follows the OS locale (zh* → Chinese, otherwise English). */
+export type LocalePreference = "system" | "en" | "zh";
+
+/** Chrome + DSH appearance. `system` follows OS `prefers-color-scheme`. */
+export type ThemePreference = "system" | "light" | "dark";
+
 export interface HubSettings {
   portStart: number;
   portEnd: number;
   quitBehavior: QuitBehavior;
   packageSource: PackageSource;
+  locale: LocalePreference;
+  theme: ThemePreference;
+  /** Empty means the built-in jsDelivr catalog URL. */
+  catalogUrl: string;
+}
+
+export type PluginTier = "verified-npm" | "verified-git" | "likely-plugin" | "related";
+
+export type PluginInstallMethod = "npm" | "git" | "manual";
+
+export type PluginCatalogSource = "remote" | "cache" | "seed";
+
+export interface PluginCatalogMeta {
+  schemaVersion: number;
+  generatedAt: string;
+  count: number;
+  contentHash: string;
+}
+
+export interface PluginCatalogEntry {
+  id: string;
+  repo: string;
+  owner: string;
+  url: string;
+  tier: PluginTier;
+  packageName?: string;
+  installMethod: PluginInstallMethod;
+  installSpec?: string;
+  runsBuildScript: boolean;
+  description: string;
+  summary?: string;
+  summaryEn?: string;
+  category?: string;
+  tags: string[];
+  stars: number;
+  license?: string;
+  hasClient: boolean;
+}
+
+export interface PluginCatalogSnapshot {
+  meta: PluginCatalogMeta;
+  entries: PluginCatalogEntry[];
+  source: PluginCatalogSource;
+  url: string;
+}
+
+export interface InstalledPlugin {
+  name: string;
+  version?: string;
+  protected: boolean;
+}
+
+export interface PluginInstallRequest {
+  profiles: string[];
+  catalogId?: string;
+  spec?: string;
+}
+
+export interface PluginInstallResult {
+  running: string[];
 }
 
 export interface OnboardingProfile {
@@ -104,11 +170,25 @@ export const DEFAULT_HUB_SETTINGS: HubSettings = {
   portEnd: 3199,
   quitBehavior: "stop",
   packageSource: inferPackageSource(),
+  locale: "system",
+  theme: "system",
+  catalogUrl: "",
 };
+
+export const DEFAULT_PLUGIN_CATALOG_URL =
+  "https://cdn.jsdelivr.net/gh/NanmiCoder/dsh-plugin-market@main/data/v1/catalog.json";
+
+export const PLUGIN_CATALOG_SCHEMA_VERSION = 1;
+
+export const INSTALLABLE_PLUGIN_TIERS: readonly PluginTier[] = ["verified-npm", "verified-git"];
+
+export const PROTECTED_PLUGIN_PACKAGES = [
+  "@deepseek-ai/dsh-base",
+  "@deepseek-ai/dsh-web-app",
+] as const;
 
 export function inferPackageSource(locale?: string): PackageSource {
   const value = locale ?? Intl.DateTimeFormat().resolvedOptions().locale;
   return /^zh([-_]|$)/i.test(value) ? "china" : "official";
 }
 
-export const ONBOARDING_NOTICE = "你的历史聊天统一由 web 维护，工作台从全新会话开始";

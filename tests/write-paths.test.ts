@@ -12,11 +12,11 @@ test("no main-process write path targets profiles/web", () => {
   for (const name of files) {
     const text = readFileSync(join(mainDir, name), "utf8");
     if (name === "patch-writer.ts") {
-      assert.match(text, /web is sacred/);
+      assert.match(text, /errors\.webSacred/);
       assert.match(text, /name === "web"/);
     }
     if (name === "profile-registry.ts") {
-      assert.match(text, /refusing to delete the web profile/);
+      assert.match(text, /errors\.refuseDeleteWebProfile/);
     }
     const writesWeb =
       /writeFileSync\([^)]*profiles[\\/]web/.test(text) ||

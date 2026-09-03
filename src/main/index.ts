@@ -1,7 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeTheme, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HubSettings, PackageSource, SpaceMeta } from "../shared/types";
+import { applyAppLocale, t } from "../shared/i18n";
+import { WINDOW_BG } from "../shared/theme";
+import type { HubSettings, PackageSource, PluginInstallRequest, SpaceMeta } from "../shared/types";
 import { createProfile } from "./create-profile";
 import { resolveDshHome } from "./dsh-home";
 import {
@@ -14,6 +16,7 @@ import {
   setManagedCliPrefix,
 } from "./dsh-cli";
 import { readSettings, writeSettings } from "./hub-settings";
+import { applyNativeTheme, currentColorScheme } from "./native-theme";
 import { setPackageSource, setToolchainRoot } from "./toolchain";
 import { confirmOnboarding } from "./onboarding";
 import { PatchWriter } from "./patch-writer";
@@ -22,12 +25,22 @@ import { ProfileRegistry } from "./profile-registry";
 import { smokeLifecycle } from "./smoke";
 import { startAutoUpdate } from "./updater";
 import { ViewManager } from "./view-manager";
+import { loadPluginCatalog } from "./plugin-catalog";
+import {
+  installPluginToProfiles,
+  listAllProfilePlugins,
+  listProfilePlugins,
+  pluginRemove,
+  resolveInstallSpec,
+} from "./plugin-ops";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dshHome = resolveDshHome();
 const registry = new ProfileRegistry(dshHome);
 const patchWriter = new PatchWriter(dshHome);
 const settings = readSettings(dshHome);
+applyAppLocale(settings.locale);
+applyNativeTheme(settings.theme);
 const processes = new ProcessManager(dshHome, patchWriter, settings.portStart, settings.portEnd);
 
 let mainWindow: BrowserWindow | null = null;
@@ -51,7 +64,7 @@ function createWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 560,
     title: "DSH Spaces",
-    backgroundColor: "#1e1f22",
+    backgroundColor: WINDOW_BG[currentColorScheme()],
     frame: isMac,
     titleBarStyle: isMac ? "hiddenInset" : undefined,
     trafficLightPosition: isMac ? { x: 12, y: 8 } : undefined,
@@ -119,7 +132,7 @@ function popupProfileMenu(name: string): void {
   const crashed = profile.status === "crashed";
   const menu = Menu.buildFromTemplate([
     {
-      label: running || starting ? "Already running" : "Start",
+      label: running || starting ? t("menu.alreadyRunning") : t("menu.start"),
       enabled: !running && !starting,
       click: () => {
         void startAndShow(name).catch((err: unknown) => {
@@ -128,7 +141,7 @@ function popupProfileMenu(name: string): void {
       },
     },
     {
-      label: "Restart",
+      label: t("menu.restart"),
       enabled: running || crashed,
       click: () => {
         views?.destroy(name);
@@ -141,7 +154,7 @@ function popupProfileMenu(name: string): void {
       },
     },
     {
-      label: "Stop",
+      label: t("menu.stop"),
       enabled: running || starting,
       click: () => {
         views?.destroy(name);
@@ -150,22 +163,26 @@ function popupProfileMenu(name: string): void {
     },
     { type: "separator" },
     {
-      label: "Rename",
+      label: t("menu.rename"),
       click: () => uiCommand({ type: "rename", name }),
     },
     {
-      label: "Change icon",
+      label: t("menu.changeIcon"),
       click: () => uiCommand({ type: "icon", name }),
     },
     {
-      label: "Open profile folder",
+      label: t("menu.openFolder"),
       click: () => {
         void shell.openPath(profile.path);
       },
     },
+    {
+      label: t("menu.managePlugins"),
+      click: () => uiCommand({ type: "plugins", name }),
+    },
     { type: "separator" },
     {
-      label: name === "web" ? "Delete (disabled)" : "Delete…",
+      label: name === "web" ? t("menu.deleteDisabled") : t("menu.delete"),
       enabled: name !== "web",
       click: () => uiCommand({ type: "delete", name }),
     },
@@ -181,11 +198,40 @@ function registerIpc(): void {
   ipcMain.handle("getSettings", () => currentSettings);
   ipcMain.handle("saveSettings", (_event, next: HubSettings) => {
     currentSettings = writeSettings(dshHome, next);
+    applyAppLocale(currentSettings.locale);
+    applyNativeTheme(currentSettings.theme);
     processes.setPortRange(currentSettings.portStart, currentSettings.portEnd);
     setPackageSource(currentSettings.packageSource);
     return currentSettings;
   });
   ipcMain.handle("getPluginQueue", () => pluginQueueSnapshot());
+  ipcMain.handle(
+    "getPluginCatalog",
+    (_event, options: { refresh?: boolean; url?: string } = {}) =>
+      loadPluginCatalog(dshHome, {
+        refresh: options.refresh,
+        url: options.url || currentSettings.catalogUrl,
+      }),
+  );
+  ipcMain.handle("listProfilePlugins", (_event, name: string) => listProfilePlugins(dshHome, name));
+  ipcMain.handle("listAllProfilePlugins", () =>
+    listAllProfilePlugins(
+      dshHome,
+      listProfiles().map((profile) => profile.name),
+    ),
+  );
+  ipcMain.handle("installPlugin", async (_event, request: PluginInstallRequest) => {
+    const spec = await resolveInstallSpec(dshHome, request);
+    return installPluginToProfiles(dshHome, request.profiles ?? [], spec, (name) => {
+      const status = processes.statusOf(name);
+      return status === "running" || status === "starting";
+    });
+  });
+  ipcMain.handle("removePlugin", async (_event, profile: string, packageName: string) => {
+    await pluginRemove(dshHome, profile, packageName);
+    const status = processes.statusOf(profile);
+    return { running: status === "running" || status === "starting" ? [profile] : [] };
+  });
   ipcMain.handle("getCliStatus", () => cliStatusSnapshot());
   ipcMain.handle("getRuntimeStatus", () => getRuntimeStatus());
   ipcMain.handle("ensureCli", (_event, source?: PackageSource) => {
@@ -222,7 +268,7 @@ function registerIpc(): void {
   ipcMain.handle(
     "deleteProfile",
     async (_event, name: string, options: { deleteOfficial?: boolean } = {}) => {
-      if (name === "web") throw new Error("cannot delete web");
+      if (name === "web") throw new Error(t("errors.cannotDeleteWeb"));
       views?.destroy(name);
       await processes.stop(name);
       registry.removeHubData(name);
@@ -235,7 +281,7 @@ function registerIpc(): void {
   );
   ipcMain.handle("openProfileDir", async (_event, name: string) => {
     const profile = listProfiles().find((item) => item.name === name);
-    if (!profile) throw new Error(`unknown profile ${name}`);
+    if (!profile) throw new Error(t("errors.unknownProfile", { name }));
     const error = await shell.openPath(profile.path);
     if (error) throw new Error(error);
   });
@@ -255,8 +301,11 @@ function registerIpc(): void {
   ipcMain.handle("setOverlayOpen", (_event, open: boolean) => {
     views?.setOverlayOpen(open);
   });
-  ipcMain.handle("setRailGutter", (_event, width: number) => {
-    views?.setGutter(width);
+  ipcMain.handle("showRailTip", (_event, text: string, top: number) => {
+    views?.showTooltip(text, top);
+  });
+  ipcMain.handle("hideRailTip", () => {
+    views?.hideTooltip();
   });
   ipcMain.handle("windowMinimize", (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize();
@@ -285,6 +334,9 @@ processes.onStatus((name, status, extra) => {
 
 onPluginQueue((snap) => broadcast("plugin-queue", snap));
 onCliStatus((status) => broadcast("cli-status", status));
+nativeTheme.on("updated", () => {
+  applyNativeTheme(currentSettings.theme);
+});
 
 void app.whenReady().then(async () => {
   setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { execSync, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { t } from "../shared/i18n";
 import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../shared/types";
 import { npmRegistry } from "./package-source";
 import {
@@ -25,7 +26,7 @@ let managedPrefixOverride: string | undefined;
 let ensuring: Promise<string> | undefined;
 let cliStatus: CliEnsureStatus = {
   state: "idle",
-  message: "Node, pnpm, and the DSH CLI will be installed into app data.",
+  message: "",
 };
 const cliListeners = new Set<(status: CliEnsureStatus) => void>();
 
@@ -97,6 +98,9 @@ function setCliStatus(next: CliEnsureStatus): void {
 }
 
 export function cliStatusSnapshot(): CliEnsureStatus {
+  if (cliStatus.state === "idle") {
+    return { ...cliStatus, message: t("cli.idleMessage") };
+  }
   return cliStatus;
 }
 
@@ -108,7 +112,7 @@ export function onCliStatus(listener: (status: CliEnsureStatus) => void): () => 
 export function dshBin(): string {
   const found = findDshBin();
   if (!found) {
-    throw new Error("dsh CLI not found. It is installed automatically on first launch.");
+    throw new Error(t("errors.cliNotFound"));
   }
   return found;
 }
@@ -119,7 +123,7 @@ async function runManagedInstall(
   onLine: (line: string) => void,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const node = nodeExecutable();
-  if (!node) throw new Error("Managed Node is not installed");
+  if (!node) throw new Error(t("errors.managedNodeMissing"));
   const pnpmJs = pnpmCjs();
   if (pnpmJs) {
     return runProcess(node, [pnpmJs, ...argsForPnpm], { onLine, timeoutMs: INSTALL_TIMEOUT_MS });
@@ -128,7 +132,7 @@ async function runManagedInstall(
   if (npmJs) {
     return runProcess(node, [npmJs, ...argsForNpm], { onLine, timeoutMs: INSTALL_TIMEOUT_MS });
   }
-  throw new Error("Neither pnpm nor npm is available in the managed toolchain");
+  throw new Error(t("errors.noPackageManager"));
 }
 
 async function installManagedCli(): Promise<string> {
@@ -157,7 +161,7 @@ async function installManagedCli(): Promise<string> {
   setCliStatus({
     state: "installing",
     step: "cli",
-    message: `Installing ${DSH_CLI_SPEC}…`,
+    message: t("cli.installingCli", { spec: DSH_CLI_SPEC }),
   });
   console.log(`dsh-cli: installing ${DSH_CLI_SPEC} into ${prefix}`);
   try {
@@ -167,7 +171,9 @@ async function installManagedCli(): Promise<string> {
       onLine,
     );
     if (existsSync(bin)) return bin;
-    throw new Error((result.stderr || result.stdout).slice(0, 800) || `install exited ${result.code}`);
+    throw new Error(
+      (result.stderr || result.stdout).slice(0, 800) || t("errors.installExited", { code: result.code }),
+    );
   } catch (err) {
     if (existsSync(bin)) return bin;
     throw err;
@@ -175,7 +181,7 @@ async function installManagedCli(): Promise<string> {
 }
 
 async function doEnsure(): Promise<string> {
-  setCliStatus({ state: "checking", message: "Looking for DSH CLI…" });
+  setCliStatus({ state: "checking", message: t("cli.lookingCli") });
   const existing = findDshBin();
   if (existing) {
     setCliStatus({ state: "ready", message: existing });
@@ -183,7 +189,7 @@ async function doEnsure(): Promise<string> {
   }
   setCliStatus({
     state: "installing",
-    message: `Installing ${DSH_CLI_SPEC}…`,
+    message: t("cli.installingCli", { spec: DSH_CLI_SPEC }),
   });
   try {
     const bin = await installManagedCli();
@@ -237,15 +243,15 @@ async function doEnsureRuntime(source?: PackageSource): Promise<string> {
       setCliStatus({ state: "ready", message: existing });
       return existing;
     }
-    setCliStatus({ state: "installing", step: "node", message: `Installing Node…` });
+    setCliStatus({ state: "installing", step: "node", message: t("cli.installingNode") });
     await ensureNode((line) => {
       setCliStatus({ state: "installing", step: "node", message: line.slice(0, 200) });
     });
-    setCliStatus({ state: "installing", step: "pnpm", message: "Installing pnpm…" });
+    setCliStatus({ state: "installing", step: "pnpm", message: t("cli.installingPnpm") });
     await ensurePnpm((line) => {
       setCliStatus({ state: "installing", step: "pnpm", message: line.slice(0, 200) });
     });
-    setCliStatus({ state: "installing", step: "cli", message: `Installing ${DSH_CLI_SPEC}…` });
+    setCliStatus({ state: "installing", step: "cli", message: t("cli.installingCli", { spec: DSH_CLI_SPEC }) });
     const bin = await ensureDshCli();
     setCliStatus({ state: "ready", message: bin });
     return bin;
@@ -367,18 +373,20 @@ export async function dshVersion(dshHome: string): Promise<string> {
   const text = `${stdout}\n${stderr}`;
   const match = text.match(/(\d+\.\d+\.\d+(?:-[\w.]+)?)/);
   if (!match) {
-    throw new Error(`could not parse dsh version (exit ${code}): ${text.slice(0, 200)}`);
+    throw new Error(t("errors.versionParse", { code, detail: text.slice(0, 200) }));
   }
   return match[1];
 }
 
 export async function addWebApp(dshHome: string, name: string): Promise<void> {
-  await enqueuePlugin(`plugin add ${name}`, async () => {
+  await enqueuePlugin(t("queue.pluginAdd", { name }), async () => {
     const version = await dshVersion(dshHome);
     const spec = `@deepseek-ai/dsh-web-app@${version}`;
     const { stdout, stderr, code } = await runDsh(dshHome, ["plugin", "--profile", name, "add", spec]);
     if (code !== 0) {
-      throw new Error(`plugin add ${spec} failed (${code}): ${(stderr || stdout).slice(0, 800)}`);
+      throw new Error(
+        t("errors.pluginAddFailed", { spec, code, detail: (stderr || stdout).slice(0, 800) }),
+      );
     }
   });
 }

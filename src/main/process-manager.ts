@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createConnection, createServer } from "node:net";
+import { t } from "../shared/i18n";
 import type { ProfileStatus } from "../shared/types";
 import { ensureDshCli, spawnNode } from "./dsh-cli";
 import { PatchWriter, PatchVerifyError } from "./patch-writer";
@@ -38,7 +39,7 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
     if (!(await portClosed(port))) return;
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`port ${port} not ready within ${timeoutMs}ms`);
+  throw new Error(t("errors.portNotReady", { port, timeout: timeoutMs }));
 }
 
 async function sessionList(port: number): Promise<void> {
@@ -72,7 +73,7 @@ async function waitForApi(port: number, timeoutMs: number): Promise<void> {
       await new Promise((r) => setTimeout(r, 400));
     }
   }
-  throw new Error(`api on port ${port} not ready within ${timeoutMs}ms (${last})`);
+  throw new Error(t("errors.apiNotReady", { port, timeout: timeoutMs, last }));
 }
 
 async function pickFreePort(from: number, to: number, used: Set<number>): Promise<number> {
@@ -91,7 +92,7 @@ async function pickFreePort(from: number, to: number, used: Set<number>): Promis
     const found = await tryPort(port);
     if (found !== null) return found;
   }
-  throw new Error(`no free port in ${from}-${to}`);
+  throw new Error(t("errors.noFreePort", { from, to }));
 }
 
 async function killTree(pid: number): Promise<void> {
@@ -171,7 +172,7 @@ export class ProcessManager {
       } catch (err) {
         const message =
           err instanceof PatchVerifyError
-            ? `Refusing to start ${name}: ${err.message}`
+            ? t("errors.refuseStart", { name, reason: err.message })
             : err instanceof Error
               ? err.message
               : String(err);
@@ -207,7 +208,8 @@ export class ProcessManager {
         this.emit(name, "stopped");
         return;
       }
-      const error = current.status === "starting" ? "process exited before ready" : "process exited unexpectedly";
+      const error =
+        current.status === "starting" ? t("errors.exitedBeforeReady") : t("errors.exitedUnexpectedly");
       this.errors.set(name, error);
       this.emit(name, "crashed", { error });
     });
@@ -215,7 +217,7 @@ export class ProcessManager {
     try {
       await waitForApi(port, READY_TIMEOUT_MS);
       if (!this.instances.has(name)) {
-        throw new Error(`${name} exited before the API opened`);
+        throw new Error(t("errors.exitedBeforeApi", { name }));
       }
       instance.status = "running";
       this.emit(name, "running", { port });
