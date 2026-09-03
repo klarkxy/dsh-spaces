@@ -72,10 +72,13 @@ DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name
 4. 转换时必须向用户明确提示：**"你的历史聊天统一由 web 维护，工作台从全新会话开始"**（被转换的 profile 打开后会话列表是空的，用户可能误以为数据丢了）。
 5. `headless` 等无 GUI profile：栏上显示但标记为"无界面"，点击不启动 Web UI（V1 可以直接不展示，二选一由实现者定，倾向不展示）。
 
-### FR5 插件安装（辅助功能，V1 可简化）
-1. 对某个 profile 执行 `dsh plugin --profile <name> add <pkg>`。
+### FR5 插件安装（Hub 安装器）
+1. 对勾选的一个或多个 profile 执行 `dsh plugin --profile <name> add <spec>` / `remove <pkg>`。
 2. Hub 内所有 plugin 命令**串行排队**，避免 pnpm 并发写 `profiles/node_modules` 回退链打架。
-3. V1 最低要求：提供"打开终端到 profile 目录"或简单输入框即可，不做插件市场。
+3. 发现层复用公开的 NanmiCoder catalog schema v1（MIT）：只对 `verified-npm` / `verified-git` 且带 `installSpec` 的条目一键安装。Renderer 只传 catalog id，主进程用自己的目录副本解析 spec。
+4. 手动输入只接受 npm 包名或 `github:owner/repo`，不是 shell 命令。
+5. 不把任何社区「插件市场」bundle 预装进 profile。插件栈仍按 profile 隔离。
+6. 装完若目标 profile 正在运行，提示重启该进程（Hub 不热挂载）。
 
 ### FR6 设置
 1. DSH_HOME 路径（默认 `~/.dsh`，可改）。
@@ -194,7 +197,7 @@ $DSH_HOME/profiles/<name>/
 
 - 数据迁移（旧聊天搬进工作台）
 - 多套 `DSH_HOME` / 沙箱机模式
-- 插件市场、跨 profile 批量装插件
+- 把社区插件市场预装进每个 profile；跨 profile **共享一份插件栈**（批量对勾选空间执行官方 `plugin add` 可以）
 - 把 Hub 做成 DSH Web 插件（插件跟着 profile 一起死，栏必须活得比任何 harness 进程长）
 - 移动端
 

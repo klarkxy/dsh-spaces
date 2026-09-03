@@ -5,6 +5,10 @@ import type {
   HubSettings,
   OnboardingScan,
   PackageSource,
+  InstalledPlugin,
+  PluginCatalogSnapshot,
+  PluginInstallRequest,
+  PluginInstallResult,
   PluginQueueSnapshot,
   ProfileRecord,
   ProfileStatus,
@@ -21,6 +25,16 @@ const api = {
   saveSettings: (settings: HubSettings): Promise<HubSettings> =>
     ipcRenderer.invoke("saveSettings", settings),
   getPluginQueue: (): Promise<PluginQueueSnapshot> => ipcRenderer.invoke("getPluginQueue"),
+  getPluginCatalog: (options?: { refresh?: boolean; url?: string }): Promise<PluginCatalogSnapshot> =>
+    ipcRenderer.invoke("getPluginCatalog", options ?? {}),
+  listProfilePlugins: (name: string): Promise<InstalledPlugin[]> =>
+    ipcRenderer.invoke("listProfilePlugins", name),
+  listAllProfilePlugins: (): Promise<Record<string, InstalledPlugin[]>> =>
+    ipcRenderer.invoke("listAllProfilePlugins"),
+  installPlugin: (request: PluginInstallRequest): Promise<PluginInstallResult> =>
+    ipcRenderer.invoke("installPlugin", request),
+  removePlugin: (profile: string, packageName: string): Promise<PluginInstallResult> =>
+    ipcRenderer.invoke("removePlugin", profile, packageName),
   getCliStatus: (): Promise<CliEnsureStatus> => ipcRenderer.invoke("getCliStatus"),
   getRuntimeStatus: (): Promise<RuntimeStatus> => ipcRenderer.invoke("getRuntimeStatus"),
   ensureCli: (source?: PackageSource): Promise<string> => ipcRenderer.invoke("ensureCli", source),
@@ -39,7 +53,9 @@ const api = {
   openProfileDir: (name: string): Promise<void> => ipcRenderer.invoke("openProfileDir", name),
   showProfileMenu: (name: string): Promise<void> => ipcRenderer.invoke("showProfileMenu", name),
   setOverlayOpen: (open: boolean): Promise<void> => ipcRenderer.invoke("setOverlayOpen", open),
-  setRailGutter: (width: number): Promise<void> => ipcRenderer.invoke("setRailGutter", width),
+  showRailTip: (text: string, top: number): Promise<void> =>
+    ipcRenderer.invoke("showRailTip", text, top),
+  hideRailTip: (): Promise<void> => ipcRenderer.invoke("hideRailTip"),
   platform: process.platform,
   windowMinimize: (): Promise<void> => ipcRenderer.invoke("windowMinimize"),
   windowToggleMaximize: (): Promise<boolean> => ipcRenderer.invoke("windowToggleMaximize"),

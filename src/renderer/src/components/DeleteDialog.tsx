@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ProfileRecord } from "@shared/types";
+import { useI18n } from "../i18n";
 import { Card, Overlay } from "./Overlay";
 
 export function DeleteDialog({
@@ -11,38 +12,40 @@ export function DeleteDialog({
   onCancel: () => void;
   onConfirm: (deleteOfficial: boolean) => void;
 }) {
+  const { t } = useI18n();
   const [deleteOfficial, setDeleteOfficial] = useState(false);
   return (
     <Overlay onBackdrop={onCancel}>
       <Card>
-        <h2 className="text-lg font-semibold">Delete {profile.meta.displayName}?</h2>
-        <p className="mt-2 text-sm text-white/65">This will:</p>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-white/65">
-          <li>Stop the running process if any</li>
-          <li>Remove the rail entry from spaces.json</li>
-          <li>
-            Delete isolated data at <code>hub/{profile.name}/</code>
-          </li>
+        <h2 className="text-lg font-semibold">
+          {t("delete.title", { name: profile.meta.displayName })}
+        </h2>
+        <p className="muted mt-2 text-sm">{t("delete.will")}</p>
+        <ul className="muted mt-2 list-disc space-y-1 pl-5 text-sm">
+          <li>{t("delete.stop")}</li>
+          <li>{t("delete.removeRail")}</li>
+          <li>{t("delete.deleteData", { name: profile.name })}</li>
         </ul>
-        <label className="mt-4 flex items-start gap-2 text-sm text-white/70">
+        <label className="muted mt-4 flex items-start gap-2 text-sm">
           <input
             type="checkbox"
             className="mt-1"
             checked={deleteOfficial}
             onChange={(event) => setDeleteOfficial(event.target.checked)}
           />
-          <span>Also delete the official profile folder (plugins). Default is off.</span>
+          <span>{t("delete.alsoOfficial")}</span>
         </label>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="rounded px-3 py-1.5 text-sm" onClick={onCancel}>
-            Cancel
+          <button type="button" className="btn-ghost rounded px-3 py-1.5 text-sm" onClick={onCancel}>
+            {t("common.cancel")}
           </button>
           <button
             type="button"
-            className="rounded bg-red-600 px-3 py-1.5 text-sm"
+            className="rounded px-3 py-1.5 text-sm text-white"
+            style={{ background: "var(--danger)" }}
             onClick={() => onConfirm(deleteOfficial)}
           >
-            Delete
+            {t("common.delete")}
           </button>
         </div>
       </Card>

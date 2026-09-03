@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import { t } from "../src/shared/i18n/index.ts";
 import { ProfileRegistry } from "../src/main/profile-registry.ts";
 
 const temps: string[] = [];
@@ -66,8 +67,10 @@ test("validateNewName rejects reserved and existing", () => {
   const home = fakeHome();
   writeProfile(home, "coding", ["@deepseek-ai/dsh-web-app"]);
   const registry = new ProfileRegistry(home);
-  assert.throws(() => registry.validateNewName("Web"), /match/);
-  assert.throws(() => registry.validateNewName("web"), /reserved/);
-  assert.throws(() => registry.validateNewName("coding"), /already exists/);
+  assert.throws(() => registry.validateNewName("Web"), { message: t("errors.nameInvalid") });
+  assert.throws(() => registry.validateNewName("web"), { message: t("errors.nameReserved", { name: "web" }) });
+  assert.throws(() => registry.validateNewName("coding"), {
+    message: t("errors.profileExists", { name: "coding" }),
+  });
   registry.validateNewName("notes");
 });

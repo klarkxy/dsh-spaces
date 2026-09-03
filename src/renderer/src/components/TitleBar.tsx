@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { TITLEBAR_HEIGHT } from "@shared/layout";
+import { useI18n } from "../i18n";
 
 function MinimizeGlyph() {
   return (
@@ -21,7 +22,7 @@ function RestoreGlyph() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
       <rect x="2.5" y="0.5" width="7" height="7" fill="none" stroke="currentColor" />
-      <path d="M0.5 2.5h7v7h-7z" fill="#111214" stroke="currentColor" />
+      <path d="M0.5 2.5h7v7h-7z" fill="var(--bg-rail)" stroke="currentColor" />
     </svg>
   );
 }
@@ -52,11 +53,25 @@ function CaptionButton({
       title={label}
       onClick={onClick}
       onMouseDown={(event) => event.preventDefault()}
-      className={`app-no-drag flex h-full w-[46px] items-center justify-center text-white/70 transition-colors ${
+      className="app-no-drag flex h-full w-[46px] items-center justify-center transition-colors"
+      style={
         danger
-          ? "hover:bg-[#e81123] hover:text-white"
-          : "hover:bg-white/10 hover:text-white"
-      }`}
+          ? undefined
+          : { color: "var(--text-muted)" }
+      }
+      onMouseEnter={(event) => {
+        if (danger) {
+          event.currentTarget.style.background = "var(--danger)";
+          event.currentTarget.style.color = "#fff";
+        } else {
+          event.currentTarget.style.background = "var(--bg-hover)";
+          event.currentTarget.style.color = "var(--text)";
+        }
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = "transparent";
+        event.currentTarget.style.color = danger ? "" : "var(--text-muted)";
+      }}
     >
       {children}
     </button>
@@ -70,6 +85,7 @@ export function TitleBar({
   busy?: string;
   queueText?: string;
 }) {
+  const { t } = useI18n();
   const isMac = window.dshSpaces.platform === "darwin";
   const [maximized, setMaximized] = useState(false);
 
@@ -81,8 +97,13 @@ export function TitleBar({
 
   return (
     <header
-      className="app-drag relative z-50 flex shrink-0 select-none items-center border-b border-white/10 bg-[#111214]"
-      style={{ height: TITLEBAR_HEIGHT }}
+      className="app-drag relative z-50 flex shrink-0 select-none items-center border-b"
+      style={{
+        height: TITLEBAR_HEIGHT,
+        background: "var(--bg-rail)",
+        borderColor: "var(--border)",
+        color: "var(--text)",
+      }}
       onDoubleClick={(event) => {
         if (isMac) return;
         if ((event.target as HTMLElement).closest("button")) return;
@@ -90,24 +111,24 @@ export function TitleBar({
       }}
     >
       <div className={`flex min-w-0 flex-1 items-center gap-3 px-3 ${isMac ? "pl-[76px]" : ""}`}>
-        {busy ? <p className="truncate text-xs text-amber-200">{busy}…</p> : null}
-        {queueText ? <p className="truncate text-xs text-amber-200">{queueText}</p> : null}
+        {busy ? <p className="truncate text-xs" style={{ color: "var(--warn)" }}>{busy}…</p> : null}
+        {queueText ? <p className="truncate text-xs" style={{ color: "var(--warn)" }}>{queueText}</p> : null}
       </div>
       {isMac ? null : (
         <div className="flex h-full">
           <CaptionButton
-            label="Minimize"
+            label={t("window.minimize")}
             onClick={() => void window.dshSpaces.windowMinimize()}
           >
             <MinimizeGlyph />
           </CaptionButton>
           <CaptionButton
-            label={maximized ? "Restore" : "Maximize"}
+            label={maximized ? t("window.restore") : t("window.maximize")}
             onClick={() => void window.dshSpaces.windowToggleMaximize().then(setMaximized)}
           >
             {maximized ? <RestoreGlyph /> : <MaximizeGlyph />}
           </CaptionButton>
-          <CaptionButton label="Close" danger onClick={() => void window.dshSpaces.windowClose()}>
+          <CaptionButton label={t("window.close")} danger onClick={() => void window.dshSpaces.windowClose()}>
             <CloseGlyph />
           </CaptionButton>
         </div>
