@@ -132,6 +132,9 @@ export function SettingsDialog({
                 />
               </label>
             </div>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
+              {t("settings.portHint")}
+            </p>
             <label className="mt-4 block text-xs" style={{ color: "var(--text-label)" }}>
               {t("settings.packageSource")}
               <select
@@ -177,11 +180,7 @@ export function SettingsDialog({
               ? t("settings.pluginQueueBusyCurrent", { count: pluginPending, current: pluginCurrent })
               : t("settings.pluginQueueBusy", { count: pluginPending })}
           </p>
-        ) : (
-          <p className="mt-3 text-sm" style={{ color: "var(--text-faint)" }}>
-            {t("settings.pluginQueueIdle")}
-          </p>
-        )}
+        ) : null}
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"

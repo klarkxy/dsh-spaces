@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   CliEnsureStatus,
   CreateProgress,
@@ -11,18 +11,30 @@ import type {
   ProfileRecord,
 } from "@shared/types";
 import { inferPackageSource } from "@shared/types";
+import {
+  restoreSelected,
+  shouldShowIdleCard,
+  shouldShowStartingCard,
+} from "@shared/restore-selected";
 import { CliSetup } from "./components/CliSetup";
 import { CreateWizard } from "./components/CreateWizard";
 import { DeleteDialog } from "./components/DeleteDialog";
+import { EmptyMain, IdleMain, StartingMain } from "./components/EmptyMain";
 import { IconDialog, RenameDialog } from "./components/MetaDialogs";
 import { Onboarding } from "./components/Onboarding";
 import { Rail } from "./components/Rail";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TitleBar } from "./components/TitleBar";
+import { visibleError } from "@shared/i18n";
 import { useI18n } from "./i18n";
 import { useTheme } from "./theme";
 
 type OverlayKind = "create" | "settings" | "rename" | "icon" | "delete" | "onboarding" | null;
+type BusyOperation = {
+  id: number;
+  label: string;
+  launchingProfile?: string;
+};
 
 export default function App() {
   const { t, preference, setPreference } = useI18n();
@@ -30,7 +42,8 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState<BusyOperation | null>(null);
+  const busyId = useRef(0);
   const [overlay, setOverlay] = useState<OverlayKind>(null);
   const [settingsTab, setSettingsTab] = useState<"general" | "plugins">("general");
   const [pluginSpace, setPluginSpace] = useState<string | null>(null);
@@ -47,8 +60,12 @@ export default function App() {
   const [packageSource, setPackageSource] = useState<PackageSource>(inferPackageSource());
 
   const refresh = async () => {
-    const next = await window.dshSpaces.listProfiles();
+    const [next, visible] = await Promise.all([
+      window.dshSpaces.listProfiles(),
+      window.dshSpaces.getSelectedProfile(),
+    ]);
     setProfiles(next);
+    setSelected((current) => restoreSelected(current, visible, next));
     return next;
   };
 
@@ -94,7 +111,7 @@ export default function App() {
           await finishRuntime(bin);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(visibleError(err instanceof Error ? err.message : String(err)));
       }
     };
     const offStatus = window.dshSpaces.onStatus(() => {
@@ -105,7 +122,7 @@ export default function App() {
     const offCli = window.dshSpaces.onCliStatus((payload) => setCli(payload));
     void bootstrap();
     const offUi = window.dshSpaces.onUiCommand((payload) => {
-      if (payload.type === "error" && payload.message) setError(payload.message);
+      if (payload.type === "error" && payload.message) setError(visibleError(payload.message));
       if (payload.type === "rename" && payload.name) {
         setTarget(payload.name);
         setOverlay("rename");
@@ -140,16 +157,21 @@ export default function App() {
     void window.dshSpaces.setOverlayOpen(overlayOpen);
   }, [overlayOpen]);
 
-  const run = async (label: string, action: () => Promise<unknown>) => {
-    setBusy(label);
+  const run = async (
+    label: string,
+    action: () => Promise<unknown>,
+    launchingProfile?: string,
+  ) => {
+    const id = ++busyId.current;
+    setBusy({ id, label, launchingProfile });
     setError("");
     try {
       await action();
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(visibleError(err instanceof Error ? err.message : String(err)));
     } finally {
-      setBusy("");
+      setBusy((current) => (current?.id === id ? null : current));
     }
   };
 
@@ -161,11 +183,24 @@ export default function App() {
 
   const current = profiles.find((p) => p.name === selected);
   const overlayProfile = profiles.find((p) => p.name === target);
+  const launchingCurrent = Boolean(selected && busy?.launchingProfile === selected);
+  const showStarting =
+    Boolean(selected) &&
+    shouldShowStartingCard(current?.status, launchingCurrent) &&
+    !overlay &&
+    !cliBusy;
+  const showIdle =
+    Boolean(selected) &&
+    shouldShowIdleCard(current?.status, launchingCurrent) &&
+    !overlay &&
+    !cliBusy;
 
   return (
     <div className="flex h-full flex-col">
       <TitleBar
-        busy={busy}
+        busy={busy?.label}
+        error={current?.status === "crashed" ? undefined : error || undefined}
+        onDismissError={() => setError("")}
         queueText={
           queue.pending > 0 && overlay !== "settings"
             ? queue.current
@@ -179,8 +214,14 @@ export default function App() {
         profiles={profiles}
         selected={selected}
         onSelect={(name) => {
+          const display =
+            profiles.find((profile) => profile.name === name)?.meta.displayName || name;
           setSelected(name);
-          void run(t("busy.select", { name }), () => window.dshSpaces.selectProfile(name));
+          void run(
+            t("busy.select", { name: display }),
+            () => window.dshSpaces.selectProfile(name),
+            name,
+          );
         }}
         onCreate={() => {
           setProgress(null);
@@ -191,7 +232,10 @@ export default function App() {
           setSettingsTab("general");
           setOverlay("settings");
         }}
-        onMenu={(name) => void window.dshSpaces.showProfileMenu(name)}
+        onMenu={(name) => {
+          void window.dshSpaces.hideRailTip();
+          void window.dshSpaces.showProfileMenu(name);
+        }}
         onReorder={(names) => void run(t("busy.reorder"), () => window.dshSpaces.reorderProfiles(names))}
         onHover={(profile, top) => {
           if (!profile) void window.dshSpaces.hideRailTip();
@@ -199,10 +243,59 @@ export default function App() {
         }}
         />
         <main className="relative flex-1" style={{ background: "var(--bg-main)" }}>
-        {error && !overlay ? (
-          <p className="pointer-events-none absolute top-4 left-4 z-20 max-w-[480px] text-sm text-red-500">
-            {error}
-          </p>
+        {showStarting && current ? (
+          <StartingMain name={current.meta.displayName || current.name} />
+        ) : null}
+        {showIdle && current ? (
+          <IdleMain
+            name={current.meta.displayName || current.name}
+            onOpen={() =>
+              void run(
+                t("busy.select", { name: current.meta.displayName || current.name }),
+                () => window.dshSpaces.selectProfile(current.name),
+                current.name,
+              )
+            }
+            onCreate={() => {
+              setProgress(null);
+              setOverlay("create");
+            }}
+            onRename={() => {
+              setTarget(current.name);
+              setOverlay("rename");
+            }}
+            onDelete={
+              current.name === "web"
+                ? undefined
+                : () => {
+                    setTarget(current.name);
+                    setOverlay("delete");
+                  }
+            }
+          />
+        ) : null}
+        {!selected && !overlay && !cliBusy ? (
+          <EmptyMain
+            firstName={profiles[0]?.meta.displayName || profiles[0]?.name}
+            onOpen={
+              profiles[0]
+                ? () => {
+                    const name = profiles[0].name;
+                    const display = profiles[0].meta.displayName || name;
+                    setSelected(name);
+                    void run(
+                      t("busy.select", { name: display }),
+                      () => window.dshSpaces.selectProfile(name),
+                      name,
+                    );
+                  }
+                : undefined
+            }
+            onCreate={() => {
+              setProgress(null);
+              setOverlay("create");
+            }}
+          />
         ) : null}
         {current?.status === "crashed" ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center">
@@ -214,13 +307,18 @@ export default function App() {
               <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
                 {current.lastError || t("crash.fallback")}
               </p>
+              <p className="mt-2 text-sm" style={{ color: "var(--text-faint)" }}>
+                {t("crash.hint")}
+              </p>
               <button
                 type="button"
                 className="mt-4 rounded px-3 py-1.5 text-sm text-white"
                 style={{ background: "var(--accent)" }}
                 onClick={() =>
-                  void run(t("busy.restart", { name: current.name }), () =>
-                    window.dshSpaces.restartProfile(current.name),
+                  void run(
+                    t("busy.restart", { name: current.meta.displayName || current.name }),
+                    () => window.dshSpaces.restartProfile(current.name),
+                    current.name,
                   )
                 }
               >
@@ -260,7 +358,7 @@ export default function App() {
                   await refresh();
                 })
                 .catch((err: unknown) => {
-                  setError(err instanceof Error ? err.message : String(err));
+                  setError(visibleError(err instanceof Error ? err.message : String(err)));
                 });
             }}
           />
@@ -290,7 +388,6 @@ export default function App() {
               void run(t("busy.create", { name }), async () => {
                 await window.dshSpaces.createProfile(name, displayName, icon);
                 setOverlay(null);
-                setSelected(name);
               })
             }
           />
@@ -315,7 +412,11 @@ export default function App() {
               })
             }
             onRestart={(name) =>
-              void run(t("busy.restart", { name }), () => window.dshSpaces.restartProfile(name))
+              void run(
+                t("busy.restart", { name }),
+                () => window.dshSpaces.restartProfile(name),
+                name,
+              )
             }
           />
         ) : null}

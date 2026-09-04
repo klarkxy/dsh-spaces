@@ -81,9 +81,13 @@ function CaptionButton({
 export function TitleBar({
   busy,
   queueText,
+  error,
+  onDismissError,
 }: {
   busy?: string;
   queueText?: string;
+  error?: string;
+  onDismissError?: () => void;
 }) {
   const { t } = useI18n();
   const isMac = window.dshSpaces.platform === "darwin";
@@ -111,8 +115,33 @@ export function TitleBar({
       }}
     >
       <div className={`flex min-w-0 flex-1 items-center gap-3 px-3 ${isMac ? "pl-[76px]" : ""}`}>
-        {busy ? <p className="truncate text-xs" style={{ color: "var(--warn)" }}>{busy}…</p> : null}
-        {queueText ? <p className="truncate text-xs" style={{ color: "var(--warn)" }}>{queueText}</p> : null}
+        {error ? (
+          <div className="app-no-drag flex min-w-0 flex-1 items-center gap-2">
+            <p className="min-w-0 truncate text-xs text-red-500" title={error}>
+              {error}
+            </p>
+            {onDismissError ? (
+              <button
+                type="button"
+                className="shrink-0 rounded px-1.5 py-0.5 text-xs"
+                style={{ color: "var(--text-muted)" }}
+                aria-label={t("common.close")}
+                onClick={onDismissError}
+              >
+                {t("common.close")}
+              </button>
+            ) : null}
+          </div>
+        ) : busy ? (
+          <p className="truncate text-xs" style={{ color: "var(--warn)" }}>
+            {busy}…
+          </p>
+        ) : null}
+        {queueText && !error ? (
+          <p className="truncate text-xs" style={{ color: "var(--warn)" }}>
+            {queueText}
+          </p>
+        ) : null}
       </div>
       {isMac ? null : (
         <div className="flex h-full">
