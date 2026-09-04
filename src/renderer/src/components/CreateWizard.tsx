@@ -71,6 +71,7 @@ export function CreateWizard({
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
+        <p className="faint mt-1 text-xs">{t("create.folderHint")}</p>
         <label className="label mt-3 block text-xs">{t("create.displayName")}</label>
         <input
           disabled={busy}

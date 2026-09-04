@@ -99,7 +99,12 @@ export class ViewManager {
 
   hideAll(): void {
     this.hideTooltip();
+    this.selected = null;
     for (const view of this.views.values()) view.setVisible(false);
+  }
+
+  selectedName(): string | null {
+    return this.selected;
   }
 
   destroy(name: string): void {

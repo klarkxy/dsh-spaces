@@ -11,7 +11,7 @@ import {
   resolveInstallSpec,
 } from "../src/main/plugin-ops.ts";
 import { seedCatalog } from "../src/main/plugin-catalog.ts";
-import { applyAppLocale } from "../src/shared/i18n/index.ts";
+import { applyAppLocale, t } from "../src/shared/i18n/index.ts";
 
 const temps: string[] = [];
 
@@ -68,7 +68,11 @@ test("listProfilePlugins reads bundles then extra dependencies", () => {
 
 test("listProfilePlugins rejects unknown profiles", () => {
   const dir = home();
-  assert.throws(() => listProfilePlugins(dir, "missing"), /Unknown profile missing|未知工作台 missing/);
+  assert.throws(() => listProfilePlugins(dir, "missing"), (err: unknown) => {
+    assert.ok(err instanceof Error);
+    assert.equal(err.message, t("errors.unknownProfile", { name: "missing" }));
+    return true;
+  });
 });
 
 test("listAllProfilePlugins returns every named space and empty for broken ones", () => {

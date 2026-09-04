@@ -154,14 +154,14 @@ export function PluginPanel({
   const otherSpaces = profiles.filter((item) => item.name !== space);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
       <label className="text-xs" style={{ color: "var(--text-label)" }}>
         {t("plugins.space")}
         <select className="field mt-1" value={space} onChange={(event) => setSpace(event.target.value)}>
           {profiles.map((profile) => (
             <option key={profile.name} value={profile.name}>
               {profile.meta.displayName}
-              {profile.name === "web" ? " (web)" : ""}
+              {profile.name === "web" && profile.meta.displayName !== "web" ? " (web)" : ""}
             </option>
           ))}
         </select>
@@ -182,6 +182,9 @@ export function PluginPanel({
           <ul className="mt-2 flex flex-col gap-2">
             {currentList.map((item) => {
               const also = othersWith(installed, item.name, space);
+              const alsoLabels = also.map(
+                (name) => profiles.find((profile) => profile.name === name)?.meta.displayName || name,
+              );
               const copyCandidates = otherSpaces.filter((profile) => !also.includes(profile.name));
               return (
                 <li key={item.name} className="text-sm">
@@ -193,7 +196,7 @@ export function PluginPanel({
                       </p>
                       {also.length > 0 ? (
                         <p className="mt-0.5 text-xs" style={{ color: "var(--text-faint)" }}>
-                          {t("plugins.alsoOn", { names: also.join(", ") })}
+                          {t("plugins.alsoOn", { names: alsoLabels.join(", ") })}
                         </p>
                       ) : null}
                     </div>
@@ -317,7 +320,7 @@ export function PluginPanel({
             onChange={(event) => setQuery(event.target.value)}
           />
           <select
-            className="field w-auto"
+            className="field w-auto shrink-0"
             value={filter}
             onChange={(event) => setFilter(event.target.value as Filter)}
             aria-label={t("plugins.filter")}
@@ -342,7 +345,7 @@ export function PluginPanel({
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           {shown.length === 0 ? (
             <p className="text-sm" style={{ color: "var(--text-faint)" }}>
-              {t("plugins.empty")}
+              {!catalog && (busy || !error) ? t("plugins.loading") : t("plugins.empty")}
             </p>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -419,18 +422,23 @@ export function PluginPanel({
         </div>
       </div>
 
-      <label className="text-xs" style={{ color: "var(--text-label)" }}>
-        {t("plugins.catalogUrl")}
-        <input
-          className="field mt-1"
-          value={catalogUrl}
-          onChange={(event) => onCatalogUrl(event.target.value)}
-          placeholder="https://"
-        />
-      </label>
-      <p className="text-xs" style={{ color: "var(--text-faint)" }}>
-        {t("plugins.catalogUrlHint")}
-      </p>
+      <div
+        className="relative z-10 mt-3 shrink-0 pt-3"
+        style={{ borderTop: "1px solid var(--border)", background: "var(--bg-main)" }}
+      >
+        <label className="text-xs" style={{ color: "var(--text-label)" }}>
+          {t("plugins.catalogUrl")}
+          <input
+            className="field mt-1"
+            value={catalogUrl}
+            onChange={(event) => onCatalogUrl(event.target.value)}
+            aria-label={t("plugins.catalogUrl")}
+          />
+        </label>
+        <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
+          {t("plugins.catalogUrlHint")}
+        </p>
+      </div>
       {restart.length > 0 ? (
         <div className="rounded-lg p-3" style={{ border: "1px solid var(--border)" }}>
           <p className="text-sm font-medium">{t("plugins.restartTitle")}</p>

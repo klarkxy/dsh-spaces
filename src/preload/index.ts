@@ -18,6 +18,7 @@ import type {
 
 const api = {
   listProfiles: (): Promise<ProfileRecord[]> => ipcRenderer.invoke("listProfiles"),
+  getSelectedProfile: (): Promise<string | null> => ipcRenderer.invoke("getSelectedProfile"),
   getDshHome: (): Promise<string> => ipcRenderer.invoke("getDshHome"),
   getOnboarding: (): Promise<OnboardingScan> => ipcRenderer.invoke("getOnboarding"),
   confirmOnboarding: (): Promise<OnboardingScan> => ipcRenderer.invoke("confirmOnboarding"),

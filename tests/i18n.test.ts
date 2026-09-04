@@ -10,6 +10,7 @@ import {
   interpolate,
   resolveLocale,
   t,
+  visibleError,
   zh,
 } from "../src/shared/i18n/index.ts";
 import { resolveColorScheme } from "../src/shared/theme.ts";
@@ -77,6 +78,81 @@ test("t uses the requested locale and interpolates placeholders", () => {
     t("onboarding.notice", undefined, "zh"),
     "你的历史聊天统一由 web 维护，工作台从全新会话开始",
   );
+});
+
+test("name errors shown to users are the same human copy, not a regex", () => {
+  for (const locale of ["en", "zh"] as const) {
+    const fromMain = t("errors.nameInvalid", undefined, locale);
+    const fromWizard = t("create.nameInvalid", undefined, locale);
+    assert.equal(fromMain, fromWizard);
+    assert.ok(!fromMain.includes("^"), locale);
+    assert.ok(!fromMain.includes("$"), locale);
+    assert.ok(!fromMain.includes("[a-z"), locale);
+  }
+});
+
+test("empty, crash, and delete copy tell a non-engineer the next step", () => {
+  assert.equal(t("empty.open", { name: "web" }, "en"), "Open web");
+  assert.equal(t("empty.open", { name: "web" }, "zh"), "打开 web");
+  assert.equal(t("starting.title", { name: "web" }, "en"), "Starting web…");
+  assert.ok(t("starting.body", undefined, "en").includes("first start"));
+  assert.equal(t("idle.open", { name: "Notes" }, "en"), "Open Notes");
+  assert.ok(t("idle.body", undefined, "en").toLowerCase().includes("open"));
+  assert.equal(t("idle.rename", undefined, "en"), "Rename");
+  assert.equal(t("idle.remove", undefined, "zh"), "删除…");
+  assert.ok(!t("menu.openFolder", undefined, "en").toLowerCase().includes("profile"));
+  assert.ok(!t("menu.openFolder", undefined, "zh").includes("profile"));
+  assert.ok(!t("queue.pluginAdd", { name: "notes" }, "en").includes("plugin add"));
+  assert.equal(t("queue.pluginAdd", { name: "notes" }, "en"), "Installing plugin on notes");
+  assert.ok(!t("onboarding.hide", undefined, "en").includes("profile"));
+  assert.ok(!t("onboarding.hide", undefined, "zh").includes("profile"));
+  assert.ok(t("empty.body", undefined, "en").includes("icons on the left"));
+  assert.ok(!t("empty.body", undefined, "en").includes("rail"));
+  assert.ok(!t("idle.body", undefined, "en").includes("rail"));
+  assert.ok(!t("delete.removeRail", undefined, "en").includes("rail"));
+  assert.ok(t("crash.hint", undefined, "en").toLowerCase().includes("restart"));
+  assert.ok(!t("delete.removeRail", undefined, "en").includes("spaces.json"));
+  assert.ok(!t("delete.deleteData", undefined, "en").includes("hub/"));
+  assert.ok(!t("delete.alsoOfficial", undefined, "en").toLowerCase().includes("official"));
+  assert.ok(!t("delete.alsoOfficial", undefined, "zh").includes("官方"));
+  assert.ok(t("delete.alsoOfficial", undefined, "en").toLowerCase().includes("entire"));
+  assert.ok(t("delete.alsoOfficial", undefined, "en").toLowerCase().includes("custom files"));
+  assert.ok(t("delete.alsoOfficial", undefined, "zh").includes("整个"));
+  assert.ok(t("delete.alsoOfficial", undefined, "zh").includes("自定义文件"));
+  assert.equal(t("settings.tabGeneral", undefined, "en"), "General");
+  assert.ok(!t("create.intro", undefined, "en").toLowerCase().includes("isolated"));
+  assert.ok(t("create.intro", undefined, "zh").includes("聊天"));
+  assert.equal(t("settings.dshHome", undefined, "en"), "Data folder");
+  assert.ok(!t("plugins.spaceHint", undefined, "en").toLowerCase().includes("patch"));
+  assert.equal(t("busy.select", { name: "Scratchpad" }, "en"), "Opening Scratchpad");
+  assert.equal(t("busy.select", { name: "Scratchpad" }, "zh"), "正在打开 Scratchpad");
+  assert.ok(!t("create.progressPatch", undefined, "en").toLowerCase().includes("dual-root"));
+  assert.ok(!t("create.progressPatch", undefined, "en").toLowerCase().includes("patch"));
+  assert.ok(!t("create.progressVerify", undefined, "en").includes("dump-config"));
+  assert.ok(!t("create.progressPlugin", undefined, "en").includes("@deepseek-ai"));
+  assert.ok(t("create.progressPatch", undefined, "zh").includes("聊天"));
+  assert.ok(t("create.progressVerify", undefined, "en").toLowerCase().includes("start"));
+  assert.equal(t("menu.openFolder", undefined, "en"), "Open folder");
+  assert.ok(!t("menu.openFolder", undefined, "zh").includes("profile"));
+  assert.ok(!t("settings.quitStop", undefined, "en").toLowerCase().includes("profile"));
+  assert.ok(!t("settings.quitStop", undefined, "zh").includes("进程"));
+  assert.ok(t("settings.quitStop", undefined, "en").toLowerCase().includes("space"));
+  assert.ok(!t("errors.portNotReady", undefined, "en").toLowerCase().includes("port"));
+  assert.ok(!t("errors.portNotReady", undefined, "zh").includes("端口"));
+  assert.ok(t("errors.portNotReady", undefined, "en").toLowerCase().includes("restart"));
+  assert.equal(
+    visibleError("Error invoking remote method 'selectProfile': Error: 这个空间没能及时打开。请点重启。"),
+    "这个空间没能及时打开。请点重启。",
+  );
+  assert.equal(visibleError(t("errors.portNotReady", undefined, "en")), t("errors.portNotReady", undefined, "en"));
+  assert.ok(!t("plugins.catalogUrlHint", undefined, "en").includes("NanmiCoder"));
+  assert.ok(!t("plugins.catalogUrlHint", undefined, "zh").includes("NanmiCoder"));
+  assert.ok(!t("plugins.restartHint", { names: "web" }, "en").toLowerCase().includes("bundle"));
+  assert.ok(!t("plugins.restartHint", { names: "web" }, "zh").includes("bundle"));
+  assert.ok(t("plugins.restartHint", { names: "web" }, "en").toLowerCase().includes("plugin"));
+  assert.ok(!t("create.folderHint", undefined, "en").toLowerCase().includes("official"));
+  assert.ok(!t("create.folderHint", undefined, "zh").includes("官方"));
+  assert.ok(t("create.folderHint", undefined, "en").toLowerCase().includes("disk"));
 });
 
 test("settings persist locale and default missing values to system", () => {

@@ -39,7 +39,7 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
     if (!(await portClosed(port))) return;
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(t("errors.portNotReady", { port, timeout: timeoutMs }));
+  throw new Error(t("errors.portNotReady"));
 }
 
 async function sessionList(port: number): Promise<void> {
@@ -120,6 +120,7 @@ async function killTree(pid: number): Promise<void> {
 
 export class ProcessManager {
   private readonly instances = new Map<string, RunningInstance>();
+  private readonly starts = new Map<string, Promise<{ port: number }>>();
   private readonly listeners = new Set<StatusListener>();
   private readonly stopping = new Set<string>();
   private readonly errors = new Map<string, string>();
@@ -158,12 +159,25 @@ export class ProcessManager {
     return this.errors.get(name);
   }
 
-  async start(name: string): Promise<{ port: number }> {
+  start(name: string): Promise<{ port: number }> {
+    const pending = this.starts.get(name);
+    if (pending) return pending;
+
     const existing = this.instances.get(name);
     if (existing && (existing.status === "running" || existing.status === "starting")) {
-      return { port: existing.port };
+      return Promise.resolve({ port: existing.port });
     }
 
+    const attempt = this.startOnce(name);
+    this.starts.set(name, attempt);
+    const clear = () => {
+      if (this.starts.get(name) === attempt) this.starts.delete(name);
+    };
+    void attempt.then(clear, clear);
+    return attempt;
+  }
+
+  private async startOnce(name: string): Promise<{ port: number }> {
     this.errors.delete(name);
 
     if (name !== "web") {

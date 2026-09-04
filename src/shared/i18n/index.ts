@@ -53,6 +53,14 @@ export function t(key: MessageKey, params?: MessageParams, locale: AppLocale = c
   return interpolate(template, params);
 }
 
+/** Strip Electron IPC wrappers so the title bar shows the same sentence the overlay uses. */
+export function visibleError(message: string): string {
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .replace(/^Error:\s*/i, "")
+    .trim();
+}
+
 export function catalogKeys(): MessageKey[] {
   return Object.keys(en) as MessageKey[];
 }

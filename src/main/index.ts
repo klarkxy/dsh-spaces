@@ -192,6 +192,7 @@ function popupProfileMenu(name: string): void {
 
 function registerIpc(): void {
   ipcMain.handle("listProfiles", () => listProfiles());
+  ipcMain.handle("getSelectedProfile", () => views?.selectedName() ?? null);
   ipcMain.handle("getDshHome", () => dshHome);
   ipcMain.handle("getOnboarding", () => registry.scanOnboarding());
   ipcMain.handle("confirmOnboarding", async () => confirmOnboarding(dshHome, registry, patchWriter));
@@ -253,6 +254,7 @@ function registerIpc(): void {
   ipcMain.handle("selectProfile", async (_event, name: string) => {
     const port = processes.portOf(name);
     if (port === undefined) {
+      views?.hideAll();
       return startAndShow(name);
     }
     views?.select(name, port);

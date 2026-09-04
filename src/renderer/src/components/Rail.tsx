@@ -40,6 +40,7 @@ function RailButton({
   return (
     <button
       type="button"
+      aria-label={profile.meta.displayName}
       draggable={draggable}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
@@ -168,6 +169,7 @@ export function Rail({
       </div>
       <button
         type="button"
+        aria-label={t("rail.newSpace")}
         onClick={onCreate}
         className="flex h-12 w-12 items-center justify-center rounded-full text-emerald-500 transition hover:rounded-[16px] hover:bg-emerald-500 hover:text-white"
         style={{ background: "var(--bg-icon)" }}
@@ -191,6 +193,7 @@ export function Rail({
       </button>
       <button
         type="button"
+        aria-label={t("rail.settings")}
         onClick={onSettings}
         className="mb-1 flex h-10 w-10 items-center justify-center rounded-full transition"
         style={{ color: "var(--text-faint)" }}
