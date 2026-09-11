@@ -80,7 +80,7 @@
       ]
     },
     "mac": {
-      "icon": "resources/icon.png",
+      "icon": "resources/mac-icon.png",
       "target": [
         "dmg",
         "zip"
