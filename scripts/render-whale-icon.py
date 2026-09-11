@@ -166,8 +166,9 @@ def main() -> None:
     resources = root / "resources"
     resources.mkdir(exist_ok=True)
     rasterize(256).save(resources / "icon.png", "PNG")
+    rasterize(1024).save(resources / "mac-icon.png", "PNG")
     rasterize(32).save(resources / "tray-icon.png", "PNG")
-    print("wrote", resources / "icon.png", "and", resources / "tray-icon.png")
+    print("wrote app, macOS and tray PNG icons to", resources)
 
 
 if __name__ == "__main__":
