@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  defaultSpaceName,
   restoreSelected,
   shouldShowIdleCard,
   shouldShowStartingCard,
@@ -27,6 +28,12 @@ test("restoreSelected stays empty when main is not showing a view", () => {
   const profiles = [profile("web", "running"), profile("notes", "running")];
   assert.equal(restoreSelected(null, null, profiles), null);
   assert.equal(restoreSelected(null, "gone", profiles), null);
+});
+
+test("defaultSpaceName prefers web, then the first space", () => {
+  assert.equal(defaultSpaceName([profile("notes", "stopped"), profile("web", "stopped")]), "web");
+  assert.equal(defaultSpaceName([profile("notes", "stopped")]), "notes");
+  assert.equal(defaultSpaceName([]), null);
 });
 
 test("opening or restarting a stopped space shows starting, not idle", () => {

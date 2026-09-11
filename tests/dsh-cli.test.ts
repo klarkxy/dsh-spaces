@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { dshBinCandidates, findDshBin, resetDshBinCache, setManagedCliPrefix } from "../src/main/dsh-cli.ts";
+import { DSH_CLI_SPEC, dshBinCandidates, findDshBin, resetDshBinCache, setManagedCliPrefix } from "../src/main/dsh-cli.ts";
+import { DSH_DEFAULT_VERSION } from "../src/shared/runtime.ts";
 
 const temps: string[] = [];
 
@@ -26,6 +27,11 @@ afterEach(() => {
   for (const dir of temps.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("managed CLI install pins the current default DSH version", () => {
+  assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_VERSION}`);
+  assert.equal(DSH_DEFAULT_VERSION, "0.1.5-rc.1");
 });
 
 test("candidates prefer the managed prefix over a global npm root", () => {

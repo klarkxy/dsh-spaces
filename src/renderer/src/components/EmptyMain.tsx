@@ -15,13 +15,11 @@ export function IdleMain({
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div
-        className="w-[420px] max-w-full rounded-xl p-5"
-        style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
-      >
-        <h2 className="text-lg font-semibold">{t("idle.title", { name })}</h2>
-        <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+    <div className="relative z-[1] flex h-full items-center justify-center p-8">
+      <div className="ui-card w-[420px] max-w-full p-5">
+        <p className="ui-kicker">{t("cli.brand")}</p>
+        <h2 className="mt-2 text-lg font-semibold text-balance">{t("idle.title", { name })}</h2>
+        <p className="mt-2 text-sm leading-6 text-pretty" style={{ color: "var(--text-muted)" }}>
           {t("idle.body")}
         </p>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -59,13 +57,11 @@ export function IdleMain({
 export function StartingMain({ name }: { name: string }) {
   const { t } = useI18n();
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div
-        className="w-[420px] max-w-full rounded-xl p-5"
-        style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
-      >
-        <h2 className="text-lg font-semibold">{t("starting.title", { name })}</h2>
-        <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+    <div className="relative z-[1] flex h-full items-center justify-center p-8">
+      <div className="ui-card ui-card--live w-[420px] max-w-full p-5">
+        <p className="ui-kicker">{t("cli.brand")}</p>
+        <h2 className="mt-2 text-lg font-semibold text-balance">{t("starting.title", { name })}</h2>
+        <p className="mt-2 text-sm leading-6 text-pretty" style={{ color: "var(--text-muted)" }}>
           {t("starting.body")}
         </p>
       </div>
@@ -84,13 +80,11 @@ export function EmptyMain({
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div
-        className="w-[420px] max-w-full rounded-xl p-5"
-        style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
-      >
-        <h2 className="text-lg font-semibold">{t("empty.title")}</h2>
-        <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+    <div className="relative z-[1] flex h-full items-center justify-center p-8">
+      <div className="ui-card w-[420px] max-w-full p-5">
+        <p className="ui-kicker">{t("cli.brand")}</p>
+        <h2 className="mt-2 text-lg font-semibold text-balance">{t("empty.title")}</h2>
+        <p className="mt-2 text-sm leading-6 text-pretty" style={{ color: "var(--text-muted)" }}>
           {t("empty.body")}
         </p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">

@@ -55,16 +55,18 @@ export class ViewManager {
 
   constructor(private readonly window: BrowserWindow) {
     this.window.on("resize", () => this.layout());
+    this.window.on("show", () => this.layout());
+    this.window.on("restore", () => this.layout());
   }
 
-  select(name: string, port: number): void {
+  select(name: string, port: number, url = `http://127.0.0.1:${port}`): void {
     this.selected = name;
     let view = this.views.get(name);
     if (!view) {
       view = new WebContentsView();
       this.views.set(name, view);
       this.window.contentView.addChildView(view);
-      void view.webContents.loadURL(`http://127.0.0.1:${port}`);
+      void view.webContents.loadURL(url);
     }
     this.layout();
   }

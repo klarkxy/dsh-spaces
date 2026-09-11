@@ -43,9 +43,7 @@ export function CliSetup({
   return (
     <Overlay>
       <Card className="w-[480px]">
-        <p className="text-xs tracking-wide uppercase" style={{ color: "var(--accent)" }}>
-          {t("cli.brand")}
-        </p>
+        <p className="ui-kicker">{t("cli.brand")}</p>
         <h2 className="mt-1 text-xl font-semibold">{title}</h2>
         <p className="muted mt-2 text-sm">{t("cli.intro")}</p>
         <div className="mt-4">
@@ -65,7 +63,7 @@ export function CliSetup({
           {packageSource === "china" ? t("cli.hintChina") : t("cli.hintOfficial")}
         </p>
         {status.step ? (
-          <p className="mt-3 text-xs uppercase tracking-wide" style={{ color: "var(--accent)" }}>
+          <p className="ui-kicker mt-3">
             {t("cli.step", { step: stepLabel })}
           </p>
         ) : null}

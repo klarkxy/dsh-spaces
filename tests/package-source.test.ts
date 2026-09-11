@@ -6,6 +6,7 @@ import {
   electronMirror,
   nodeArchiveName,
   nodeDownloadUrl,
+  npmPackumentUrl,
   npmRegistry,
   sourceEnv,
 } from "../src/main/package-source.ts";
@@ -30,6 +31,17 @@ test("china source uses npmmirror for node and npm", () => {
   assert.equal(npmRegistry("china"), "https://registry.npmmirror.com");
   assert.equal(electronMirror("china"), "https://npmmirror.com/mirrors/electron/");
   assert.equal(sourceEnv("china").npm_config_registry, "https://registry.npmmirror.com");
+});
+
+test("packument URLs encode scoped package names", () => {
+  assert.equal(
+    npmPackumentUrl("official", "@deepseek-ai/dsh"),
+    "https://registry.npmjs.org/%40deepseek-ai%2Fdsh",
+  );
+  assert.equal(
+    npmPackumentUrl("china", "@deepseek-ai/dsh"),
+    "https://registry.npmmirror.com/%40deepseek-ai%2Fdsh",
+  );
 });
 
 test("official source uses nodejs.org and npmjs", () => {

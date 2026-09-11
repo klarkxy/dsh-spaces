@@ -41,7 +41,10 @@ export type ThemePreference = "system" | "light" | "dark";
 export interface HubSettings {
   portStart: number;
   portEnd: number;
+  /** Read for compatibility. Quit always stops owned spaces; keep is no longer applied. */
   quitBehavior: QuitBehavior;
+  /** One-time notice after migrating away from quitBehavior=keep. */
+  quitKeepHintDismissed?: boolean;
   packageSource: PackageSource;
   locale: LocalePreference;
   theme: ThemePreference;
@@ -95,10 +98,45 @@ export interface InstalledPlugin {
   protected: boolean;
 }
 
+export type PluginLibrarySource = "catalog" | "manual" | "installed";
+
+export interface PluginLibraryEntry {
+  id: string;
+  spec: string;
+  packageName: string;
+  title: string;
+  catalogId?: string;
+  /** Path relative to DSH_HOME, e.g. `hub/plugins/foo.tgz`. */
+  tarball?: string;
+  source: PluginLibrarySource;
+  downloadedAt: string;
+}
+
+export interface PluginManageRow {
+  id: string;
+  packageName: string;
+  title: string;
+  version?: string;
+  protected: boolean;
+  enabled: boolean;
+  inLibrary: boolean;
+}
+
 export interface PluginInstallRequest {
   profiles: string[];
   catalogId?: string;
   spec?: string;
+}
+
+export interface PluginDownloadRequest {
+  catalogId?: string;
+  spec?: string;
+}
+
+export interface PluginSpaceToggleRequest {
+  profile: string;
+  id: string;
+  enabled: boolean;
 }
 
 export interface PluginInstallResult {
@@ -150,21 +188,6 @@ export const RESERVED_PROFILE_NAMES = ["web", "hub", "headless", "node_modules"]
 
 export const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
-export const PRESET_ICONS = [
-  "code",
-  "pencil",
-  "terminal",
-  "folder",
-  "sparkles",
-  "bot",
-  "book",
-  "wrench",
-  "globe",
-  "music",
-] as const;
-
-export type PresetIcon = (typeof PRESET_ICONS)[number];
-
 export const DEFAULT_HUB_SETTINGS: HubSettings = {
   portStart: 3100,
   portEnd: 3199,
@@ -176,7 +199,7 @@ export const DEFAULT_HUB_SETTINGS: HubSettings = {
 };
 
 export const DEFAULT_PLUGIN_CATALOG_URL =
-  "https://cdn.jsdelivr.net/gh/NanmiCoder/dsh-plugin-market@main/data/v1/catalog.json";
+  "https://cdn.jsdelivr.net/gh/wgd753/awesome-dsh-plugin@main/data/repositories.json";
 
 export const PLUGIN_CATALOG_SCHEMA_VERSION = 1;
 

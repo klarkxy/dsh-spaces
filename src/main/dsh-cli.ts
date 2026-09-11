@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { t } from "../shared/i18n";
+import { DSH_DEFAULT_VERSION, DSH_RUNTIME_PACKAGE } from "../shared/runtime";
 import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../shared/types";
 import { npmRegistry } from "./package-source";
+import { terminateProcessTree } from "./terminate-process";
 import {
   currentPackageSource,
   ensureNode,
@@ -18,10 +20,16 @@ import {
   toolchainEnv,
 } from "./toolchain";
 
-export const DSH_CLI_SPEC = "@deepseek-ai/dsh@0.1.1-rc.2";
+export const DSH_CLI_SPEC = `${DSH_RUNTIME_PACKAGE}@${DSH_DEFAULT_VERSION}`;
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 let cachedBin: string | undefined;
+let selectedBin: (() => string | undefined) | undefined;
+
+/** A persisted selection is authoritative; resolver errors must not trigger a fallback install. */
+export function setSelectedDshResolver(resolver: () => string | undefined): void {
+  selectedBin = resolver;
+}
 let managedPrefixOverride: string | undefined;
 let ensuring: Promise<string> | undefined;
 let cliStatus: CliEnsureStatus = {
@@ -80,6 +88,10 @@ function probeNpmGlobalRoot(): string | undefined {
 }
 
 export function findDshBin(): string | undefined {
+  return selectedBin ? selectedBin() : findLegacyDshBin();
+}
+
+export function findLegacyDshBin(): string | undefined {
   if (cachedBin && existsSync(cachedBin)) return cachedBin;
   const candidates = dshBinCandidates({ npmGlobalRoot: probeNpmGlobalRoot() });
   const found = candidates.find((path) => existsSync(path));
@@ -206,7 +218,7 @@ async function doEnsure(): Promise<string> {
 export function ensureDshCli(): Promise<string> {
   const existing = findDshBin();
   if (existing) {
-    if (cliStatus.state !== "ready") {
+    if (cliStatus.state !== "ready" || cliStatus.message !== existing) {
       setCliStatus({ state: "ready", message: existing });
     }
     return Promise.resolve(existing);
@@ -240,6 +252,9 @@ async function doEnsureRuntime(source?: PackageSource): Promise<string> {
     if (source) setPackageSource(source);
     const existing = findDshBin();
     if (existing && nodeExecutable() && pnpmCjs()) {
+      // Older DSH snapshots do not need a newer Node to reopen offline.
+      if (readFileSync(existing, "utf8").includes("import.meta.main")) await ensureNode();
+      await ensurePnpm();
       setCliStatus({ state: "ready", message: existing });
       return existing;
     }
@@ -290,12 +305,16 @@ export async function runDsh(
         npm_config_ignore_workspace_root_check: "true",
       },
       windowsHide: true,
+      detached: process.platform !== "win32",
     });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
     const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`dsh ${args.join(" ")} timed out after ${timeoutMs}ms`));
+      timedOut = true;
+      void terminateProcessTree(child).then(
+        () => reject(new Error(`DSH command timed out after ${timeoutMs}ms`)), reject,
+      );
     }, timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
@@ -309,6 +328,7 @@ export async function runDsh(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (timedOut) return;
       resolvePromise({ stdout, stderr, code: code ?? 1 });
     });
   });
@@ -333,6 +353,10 @@ export function pluginQueueSnapshot(): PluginQueueSnapshot {
 }
 
 let pluginTail: Promise<void> = Promise.resolve();
+
+export function drainPluginQueue(): Promise<void> {
+  return pluginTail;
+}
 
 export function enqueuePlugin<T>(label: string, work: () => Promise<T>): Promise<T> {
   pending += 1;

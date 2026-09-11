@@ -4,8 +4,8 @@ export type { ThemePreference };
 export type ColorScheme = "light" | "dark";
 
 export const WINDOW_BG: Record<ColorScheme, string> = {
-  dark: "#1e1f22",
-  light: "#f5f6f8",
+  dark: "#0b1016",
+  light: "#e7eef3",
 };
 
 export function resolveColorScheme(

@@ -8,12 +8,16 @@ import {
   isInstallableEntry,
   isSafeSpec,
   loadPluginCatalog,
+  parseAnyCatalog,
   parseCatalog,
+  parseGitHubRepo,
   resolveCatalogUrl,
+  searchPluginCatalog,
   seedCatalog,
   type CatalogFetcher,
 } from "../src/main/plugin-catalog.ts";
 import { parseCatalogUrl, readSettings, writeSettings as saveSettings } from "../src/main/hub-settings.ts";
+import { formatCount, isGitSpec, matchesPluginQuery, pluginDisplayName } from "../src/shared/plugin.ts";
 import { DEFAULT_HUB_SETTINGS, DEFAULT_PLUGIN_CATALOG_URL } from "../src/shared/types.ts";
 
 const temps: string[] = [];
@@ -36,6 +40,42 @@ test("rejects unsafe plugin specs", () => {
   assert.equal(isSafeSpec("dsh-outline"), true);
   assert.equal(isSafeSpec("@liustack/modlens"), true);
   assert.equal(isSafeSpec("github:example/git-bundle"), true);
+  assert.equal(isSafeSpec("github:owner/repo#path:/plugins/foo"), true);
+});
+
+test("git specs are the github: shorthand", () => {
+  assert.equal(isGitSpec("github:example/git-bundle"), true);
+  assert.equal(isGitSpec("dsh-outline"), false);
+});
+
+test("formatCount and pluginDisplayName match store-style cards", () => {
+  assert.equal(formatCount(12), "12");
+  assert.equal(formatCount(3395), "3.4k");
+  assert.equal(formatCount(2353), "2.4k");
+  assert.equal(formatCount(158200), "158.2k");
+  assert.equal(
+    pluginDisplayName({
+      id: "linxin666/dsh-web-ui",
+      repo: "linxin666/dsh-web-ui",
+      packageName: "@linxin666/dsh-web-ui-all",
+    }),
+    "dsh-web-ui-all",
+  );
+  assert.equal(pluginDisplayName({ id: "liustack/modlens", repo: "liustack/modlens" }), "modlens");
+});
+
+test("plugin search matches tokenized names without pinning aliases", () => {
+  const autoevo = {
+    id: "klarkxy/dsh-plugin-autoevo",
+    repo: "klarkxy/dsh-plugin-autoevo",
+    owner: "klarkxy",
+    packageName: "dsh-plugin-autoevo",
+    description: "发现、探索、审查、升级。",
+    tags: ["dsh-plugin", "auto-evolution"],
+  };
+  assert.equal(matchesPluginQuery(autoevo, "dsh-plugin-evo"), true);
+  assert.equal(matchesPluginQuery(autoevo, "klarkxy/dsh-plugin-evo"), true);
+  assert.equal(matchesPluginQuery(autoevo, "modlens"), false);
 });
 
 test("seed catalog parses and only verified entries are one-click installable", () => {
@@ -118,14 +158,14 @@ test("loadPluginCatalog caches a remote document and reuses it on 304", async ()
       json: async () => catalog,
     };
   };
-  const first = await loadPluginCatalog(dir, { fetchImpl, refresh: true });
+  const first = await loadPluginCatalog(dir, { fetchImpl, refresh: true, url: "https://example.com/c.json" });
   assert.equal(first.source, "remote");
   assert.equal(first.entries[0].id, "remote/pkg");
   const cached = JSON.parse(readFileSync(join(dir, "hub", "plugin-catalog.json"), "utf8")) as {
     entries: { id: string }[];
   };
   assert.equal(cached.entries[0].id, "remote/pkg");
-  const second = await loadPluginCatalog(dir, { fetchImpl });
+  const second = await loadPluginCatalog(dir, { fetchImpl, url: "https://example.com/c.json" });
   assert.equal(second.source, "cache");
   assert.equal(fetches, 2);
 });
@@ -136,6 +176,58 @@ test("catalog URL must be https and empty means default", () => {
   assert.equal(parseCatalogUrl("https://example.com/c.json"), "https://example.com/c.json");
   assert.equal(resolveCatalogUrl(""), DEFAULT_PLUGIN_CATALOG_URL);
   assert.equal(resolveCatalogUrl("https://example.com/c.json"), "https://example.com/c.json");
+});
+
+test("topic dump catalogs map GitHub repos into git install specs", () => {
+  const parsed = parseAnyCatalog({
+    "klarkxy/dsh-plugins": {
+      full_name: "klarkxy/dsh-plugins",
+      html_url: "https://github.com/klarkxy/dsh-plugins",
+      description: "Small, independently installable plugins for DeepSeek Harness.",
+      stars: 0,
+      topics: ["dsh-plugin"],
+      category: "other",
+      archived: false,
+      disabled: false,
+    },
+    "random/not-dsh": {
+      full_name: "random/not-dsh",
+      html_url: "https://github.com/random/not-dsh",
+      description: "nope",
+      stars: 9,
+      topics: ["website"],
+    },
+  });
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].id, "klarkxy/dsh-plugins");
+  assert.equal(parsed.entries[0].installSpec, "github:klarkxy/dsh-plugins");
+  assert.equal(isInstallableEntry(parsed.entries[0]), true);
+});
+
+test("searchPluginCatalog fetches an owner/repo that has the dsh-plugin topic", async () => {
+  const dir = home();
+  const fetchImpl: CatalogFetcher = async (url) => {
+    assert.match(url, /api\.github\.com\/repos\/klarkxy\/dsh-plugins$/);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        full_name: "klarkxy/dsh-plugins",
+        html_url: "https://github.com/klarkxy/dsh-plugins",
+        description: "Small, independently installable plugins for DeepSeek Harness.",
+        stargazers_count: 0,
+        owner: { login: "klarkxy" },
+        topics: ["dsh-plugin", "deepseek-harness"],
+        archived: false,
+        disabled: false,
+      }),
+    };
+  };
+  const hits = await searchPluginCatalog(dir, "klarkxy/dsh-plugins", { fetchImpl });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].id, "klarkxy/dsh-plugins");
+  assert.equal(parseGitHubRepo({ full_name: "facebook/react", html_url: "https://github.com/facebook/react", topics: ["react"] }), undefined);
 });
 
 test("settings persist catalogUrl", () => {

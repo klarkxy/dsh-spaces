@@ -1,7 +1,7 @@
 /**
  * Re-extract Electron when install.js/extract-zip fails on paths that contain spaces.
  */
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ function zipName() {
 function main() {
   const exe = join(DIST, exeName());
   if (existsSync(exe)) {
+    writeFileSync(join(DIST, "..", "path.txt"), exeName());
     console.log("electron binary present");
     return;
   }
@@ -48,6 +49,7 @@ function main() {
     process.exit(1);
   }
   console.log("electron binary restored");
+  writeFileSync(join(DIST, "..", "path.txt"), exeName());
 }
 
 main();

@@ -1,6 +1,6 @@
 {
   "name": "dsh-spaces",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "description": "Spaces for DeepSeek Harness — switch DSH workspaces like Discord servers.",
@@ -21,7 +21,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "tsx --test tests/profile-registry.test.ts tests/patch-writer.test.ts tests/write-paths.test.ts tests/dsh-cli.test.ts tests/package-source.test.ts tests/toolchain.test.ts tests/i18n.test.ts tests/plugin-catalog.test.ts tests/plugin-ops.test.ts tests/process-manager.test.ts tests/restore-selected.test.ts",
+    "test": "tsx --test tests/profile-registry.test.ts tests/patch-writer.test.ts tests/write-paths.test.ts tests/dsh-cli.test.ts tests/package-source.test.ts tests/toolchain.test.ts tests/i18n.test.ts tests/plugin-catalog.test.ts tests/plugin-ops.test.ts tests/plugin-library.test.ts tests/process-manager.test.ts tests/restore-selected.test.ts tests/diagnostics.test.ts tests/runtime-store.test.ts tests/snapshot-store.test.ts tests/restore-session.test.ts tests/frontend-recovery.test.ts tests/package-build.test.ts tests/maintenance-gate.test.ts tests/coordinated-upgrade.test.ts tests/terminate-process.test.ts tests/dsh-endpoint.test.ts tests/space-icon.test.ts",
     "validate:isolation": "node scripts/validate-isolation.mjs --clean",
     "validate:lifecycle": "node scripts/verify-lifecycle.mjs",
     "validate:a8": "node scripts/verify-a8.mjs",
@@ -33,10 +33,13 @@
     "dist:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "electron-updater": "^6.6.2",
     "js-yaml": "^4.2.0",
     "lucide-react": "^0.542.0",
-    "motion": "^12.23.12"
+    "motion": "^12.23.12",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.12",
@@ -66,18 +69,26 @@
       "out/**/*"
     ],
     "asar": true,
+    "asarUnpack": [
+      "out/main/snapshot-worker.mjs",
+      "out/main/chunks/**"
+    ],
     "win": {
+      "icon": "resources/icon.png",
       "target": [
         "nsis"
       ]
     },
     "mac": {
+      "icon": "resources/icon.png",
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.developer-tools"
     },
     "linux": {
+      "icon": "resources/icon.png",
       "target": [
         "AppImage"
       ],

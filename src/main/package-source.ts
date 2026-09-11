@@ -1,6 +1,6 @@
 import type { PackageSource } from "../shared/types";
 
-export const NODE_VERSION = "22.16.0";
+export const NODE_VERSION = "22.23.2";
 export const PNPM_VERSION = "10.29.2";
 
 export function nodeArchiveName(platform = process.platform, arch = process.arch): string {
@@ -25,6 +25,10 @@ export function nodeDownloadUrl(
 
 export function npmRegistry(source: PackageSource): string {
   return source === "china" ? "https://registry.npmmirror.com" : "https://registry.npmjs.org";
+}
+
+export function npmPackumentUrl(source: PackageSource, name: string): string {
+  return `${npmRegistry(source)}/${encodeURIComponent(name)}`;
 }
 
 export function electronMirror(source: PackageSource): string | undefined {

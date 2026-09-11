@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, type CreateProgress, type PresetIcon } from "@shared/types";
+import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, type CreateProgress } from "@shared/types";
 import { useI18n } from "../i18n";
-import { PRESET_ICONS, SpaceGlyph } from "./icons";
+import { SpaceIconPicker } from "./icons";
 import { Card, Overlay } from "./Overlay";
 
 const STEPS: CreateProgress["step"][] = ["validate", "plugin", "patch", "verify", "meta"];
@@ -17,12 +17,12 @@ export function CreateWizard({
   error: string;
   progress: CreateProgress | null;
   onCancel: () => void;
-  onSubmit: (name: string, displayName: string, icon?: PresetIcon) => void;
+  onSubmit: (name: string, displayName: string, icon?: string) => void;
 }) {
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [icon, setIcon] = useState<PresetIcon | undefined>();
+  const [icon, setIcon] = useState("");
   const [localError, setLocalError] = useState("");
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export function CreateWizard({
       setLocalError(t("create.nameReserved", { name: trimmed }));
       return;
     }
-    onSubmit(trimmed, displayName.trim() || trimmed, icon);
+    onSubmit(trimmed, displayName.trim() || trimmed, icon || undefined);
   };
 
   return (
@@ -81,23 +81,7 @@ export function CreateWizard({
           onChange={(event) => setDisplayName(event.target.value)}
         />
         <p className="label mt-3 text-xs">{t("create.icon")}</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {PRESET_ICONS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              disabled={busy}
-              onClick={() => setIcon(id)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg"
-              style={{
-                background: icon === id ? "var(--accent)" : "var(--bg-icon)",
-                color: icon === id ? "#fff" : "var(--text)",
-              }}
-            >
-              <SpaceGlyph icon={id} name={id} className="h-4 w-4" />
-            </button>
-          ))}
-        </div>
+        <SpaceIconPicker icon={icon} disabled={busy} onChange={setIcon} />
         {busy && progress ? (
           <ol className="muted mt-4 space-y-1 text-sm">
             {STEPS.map((step) => {

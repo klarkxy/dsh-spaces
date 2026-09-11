@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -6,6 +7,7 @@ import { t } from "../shared/i18n";
 import type { PackageSource, RuntimeStatus } from "../shared/types";
 import { inferPackageSource } from "../shared/types";
 import { atomicWrite } from "./atomic";
+import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
 import {
   NODE_VERSION,
   PNPM_VERSION,
@@ -95,6 +97,8 @@ function writeNpmrc(source: PackageSource): void {
 }
 
 export function findNodeDir(root = toolchainRoot()): string | undefined {
+  const preferred = join(root, "node", nodeArchiveName().replace(/\.(zip|tar\.gz)$/, ""));
+  if (existsSync(join(preferred, "node.exe")) || existsSync(join(preferred, "bin", "node"))) return preferred;
   const directWin = join(root, "node", "node.exe");
   const directUnix = join(root, "node", "bin", "node");
   if (existsSync(directWin)) return join(root, "node");
@@ -179,13 +183,17 @@ export function runProcess(
       windowsHide: true,
       shell: options.shell ?? false,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
       env: options.env ?? toolchainEnv(),
     });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
     const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`${command} ${args.join(" ")} timed out after ${timeoutMs}ms`));
+      timedOut = true;
+      void terminateProcessTree(child).then(
+        () => reject(new Error(`${command} timed out after ${timeoutMs}ms`)), reject,
+      );
     }, timeoutMs);
     const take = (chunk: Buffer, which: "stdout" | "stderr") => {
       const text = chunk.toString("utf8");
@@ -202,6 +210,7 @@ export function runProcess(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (timedOut) return;
       resolveRun({ stdout, stderr, code: code ?? 1 });
     });
   });
@@ -264,7 +273,7 @@ function writePnpmShim(nodePath: string, pnpmJs: string): void {
 
 export async function ensureNode(onLine?: (line: string) => void): Promise<string> {
   const existing = nodeExecutable();
-  if (existing) return existing;
+  if (existing && await supportsCliEntry(existing)) return existing;
   const source = currentPackageSource();
   const root = toolchainRoot();
   const archive = nodeArchiveName();
@@ -275,15 +284,43 @@ export async function ensureNode(onLine?: (line: string) => void): Promise<strin
     await downloadFile(url, zip, onLine);
   }
   const dest = join(root, "node");
-  rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
+  const staging = join(dest, `.install-${randomUUID()}`);
+  const distribution = archive.replace(/\.(zip|tar\.gz)$/, "");
+  const published = join(dest, distribution);
+  const previous = join(dest, `.previous-${randomUUID()}`);
   onLine?.(t("cli.extractingNode"));
-  await extractArchiveAsync(zip, dest);
-  const node = nodeExecutable();
-  if (!node) throw new Error(t("errors.nodeExtractFailed", { dest }));
+  try {
+    await extractArchiveAsync(zip, staging);
+    const extracted = join(staging, distribution);
+    const executable = process.platform === "win32" ? "node.exe" : join("bin", "node");
+    if (!await supportsCliEntry(join(extracted, executable))) {
+      throw new Error(t("errors.nodeExtractFailed", { dest: staging }));
+    }
+    // Retain older distributions: a running space may still own their executable.
+    if (existsSync(published)) renameSync(published, previous);
+    try { renameSync(extracted, published); }
+    catch (error) {
+      if (existsSync(previous)) renameSync(previous, published);
+      throw error;
+    }
+  } finally { rmSync(staging, { recursive: true, force: true }); }
+  const node = nodeExecutable()!;
   writeToolchainConfig({ nodeVersion: NODE_VERSION, packageSource: source });
   writeNpmrc(source);
   return node;
+}
+
+/** New DSH entry points use import.meta.main; old managed Node 22.16 silently exits. */
+async function supportsCliEntry(node: string): Promise<boolean> {
+  if (!existsSync(node)) return false;
+  try {
+    const result = await runProcess(node, ["--input-type=module", "-e", "process.stdout.write(typeof import.meta.main)"], { timeoutMs: 10_000 });
+    return result.code === 0 && result.stdout.trim() === "boolean";
+  } catch (error) {
+    if (error instanceof ProcessTerminationError) throw error;
+    return false;
+  }
 }
 
 export async function ensurePnpm(onLine?: (line: string) => void): Promise<string> {

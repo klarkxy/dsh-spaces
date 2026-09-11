@@ -7,11 +7,12 @@ import type {
   OnboardingScan,
   PackageSource,
   PluginQueueSnapshot,
-  PresetIcon,
   ProfileRecord,
+  RuntimeStatus,
 } from "@shared/types";
 import { inferPackageSource } from "@shared/types";
 import {
+  defaultSpaceName,
   restoreSelected,
   shouldShowIdleCard,
   shouldShowStartingCard,
@@ -19,9 +20,11 @@ import {
 import { CliSetup } from "./components/CliSetup";
 import { CreateWizard } from "./components/CreateWizard";
 import { DeleteDialog } from "./components/DeleteDialog";
+import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EmptyMain, IdleMain, StartingMain } from "./components/EmptyMain";
 import { IconDialog, RenameDialog } from "./components/MetaDialogs";
 import { Onboarding } from "./components/Onboarding";
+import { PluginDialog } from "./components/PluginPanel";
 import { Rail } from "./components/Rail";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TitleBar } from "./components/TitleBar";
@@ -29,7 +32,7 @@ import { visibleError } from "@shared/i18n";
 import { useI18n } from "./i18n";
 import { useTheme } from "./theme";
 
-type OverlayKind = "create" | "settings" | "rename" | "icon" | "delete" | "onboarding" | null;
+type OverlayKind = "create" | "settings" | "rename" | "icon" | "delete" | "onboarding" | "diagnostics" | "plugins" | null;
 type BusyOperation = {
   id: number;
   label: string;
@@ -37,7 +40,7 @@ type BusyOperation = {
 };
 
 export default function App() {
-  const { t, preference, setPreference } = useI18n();
+  const { t, locale, preference, setPreference } = useI18n();
   const { setPreference: setThemePreference } = useTheme();
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -45,7 +48,6 @@ export default function App() {
   const [busy, setBusy] = useState<BusyOperation | null>(null);
   const busyId = useRef(0);
   const [overlay, setOverlay] = useState<OverlayKind>(null);
-  const [settingsTab, setSettingsTab] = useState<"general" | "plugins">("general");
   const [pluginSpace, setPluginSpace] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const [scan, setScan] = useState<OnboardingScan | null>(null);
@@ -58,6 +60,9 @@ export default function App() {
     message: "",
   });
   const [packageSource, setPackageSource] = useState<PackageSource>(inferPackageSource());
+  const [runtimeFault, setRuntimeFault] = useState<string | null>(null);
+  const suppressAutoLaunch = useRef(false);
+  const defaultLaunch = useRef<string | null>(null);
 
   const refresh = async () => {
     const [next, visible] = await Promise.all([
@@ -65,7 +70,7 @@ export default function App() {
       window.dshSpaces.getSelectedProfile(),
     ]);
     setProfiles(next);
-    setSelected((current) => restoreSelected(current, visible, next));
+    setSelected((current) => restoreSelected(current, visible, next) ?? defaultLaunch.current);
     return next;
   };
 
@@ -94,24 +99,44 @@ export default function App() {
       await loadHub();
     };
     const bootstrap = async () => {
+      let initialCli: CliEnsureStatus;
+      let hubSettings: HubSettings;
       try {
-        const [initialCli, runtime, hubSettings] = await Promise.all([
+        [initialCli, hubSettings] = await Promise.all([
           window.dshSpaces.getCliStatus(),
-          window.dshSpaces.getRuntimeStatus(),
           window.dshSpaces.getSettings(),
         ]);
-        if (cancelled) return;
-        setCli(initialCli);
-        setPackageSource(runtime.packageSource || hubSettings.packageSource);
-        setSettings(hubSettings);
-        setPreference(hubSettings.locale);
-        setThemePreference(hubSettings.theme);
-        if (runtime.node && runtime.pnpm && runtime.cli) {
-          const bin = await window.dshSpaces.ensureCli(runtime.packageSource);
-          await finishRuntime(bin);
-        }
       } catch (err) {
         if (!cancelled) setError(visibleError(err instanceof Error ? err.message : String(err)));
+        return;
+      }
+      if (cancelled) return;
+      setCli(initialCli);
+      setSettings(hubSettings);
+      setPreference(hubSettings.locale);
+      setThemePreference(hubSettings.theme);
+      let runtime: RuntimeStatus;
+      try {
+        runtime = await window.dshSpaces.getRuntimeStatus();
+      } catch (err) {
+        // A damaged selected runtime must not block settings or snapshot recovery.
+        if (cancelled) return;
+        setPackageSource(hubSettings.packageSource);
+        setRuntimeFault(visibleError(err instanceof Error ? err.message : String(err)));
+        await loadHub();
+        return;
+      }
+      setPackageSource(runtime.packageSource || hubSettings.packageSource);
+      if (runtime.node && runtime.pnpm && runtime.cli) {
+        try {
+          const bin = await window.dshSpaces.ensureCli(runtime.packageSource);
+          await finishRuntime(bin);
+        } catch (err) {
+          if (cancelled) return;
+          const message = visibleError(err instanceof Error ? err.message : String(err));
+          setCli({ state: "error", message });
+          setError(message);
+        }
       }
     };
     const offStatus = window.dshSpaces.onStatus(() => {
@@ -123,6 +148,10 @@ export default function App() {
     void bootstrap();
     const offUi = window.dshSpaces.onUiCommand((payload) => {
       if (payload.type === "error" && payload.message) setError(visibleError(payload.message));
+      if (payload.type === "diagnostics" && payload.name) {
+        setTarget(payload.name);
+        setOverlay("diagnostics");
+      }
       if (payload.type === "rename" && payload.name) {
         setTarget(payload.name);
         setOverlay("rename");
@@ -137,8 +166,7 @@ export default function App() {
       }
       if (payload.type === "plugins" && payload.name) {
         setPluginSpace(payload.name);
-        setSettingsTab("plugins");
-        setOverlay("settings");
+        setOverlay("plugins");
       }
     });
     return () => {
@@ -151,7 +179,7 @@ export default function App() {
     };
   }, []);
 
-  const cliBusy = cli.state !== "ready";
+  const cliBusy = !runtimeFault && cli.state !== "ready";
   const overlayOpen = overlay !== null || cliBusy;
   useEffect(() => {
     void window.dshSpaces.setOverlayOpen(overlayOpen);
@@ -181,6 +209,58 @@ export default function App() {
     void window.dshSpaces.saveSettings({ ...settings, locale: next }).then(setSettings);
   };
 
+  useEffect(() => {
+    if (cliBusy || overlay || runtimeFault) return;
+    if (selected || defaultLaunch.current) return;
+    // Maintenance (restore/upgrade/snapshot) leaves spaces stopped; the suppress
+    // flag stays set until the user explicitly starts a space, so later profile
+    // or settings refreshes cannot auto-start one.
+    if (suppressAutoLaunch.current) return;
+    const name = defaultSpaceName(profiles);
+    if (!name) return;
+    const profile = profiles.find((item) => item.name === name);
+    if (!profile) return;
+    defaultLaunch.current = name;
+    const display = profile.meta.displayName || name;
+    setSelected(name);
+    void run(
+      t("busy.select", { name: display }),
+      () => window.dshSpaces.selectProfile(name),
+      name,
+    ).finally(() => {
+      defaultLaunch.current = null;
+    });
+  }, [cliBusy, overlay, selected, profiles, t, runtimeFault]);
+
+  const refreshAfterMaintenance = async () => {
+    const saved = await window.dshSpaces.getSettings();
+    setSettings(saved);
+    setPreference(saved.locale);
+    setThemePreference(saved.theme);
+    setPackageSource(saved.packageSource);
+    await refresh();
+    // Maintenance leaves spaces stopped; block auto-launch until explicit user start.
+    suppressAutoLaunch.current = true;
+    // Maintenance can fix (or break) the selected runtime; always re-resolve it
+    // so the fault view appears exactly while the runtime is unusable.
+    try {
+      const runtime = await window.dshSpaces.getRuntimeStatus();
+      if (runtimeFault) {
+        // Recovered runtime: getRuntimeStatus/getCliStatus alone never advance the
+        // CLI past idle/error, so finish toolchain readiness through ensureCli
+        // before leaving the fault view. Failure keeps the fault visible.
+        const bin = await window.dshSpaces.ensureCli(runtime.packageSource || saved.packageSource);
+        setCli({ state: "ready", message: bin });
+      } else {
+        setCli(await window.dshSpaces.getCliStatus());
+      }
+      setPackageSource(runtime.packageSource || saved.packageSource);
+      setRuntimeFault(null);
+    } catch (err) {
+      setRuntimeFault(visibleError(err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const current = profiles.find((p) => p.name === selected);
   const overlayProfile = profiles.find((p) => p.name === target);
   const launchingCurrent = Boolean(selected && busy?.launchingProfile === selected);
@@ -188,12 +268,14 @@ export default function App() {
     Boolean(selected) &&
     shouldShowStartingCard(current?.status, launchingCurrent) &&
     !overlay &&
-    !cliBusy;
+    !cliBusy &&
+    !runtimeFault;
   const showIdle =
     Boolean(selected) &&
     shouldShowIdleCard(current?.status, launchingCurrent) &&
     !overlay &&
-    !cliBusy;
+    !cliBusy &&
+    !runtimeFault;
 
   return (
     <div className="flex h-full flex-col">
@@ -202,7 +284,7 @@ export default function App() {
         error={current?.status === "crashed" ? undefined : error || undefined}
         onDismissError={() => setError("")}
         queueText={
-          queue.pending > 0 && overlay !== "settings"
+          queue.pending > 0 && overlay !== "plugins"
             ? queue.current
               ? t("titleBar.pluginQueueCurrent", { count: queue.pending, current: queue.current })
               : t("titleBar.pluginQueue", { count: queue.pending })
@@ -227,11 +309,11 @@ export default function App() {
           setProgress(null);
           setOverlay("create");
         }}
-        onSettings={() => {
+        onPlugins={() => {
           setPluginSpace(null);
-          setSettingsTab("general");
-          setOverlay("settings");
+          setOverlay("plugins");
         }}
+        onSettings={() => setOverlay("settings")}
         onMenu={(name) => {
           void window.dshSpaces.hideRailTip();
           void window.dshSpaces.showProfileMenu(name);
@@ -242,7 +324,8 @@ export default function App() {
           else void window.dshSpaces.showRailTip(profile.meta.displayName, top);
         }}
         />
-        <main className="relative flex-1" style={{ background: "var(--bg-main)" }}>
+        <main className="relative flex-1 overflow-hidden" style={{ background: "var(--bg-main)" }}>
+        <div className="ui-grid" aria-hidden />
         {showStarting && current ? (
           <StartingMain name={current.meta.displayName || current.name} />
         ) : null}
@@ -274,7 +357,7 @@ export default function App() {
             }
           />
         ) : null}
-        {!selected && !overlay && !cliBusy ? (
+        {!selected && !overlay && !cliBusy && !runtimeFault ? (
           <EmptyMain
             firstName={profiles[0]?.meta.displayName || profiles[0]?.name}
             onOpen={
@@ -297,14 +380,35 @@ export default function App() {
             }}
           />
         ) : null}
+        {runtimeFault && !overlay ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
+            <div className="ui-card w-[420px] p-5">
+              <h2 className="text-lg font-semibold text-balance">
+                {locale === "zh" ? "运行时不可用" : "Runtime unavailable"}
+              </h2>
+              <p className="mt-2 text-sm text-pretty" style={{ color: "var(--text-muted)" }}>
+                {runtimeFault}
+              </p>
+              <p className="mt-2 text-sm" style={{ color: "var(--text-faint)" }}>
+                {locale === "zh"
+                  ? "空间不会自动启动。可在“版本与恢复”中检查快照并恢复到可用版本。"
+                  : "Spaces will not auto-start. Open Version & recovery to inspect snapshots and restore a working version."}
+              </p>
+              <button
+                type="button"
+                className="btn-primary mt-4 rounded px-3 py-1.5 text-sm"
+                onClick={() => setOverlay("settings")}
+              >
+                {locale === "zh" ? "版本与恢复" : "Version & recovery"}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {current?.status === "crashed" ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center">
-            <div
-              className="w-[360px] rounded-xl p-5"
-              style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
-            >
-              <h2 className="text-lg font-semibold">{t("crash.title")}</h2>
-              <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+            <div className="ui-card w-[360px] p-5">
+              <h2 className="text-lg font-semibold text-balance">{t("crash.title")}</h2>
+              <p className="mt-2 text-sm text-pretty" style={{ color: "var(--text-muted)" }}>
                 {current.lastError || t("crash.fallback")}
               </p>
               <p className="mt-2 text-sm" style={{ color: "var(--text-faint)" }}>
@@ -312,8 +416,7 @@ export default function App() {
               </p>
               <button
                 type="button"
-                className="mt-4 rounded px-3 py-1.5 text-sm text-white"
-                style={{ background: "var(--accent)" }}
+                className="btn-primary mt-4 rounded px-3 py-1.5 text-sm"
                 onClick={() =>
                   void run(
                     t("busy.restart", { name: current.meta.displayName || current.name }),
@@ -324,6 +427,9 @@ export default function App() {
               >
                 {t("crash.restart")}
               </button>
+              <button type="button" className="btn-ghost ml-3 rounded px-3 py-1.5 text-sm" onClick={() => {
+                setTarget(current.name); setOverlay("diagnostics");
+              }}>{locale === "zh" ? "查看诊断" : "View diagnostics"}</button>
             </div>
           </div>
         ) : null}
@@ -358,7 +464,9 @@ export default function App() {
                   await refresh();
                 })
                 .catch((err: unknown) => {
-                  setError(visibleError(err instanceof Error ? err.message : String(err)));
+                  const message = visibleError(err instanceof Error ? err.message : String(err));
+                  setCli({ state: "error", message });
+                  setError(message);
                 });
             }}
           />
@@ -375,6 +483,32 @@ export default function App() {
                 setScan(next);
                 setOverlay(null);
               })
+            }
+          />
+        ) : null}
+        {overlay === "diagnostics" && target ? <DiagnosticsPanel key={target} name={target} onClose={() => setOverlay(null)} onChanged={refresh} /> : null}
+        {overlay === "plugins" ? (
+          <PluginDialog
+            profiles={profiles}
+            selected={pluginSpace ?? selected}
+            initialCatalogUrl={settings?.catalogUrl ?? ""}
+            pluginPending={queue.pending}
+            pluginCurrent={queue.current}
+            onClose={() => {
+              setPluginSpace(null);
+              setOverlay(null);
+            }}
+            onSaveCatalogUrl={async (url) => {
+              if (!settings) return;
+              const saved = await window.dshSpaces.saveSettings({ ...settings, catalogUrl: url });
+              setSettings(saved);
+            }}
+            onRestart={(name) =>
+              void run(
+                t("busy.restart", { name }),
+                () => window.dshSpaces.restartProfile(name),
+                name,
+              )
             }
           />
         ) : null}
@@ -396,12 +530,10 @@ export default function App() {
           <SettingsDialog
             initial={settings}
             dshHome={dshHome}
-            profiles={profiles}
-            selected={pluginSpace ?? selected}
-            initialTab={settingsTab}
-            pluginPending={queue.pending}
-            pluginCurrent={queue.current}
+            initialTab={runtimeFault ? "runtime" : "general"}
+            onQuit={() => void run(t("tray.quit"), () => window.dshSpaces.quitApp())}
             onCancel={() => setOverlay(null)}
+            onMaintenanceChanged={refreshAfterMaintenance}
             onSave={(next) =>
               void run(t("busy.saveSettings"), async () => {
                 const saved = await window.dshSpaces.saveSettings(next);
@@ -410,13 +542,6 @@ export default function App() {
                 setThemePreference(saved.theme);
                 setOverlay(null);
               })
-            }
-            onRestart={(name) =>
-              void run(
-                t("busy.restart", { name }),
-                () => window.dshSpaces.restartProfile(name),
-                name,
-              )
             }
           />
         ) : null}
@@ -436,9 +561,9 @@ export default function App() {
           <IconDialog
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
-            onSave={(icon: PresetIcon | undefined) =>
+            onSave={(icon: string) =>
               void run(t("busy.icon"), async () => {
-                await window.dshSpaces.updateMeta(overlayProfile.name, { icon: icon ?? "" });
+                await window.dshSpaces.updateMeta(overlayProfile.name, { icon });
                 setOverlay(null);
               })
             }

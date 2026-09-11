@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const {PatchWriter,assertDumpPatched,extractRoot}=await import(new URL('../src/main/patch-writer.ts', import.meta.url).href);
+const mk=original=>{const home=mkdtempSync(join(tmpdir(),'spaces-patch-review-'));const dir=join(home,'profiles','notes');mkdirSync(dir,{recursive:true});const file=join(dir,'cordis.patch.yml');writeFileSync(file,original);return {home,file,writer:new PatchWriter(home)};};
+let passes=0;
+function check(name,fn){try{fn();console.log('PASS '+name);passes++;}catch(e){console.error('FAIL '+name+': '+e.message);process.exitCode=1;}}
+const good=`- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('hub/notes/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/notes/storages')\n`;
+check('valid dual roots accepted',()=>assertDumpPatched(good,'notes'));
+check('missing root cannot be read from next row',()=>{const dump=`- id: session-persistence-jsonl\n  config: {}\n- id: other\n  config:\n    root: !!js dshHomePath('hub/notes/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/notes/storages')\n`;assert.equal(extractRoot(dump,'session-persistence-jsonl'),null);assert.throws(()=>assertDumpPatched(dump,'notes'));});
+check('similar row id cannot impersonate required row',()=>assert.throws(()=>assertDumpPatched(good.replace('id: session-persistence-jsonl','id: session-persistence-jsonl-extra'),'notes')));
+check('path traversal is rejected',()=>assert.throws(()=>assertDumpPatched(good.replace('hub/notes/sessions','hub/notes/sessions/../../elsewhere'),'notes')));
+check('expression suffix is rejected',()=>assert.throws(()=>assertDumpPatched(good.replace("dshHomePath('hub/notes/sessions')","dshHomePath('hub/notes/sessions') + '/evil'"),'notes')));
+check('duplicate targeted row is rejected',()=>assert.throws(()=>assertDumpPatched(good+`- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/other/storages')\n`,'notes')));
+check('repeat patch retains comments custom tags and config fields',()=>{const a=mk(`# user commentary\n- id: custom\n  config:\n    value: !!js process.env.EXAMPLE\n- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('sessions')\n    compression: none # preserve this\n`);a.writer.ensureWorkbenchPatch('notes');a.writer.ensureWorkbenchPatch('notes');const body=readFileSync(a.file,'utf8');assert.match(body,/# user commentary/);assert.match(body,/# preserve this/);assert.match(body,/compression: none/);assert.match(body,/!!js process.env.EXAMPLE/);assert.equal((body.match(/id: session-persistence-jsonl/g)||[]).length,1);assert.equal((body.match(/id: storage-json/g)||[]).length,1);assertDumpPatched(body,'notes');});
+check('invalid top-level data is not discarded',()=>{const original='unexpected: configuration\n';const a=mk(original);assert.throws(()=>a.writer.ensureWorkbenchPatch('notes'));assert.equal(readFileSync(a.file,'utf8'),original);});
+check('web cannot be patched',()=>{const a=mk('[]\n');assert.throws(()=>a.writer.ensureWorkbenchPatch('web'));});
+check('untagged expression cannot impersonate an evaluated root',()=>assert.throws(()=>assertDumpPatched(good.replaceAll('!!js ',''),'notes')));
+check('relative string root does not equal an absolute DSH home root',()=>assert.throws(()=>assertDumpPatched(good.replaceAll(/!!js dshHomePath\('([^']+)'\)/g,'$1'),'notes')));
+check('root inline comment is retained',()=>{const a=mk(good.replace("dshHomePath('hub/notes/sessions')","dshHomePath('hub/notes/sessions') # important root note"));a.writer.ensureWorkbenchPatch('notes');assert.match(readFileSync(a.file,'utf8'),/# important root note/);});
+check('dynamic config is not silently replaced',()=>{const original=`- id: session-persistence-jsonl\n  config: !!js "({ root: 'sessions', compression: 'none' })"\n`;const a=mk(original);assert.throws(()=>a.writer.ensureWorkbenchPatch('notes'));assert.equal(readFileSync(a.file,'utf8'),original);});
+console.log(`Independent acceptance: ${passes}/13 passed`);
