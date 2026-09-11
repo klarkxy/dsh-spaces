@@ -35,9 +35,7 @@ export function Onboarding({
   return (
     <Overlay>
       <Card className="w-[480px]">
-        <p className="text-xs tracking-wide uppercase" style={{ color: "var(--accent)" }}>
-          {t("cli.brand")}
-        </p>
+        <p className="ui-kicker">{t("cli.brand")}</p>
         <h2 className="mt-1 text-xl font-semibold">{t("onboarding.title")}</h2>
         <div className="mt-4">
           <LocaleSelect value={locale} onChange={onLocale} disabled={busy} />

@@ -11,6 +11,12 @@ export function restoreSelected(
   return null;
 }
 
+/** Home space to open when nothing is selected. Prefer pinned `web`. */
+export function defaultSpaceName(profiles: Pick<ProfileRecord, "name">[]): string | null {
+  if (profiles.some((profile) => profile.name === "web")) return "web";
+  return profiles[0]?.name ?? null;
+}
+
 export function shouldShowStartingCard(
   status: ProfileStatus | undefined,
   launching: boolean,

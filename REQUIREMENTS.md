@@ -5,6 +5,8 @@
 > 一句话定位：**Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
 > 目标：社区开源产品（Windows / macOS / Linux）
 
+> 2026-09-08 后续决策：以 `tasks/plan.md` 为新增施工契约。关闭窗口进入托盘、明确退出停止全部；全应用统一 DSH 版本，协调升级官方基础插件并支持升级前快照恢复。`web` 仍不写隔离 patch、不迁移旧聊天，但明确的升级操作可更新其官方基础插件。本文历史技术实测对应 0.1.1-rc.2，不代表更新版本已验收。
+
 ---
 
 ## 1. 背景与问题
@@ -15,7 +17,7 @@ DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name
 - 官方 profile 只隔离**插件栈**；会话（`sessions/`）、工作区分组（`storages/workspace.json`）、API Key 全部在 home 级共享。
 - 切 profile 必须重启 harness 进程，没有任何 GUI 支持多 profile 的可视化切换。
 - 想同时跑多个 profile 的用户会遇到端口冲突和**并发写坏数据**（JSONL 持久化是"每个 session 文件同一时刻只允许一个活的写者"；两个进程抢同一个 `workspace.json` 会 last-writer-wins，参见官方仓库 discussion #1485）。
-- 社区已有产品（MarcoG-h/DSH-Launcher、anywhere-labs/dsh-desktop、FlashingChen/dsh-desktop-hub 等）没有一个做成"左侧多 profile 图标栏 + 右侧官方 GUI + 栏上快捷重启"的形态。竞品调研详见本仓库 canvas 简报。
+- 社区已有 DSH-Launcher V3 等多实例内嵌界面产品。Spaces 的重点是共享身份下的工作台管理、分离会话存储以及兼容性检查，不以多开或内嵌界面作为独有能力。
 
 ## 2. 产品定义
 

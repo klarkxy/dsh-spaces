@@ -6,6 +6,15 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: { index: resolve("src/main/index.ts"), "snapshot-worker": resolve("src/main/snapshot-worker.ts") },
+        output: {
+          entryFileNames: chunk => chunk.name === "snapshot-worker" ? "snapshot-worker.mjs" : "[name].js",
+          chunkFileNames: "chunks/[name]-[hash].mjs",
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

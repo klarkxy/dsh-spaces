@@ -107,6 +107,7 @@ export function TitleBar({
         background: "var(--bg-rail)",
         borderColor: "var(--border)",
         color: "var(--text)",
+        boxShadow: "inset 0 -1px 0 var(--accent-ring)",
       }}
       onDoubleClick={(event) => {
         if (isMac) return;
@@ -115,6 +116,7 @@ export function TitleBar({
       }}
     >
       <div className={`flex min-w-0 flex-1 items-center gap-3 px-3 ${isMac ? "pl-[76px]" : ""}`}>
+        <p className="ui-kicker shrink-0">{t("cli.brand")}</p>
         {error ? (
           <div className="app-no-drag flex min-w-0 flex-1 items-center gap-2">
             <p className="min-w-0 truncate text-xs text-red-500" title={error}>

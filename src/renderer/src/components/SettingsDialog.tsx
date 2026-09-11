@@ -1,50 +1,59 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   HubSettings,
   LocalePreference,
   PackageSource,
-  ProfileRecord,
   ThemePreference,
 } from "@shared/types";
 import { useI18n } from "../i18n";
+import { settingsFormKey } from "../recovery";
 import { useTheme } from "../theme";
 import { LocaleSelect } from "./LocaleSelect";
+import { MaintenancePanel } from "./MaintenanceDialog";
 import { Card, Overlay } from "./Overlay";
-import { PluginPanel } from "./PluginPanel";
 
 export function SettingsDialog({
   initial,
   dshHome,
-  profiles,
-  selected,
   initialTab = "general",
-  pluginPending,
-  pluginCurrent,
   onCancel,
   onSave,
-  onRestart,
+  onQuit,
+  onMaintenanceChanged,
 }: {
   initial: HubSettings;
   dshHome: string;
-  profiles: ProfileRecord[];
-  selected: string | null;
-  initialTab?: "general" | "plugins";
-  pluginPending: number;
-  pluginCurrent?: string;
+  initialTab?: "general" | "runtime";
   onCancel: () => void;
   onSave: (settings: HubSettings) => void;
-  onRestart: (name: string) => void;
+  onQuit: () => void;
+  onMaintenanceChanged: () => Promise<unknown>;
 }) {
   const { t, setPreference } = useI18n();
   const { setPreference: setThemePreference } = useTheme();
-  const [tab, setTab] = useState<"general" | "plugins">(initialTab);
+  const [tab, setTab] = useState<"general" | "runtime">(initialTab);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [portStart, setPortStart] = useState(String(initial.portStart));
   const [portEnd, setPortEnd] = useState(String(initial.portEnd));
-  const [quitBehavior, setQuitBehavior] = useState(initial.quitBehavior);
+  const showQuitKeepHint = initial.quitBehavior === "keep" && !initial.quitKeepHintDismissed;
   const [packageSource, setPackageSource] = useState<PackageSource>(initial.packageSource);
   const [locale, setLocale] = useState<LocalePreference>(initial.locale);
   const [theme, setTheme] = useState<ThemePreference>(initial.theme);
-  const [catalogUrl, setCatalogUrl] = useState(initial.catalogUrl);
+
+  // A maintenance action (e.g. snapshot restore) rewrites settings on disk and
+  // updates `initial`; drop the now-stale draft so Save can't overwrite the
+  // restored values. Unchanged settings keep in-progress edits untouched.
+  const initialKey = settingsFormKey(initial);
+  const syncedKey = useRef(initialKey);
+  useEffect(() => {
+    if (syncedKey.current === initialKey) return;
+    syncedKey.current = initialKey;
+    setPortStart(String(initial.portStart));
+    setPortEnd(String(initial.portEnd));
+    setPackageSource(initial.packageSource);
+    setLocale(initial.locale);
+    setTheme(initial.theme);
+  }, [initialKey, initial]);
 
   const revert = () => {
     setPreference(initial.locale);
@@ -68,25 +77,28 @@ export function SettingsDialog({
   });
 
   return (
-    <Overlay onBackdrop={revert}>
+    <Overlay onBackdrop={maintenanceBusy ? undefined : revert}>
       <Card wide>
-        <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
+        <p className="ui-kicker">{t("cli.brand")}</p>
+        <h2 className="mt-1 text-lg font-semibold">{t("settings.title")}</h2>
         <div className="mt-3 flex gap-4">
           <button
             type="button"
-            className="pb-1 text-sm"
+            className="pb-1 text-sm disabled:opacity-40"
             style={tabStyle(tab === "general")}
+            disabled={maintenanceBusy}
             onClick={() => setTab("general")}
           >
             {t("settings.tabGeneral")}
           </button>
           <button
             type="button"
-            className="pb-1 text-sm"
-            style={tabStyle(tab === "plugins")}
-            onClick={() => setTab("plugins")}
+            className="pb-1 text-sm disabled:opacity-40"
+            style={tabStyle(tab === "runtime")}
+            disabled={maintenanceBusy && tab !== "runtime"}
+            onClick={() => setTab("runtime")}
           >
-            {t("settings.tabPlugins")}
+            {t("settings.tabRuntime")}
           </button>
         </div>
         {tab === "general" ? (
@@ -149,60 +161,52 @@ export function SettingsDialog({
             <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
               {t("settings.packageSourceHint")}
             </p>
-            <label className="mt-4 block text-xs" style={{ color: "var(--text-label)" }}>
+            <p className="mt-4 text-xs" style={{ color: "var(--text-label)" }}>
               {t("settings.onQuit")}
-              <select
-                className="field mt-1"
-                value={quitBehavior}
-                onChange={(event) =>
-                  setQuitBehavior(event.target.value as HubSettings["quitBehavior"])
-                }
-              >
-                <option value="stop">{t("settings.quitStop")}</option>
-                <option value="keep">{t("settings.quitKeep")}</option>
-              </select>
-            </label>
+            </p>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
+              {t("settings.quitHint")}
+            </p>
+            {showQuitKeepHint ? (
+              <p className="mt-2 text-xs" style={{ color: "var(--warn)" }}>
+                {t("settings.quitKeepMigrate")}
+              </p>
+            ) : null}
+            <button type="button" className="mt-3 rounded border px-3 py-1.5 text-sm" onClick={onQuit}>
+              {t("tray.quit")}
+            </button>
           </div>
         ) : (
           <div className="mt-4 flex min-h-0 flex-1 flex-col">
-            <PluginPanel
-              profiles={profiles}
-              selected={selected}
-              catalogUrl={catalogUrl}
-              onCatalogUrl={setCatalogUrl}
-              onRestart={onRestart}
+            <MaintenancePanel
+              onChanged={onMaintenanceChanged}
+              onBusyChange={setMaintenanceBusy}
             />
           </div>
         )}
-        {pluginPending > 0 ? (
-          <p className="mt-3 text-sm" style={{ color: "var(--warn)" }}>
-            {pluginCurrent
-              ? t("settings.pluginQueueBusyCurrent", { count: pluginPending, current: pluginCurrent })
-              : t("settings.pluginQueueBusy", { count: pluginPending })}
-          </p>
-        ) : null}
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
-            className="rounded px-3 py-1.5 text-sm"
-            style={{ color: "var(--text-muted)" }}
+            className="btn-ghost rounded px-3 py-1.5 text-sm disabled:opacity-40"
+            disabled={maintenanceBusy}
             onClick={revert}
           >
             {t("common.cancel")}
           </button>
           <button
             type="button"
-            className="rounded px-3 py-1.5 text-sm text-white"
-            style={{ background: "var(--accent)" }}
+            className="btn-primary rounded px-3 py-1.5 text-sm disabled:opacity-40"
+            disabled={maintenanceBusy}
             onClick={() =>
               onSave({
                 portStart: Number(portStart),
                 portEnd: Number(portEnd),
-                quitBehavior,
+                quitBehavior: "stop",
+                quitKeepHintDismissed: true,
                 packageSource,
                 locale,
                 theme,
-                catalogUrl,
+                catalogUrl: initial.catalogUrl,
               })
             }
           >

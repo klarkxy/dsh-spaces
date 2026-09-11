@@ -1,20 +1,21 @@
 import { motion } from "motion/react";
-import { Settings, Plus } from "lucide-react";
+import { Puzzle, Settings, Plus } from "lucide-react";
 import { useState } from "react";
 import type { ProfileRecord, ProfileStatus } from "@shared/types";
 import { useI18n } from "../i18n";
+import { isUploadedSpaceIcon } from "@shared/space-icon";
 import { SpaceGlyph } from "./icons";
 
 function statusClass(status: ProfileStatus): string {
   switch (status) {
     case "running":
-      return "bg-emerald-400 animate-pulse";
+      return "ui-status ui-status-running";
     case "starting":
-      return "bg-amber-400 animate-pulse";
+      return "ui-status ui-status-starting";
     case "crashed":
-      return "bg-red-500";
+      return "ui-status ui-status-crashed";
     default:
-      return "bg-zinc-500";
+      return "ui-status ui-status-idle";
   }
 }
 
@@ -37,6 +38,7 @@ function RailButton({
   onDragStart?: () => void;
   onDrop?: () => void;
 }) {
+  const uploaded = isUploadedSpaceIcon(profile.meta.icon);
   return (
     <button
       type="button"
@@ -64,7 +66,7 @@ function RailButton({
         onHover(profile, top);
       }}
       onMouseLeave={() => onHover(null, 0)}
-      className="relative flex h-12 w-12 items-center justify-center"
+      className="relative flex size-12 items-center justify-center"
     >
       {selected ? (
         <motion.span
@@ -77,17 +79,25 @@ function RailButton({
         <span className="absolute left-[-14px] h-2 w-[4px] rounded-r-full bg-transparent" />
       )}
       <motion.span
-        className={`flex h-12 w-12 items-center justify-center ${
-          selected ? "rounded-[16px] text-white" : "rounded-full"
+        className={`flex size-12 items-center justify-center overflow-hidden ${
+          selected ? "rounded-[16px]" : "rounded-full"
         }`}
-        style={{
-          background: selected ? "var(--accent)" : "var(--bg-icon)",
-          color: selected ? "#fff" : "var(--text)",
-        }}
+        style={
+          uploaded
+            ? {
+                background: "var(--bg-icon)",
+                boxShadow: selected ? "0 0 0 2px var(--accent), 0 0 18px var(--accent-glow)" : "none",
+              }
+            : {
+                background: selected ? "var(--accent)" : "var(--bg-icon)",
+                color: selected ? "var(--accent-ink)" : "var(--text)",
+                boxShadow: selected ? "0 0 18px var(--accent-glow)" : "none",
+              }
+        }
         whileHover={{ borderRadius: 16 }}
         transition={{ type: "spring", stiffness: 380, damping: 24 }}
       >
-        <SpaceGlyph icon={profile.meta.icon} name={profile.meta.displayName} />
+        <SpaceGlyph icon={profile.meta.icon} className={uploaded ? "h-full w-full" : "h-6 w-6"} />
       </motion.span>
       <span
         className={`absolute right-0 bottom-0 h-3 w-3 rounded-full border-2 ${statusClass(profile.status)}`}
@@ -103,6 +113,7 @@ export function Rail({
   onSelect,
   onCreate,
   onSettings,
+  onPlugins,
   onMenu,
   onReorder,
   onHover,
@@ -112,6 +123,7 @@ export function Rail({
   onSelect: (name: string) => void;
   onCreate: () => void;
   onSettings: () => void;
+  onPlugins: () => void;
   onMenu: (name: string) => void;
   onReorder: (names: string[]) => void;
   onHover: (profile: ProfileRecord | null, top: number) => void;
@@ -124,7 +136,11 @@ export function Rail({
   return (
     <aside
       className="z-10 flex h-full w-[72px] flex-col items-center gap-2 border-r py-3"
-      style={{ background: "var(--bg-rail)", borderColor: "var(--border)" }}
+      style={{
+        background: "var(--bg-rail)",
+        borderColor: "var(--border)",
+        boxShadow: "inset -1px 0 12px var(--accent-glow)",
+      }}
     >
       {root.map((profile) => (
         <RailButton
@@ -171,8 +187,7 @@ export function Rail({
         type="button"
         aria-label={t("rail.newSpace")}
         onClick={onCreate}
-        className="flex h-12 w-12 items-center justify-center rounded-full text-emerald-500 transition hover:rounded-[16px] hover:bg-emerald-500 hover:text-white"
-        style={{ background: "var(--bg-icon)" }}
+        className="ui-rail-add flex size-12 items-center justify-center rounded-full transition hover:rounded-[16px]"
         onMouseEnter={(event) =>
           onHover(
             {
@@ -193,13 +208,33 @@ export function Rail({
       </button>
       <button
         type="button"
+        className="ui-rail-tool flex size-10 items-center justify-center rounded-full"
+        onClick={onPlugins}
+        aria-label={t("rail.plugins")}
+        onMouseEnter={(event) =>
+          onHover(
+            {
+              name: "plugins",
+              kind: "workbench",
+              path: "",
+              hasWebApp: true,
+              needsConversion: false,
+              meta: { displayName: t("rail.plugins"), order: 0 },
+              status: "stopped",
+            },
+            event.currentTarget.getBoundingClientRect().top,
+          )
+        }
+        onMouseLeave={() => onHover(null, 0)}
+      >
+        <Puzzle className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
         aria-label={t("rail.settings")}
         onClick={onSettings}
-        className="mb-1 flex h-10 w-10 items-center justify-center rounded-full transition"
-        style={{ color: "var(--text-faint)" }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.background = "var(--bg-hover)";
-          event.currentTarget.style.color = "var(--text)";
+        className="ui-rail-tool mb-1 flex size-10 items-center justify-center rounded-full"
+        onMouseEnter={(event) =>
           onHover(
             {
               name: "settings",
@@ -211,13 +246,9 @@ export function Rail({
               status: "stopped",
             },
             event.currentTarget.getBoundingClientRect().top,
-          );
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.background = "transparent";
-          event.currentTarget.style.color = "var(--text-faint)";
-          onHover(null, 0);
-        }}
+          )
+        }
+        onMouseLeave={() => onHover(null, 0)}
       >
         <Settings className="h-5 w-5" />
       </button>

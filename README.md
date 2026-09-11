@@ -10,31 +10,38 @@ A standalone Electron desktop shell (not a DSH plugin). Left rail of official DS
 
 Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Running two profiles at once can race the same JSONL files. DSH Spaces keeps **one shared identity** (API keys, `settings.yaml`) and gives every workbench its own session/storage roots under `$DSH_HOME/hub/<name>/`. Plugin discovery is in Hub settings (NanmiCoder catalog schema, MIT); installs still run `dsh plugin --profile <name> add` into the spaces you select.
 
-`web` is the unique home profile. It is never patched. Pre-Hub chats stay there.
+`web` is the unique home profile. Spaces never writes its isolation patch. Pre-Hub chats stay there; explicitly requested plugin operations may update its plugin installation.
 
 ## vs other launchers
 
-| | DSH Spaces | DSH-Launcher / dsh-desktop |
+| | DSH Spaces | [DSH-Launcher V3](https://github.com/MarcoG-h/DSH-Launcher) |
 |---|---|---|
-| UI | Discord-style rail + embedded official Web UI | Usually process lists / custom chrome |
-| Isolation | Dual-root patch to `hub/<name>/` (sibling of default trees) | Varies |
-| `web` | Zero writes | Often treated like any profile |
-| Parallelism | Required: one process + port per space | Often sequential |
+| UI | Space rail + embedded official Web UI | Embedded official Web UI and instance management |
+| Data model | Shared identity; separate workbench session/storage roots | Shared or independent DSH_HOME per instance |
+| Parallelism | One process and port per space | Multiple concurrent instances |
+
+Comparison checked against published documentation on 2026-09-08, not a performance benchmark. Spaces focuses on one person's separate working environments. Session isolation does not restrict file access or prevent two agents from editing the same source directory.
 
 ## Safety design
 
-- **No telemetry.** Nothing is uploaded.
-- **`web` zero writes.** Hub never patches `profiles/web/` or the default `sessions/` / `storages/` trees.
+- **No Spaces telemetry.** Model calls and installed plugins use their own network configuration.
+- **`web` isolation protection.** Spaces never applies storage-root overrides to `web` or migrates its existing chats.
 - **Backups.** Any write to `cordis.patch.yml` first copies `cordis.patch.yml.bak-<timestamp>`.
 - **Atomic writes.** `spaces.json` and patches use same-volume temp + rename (not `%TEMP%`).
 - **Start gate.** Workbenches run `dsh --profile <name> --dump-config` first. Missing/wrong row ids refuse to start (A8).
 - **Dev sandbox.** Unpackaged builds use `.sandbox/dsh-home`. Tests refuse the real `~/.dsh`.
 
+## Runtime upgrades and recovery
+
+Version 0.2.0 includes process lifecycle controls, tray behavior, diagnostics, and coordinated DSH upgrades with recoverable snapshots. App updates and DSH runtime upgrades are separate operations. Explicit runtime upgrades may update official base plugins in `web`, while its isolation patch remains protected. See the [acceptance record](tasks/fix-acceptance-2026-09-11.md) for tested scenarios and platform limits.
+
+Recovery normally saves a complete backup before replacing data. If the current runtime is missing or damaged, recovery requires explicit confirmation to preserve the current data without that runtime. Such backups are marked as data-only and cannot be applied as complete runtime snapshots. Recovery must finish before spaces can start or modify data.
+
 ## Requirements
 
-- Node 22+ (24 recommended) for contributing; the app also installs a managed Node, pnpm, and DSH CLI on first launch
+- Node 24 for contributing; the app also installs a managed Node, pnpm, and DSH CLI on first launch
 - Package source is selectable: China (npmmirror) or official (npmjs / nodejs.org)
-- Pin `@deepseek-ai/dsh-web-app` to the **same version as the CLI**. npm `latest` may still point at a broken `0.0.1-rc.1`.
+- Keep official base plugins matched to the selected CLI rather than independently following plugin dist-tags. First install uses `@deepseek-ai/dsh@0.1.5-rc.1`.
 
 ## Develop
 
@@ -81,7 +88,9 @@ MIT. See `LICENSE`.
 
 ## 安全
 
-无遥测；`web` 零写入；写 patch 先备份；启动前 `dump-config` 校验；开发测试只走沙箱 `.sandbox/dsh-home`。
+Spaces 不添加自己的遥测；上游 DSH 和插件遵循各自网络设置。`web` 不写工作台隔离 patch，但运行 DSH 会正常写入其配置和聊天。写工作台 patch 前保留备份；启动前用真实 `dump-config` 校验。工作台隔离聊天和存储，不是文件访问沙箱。开发测试默认使用 `.sandbox/dsh-home`，本轮验收使用全新临时 Home。
+
+恢复快照前通常会完整备份当前状态。当前运行时损坏或丢失时，需要明确确认后，才能先保存当前数据再恢复；该备份会标为“仅数据备份”，不能作为完整运行环境直接恢复。恢复流程完成前，空间不能启动或修改数据。
 
 ## 开发
 

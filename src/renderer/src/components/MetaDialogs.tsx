@@ -1,7 +1,8 @@
 import { useState } from "react";
-import type { PresetIcon, ProfileRecord } from "@shared/types";
+import type { ProfileRecord } from "@shared/types";
+import { isUploadedSpaceIcon } from "@shared/space-icon";
 import { useI18n } from "../i18n";
-import { PRESET_ICONS, SpaceGlyph } from "./icons";
+import { SpaceIconPicker } from "./icons";
 import { Card, Overlay } from "./Overlay";
 
 export function RenameDialog({
@@ -50,40 +51,17 @@ export function IconDialog({
 }: {
   profile: ProfileRecord;
   onCancel: () => void;
-  onSave: (icon: PresetIcon | undefined) => void;
+  onSave: (icon: string) => void;
 }) {
   const { t } = useI18n();
-  const [icon, setIcon] = useState<PresetIcon | undefined>(
-    PRESET_ICONS.includes(profile.meta.icon as PresetIcon) ? (profile.meta.icon as PresetIcon) : undefined,
+  const [icon, setIcon] = useState(
+    isUploadedSpaceIcon(profile.meta.icon) ? profile.meta.icon! : "",
   );
   return (
     <Overlay onBackdrop={onCancel}>
       <Card className="w-[360px]">
         <h2 className="text-lg font-semibold">{t("icon.title")}</h2>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-lg"
-            style={{ background: !icon ? "var(--accent)" : "var(--bg-icon)", color: !icon ? "#fff" : "var(--text)" }}
-            onClick={() => setIcon(undefined)}
-          >
-            {profile.name.slice(0, 1).toUpperCase()}
-          </button>
-          {PRESET_ICONS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className="flex h-9 w-9 items-center justify-center rounded-lg"
-              style={{
-                background: icon === id ? "var(--accent)" : "var(--bg-icon)",
-                color: icon === id ? "#fff" : "var(--text)",
-              }}
-              onClick={() => setIcon(id)}
-            >
-              <SpaceGlyph icon={id} name={id} className="h-4 w-4" />
-            </button>
-          ))}
-        </div>
+        <SpaceIconPicker icon={icon} onChange={setIcon} />
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" className="btn-ghost rounded px-3 py-1.5 text-sm" onClick={onCancel}>
             {t("common.cancel")}

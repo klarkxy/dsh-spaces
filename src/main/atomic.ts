@@ -8,3 +8,16 @@ export function atomicWrite(filePath: string, contents: string): void {
   writeFileSync(tmp, contents, "utf8");
   renameSync(tmp, filePath);
 }
+
+/** Windows scanners can briefly deny a directory rename immediately after writes. */
+export function renameDirectory(source: string, destination: string): void {
+  const deadline = Date.now() + 500;
+  for (;;) {
+    try { renameSync(source, destination); return; }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "") || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}

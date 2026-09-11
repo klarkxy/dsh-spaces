@@ -124,6 +124,93 @@ export function parseCatalog(value: unknown): { meta: PluginCatalogMeta; entries
   };
 }
 
+const DSH_TOPICS = new Set(["dsh-plugin", "dsh", "deepseek-harness", "deepseekharness"]);
+const OWNER_REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const GITHUB_HEADERS = {
+  accept: "application/vnd.github+json",
+  "user-agent": "dsh-spaces",
+};
+
+function topicsOf(value: unknown): string[] {
+  return strings(value).map((item) => item.toLowerCase());
+}
+
+function isDshRelated(topics: string[]): boolean {
+  return topics.some((topic) => DSH_TOPICS.has(topic));
+}
+
+function gitSpec(fullName: string): string {
+  return `github:${fullName}`;
+}
+
+export function parseGitHubRepo(value: unknown): PluginCatalogEntry | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  if (row.archived === true || row.disabled === true) return undefined;
+  const fullName = text(row.full_name);
+  const url = text(row.html_url);
+  if (!fullName || !OWNER_REPO_RE.test(fullName) || !url?.startsWith("https://github.com/")) return undefined;
+  const topics = topicsOf(row.topics);
+  if (!isDshRelated(topics)) return undefined;
+  const owner =
+    text((row.owner as { login?: unknown } | undefined)?.login) || fullName.split("/")[0] || "";
+  const spec = gitSpec(fullName);
+  const description = text(row.description) ?? "";
+  const category = text(row.category);
+  return {
+    id: fullName.toLowerCase(),
+    repo: fullName,
+    owner,
+    url,
+    tier: "verified-git",
+    packageName: fullName.split("/")[1],
+    installMethod: "git",
+    installSpec: spec,
+    runsBuildScript: true,
+    description,
+    summary: description,
+    summaryEn: description,
+    category,
+    tags: topics,
+    stars: num(row.stargazers_count ?? row.stars),
+    license: text((row.license as { spdx_id?: unknown } | undefined)?.spdx_id) || text(row.license),
+    hasClient: false,
+  };
+}
+
+export function parseTopicDump(value: unknown): { meta: PluginCatalogMeta; entries: PluginCatalogEntry[] } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("unsupported plugin catalog");
+  }
+  const unique = new Map<string, PluginCatalogEntry>();
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const row =
+      item && typeof item === "object"
+        ? { full_name: key, ...(item as Record<string, unknown>) }
+        : undefined;
+    const entry = parseGitHubRepo(row);
+    if (entry && !unique.has(entry.id)) unique.set(entry.id, entry);
+  }
+  const entries = [...unique.values()];
+  return {
+    meta: {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      count: entries.length,
+      contentHash: "github-topic",
+    },
+    entries,
+  };
+}
+
+export function parseAnyCatalog(value: unknown): { meta: PluginCatalogMeta; entries: PluginCatalogEntry[] } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const row = value as Record<string, unknown>;
+    if (row.meta && Array.isArray(row.entries)) return parseCatalog(value);
+  }
+  return parseTopicDump(value);
+}
+
 export function seedCatalog(): { meta: PluginCatalogMeta; entries: PluginCatalogEntry[] } {
   return parseCatalog(seedJson);
 }
@@ -148,10 +235,64 @@ function readCachedCatalog(dshHome: string): { meta: PluginCatalogMeta; entries:
   const path = catalogCachePath(dshHome);
   if (!existsSync(path)) return undefined;
   try {
-    return parseCatalog(JSON.parse(readFileSync(path, "utf8")));
+    return parseAnyCatalog(JSON.parse(readFileSync(path, "utf8")));
   } catch {
     return undefined;
   }
+}
+
+function rememberEntries(dshHome: string, extras: PluginCatalogEntry[]): void {
+  if (extras.length === 0) return;
+  const current = readCachedCatalog(dshHome) ?? seedCatalog();
+  const unique = new Map(current.entries.map((entry) => [entry.id, entry]));
+  for (const entry of extras) unique.set(entry.id, entry);
+  const entries = [...unique.values()];
+  writeCache(dshHome, {
+    meta: { ...current.meta, count: entries.length },
+    entries,
+  });
+}
+
+function githubJson(fetchImpl: CatalogFetcher, url: string): Promise<unknown> {
+  return fetchImpl(url, { headers: GITHUB_HEADERS }).then(async (response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  });
+}
+
+export async function searchPluginCatalog(
+  dshHome: string,
+  query: string,
+  options: { fetchImpl?: CatalogFetcher } = {},
+): Promise<PluginCatalogEntry[]> {
+  assertNotRealHome(dshHome);
+  const q = query.trim();
+  if (!q || q.length > 80) return [];
+  const fetchImpl =
+    options.fetchImpl ??
+    (async (target, init) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20_000);
+      try {
+        return await fetch(target, { headers: init?.headers, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  const extras: PluginCatalogEntry[] = [];
+  if (OWNER_REPO_RE.test(q)) {
+    const [owner, repo] = q.split("/");
+    try {
+      const entry = parseGitHubRepo(
+        await githubJson(fetchImpl, `https://api.github.com/repos/${owner}/${repo}`),
+      );
+      if (entry) extras.push(entry);
+    } catch {
+      // keep local catalog matches
+    }
+  }
+  rememberEntries(dshHome, extras);
+  return extras;
 }
 
 function writeCache(
@@ -193,7 +334,7 @@ export async function loadPluginCatalog(
         return { ...cached, source: "cache", url };
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const parsed = parseCatalog(await response.json());
+      const parsed = parseAnyCatalog(await response.json());
       writeCache(dshHome, parsed, response.headers.get("etag"));
       return { ...parsed, source: "remote", url };
     } catch {

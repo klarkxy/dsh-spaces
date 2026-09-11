@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -120,10 +120,17 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(t("delete.alsoOfficial", undefined, "zh").includes("整个"));
   assert.ok(t("delete.alsoOfficial", undefined, "zh").includes("自定义文件"));
   assert.equal(t("settings.tabGeneral", undefined, "en"), "General");
+  assert.equal(t("settings.tabRuntime", undefined, "en"), "Versions and recovery");
+  assert.equal(t("rail.plugins", undefined, "zh"), "插件管理");
+  assert.equal(t("plugins.title", undefined, "en"), "Plugins");
+  assert.equal(t("plugins.tabManage", undefined, "en"), "Manage");
+  assert.equal(t("plugins.tabMarket", undefined, "en"), "Market");
   assert.ok(!t("create.intro", undefined, "en").toLowerCase().includes("isolated"));
   assert.ok(t("create.intro", undefined, "zh").includes("聊天"));
   assert.equal(t("settings.dshHome", undefined, "en"), "Data folder");
-  assert.ok(!t("plugins.spaceHint", undefined, "en").toLowerCase().includes("patch"));
+  assert.ok(!t("plugins.manageHint", undefined, "en").toLowerCase().includes("patch"));
+  assert.ok(t("plugins.manageHint", undefined, "en").toLowerCase().includes("click"));
+  assert.ok(t("plugins.marketHint", undefined, "en").toLowerCase().includes("download"));
   assert.equal(t("busy.select", { name: "Scratchpad" }, "en"), "Opening Scratchpad");
   assert.equal(t("busy.select", { name: "Scratchpad" }, "zh"), "正在打开 Scratchpad");
   assert.ok(!t("create.progressPatch", undefined, "en").toLowerCase().includes("dual-root"));
@@ -137,6 +144,12 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(!t("settings.quitStop", undefined, "en").toLowerCase().includes("profile"));
   assert.ok(!t("settings.quitStop", undefined, "zh").includes("进程"));
   assert.ok(t("settings.quitStop", undefined, "en").toLowerCase().includes("space"));
+  assert.ok(t("settings.quitHint", undefined, "en").toLowerCase().includes("tray"));
+  assert.ok(t("settings.quitHint", undefined, "en").toLowerCase().includes("quit"));
+  assert.ok(!t("settings.quitHint", undefined, "en").toLowerCase().includes("profile"));
+  assert.ok(!t("settings.quitKeepMigrate", undefined, "en").toLowerCase().includes("profile"));
+  assert.ok(t("tray.stopAll", undefined, "en").toLowerCase().includes("space"));
+  assert.ok(!t("errors.stopFailed", { detail: "x" }, "en").toLowerCase().includes("profile"));
   assert.ok(!t("errors.portNotReady", undefined, "en").toLowerCase().includes("port"));
   assert.ok(!t("errors.portNotReady", undefined, "zh").includes("端口"));
   assert.ok(t("errors.portNotReady", undefined, "en").toLowerCase().includes("restart"));
@@ -153,6 +166,9 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(!t("create.folderHint", undefined, "en").toLowerCase().includes("official"));
   assert.ok(!t("create.folderHint", undefined, "zh").includes("官方"));
   assert.ok(t("create.folderHint", undefined, "en").toLowerCase().includes("disk"));
+  assert.ok(t("icon.hint", undefined, "en").toLowerCase().includes("whale"));
+  assert.ok(t("icon.hint", undefined, "zh").includes("鲸鱼"));
+  assert.ok(t("icon.upload", undefined, "zh").includes("上传"));
 });
 
 test("settings persist locale and default missing values to system", () => {
@@ -171,4 +187,22 @@ test("settings persist locale and default missing values to system", () => {
   temps.push(other);
   assert.equal(readSettings(other).locale, "system");
   assert.equal(readSettings(other).theme, "system");
+});
+
+test("readSettings keeps quitBehavior=keep and can store the one-time hint", () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-spaces-"));
+  temps.push(home);
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "settings.json"),
+    `${JSON.stringify({ portStart: 3100, portEnd: 3199, quitBehavior: "keep" })}\n`,
+  );
+  const loaded = readSettings(home);
+  assert.equal(loaded.quitBehavior, "keep");
+  assert.equal(Boolean(loaded.quitKeepHintDismissed), false);
+  const saved = writeSettings(home, { ...loaded, quitBehavior: "stop", quitKeepHintDismissed: true });
+  assert.equal(saved.quitBehavior, "stop");
+  assert.equal(saved.quitKeepHintDismissed, true);
+  assert.equal(readSettings(home).quitKeepHintDismissed, true);
+  assert.equal(readSettings(home).quitBehavior, "stop");
 });
