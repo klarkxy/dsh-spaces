@@ -12,18 +12,26 @@ import type {
 } from "@shared/types";
 import { inferPackageSource } from "@shared/types";
 import {
+  desktopSelectAccess,
+  shouldDesktopAutoLaunch,
+  type DesktopControllerState,
+  type DesktopReleaseSpace,
+} from "@shared/desktop-controller";
+import {
   defaultSpaceName,
   restoreSelected,
   shouldShowIdleCard,
   shouldShowStartingCard,
 } from "@shared/restore-selected";
 import { CliSetup } from "./components/CliSetup";
+import { ControllerStatus } from "./components/ControllerStatus";
 import { CreateWizard } from "./components/CreateWizard";
 import { DeleteDialog } from "./components/DeleteDialog";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EmptyMain, IdleMain, StartingMain } from "./components/EmptyMain";
 import { IconDialog, RenameDialog } from "./components/MetaDialogs";
 import { Onboarding } from "./components/Onboarding";
+import { Card, Overlay } from "./components/Overlay";
 import { PluginDialog } from "./components/PluginPanel";
 import { Rail } from "./components/Rail";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -61,8 +69,11 @@ export default function App() {
   });
   const [packageSource, setPackageSource] = useState<PackageSource>(inferPackageSource());
   const [runtimeFault, setRuntimeFault] = useState<string | null>(null);
+  const [controller, setController] = useState<DesktopControllerState | null>(null);
+  const [releasePreview, setReleasePreview] = useState<DesktopReleaseSpace[] | null>(null);
   const suppressAutoLaunch = useRef(false);
   const defaultLaunch = useRef<string | null>(null);
+  const writable = controller?.writable === true;
 
   const refresh = async () => {
     const [next, visible] = await Promise.all([
@@ -76,7 +87,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    const loadHub = async () => {
+    const loadHub = async (canWrite: boolean) => {
       const [home, onboarding, hubSettings, snap] = await Promise.all([
         window.dshSpaces.getDshHome(),
         window.dshSpaces.getOnboarding(),
@@ -90,15 +101,29 @@ export default function App() {
       setPreference(hubSettings.locale);
       setThemePreference(hubSettings.theme);
       setQueue(snap);
-      if (!onboarding.onboarded) setOverlay("onboarding");
+      if (!onboarding.onboarded && canWrite) setOverlay("onboarding");
       await refresh();
     };
     const finishRuntime = async (bin: string) => {
       if (cancelled) return;
       setCli({ state: "ready", message: bin });
-      await loadHub();
+      await loadHub(true);
     };
     const bootstrap = async () => {
+      let initialState: DesktopControllerState;
+      try {
+        initialState = await window.dshSpaces.getControllerState();
+      } catch (err) {
+        if (!cancelled) setError(visibleError(err instanceof Error ? err.message : String(err)));
+        return;
+      }
+      if (cancelled) return;
+      setController(initialState);
+      if (!initialState.writable) {
+        setCli({ state: "ready", message: "" });
+        await loadHub(false);
+        return;
+      }
       let initialCli: CliEnsureStatus;
       let hubSettings: HubSettings;
       try {
@@ -123,7 +148,7 @@ export default function App() {
         if (cancelled) return;
         setPackageSource(hubSettings.packageSource);
         setRuntimeFault(visibleError(err instanceof Error ? err.message : String(err)));
-        await loadHub();
+        await loadHub(true);
         return;
       }
       setPackageSource(runtime.packageSource || hubSettings.packageSource);
@@ -145,6 +170,7 @@ export default function App() {
     const offProgress = window.dshSpaces.onCreateProgress((payload) => setProgress(payload));
     const offQueue = window.dshSpaces.onPluginQueue((payload) => setQueue(payload));
     const offCli = window.dshSpaces.onCliStatus((payload) => setCli(payload));
+    const offController = window.dshSpaces.onControllerStatus((payload) => setController(payload));
     void bootstrap();
     const offUi = window.dshSpaces.onUiCommand((payload) => {
       if (payload.type === "error" && payload.message) setError(visibleError(payload.message));
@@ -175,12 +201,21 @@ export default function App() {
       offProgress();
       offQueue();
       offCli();
+      offController();
       offUi();
     };
   }, []);
 
-  const cliBusy = !runtimeFault && cli.state !== "ready";
-  const overlayOpen = overlay !== null || cliBusy;
+  useEffect(() => {
+    if (shouldDesktopAutoLaunch(controller)) return;
+    const timer = window.setInterval(() => {
+      void window.dshSpaces.getControllerState().then(setController).catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [controller]);
+
+  const cliBusy = Boolean(writable && !runtimeFault && cli.state !== "ready");
+  const overlayOpen = overlay !== null || cliBusy || releasePreview !== null;
   useEffect(() => {
     void window.dshSpaces.setOverlayOpen(overlayOpen);
   }, [overlayOpen]);
@@ -205,11 +240,38 @@ export default function App() {
 
   const persistLocale = (next: LocalePreference) => {
     setPreference(next);
-    if (!settings) return;
+    if (!settings || !writable) return;
     void window.dshSpaces.saveSettings({ ...settings, locale: next }).then(setSettings);
   };
 
+  const refuseWrite = (message?: string) => {
+    setError(
+      message ||
+        (locale === "zh"
+          ? "当前为只读。接管 Home 后才能更改。"
+          : "Home is read-only. Take over before making changes."),
+    );
+  };
+
+  const selectSpace = (name: string) => {
+    const profile = profiles.find((item) => item.name === name);
+    const display = profile?.meta.displayName || name;
+    const running = profile?.status === "running";
+    const access = desktopSelectAccess(writable, Boolean(running));
+    setSelected(name);
+    if (access === "deny") {
+      refuseWrite();
+      return;
+    }
+    void run(
+      t("busy.select", { name: display }),
+      () => window.dshSpaces.selectProfile(name),
+      name,
+    );
+  };
+
   useEffect(() => {
+    if (!shouldDesktopAutoLaunch(controller)) return;
     if (cliBusy || overlay || runtimeFault) return;
     if (selected || defaultLaunch.current) return;
     // Maintenance (restore/upgrade/snapshot) leaves spaces stopped; the suppress
@@ -230,7 +292,7 @@ export default function App() {
     ).finally(() => {
       defaultLaunch.current = null;
     });
-  }, [cliBusy, overlay, selected, profiles, t, runtimeFault]);
+  }, [cliBusy, overlay, selected, profiles, t, runtimeFault, controller]);
 
   const refreshAfterMaintenance = async () => {
     const saved = await window.dshSpaces.getSettings();
@@ -278,7 +340,7 @@ export default function App() {
     !runtimeFault;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <TitleBar
         busy={busy?.label}
         error={current?.status === "crashed" ? undefined : error || undefined}
@@ -291,21 +353,45 @@ export default function App() {
             : undefined
         }
       />
+      {controller ? (
+        <div
+          className="pointer-events-none absolute top-0 z-[60] flex h-8 items-center justify-end"
+          style={{
+            left: window.dshSpaces.platform === "darwin" ? 168 : 132,
+            right: window.dshSpaces.platform === "darwin" ? 12 : 148,
+          }}
+        >
+          <div className="pointer-events-auto max-w-full">
+            <ControllerStatus
+              state={controller}
+              locale={locale === "zh" ? "zh" : "en"}
+              busy={Boolean(busy)}
+              onAcquire={() =>
+                void run(locale === "zh" ? "接管" : "Take over", async () => {
+                  const next = await window.dshSpaces.acquireController();
+                  setController(next);
+                  if (next.writable) await refresh();
+                })
+              }
+              onRelease={() => {
+                void window.dshSpaces.previewControllerRelease().then(setReleasePreview).catch((err: unknown) => {
+                  setError(visibleError(err instanceof Error ? err.message : String(err)));
+                });
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1">
         <Rail
         profiles={profiles}
         selected={selected}
-        onSelect={(name) => {
-          const display =
-            profiles.find((profile) => profile.name === name)?.meta.displayName || name;
-          setSelected(name);
-          void run(
-            t("busy.select", { name: display }),
-            () => window.dshSpaces.selectProfile(name),
-            name,
-          );
-        }}
+        onSelect={selectSpace}
         onCreate={() => {
+          if (!writable) {
+            refuseWrite();
+            return;
+          }
           setProgress(null);
           setOverlay("create");
         }}
@@ -318,7 +404,13 @@ export default function App() {
           void window.dshSpaces.hideRailTip();
           void window.dshSpaces.showProfileMenu(name);
         }}
-        onReorder={(names) => void run(t("busy.reorder"), () => window.dshSpaces.reorderProfiles(names))}
+        onReorder={(names) => {
+          if (!writable) {
+            refuseWrite();
+            return;
+          }
+          void run(t("busy.reorder"), () => window.dshSpaces.reorderProfiles(names));
+        }}
         onHover={(profile, top) => {
           if (!profile) void window.dshSpaces.hideRailTip();
           else void window.dshSpaces.showRailTip(profile.meta.displayName, top);
@@ -330,15 +422,10 @@ export default function App() {
           <StartingMain name={current.meta.displayName || current.name} />
         ) : null}
         {showIdle && current ? (
+          writable ? (
           <IdleMain
             name={current.meta.displayName || current.name}
-            onOpen={() =>
-              void run(
-                t("busy.select", { name: current.meta.displayName || current.name }),
-                () => window.dshSpaces.selectProfile(current.name),
-                current.name,
-              )
-            }
+            onOpen={() => selectSpace(current.name)}
             onCreate={() => {
               setProgress(null);
               setOverlay("create");
@@ -356,25 +443,26 @@ export default function App() {
                   }
             }
           />
+          ) : (
+            <EmptyMain
+              firstName={current.meta.displayName || current.name}
+              onCreate={() => refuseWrite()}
+            />
+          )
         ) : null}
         {!selected && !overlay && !cliBusy && !runtimeFault ? (
           <EmptyMain
             firstName={profiles[0]?.meta.displayName || profiles[0]?.name}
             onOpen={
-              profiles[0]
-                ? () => {
-                    const name = profiles[0].name;
-                    const display = profiles[0].meta.displayName || name;
-                    setSelected(name);
-                    void run(
-                      t("busy.select", { name: display }),
-                      () => window.dshSpaces.selectProfile(name),
-                      name,
-                    );
-                  }
+              writable && profiles[0]
+                ? () => selectSpace(profiles[0].name)
                 : undefined
             }
             onCreate={() => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               setProgress(null);
               setOverlay("create");
             }}
@@ -417,13 +505,17 @@ export default function App() {
               <button
                 type="button"
                 className="btn-primary mt-4 rounded px-3 py-1.5 text-sm"
-                onClick={() =>
+                onClick={() => {
+                  if (!writable) {
+                    refuseWrite();
+                    return;
+                  }
                   void run(
                     t("busy.restart", { name: current.meta.displayName || current.name }),
                     () => window.dshSpaces.restartProfile(current.name),
                     current.name,
-                  )
-                }
+                  );
+                }}
               >
                 {t("crash.restart")}
               </button>
@@ -441,6 +533,10 @@ export default function App() {
             onPackageSource={setPackageSource}
             onLocale={persistLocale}
             onInstall={(source) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               setError("");
               setPackageSource(source);
               setCli({ state: "installing", step: "node", message: t("cli.starting") });
@@ -460,7 +556,7 @@ export default function App() {
                   setPreference(hubSettings.locale);
                   setThemePreference(hubSettings.theme);
                   setQueue(snap);
-                  if (!onboarding.onboarded) setOverlay("onboarding");
+                  if (!onboarding.onboarded && writable) setOverlay("onboarding");
                   await refresh();
                 })
                 .catch((err: unknown) => {
@@ -470,20 +566,24 @@ export default function App() {
                 });
             }}
           />
-        ) : overlay === "onboarding" && scan ? (
+        ) : overlay === "onboarding" && scan && writable ? (
           <Onboarding
             scan={scan}
             busy={Boolean(busy)}
             error={error}
             locale={settings?.locale ?? preference}
             onLocale={persistLocale}
-            onConfirm={() =>
+            onConfirm={() => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(t("busy.onboarding"), async () => {
                 const next = await window.dshSpaces.confirmOnboarding();
                 setScan(next);
                 setOverlay(null);
-              })
-            }
+              });
+            }}
           />
         ) : null}
         {overlay === "diagnostics" && target ? <DiagnosticsPanel key={target} name={target} onClose={() => setOverlay(null)} onChanged={refresh} /> : null}
@@ -499,17 +599,21 @@ export default function App() {
               setOverlay(null);
             }}
             onSaveCatalogUrl={async (url) => {
-              if (!settings) return;
+              if (!settings || !writable) return;
               const saved = await window.dshSpaces.saveSettings({ ...settings, catalogUrl: url });
               setSettings(saved);
             }}
-            onRestart={(name) =>
+            onRestart={(name) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(
                 t("busy.restart", { name }),
                 () => window.dshSpaces.restartProfile(name),
                 name,
-              )
-            }
+              );
+            }}
           />
         ) : null}
         {overlay === "create" ? (
@@ -518,12 +622,16 @@ export default function App() {
             error={error}
             progress={progress}
             onCancel={() => setOverlay(null)}
-            onSubmit={(name, displayName, icon) =>
+            onSubmit={(name, displayName, icon) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(t("busy.create", { name }), async () => {
                 await window.dshSpaces.createProfile(name, displayName, icon);
                 setOverlay(null);
-              })
-            }
+              });
+            }}
           />
         ) : null}
         {overlay === "settings" && settings ? (
@@ -534,53 +642,134 @@ export default function App() {
             onQuit={() => void run(t("tray.quit"), () => window.dshSpaces.quitApp())}
             onCancel={() => setOverlay(null)}
             onMaintenanceChanged={refreshAfterMaintenance}
-            onSave={(next) =>
+            onSave={(next) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(t("busy.saveSettings"), async () => {
                 const saved = await window.dshSpaces.saveSettings(next);
                 setSettings(saved);
                 setPreference(saved.locale);
                 setThemePreference(saved.theme);
                 setOverlay(null);
-              })
-            }
+              });
+            }}
           />
         ) : null}
         {overlay === "rename" && overlayProfile ? (
           <RenameDialog
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
-            onSave={(displayName) =>
+            onSave={(displayName) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(t("busy.rename"), async () => {
                 await window.dshSpaces.updateMeta(overlayProfile.name, { displayName });
                 setOverlay(null);
-              })
-            }
+              });
+            }}
           />
         ) : null}
         {overlay === "icon" && overlayProfile ? (
           <IconDialog
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
-            onSave={(icon: string) =>
+            onSave={(icon: string) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(t("busy.icon"), async () => {
                 await window.dshSpaces.updateMeta(overlayProfile.name, { icon });
                 setOverlay(null);
-              })
-            }
+              });
+            }}
           />
         ) : null}
         {overlay === "delete" && overlayProfile ? (
           <DeleteDialog
             profile={overlayProfile}
             onCancel={() => setOverlay(null)}
-            onConfirm={(deleteOfficial) =>
+            onConfirm={(deleteOfficial) => {
+              if (!writable) {
+                refuseWrite();
+                return;
+              }
               void run(t("busy.delete"), async () => {
                 await window.dshSpaces.deleteProfile(overlayProfile.name, { deleteOfficial });
                 if (selected === overlayProfile.name) setSelected(null);
                 setOverlay(null);
-              })
-            }
+              });
+            }}
           />
+        ) : null}
+        {!writable && scan && !scan.onboarded && !overlay && !cliBusy ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-8">
+            <div className="ui-card w-[420px] max-w-full p-5">
+              <h2 className="text-lg font-semibold">
+                {locale === "zh" ? "只读概览" : "Read-only overview"}
+              </h2>
+              <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+                {locale === "zh"
+                  ? "此 Home 尚未完成引导。当前为只读，不会写入空间配置。"
+                  : "This Home has not been onboarded. The desktop is read-only and will not write space setup."}
+              </p>
+              <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm">
+                {scan.profiles.map((profile) => (
+                  <li key={profile.name} style={{ color: "var(--text-muted)" }}>
+                    {profile.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
+        {releasePreview ? (
+          <Overlay onBackdrop={() => setReleasePreview(null)}>
+            <Card className="w-[420px]">
+              <h2 className="text-lg font-semibold">
+                {locale === "zh" ? "移交将停止这些空间" : "Hand-off will stop these spaces"}
+              </h2>
+              <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+                {locale === "zh"
+                  ? "仅停止本桌面持有的实例，不会停止 Web 工作台的外部进程。优雅停止失败会保留运行权。"
+                  : "Only this desktop's instances stop. External web-workbench processes are left running. A graceful stop failure keeps the lease."}
+              </p>
+              {releasePreview.length === 0 ? (
+                <p className="mt-3 text-sm" style={{ color: "var(--text-faint)" }}>
+                  {locale === "zh" ? "当前没有本桌面正在运行的空间。" : "No desktop-owned spaces are running."}
+                </p>
+              ) : (
+                <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm">
+                  {releasePreview.map((space) => (
+                    <li key={space.name}>
+                      {space.displayName} ({space.status})
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" className="btn-ghost rounded px-3 py-1.5 text-sm" onClick={() => setReleasePreview(null)}>
+                  {locale === "zh" ? "取消" : "Cancel"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary rounded px-3 py-1.5 text-sm"
+                  onClick={() => {
+                    setReleasePreview(null);
+                    void run(locale === "zh" ? "移交" : "Hand off", async () => {
+                      setController(await window.dshSpaces.releaseController());
+                    });
+                  }}
+                >
+                  {locale === "zh" ? "确认移交" : "Confirm hand-off"}
+                </button>
+              </div>
+            </Card>
+          </Overlay>
         ) : null}
         </main>
       </div>

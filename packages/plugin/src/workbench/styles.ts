@@ -4,8 +4,8 @@ export const WORKBENCH_CSS = `
 .dsh-workbench {
   --wb-rail: var(--dsw-specific-sidebar-fill, #16171a);
   --wb-rail-border: var(--dsw-alias-border-l3, rgba(255,255,255,0.08));
-  --wb-bg: var(--dsw-alias-app-bg, #0f1012);
-  --wb-panel: var(--dsw-alias-app-bg, #18191d);
+  --wb-bg: var(--dsw-alias-bg-base, #0f1012);
+  --wb-panel: var(--dsw-alias-bg-base, #18191d);
   --wb-text: var(--dsw-alias-label-primary, #f2f3f5);
   --wb-muted: var(--dsw-alias-label-secondary, #9aa0a6);
   --wb-faint: var(--dsw-alias-label-tertiary, #6e7378);
@@ -14,9 +14,9 @@ export const WORKBENCH_CSS = `
   --wb-danger: var(--dsw-alias-danger, #d1242f);
   --wb-ok: var(--dsw-alias-success, #3ba55d);
   --wb-warn: var(--dsw-alias-warning, #c9a227);
-  --wb-icon: #2b2d31;
-  --wb-border: rgba(255,255,255,0.1);
-  --wb-input: rgba(255,255,255,0.04);
+  --wb-icon: color-mix(in srgb, var(--wb-text) 10%, var(--wb-bg));
+  --wb-border: color-mix(in srgb, var(--wb-text) 15%, transparent);
+  --wb-input: color-mix(in srgb, var(--wb-text) 5%, var(--wb-bg));
   box-sizing: border-box;
   height: 100%;
   min-height: 0;
@@ -170,7 +170,7 @@ export const WORKBENCH_CSS = `
   align-items: center;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(15,16,18,0.92);
+  background: var(--wb-panel);
   border: 1px solid var(--wb-border);
 }
 .dsh-wb-card, .dsh-wb-recovery {

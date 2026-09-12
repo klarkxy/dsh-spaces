@@ -18,8 +18,8 @@ import {
 } from "../src/adapters/node/spaces-control";
 import { HomeOperationLock } from "../src/adapters/node/home-operation-lock";
 import { SpacesHost } from "../packages/plugin/src/host/spaces-service";
-import { SPACES_REMOTE_CODES } from "../packages/plugin/src/host/remote-errors";
-import { TYPERT, createInputSchema } from "../packages/plugin/src/typert.host";
+import { SPACES_REMOTE_CODES, WORKBENCH_REMOTE_CODES } from "../packages/plugin/src/host/remote-errors";
+import { TYPERT, workbenchCommandSchema } from "../packages/plugin/src/typert.host";
 import { TYPERT_REMOTE } from "../packages/plugin/src/typert.remote-client";
 
 const temps: string[] = [];
@@ -438,11 +438,33 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
   assert.equal(TYPERT.face, "host");
   assert.deepEqual(
     TYPERT.invocations.map((row) => `${row.namespace}/${row.method}`),
-    ["spaces/overview", "spaces/detail", "spaces/create", "spaces/verify"],
+    [
+      "workbenchGuide/role",
+      "workbenchGuide/bootstrap",
+      "workbenchGuide/returnTarget",
+      "spaces/overview",
+      "spaces/detail",
+      "workbench/state",
+      "workbench/detail",
+      "workbench/submit",
+      "workbench/job",
+      "workbench/cancel",
+      "workbench/view",
+      "workbench/preview",
+      "workbench/plugins",
+      "workbench/snapshots",
+      "workbench/snapshot",
+      "workbench/runtimes",
+      "workbench/backups",
+    ],
   );
   assert.equal(TYPERT_REMOTE.package, "@dsh-spaces/plugin");
-  assert.equal(TYPERT_REMOTE.descriptors.length, 4);
-  const parsed = createInputSchema.safeParse({ name: "notes", extra: "nope" });
+  assert.equal(TYPERT_REMOTE.descriptors.length, TYPERT.invocations.length);
+  assert.equal(
+    TYPERT.invocations.some((row) => row.method === "create" || row.method === "verify"),
+    false,
+  );
+  const parsed = workbenchCommandSchema.safeParse({ kind: "space.create", input: { name: "notes" }, extra: "nope" });
   assert.equal(parsed.success, false);
   const failure = new RemoteError("spaces/host-denied", PUBLIC_ERROR["spaces/host-denied"], {});
   assert.equal(failure.isDSHRemoteError, true);
@@ -456,4 +478,5 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
     "spaces/locked",
     "spaces/unavailable",
   ]);
+  assert.ok(WORKBENCH_REMOTE_CODES.includes("workbench/forbidden"));
 });
