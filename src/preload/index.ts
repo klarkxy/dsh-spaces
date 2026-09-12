@@ -4,6 +4,8 @@ import type { MaintenanceView } from "../shared/maintenance-view";
 import type { RuntimeCatalog } from "../shared/runtime";
 import type { RestoreSnapshotOptions, SnapshotMeta } from "../shared/snapshots";
 import type { UpgradePreview, UpgradeProgress } from "../shared/upgrade";
+import type { DesktopControllerState, DesktopReleaseSpace } from "../shared/desktop-controller";
+import { DESKTOP_CONTROLLER_IPC } from "../shared/desktop-controller";
 import type {
   CliEnsureStatus,
   CreateProgress,
@@ -26,6 +28,16 @@ import type {
 } from "../shared/types";
 
 const api = {
+  getControllerState: (): Promise<DesktopControllerState> => ipcRenderer.invoke(DESKTOP_CONTROLLER_IPC.get),
+  acquireController: (): Promise<DesktopControllerState> => ipcRenderer.invoke(DESKTOP_CONTROLLER_IPC.acquire),
+  releaseController: (): Promise<DesktopControllerState> => ipcRenderer.invoke(DESKTOP_CONTROLLER_IPC.release),
+  previewControllerRelease: (): Promise<DesktopReleaseSpace[]> =>
+    ipcRenderer.invoke(DESKTOP_CONTROLLER_IPC.previewRelease),
+  onControllerStatus: (listener: (state: DesktopControllerState) => void): (() => void) => {
+    const handler = (_event: unknown, state: DesktopControllerState) => listener(state);
+    ipcRenderer.on(DESKTOP_CONTROLLER_IPC.event, handler);
+    return () => ipcRenderer.off(DESKTOP_CONTROLLER_IPC.event, handler);
+  },
   quitApp: (): Promise<void> => ipcRenderer.invoke("quitApp"),
   previewUpgrade: (version: string): Promise<UpgradePreview> => ipcRenderer.invoke("previewUpgrade", version),
   onMaintenanceProgress: (listener: (progress: UpgradeProgress) => void): (() => void) => {

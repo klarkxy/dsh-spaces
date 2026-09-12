@@ -549,6 +549,7 @@ export class WorkbenchController {
       error: null,
       state,
       selected,
+      createdNotice: this.ui.createdNotice?.spaceId === selected ? null : this.ui.createdNotice,
       pluginSpaceId,
       frames: this.views.list(),
       visibleSpaceId: this.views.visibleSpaceId,

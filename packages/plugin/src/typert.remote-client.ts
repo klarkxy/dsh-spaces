@@ -1,133 +1,87 @@
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
+import type { SpaceDetail, SpacesOverview } from "../../../src/shared/spaces-control";
 import type {
-  CreateSpaceInput,
-  SpaceDetail,
-  SpaceSummary,
-  SpacesOverview,
-  VerifySpaceResult,
-} from "../../../src/shared/spaces-control";
-import {
-  TYPERT,
-  createInputSchema,
-  detailSchema,
-  overviewSchema,
-  spaceIdSchema,
-  spaceSummarySchema,
-  verifyResultSchema,
-} from "./typert.host";
+  WorkbenchBackup,
+  WorkbenchCommand,
+  WorkbenchJob,
+  WorkbenchPlan,
+  WorkbenchPlanRequest,
+  WorkbenchPlugin,
+  WorkbenchRuntime,
+  WorkbenchSnapshot,
+  WorkbenchState,
+  WorkbenchView,
+} from "../../../src/shared/workbench";
+import type {
+  WorkbenchBootstrapResult,
+  WorkbenchGuideRole,
+  WorkbenchReturnTarget,
+} from "./types";
+import { TYPERT } from "./typert.host";
 import "./host/remote-errors";
 
 declare module "@deepseek-ai/dsh-typert-protocol" {
+  interface TypertRemoteNamespace$workbenchGuide {
+    role: () => Promise<RemoteResult<WorkbenchGuideRole>>;
+    bootstrap: () => Promise<RemoteResult<WorkbenchBootstrapResult>>;
+    returnTarget: () => Promise<RemoteResult<WorkbenchReturnTarget>>;
+  }
   interface TypertRemoteNamespace$spaces {
     overview: () => Promise<RemoteResult<SpacesOverview>>;
     detail: (id: string) => Promise<RemoteResult<SpaceDetail>>;
-    create: (input: CreateSpaceInput) => Promise<RemoteResult<SpaceSummary>>;
-    verify: (id: string) => Promise<RemoteResult<VerifySpaceResult>>;
+  }
+  interface TypertRemoteNamespace$workbench {
+    state: () => Promise<RemoteResult<WorkbenchState>>;
+    detail: (spaceId: string) => Promise<RemoteResult<SpaceDetail>>;
+    submit: (command: WorkbenchCommand, requestId: string) => Promise<RemoteResult<WorkbenchJob>>;
+    job: (id: string) => Promise<RemoteResult<WorkbenchJob>>;
+    cancel: (id: string) => Promise<RemoteResult<WorkbenchJob>>;
+    view: (spaceId: string) => Promise<RemoteResult<WorkbenchView>>;
+    preview: (request: WorkbenchPlanRequest) => Promise<RemoteResult<WorkbenchPlan>>;
+    plugins: (query: string) => Promise<RemoteResult<WorkbenchPlugin[]>>;
+    snapshots: () => Promise<RemoteResult<WorkbenchSnapshot[]>>;
+    snapshot: (id: string) => Promise<RemoteResult<WorkbenchSnapshot>>;
+    runtimes: () => Promise<RemoteResult<WorkbenchRuntime[]>>;
+    backups: (spaceId: string) => Promise<RemoteResult<WorkbenchBackup[]>>;
   }
   interface TypertRemoteMap {
+    "workbenchGuide/role": () => Promise<RemoteResult<WorkbenchGuideRole>>;
+    "workbenchGuide/bootstrap": () => Promise<RemoteResult<WorkbenchBootstrapResult>>;
+    "workbenchGuide/returnTarget": () => Promise<RemoteResult<WorkbenchReturnTarget>>;
     "spaces/overview": () => Promise<RemoteResult<SpacesOverview>>;
     "spaces/detail": (id: string) => Promise<RemoteResult<SpaceDetail>>;
-    "spaces/create": (input: CreateSpaceInput) => Promise<RemoteResult<SpaceSummary>>;
-    "spaces/verify": (id: string) => Promise<RemoteResult<VerifySpaceResult>>;
+    "workbench/state": () => Promise<RemoteResult<WorkbenchState>>;
+    "workbench/detail": (spaceId: string) => Promise<RemoteResult<SpaceDetail>>;
+    "workbench/submit": (command: WorkbenchCommand, requestId: string) => Promise<RemoteResult<WorkbenchJob>>;
+    "workbench/job": (id: string) => Promise<RemoteResult<WorkbenchJob>>;
+    "workbench/cancel": (id: string) => Promise<RemoteResult<WorkbenchJob>>;
+    "workbench/view": (spaceId: string) => Promise<RemoteResult<WorkbenchView>>;
+    "workbench/preview": (request: WorkbenchPlanRequest) => Promise<RemoteResult<WorkbenchPlan>>;
+    "workbench/plugins": (query: string) => Promise<RemoteResult<WorkbenchPlugin[]>>;
+    "workbench/snapshots": () => Promise<RemoteResult<WorkbenchSnapshot[]>>;
+    "workbench/snapshot": (id: string) => Promise<RemoteResult<WorkbenchSnapshot>>;
+    "workbench/runtimes": () => Promise<RemoteResult<WorkbenchRuntime[]>>;
+    "workbench/backups": (spaceId: string) => Promise<RemoteResult<WorkbenchBackup[]>>;
   }
   interface TypertRemoteNamespaceMap {
+    workbenchGuide: TypertRemoteNamespace$workbenchGuide;
     spaces: TypertRemoteNamespace$spaces;
+    workbench: TypertRemoteNamespace$workbench;
   }
 }
 
 export const TYPERT_REMOTE: TypertRemoteContribution = {
   package: "@dsh-spaces/plugin",
-  descriptors: [
-    {
-      id: "@dsh-spaces/plugin#spaces/overview",
-      service: "spaces",
-      namespace: "spaces",
-      method: "overview",
-      invocation: { kind: "direct" },
-      parameters: [],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#SpacesOverview",
-        schema: overviewSchema,
-      },
-      sourceLocation: TYPERT.invocations[0].sourceLocation,
-    },
-    {
-      id: "@dsh-spaces/plugin#spaces/detail",
-      service: "spaces",
-      namespace: "spaces",
-      method: "detail",
-      invocation: { kind: "direct" },
-      parameters: [
-        {
-          name: "id",
-          wire: "id",
-          source: "json",
-          codec: {
-            mode: "strict",
-            typeSymbol: "@dsh-spaces/plugin#spaces/detail:id",
-            schema: spaceIdSchema,
-          },
-        },
-      ],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#SpaceDetail",
-        schema: detailSchema,
-      },
-      sourceLocation: TYPERT.invocations[1].sourceLocation,
-    },
-    {
-      id: "@dsh-spaces/plugin#spaces/create",
-      service: "spaces",
-      namespace: "spaces",
-      method: "create",
-      invocation: { kind: "direct" },
-      parameters: [
-        {
-          name: "input",
-          wire: "input",
-          source: "json",
-          codec: {
-            mode: "strict",
-            typeSymbol: "@dsh-spaces/plugin/types#CreateSpaceInput",
-            schema: createInputSchema,
-          },
-        },
-      ],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#SpaceSummary",
-        schema: spaceSummarySchema,
-      },
-      sourceLocation: TYPERT.invocations[2].sourceLocation,
-    },
-    {
-      id: "@dsh-spaces/plugin#spaces/verify",
-      service: "spaces",
-      namespace: "spaces",
-      method: "verify",
-      invocation: { kind: "direct" },
-      parameters: [
-        {
-          name: "id",
-          wire: "id",
-          source: "json",
-          codec: {
-            mode: "strict",
-            typeSymbol: "@dsh-spaces/plugin#spaces/verify:id",
-            schema: spaceIdSchema,
-          },
-        },
-      ],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#VerifySpaceResult",
-        schema: verifyResultSchema,
-      },
-      sourceLocation: TYPERT.invocations[3].sourceLocation,
-    },
-  ],
+  descriptors: TYPERT.invocations.map((row) => ({
+    id: row.id,
+    service: row.service,
+    namespace: row.namespace,
+    method: row.method,
+    invocation: row.invocation,
+    parameters: row.parameters,
+    result: row.result,
+    sourceLocation: row.sourceLocation,
+  })),
 };
 
 export default TYPERT_REMOTE;

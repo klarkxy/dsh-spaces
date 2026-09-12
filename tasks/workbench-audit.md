@@ -27,6 +27,20 @@ Codex已在独立临时Home实际复现：
 
 初版21项store/SSR测试不足以证明持久DOM：components.tsx条件渲染WorkspaceStage会在首页或轮询故障时卸载iframe；selectSpace提前持久化未就绪目标；create即时成功会自动选中新空间；没有视图就绪超时。已交唯一聚焦修正，要求实际DOM节点/草稿验证以及最后选择胜出、失败保留旧空间。
 
+修正验收：Grok重试后，Codex独立运行30项UI检查（29单测+1真实Chromium DOM）通过。Codex补了临时断线不销毁已访问视图、挂起的授权请求不被轮询重复提交/重置超时，以及删除选中目标后持久化首页。DOM fixture已从忽略的.sandbox迁入tests/fixtures/workbench-ui，测试可复跑。日志.sandbox/workbench-ui-root-tests.log；完整DSH主题切换仍待产品验收。
+
 ## A0 实验范围
 
 Codex检查results.json和两张实际截图，两个真实普通DSH主题空间嵌入、草稿输入和入口救援层可见。入口和管理进程仍为实验Node脚手架；不得将该PASS算作正式专用DSH管理profile自维护的验收。后续产品分发必须重新实测。
+
+## 监督与维护集成反例
+
+实际分发根验收新增发现并修正：监督CLI输出双shebang（node --check门禁）；稳定入口内联脚本缺右括号（新增脚本直接解析测试）；DSH rc1在Windows用shell转发pnpm导致空格路径拆参（限定owned archive用带引号的profile相对file spec）；无窗口Node不能用taskkill无/F正常退出（私有IPC调用DSH已注册SIGTERM清理，真实manager退出成功）；监督parseId拒绝合法@scope/name（插件标识单独校验）。
+
+正式A基础实际Chromium截图与results通过，但完整维护/主题/桌面矩阵尚未完成。普通DSH初次启动必须建立并选择空工作区后才能输入草稿，测试不配置真实模型。
+
+Codex独立运行维护15项原测试全部通过，但额外注入snapshots.pendingRestore读取失败，recover返回consistent=true及settleInterruptedJobs=true；错误被当作没有待恢复日志。反例脚本/结果在.sandbox/workbench-maintenance-root-repro.ts。
+
+Codex为监督模块补两个ROOT测试并实际运行：初始化后manager状态仍stopped；子进程停止失败时close不拒绝且释放流程继续。见.sandbox/workbench-supervisor-root-repro.log。代码同时存在stopOwnedAll吞force-kill失败、静态入口不跟随manager状态切换、CLI未默认组合维护模块等整合缺口。监督及维护分别交唯一聚焦审计重试；未通过A批产品验收。
+
+维护重试后Codex再次运行原反例，现为recover失败且consistent=false/settleInterruptedJobs=false；23项维护测试通过。仍需真实打包/事务恢复整合。桌面新增两个ROOT反例都失败：损坏manager身份、未完成Web任务都可绕过server-side写门。已交桌面唯一审计修正。插件引导另交唯一整合修正（缺失artifact参数、新浏览器Cookie引导、桥真实DOM/连接就绪）。

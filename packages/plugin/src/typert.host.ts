@@ -1,178 +1,183 @@
-/* Host FaceModel descriptors for the spaces Remote. */
+/* Host FaceModel descriptors for guide, manager, and compatibility-read Remotes. */
 import { z } from "zod";
+import {
+  backupsResultSchema,
+  jobIdSchema,
+  overviewSchema,
+  pluginsQuerySchema,
+  requestIdSchema,
+  snapshotIdSchema,
+  spaceIdSchema,
+  workbenchBootstrapResultSchema,
+  workbenchCommandSchema,
+  workbenchGuideRoleSchema,
+  workbenchJobSchema,
+  workbenchPlanRequestSchema,
+  workbenchPlanSchema,
+  workbenchPluginListSchema,
+  workbenchReturnTargetSchema,
+  workbenchRuntimeListSchema,
+  workbenchSnapshotSchema,
+  workbenchSpaceDetailSchema,
+  workbenchStateSchema,
+  workbenchViewSchema,
+} from "./host/workbench-schemas";
 
-const spaceIdSchema = z.string();
+export {
+  backupsResultSchema,
+  jobIdSchema,
+  overviewSchema,
+  pluginsQuerySchema,
+  requestIdSchema,
+  snapshotIdSchema,
+  spaceIdSchema,
+  spaceSummarySchema,
+  workbenchBootstrapResultSchema,
+  workbenchCommandSchema,
+  workbenchGuideRoleSchema,
+  workbenchJobSchema,
+  workbenchPlanRequestSchema,
+  workbenchPlanSchema,
+  workbenchPluginListSchema,
+  workbenchReturnTargetSchema,
+  workbenchRuntimeListSchema,
+  workbenchSnapshotSchema,
+  workbenchSpaceDetailSchema,
+  workbenchStateSchema,
+  workbenchViewSchema,
+} from "./host/workbench-schemas";
 
-const createInputSchema = z
-  .object({
-    name: z.string(),
-    displayName: z.string().optional(),
-  })
-  .strict();
+const source = (file: string) => ({ file, line: 1, column: 1 });
 
-const capabilitiesSchema = z
-  .object({
-    mode: z.enum(["verified-full", "verified-limited", "unknown-readonly", "recovery-only"]),
-    hostSpaceId: z.union([z.string(), z.null()]),
-    dshVersion: z.union([z.string(), z.null()]),
-    canCreate: z.boolean(),
-    canVerify: z.boolean(),
-    reasons: z.array(z.string()),
-  })
-  .strict();
+function param(name: string, schema: z.ZodType, typeSymbol: string) {
+  return {
+    name,
+    wire: name,
+    source: "json" as const,
+    codec: {
+      mode: "strict" as const,
+      typeSymbol,
+      schema,
+    },
+  };
+}
 
-const spaceSummarySchema = z
-  .object({
-    id: z.string(),
-    displayName: z.string(),
-    isHost: z.boolean(),
-    hasWebApp: z.boolean(),
-    status: z.enum(["running", "stopped", "unknown"]),
-    isolation: z.enum(["verified", "unverified", "invalid", "default"]),
-  })
-  .strict();
+function result(typeSymbol: string, schema: z.ZodType) {
+  return {
+    mode: "strict" as const,
+    typeSymbol,
+    schema,
+  };
+}
 
-const overviewSchema = z
-  .object({
-    capabilities: capabilitiesSchema,
-    spaces: z.array(spaceSummarySchema),
-  })
-  .strict();
+function invocation(
+  service: string,
+  method: string,
+  file: string,
+  parameters: ReturnType<typeof param>[],
+  resultSpec: ReturnType<typeof result>,
+) {
+  return {
+    id: `@dsh-spaces/plugin#${service}/${method}`,
+    service,
+    namespace: service,
+    method,
+    invocation: { kind: "direct" as const },
+    parameters,
+    result: resultSpec,
+    sourceLocation: source(file),
+  };
+}
 
-const detailSchema = z
-  .object({
-    space: spaceSummarySchema,
-    plugins: z.array(
-      z
-        .object({
-          name: z.string(),
-          version: z.union([z.string(), z.null()]),
-        })
-        .strict(),
-    ),
-    snapshots: z.array(
-      z
-        .object({
-          id: z.string(),
-          createdAt: z.string(),
-          runtimeVersion: z.union([z.string(), z.null()]),
-        })
-        .strict(),
-    ),
-    diagnostics: z.array(
-      z
-        .object({
-          level: z.enum(["info", "warning", "error"]),
-          code: z.string(),
-          message: z.string(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
-
-const verifyResultSchema = z
-  .object({
-    id: z.string(),
-    valid: z.boolean(),
-    message: z.string(),
-  })
-  .strict();
+const guideFile = "packages/plugin/src/host/workbench-guide.ts";
+const managerFile = "packages/plugin/src/host/workbench-manager.ts";
+const spacesFile = "packages/plugin/src/host/spaces-service.ts";
 
 export const TYPERT = {
   package: "@dsh-spaces/plugin",
   face: "host",
   schemas: [],
   invocations: [
-    {
-      id: "@dsh-spaces/plugin#spaces/overview",
-      service: "spaces",
-      namespace: "spaces",
-      method: "overview",
-      invocation: { kind: "direct" },
-      parameters: [],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#SpacesOverview",
-        schema: overviewSchema,
-      },
-      sourceLocation: { file: "packages/plugin/src/host/spaces-service.ts", line: 1, column: 1 },
-    },
-    {
-      id: "@dsh-spaces/plugin#spaces/detail",
-      service: "spaces",
-      namespace: "spaces",
-      method: "detail",
-      invocation: { kind: "direct" },
-      parameters: [
-        {
-          name: "id",
-          wire: "id",
-          source: "json",
-          codec: {
-            mode: "strict",
-            typeSymbol: "@dsh-spaces/plugin#spaces/detail:id",
-            schema: spaceIdSchema,
-          },
-        },
+    invocation("workbenchGuide", "role", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchGuideRole", workbenchGuideRoleSchema)),
+    invocation("workbenchGuide", "bootstrap", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
+    invocation("workbenchGuide", "returnTarget", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
+    invocation("spaces", "overview", spacesFile, [], result("@dsh-spaces/plugin/types#SpacesOverview", overviewSchema)),
+    invocation(
+      "spaces",
+      "detail",
+      spacesFile,
+      [param("id", spaceIdSchema, "@dsh-spaces/plugin#spaces/detail:id")],
+      result("@dsh-spaces/plugin/types#SpaceDetail", workbenchSpaceDetailSchema),
+    ),
+    invocation("workbench", "state", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchState", workbenchStateSchema)),
+    invocation(
+      "workbench",
+      "detail",
+      managerFile,
+      [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/detail:spaceId")],
+      result("@dsh-spaces/plugin/types#SpaceDetail", workbenchSpaceDetailSchema),
+    ),
+    invocation(
+      "workbench",
+      "submit",
+      managerFile,
+      [
+        param("command", workbenchCommandSchema, "@dsh-spaces/plugin/types#WorkbenchCommand"),
+        param("requestId", requestIdSchema, "@dsh-spaces/plugin#workbench/submit:requestId"),
       ],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#SpaceDetail",
-        schema: detailSchema,
-      },
-      sourceLocation: { file: "packages/plugin/src/host/spaces-service.ts", line: 1, column: 1 },
-    },
-    {
-      id: "@dsh-spaces/plugin#spaces/create",
-      service: "spaces",
-      namespace: "spaces",
-      method: "create",
-      invocation: { kind: "direct" },
-      parameters: [
-        {
-          name: "input",
-          wire: "input",
-          source: "json",
-          codec: {
-            mode: "strict",
-            typeSymbol: "@dsh-spaces/plugin/types#CreateSpaceInput",
-            schema: createInputSchema,
-          },
-        },
-      ],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#SpaceSummary",
-        schema: spaceSummarySchema,
-      },
-      sourceLocation: { file: "packages/plugin/src/host/spaces-service.ts", line: 1, column: 1 },
-    },
-    {
-      id: "@dsh-spaces/plugin#spaces/verify",
-      service: "spaces",
-      namespace: "spaces",
-      method: "verify",
-      invocation: { kind: "direct" },
-      parameters: [
-        {
-          name: "id",
-          wire: "id",
-          source: "json",
-          codec: {
-            mode: "strict",
-            typeSymbol: "@dsh-spaces/plugin#spaces/verify:id",
-            schema: spaceIdSchema,
-          },
-        },
-      ],
-      result: {
-        mode: "strict",
-        typeSymbol: "@dsh-spaces/plugin/types#VerifySpaceResult",
-        schema: verifyResultSchema,
-      },
-      sourceLocation: { file: "packages/plugin/src/host/spaces-service.ts", line: 1, column: 1 },
-    },
+      result("@dsh-spaces/plugin/types#WorkbenchJob", workbenchJobSchema),
+    ),
+    invocation(
+      "workbench",
+      "job",
+      managerFile,
+      [param("id", jobIdSchema, "@dsh-spaces/plugin#workbench/job:id")],
+      result("@dsh-spaces/plugin/types#WorkbenchJob", workbenchJobSchema),
+    ),
+    invocation(
+      "workbench",
+      "cancel",
+      managerFile,
+      [param("id", jobIdSchema, "@dsh-spaces/plugin#workbench/cancel:id")],
+      result("@dsh-spaces/plugin/types#WorkbenchJob", workbenchJobSchema),
+    ),
+    invocation(
+      "workbench",
+      "view",
+      managerFile,
+      [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/view:spaceId")],
+      result("@dsh-spaces/plugin/types#WorkbenchView", workbenchViewSchema),
+    ),
+    invocation(
+      "workbench",
+      "preview",
+      managerFile,
+      [param("request", workbenchPlanRequestSchema, "@dsh-spaces/plugin/types#WorkbenchPlanRequest")],
+      result("@dsh-spaces/plugin/types#WorkbenchPlan", workbenchPlanSchema),
+    ),
+    invocation(
+      "workbench",
+      "plugins",
+      managerFile,
+      [param("query", pluginsQuerySchema, "@dsh-spaces/plugin#workbench/plugins:query")],
+      result("@dsh-spaces/plugin/types#WorkbenchPlugin[]", workbenchPluginListSchema),
+    ),
+    invocation("workbench", "snapshots", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchSnapshot[]", workbenchSnapshotSchema.array())),
+    invocation(
+      "workbench",
+      "snapshot",
+      managerFile,
+      [param("id", snapshotIdSchema, "@dsh-spaces/plugin#workbench/snapshot:id")],
+      result("@dsh-spaces/plugin/types#WorkbenchSnapshot", workbenchSnapshotSchema),
+    ),
+    invocation("workbench", "runtimes", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchRuntime[]", workbenchRuntimeListSchema)),
+    invocation(
+      "workbench",
+      "backups",
+      managerFile,
+      [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/backups:spaceId")],
+      result("@dsh-spaces/plugin/types#WorkbenchBackup[]", backupsResultSchema),
+    ),
   ],
   model: {
     services: [],
@@ -181,11 +186,19 @@ export const TYPERT = {
   },
 };
 
-export {
-  createInputSchema,
-  detailSchema,
-  overviewSchema,
-  spaceIdSchema,
-  spaceSummarySchema,
-  verifyResultSchema,
-};
+export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget"] as const;
+export const MANAGER_METHODS = [
+  "state",
+  "detail",
+  "submit",
+  "job",
+  "cancel",
+  "view",
+  "preview",
+  "plugins",
+  "snapshots",
+  "snapshot",
+  "runtimes",
+  "backups",
+] as const;
+export const SPACES_READ_METHODS = ["overview", "detail"] as const;
