@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.spaces.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "packages/core/lib/types"
+  },
+  "include": ["src/core/**/*", "src/shared/**/*"]
+}

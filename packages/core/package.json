@@ -1,0 +1,12 @@
+{
+  "name": "@dsh-spaces/core",
+  "version": "0.2.0",
+  "description": "Shared DSH Spaces domain and application logic",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
+  "files": ["lib", "README.md", "LICENSE"],
+  "engines": { "node": ">=22.23.0" }
+}

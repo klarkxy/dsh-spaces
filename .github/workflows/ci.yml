@@ -21,7 +21,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run typecheck:spaces
       - run: npm test
+      - run: npm run test:spaces
+      - run: npm run build:spaces
       - name: Install DSH CLI
         run: |
           pnpm --version

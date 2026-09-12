@@ -1,0 +1,41 @@
+{
+  "name": "@dsh-spaces/plugin",
+  "version": "0.2.0",
+  "license": "MIT",
+  "description": "DSH Host plugin for observing and verifying non-host spaces",
+  "type": "module",
+  "main": "./lib/index.js",
+  "files": ["lib", "README.md", "LICENSE", "cordis.patch.yml"],
+  "exports": {
+    ".": "./lib/index.js",
+    "./typert": "./lib/typert.host.js",
+    "./remote": "./lib/typert.remote-client.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-connection"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
+    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-layout": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2",
+    "zod": "^4.4.3"
+  }
+}

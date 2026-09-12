@@ -2,7 +2,7 @@
 
 **Spaces for DeepSeek Harness — switch your DSH workspaces like Discord servers.**
 
-A standalone Electron desktop shell (not a DSH plugin). Left rail of official DSH profiles; right side embeds the official DSH Web UI. Community / open source. Windows / macOS / Linux.
+A desktop shell and a DSH-native Spaces control plugin, sharing the same isolation and recovery core. The desktop rail embeds the official DSH Web UI; the plugin adds a Spaces management panel inside DSH Web. Community / open source. Desktop targets Windows / macOS / Linux.
 
 中文说明见下方 [中文](#dsh-spaces-中文)。
 
@@ -45,6 +45,10 @@ Recovery normally saves a complete backup before replacing data. If the current 
 
 ## Develop
 
+The pluginization branch implements the Phase 0 + Phase 1 preview described in [the implementation plan](tasks/pluginization-plan.md). See [plugin installation and boundaries](packages/plugin/README.md). The desktop keeps its existing features; Web lifecycle control, plugin changes and snapshot restore are later phases.
+
+The plugin provides Chinese and English UI and declares a native DSH bundle for activation through the official plugin manager. `npm run validate:distribution` checks installation, replacement and removal with a disposable profile; `npm run validate:plugin` checks the real browser flow. `npm run validate:desktop` accepts `DSH_TEST_PACKAGED_EXE` for an isolated packaged-app check. Fixture requirements and remaining limits are recorded in the [acceptance report](tasks/pluginization-acceptance.md).
+
 ```bash
 npm install
 node scripts/setup-sandbox.mjs
@@ -75,7 +79,9 @@ MIT. See `LICENSE`.
 
 **Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
 
-独立 Electron 桌面壳（不是 DSH 插件）：左侧官方 profile 图标栏，右侧内嵌官方 Web UI。社区开源，Windows / macOS / Linux。
+桌面壳与 DSH 原生 Spaces 管理插件，共用隔离规则和恢复核心。桌面版左侧是官方 profile 图标栏，右侧内嵌官方 Web UI；插件版在 DSH Web 内增加独立管理面板。桌面版面向 Windows / macOS / Linux。
+
+当前插件预览按 Phase 0 + Phase 1 实施：查看空间、能力限制和诊断，并在宿主验证通过时创建、验证非宿主空间。桌面原有功能保留。安装方法与范围见[插件说明](packages/plugin/README.md)，施工与验收要求见[任务计划](tasks/pluginization-plan.md)。
 
 ## 数据规则
 
