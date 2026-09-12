@@ -876,12 +876,27 @@ test("create success does not auto-switch; enter is explicit for immediate and a
               result: { spaceId: "later" },
             }),
           ],
+          spaces: [manager, space({ id: "later", status: "stopped" })],
         }),
     }),
   );
   await ctrl2.poll();
   assert.equal(ctrl2.getSnapshot().selected, "home");
   assert.equal(ctrl2.getSnapshot().createdNotice?.spaceId, "later");
+});
+
+test("deleted spaces do not regain an enter notice from historical creation jobs", async () => {
+  const completed = job({ kind: "space.create", status: "succeeded", result: { spaceId: "gone" } });
+  let current = state({ jobs: [completed] });
+  const ctrl = controller(fakeApi({ state: async () => current }));
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().createdNotice, null);
+  current = state({ jobs: [completed], spaces: [manager, space({ id: "gone" })] });
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "gone");
+  current = state({ jobs: [completed] });
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().createdNotice, null);
 });
 
 test("openIndependent re-requests view and does not reuse a consumed src", async () => {
