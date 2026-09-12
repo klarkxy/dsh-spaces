@@ -142,6 +142,8 @@ test("doctor reports registry, journals, lock, and optional CLI metadata", async
   assert.deepEqual(body.journals, {
     mutation: { present: true, op: "create", phase: "patch", spaceId: "coding" },
     restore: { needed: true, phase: "swapping" },
+    upgrade: { needed: false },
+    pluginMutation: { present: false },
   });
   assert.deepEqual(body.lock, { held: false });
   assert.deepEqual(body.runtime, { bound: true, version: "0.1.5-rc.1", allowed: true });
@@ -353,17 +355,22 @@ setInterval(() => process.stdout.write("x".repeat(8192)), 5);`,
   assert.throws(() => process.kill(pid, 0));
 });
 
-test("recover and rollback refuse instead of mutating", async () => {
+test("recover and rollback refuse unknown journals or missing snapshot ids and keep bytes", async () => {
   const home = tempDir("dsh-doctor-rec-");
   mkdirSync(join(home, RESTORE_STAGE_DIR), { recursive: true });
   writeFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "{}\n");
-  for (const command of ["recover", "rollback"]) {
-    const result = await runDoctor([command, "--home", home]);
-    assert.equal(result.code, 10);
-    const body = jsonOf(result.stdout);
-    assert.equal(body.code, "RECOVERY_UNAVAILABLE");
-    assert.equal(body.command, command);
-    assert.match(String(body.message), /Desktop/);
-    assert.equal(existsSync(join(home, RESTORE_STAGE_DIR, "journal.json")), true);
-  }
+
+  const recovered = await runDoctor(["recover", "--home", home]);
+  assert.equal(recovered.code, 10);
+  const recoveredBody = jsonOf(recovered.stdout);
+  assert.equal(recoveredBody.code, "RECOVERY_NEEDED");
+  assert.equal(recoveredBody.command, "recover");
+  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
+
+  const rolled = await runDoctor(["rollback", "--home", home]);
+  assert.equal(rolled.code, 2);
+  const rolledBody = jsonOf(rolled.stdout);
+  assert.equal(rolledBody.code, "USAGE");
+  assert.match(String(rolledBody.message), /snapshot/i);
+  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
 });
