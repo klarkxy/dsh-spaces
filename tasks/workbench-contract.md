@@ -17,6 +17,8 @@ Codex owns src/shared/workbench.ts。本文件固定新接口，保留旧 Spaces
 
 管理profile内优先通过已认证的DSH Remote代理WorkbenchApi至监督进程，浏览器不接收进程间私密凭据；稳定入口直接使用监督进程受认证的同源API。保留独立稳定入口页面（正常时嵌入管理profile，停机时显示维护页），避免管理profile被停止就失去进度/救援入口。
 
+整合澄清：WorkbenchView.entryOrigin 是监督进程的干净 origin，entryPath 相对此 origin；WorkbenchView.origin 是最终子 DSH origin，只用于消息校验。两者不应混用。新增必填 entryOrigin，所有生产 view DTO 与客户端必须携带并校验；不得把引导路径拼到子 DSH 端口。
+
 controller.acquire是唯一允许只读端请求的写运行权操作，仍必须已有本机浏览器认证；只在无人占有且无恢复歧义时获取，不自动抢占。另一端释放后必须由用户明确点击接管，不因轮询发现空闲而自动获得运行权。
 
 ## 已选行为
@@ -35,3 +37,5 @@ A1 owns home-controller.ts（管理身份/运行权）。后续监督runtime仅�
 任务持久化模块与runtime分开，以类型合同交接。公共合同、依赖和最终构建整合由Codex单写。
 
 A2 owns src/adapters/node/workbench-jobs.ts、tests/workbench-jobs.test.ts、tasks/workbench-jobs-worker.md（持久化任务/幂等/取消/中断恢复标记）。调用者必须先持有A1运行权；A2不启动DSH或管理进程。
+
+维护层组合接口固定为 src/adapters/node/workbench-maintenance-ports.ts，由监督runtime提供现有模块与安全生命周期回调。维护层不自行生成第二个ProcessManager或运行权；controller.release/shutdown由监督层处理。所有业务目标验证和停机通过ports，避免绕过运行权或误停外部实例。Web停止超时应失败并保留实例记录，不沿用桌面ProcessManager默认自动强杀而不提示。

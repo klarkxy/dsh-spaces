@@ -32,6 +32,8 @@ export interface WorkbenchView {
   generation: number;
   /** Clean child origin for exact postMessage source checking. */
   origin: string;
+  /** Clean supervisor origin serving entryPath, distinct from the child origin. */
+  entryOrigin: string;
   /** Authenticated supervisor-relative route. No child launch token. */
   entryPath: string;
   /** Correlation only, never authorizes a management action. */
