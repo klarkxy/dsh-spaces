@@ -527,8 +527,8 @@ function portClosed(port) {
       resolveClosed(closed);
     };
     socket.once("connect", () => finish(false));
-    socket.once("error", () => finish(true));
-    socket.once("timeout", () => finish(true));
+    socket.once("error", (error) => finish(error.code === "ECONNREFUSED"));
+    socket.once("timeout", () => finish(false));
   });
 }
 
@@ -1164,14 +1164,58 @@ async function main() {
   console.log("\nDISTRIBUTION ACCEPTANCE: PASS");
 }
 
-main().catch((error) => {
-  console.error(`FAIL  ${redact(error instanceof Error ? error.stack || error.message : String(error))}`);
-  writeJson(join(ARTIFACT, "results.json"), {
-    status: "fail",
-    proved,
-    skipped,
-    error: redact(error instanceof Error ? error.message : String(error)),
-    at: new Date().toISOString(),
+export {
+  HOST,
+  DEFAULT_BIN,
+  FALLBACK_NODE,
+  TOOLCHAIN_PNPM,
+  REGISTRY,
+  DUMP_MS,
+  PLUGIN_MS,
+  BOOT_MS,
+  RPC_MS,
+  STOP_MS,
+  PORT_MS,
+  LAUNCH_RING,
+  redact,
+  samePath,
+  refuseRealHome,
+  writeJson,
+  sha256File,
+  resolveNode,
+  resolveNpmCli,
+  resolvePnpmCjs,
+  dshBin,
+  cliVersion,
+  run,
+  writePnpmShim,
+  isolatedEnv,
+  runDsh,
+  runDshRetry,
+  importCore,
+  ephemeralPort,
+  portClosed,
+  waitPortClosed,
+  stopOwned,
+  captureLaunchUrl,
+  sessionCookie,
+  rpc,
+  assertRpcOk,
+  rpcAvailable,
+  startProfile,
+  withHost,
+};
+
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(`FAIL  ${redact(error instanceof Error ? error.stack || error.message : String(error))}`);
+    writeJson(join(ARTIFACT, "results.json"), {
+      status: "fail",
+      proved,
+      skipped,
+      error: redact(error instanceof Error ? error.message : String(error)),
+      at: new Date().toISOString(),
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+}
