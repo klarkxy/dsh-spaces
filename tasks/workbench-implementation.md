@@ -31,6 +31,10 @@ D：分发、回归、实际浏览器/桌面验收和新视频。
 - A0 Grok：scripts/verify-workbench-foundation.mjs、tasks/workbench-foundation-worker.md、.sandbox/workbench-foundation/**。真实架构试验；不得改产品源码或既有主题/录像 Home。
 - A1 Grok：src/adapters/node/home-controller.ts、tests/home-controller.test.ts、tasks/workbench-controller-worker.md。独立管理身份、长期运行权模块与测试；不得改桌面/插件入口及公共 DTO。
 - A2 Grok：src/adapters/node/workbench-jobs.ts、tests/workbench-jobs.test.ts、tasks/workbench-jobs-worker.md。持久化任务、幂等与取消；不启动DSH/HTTP。
+- B-UI Grok：packages/plugin/src/workbench/**、tests/workbench-ui.test.tsx、tasks/workbench-ui-worker.md。基于固定合同独立制作工作台组件；不改入口，不启动浏览器；真实接线仍等待A闸门通过。
+- A/B监督服务 Grok：src/adapters/node/workbench-{runtime,http,supervisor,views}.ts、packages/supervisor/src/**、tests/workbench-{runtime,http}.test.ts、tasks/workbench-supervisor-worker.md。只做正式运行服务和组合，不改旧模块/公共DTO/构建；真实DSH验收由主Agent串行运行。
+- C维护 Grok：src/adapters/node/workbench-maintenance.ts、tests/workbench-maintenance.test.ts、tasks/workbench-maintenance-worker.md。消费固定Node ports复用旧事务，不自建监督进程。
+- 插件角色/桥 Grok：packages/plugin/src/host/**、client/index.tsx与workbench-remote.ts、入口/typert/types、packages/view-bridge/src/**、tests/workbench-plugin.test.ts与spaces-host.test.ts、tasks/workbench-plugin-worker.md。不得改工作台UI、Node适配器或构建清单。
 - Codex：本记录、接口合同、根依赖与构建配置、Git、独立验收。后续叶子派发前补充所有权。
 
 ## 当前记录
@@ -38,6 +42,12 @@ D：分发、回归、实际浏览器/桌面验收和新视频。
 - 实现前基线：180项桌面测试、89项插件测试、桌面TypeScript通过；日志 .sandbox/workbench-baseline-{desktop,spaces,types}.log。
 - A0 task_5099138387 / sess_85bce9de05；A1 task_d74dc0f97e / sess_bf242b2bdb；A2 task_56b8a94682 / sess_eb1c507a1c。均请求Grok/high，实际模型待回执。
 - 公共类型在 src/shared/workbench.ts，通信/拓扑见 tasks/workbench-contract.md。写接口根作者Codex。
+- B-UI与基础后端独立制作，task与session见后续派工回执；不得把未接入组件当运行完成。
+- B-UI task_ae8befe357 / sess_c800355aa4；监督 task_d01250167f / sess_51f4611809；维护 task_e7c4540010 / sess_143b1c3e59。
+- A1审计修正通过主Agent24项测试与2个独立反例复验，commit 99ae600；session已关闭。A2审计修正task_27891e3718 / sess_eb1c507a1c进行中。
+- A0 run.log已有双真实DSH iframe/草稿保持/Origin隔离/不暴露token/独立入口存活的实验PASS；实验管理服务是Node脚手架，不冒充正式管理profile验收，正式接线仍需重验。
+- A0已交回并关闭session；Codex读回JSON及截图。A2一次修正完成，Codex追加损坏记录结算门禁并独立21 tests通过，session关闭。
+- B-UI审计重试task_bdcec2fb00 / sess_c800355aa4；插件角色/桥task_518594be2a / sess_97b2c25108。均Grok/high。公共View新增entryOrigin，详合同。
 
 ## 证据入口
 
