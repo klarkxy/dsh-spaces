@@ -25,6 +25,8 @@ Thumbs.db
 
 # Electron
 *.asar
+packages/*/lib/
+packages/*/*.tgz
 
 # TypeScript build info
 *.tsbuildinfo
