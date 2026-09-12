@@ -9,11 +9,14 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"]
   },
   "include": [
     "electron.vite.config.ts",
     "src/main/**/*",
+    "src/core/**/*",
+    "src/adapters/**/*",
     "src/preload/**/*",
     "src/shared/**/*"
   ]
