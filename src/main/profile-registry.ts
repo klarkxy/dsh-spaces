@@ -2,15 +2,27 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:f
 import { join } from "node:path";
 import { t } from "../shared/i18n";
 import type { OnboardingProfile, OnboardingScan, ProfileKind, ProfileRecord, SpaceMeta, SpacesFile } from "../shared/types";
-import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../shared/types";
+import {
+  applyMetaPatch,
+  applyWorkbenchReorder,
+  assertValidProfileName,
+  classifyProfile,
+  compareScannedProfiles,
+  completeWorkbenchOrder,
+  defaultSpaceMeta,
+  emptySpacesFile,
+  normalizeSpacesFile,
+  onboardingAction,
+  packageHasWebApp,
+  removeSpaceMeta,
+} from "../core/domain/registry";
+import { patchTextLooksIsolated } from "../core/domain/isolation";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 
-const SPACES_VERSION = 1 as const;
-
 export class ProfileRegistry {
-  constructor(private readonly dshHome: string) {
-    assertNotRealHome(dshHome);
+  constructor(private readonly dshHome: string, options: { allowRealHome?: boolean } = {}) {
+    if (!options.allowRealHome) assertNotRealHome(dshHome);
   }
 
   profilesDir(): string {
@@ -28,18 +40,9 @@ export class ProfileRegistry {
   readSpaces(): SpacesFile {
     const path = this.spacesPath();
     if (!existsSync(path)) {
-      return { version: SPACES_VERSION, onboarded: false, order: [], meta: {} };
+      return emptySpacesFile();
     }
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as SpacesFile;
-    if (parsed.version !== 1) {
-      throw new Error(t("errors.unsupportedSpacesVersion", { version: String(parsed.version) }));
-    }
-    return {
-      version: 1,
-      onboarded: Boolean(parsed.onboarded),
-      order: parsed.order ?? [],
-      meta: parsed.meta ?? {},
-    };
+    return normalizeSpacesFile(JSON.parse(readFileSync(path, "utf8")) as SpacesFile);
   }
 
   writeSpaces(file: SpacesFile): void {
@@ -57,10 +60,7 @@ export class ProfileRegistry {
     const records: ProfileRecord[] = names.map((name) => {
       const path = join(dir, name);
       const kind = this.classify(name, path);
-      const meta = spaces.meta[name] ?? {
-        displayName: name === "web" ? "Home" : name,
-        order: name === "web" ? -1 : 1000,
-      };
+      const meta = spaces.meta[name] ?? defaultSpaceMeta(name);
       return {
         name,
         kind,
@@ -72,17 +72,7 @@ export class ProfileRegistry {
       };
     });
 
-    records.sort((a, b) => {
-      if (a.kind === "root" && b.kind !== "root") return -1;
-      if (b.kind === "root" && a.kind !== "root") return 1;
-      const ao = spaces.order.indexOf(a.name);
-      const bo = spaces.order.indexOf(b.name);
-      if (ao !== -1 || bo !== -1) {
-        return (ao === -1 ? 9999 : ao) - (bo === -1 ? 9999 : bo);
-      }
-      return a.meta.order - b.meta.order || a.name.localeCompare(b.name);
-    });
-
+    records.sort((a, b) => compareScannedProfiles(a, b, spaces.order));
     return records.filter((record) => record.kind !== "hidden");
   }
 
@@ -96,12 +86,7 @@ export class ProfileRegistry {
     const profiles: OnboardingProfile[] = names.map((name) => {
       const path = join(dir, name);
       const kind = this.classify(name, path);
-      let action: OnboardingProfile["action"] = "hide";
-      if (kind === "root") action = "adopt-root";
-      else if (kind === "workbench") {
-        action = this.hasWorkbenchPatch(name) ? "already-workbench" : "convert-workbench";
-      }
-      return { name, kind, action };
+      return { name, kind, action: onboardingAction(kind, this.hasWorkbenchPatch(name)) };
     });
     return {
       onboarded: Boolean(this.readSpaces().onboarded),
@@ -118,12 +103,7 @@ export class ProfileRegistry {
 
   updateMeta(name: string, patch: Partial<SpaceMeta>): SpaceMeta {
     const spaces = this.readSpaces();
-    const current = spaces.meta[name] ?? { displayName: name, order: 1000 };
-    const next = { ...current, ...patch };
-    spaces.meta[name] = next;
-    if (!spaces.order.includes(name) && name !== "web") {
-      spaces.order.push(name);
-    }
+    const next = applyMetaPatch(spaces, name, patch);
     this.writeSpaces(spaces);
     return next;
   }
@@ -133,22 +113,13 @@ export class ProfileRegistry {
     const visible = this.scan()
       .filter((p) => p.kind === "workbench")
       .map((p) => p.name);
-    const filtered = names.filter((name) => visible.includes(name) && name !== "web");
-    for (const name of visible) {
-      if (!filtered.includes(name)) filtered.push(name);
-    }
-    spaces.order = filtered;
-    filtered.forEach((name, index) => {
-      const meta = spaces.meta[name] ?? { displayName: name, order: index };
-      spaces.meta[name] = { ...meta, order: index };
-    });
+    applyWorkbenchReorder(spaces, completeWorkbenchOrder(visible, names));
     this.writeSpaces(spaces);
   }
 
   removeMeta(name: string): void {
     const spaces = this.readSpaces();
-    delete spaces.meta[name];
-    spaces.order = spaces.order.filter((item) => item !== name);
+    removeSpaceMeta(spaces, name);
     this.writeSpaces(spaces);
   }
 
@@ -177,12 +148,7 @@ export class ProfileRegistry {
   }
 
   validateNewName(name: string): void {
-    if (!PROFILE_NAME_RE.test(name)) {
-      throw new Error(t("errors.nameInvalid"));
-    }
-    if ((RESERVED_PROFILE_NAMES as readonly string[]).includes(name)) {
-      throw new Error(t("errors.nameReserved", { name }));
-    }
+    assertValidProfileName(name);
     if (this.has(name)) {
       throw new Error(t("errors.profileExists", { name }));
     }
@@ -192,24 +158,18 @@ export class ProfileRegistry {
     if (name === "web") return false;
     const path = join(this.profilesDir(), name, "cordis.patch.yml");
     if (!existsSync(path)) return false;
-    const text = readFileSync(path, "utf8");
-    return text.includes(`hub/${name}/sessions`) && text.includes(`hub/${name}/storages`);
+    return patchTextLooksIsolated(readFileSync(path, "utf8"), name);
   }
 
   classify(name: string, path: string): ProfileKind {
-    if (name === "web") return "root";
-    if (!this.hasWebApp(path)) return "hidden";
-    return "workbench";
+    return classifyProfile(name, this.hasWebApp(path));
   }
 
   hasWebApp(profilePath: string): boolean {
     const pkgPath = join(profilePath, "package.json");
     if (!existsSync(pkgPath)) return false;
     try {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-        dsh?: { profile?: { bundles?: string[] } };
-      };
-      return (pkg.dsh?.profile?.bundles ?? []).includes("@deepseek-ai/dsh-web-app");
+      return packageHasWebApp(JSON.parse(readFileSync(pkgPath, "utf8")));
     } catch {
       return false;
     }

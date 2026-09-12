@@ -30,7 +30,7 @@ import {
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { RuntimeStore } from "./runtime-store";
 import { SnapshotExecutor } from "./snapshot-executor";
-import { MaintenanceGate } from "./maintenance-gate";
+import { createDesktopHomeControl } from "../adapters/desktop";
 import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RestoreSession } from "./restore-session";
@@ -96,7 +96,8 @@ function startMain(): void {
   let quitInProgress = false;
   let initialized = false;
   let tray: TrayHandle | null = null;
-  const maintenance = new MaintenanceGate();
+  const homeControl = createDesktopHomeControl(dshHome);
+  const maintenance = homeControl.maintenance;
   setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));
   setToolchainRoot(join(app.getPath("userData"), "toolchain"));
   const runtimes = new RuntimeStore({
@@ -154,7 +155,11 @@ function startMain(): void {
 
   async function mutate<T>(action: () => T | Promise<T>): Promise<T> {
     assertAvailable();
-    return maintenance.runMutation(async () => action());
+    return homeControl.mutate(action);
+  }
+
+  function runMaintenance<T>(label: string, action: () => Promise<T>): Promise<T> {
+    return homeControl.runMaintenance(label, action);
   }
 
   async function finishRestore(): Promise<void> {
@@ -338,6 +343,7 @@ function startMain(): void {
       'confirmOnboarding', 'saveSettings', 'installPlugin', 'removePlugin', 'downloadPlugin',
       'removeLibraryPlugin', 'setSpacePlugin', 'ensureCli',
       'stopProfile', 'restartProfile', 'updateMeta', 'reorderProfiles', 'deleteProfile', 'createProfile',
+      'getPluginCatalog', 'searchPluginCatalog', 'listPluginLibrary', 'previewUpgrade',
     ]);
     const handle = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]) => {
       ipcMain.handle(channel, (event, ...args) => mutationChannels.has(channel)
@@ -348,7 +354,7 @@ function startMain(): void {
     handle("previewConfigBackup", (_event, name: string, id: string) => diagnostics.previewBackup(name, id));
     handle("restoreConfigBackup", (_event, name: string, id: string) => {
       assertAvailable();
-      return maintenance.run("config-restore", async () => {
+      return runMaintenance("config-restore", async () => {
         await drainPluginQueue();
         await diagnostics.restoreBackup(name, id);
       });
@@ -358,7 +364,7 @@ function startMain(): void {
     handle("previewUpgrade", (_event, version: string) => upgrades.preview(version));
     handle("upgradeRuntime", (_event, version: string) => {
       assertAvailable();
-      return maintenance.run("upgrade", async () => {
+      return runMaintenance("upgrade", async () => {
         try { await upgrades.upgrade(version); await finishRestore(); }
         catch (err) {
           try { await upgrades.recover(); await finishRestore(); }
@@ -369,11 +375,11 @@ function startMain(): void {
     });
     handle("installRuntimeVersion", (_event, version: string) => {
       assertAvailable();
-      return maintenance.run("runtime-install", async () => { await runtimes.install(version); });
+      return runMaintenance("runtime-install", async () => { await runtimes.install(version); });
     });
     handle("createSnapshot", () => {
       assertAvailable();
-      return maintenance.run("snapshot", async () => {
+      return runMaintenance("snapshot", async () => {
         await drainPluginQueue(); await processes.stopAll();
         await snapshots.create(describeRuntime(runtimes.current()), "manual");
       });
@@ -381,7 +387,7 @@ function startMain(): void {
     handle("previewSnapshot", (_event, id: string) => snapshots.preview(id));
     handle("restoreSnapshot", (_event, id: string, options?: RestoreSnapshotOptions) => {
       if (quitInProgress) throw new Error("The application is exiting.");
-      return maintenance.run("snapshot-restore", async () => {
+      return runMaintenance("snapshot-restore", async () => {
         await drainPluginQueue(); await processes.stopAll();
         await restore.restoreSnapshot(id, {
           allowDataOnlyBackup: options?.allowDataOnlyBackup === true,
@@ -390,7 +396,7 @@ function startMain(): void {
     });
     handle("deleteSnapshot", (_event, id: string) => {
       assertAvailable();
-      return maintenance.run("snapshot-delete", async () => { await snapshots.delete(id); });
+      return runMaintenance("snapshot-delete", async () => { await snapshots.delete(id); });
     });
     handle("listProfiles", () => listProfiles());
     handle("getSelectedProfile", () => views?.selectedName() ?? null);
@@ -557,10 +563,14 @@ function startMain(): void {
     if (allowClose || quitInProgress) return;
     quitInProgress = true;
     try {
+      // Cancel starts without taking the home lock so a maintenance drain
+      // waiting for mutations cannot deadlock against quit.
       if (!maintenance.busy || maintenance.mutations > 0) await processes.stopAll();
       await maintenance.idle();
       await drainPluginQueue();
-      await processes.stopAll();
+      await runMaintenance("quit", async () => {
+        await processes.stopAll();
+      });
       allowClose = true;
       tray?.destroy();
       app.exit(0);
@@ -596,7 +606,7 @@ function startMain(): void {
     setToolchainRoot(join(app.getPath("userData"), "toolchain"));
     setPackageSource(currentSettings.packageSource);
     try {
-      await maintenance.run("startup-recovery", async () => {
+      await runMaintenance("startup-recovery", async () => {
         await upgrades.recover();
         await restore.recoverOnStartup();
       });
@@ -608,8 +618,10 @@ function startMain(): void {
     registerIpc();
     if (process.env.DSH_SPACES_SMOKE === "1") {
       try {
-        await ensureRuntime(currentSettings.packageSource);
-        await smokeLifecycle(processes);
+        await runMaintenance("runtime-prep", async () => {
+          await ensureRuntime(currentSettings.packageSource);
+          await smokeLifecycle(processes);
+        });
         console.log("SMOKE: PASS");
         allowClose = true;
         app.exit(0);
