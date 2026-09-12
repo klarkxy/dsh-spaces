@@ -1,0 +1,2 @@
+# This is an exact-byte upstream fixture used by the compatibility hash guard.
+tests/fixtures/xp-original/client.js -text
