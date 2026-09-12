@@ -535,6 +535,9 @@ export class WorkbenchController {
       }
     }
     let selected = this.ui.selected;
+    const noticeId = this.ui.createdNotice?.spaceId;
+    const noticeRemoved = Boolean(noticeId && this.ui.state?.spaces.some(space => space.id === noticeId) &&
+      !state.spaces.some(space => space.id === noticeId));
     const selectedWasRemoved = selected !== "home" && !state.spaces.some((space) => space.id === selected);
     if (selectedWasRemoved) {
       selected = "home";
@@ -549,14 +552,14 @@ export class WorkbenchController {
       error: null,
       state,
       selected,
-      createdNotice: this.ui.createdNotice?.spaceId === selected ? null : this.ui.createdNotice,
+      createdNotice: noticeId === selected || noticeRemoved ? null : this.ui.createdNotice,
       pluginSpaceId,
       frames: this.views.list(),
       visibleSpaceId: this.views.visibleSpaceId,
       viewError: this.views.viewError,
     });
     if (selectedWasRemoved) this.writePersist();
-    for (const item of state.jobs) this.noteCreated(item);
+    for (const item of state.jobs) this.noteCreated(item, true);
     const restoreId = this.restoreId;
     if (restoreId) {
       this.restoreId = null;
@@ -724,8 +727,9 @@ export class WorkbenchController {
     this.noteCreated(job);
   }
 
-  private noteCreated(job: WorkbenchJob): void {
+  private noteCreated(job: WorkbenchJob, fromSnapshot = false): void {
     if (job.kind !== "space.create" || job.status !== "succeeded" || !job.result?.spaceId) return;
+    if (fromSnapshot && !this.ui.state?.spaces.some(space => space.id === job.result?.spaceId)) return;
     if (this.notedCreates.has(job.result.spaceId)) return;
     this.notedCreates.add(job.result.spaceId);
     this.patch({ createdNotice: { spaceId: job.result.spaceId } });
