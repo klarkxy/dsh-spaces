@@ -29,10 +29,10 @@ export type HomeToolchainInspect =
   | VerifiedHomeToolchain;
 
 /** Read-only scan of leftover control-dir work. Never writes or kills. */
-export function inspectControlResidue(home: string): string[] {
+export function inspectControlResidue(home: string, ownsRecord?: (value: Record<string, unknown>) => boolean): string[] {
   return [
     ...inspectJobs(join(home, HOME_CONTROL_DIR_NAME, CONTROL_JOBS_DIR_NAME)),
-    ...inspectInstances(join(home, HOME_CONTROL_DIR_NAME, CONTROL_INSTANCES_DIR_NAME)),
+    ...inspectInstances(join(home, HOME_CONTROL_DIR_NAME, CONTROL_INSTANCES_DIR_NAME), ownsRecord),
     ...inspectExistingFile(
       join(home, HOME_UPGRADE_STAGE_DIR, HOME_UPGRADE_JOURNAL_FILE),
       "An upgrade journal is unfinished and was not replayed.",
@@ -157,7 +157,7 @@ function inspectJobFile(path: string): string | undefined {
   return undefined;
 }
 
-function inspectInstances(dir: string): string[] {
+function inspectInstances(dir: string, ownsRecord?: (value: Record<string, unknown>) => boolean): string[] {
   const state = inspectNamedDir(dir);
   if (state === "missing") return [];
   if (state === "ambiguous") return ["Instance records are ambiguous and were not adopted."];
@@ -167,7 +167,17 @@ function inspectInstances(dir: string): string[] {
   } catch {
     return ["Instance records could not be read."];
   }
-  if (names.length === 0) return [];
+  if (names.every(name => {
+    if (!ownsRecord) return false;
+    try {
+      const path = join(dir, name);
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) return false;
+      const value = JSON.parse(readFileSync(path, "utf8"));
+      return value && typeof value === "object" && !Array.isArray(value) &&
+        value.spaceId === name.slice(0, -5) && ownsRecord(value);
+    } catch { return false; }
+  })) return [];
   return ["Leftover instance records were not adopted and unknown processes were not killed."];
 }
 

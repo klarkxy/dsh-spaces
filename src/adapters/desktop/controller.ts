@@ -47,6 +47,7 @@ export interface DesktopControllerOptions {
   clearViews?: () => void;
   profileNames?: () => string[];
   ownedSpaces?: () => DesktopReleaseSpace[];
+  ownsInstanceRecord?: (record: Record<string, unknown>) => boolean;
   onAdmit?: () => void | Promise<void>;
   onState?: (state: DesktopControllerState) => void;
 }
@@ -71,6 +72,7 @@ export class DesktopController {
   private readonly clearViews: () => void;
   private readonly profileNames: () => string[];
   private readonly ownedSpaces: () => DesktopReleaseSpace[];
+  private readonly ownsInstanceRecord?: DesktopControllerOptions["ownsInstanceRecord"];
   private readonly onAdmit?: () => void | Promise<void>;
   private readonly onState?: (state: DesktopControllerState) => void;
 
@@ -88,6 +90,7 @@ export class DesktopController {
     this.clearViews = options.clearViews ?? (() => undefined);
     this.profileNames = options.profileNames ?? (() => []);
     this.ownedSpaces = options.ownedSpaces ?? (() => []);
+    this.ownsInstanceRecord = options.ownsInstanceRecord;
     this.onAdmit = options.onAdmit;
     this.onState = options.onState;
   }
@@ -392,7 +395,7 @@ export class DesktopController {
       this.managerProfileId = null;
       live.push("Manager identity no longer matches the recorded profile and was not rebuilt.");
     }
-    live.push(...inspectControlResidue(this.home));
+    live.push(...inspectControlResidue(this.home, this.handle ? this.ownsInstanceRecord : undefined));
     const toolchain = inspectHomeToolchain(this.home);
     if (toolchain.kind === "invalid") live.push(toolchain.reason);
     return uniqueReasons(this.extraReasons, live);
@@ -405,7 +408,7 @@ export class DesktopController {
       if (error instanceof HomeControlPathError) return "damaged";
       throw error;
     }
-    if (inspectControlResidue(this.home).length > 0) return "skip-create";
+    if (inspectControlResidue(this.home, this.handle ? this.ownsInstanceRecord : undefined).length > 0) return "skip-create";
     return "ok";
   }
 
