@@ -1,6 +1,13 @@
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
+const authorizedHomes = new Set<string>();
+
+/** Product entrypoint authorization is scoped to one Home in this process. */
+export function authorizeProductHome(home: string): void {
+  authorizedHomes.add(resolve(home).toLowerCase());
+}
+
 export function realDshHome(): string {
   return join(homedir(), ".dsh");
 }
@@ -21,6 +28,8 @@ export function isInsideRealHome(home: string): boolean {
  * never write the real home.
  */
 export function assertNotRealHome(home: string): void {
+  const target = resolve(home).toLowerCase();
+  if ([...authorizedHomes].some(root => target === root || target.startsWith(root + sep))) return;
   if (!isInsideRealHome(home)) return;
   if (process.env.DSH_SPACES_PACKAGED === "1") return;
   if (process.env.DSH_SPACES_ALLOW_REAL_HOME) return;
