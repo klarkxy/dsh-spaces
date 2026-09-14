@@ -1,0 +1,47 @@
+# Manual pack of the prebuilt Spaces plugin for review / directory listing.
+# Does not npm publish, does not git tag, does not run electron-builder.
+# The plugin tarball (embedded supervisor + view-bridge) is the distribution unit.
+name: Plugin distribution pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Explicit @dsh-spaces/plugin version; must match packages/plugin/package.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck:spaces
+      - run: npm run build:spaces
+      - name: Version must match the dispatch input
+        env:
+          EXPECTED: ${{ github.event.inputs.version }}
+        run: node -e "const fs=require('fs'); const plugin=JSON.parse(fs.readFileSync('packages/plugin/package.json','utf8')); const view=JSON.parse(fs.readFileSync('packages/view-bridge/package.json','utf8')); const expected=process.env.EXPECTED; if (plugin.version!==expected || view.version!==expected) { console.error('package.json', plugin.version, view.version, '!=', expected); process.exit(1) }"
+      - name: Pack preflight
+        run: node scripts/pack-spaces-plugin.mjs --preflight
+      - name: Pack outside the package trees
+        env:
+          DSH_PACK_DEST: ${{ runner.temp }}\dsh-spaces-pack
+        run: node scripts/pack-spaces-plugin.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-spaces-plugin-${{ github.event.inputs.version }}
+          path: |
+            ${{ runner.temp }}/dsh-spaces-pack/*.tgz
+            ${{ runner.temp }}/dsh-spaces-pack/pack-report.json
+      - name: Not published
+        run: echo "Review artifact only. @dsh-spaces/plugin is not on npm. Do not treat this as a registry release. Desktop tags stay on the Release workflow."

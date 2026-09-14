@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { execSync, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawnObserved } from "./owned-process-record";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { t } from "../shared/i18n";
@@ -285,7 +286,7 @@ export function spawnNode(args: string[], options: SpawnOptions = {}): ChildProc
   const env = toolchainEnv({ ...(options.env as Record<string, string | undefined> | undefined) });
   if (usingElectron) env.ELECTRON_RUN_AS_NODE = "1";
   else delete env.ELECTRON_RUN_AS_NODE;
-  return spawn(exe, args, {
+  return spawnObserved(exe, args, {
     ...options,
     env,
   });

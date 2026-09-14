@@ -1,0 +1,7 @@
+*.tgz
+**/*.tgz
+src
+*.tsbuildinfo
+.sandbox
+.env
+.env.*

@@ -592,6 +592,257 @@ test("old snapshots without runtimeMissing remain complete restore targets", () 
   store.completeRestore();
 });
 
+const PLAN_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const PLAN_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+test("interrupted restore before and during swap leaves a rolled-back receipt a new store can read", () => {
+  const { home, runtime } = harness();
+  seedHome(home, { profiles: ["web"], settings: "live\n", session: "live-session\n" });
+  const root = fakeDir("dsh-snaps-");
+  const store = new SnapshotStore({ home, root });
+  const snap = store.create(runtime);
+  writeFileSync(join(home, "settings.yaml"), "dirty\n");
+  const presence = {
+    profiles: true,
+    sessions: true,
+    storages: false,
+    hub: false,
+    "settings.yaml": true,
+    "cordis.patch.yml": false,
+  };
+  const stage = join(home, RESTORE_STAGE_DIR);
+  mkdirSync(join(stage, "backup"), { recursive: true });
+  mkdirSync(join(stage, "incoming"), { recursive: true });
+  const beforeJournal = {
+    phase: "swapping" as const,
+    snapshotId: snap.id,
+    beforeRestoreId: snap.id,
+    originalPresence: presence,
+    runtimeVersion: "1.0.0",
+    binRelative: "bin.js",
+    startedAt: "2026-09-12T00:00:00.000Z",
+    planId: PLAN_A,
+  };
+  writeFileSync(join(stage, "journal.json"), `${JSON.stringify(beforeJournal, null, 2)}\n`);
+  assert.equal(new SnapshotStore({ home, root }).restoreJournal()?.phase, "swapping");
+  assert.equal(new SnapshotStore({ home, root }).restoreJournal()?.planId, PLAN_A);
+  const recovered = new SnapshotStore({ home, root });
+  assert.equal(recovered.recover(), undefined);
+  const receipt = recovered.recoveryReceipt();
+  assert.equal(receipt?.outcome, "rolled-back");
+  assert.equal(receipt?.schemaVersion, 1);
+  assert.equal(receipt?.snapshotId, snap.id);
+  assert.equal(receipt?.planId, PLAN_A);
+  assert.equal(receipt?.startedAt, beforeJournal.startedAt);
+  assert.equal(receipt?.runtimeVersion, "1.0.0");
+  assert.equal(receipt?.binRelative, "bin.js");
+  assert.equal(existsSync(join(home, "restore-receipt.json")), false);
+  assert.equal(existsSync(join(root, "restore-receipt.json")), true);
+  assert.equal(recovered.restoreJournal(), undefined);
+  assert.equal(recovered.pendingRestore(), undefined);
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "dirty\n");
+  const again = new SnapshotStore({ home, root });
+  assert.equal(again.recover(), undefined);
+  assert.deepEqual(again.recoveryReceipt(), receipt);
+
+  seedHome(home, { profiles: ["web"], settings: "live\n", session: "live-session\n" });
+  const next = new SnapshotStore({ home, root }).create(runtime);
+  mkdirSync(join(stage, "backup"), { recursive: true });
+  mkdirSync(join(stage, "incoming"), { recursive: true });
+  renameSync(join(home, "settings.yaml"), join(stage, "backup", "settings.yaml"));
+  writeFileSync(join(home, "settings.yaml"), "from-snap\n");
+  writeFileSync(
+    join(stage, "journal.json"),
+    `${JSON.stringify({
+      ...beforeJournal,
+      snapshotId: next.id,
+      beforeRestoreId: next.id,
+      planId: PLAN_B,
+      startedAt: "2026-09-12T01:00:00.000Z",
+    }, null, 2)}\n`,
+  );
+  const afterMid = new SnapshotStore({ home, root });
+  assert.equal(afterMid.restoreJournal()?.phase, "swapping");
+  assert.equal(afterMid.recover(), undefined);
+  const midReceipt = new SnapshotStore({ home, root }).recoveryReceipt();
+  assert.equal(midReceipt?.outcome, "rolled-back");
+  assert.equal(midReceipt?.snapshotId, next.id);
+  assert.equal(midReceipt?.planId, PLAN_B);
+  assert.equal(midReceipt?.startedAt, "2026-09-12T01:00:00.000Z");
+  assert.equal(midReceipt?.snapshotId === snap.id, false);
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "live\n");
+  const repeated = new SnapshotStore({ home, root });
+  assert.equal(repeated.recover(), undefined);
+  assert.deepEqual(repeated.recoveryReceipt(), midReceipt);
+});
+
+test("completeRestore writes a completed receipt a new store can read, including exact planId", () => {
+  const { home, root, store, runtime } = harness();
+  seedHome(home, { profiles: ["web"], settings: "old\n" });
+  const snap = store.create(runtime);
+  writeFileSync(join(home, "settings.yaml"), "new\n");
+  store.restore(snap.id, runtime, { planId: PLAN_A });
+  const pending = store.pendingRestore();
+  assert.equal(pending?.planId, PLAN_A);
+  assert.equal(store.restoreJournal()?.planId, PLAN_A);
+  store.completeRestore();
+  assert.equal(store.pendingRestore(), undefined);
+  assert.equal(store.restoreJournal(), undefined);
+  const receipt = new SnapshotStore({ home, root }).recoveryReceipt();
+  assert.equal(receipt?.outcome, "completed");
+  assert.equal(receipt?.snapshotId, snap.id);
+  assert.equal(receipt?.beforeRestoreId, pending?.beforeRestoreId);
+  assert.equal(receipt?.startedAt, pending?.startedAt);
+  assert.equal(receipt?.planId, PLAN_A);
+  assert.equal(receipt?.runtimeVersion, pending?.runtimeVersion);
+  assert.equal(receipt?.binRelative, "bin.js");
+});
+
+test("legacy restore without planId keeps the original journal pending and receipt shape", () => {
+  const { home, root, store, runtime } = harness();
+  seedHome(home, { profiles: ["web"], settings: "old\n" });
+  const snap = store.create(runtime);
+  store.restore(snap.id, runtime);
+  const journalRaw = readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8");
+  const pendingRaw = readFileSync(join(root, "pending-restore.json"), "utf8");
+  assert.equal("planId" in JSON.parse(journalRaw), false);
+  assert.equal("planId" in JSON.parse(pendingRaw), false);
+  assert.equal(store.pendingRestore()?.planId, undefined);
+  store.completeRestore();
+  const receiptRaw = readFileSync(join(root, "restore-receipt.json"), "utf8");
+  assert.equal("planId" in JSON.parse(receiptRaw), false);
+  assert.equal(new SnapshotStore({ home, root }).recoveryReceipt()?.planId, undefined);
+});
+
+test("receipt write failure keeps journal and pending; a later recover still settles the same rollback", () => {
+  const { home, runtime } = harness();
+  seedHome(home, { profiles: ["web"], settings: "live\n", session: "live-session" });
+  const root = fakeDir("dsh-snaps-");
+  const store = new SnapshotStore({ home, root });
+  const target = store.create(runtime);
+  const stage = join(home, RESTORE_STAGE_DIR);
+  mkdirSync(join(stage, "backup"), { recursive: true });
+  mkdirSync(join(stage, "incoming"), { recursive: true });
+  renameSync(join(home, "settings.yaml"), join(stage, "backup", "settings.yaml"));
+  writeFileSync(join(home, "settings.yaml"), "from-snap\n");
+  const journal = {
+    phase: "swapping" as const,
+    snapshotId: target.id,
+    beforeRestoreId: target.id,
+    originalPresence: {
+      profiles: true,
+      sessions: true,
+      storages: false,
+      hub: false,
+      "settings.yaml": true,
+      "cordis.patch.yml": false,
+    },
+    runtimeVersion: "1.0.0",
+    binRelative: "bin.js",
+    startedAt: "2026-09-12T00:00:00.000Z",
+    planId: PLAN_A,
+  };
+  writeFileSync(join(stage, "journal.json"), `${JSON.stringify(journal, null, 2)}\n`);
+  const journalBytes = readFileSync(join(stage, "journal.json"), "utf8");
+  const failing = new SnapshotStore({
+    home,
+    root,
+    inject: (op) => {
+      if (op === "restore:receipt") throw new Error("receipt disk full");
+    },
+  });
+  assert.throws(() => failing.recover(), /receipt disk full/);
+  assert.equal(readFileSync(join(stage, "journal.json"), "utf8"), journalBytes);
+  assert.equal(existsSync(join(root, "restore-receipt.json")), false);
+  assert.equal(failing.pendingRestore(), undefined);
+
+  const recovered = new SnapshotStore({ home, root });
+  assert.equal(recovered.recover(), undefined);
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "live\n");
+  assert.equal(existsSync(stage), false);
+  const receipt = new SnapshotStore({ home, root }).recoveryReceipt();
+  assert.equal(receipt?.outcome, "rolled-back");
+  assert.equal(receipt?.planId, PLAN_A);
+  assert.equal(receipt?.startedAt, journal.startedAt);
+  const onceMore = new SnapshotStore({ home, root });
+  assert.equal(onceMore.recover(), undefined);
+  assert.deepEqual(onceMore.recoveryReceipt(), receipt);
+});
+
+test("completeRestore receipt write failure keeps pending and journal", () => {
+  const { home, root, runtime } = harness();
+  seedHome(home, { profiles: ["web"], settings: "old\n" });
+  const store = new SnapshotStore({ home, root });
+  const snap = store.create(runtime);
+  store.restore(snap.id, runtime, { planId: PLAN_A });
+  const pendingBytes = readFileSync(join(root, "pending-restore.json"), "utf8");
+  const journalBytes = readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8");
+  const failing = new SnapshotStore({
+    home,
+    root,
+    inject: (op) => {
+      if (op === "restore:receipt") throw new Error("receipt disk full");
+    },
+  });
+  assert.throws(() => failing.completeRestore(), /receipt disk full/);
+  assert.equal(readFileSync(join(root, "pending-restore.json"), "utf8"), pendingBytes);
+  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), journalBytes);
+  assert.equal(existsSync(join(root, "restore-receipt.json")), false);
+  assert.equal(failing.pendingRestore()?.planId, PLAN_A);
+});
+
+test("bad and future restore receipts throw and keep the original bytes", () => {
+  const { home, root, store } = harness();
+  const receiptPath = join(root, "restore-receipt.json");
+  assert.equal(store.recoveryReceipt(), undefined);
+  writeFileSync(receiptPath, "{not-json");
+  assert.throws(() => store.recoveryReceipt(), /not valid JSON/);
+  assert.equal(readFileSync(receiptPath, "utf8"), "{not-json");
+
+  const future = `${JSON.stringify({
+    schemaVersion: 2,
+    outcome: "completed",
+    snapshotId: "11111111-1111-1111-1111-111111111111",
+    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
+    runtimeVersion: "1.0.0",
+    binRelative: "bin.js",
+    startedAt: "2026-09-12T00:00:00.000Z",
+  }, null, 2)}\n`;
+  writeFileSync(receiptPath, future);
+  assert.throws(() => new SnapshotStore({ home, root }).recoveryReceipt(), /not supported/);
+  assert.equal(readFileSync(receiptPath, "utf8"), future);
+
+  const illegal = `${JSON.stringify({
+    schemaVersion: 1,
+    outcome: "rolled-back",
+    snapshotId: "not-a-uuid",
+    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
+    runtimeVersion: "1.0.0",
+    binRelative: "bin.js",
+    startedAt: "2026-09-12T00:00:00.000Z",
+  }, null, 2)}\n`;
+  writeFileSync(receiptPath, illegal);
+  assert.throws(() => new SnapshotStore({ home, root }).recoveryReceipt(), /invalid/);
+  assert.equal(readFileSync(receiptPath, "utf8"), illegal);
+});
+
+test("a later restore replaces the previous receipt and does not refuse because one already exists", () => {
+  const { home, root, store, runtime } = harness();
+  seedHome(home, { profiles: ["web"], settings: "v1\n" });
+  const first = store.create(runtime);
+  store.restore(first.id, runtime, { planId: PLAN_A });
+  store.completeRestore();
+  assert.equal(store.recoveryReceipt()?.planId, PLAN_A);
+  writeFileSync(join(home, "settings.yaml"), "v2\n");
+  const second = store.create(runtime);
+  store.restore(second.id, runtime, { planId: PLAN_B });
+  store.completeRestore();
+  const receipt = new SnapshotStore({ home, root }).recoveryReceipt();
+  assert.equal(receipt?.outcome, "completed");
+  assert.equal(receipt?.snapshotId, second.id);
+  assert.equal(receipt?.planId, PLAN_B);
+});
+
 function harness(): { home: string; root: string; runtime: SnapshotRuntime; store: SnapshotStore } {
   const home = fakeDir("dsh-home-");
   const root = fakeDir("dsh-snaps-");

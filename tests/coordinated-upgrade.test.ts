@@ -44,8 +44,24 @@ test("preview lists every profile including hidden and does not guess CLI versio
 
 test("upgrade stages on an isolated home, rewrites junctions, then commits official versions only", async (t) => {
   const ctx = await harness(t);
+  mkdirSync(join(ctx.home, "hub", "plugins"), { recursive: true });
+  writeFileSync(join(ctx.home, "hub", "plugins", "owned.tgz"), "owned archive bytes");
+  const modules = join(ctx.home, "profiles", "coding", "node_modules");
+  mkdirSync(join(modules, ".pnpm"), { recursive: true });
+  writeFileSync(join(modules, ".modules.yaml"), JSON.stringify({
+    virtualStoreDir: join(modules, ".pnpm"), storeDir: "leave-the-shared-store-alone", layoutVersion: 5,
+  }));
   const phases: string[] = [];
-  ctx.upgrade = makeUpgrade(ctx, { onProgress: (progress) => phases.push(progress.phase) });
+  ctx.upgrade = makeUpgrade(ctx, { onProgress: (progress) => {
+    phases.push(progress.phase);
+    if (progress.phase === "verify") assert.equal(readFileSync(join(ctx.home, ".dsh-spaces-upgrade", "home", "hub", "plugins", "owned.tgz"), "utf8"), "owned archive bytes");
+    if (progress.phase === "verify") {
+      const staged = join(ctx.home, ".dsh-spaces-upgrade", "home", "profiles", "coding", "node_modules");
+      const metadata = JSON.parse(readFileSync(join(staged, ".modules.yaml"), "utf8"));
+      assert.equal(metadata.virtualStoreDir, join(staged, ".pnpm"));
+      assert.equal(metadata.storeDir, "leave-the-shared-store-alone");
+    }
+  } });
   const result = await ctx.upgrade.upgrade("0.9.9");
   assert.equal(result.version, "0.9.9");
   assert.equal(result.official.base, "0.2.0");
@@ -53,6 +69,7 @@ test("upgrade stages on an isolated home, rewrites junctions, then commits offic
   assert.equal(ctx.drained, true);
   assert.equal(ctx.stopped, true);
   assert.equal(ctx.runtimes.current()?.version, "0.9.9");
+  assert.equal(JSON.parse(readFileSync(join(modules, ".modules.yaml"), "utf8")).virtualStoreDir, join(modules, ".pnpm"));
   assert.equal(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[WEB], "0.2.1");
@@ -270,6 +287,41 @@ test("upgrade accepts generated fallback links and preserves global patches and 
   await ctx.upgrade.recover();
   assert.equal(ctx.runtimes.current()?.version, "0.9.9");
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
+});
+
+test("restore recovery consumes only the requested receipt and leaves a later runtime selection alone", async t => {
+  const ctx = await harness(t);
+  const snapshotRoot = fakeDir(t, "dsh-receipt-");
+  ctx.snapshots = new SnapshotStore({ home: ctx.home, root: snapshotRoot,
+    inject: op => { if (op === "restore:swap") throw new Error("interrupted before swap"); } });
+  const snapshot = ctx.snapshots.create(descriptor(ctx.runtimes));
+  const marker = join(ctx.home, "settings.yaml");
+  writeFileSync(marker, "before-restore data\n");
+  const planId = "12345678-1234-1234-1234-123456789abc";
+  await assert.rejects(async () => ctx.snapshots.restore(snapshot.id, descriptor(ctx.runtimes), { planId }), /interrupted/);
+  ctx.snapshots = new SnapshotStore({ home: ctx.home, root: snapshotRoot });
+  ctx.upgrade = makeUpgrade(ctx);
+  const recovered = await ctx.upgrade.recover({ receiptPlanId: planId });
+  assert.equal(recovered.restoreRolledBack, true);
+  assert.equal(recovered.restoreReceipt?.planId, planId);
+  assert.equal(readFileSync(marker, "utf8"), "before-restore data\n");
+  assert.deepEqual(await ctx.upgrade.recover({ receiptPlanId: "22345678-1234-1234-1234-123456789abc" }), {});
+  await ctx.runtimes.install("0.9.9");
+  ctx.runtimes.select("0.9.9");
+  assert.deepEqual(await ctx.upgrade.recover(), {});
+  assert.equal(ctx.runtimes.current()?.version, "0.9.9");
+});
+
+test("successful restore persists the exact plan for recovery after job persistence is interrupted", async t => {
+  const ctx = await harness(t);
+  const snapshot = ctx.snapshots.create(descriptor(ctx.runtimes));
+  const planId = "32345678-1234-1234-1234-123456789abc";
+  await ctx.upgrade.restore(snapshot.id, planId);
+  assert.equal(ctx.snapshots.pendingRestore(), undefined);
+  const recovered = await ctx.upgrade.recover({ receiptPlanId: planId });
+  assert.equal(recovered.restoreCompleted, true);
+  assert.equal(recovered.restoreReceipt?.planId, planId);
+  assert.equal(recovered.restoreReceipt?.snapshotId, snapshot.id);
 });
 
 interface Harness {

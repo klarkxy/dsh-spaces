@@ -31,7 +31,7 @@ afterEach(() => {
 
 test("managed CLI install pins the current default DSH version", () => {
   assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_VERSION}`);
-  assert.equal(DSH_DEFAULT_VERSION, "0.1.5-rc.1");
+  assert.equal(DSH_DEFAULT_VERSION, "0.1.5-rc.2");
 });
 
 test("candidates prefer the managed prefix over a global npm root", () => {

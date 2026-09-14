@@ -1,0 +1,48 @@
+{
+  "name": "@dsh-spaces/view-bridge",
+  "version": "0.2.0",
+  "license": "MIT",
+  "description": "Lightweight DSH embedded view readiness bridge without workspace management",
+  "author": "dsh-spaces",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klarkxy/dsh-spaces.git",
+    "directory": "packages/view-bridge"
+  },
+  "homepage": "https://github.com/klarkxy/dsh-spaces/tree/main/packages/view-bridge",
+  "bugs": {
+    "url": "https://github.com/klarkxy/dsh-spaces/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "spaces",
+    "view-bridge"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "files": ["lib", "README.md", "LICENSE", "cordis.patch.yml"],
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": ["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-renderer"],
+      "platform": "web"
+    },
+    "bundle": {"patch": "./cordis.patch.yml"}
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2"
+  }
+}

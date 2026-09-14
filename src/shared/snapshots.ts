@@ -48,6 +48,13 @@ export interface PendingRestore {
   runtimeVersion: string;
   binRelative: string;
   startedAt: string;
+  /** Workbench plan identity. Absent on legacy desktop restores. */
+  planId?: string;
+}
+
+export interface RestoreRecoveryReceipt extends PendingRestore {
+  schemaVersion: 1;
+  outcome: "completed" | "rolled-back";
 }
 
 export interface RestoreResult {
@@ -65,4 +72,6 @@ export interface RestoreJournal {
   runtimeVersion: string;
   binRelative: string;
   startedAt: string;
+  /** Workbench plan identity. Absent on legacy desktop restores. */
+  planId?: string;
 }

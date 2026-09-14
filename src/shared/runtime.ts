@@ -1,7 +1,7 @@
 import type { PackageSource } from "./types";
 
 export const DSH_RUNTIME_PACKAGE = "@deepseek-ai/dsh";
-export const DSH_DEFAULT_VERSION = "0.1.5-rc.1";
+export const DSH_DEFAULT_VERSION = "0.1.5-rc.2";
 
 /** Where the active CLI binary came from. Independent of npm dist-tags. */
 export type RuntimeOrigin = "store" | "managed" | "system" | "snapshot";

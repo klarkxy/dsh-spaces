@@ -1,0 +1,11 @@
+{
+  "name": "@dsh-spaces/supervisor",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Local DSH Spaces supervisor and independent maintenance entry",
+  "type": "module",
+  "main": "./lib/index.js",
+  "bin": {"dsh-spaces-workbench": "./lib/index.js"},
+  "files": ["lib", "LICENSE"]
+}
