@@ -3,10 +3,9 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
+import { rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { t } from "../shared/i18n";
 import {
@@ -24,6 +23,8 @@ import type { PackageSource } from "../shared/types";
 import { atomicWrite } from "./atomic";
 import { ProcessTerminationError } from "./terminate-process";
 import { assertNotRealHome } from "./home-guard";
+import { isAuthorizedProductHome } from "./home-guard";
+import { runSnapshotWorker } from "./snapshot-executor";
 import { npmPackumentUrl, npmRegistry, sourceEnv } from "./package-source";
 import {
   nodeExecutable,
@@ -31,6 +32,7 @@ import {
   npmCliJs,
   runProcess,
   toolchainEnv,
+  toolchainRoot,
 } from "./toolchain";
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
@@ -60,6 +62,7 @@ export type RegistryFetcher = (
 }>;
 
 export interface RuntimeStoreOptions {
+  installWorker?: { file: string; home: string };
   root: string;
   snapshotRoot?: string;
   source: () => PackageSource;
@@ -135,6 +138,7 @@ export class RuntimeStore {
   private readonly run: RunProcessFn;
   private readonly fetchImpl: RegistryFetcher;
   private readonly customRun: boolean;
+  private readonly installWorker?: RuntimeStoreOptions["installWorker"];
   private readonly inflight = new Map<string, Promise<InstalledRuntime>>();
 
   constructor(options: RuntimeStoreOptions) {
@@ -144,6 +148,7 @@ export class RuntimeStore {
     this.source = options.source;
     this.legacy = options.legacy;
     this.customRun = Boolean(options.run);
+    this.installWorker = options.installWorker;
     this.run = options.run ?? runProcess;
     this.fetchImpl = options.fetch ?? defaultFetch;
   }
@@ -208,7 +213,15 @@ export class RuntimeStore {
     const exact = this.requireVersion(version);
     const existing = this.inflight.get(exact);
     if (existing) return existing;
-    const pending = this.installOnce(exact).finally(() => {
+    const work = this.installWorker && !this.customRun
+      ? runSnapshotWorker<InstalledRuntime>(this.installWorker.file, {
+        operation: "runtimeInstall", home: this.installWorker.home,
+        allowProductHome: isAuthorizedProductHome(this.installWorker.home),
+        root: this.snapshotRoot, runtimeRoot: this.root, version: exact,
+        packageSource: this.source(), legacy: this.legacy(), toolchainRoot: toolchainRoot(),
+      })
+      : this.installOnce(exact);
+    const pending = work.finally(() => {
       if (this.inflight.get(exact) === pending) this.inflight.delete(exact);
     });
     this.inflight.set(exact, pending);
@@ -373,7 +386,7 @@ export class RuntimeStore {
     if (!this.customRun) await ensureNode();
 
     const staging = join(this.root, `.tmp-dsh-${version}-${process.pid}`);
-    if (existsSync(staging)) rmSync(staging, { recursive: true, force: true });
+    await rmTree(staging);
     mkdirSync(staging, { recursive: true });
 
     try {
@@ -413,12 +426,12 @@ export class RuntimeStore {
       if (existsSync(dest)) {
         const reused = this.readInstalled(version);
         if (reused) {
-          rmSync(staging, { recursive: true, force: true });
+          await rmTree(staging);
           return reused;
         }
-        rmSync(dest, { recursive: true, force: true });
+        await rmTree(dest);
       }
-      renameSync(staging, dest);
+      await renameTree(staging, dest);
       const installed = this.readInstalled(version);
       if (!installed) throw new Error(`runtime ${version} failed to become readable after install`);
       atomicWrite(
@@ -427,8 +440,33 @@ export class RuntimeStore {
       );
       return installed;
     } catch (err) {
-      if (!(err instanceof ProcessTerminationError)) rmSync(staging, { recursive: true, force: true });
+      if (!(err instanceof ProcessTerminationError)) await rmTree(staging);
       throw err;
+    }
+  }
+}
+
+function rmTree(path: string): Promise<void> {
+  return rm(path, { recursive: true, force: true });
+}
+
+/** Same-volume directory publish. Retry scanner locks without blocking the HTTP loop. */
+async function renameTree(source: string, destination: string): Promise<void> {
+  const deadline = Date.now() + 500;
+  for (;;) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        process.platform !== "win32" ||
+        !["EPERM", "EACCES", "EBUSY"].includes(code ?? "") ||
+        Date.now() >= deadline
+      ) {
+        throw error;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
     }
   }
 }

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { t } from "../shared/i18n";
 import {
   PROTECTED_PLUGIN_PACKAGES,
@@ -132,10 +132,15 @@ function addableSpec(dshHome: string, spec: string): string {
 export async function pluginAdd(dshHome: string, name: string, spec: string): Promise<void> {
   assertProfile(dshHome, name);
   const target = addableSpec(dshHome, spec);
+  // DSH forwards pnpm via a Windows command shell. Owned archive paths can
+  // contain spaces in Home; a profile-relative file reference stays one argument.
+  const cliTarget = process.platform === "win32" && isHubPluginArchive(dshHome, target)
+    ? `"file:${relative(profileDir(dshHome, name), target).replaceAll("\\", "/")}"`
+    : target;
   await enqueuePlugin(t("queue.pluginAddSpec", { name, spec: target }), async () => {
     const { stdout, stderr, code } = await runDsh(
       dshHome,
-      ["plugin", "--profile", name, "add", target],
+      ["plugin", "--profile", name, "add", cliTarget],
       { timeoutMs: PLUGIN_TIMEOUT_MS },
     );
     if (code !== 0) throw pluginError(target, code, stdout, stderr);

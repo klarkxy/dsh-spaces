@@ -1,3 +1,7 @@
+# 2026-09-13 当前计划：标准插件安装与最新 CLI
+
+用户已同意补齐社区可安装入口，并提升到官方最新发布 CLI。Grok 实施，Codex 整合与独立验收。完整契约见 [plugin-standard-install.md](plugin-standard-install.md)。下面的 9 月 8 日计划保留为历史。
+
 # DSH Spaces 竞品能力吸收与产品完善计划
 
 日期：2026-09-08。用户已确认方案，并指定 Grok 施工、Codex 独立验收。

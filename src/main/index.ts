@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { atomicWrite } from "./atomic";
 import { fileURLToPath } from "node:url";
 import { applyAppLocale, t } from "../shared/i18n";
 import { sanitizeSpaceIcon } from "../shared/space-icon";
@@ -29,8 +30,19 @@ import {
 } from "./dsh-cli";
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { RuntimeStore } from "./runtime-store";
+import { CooperativeChildren } from "../adapters/node/cooperative-children";
+import { observeMaintenanceChild, ownsObservedChild, withChildObservation } from "./owned-process-record";
 import { SnapshotExecutor } from "./snapshot-executor";
-import { MaintenanceGate } from "./maintenance-gate";
+import {
+  createDesktopController,
+  createDesktopHomeControl,
+  createDesktopProcessKill,
+} from "../adapters/desktop";
+import {
+  DESKTOP_CONTROLLER_IPC,
+  desktopSelectAccess,
+  isDesktopMutateIpcChannel,
+} from "../shared/desktop-controller";
 import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RestoreSession } from "./restore-session";
@@ -38,7 +50,7 @@ import type { MaintenanceView } from "../shared/maintenance-view";
 import type { RestoreSnapshotOptions } from "../shared/snapshots";
 import { readSettings, writeSettings } from "./hub-settings";
 import { applyNativeTheme, currentColorScheme } from "./native-theme";
-import { setPackageSource, setToolchainRoot } from "./toolchain";
+import { nodeExecutable, setPackageSource, setToolchainRoot, toolchainRoot } from "./toolchain";
 import { confirmOnboarding } from "./onboarding";
 import { PatchWriter } from "./patch-writer";
 import { isStartCancelled, ProcessManager } from "./process-manager";
@@ -87,7 +99,18 @@ function startMain(): void {
   const settings = readSettings(dshHome);
   applyAppLocale(settings.locale);
   applyNativeTheme(settings.theme);
-  const processes = new ProcessManager(dshHome, patchWriter, settings.portStart, settings.portEnd);
+  let allowForceKill = false;
+  const cooperativeChildren = new CooperativeChildren({
+    journalHome: dshHome,
+    onJournalFailure: () => desktop.revokeAdmission("The owned process record requires recovery before further changes."),
+  });
+  const processes = new ProcessManager(dshHome, patchWriter, settings.portStart, settings.portEnd, {
+    spawn: cooperativeChildren.spawn,
+    kill: async (pid, kind) => {
+      if (kind === "term") return cooperativeChildren.stop(pid);
+      return createDesktopProcessKill(() => allowForceKill)(pid, kind);
+    },
+  });
 
   let mainWindow: BrowserWindow | null = null;
   let views: ViewManager | null = null;
@@ -96,16 +119,65 @@ function startMain(): void {
   let quitInProgress = false;
   let initialized = false;
   let tray: TrayHandle | null = null;
-  const maintenance = new MaintenanceGate();
-  setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));
-  setToolchainRoot(join(app.getPath("userData"), "toolchain"));
-  const runtimes = new RuntimeStore({
-    root: join(app.getPath("userData"), "runtimes"),
-    snapshotRoot: join(app.getPath("userData"), "snapshots"),
-    source: () => currentSettings.packageSource,
-    legacy: () => readRuntimeRef(findLegacyDshBin()),
+  const homeControl = createDesktopHomeControl(dshHome);
+  const maintenance = homeControl.maintenance;
+  const desktop = createDesktopController(dshHome, {
+    homeControl,
+    ownsInstanceRecord: record => cooperativeChildren.ownsRecord(record) || ownsObservedChild(dshHome, record),
+    stopOwned: async () => {
+      allowForceKill = false;
+      try {
+        await processes.stopAll();
+      } finally {
+        allowForceKill = false;
+      }
+    },
+    drainPlugins: drainPluginQueue,
+    clearViews: () => {
+      for (const profile of listProfiles()) views?.destroy(profile.name);
+      views?.hideAll();
+    },
+    profileNames: () => registry.scan().map((row) => row.name),
+    ownedSpaces: () =>
+      listProfiles()
+        .filter((profile) => profile.status === "running" || profile.status === "starting")
+        .map((profile) => ({
+          name: profile.name,
+          displayName: profile.meta.displayName || profile.name,
+          status: profile.status,
+        })),
+    onAdmit: () => {
+      currentSettings = readSettings(dshHome);
+      applyAppLocale(currentSettings.locale);
+      applyNativeTheme(currentSettings.theme);
+      processes.setPortRange(currentSettings.portStart, currentSettings.portEnd);
+      setPackageSource(currentSettings.packageSource);
+      const toolchain = desktop.homeToolchain();
+      if (toolchain.kind === "verified") {
+        setSelectedDshResolver(() => runtimes.current()?.bin ?? toolchain.bin);
+      } else if (toolchain.kind === "absent") {
+        setSelectedDshResolver(() => runtimes.current()?.bin);
+      } else {
+        throw new Error(toolchain.reason);
+      }
+      persistHomeToolchain();
+    },
+    onState: (state) => broadcast("controller-status", state),
   });
-  const snapshotRoot = join(app.getPath("userData"), "snapshots");
+  desktop.acquireOnStart();
+  const initialToolchain = desktop.homeToolchain();
+  const sharedResources = initialToolchain.kind === "verified" ? initialToolchain : undefined;
+  setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));
+  setToolchainRoot(sharedResources?.toolchainRoot ?? join(app.getPath("userData"), "toolchain"));
+  const snapshotRoot = sharedResources?.snapshotRoot ?? join(app.getPath("userData"), "snapshots");
+  const runtimeRoot = sharedResources?.runtimeRoot ?? join(app.getPath("userData"), "runtimes");
+  const runtimes = new RuntimeStore({
+    installWorker: { file: join(__dirname, "snapshot-worker.mjs").replace("app.asar", "app.asar.unpacked"), home: dshHome },
+    root: runtimeRoot,
+    snapshotRoot,
+    source: () => currentSettings.packageSource,
+    legacy: () => sharedResources ? readRuntimeRef(sharedResources.bin) : readRuntimeRef(findLegacyDshBin()),
+  });
   const snapshots = new SnapshotExecutor({
     home: dshHome, root: snapshotRoot,
     workerFile: join(__dirname, "snapshot-worker.mjs").replace("app.asar", "app.asar.unpacked"),
@@ -122,6 +194,8 @@ function startMain(): void {
   setSelectedDshResolver(() => runtimes.current()?.bin);
   const upgrades = new CoordinatedUpgrade({
     home: dshHome, profiles: () => registry.scanOnboarding().profiles.map(row => row.name),
+    workerFile: join(__dirname, "snapshot-worker.mjs").replace("app.asar", "app.asar.unpacked"),
+    observeChild: () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Maintenance process identity needs recovery.")),
     stopAll: () => processes.stopAll(), drainPlugins: drainPluginQueue,
     snapshots, runtimes, runtimeDescriptor: () => describeRuntime(runtimes.current()),
     onProgress: (progress) => broadcast("maintenance-progress", progress),
@@ -154,7 +228,29 @@ function startMain(): void {
 
   async function mutate<T>(action: () => T | Promise<T>): Promise<T> {
     assertAvailable();
-    return maintenance.runMutation(async () => action());
+    return desktop.mutate(() => withChildObservation(
+      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity needs recovery.")), action));
+  }
+
+  function runMaintenance<T>(label: string, action: () => Promise<T>): Promise<T> {
+    return desktop.runMaintenance(label, () => withChildObservation(
+      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity needs recovery.")), async () => {
+      const result = await action();
+      persistHomeToolchain();
+      return result;
+    }));
+  }
+
+  function persistHomeToolchain(): void {
+    if (!desktop.held) return;
+    const current = runtimes.current();
+    const nodeExe = nodeExecutable();
+    if (!current || !nodeExe) return;
+    const path = join(dshHome, ".dsh-spaces-control", "toolchain.json");
+    const prior = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+    atomicWrite(path, `${JSON.stringify({ ...prior, version: 1, bin: current.bin,
+      nodeExe, dshVersion: current.version, runtimeRoot, snapshotRoot,
+      toolchainRoot: toolchainRoot(), boundAt: new Date().toISOString() }, null, 2)}\n`);
   }
 
   async function finishRestore(): Promise<void> {
@@ -251,7 +347,8 @@ function startMain(): void {
   }
 
   function listProfiles() {
-    return registry.scan().map((profile) => ({
+    const managerId = desktop.managerId();
+    return registry.scan().filter(profile => profile.name !== managerId).map((profile) => ({
       ...profile,
       status: processes.statusOf(profile.name),
       port: processes.portOf(profile.name),
@@ -334,21 +431,23 @@ function startMain(): void {
   }
 
   function registerIpc(): void {
-    const mutationChannels = new Set([
-      'confirmOnboarding', 'saveSettings', 'installPlugin', 'removePlugin', 'downloadPlugin',
-      'removeLibraryPlugin', 'setSpacePlugin', 'ensureCli',
-      'stopProfile', 'restartProfile', 'updateMeta', 'reorderProfiles', 'deleteProfile', 'createProfile',
-    ]);
     const handle = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]) => {
-      ipcMain.handle(channel, (event, ...args) => mutationChannels.has(channel)
+      ipcMain.handle(channel, (event, ...args) => isDesktopMutateIpcChannel(channel)
         ? mutate(() => listener(event, ...args)) : listener(event, ...args));
     };
+    handle(DESKTOP_CONTROLLER_IPC.get, () => desktop.state());
+    handle(DESKTOP_CONTROLLER_IPC.acquire, async () => {
+      desktop.acquireExplicit();
+      return desktop.admitWrites();
+    });
+    handle(DESKTOP_CONTROLLER_IPC.release, () => desktop.release());
+    handle(DESKTOP_CONTROLLER_IPC.previewRelease, () => desktop.releasePreview());
     handle("getDiagnostics", (_event, name: string) => diagnostics.get(name));
     handle("quitApp", () => requestQuit());
     handle("previewConfigBackup", (_event, name: string, id: string) => diagnostics.previewBackup(name, id));
     handle("restoreConfigBackup", (_event, name: string, id: string) => {
       assertAvailable();
-      return maintenance.run("config-restore", async () => {
+      return runMaintenance("config-restore", async () => {
         await drainPluginQueue();
         await diagnostics.restoreBackup(name, id);
       });
@@ -358,7 +457,7 @@ function startMain(): void {
     handle("previewUpgrade", (_event, version: string) => upgrades.preview(version));
     handle("upgradeRuntime", (_event, version: string) => {
       assertAvailable();
-      return maintenance.run("upgrade", async () => {
+      return runMaintenance("upgrade", async () => {
         try { await upgrades.upgrade(version); await finishRestore(); }
         catch (err) {
           try { await upgrades.recover(); await finishRestore(); }
@@ -369,11 +468,11 @@ function startMain(): void {
     });
     handle("installRuntimeVersion", (_event, version: string) => {
       assertAvailable();
-      return maintenance.run("runtime-install", async () => { await runtimes.install(version); });
+      return runMaintenance("runtime-install", async () => { await runtimes.install(version); });
     });
     handle("createSnapshot", () => {
       assertAvailable();
-      return maintenance.run("snapshot", async () => {
+      return runMaintenance("snapshot", async () => {
         await drainPluginQueue(); await processes.stopAll();
         await snapshots.create(describeRuntime(runtimes.current()), "manual");
       });
@@ -381,7 +480,7 @@ function startMain(): void {
     handle("previewSnapshot", (_event, id: string) => snapshots.preview(id));
     handle("restoreSnapshot", (_event, id: string, options?: RestoreSnapshotOptions) => {
       if (quitInProgress) throw new Error("The application is exiting.");
-      return maintenance.run("snapshot-restore", async () => {
+      return runMaintenance("snapshot-restore", async () => {
         await drainPluginQueue(); await processes.stopAll();
         await restore.restoreSnapshot(id, {
           allowDataOnlyBackup: options?.allowDataOnlyBackup === true,
@@ -390,7 +489,7 @@ function startMain(): void {
     });
     handle("deleteSnapshot", (_event, id: string) => {
       assertAvailable();
-      return maintenance.run("snapshot-delete", async () => { await snapshots.delete(id); });
+      return runMaintenance("snapshot-delete", async () => { await snapshots.delete(id); });
     });
     handle("listProfiles", () => listProfiles());
     handle("getSelectedProfile", () => views?.selectedName() ?? null);
@@ -409,13 +508,24 @@ function startMain(): void {
     handle("getPluginQueue", () => pluginQueueSnapshot());
     handle(
       "getPluginCatalog",
-      (_event, options: { refresh?: boolean; url?: string } = {}) =>
-        loadPluginCatalog(dshHome, {
-          refresh: options.refresh,
-          url: options.url || currentSettings.catalogUrl,
-        }),
+      (_event, options: { refresh?: boolean; url?: string } = {}) => {
+        const url = options.url || currentSettings.catalogUrl;
+        if (!desktop.writable) {
+          if (options.refresh) desktop.assertWritable("getPluginCatalog");
+          return desktop.readPluginCatalog(url);
+        }
+        return mutate(() =>
+          loadPluginCatalog(dshHome, {
+            refresh: options.refresh,
+            url,
+          }),
+        );
+      },
     );
-    handle("searchPluginCatalog", (_event, query: string) => searchPluginCatalog(dshHome, query));
+    handle("searchPluginCatalog", (_event, query: string) => {
+      if (!desktop.writable) return desktop.searchPluginCatalog(query);
+      return mutate(() => searchPluginCatalog(dshHome, query));
+    });
     handle("listProfilePlugins", (_event, name: string) => listProfilePlugins(dshHome, name));
     handle("listAllProfilePlugins", () =>
       listAllProfilePlugins(
@@ -423,20 +533,28 @@ function startMain(): void {
         listProfiles().map((profile) => profile.name),
       ),
     );
-    handle("listPluginLibrary", () =>
-      listPluginLibrary(
-        dshHome,
-        listProfiles().map((profile) => profile.name),
-      ),
-    );
+    handle("listPluginLibrary", () => {
+      if (!desktop.writable) return desktop.readPluginLibrary();
+      return mutate(() =>
+        listPluginLibrary(
+          dshHome,
+          listProfiles().map((profile) => profile.name),
+        ),
+      );
+    });
     handle("installPlugin", async (_event, request: PluginInstallRequest) => {
       const spec = await resolveInstallSpec(dshHome, request);
+      desktop.assertDesktopPluginMutation(request.profiles ?? [], spec);
       return installPluginToProfiles(dshHome, request.profiles ?? [], spec, (name) => {
         const status = processes.statusOf(name);
         return status === "running" || status === "starting";
       });
     });
-    handle("downloadPlugin", (_event, request: PluginDownloadRequest) => downloadPlugin(dshHome, request));
+    handle("downloadPlugin", async (_event, request: PluginDownloadRequest) => {
+      const spec = await resolveInstallSpec(dshHome, request);
+      desktop.assertOrdinaryPluginSpec(spec);
+      return downloadPlugin(dshHome, request);
+    });
     handle("removeLibraryPlugin", (_event, id: string) =>
       removeDownloadedPlugin(
         dshHome,
@@ -445,12 +563,14 @@ function startMain(): void {
       ),
     );
     handle("setSpacePlugin", async (_event, request: PluginSpaceToggleRequest) => {
+      desktop.assertDesktopPluginMutation([request.profile], request.id);
       return setSpacePlugin(dshHome, request.profile, request.id, request.enabled, (name) => {
         const status = processes.statusOf(name);
         return status === "running" || status === "starting";
       });
     });
     handle("removePlugin", async (_event, profile: string, packageName: string) => {
+      desktop.assertDesktopPluginMutation([profile], packageName);
       await pluginRemove(dshHome, profile, packageName);
       const status = processes.statusOf(profile);
       return { running: status === "running" || status === "starting" ? [profile] : [] };
@@ -477,17 +597,24 @@ function startMain(): void {
       assertAvailable();
       if (maintenance.busy) throw new Error("A maintenance operation is in progress.");
       const port = processes.portOf(name);
-      if (port === undefined || processes.statusOf(name) !== "running") {
+      const running = port !== undefined && processes.statusOf(name) === "running";
+      const access = desktopSelectAccess(desktop.writable, running);
+      if (access === "deny") desktop.assertWritable("selectProfile");
+      if (access === "start") {
         views?.hideAll();
         return startAndShow(name);
       }
-      views?.select(name, port, processes.urlOf(name));
-      return { port };
+      views?.select(name, port!, processes.urlOf(name));
+      return { port: port! };
     });
     handle("pickSpaceIcon", (event) => pickSpaceIcon(event.sender));
     handle("updateMeta", (_event, name: string, patch: Partial<SpaceMeta>) => {
+      if ("displayName" in patch) desktop.assertMutableProfile(name, "rename");
       if ("icon" in patch) patch = { ...patch, icon: sanitizeSpaceIcon(patch.icon) };
-      return registry.updateMeta(name, patch);
+      const meta = registry.updateMeta(name, patch);
+      broadcast("profile-status", { name, status: processes.statusOf(name), port: processes.portOf(name) });
+      tray?.refresh();
+      return meta;
     });
     handle("reorderProfiles", (_event, names: string[]) => {
       registry.reorder(names);
@@ -497,6 +624,7 @@ function startMain(): void {
       "deleteProfile",
       async (_event, name: string, options: { deleteOfficial?: boolean } = {}) => {
         if (name === "web") throw new Error(t("errors.cannotDeleteWeb"));
+        desktop.assertMutableProfile(name, "delete");
         views?.destroy(name);
         await processes.stop(name);
         registry.removeHubData(name);
@@ -519,6 +647,7 @@ function startMain(): void {
     handle(
       "createProfile",
       async (_event, name: string, displayName: string | undefined, icon: string | undefined) => {
+        desktop.assertMutableProfile(name, "create");
         await createProfile(dshHome, registry, patchWriter, name, displayName, (progress) => {
           broadcast("create-progress", progress);
         });
@@ -557,10 +686,7 @@ function startMain(): void {
     if (allowClose || quitInProgress) return;
     quitInProgress = true;
     try {
-      if (!maintenance.busy || maintenance.mutations > 0) await processes.stopAll();
-      await maintenance.idle();
-      await drainPluginQueue();
-      await processes.stopAll();
+      if (desktop.held) await desktop.release();
       allowClose = true;
       tray?.destroy();
       app.exit(0);
@@ -575,11 +701,15 @@ function startMain(): void {
     if (status === "crashed" || status === "stopped") {
       views?.destroy(name);
     }
-    diagnostics.record(name, "lifecycle", `${status}${extra?.error ? `: ${extra.error}` : ""}`);
+    if (desktop.writable) {
+      diagnostics.record(name, "lifecycle", `${status}${extra?.error ? `: ${extra.error}` : ""}`);
+    }
     broadcast("profile-status", { name, status, ...extra, error: extra?.error ? sanitizeLogText(extra.error) : undefined });
     tray?.refresh();
   });
-  processes.onLog((name, channel, text) => diagnostics.record(name, channel, text));
+  processes.onLog((name, channel, text) => {
+    if (desktop.writable) diagnostics.record(name, channel, text);
+  });
 
   onPluginQueue((snap) => broadcast("plugin-queue", snap));
   onCliStatus((status) => broadcast("cli-status", status));
@@ -593,23 +723,30 @@ function startMain(): void {
 
   void app.whenReady().then(async () => {
     setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));
-    setToolchainRoot(join(app.getPath("userData"), "toolchain"));
-    setPackageSource(currentSettings.packageSource);
-    try {
-      await maintenance.run("startup-recovery", async () => {
-        await upgrades.recover();
-        await restore.recoverOnStartup();
-      });
-    } catch (err) {
-      if (!restore.recoveryError) {
-        restore.recoveryError = `Restore needs recovery before spaces can start: ${String(err)}`;
+    setToolchainRoot(sharedResources?.toolchainRoot ?? join(app.getPath("userData"), "toolchain"));
+    if (desktop.held) {
+      await desktop.admitWrites();
+      if (desktop.writable) {
+        try {
+          await runMaintenance("startup-recovery", async () => {
+            await upgrades.recover();
+            await restore.recoverOnStartup();
+          });
+        } catch (err) {
+          if (!restore.recoveryError) {
+            restore.recoveryError = `Restore needs recovery before spaces can start: ${String(err)}`;
+          }
+          desktop.revokeAdmission("Interrupted restore must be recovered before new changes.");
+        }
       }
     }
     registerIpc();
     if (process.env.DSH_SPACES_SMOKE === "1") {
       try {
-        await ensureRuntime(currentSettings.packageSource);
-        await smokeLifecycle(processes);
+        await runMaintenance("runtime-prep", async () => {
+          await ensureRuntime(currentSettings.packageSource);
+          await smokeLifecycle(processes);
+        });
         console.log("SMOKE: PASS");
         allowClose = true;
         app.exit(0);

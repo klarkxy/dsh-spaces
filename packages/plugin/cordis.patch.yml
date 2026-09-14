@@ -1,0 +1,8 @@
+# Bundle patch for @dsh-spaces/plugin. Official `dsh plugin add` appends this
+# package to dsh.profile.bundles; `dsh plugin remove` drops the layer.
+# Profile cordis.patch.yml may overlay this row by id (whole `config` replace).
+
+- insert:
+    - id: dsh-spaces
+      name: '@dsh-spaces/plugin'
+      config: {}

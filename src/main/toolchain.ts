@@ -1,12 +1,14 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { rm as rmAsync } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawnObserved } from "./owned-process-record";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { t } from "../shared/i18n";
 import type { PackageSource, RuntimeStatus } from "../shared/types";
 import { inferPackageSource } from "../shared/types";
-import { atomicWrite } from "./atomic";
+import { atomicWrite, renameDirectoryAsync } from "./atomic";
 import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
 import {
   NODE_VERSION,
@@ -179,7 +181,7 @@ export function runProcess(
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const timeoutMs = options.timeoutMs ?? INSTALL_TIMEOUT_MS;
   return new Promise((resolveRun, reject) => {
-    const child: ChildProcess = spawn(command, args, {
+    const child: ChildProcess = spawnObserved(command, args, {
       windowsHide: true,
       shell: options.shell ?? false,
       stdio: ["ignore", "pipe", "pipe"],
@@ -298,13 +300,13 @@ export async function ensureNode(onLine?: (line: string) => void): Promise<strin
       throw new Error(t("errors.nodeExtractFailed", { dest: staging }));
     }
     // Retain older distributions: a running space may still own their executable.
-    if (existsSync(published)) renameSync(published, previous);
-    try { renameSync(extracted, published); }
+    if (existsSync(published)) await renameDirectoryAsync(published, previous);
+    try { await renameDirectoryAsync(extracted, published); }
     catch (error) {
-      if (existsSync(previous)) renameSync(previous, published);
+      if (existsSync(previous)) await renameDirectoryAsync(previous, published);
       throw error;
     }
-  } finally { rmSync(staging, { recursive: true, force: true }); }
+  } finally { await rmAsync(staging, { recursive: true, force: true }); }
   const node = nodeExecutable()!;
   writeToolchainConfig({ nodeVersion: NODE_VERSION, packageSource: source });
   writeNpmrc(source);

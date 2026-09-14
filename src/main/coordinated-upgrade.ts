@@ -11,23 +11,27 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { type ChildProcess } from "node:child_process";
+import { type ChildProcess, type SpawnOptions } from "node:child_process";
+import { withoutChildObservation, type ChildObservation } from "./owned-process-record";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { pluginQueueSnapshot, spawnNode } from "./dsh-cli";
-import { assertNotRealHome, samePath } from "./home-guard";
+import { assertNotRealHome, isAuthorizedProductHome, samePath } from "./home-guard";
+import { runSnapshotWorker, type SnapshotWorkerOperation } from "./snapshot-executor";
 import { assertDumpPatched } from "./patch-writer";
 import { listProfilePlugins } from "./plugin-ops";
 import { clearRuntimeFallback, copyLinkedTree, retargetTree } from "./snapshot-store";
-import { terminateProcessTree } from "./terminate-process";
+import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
 import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "./dsh-endpoint";
 import { toolchainEnv } from "./toolchain";
 import { renameDirectory as renameSync } from "./atomic";
 import { sanitizeLogText } from "./diagnostics";
 import { PROTECTED_PLUGIN_PACKAGES } from "../shared/types";
 import { isExactRuntimeVersion } from "../shared/runtime";
-import type { PendingRestore, RestoreResult, SnapshotMeta, SnapshotRuntime } from "../shared/snapshots";
+import type { PendingRestore, RestoreResult, RestoreRecoveryReceipt, SnapshotMeta, SnapshotRuntime } from "../shared/snapshots";
+import type { SnapshotRestoreOptions } from "./snapshot-store";
 import type {
   OfficialPluginChange,
   UpgradePhase,
@@ -71,10 +75,11 @@ export interface RuntimeStoreLike {
 
 export interface SnapshotStoreLike {
   create(runtime: SnapshotRuntime, reason?: string): SnapshotMeta | Promise<SnapshotMeta>;
-  restore(id: string, currentRuntime: SnapshotRuntime): RestoreResult | Promise<RestoreResult>;
-  completeRestore(): void;
+  restore(id: string, currentRuntime: SnapshotRuntime, options?: SnapshotRestoreOptions): RestoreResult | Promise<RestoreResult>;
+  completeRestore(): void | Promise<void>;
   pendingRestore(): PendingRestore | undefined;
   recover(): PendingRestore | undefined | Promise<PendingRestore | undefined>;
+  recoveryReceipt?(): RestoreRecoveryReceipt | undefined;
   preview(id: string): SnapshotMeta;
   runtimeBin(id: string): string;
 }
@@ -87,6 +92,7 @@ export interface CoordinatedUpgradeOptions {
   snapshots: SnapshotStoreLike;
   runtimes: RuntimeStoreLike;
   runtimeDescriptor: () => SnapshotRuntime;
+  observeChild?: () => ChildObservation;
   onProgress?: (progress: UpgradeProgress) => void;
   runCli?: RunCliFn;
   smokeWeb?: SmokeWebFn;
@@ -94,9 +100,13 @@ export interface CoordinatedUpgradeOptions {
   kill?: (pid: number) => Promise<void>;
   smokeTimeoutMs?: number;
   inject?: (op: string) => void;
+  /** Packed snapshot-worker.mjs; large profile copy/rm run there. Tests may omit it. */
+  workerFile?: string;
+  workerExecArgv?: string[];
 }
 
 interface UpgradeJournal {
+  planId?: string;
   phase: "preparing" | "committing";
   snapshotId: string;
   version: string;
@@ -114,6 +124,12 @@ export class CoordinatedUpgrade {
   private readonly home: string;
   private readonly children = new Set<ChildProcess>();
   private committed = false;
+  private readonly progressListeners = new Set<(progress: UpgradeProgress) => void>();
+
+  onProgress(listener: (progress: UpgradeProgress) => void): () => void {
+    this.progressListeners.add(listener);
+    return () => { this.progressListeners.delete(listener); };
+  }
 
   constructor(private readonly opts: CoordinatedUpgradeOptions) {
     assertNotRealHome(opts.home);
@@ -147,7 +163,8 @@ export class CoordinatedUpgrade {
     return { version: exact, currentVersion, profiles, officialTargets };
   }
 
-  async upgrade(version: string): Promise<UpgradeResult> {
+  async upgrade(version: string, planId?: string): Promise<UpgradeResult> {
+    if (planId !== undefined && !/^[a-zA-Z0-9_-]{1,128}$/.test(planId)) throw new Error("Invalid upgrade plan identity");
     const exact = requireVersion(version);
     this.assertClear();
     this.committed = false;
@@ -165,6 +182,7 @@ export class CoordinatedUpgrade {
     const snapshot = await this.opts.snapshots.create(originalRuntime, "upgrade");
     this.writeJournal({
       phase: "preparing",
+      planId,
       originalRuntime,
       snapshotId: snapshot.id,
       version: exact,
@@ -176,11 +194,11 @@ export class CoordinatedUpgrade {
       const installed = await this.opts.runtimes.install(exact);
       const official = resolveOfficialVersions(installed.bin);
       const stageHome = this.stageHome();
-      this.discardPath(stageHome);
+      await this.discardPath(stageHome);
       mkdirSync(stageHome, { recursive: true });
 
       this.progress("stage");
-      this.materializeStage(stageHome, names);
+      await this.materializeStage(stageHome, names);
       for (const name of names) {
         await this.stageProfile(installed.bin, stageHome, name, official);
       }
@@ -197,17 +215,18 @@ export class CoordinatedUpgrade {
       this.progress("commit");
       this.writeJournal({
         phase: "committing",
+        planId,
         originalRuntime,
         snapshotId: snapshot.id,
         version: exact,
         startedAt: new Date().toISOString(),
       });
-      clearRuntimeFallback(join(stageHome, "profiles"), installed.dir);
-      this.commitProfiles(stageHome);
+      await this.clearFallback(join(stageHome, "profiles"), installed.dir);
+      await this.commitProfiles(stageHome);
       this.opts.runtimes.select(exact);
       this.clearJournal();
       this.committed = true;
-      this.discardStage();
+      await this.discardStage();
       this.progress("done");
       return { version: exact, snapshotId: snapshot.id, profiles: names, official };
     } catch (err) {
@@ -221,13 +240,13 @@ export class CoordinatedUpgrade {
         try {
           await this.rollbackSnapshot(snapshot.id);
           this.clearJournal();
-          this.discardStage();
+          await this.discardStage();
         } catch (rollbackErr) {
           throw combine(err, rollbackErr);
         }
       } else if (!this.committed) {
         this.clearJournal();
-        this.discardStage();
+        await this.discardStage();
       }
       throw err instanceof Error ? err : new Error(String(err));
     } finally {
@@ -235,49 +254,58 @@ export class CoordinatedUpgrade {
     }
   }
 
-  async restore(id: string): Promise<RestoreResult> {
+  async restore(id: string, planId?: string): Promise<RestoreResult> {
     this.committed = false;
     this.assertClear();
     this.progress("drain");
     await (this.opts.drainPlugins ?? defaultDrainPlugins)();
     this.progress("stop");
     await this.opts.stopAll();
-    const result = await this.opts.snapshots.restore(id, this.opts.runtimeDescriptor());
+    const result = await this.opts.snapshots.restore(id, this.opts.runtimeDescriptor(), { planId });
     await this.opts.runtimes.selectExisting({
       bin: this.opts.snapshots.runtimeBin(id),
       version: result.restored.runtimeVersion,
     });
-    this.opts.snapshots.completeRestore();
+    await this.opts.snapshots.completeRestore();
     this.progress("done");
     return result;
   }
 
-  async recover(): Promise<{ upgradeRolledBack?: boolean; restoreCompleted?: boolean }> {
+  async recover(options: { receiptPlanId?: string } = {}): Promise<{ upgradeRolledBack?: boolean; upgradePlanId?: string; restoreCompleted?: boolean;
+    restoreRolledBack?: boolean; restoreReceipt?: RestoreRecoveryReceipt }> {
     this.committed = false;
     await this.ensureCandidatesGone();
-    if (this.readJournal()?.phase === "committing") this.restoreProfilesBackup();
+    if (this.readJournal()?.phase === "committing") await this.restoreProfilesBackup();
     const pending = (await this.opts.snapshots.recover()) ?? this.opts.snapshots.pendingRestore();
     if (pending) {
       await this.opts.runtimes.selectExisting({
         bin: this.opts.snapshots.runtimeBin(pending.snapshotId),
         version: pending.runtimeVersion,
       });
-      this.opts.snapshots.completeRestore();
+      await this.opts.snapshots.completeRestore();
       this.clearJournal();
-      this.discardStage();
-      return { restoreCompleted: true };
+      await this.discardStage();
+      return { restoreCompleted: true, restoreReceipt: this.opts.snapshots.recoveryReceipt?.() };
     }
     const journal = this.readJournal();
     if (journal?.phase === "committing") {
       this.progress("rollback");
       await this.rollbackSnapshot(journal.snapshotId);
       this.clearJournal();
-      this.discardStage();
-      return { upgradeRolledBack: true };
+      await this.discardStage();
+      return { upgradeRolledBack: true, upgradePlanId: journal.planId };
     }
     this.clearJournal();
-    this.discardStage();
-    return {};
+    await this.discardStage();
+    if (journal?.phase === "preparing") return journal.planId
+      ? { upgradeRolledBack: true, upgradePlanId: journal.planId } : {};
+    const foundReceipt = options.receiptPlanId ? this.opts.snapshots.recoveryReceipt?.() : undefined;
+    const receipt = foundReceipt?.planId === options.receiptPlanId ? foundReceipt : undefined;
+    return receipt ? {
+      restoreCompleted: receipt.outcome === "completed",
+      restoreRolledBack: receipt.outcome === "rolled-back",
+      restoreReceipt: receipt,
+    } : {};
   }
 
   private assertClear(): void {
@@ -289,11 +317,20 @@ export class CoordinatedUpgrade {
     }
   }
 
-  private materializeStage(stageHome: string, names: string[]): void {
+  private async materializeStage(stageHome: string, names: string[]): Promise<void> {
     const liveProfiles = join(this.home, "profiles");
     const stagedProfiles = join(stageHome, "profiles");
     if (!lexists(liveProfiles)) throw new Error("Live profiles directory is missing");
-    copyLinkedTree(liveProfiles, stagedProfiles, this.opts.runtimeDescriptor().root);
+    await this.copyTree(liveProfiles, stagedProfiles, this.opts.runtimeDescriptor().root);
+    // pnpm re-resolves file:../../hub/plugins dependencies while updating
+    // official bundles. Their owned archives must exist in the staged Home.
+    const archives = join(this.home, "hub", "plugins");
+    if (lexists(archives)) {
+      const stat = lstatSync(archives);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Owned plugin archives are not a regular directory");
+      mkdirSync(join(stageHome, "hub"), { recursive: true });
+      await this.copyTree(archives, join(stageHome, "hub", "plugins"));
+    }
     for (const name of names) {
       if (!lexists(join(stagedProfiles, name))) {
         throw new Error(`Profile ${name} was not copied into the upgrade stage`);
@@ -335,7 +372,7 @@ export class CoordinatedUpgrade {
     const result = await this.runCli(bin, home, ["plugin", "--profile", name, "add", spec], PLUGIN_TIMEOUT_MS);
     if (result.code !== 0) {
       throw new Error(
-        `dsh plugin add ${spec} in ${name} failed (${result.code}): ${(result.stderr || result.stdout).slice(0, 800)}`,
+        `dsh plugin add ${spec} in ${name} failed (${result.code}): ${`${result.stdout}\n${result.stderr}`.slice(-1600)}`,
       );
     }
   }
@@ -368,7 +405,7 @@ export class CoordinatedUpgrade {
     register: (child: ChildProcess) => void;
   }): Promise<void> {
     const port = await ephemeralPort();
-    const child = spawnNode(
+    const child = this.spawnCandidate(
       [input.bin, "--profile", "web", "--no-open", "--host", "127.0.0.1", "--port", String(port)],
       {
         env: toolchainEnv({ DSH_HOME: input.home }),
@@ -403,47 +440,47 @@ export class CoordinatedUpgrade {
     }
   }
 
-  private commitProfiles(stageHome: string): void {
+  private async commitProfiles(stageHome: string): Promise<void> {
     const live = join(this.home, "profiles");
     const staged = join(stageHome, "profiles");
     const backup = this.profilesBackup();
     assertContained(this.home, live, "live profiles");
     assertContained(stageHome, staged, "staged profiles");
     assertContained(this.stageRoot(), backup, "profile backup");
-    if (lexists(backup)) this.discardPath(backup);
+    if (lexists(backup)) await this.discardPath(backup);
     this.hook("commit:backup");
-    if (lexists(live)) renameSync(live, backup);
+    if (lexists(live)) await this.renameTree(live, backup);
     try {
       this.hook("commit:swap");
-      renameSync(staged, live);
+      await this.renameTree(staged, live);
       this.hook("commit:retarget");
-      if (lstatSync(live).isDirectory()) retargetTree(live, staged, live);
+      if (lstatSync(live).isDirectory()) await this.retarget(live, staged, live);
     } catch (err) {
-      this.restoreProfilesBackup();
+      await this.restoreProfilesBackup();
       throw err;
     }
   }
 
-  private restoreProfilesBackup(): void {
+  private async restoreProfilesBackup(): Promise<void> {
     if (this.stageIsLink()) return;
     const live = join(this.home, "profiles");
     const backup = this.profilesBackup();
     if (!lexists(backup) || lstatSync(backup).isSymbolicLink()) return;
     assertContained(this.stageRoot(), backup, "profile backup");
-    if (lexists(live)) this.discardPath(live);
-    renameSync(backup, live);
+    if (lexists(live)) await this.discardPath(live);
+    await this.renameTree(backup, live);
   }
 
   private async rollbackSnapshot(snapshotId: string): Promise<void> {
-    this.restoreProfilesBackup();
+    await this.restoreProfilesBackup();
     const originalRuntime = this.readJournal()?.originalRuntime;
-    if (originalRuntime) clearRuntimeFallback(join(this.home, "profiles"), originalRuntime.root);
+    if (originalRuntime) await this.clearFallback(join(this.home, "profiles"), originalRuntime.root);
     const result = await this.opts.snapshots.restore(snapshotId, this.opts.runtimeDescriptor());
     await this.opts.runtimes.selectExisting({
       bin: this.opts.snapshots.runtimeBin(snapshotId),
       version: result.restored.runtimeVersion,
     });
-    this.opts.snapshots.completeRestore();
+    await this.opts.snapshots.completeRestore();
   }
 
   private async runCli(
@@ -462,7 +499,7 @@ export class CoordinatedUpgrade {
     args: string[],
     timeoutMs: number,
   ): Promise<{ code: number; stdout: string; stderr: string }> {
-    const child = spawnNode([bin, ...args], {
+    const child = this.spawnCandidate([bin, ...args], {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
@@ -508,9 +545,20 @@ export class CoordinatedUpgrade {
   }
 
   private track(child: ChildProcess): void {
+    if (this.children.has(child)) return;
     this.children.add(child);
     child.stdout?.on("data", () => undefined);
     child.stderr?.on("data", () => undefined);
+  }
+
+  private spawnCandidate(args: string[], options: SpawnOptions): ChildProcess {
+    const observation = this.opts.observeChild?.();
+    let child: ChildProcess;
+    try { child = observation ? withoutChildObservation(() => spawnNode(args, options)) : spawnNode(args, options); }
+    catch (error) { observation?.cancel(); throw error; }
+    this.track(child);
+    observation?.attach(child);
+    return child;
   }
 
   private async release(child: ChildProcess): Promise<void> {
@@ -542,7 +590,7 @@ export class CoordinatedUpgrade {
       }
     }
     if (errors.length > 0) {
-      throw new Error(`Candidate processes still running: ${errors.join("; ")}`);
+      throw new ProcessTerminationError(`Candidate processes still running: ${errors.join("; ")}`);
     }
   }
 
@@ -558,6 +606,7 @@ export class CoordinatedUpgrade {
 
   private progress(phase: UpgradePhase, detail?: string): void {
     this.opts.onProgress?.({ phase, detail });
+    for (const listener of this.progressListeners) listener({ phase, detail });
   }
 
   private hook(op: string): void {
@@ -613,11 +662,11 @@ export class CoordinatedUpgrade {
     if (lexists(path) && lstatSync(path).isFile()) unlinkSync(path);
   }
 
-  private discardStage(): void {
-    this.discardPath(this.stageRoot());
+  private async discardStage(): Promise<void> {
+    await this.discardPath(this.stageRoot());
   }
 
-  private discardPath(target: string): void {
+  private async discardPath(target: string): Promise<void> {
     if (!lexists(target)) return;
     if (samePath(target, this.home)) throw new Error("Refusing to delete DSH home");
     assertContained(this.home, target, "controlled directory");
@@ -626,8 +675,75 @@ export class CoordinatedUpgrade {
       unlinkSync(target);
       return;
     }
-    rmLinkAware(target);
+    await this.runIo("removeTree", { target });
   }
+
+  private async copyTree(src: string, dest: string, fallbackRuntimeRoot?: string): Promise<void> {
+    await this.runIo("copyLinkedTree", { src, dest, fallbackRuntimeRoot });
+  }
+
+  private async renameTree(src: string, dest: string): Promise<void> {
+    await this.runIo("renameTree", { src, dest });
+  }
+
+  private async retarget(dir: string, oldRoot: string, newRoot: string): Promise<void> {
+    await this.runIo("retargetTree", { dir, oldRoot, newRoot });
+  }
+
+  private async clearFallback(profiles: string, runtimeRoot: string): Promise<void> {
+    await this.runIo("clearRuntimeFallback", { profiles, runtimeRoot });
+  }
+
+  private async runIo(
+    operation: "copyLinkedTree" | "removeTree" | "renameTree" | "retargetTree" | "clearRuntimeFallback",
+    args: Record<string, unknown>,
+  ): Promise<void> {
+    const workerFile = this.opts.workerFile ?? packedSnapshotWorkerFile();
+    if (!workerFile) {
+      this.runIoLocal(operation, args);
+      return;
+    }
+    await runSnapshotWorker(workerFile, {
+      home: this.home,
+      operation,
+      allowProductHome: isAuthorizedProductHome(this.home),
+      ...args,
+    }, this.opts.workerExecArgv ?? []);
+  }
+
+  private runIoLocal(operation: SnapshotWorkerOperation, args: Record<string, unknown>): void {
+    if (operation === "copyLinkedTree") {
+      copyLinkedTree(String(args.src), String(args.dest), args.fallbackRuntimeRoot ? String(args.fallbackRuntimeRoot) : undefined);
+      return;
+    }
+    if (operation === "renameTree") {
+      renameSync(String(args.src), String(args.dest));
+      return;
+    }
+    if (operation === "retargetTree") {
+      retargetTree(String(args.dir), String(args.oldRoot), String(args.newRoot));
+      return;
+    }
+    if (operation === "clearRuntimeFallback") {
+      clearRuntimeFallback(String(args.profiles), String(args.runtimeRoot));
+      return;
+    }
+    rmLinkAware(String(args.target));
+  }
+}
+
+function packedSnapshotWorkerFile(): string | undefined {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const names = ["snapshot-worker.mjs", join("..", "snapshot-worker.mjs")];
+  for (const name of names) {
+    const candidate = unpackAsarPath(join(here, name));
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function unpackAsarPath(path: string): string {
+  return path.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`);
 }
 
 function requireVersion(version: string): string {
@@ -755,7 +871,9 @@ function sameBytes(a: Buffer | undefined, b: Buffer | undefined): boolean {
 function combine(primary: unknown, extra: unknown): Error {
   const first = primary instanceof Error ? primary.message : String(primary);
   const second = extra instanceof Error ? extra.message : String(extra);
-  const err = new Error(`${second} (after: ${first})`);
+  const Failure = primary instanceof ProcessTerminationError || extra instanceof ProcessTerminationError
+    ? ProcessTerminationError : Error;
+  const err = new Failure(`${second} (after: ${first})`);
   err.cause = primary instanceof Error ? primary : extra;
   return err;
 }
