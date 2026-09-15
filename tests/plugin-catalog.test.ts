@@ -38,6 +38,7 @@ test("rejects unsafe plugin specs", () => {
   assert.equal(isSafeSpec("a".repeat(201)), false);
   assert.equal(isSafeSpec("pkg; rm -rf /"), false);
   assert.equal(isSafeSpec("dsh-outline"), true);
+  assert.equal(isSafeSpec("dsh-outline@1.2.3"), true);
   assert.equal(isSafeSpec("@liustack/modlens"), true);
   assert.equal(isSafeSpec("github:example/git-bundle"), true);
   assert.equal(isSafeSpec("github:owner/repo#path:/plugins/foo"), true);

@@ -7,6 +7,7 @@ import {
   isProtectedPlugin,
   listAllProfilePlugins,
   listProfilePlugins,
+  parseNpmNameAndVersion,
   pluginRemove,
   resolveInstallSpec,
 } from "../src/main/plugin-ops.ts";
@@ -42,7 +43,7 @@ function writeProfile(
   );
 }
 
-test("listProfilePlugins reads bundles then extra dependencies", () => {
+test("listProfilePlugins lists configured bundles and omits extra dependencies", () => {
   const dir = home();
   writeProfile(
     dir,
@@ -55,15 +56,24 @@ test("listProfilePlugins reads bundles then extra dependencies", () => {
       "extra-dep": "2.0.0",
     },
   );
+  mkdirSync(join(dir, "profiles", "coding", "node_modules", "dsh-outline"), { recursive: true });
+  writeFileSync(
+    join(dir, "profiles", "coding", "node_modules", "dsh-outline", "package.json"),
+    JSON.stringify({ name: "dsh-outline", version: "1.0.0" }),
+  );
   const list = listProfilePlugins(dir, "coding");
   assert.deepEqual(
     list.map((item) => item.name),
-    ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-outline", "extra-dep"],
+    ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-outline"],
   );
+  assert.equal(list.some((item) => item.name === "extra-dep"), false);
   assert.equal(list[0].protected, true);
   assert.equal(list[1].protected, true);
   assert.equal(list[2].protected, false);
   assert.equal(list[2].version, "1.0.0");
+  assert.equal(list[2].resolvedVersion, "1.0.0");
+  assert.equal(list[0].version, null);
+  assert.equal(list[0].requestedSpec, "0.1.1-rc.2");
 });
 
 test("listProfilePlugins rejects unknown profiles", () => {
@@ -121,4 +131,12 @@ test("resolveInstallSpec uses catalog id not a renderer spec", async () => {
   await assert.rejects(resolveInstallSpec(dir, { spec: "-foo" }), /not allowed|不合法/);
   const typed = await resolveInstallSpec(dir, { spec: "github:owner/repo" });
   assert.equal(typed, "github:owner/repo");
+});
+
+test("parseNpmNameAndVersion requires an exact version and never reads latest", () => {
+  assert.deepEqual(parseNpmNameAndVersion("dsh-outline@1.2.3"), { name: "dsh-outline", version: "1.2.3" });
+  assert.deepEqual(parseNpmNameAndVersion("@scope/pkg@1.0.0-rc.1"), { name: "@scope/pkg", version: "1.0.0-rc.1" });
+  assert.equal(parseNpmNameAndVersion("dsh-outline"), null);
+  assert.equal(parseNpmNameAndVersion("dsh-outline@latest"), null);
+  assert.equal(parseNpmNameAndVersion("github:owner/repo"), null);
 });

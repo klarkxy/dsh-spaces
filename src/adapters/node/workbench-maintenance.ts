@@ -44,15 +44,16 @@ import { BACKUP_FILE_PREFIX, type ConfigBackupMeta } from "../../shared/diagnost
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
 import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES } from "../../shared/types";
 import type { RestoreRecoveryReceipt, SnapshotMeta } from "../../shared/snapshots";
-import type {
-  WorkbenchBackup,
-  WorkbenchJob,
-  WorkbenchPlan,
-  WorkbenchPlanRequest,
-  WorkbenchPlugin,
-  WorkbenchRuntime,
-  WorkbenchPackageRelease,
-  WorkbenchSnapshot,
+import {
+  formatWorkbenchFailure,
+  type WorkbenchBackup,
+  type WorkbenchJob,
+  type WorkbenchPlan,
+  type WorkbenchPlanRequest,
+  type WorkbenchPlugin,
+  type WorkbenchRuntime,
+  type WorkbenchPackageRelease,
+  type WorkbenchSnapshot,
 } from "../../shared/workbench";
 import {
   WORKBENCH_CONTROL_DIR_NAME,
@@ -1150,7 +1151,23 @@ export class WorkbenchMaintenance {
         throw error;
       }
       this.failPluginMutation();
-      throw error;
+      const row = expected[0];
+      const reason = error instanceof Error ? error.message : String(error);
+      const stage = row?.action === "remove" ? "remove" : row?.action === "install" ? "install" : "plugin";
+      const message = formatWorkbenchFailure({
+        spaceId: row?.spaceId,
+        stage,
+        packageName: row?.packageName,
+        pluginAttribution: row?.packageName ? "known" : "unknown",
+        reason,
+      });
+      ctx.message(message);
+      throw new WorkbenchJobError("workbench/failed", message, {
+        spaceId: row?.spaceId,
+        stage,
+        packageName: row?.packageName,
+        pluginAttribution: row?.packageName ? "known" : "unknown",
+      });
     }
     await this.startRequired(running);
   }
@@ -1348,19 +1365,15 @@ export class WorkbenchMaintenance {
     try {
       const packument = await this.fetchPackument(name);
       const packageName = typeof packument.name === "string" && packument.name ? packument.name : name;
-      const latest = packument["dist-tags"]?.latest;
-      const version = latest && isExactRuntimeVersion(latest) ? latest : null;
       const description =
         (typeof packument.description === "string" && packument.description) ||
-        (version && typeof packument.versions?.[version]?.description === "string"
-          ? String(packument.versions[version]?.description)
-          : "");
+        "";
       return publicPlugin({
         id: packageName,
         title: packageName,
         packageName,
         description,
-        version,
+        version: null,
         installedIn: [],
         protected: isGuardedPackage(packageName),
       });

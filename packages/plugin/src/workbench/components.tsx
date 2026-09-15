@@ -1147,7 +1147,7 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
               <ul>
                 {detail.plugins.map((plugin) => (
                   <li key={plugin.name}>
-                    {plugin.name} {plugin.version ?? ""}
+                    {plugin.name} {plugin.version ?? t(locale, "app.status.unknown")}
                   </li>
                 ))}
               </ul>
@@ -1294,7 +1294,12 @@ export function JobsList({
           </div>
           {job.status === "failed" && job.error && (
             <p className="dsh-wb-alert" role="alert">
-              {t(locale, "jobs.failed")}: {job.error.message}
+              {t(locale, "jobs.failed")}: {job.message || job.error.message}
+              {job.error.packageName
+                ? ` · ${job.error.packageName}`
+                : job.error.pluginAttribution === "unknown"
+                  ? ` · ${t(locale, "app.status.unknown")}`
+                  : ""}
             </p>
           )}
           {job.canCancel ? (
