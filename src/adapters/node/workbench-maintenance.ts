@@ -40,6 +40,7 @@ import { ProcessTerminationError } from "../../main/terminate-process";
 import { WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
+import { runBatch } from "../../shared/batch";
 import { BACKUP_FILE_PREFIX, type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
 import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES } from "../../shared/types";
@@ -1035,11 +1036,14 @@ export class WorkbenchMaintenance {
         ctx.cancellable(false);
         ctx.phase("install");
         ctx.message(`Installing ${command.packageName}@${command.version}.`);
-        for (const spaceId of command.spaceIds) {
+        const batch = await runBatch(command.spaceIds, async (spaceId) => {
           await this.pluginAddImpl(this.ports.home, spaceId, spec);
           if (command.packageName === XP_PACKAGE_NAME && command.version === XP_SUPPORTED_VERSION) {
             applyXpEmbedCompatibility(this.ports.home, spaceId);
           }
+        });
+        if (batch.failed) {
+          throw new Error(batch.failed.error);
         }
       },
     );

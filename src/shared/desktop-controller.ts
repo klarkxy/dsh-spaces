@@ -46,6 +46,7 @@ export const DESKTOP_WRITE_IPC_CHANNELS = [
   "createProfile",
   "exportSpaceShare",
   "importSpaceShare",
+  "createSpaceFromTemplate",
   "restoreConfigBackup",
   "upgradeRuntime",
   "installRuntimeVersion",
@@ -73,6 +74,7 @@ export const DESKTOP_MUTATE_IPC_CHANNELS = [
   "createProfile",
   "exportSpaceShare",
   "importSpaceShare",
+  "createSpaceFromTemplate",
 ] as const;
 
 const WRITE_CHANNEL_SET = new Set<string>(DESKTOP_WRITE_IPC_CHANNELS);

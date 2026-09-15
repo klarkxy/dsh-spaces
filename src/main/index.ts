@@ -71,7 +71,8 @@ import {
   resolveInstallSpec,
   setSpacePlugin,
 } from "./plugin-ops";
-import { exportSpaceArchive, importSpaceArchive, writeSpaceArchiveFile } from "./space-share";
+import { exportSpaceArchive, importSpaceArchive, uniqueSpaceName, writeSpaceArchiveFile } from "./space-share";
+import { createSpaceFromTemplate, listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -452,6 +453,19 @@ function startMain(): void {
         click: () => uiCommand({ type: "plugins", name }),
       },
       {
+        label: currentSettings.locale === "en" ? "Save as template" : "存为模板",
+        enabled: name !== "web",
+        click: () => {
+          try {
+            saveSpaceTemplate(dshHome, name, profile.meta.displayName || name, {
+              displayName: profile.meta.displayName || name,
+            });
+          } catch (err) {
+            reportError(err);
+          }
+        },
+      },
+      {
         label: currentSettings.locale === "en" ? "Export space…" : "导出空间…",
         enabled: name !== "web",
         click: () => {
@@ -675,6 +689,21 @@ function startMain(): void {
     handle("importSpaceShare", async () => {
       assertAvailable();
       return importSpaceShare();
+    });
+    handle("listSpaceTemplates", () => listSpaceTemplates(dshHome));
+    handle("createSpaceFromTemplate", async (_event, templateId: string) => {
+      assertAvailable();
+      const template = listSpaceTemplates(dshHome).find((row) => row.id === templateId);
+      if (!template) throw new Error("That template was not found.");
+      const name = uniqueSpaceName(template.displayName, listProfiles().map((row) => row.name));
+      return createSpaceFromTemplate(template, name, {
+        createSpace: async (input) => {
+          await createProfile(dshHome, registry, patchWriter, input.name, input.displayName);
+        },
+        installPlugin: async (spaceId, spec) => {
+          await pluginAdd(dshHome, spaceId, spec);
+        },
+      });
     });
     handle(
       "createProfile",

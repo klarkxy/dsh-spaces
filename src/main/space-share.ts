@@ -15,6 +15,7 @@ import {
 import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES, type InstalledPlugin } from "../shared/types";
 import { listProfilePlugins } from "./plugin-ops";
 import { packZip, unpackZip } from "./space-share-zip";
+import { runBatch } from "../shared/batch";
 
 const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, "@dsh-spaces/plugin"]);
 
@@ -204,17 +205,14 @@ export async function importSpaceArchive(
   const pendingManual = parsed.plugins.filter((row) => row.source !== "npm" || !row.resolvedVersion);
   const npmPlugins = parsed.plugins.filter((row) => row.source === "npm" && row.resolvedVersion);
   let pluginStatus: SpaceImportResult["plugins"] = npmPlugins.length ? "completed" : pendingManual.length ? "pending-manual" : "completed";
-  for (const plugin of npmPlugins) {
+  const batch = await runBatch(npmPlugins, async (plugin) => {
     const spec = plugin.installSpec || `${plugin.packageName}@${plugin.resolvedVersion}`;
-    try {
-      await ports.installPlugin(name, spec);
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-      pluginStatus = "failed";
-      break;
-    }
-  }
-  if (pluginStatus !== "failed" && pendingManual.length) pluginStatus = "pending-manual";
+    await ports.installPlugin(name, spec);
+  });
+  if (batch.failed) {
+    errors.push(batch.failed.error);
+    pluginStatus = "failed";
+  } else if (pendingManual.length) pluginStatus = "pending-manual";
 
   return {
     definition: "imported",

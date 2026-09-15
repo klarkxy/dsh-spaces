@@ -44,3 +44,17 @@ export interface SpaceImportResult {
 export interface SpaceExportOptions {
   includeConfig?: boolean;
 }
+
+export interface SpaceTemplate {
+  id: string;
+  name: string;
+  displayName: string;
+  plugins: SpaceSharePlugin[];
+  createdAt: string;
+}
+
+export interface CreateFromTemplateResult {
+  spaceId: string;
+  plugins: "completed" | "failed" | "pending-manual";
+  errors: string[];
+}
