@@ -16,13 +16,10 @@ const copy = {
     backups: "Configuration backups",
     noBackups: "No configuration backups yet.",
     preview: "Preview",
-    restore: "Restore this backup",
-    restoreHint:
-      "Restoring will stop this space. Only configuration is restored; chats are not.",
-    tooLarge: "This backup is larger than 1 MiB. It will not be restored or truncated automatically.",
-    webNoRestore: "The Home (web) space can show diagnostics, but configuration restore is not allowed.",
+    tooLarge: "This backup is larger than 1 MiB.",
+    backupsHint: "Configuration backups are listed for diagnosis. Restore is not supported.",
     previewTitle: "Backup preview",
-    emptyPreview: "Select a backup and preview it before restoring.",
+    emptyPreview: "Select a backup to preview it.",
     stopped: "stopped",
     starting: "starting",
     running: "running",
@@ -40,12 +37,10 @@ const copy = {
     backups: "配置备份",
     noBackups: "还没有配置备份。",
     preview: "预览",
-    restore: "恢复此备份",
-    restoreHint: "恢复会停止当前空间。只会恢复配置，不会恢复聊天。",
-    tooLarge: "这份备份超过 1 MiB。不会自动截断，也不会执行恢复。",
-    webNoRestore: "Home（web）空间可以查看诊断，但不能恢复配置。",
+    tooLarge: "这份备份超过 1 MiB。",
+    backupsHint: "配置备份仅供诊断查看，不支持恢复。",
     previewTitle: "备份预览",
-    emptyPreview: "请先选择一份备份并预览，再恢复。",
+    emptyPreview: "选择一份备份以预览。",
     stopped: "已停止",
     starting: "正在启动",
     running: "运行中",
@@ -63,7 +58,6 @@ export function DiagnosticsDialog({
   preview = null,
   onRefresh,
   onPreview,
-  onRestore,
   onClose,
   onCopy,
 }: {
@@ -74,7 +68,6 @@ export function DiagnosticsDialog({
   preview?: BackupPreview | null;
   onRefresh: () => void;
   onPreview: (backupId: string) => void;
-  onRestore: (backupId: string) => void;
   onClose: () => void;
   onCopy?: () => void;
 }) {
@@ -85,8 +78,6 @@ export function DiagnosticsDialog({
   const selectedId = preview?.id;
   const selected = backups.find((item) => item.id === selectedId) ?? preview;
   const tooLarge = Boolean(selected?.tooLarge || preview?.tooLarge);
-  const canRestore =
-    snapshot.canRestore && Boolean(selectedId) && Boolean(preview) && !tooLarge && !busy;
 
   const statusLabel =
     snapshot.status === "stopped" ||
@@ -167,11 +158,10 @@ export function DiagnosticsDialog({
           <p className="mt-4 text-xs" style={{ color: "var(--text-label)" }}>
             {d("backups")}
           </p>
-          {!snapshot.canRestore ? (
-            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              {d("webNoRestore")}
-            </p>
-          ) : backups.length === 0 ? (
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            {d("backupsHint")}
+          </p>
+          {backups.length === 0 ? (
             <p className="mt-1 text-sm" style={{ color: "var(--text-faint)" }}>
               {d("noBackups")}
             </p>
@@ -203,7 +193,7 @@ export function DiagnosticsDialog({
             </ul>
           )}
 
-          {snapshot.canRestore ? (
+          {preview ? (
             <>
               <p className="mt-4 text-xs" style={{ color: "var(--text-label)" }}>
                 {d("previewTitle")}
@@ -212,7 +202,7 @@ export function DiagnosticsDialog({
                 <p className="mt-1 text-sm" style={{ color: "var(--warn)" }}>
                   {d("tooLarge")}
                 </p>
-              ) : preview?.content != null ? (
+              ) : preview.content != null ? (
                 <pre
                   className="mt-2 max-h-40 overflow-auto rounded p-2 font-mono text-xs"
                   style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
@@ -224,29 +214,6 @@ export function DiagnosticsDialog({
                   {d("emptyPreview")}
                 </p>
               )}
-
-              <p className="mt-4 text-sm" style={{ color: "var(--text-muted)" }}>
-                {d("restoreHint")}
-              </p>
-              <div className="mt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="btn-ghost rounded px-3 py-1.5 text-sm"
-                  disabled={busy || !selectedId}
-                  onClick={() => selectedId && onPreview(selectedId)}
-                >
-                  {d("preview")}
-                </button>
-                <button
-                  type="button"
-                  className="rounded px-3 py-1.5 text-sm text-white"
-                  style={{ background: canRestore ? "var(--danger)" : "var(--bg-hover)" }}
-                  disabled={!canRestore}
-                  onClick={() => selectedId && onRestore(selectedId)}
-                >
-                  {d("restore")}
-                </button>
-              </div>
             </>
           ) : null}
         </div>

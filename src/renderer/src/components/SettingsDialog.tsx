@@ -40,7 +40,7 @@ export function SettingsDialog({
   const [locale, setLocale] = useState<LocalePreference>(initial.locale);
   const [theme, setTheme] = useState<ThemePreference>(initial.theme);
 
-  // A maintenance action (e.g. snapshot restore) rewrites settings on disk and
+  // A maintenance action (e.g. snapshot create) rewrites settings on disk and
   // updates `initial`; drop the now-stale draft so Save can't overwrite the
   // restored values. Unchanged settings keep in-progress edits untouched.
   const initialKey = settingsFormKey(initial);

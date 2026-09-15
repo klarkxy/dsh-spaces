@@ -144,7 +144,7 @@ export default function App() {
       try {
         runtime = await window.dshSpaces.getRuntimeStatus();
       } catch (err) {
-        // A damaged selected runtime must not block settings or snapshot recovery.
+        // A damaged selected runtime must not block settings.
         if (cancelled) return;
         setPackageSource(hubSettings.packageSource);
         setRuntimeFault(visibleError(err instanceof Error ? err.message : String(err)));
@@ -274,7 +274,7 @@ export default function App() {
     if (!shouldDesktopAutoLaunch(controller)) return;
     if (cliBusy || overlay || runtimeFault) return;
     if (selected || defaultLaunch.current) return;
-    // Maintenance (restore/upgrade/snapshot) leaves spaces stopped; the suppress
+    // Maintenance (upgrade/snapshot create) leaves spaces stopped; the suppress
     // flag stays set until the user explicitly starts a space, so later profile
     // or settings refreshes cannot auto-start one.
     if (suppressAutoLaunch.current) return;
@@ -479,15 +479,15 @@ export default function App() {
               </p>
               <p className="mt-2 text-sm" style={{ color: "var(--text-faint)" }}>
                 {locale === "zh"
-                  ? "空间不会自动启动。可在“版本与恢复”中检查快照并恢复到可用版本。"
-                  : "Spaces will not auto-start. Open Version & recovery to inspect snapshots and restore a working version."}
+                  ? "空间不会自动启动。可在“版本”中查看已安装运行时。"
+                  : "Spaces will not auto-start. Open Versions to inspect installed runtimes."}
               </p>
               <button
                 type="button"
                 className="btn-primary mt-4 rounded px-3 py-1.5 text-sm"
                 onClick={() => setOverlay("settings")}
               >
-                {locale === "zh" ? "版本与恢复" : "Version & recovery"}
+                {locale === "zh" ? "版本" : "Versions"}
               </button>
             </div>
           </div>
@@ -506,22 +506,15 @@ export default function App() {
                 type="button"
                 className="btn-primary mt-4 rounded px-3 py-1.5 text-sm"
                 onClick={() => {
-                  if (!writable) {
-                    refuseWrite();
-                    return;
-                  }
-                  void run(
-                    t("busy.restart", { name: current.meta.displayName || current.name }),
-                    () => window.dshSpaces.restartProfile(current.name),
-                    current.name,
-                  );
+                  setTarget(current.name); setOverlay("diagnostics");
                 }}
               >
-                {t("crash.restart")}
+                {locale === "zh" ? "查看错误详情" : "View error details"}
               </button>
               <button type="button" className="btn-ghost ml-3 rounded px-3 py-1.5 text-sm" onClick={() => {
-                setTarget(current.name); setOverlay("diagnostics");
-              }}>{locale === "zh" ? "查看诊断" : "View diagnostics"}</button>
+                const text = [current.lastError, current.name].filter(Boolean).join("\n");
+                void navigator.clipboard?.writeText(text);
+              }}>{locale === "zh" ? "复制脱敏日志" : "Copy redacted logs"}</button>
             </div>
           </div>
         ) : null}

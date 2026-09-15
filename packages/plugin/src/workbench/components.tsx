@@ -14,6 +14,11 @@ import type { HomeTab, WorkbenchController, WorkbenchUiState } from "./store";
 import { WORKBENCH_CSS } from "./styles";
 import type { ViewFrameState } from "./view-session";
 
+function copyRedacted(text: string): void {
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+  if (clipboard?.writeText) void clipboard.writeText(text);
+}
+
 export interface WorkbenchViewProps {
   ui: WorkbenchUiState;
   controller: WorkbenchController;
@@ -552,14 +557,6 @@ function SnapshotRow({
       </span>
       <button
         type="button"
-        className="dsh-wb-btn"
-        disabled={!writable || !snapshot.restorable}
-        onClick={() => controller.preview({ kind: "snapshot.restore", snapshotId: snapshot.id })}
-      >
-        {t(locale, "snapshots.restore")}
-      </button>
-      <button
-        type="button"
         className="dsh-wb-btn danger"
         disabled={!writable}
         onClick={() => controller.preview({ kind: "snapshot.delete", snapshotId: snapshot.id })}
@@ -725,11 +722,15 @@ function WorkspaceChrome({ ui, controller }: WorkbenchViewProps): ReactElement |
       {ui.viewError && (
         <div className="dsh-wb-banner" role="alert">
           <span>{t(locale, "app.viewFailed")}</span>
-          <button type="button" className="dsh-wb-btn" onClick={() => controller.retryView(ui.viewError!.spaceId)}>
-            {t(locale, "app.retry")}
-          </button>
           <button type="button" className="dsh-wb-btn" onClick={() => controller.openDetail(ui.viewError!.spaceId)}>
-            {t(locale, "app.diagnose")}
+            {t(locale, "app.errorDetails")}
+          </button>
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            onClick={() => copyRedacted(ui.viewError?.message ?? t(locale, "app.viewFailed"))}
+          >
+            {t(locale, "app.copyLogs")}
           </button>
           <button type="button" className="dsh-wb-btn" onClick={() => controller.openIndependent(ui.viewError!.spaceId)}>
             {t(locale, "app.openIndependent")}
@@ -791,21 +792,37 @@ function IdleCard({
       : space.status === "crashed"
         ? "app.crashedTitle"
         : "app.idleTitle";
+  const crashed = space.status === "crashed";
   return (
     <div className="dsh-wb-idle">
       <div className="dsh-wb-dialog">
         <h2 className="dsh-wb-title">{t(locale, titleKey, { name: space.displayName })}</h2>
-        <p className="dsh-wb-muted">{t(locale, "app.idleBody")}</p>
+        <p className="dsh-wb-muted">{crashed ? t(locale, "app.errorDetails") : t(locale, "app.idleBody")}</p>
         {!space.managed && <p className="dsh-wb-notice">{t(locale, "app.unmanaged")}</p>}
         <div className="dsh-wb-actions">
-          <button
-            type="button"
-            className="dsh-wb-btn primary"
-            disabled={!writable || !space.managed || space.status === "starting" || space.status === "stopping"}
-            onClick={() => controller.startSpace(space.id)}
-          >
-            {t(locale, "app.start")}
-          </button>
+          {crashed ? (
+            <>
+              <button type="button" className="dsh-wb-btn primary" onClick={() => controller.openDetail(space.id)}>
+                {t(locale, "app.errorDetails")}
+              </button>
+              <button
+                type="button"
+                className="dsh-wb-btn"
+                onClick={() => copyRedacted(`${space.id} ${space.status}`)}
+              >
+                {t(locale, "app.copyLogs")}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="dsh-wb-btn primary"
+              disabled={!writable || !space.managed || space.status === "starting" || space.status === "stopping"}
+              onClick={() => controller.startSpace(space.id)}
+            >
+              {t(locale, "app.start")}
+            </button>
+          )}
           <button type="button" className="dsh-wb-btn" onClick={() => controller.openRename(space.id)} disabled={!writable}>
             {t(locale, "app.rename")}
           </button>
@@ -1152,14 +1169,6 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
             <span>
               {backup.createdAt} · {backup.reason}
             </span>
-            <button
-              type="button"
-              className="dsh-wb-btn"
-              disabled={!writable}
-              onClick={() => controller.preview({ kind: "config.restore", spaceId, backupId: backup.id })}
-            >
-              {t(locale, "detail.restoreBackup")}
-            </button>
           </div>
         ))}
         <div className="dsh-wb-actions">
@@ -1334,7 +1343,6 @@ export function RecoveryView({
   commandError,
   onLocale,
   onAcquire,
-  onResume,
   onCancelJob,
   onRefresh,
 }: {
@@ -1344,10 +1352,19 @@ export function RecoveryView({
   commandError: string | null;
   onLocale: (locale: WorkbenchLocale) => void;
   onAcquire: () => void;
-  onResume: () => void;
   onCancelJob: (id: string) => void;
   onRefresh: () => void;
 }): ReactElement {
+  const logText = [
+    ...(state?.reasons ?? []),
+    ...(state?.jobs ?? []).map((job) =>
+      [job.kind, job.status, job.phase, job.message, job.error?.message].filter(Boolean).join(" · "),
+    ),
+    error,
+    commandError,
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
     <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale}>
       <style>{WORKBENCH_CSS}</style>
@@ -1368,7 +1385,7 @@ export function RecoveryView({
           </p>
         )}
         <section>
-          <h2>{t(locale, "recovery.reasons")}</h2>
+          <h2>{t(locale, "app.errorDetails")}</h2>
           {state?.reasons.length ? (
             <ul>
               {state.reasons.map((reason) => (
@@ -1388,8 +1405,8 @@ export function RecoveryView({
           <button type="button" className="dsh-wb-btn primary" onClick={onAcquire}>
             {t(locale, "recovery.acquire")}
           </button>
-          <button type="button" className="dsh-wb-btn" onClick={onResume}>
-            {t(locale, "recovery.resume")}
+          <button type="button" className="dsh-wb-btn" onClick={() => copyRedacted(logText)}>
+            {t(locale, "app.copyLogs")}
           </button>
           <button type="button" className="dsh-wb-btn" onClick={onRefresh}>
             {t(locale, "app.retry")}

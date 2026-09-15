@@ -110,7 +110,7 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(!t("empty.body", undefined, "en").includes("rail"));
   assert.ok(!t("idle.body", undefined, "en").includes("rail"));
   assert.ok(!t("delete.removeRail", undefined, "en").includes("rail"));
-  assert.ok(t("crash.hint", undefined, "en").toLowerCase().includes("restart"));
+  assert.ok(t("crash.hint", undefined, "en").toLowerCase().includes("error details"));
   assert.ok(!t("delete.removeRail", undefined, "en").includes("spaces.json"));
   assert.ok(!t("delete.deleteData", undefined, "en").includes("hub/"));
   assert.ok(!t("delete.alsoOfficial", undefined, "en").toLowerCase().includes("official"));
@@ -120,7 +120,7 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(t("delete.alsoOfficial", undefined, "zh").includes("整个"));
   assert.ok(t("delete.alsoOfficial", undefined, "zh").includes("自定义文件"));
   assert.equal(t("settings.tabGeneral", undefined, "en"), "General");
-  assert.equal(t("settings.tabRuntime", undefined, "en"), "Versions and recovery");
+  assert.equal(t("settings.tabRuntime", undefined, "en"), "Versions");
   assert.equal(t("rail.plugins", undefined, "zh"), "插件管理");
   assert.equal(t("plugins.title", undefined, "en"), "Plugins");
   assert.equal(t("plugins.tabManage", undefined, "en"), "Manage");

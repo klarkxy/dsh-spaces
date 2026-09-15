@@ -465,7 +465,7 @@ test("bootstrap exchanges a one-time token for the authority cookie and a clean 
   const page = await fetch(`${handle.origin}/`, { headers: { cookie }, redirect: "manual" });
   const html = await page.text();
   assert.equal(page.status, 200);
-  assert.match(html, /稳定入口|工作台入口|救援入口/);
+  assert.match(html, /工作台入口|管理环境/);
   assert.doesNotMatch(html, /token=/i);
   assert.equal(new URL(handle.origin).hostname, "127.0.0.1");
 });
@@ -675,7 +675,7 @@ test("stable entry still responds after the manager process is gone", async () =
   const page = await fetch(`${handle.origin}/`, { headers: { cookie } });
   const html = await page.text();
   assert.equal(page.status, 200);
-  assert.match(html, /稳定入口|救援入口|工作台入口|管理环境/);
+  assert.match(html, /工作台入口|管理环境/);
   const state = await api(handle.origin, cookie, "state");
   assert.equal(state.body.ok, true);
 });
@@ -860,12 +860,12 @@ test("CLI accepts --cli as an alias of --bin and writes a private endpoint file"
   assert.doesNotMatch(JSON.stringify(mintedBody), /token=/i);
   const page = await fetch(`${handle.origin}/`, { headers: { cookie } });
   const html = await page.text();
-  assert.match(html, /检查并恢复/);
-  assert.match(html, /api\("job"/);
+  assert.doesNotMatch(html, /检查并恢复|救援入口|需要恢复|recovery\.resume/);
+  assert.match(html, /查看错误详情|复制脱敏日志|接管运行权/);
   assert.doesNotMatch(html, /标记恢复完成/);
 });
 
-test("recovery resume does not cancel unrelated interrupted jobs", async () => {
+test("recovery.resume is unsupported and leftover jobs stay failed", async () => {
   const home = tempHome();
   writeProfile(home, "alpha", { name: "alpha" });
   writeInterruptedJob(home, {
@@ -889,22 +889,18 @@ test("recovery resume does not cancel unrelated interrupted jobs", async () => {
     }),
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const leftoverBefore = readFileSync(join(home, ".dsh-spaces-control", "jobs", "old-space.json"));
   const resume = await api(handle.origin, cookie, "submit", {
     command: { kind: "recovery.resume" },
     requestId: "resume-1",
   });
-  assert.equal(resume.body.ok, true, JSON.stringify(resume.body));
-  await waitJob(handle.origin, cookie, "resume-1", "failed");
-  const leftover = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "jobs", "old-space.json"), "utf8")) as {
-    status: string;
-  };
-  assert.equal(leftover.status, "recovery-required");
-  const state = await handle.runtime.state();
-  assert.equal(state.recoveryRequired, true);
-  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+  assert.equal(resume.body.ok, false, JSON.stringify(resume.body));
+  assert.equal(resume.body.error?.code, "workbench/unsupported");
+  const leftoverAfter = readFileSync(join(home, ".dsh-spaces-control", "jobs", "old-space.json"));
+  assert.deepEqual(leftoverAfter, leftoverBefore);
 });
 
-test("recovery resume settles only the matching plan.execute restore and fails while others remain", async () => {
+test.skip("recovery resume settles only the matching plan.execute restore and fails while others remain", async () => {
   const home = tempHome();
   const snapA = "11111111-1111-1111-1111-111111111111";
   const snapB = "22222222-2222-2222-2222-222222222222";
@@ -976,7 +972,7 @@ test("recovery resume settles only the matching plan.execute restore and fails w
   assert.notEqual(afterSecond.spaces.find((space) => space.id === afterSecond.managerId)?.status, "running");
 });
 
-test("recovery resume does not settle jobs or start the manager when pending recover fails", async () => {
+test.skip("recovery resume does not settle jobs or start the manager when pending recover fails", async () => {
   const home = tempHome();
   writeInterruptedPlan(home, "plan-restore-a", {
     kind: "snapshot.restore",
@@ -1036,7 +1032,7 @@ test("recovery resume does not settle jobs or start the manager when pending rec
   assert.equal(blocked.body.error?.code, "workbench/unavailable");
 });
 
-test("ROOT cold recovery opens with a dead transaction lock and reclaims only after explicit resume", async () => {
+test.skip("ROOT cold recovery opens with a dead transaction lock and reclaims only after explicit resume", async () => {
   for (const pid of [2147483647, process.pid]) {
     const home = tempHome();
     await new HomeController(home).ensureManager();
@@ -1057,7 +1053,7 @@ test("ROOT cold recovery opens with a dead transaction lock and reclaims only af
   }
 });
 
-test("ROOT package recovery settles only its matching job and preserves abandoned failure", async () => {
+test.skip("ROOT package recovery settles only its matching job and preserves abandoned failure", async () => {
   for (const succeeded of [true, false]) {
     const home = tempHome();
     for (const suffix of ["a", "b"]) {
@@ -1083,7 +1079,7 @@ test("ROOT package recovery settles only its matching job and preserves abandone
   }
 });
 
-test("recovery resume settles only the matching runtime.upgrade planId", async () => {
+test.skip("recovery resume settles only the matching runtime.upgrade planId", async () => {
   const home = tempHome();
   writeInterruptedPlan(home, "plan-upgrade-a", { kind: "runtime.upgrade" });
   writeInterruptedPlan(home, "plan-upgrade-b", { kind: "runtime.upgrade" });
@@ -1153,7 +1149,7 @@ test("recovery resume settles only the matching runtime.upgrade planId", async (
   assert.equal(jobStatus(homeLegacy, "job-upgrade-old"), "recovery-required");
 });
 
-test("recovery resume does not follow a junctioned plans directory", async () => {
+test.skip("recovery resume does not follow a junctioned plans directory", async () => {
   const home = tempHome();
   const snapA = "11111111-1111-1111-1111-111111111111";
   const outside = join(home, "outside-plans");

@@ -9,7 +9,7 @@ export interface RecoverySurfaceProps {
 }
 
 /**
- * Stable-entry recovery page. Shows jobs, read-only reasons, acquire and resume.
+ * Stable-entry page. Shows jobs, read-only reasons, and acquire.
  * Does not embed or fake a manager frame; the supervisor wires that later.
  */
 export function RecoverySurface({ api, env }: RecoverySurfaceProps): ReactElement {
@@ -27,7 +27,6 @@ export function RecoverySurface({ api, env }: RecoverySurfaceProps): ReactElemen
       commandError={ui.commandError}
       onLocale={controller.setLocale}
       onAcquire={controller.acquire}
-      onResume={controller.resume}
       onCancelJob={controller.cancelJob}
       onRefresh={() => void controller.poll()}
     />
