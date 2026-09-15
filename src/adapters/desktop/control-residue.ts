@@ -37,8 +37,8 @@ export function inspectControlResidue(home: string, ownsRecord?: (value: Record<
       join(home, HOME_UPGRADE_STAGE_DIR, HOME_UPGRADE_JOURNAL_FILE),
       "An upgrade journal is unfinished and was not replayed.",
     ),
-    ...inspectExistingFile(join(home, HOME_MUTATION_JOURNAL), "A Spaces operation needs recovery."),
-    ...inspectExistingFile(join(home, HOME_CONTROL_DIR_NAME, "workbench-upgrade.json"), "A workbench package update needs recovery."),
+    ...inspectExistingFile(join(home, HOME_MUTATION_JOURNAL), "A Spaces operation left unfinished evidence. Writes are blocked."),
+    ...inspectExistingFile(join(home, HOME_CONTROL_DIR_NAME, "workbench-upgrade.json"), "A workbench package update left unfinished evidence. Writes are blocked."),
   ];
 }
 

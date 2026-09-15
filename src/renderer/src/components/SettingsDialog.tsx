@@ -5,12 +5,14 @@ import type {
   PackageSource,
   ThemePreference,
 } from "@shared/types";
+import type { SpaceTemplate } from "@shared/space-share";
 import { useI18n } from "../i18n";
 import { settingsFormKey } from "../recovery";
 import { useTheme } from "../theme";
 import { LocaleSelect } from "./LocaleSelect";
 import { MaintenancePanel } from "./MaintenanceDialog";
 import { Card, Overlay } from "./Overlay";
+import { SpaceSharePanel, type SpaceShareChoice } from "./SpaceSharePanel";
 
 export function SettingsDialog({
   initial,
@@ -39,7 +41,15 @@ export function SettingsDialog({
   const [packageSource, setPackageSource] = useState<PackageSource>(initial.packageSource);
   const [locale, setLocale] = useState<LocalePreference>(initial.locale);
   const [shareNotice, setShareNotice] = useState("");
+  const [templates, setTemplates] = useState<SpaceShareChoice[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [exportSpaces, setExportSpaces] = useState<SpaceShareChoice[]>([]);
+  const [exportSpaceId, setExportSpaceId] = useState("");
+  const [includeConfig, setIncludeConfig] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(initial.theme);
+  const showShareError = (error: unknown) => {
+    setShareNotice(error instanceof Error ? error.message : String(error));
+  };
 
   // A maintenance action (e.g. snapshot create) rewrites settings on disk and
   // updates `initial`; drop the now-stale draft so Save can't overwrite the
@@ -55,6 +65,39 @@ export function SettingsDialog({
     setLocale(initial.locale);
     setTheme(initial.theme);
   }, [initialKey, initial]);
+
+  useEffect(() => {
+    void window.dshSpaces
+      .listSpaceTemplates()
+      .then((rows: SpaceTemplate[]) => {
+        const choices = rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          displayName: row.displayName || row.name,
+        }));
+        setTemplates(choices);
+        setTemplateId((current) => current || choices[0]?.id || "");
+      })
+      .catch((error: unknown) => {
+        setShareNotice(error instanceof Error ? error.message : String(error));
+      });
+    void window.dshSpaces
+      .listProfiles()
+      .then((rows) => {
+        const choices = rows
+          .filter((row) => row.name !== "web")
+          .map((row) => ({
+            id: row.name,
+            name: row.name,
+            displayName: row.meta.displayName || row.name,
+          }));
+        setExportSpaces(choices);
+        setExportSpaceId((current) => current || choices[0]?.id || "");
+      })
+      .catch((error: unknown) => {
+        setShareNotice(error instanceof Error ? error.message : String(error));
+      });
+  }, []);
 
   const revert = () => {
     setPreference(initial.locale);
@@ -127,10 +170,18 @@ export function SettingsDialog({
             <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
               {t("settings.dshHomeHint")}
             </p>
-            <button
-              type="button"
-              className="btn-ghost mt-4 rounded px-3 py-1.5 text-sm"
-              onClick={() => {
+            <SpaceSharePanel
+              locale={appLocale}
+              templates={templates}
+              templateId={templateId}
+              spaces={exportSpaces}
+              spaceId={exportSpaceId}
+              includeConfig={includeConfig}
+              notice={shareNotice}
+              onTemplateId={setTemplateId}
+              onSpaceId={setExportSpaceId}
+              onIncludeConfig={setIncludeConfig}
+              onImport={() => {
                 void (async () => {
                   setShareNotice("");
                   const result = await window.dshSpaces.importSpaceShare();
@@ -144,38 +195,33 @@ export function SettingsDialog({
                   ];
                   setShareNotice(lines.join("\n"));
                   await onMaintenanceChanged();
-                })();
+                })().catch(showShareError);
               }}
-            >
-              {t("settings.importSpace")}
-            </button>
-            <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
-              {t("settings.importSpaceHint")}
-            </p>
-            {shareNotice ? (
-              <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-xs" role="status">
-                {shareNotice}
-              </pre>
-            ) : null}
-            <button
-              type="button"
-              className="btn-ghost mt-3 rounded px-3 py-1.5 text-sm"
-              onClick={() => {
+              onCreateFromTemplate={() => {
                 void (async () => {
-                  const templates = await window.dshSpaces.listSpaceTemplates();
-                  const first = templates[0];
-                  if (!first) {
-                    setShareNotice("No templates.");
+                  if (!templateId) {
+                    setShareNotice(appLocale === "zh" ? "没有模板。" : "No templates.");
                     return;
                   }
-                  const result = await window.dshSpaces.createSpaceFromTemplate(first.id);
-                  setShareNotice(`template ${first.id}\nspace ${result.spaceId}\nplugins ${result.plugins}\n${result.errors.join("\n")}`);
+                  const result = await window.dshSpaces.createSpaceFromTemplate(templateId);
+                  setShareNotice(
+                    `template ${templateId}\nspace ${result.spaceId}\nplugins ${result.plugins}\n${result.errors.join("\n")}`,
+                  );
                   await onMaintenanceChanged();
-                })();
+                })().catch(showShareError);
               }}
-            >
-              {appLocale === "zh" ? "从模板创建" : "Create from template"}
-            </button>
+              onExport={() => {
+                void (async () => {
+                  if (!exportSpaceId) {
+                    setShareNotice(appLocale === "zh" ? "没有可导出的空间。" : "No exportable spaces.");
+                    return;
+                  }
+                  const path = await window.dshSpaces.exportSpaceShare(exportSpaceId, includeConfig);
+                  if (!path) return;
+                  setShareNotice(`exported ${path}\nincludeConfig ${includeConfig}`);
+                })().catch(showShareError);
+              }}
+            />
             <div className="mt-4 grid grid-cols-2 gap-3">
               <label className="text-xs" style={{ color: "var(--text-label)" }}>
                 {t("settings.portStart")}

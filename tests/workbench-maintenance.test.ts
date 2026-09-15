@@ -253,10 +253,33 @@ test("batch plugin install stops at the first failure and does not run later spa
     catalogId: "urzeye/dsh-outline",
     version: "1.2.3",
   });
-  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
+  const messages: string[] = [];
+  const ctx = jobCtx();
+  const capturing = {
+    ...ctx,
+    message: (text: string) => {
+      messages.push(text);
+    },
+  };
+  await assert.rejects(
+    () => maintenance.execute(plan.id, capturing),
+    (error: unknown) => {
+      assert.ok(error instanceof WorkbenchJobError);
+      assert.equal(error.context?.spaceId, "notes");
+      assert.equal(error.context?.packageName, "dsh-outline");
+      assert.equal(error.context?.stage, "install");
+      assert.equal(error.context?.pluginAttribution, "known");
+      return matchCode("workbench/failed")(error);
+    },
+  );
   assert.equal(listProfilePlugins(home, "coding").some((item) => item.name === "dsh-outline"), true);
   assert.equal(listProfilePlugins(home, "notes").some((item) => item.name === "dsh-outline"), false);
   assert.equal(listProfilePlugins(home, "lab").some((item) => item.name === "dsh-outline"), false);
+  const reported = messages.join("\n");
+  assert.match(reported, /notes/);
+  assert.match(reported, /dsh-outline/);
+  assert.match(reported, /install/);
+  assert.doesNotMatch(reported, /空间 coding/);
 });
 
 test("readonly plugin query does not sync the library or write the catalog cache", async () => {

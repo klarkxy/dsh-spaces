@@ -207,7 +207,7 @@ test("explicit release stops in order and failed stop keeps the lease", async ()
   assert.equal(existsSync(ownerFile(home)), true);
 });
 
-test("alive and ambiguous owners are not stolen; dead owner needs explicit reclaim", async () => {
+test("alive, ambiguous, and dead owners are not taken; the ownership record is kept", async () => {
   const home = tempHome();
   let liveness: PidLiveness = "alive";
   const web = new HomeController(home, { pidAlive: () => liveness }).acquire("web");
@@ -228,12 +228,20 @@ test("alive and ambiguous owners are not stolen; dead owner needs explicit recla
   assert.equal(stillReadOnly.writable, false);
   assert.equal(stillReadOnly.recoveryRequired, true);
   assert.equal(existsSync(ownerFile(home)), true);
-  desktop.acquireExplicit();
-  const taken = await desktop.hydrateManager();
-  assert.equal(taken.writable, true);
-  assert.equal(taken.ownerKind, "desktop");
-  assert.equal(taken.held, true);
+  assert.throws(
+    () => desktop.acquireExplicit(),
+    (error: unknown) => {
+      assert.ok(error instanceof DesktopReadOnlyError);
+      assert.match(error.message, /dead/i);
+      assert.doesNotMatch(error.message, /reclaim|recover|restore/i);
+      return true;
+    },
+  );
+  assert.equal(desktop.writable, false);
+  assert.equal(desktop.held, false);
   assert.equal(existsSync(ownerFile(home)), true);
+  const after = JSON.parse(readFileSync(ownerFile(home), "utf8")) as { kind?: string };
+  assert.equal(after.kind, "web");
   void web;
 });
 
@@ -386,7 +394,7 @@ test("ControllerStatus renders bilingual takeover and hand-off actions", () => {
     held: true,
     writable: false,
     recoveryRequired: true,
-    reasons: ["Holding Home control pending recovery. Ordinary writes are blocked."],
+    reasons: ["Holding Home control. Fault or leftover evidence was reported; writes are blocked."],
     transferPending: false,
   };
   const heldZh = renderToStaticMarkup(

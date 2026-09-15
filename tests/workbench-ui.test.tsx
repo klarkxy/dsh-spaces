@@ -20,7 +20,9 @@ import type {
 } from "../src/shared/workbench.ts";
 import { WorkbenchApp } from "../packages/plugin/src/workbench/app.tsx";
 import { RecoverySurface } from "../packages/plugin/src/workbench/recovery.tsx";
-import { WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
+import { JobsList, WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
+import { SpaceSharePanel } from "../src/renderer/src/components/SpaceSharePanel.tsx";
+import { INTERRUPTED_JOB_MESSAGE } from "../src/adapters/node/workbench-jobs.ts";
 import {
   WorkbenchController,
   pollDelayMs,
@@ -1175,4 +1177,58 @@ test("workbench package reloads after a confirmed upgrade reaches a terminal job
   const html = ready(ctrl);
   assert.ok(upgradeButton(html).includes("disabled"));
   assert.ok(html.includes(t("zh", "workbenchPackage.current")));
+});
+
+test("failed interrupted jobs render the persisted unconfirmed not-replayed message", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(JobsList, {
+      locale: "en",
+      jobs: [
+        job({
+          status: "failed",
+          canCancel: false,
+          phase: "install",
+          message: INTERRUPTED_JOB_MESSAGE,
+          error: {
+            code: "workbench/failed",
+            message: INTERRUPTED_JOB_MESSAGE,
+          },
+        }),
+      ],
+      onCancel() {},
+    }),
+  );
+  assert.match(html, /unconfirmed/i);
+  assert.match(html, /not replayed/i);
+  assert.match(html, /install/);
+});
+
+test("settings share panel lists every template and offers config export", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(SpaceSharePanel, {
+      locale: "en",
+      templates: [
+        { id: "dev", name: "Dev", displayName: "Development" },
+        { id: "writing", name: "Writing", displayName: "Writing" },
+      ],
+      templateId: "writing",
+      spaces: [{ id: "coding", name: "coding", displayName: "Coding" }],
+      spaceId: "coding",
+      includeConfig: true,
+      notice: "",
+      onTemplateId() {},
+      onSpaceId() {},
+      onIncludeConfig() {},
+      onImport() {},
+      onCreateFromTemplate() {},
+      onExport() {},
+    }),
+  );
+  assert.match(html, /Development/);
+  assert.match(html, /Writing/);
+  assert.match(html, /value="writing" selected/);
+  assert.match(html, /Select template/);
+  assert.match(html, /Include config \(preview before save\)/);
+  assert.match(html, /type="checkbox" checked/);
+  assert.match(html, /Export and preview/);
 });

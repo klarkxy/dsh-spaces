@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { applyIsolationPatch, patchTextLooksIsolated } from "../core/domain/isolation";
 import { isGitSpec } from "../shared/plugin";
 import { isExactRuntimeVersion } from "../shared/runtime";
+import { FULL_SPACES_PACKAGE, isFullSpacesManagerSpec } from "../shared/desktop-controller";
 import {
   SPACE_SHARE_FORMAT_VERSION,
   SPACE_SHARE_KIND,
@@ -12,12 +14,21 @@ import {
   type SpaceSharePluginSource,
   type SpaceSharePreview,
 } from "../shared/space-share";
-import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES, type InstalledPlugin } from "../shared/types";
-import { listProfilePlugins } from "./plugin-ops";
+import {
+  PROFILE_NAME_RE,
+  PROTECTED_PLUGIN_PACKAGES,
+  type InstalledPlugin,
+  type PluginLibraryEntry,
+} from "../shared/types";
+import { listProfilePlugins, parseNpmNameAndVersion } from "./plugin-ops";
+import { isHubPluginArchive, readPluginLibrary } from "./plugin-library";
 import { packZip, unpackZip } from "./space-share-zip";
 import { runBatch } from "../shared/batch";
 
-const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, "@dsh-spaces/plugin"]);
+const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, FULL_SPACES_PACKAGE]);
+const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i;
+const NPM_RANGE_RE = /^[~^=]?v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\+[0-9A-Za-z.]+)?$/;
+const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "unknown"]);
 
 export interface SpaceSharePorts {
   createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;
@@ -27,27 +38,105 @@ export interface SpaceSharePorts {
   now?: () => Date;
 }
 
+export interface PluginShareContext {
+  library?: PluginLibraryEntry[];
+  dshHome?: string;
+  spaceId?: string;
+}
+
+export function isSafeNpmPackageName(name: string): boolean {
+  if (!name || name.length > 214) return false;
+  if (name.startsWith(".") || name.startsWith("_")) return false;
+  return NPM_NAME_RE.test(name);
+}
+
+export function isNpmRangeOrExact(spec: string): boolean {
+  return NPM_RANGE_RE.test(spec.trim());
+}
+
+export function canonicalNpmInstallSpec(plugin: SpaceSharePlugin): string | null {
+  if (!isSafeNpmPackageName(plugin.packageName)) return null;
+  if (HOST_PACKAGES.has(plugin.packageName) || isFullSpacesManagerSpec(plugin.packageName)) return null;
+  if (plugin.source !== "npm") return null;
+  const version = plugin.resolvedVersion;
+  if (!version || !isExactRuntimeVersion(version)) return null;
+  const expected = `${plugin.packageName}@${version}`;
+  if (plugin.installSpec && plugin.installSpec !== expected) return null;
+  return expected;
+}
+
 export function classifyPluginSource(spec?: string): SpaceSharePluginSource {
   if (!spec) return "unknown";
   if (isGitSpec(spec)) return "git";
+  const trimmed = spec.trim();
+  if (isExactRuntimeVersion(trimmed) || isNpmRangeOrExact(trimmed) || isSafeNpmPackageName(trimmed)) {
+    return "npm";
+  }
+  const versionAt = trimmed.startsWith("@") ? trimmed.indexOf("@", 1) : trimmed.lastIndexOf("@");
+  if (
+    versionAt > 0 &&
+    isSafeNpmPackageName(trimmed.slice(0, versionAt)) &&
+    isNpmRangeOrExact(trimmed.slice(versionAt + 1))
+  ) {
+    return "npm";
+  }
   if (spec.startsWith("file:") || spec.startsWith(".") || spec.includes("\\") || spec.includes("/")) return "manual";
-  if (isExactRuntimeVersion(spec) || /@\d+\.\d+\.\d+/.test(spec)) return "npm";
-  if (/^[a-z0-9][a-z0-9._-]*$/i.test(spec) || spec.startsWith("@")) return "npm";
   return "unknown";
 }
 
-export function pluginToShare(plugin: InstalledPlugin): SpaceSharePlugin | null {
-  if (HOST_PACKAGES.has(plugin.name)) return null;
+function looksLikeHubCacheSpec(spec: string): boolean {
+  const lower = spec.replaceAll("\\", "/").toLowerCase();
+  return /(?:^|\/)hub\/plugins\/[^/]+\.(?:tgz|tar\.gz)$/.test(lower);
+}
+
+function hubFileProvesNpm(
+  spec: string,
+  packageName: string,
+  version: string,
+  context: PluginShareContext,
+): boolean {
+  if (!looksLikeHubCacheSpec(spec)) return false;
+  if (!context.library || !context.dshHome || !context.spaceId) return false;
+  const raw = spec.trim().replace(/^file:/i, "").replace(/^"|"$/g, "");
+  const abs = resolve(context.dshHome, "profiles", context.spaceId, raw);
+  if (!isHubPluginArchive(context.dshHome, abs)) return false;
+  return context.library.some((entry) => {
+    if (entry.packageName !== packageName || !entry.tarball) return false;
+    if (resolve(context.dshHome!, entry.tarball) !== abs) return false;
+    const parsed = parseNpmNameAndVersion(entry.spec);
+    return parsed?.name === packageName && parsed.version === version;
+  });
+}
+
+export function pluginToShare(
+  plugin: InstalledPlugin,
+  context: PluginShareContext = {},
+): SpaceSharePlugin | null {
+  if (HOST_PACKAGES.has(plugin.name) || plugin.protected) return null;
   const requestedSpec = plugin.requestedSpec;
-  const source = classifyPluginSource(requestedSpec ?? plugin.version ?? undefined);
-  const installSpec =
-    source === "npm" && plugin.resolvedVersion
-      ? `${plugin.name}@${plugin.resolvedVersion}`
-      : requestedSpec;
+  const resolved =
+    plugin.resolvedVersion && isExactRuntimeVersion(plugin.resolvedVersion)
+      ? plugin.resolvedVersion
+      : null;
+  let source = classifyPluginSource(requestedSpec ?? plugin.version ?? undefined);
+  let installSpec = requestedSpec;
+  if (resolved && requestedSpec && isNpmRangeOrExact(requestedSpec)) {
+    source = "npm";
+    installSpec = `${plugin.name}@${resolved}`;
+  } else if (
+    resolved &&
+    requestedSpec &&
+    hubFileProvesNpm(requestedSpec, plugin.name, resolved, context)
+  ) {
+    source = "npm";
+    installSpec = `${plugin.name}@${resolved}`;
+  } else if (source === "npm" && resolved) {
+    installSpec = `${plugin.name}@${resolved}`;
+  }
   return {
     packageName: plugin.name,
     requestedSpec,
-    resolvedVersion: plugin.resolvedVersion ?? plugin.version ?? null,
+    resolvedVersion: resolved ?? plugin.resolvedVersion ?? null,
     source,
     installSpec,
   };
@@ -61,8 +150,18 @@ export function buildSpaceShare(input: {
   dshVersion?: string | null;
   includeConfig?: boolean;
   now?: Date;
+  library?: PluginLibraryEntry[];
+  dshHome?: string;
+  spaceId?: string;
 }): { manifest: SpaceShareManifest; plugins: SpaceSharePlugin[]; patch?: string } {
-  const plugins = input.plugins.map(pluginToShare).filter((row): row is SpaceSharePlugin => row !== null);
+  const context: PluginShareContext = {
+    library: input.library,
+    dshHome: input.dshHome,
+    spaceId: input.spaceId,
+  };
+  const plugins = input.plugins
+    .map((plugin) => pluginToShare(plugin, context))
+    .filter((row): row is SpaceSharePlugin => row !== null);
   return {
     manifest: {
       formatVersion: SPACE_SHARE_FORMAT_VERSION,
@@ -91,6 +190,80 @@ export function packSpaceShare(share: {
   return packZip(entries);
 }
 
+function assertSharePlugin(value: unknown, index: number): SpaceSharePlugin {
+  if (!value || typeof value !== "object") {
+    throw new Error(`The space share plugins list is invalid at index ${index}.`);
+  }
+  const row = value as Record<string, unknown>;
+  if (typeof row.packageName !== "string" || !row.packageName.trim()) {
+    throw new Error(`The space share plugin at index ${index} is missing packageName.`);
+  }
+  if (
+    row.resolvedVersion !== null &&
+    row.resolvedVersion !== undefined &&
+    typeof row.resolvedVersion !== "string"
+  ) {
+    throw new Error(`The space share plugin at index ${index} has an invalid resolvedVersion.`);
+  }
+  if (typeof row.source !== "string" || !SHARE_SOURCES.has(row.source as SpaceSharePluginSource)) {
+    throw new Error(`The space share plugin at index ${index} has an invalid source.`);
+  }
+  if (row.installSpec !== undefined && typeof row.installSpec !== "string") {
+    throw new Error(`The space share plugin at index ${index} has an invalid installSpec.`);
+  }
+  if (row.requestedSpec !== undefined && typeof row.requestedSpec !== "string") {
+    throw new Error(`The space share plugin at index ${index} has an invalid requestedSpec.`);
+  }
+  return {
+    packageName: row.packageName,
+    requestedSpec: typeof row.requestedSpec === "string" ? row.requestedSpec : undefined,
+    resolvedVersion: typeof row.resolvedVersion === "string" ? row.resolvedVersion : null,
+    source: row.source as SpaceSharePluginSource,
+    installSpec: typeof row.installSpec === "string" ? row.installSpec : undefined,
+  };
+}
+
+function assertShareManifest(value: unknown): SpaceShareManifest {
+  if (!value || typeof value !== "object") {
+    throw new Error("The space share manifest is invalid.");
+  }
+  const row = value as Record<string, unknown>;
+  if (row.kind !== SPACE_SHARE_KIND) throw new Error("That file is not a DSH space share.");
+  if (row.formatVersion !== SPACE_SHARE_FORMAT_VERSION) {
+    throw new Error(`Unsupported space share format ${String(row.formatVersion)}.`);
+  }
+  if (!row.space || typeof row.space !== "object") {
+    throw new Error("The space share is missing a display name.");
+  }
+  const space = row.space as Record<string, unknown>;
+  if (typeof space.displayName !== "string" || !space.displayName.trim()) {
+    throw new Error("The space share is missing a display name.");
+  }
+  if (space.icon !== undefined && typeof space.icon !== "string") {
+    throw new Error("The space share has an invalid icon.");
+  }
+  if (typeof row.exportedAt !== "string") {
+    throw new Error("The space share has an invalid export timestamp.");
+  }
+  if (!row.source || typeof row.source !== "object") {
+    throw new Error("The space share has invalid source metadata.");
+  }
+  const dshVersion = (row.source as Record<string, unknown>).dshVersion;
+  if (dshVersion !== undefined && dshVersion !== null && typeof dshVersion !== "string") {
+    throw new Error("The space share has an invalid DSH version.");
+  }
+  return {
+    formatVersion: SPACE_SHARE_FORMAT_VERSION,
+    kind: SPACE_SHARE_KIND,
+    exportedAt: row.exportedAt,
+    source: { dshVersion: typeof dshVersion === "string" ? dshVersion : null },
+    space: {
+      displayName: space.displayName,
+      icon: typeof space.icon === "string" ? space.icon : undefined,
+    },
+  };
+}
+
 export function parseSpaceShare(archive: Buffer): {
   manifest: SpaceShareManifest;
   plugins: SpaceSharePlugin[];
@@ -100,16 +273,27 @@ export function parseSpaceShare(archive: Buffer): {
   const manifestRaw = files.get("manifest.json");
   const pluginsRaw = files.get("plugins.json");
   if (!manifestRaw || !pluginsRaw) throw new Error("The space share is missing manifest.json or plugins.json.");
-  const manifest = JSON.parse(manifestRaw.toString("utf8")) as SpaceShareManifest;
-  if (manifest.kind !== SPACE_SHARE_KIND) throw new Error("That file is not a DSH space share.");
-  if (manifest.formatVersion !== SPACE_SHARE_FORMAT_VERSION) {
-    throw new Error(`Unsupported space share format ${String(manifest.formatVersion)}.`);
-  }
-  if (!manifest.space?.displayName) throw new Error("The space share is missing a display name.");
-  const plugins = JSON.parse(pluginsRaw.toString("utf8")) as SpaceSharePlugin[];
-  if (!Array.isArray(plugins)) throw new Error("The space share plugins list is invalid.");
+  const manifest = assertShareManifest(JSON.parse(manifestRaw.toString("utf8")) as unknown);
+  const pluginsJson = JSON.parse(pluginsRaw.toString("utf8")) as unknown;
+  if (!Array.isArray(pluginsJson)) throw new Error("The space share plugins list is invalid.");
+  const plugins = pluginsJson.map((row, index) => assertSharePlugin(row, index));
   const patch = files.get("profile.patch.yml")?.toString("utf8");
   return { manifest, plugins, patch };
+}
+
+export function validateImportedPatch(patch: string, spaceId: string): string {
+  if (spaceId === "web") throw new Error("The web space cannot be imported onto.");
+  const applied = applyIsolationPatch(patch, spaceId, "profile.patch.yml");
+  if (!patchTextLooksIsolated(applied, spaceId)) {
+    throw new Error("The imported config does not isolate this space.");
+  }
+  if (/dshHomePath\s*\(\s*['"][^'"]*\.\./i.test(applied)) {
+    throw new Error("The imported config contains a path that is not allowed.");
+  }
+  if (/(?:hub|profiles)\/web\b/i.test(applied) && spaceId !== "web") {
+    throw new Error("The imported config points at the web space.");
+  }
+  return applied;
 }
 
 export function previewSpaceShare(archive: Buffer): SpaceSharePreview {
@@ -138,6 +322,9 @@ export function exportSpaceArchive(
     patch,
     dshVersion: options.dshVersion,
     includeConfig: options.includeConfig,
+    library: readPluginLibrary(dshHome),
+    dshHome,
+    spaceId,
   });
   return packSpaceShare(share);
 }
@@ -178,6 +365,21 @@ export async function importSpaceArchive(
   }
 
   const name = uniqueSpaceName(parsed.manifest.space.displayName, ports.listSpaceIds());
+  let isolatedPatch: string | undefined;
+  if (parsed.patch) {
+    try {
+      isolatedPatch = validateImportedPatch(parsed.patch, name);
+    } catch (error) {
+      return {
+        definition: "failed",
+        plugins: "not-run",
+        start: "not-run",
+        errors: [error instanceof Error ? error.message : String(error)],
+        pendingManual: [],
+      };
+    }
+  }
+
   try {
     await ports.createSpace({
       name,
@@ -194,20 +396,35 @@ export async function importSpaceArchive(
     };
   }
 
-  if (parsed.patch && options.writePatch) {
+  if (isolatedPatch && options.writePatch) {
     try {
-      options.writePatch(name, parsed.patch);
+      options.writePatch(name, isolatedPatch);
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+      return {
+        definition: "imported",
+        plugins: "not-run",
+        start: "not-run",
+        spaceId: name,
+        errors: [error instanceof Error ? error.message : String(error)],
+        pendingManual: [],
+      };
     }
   }
 
-  const pendingManual = parsed.plugins.filter((row) => row.source !== "npm" || !row.resolvedVersion);
-  const npmPlugins = parsed.plugins.filter((row) => row.source === "npm" && row.resolvedVersion);
-  let pluginStatus: SpaceImportResult["plugins"] = npmPlugins.length ? "completed" : pendingManual.length ? "pending-manual" : "completed";
-  const batch = await runBatch(npmPlugins, async (plugin) => {
-    const spec = plugin.installSpec || `${plugin.packageName}@${plugin.resolvedVersion}`;
-    await ports.installPlugin(name, spec);
+  const auto: { plugin: SpaceSharePlugin; spec: string }[] = [];
+  const pendingManual: SpaceSharePlugin[] = [];
+  for (const plugin of parsed.plugins) {
+    const spec = canonicalNpmInstallSpec(plugin);
+    if (spec) auto.push({ plugin, spec });
+    else pendingManual.push(plugin);
+  }
+  let pluginStatus: SpaceImportResult["plugins"] = auto.length
+    ? "completed"
+    : pendingManual.length
+      ? "pending-manual"
+      : "completed";
+  const batch = await runBatch(auto, async (row) => {
+    await ports.installPlugin(name, row.spec);
   });
   if (batch.failed) {
     errors.push(batch.failed.error);

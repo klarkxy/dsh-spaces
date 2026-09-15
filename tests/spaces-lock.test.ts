@@ -537,21 +537,23 @@ test("symlink lock path is ambiguous and is not stolen", async (t) => {
   await assert.rejects(lock.run("create", async () => "no"), /ambiguous|symlink/);
 });
 
-test("desktop blocks an interrupted plugin mutation until a successful full restore", async () => {
+test("desktop keeps interrupted plugin evidence blocked and snapshot restore cannot bypass it", async () => {
   const home = tempHome();
   const control = createDesktopHomeControl(home);
   const journal = join(home, ".dsh-spaces-mutation.json");
   writeFileSync(journal, '{"op":"create","spaceId":"unfinished"}');
   let ran = false;
-  await assert.rejects(control.mutate(async () => { ran = true; }), /needs recovery/);
-  await assert.rejects(control.runMaintenance("startup-recovery", async () => { ran = true; }), /needs recovery/);
+  await assert.rejects(control.mutate(async () => { ran = true; }), /unfinished evidence|writes are blocked/i);
+  await assert.rejects(control.runMaintenance("startup-recovery", async () => { ran = true; }), /unfinished evidence|writes are blocked/i);
   assert.equal(ran, false);
   await control.runMaintenance("quit", async () => { ran = true; });
   assert.equal(ran, true);
   assert.equal(existsSync(journal), true);
-  await assert.rejects(control.runMaintenance("snapshot-restore", async () => { throw new Error("restore failed"); }), /restore failed/);
+  let restoreRan = false;
+  await assert.rejects(
+    control.runMaintenance("snapshot-restore", async () => { restoreRan = true; }),
+    /unfinished evidence|writes are blocked/i,
+  );
+  assert.equal(restoreRan, false);
   assert.equal(existsSync(journal), true);
-  await control.runMaintenance("snapshot-restore", async () => {});
-  assert.equal(existsSync(journal), false);
-  await control.mutate(async () => {});
 });
