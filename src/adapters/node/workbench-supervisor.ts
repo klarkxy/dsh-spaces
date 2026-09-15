@@ -129,7 +129,8 @@ export const WORKBENCH_ERROR = {
   "workbench/forbidden": "This origin cannot call that workbench method.",
   "workbench/not-found": "That item was not found.",
   "workbench/read-only": "The workbench is read-only until control is acquired.",
-  "workbench/unavailable": "A previous operation did not finish. Recovery is required.",
+  "workbench/unavailable": "The workbench cannot accept this request.",
+  "workbench/unsupported": "That command is not supported.",
   "workbench/busy": "Another controller already holds run rights for this home.",
   "workbench/unmanaged": "This instance is not managed here. It can be viewed only.",
   "workbench/protected": "The web profile and manager space cannot be changed this way.",
@@ -546,11 +547,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     this.assertWritable();
-    if (this.maintenanceBlocked && command.kind !== "recovery.resume") {
+    if (command.kind === "recovery.resume") {
+      throw new WorkbenchPublicError("workbench/unsupported");
+    }
+    if (this.maintenanceBlocked) {
       throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
     }
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    if (this.recoveryRequired && command.kind !== "recovery.resume") {
+    if (this.recoveryRequired) {
       throw new WorkbenchPublicError("workbench/unavailable");
     }
     const job = await this.jobs.submit(command, requestId, (ctx) =>
@@ -667,8 +671,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now });
     this.processes = this.createProcessManager();
     this.reconcileInstanceRecords();
-    if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size ||
-      this.jobs.list().some(job => job.status === "recovery-required")) {
+    if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size) {
       this.maintenance = this.createMaintenance();
       this.refreshRecovery();
       return;
@@ -717,12 +720,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.reasons.push("Maintenance could not be composed.");
     }
     this.refreshRecovery();
-    if (this.jobs.list().some((job) => job.status === "recovery-required")) {
-      this.recoveryRequired = true;
-      if (!this.reasons.includes("Interrupted work must be recovered before new changes.")) {
-        this.reasons.push("Interrupted work must be recovered before new changes.");
-      }
-    }
+
     if (this.managerInstall === "manager" && this.cli && !this.recoveryRequired && !this.unmanaged.has(identity.profileId)) {
       try {
         await this.startSpace(identity.profileId, silentJobContext());
@@ -1171,7 +1169,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "plan.execute":
         return this.executePlan(command.planId, ctx);
       case "recovery.resume":
-        return this.resumeRecovery(ctx);
+        throw new WorkbenchPublicError("workbench/unsupported");
       case "controller.acquire":
         return undefined;
     }
@@ -1360,75 +1358,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
-  private async resumeRecovery(ctx: WorkbenchJobContext): Promise<void> {
-    ctx.phase("inspect-journal");
-    ctx.cancellable(false);
-    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    this.holdManagerStart = true;
-    try {
-      await this.stopOwnedAll();
-      this.unmanaged.clear();
-      this.reconcileInstanceRecords();
-      if (this.unmanaged.size) {
-        throw new WorkbenchPublicError("workbench/unavailable", "Leftover processes must be proven stopped before recovery.");
-      }
-      if (this.lock.inspect().held) {
-        const reclaimed = this.lock.unlockDead();
-        if (!reclaimed.unlocked && reclaimed.reason !== "not-held") {
-          throw new WorkbenchPublicError("workbench/busy", "The Home transaction lock is live or ambiguous and was left in place.");
-        }
-      }
-      if (this.maintenance) {
-        try {
-          await this.maintenance.recover(ctx);
-        } catch {
-          const failed = this.maintenance.recoveryOutcome?.();
-          const detail = failed?.message?.trim()
-            || "Snapshot or upgrade recovery failed. Diagnostic journals were left in place.";
-          ctx.message(detail);
-          this.refreshRecovery();
-          throw new WorkbenchPublicError(
-            "workbench/unavailable",
-            `${detail} Use doctor if this entry cannot finish remaining records.`,
-          );
-        }
-      }
-      const outcome = this.maintenance?.recoveryOutcome?.();
-      if (outcome?.settleInterruptedJobs) {
-        await this.settleProvedRecoveryJobs(outcome);
-      }
-      this.refreshRecovery();
-      const leftovers = this.jobs.list().filter((job) => job.status === "recovery-required");
-      if (leftovers.length || this.hasMaintenanceEvidence() || this.unmanaged.size) {
-        const message =
-          "Recovery is still required. Unproved jobs were left in place. Use doctor if this entry cannot finish them.";
-        ctx.message(message);
-        throw new WorkbenchPublicError("workbench/unavailable", message);
-      }
-      this.holdManagerStart = false;
-      this.maintenanceBlocked = false;
-      if (outcome?.settleInterruptedJobs) await this.reinitializeManager();
-    } finally {
-      this.holdManagerStart = false;
-      this.refreshRecovery();
-    }
+  private async resumeRecovery(_ctx: WorkbenchJobContext): Promise<void> {
+    throw new WorkbenchPublicError("workbench/unsupported");
   }
 
-  private async settleProvedRecoveryJobs(outcome: WorkbenchRecoveryOutcome): Promise<void> {
-    if (!this.jobs) return;
-    for (const job of this.jobs.list()) {
-      if (job.status !== "recovery-required") continue;
-      const planId = job.kind === "plan.execute" ? readJobPlanId(this.home, job.id) : undefined;
-      const plan = planId ? readPlanEvidence(this.home, planId) : undefined;
-      const settlement = settlementForRecoveredJob(job.kind, planId, plan, outcome);
-      if (!settlement) continue;
-      try {
-        await this.jobs.settleRecovery(job.id, settlement);
-        if (planId) markHandledPlan(this.home, planId, settlement.status);
-      } catch {
-        /* unreadable/unknown records stay for doctor */
-      }
-    }
+  private async settleProvedRecoveryJobs(_outcome: WorkbenchRecoveryOutcome): Promise<void> {
+    return;
   }
 
   private async finishRelinquish(): Promise<void> {
@@ -1640,9 +1575,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.jobs?.list().some(job => job.status === "running")) {
       if (this.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance must be recovered before new changes.");
     }
-    if (this.jobs?.list().some((job) => job.status === "recovery-required")) {
-      extra.push("Interrupted work must be recovered before new changes.");
-    }
+
     if (!this.cli) extra.push(WORKBENCH_ERROR["workbench/incompatible"]);
     if (this.managerId && this.managerInstall !== "manager") {
       extra.push("The manager profile cannot be used until recovery.");

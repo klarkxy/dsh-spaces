@@ -89,7 +89,7 @@ export const workbenchJobSchema = z
     id: jobIdSchema,
     requestId: requestIdSchema,
     kind: z.string().min(1).max(64),
-    status: z.enum(["queued", "running", "succeeded", "failed", "cancelled", "recovery-required"]),
+    status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
     phase: z.string().max(64),
     message: z.string().max(500),
     affectedSpaceIds: z.array(spaceIdSchema).max(256),

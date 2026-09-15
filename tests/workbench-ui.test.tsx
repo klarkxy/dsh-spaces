@@ -527,7 +527,7 @@ test("readonly rejects mutations but still allows queries and acquire/resume", a
         writable: false,
         recoveryRequired: true,
         reasons: ["owner held by desktop"],
-        jobs: [job({ canCancel: false, status: "recovery-required" })],
+        jobs: [job({ canCancel: false, status: "failed" })],
       }),
   });
   const ctrl = controller(api);
@@ -748,7 +748,7 @@ test("RecoverySurface shows reasons, jobs, acquire and resume without a manager 
         writable: false,
         recoveryRequired: true,
         reasons: ["desktop holds write access"],
-        jobs: [job({ status: "recovery-required", canCancel: false, message: "needs resume" })],
+        jobs: [job({ status: "failed", canCancel: false, message: "needs resume" })],
       }),
   });
   const ctrl = controller(api);

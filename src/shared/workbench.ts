@@ -3,7 +3,50 @@ import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './
 
 export type WorkbenchRole = 'manager' | 'workspace' | 'uninitialized';
 export type ControllerKind = 'web' | 'desktop';
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'recovery-required';
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+/** Browser-safe failure fields. Do not put paths, tokens, or suggested fixes here. */
+export interface WorkbenchFailureContext {
+  spaceId?: string;
+  stage?: string;
+  packageName?: string;
+  /** Known plugin vs could not attribute. */
+  pluginAttribution?: 'known' | 'unknown';
+  exitCode?: number | null;
+  signal?: string | null;
+}
+
+export interface WorkbenchJobErrorInfo extends WorkbenchFailureContext {
+  code: string;
+  message: string;
+}
+
+export function formatWorkbenchFailure(input: {
+  spaceId?: string;
+  stage?: string;
+  packageName?: string;
+  pluginAttribution?: 'known' | 'unknown';
+  reason: string;
+  exitCode?: number | null;
+  signal?: string | null;
+}): string {
+  const lines = [
+    input.spaceId ? `空间 ${input.spaceId} 启动失败` : '操作失败',
+    '',
+    input.stage ? `阶段：${input.stage}` : '',
+    input.pluginAttribution === 'unknown'
+      ? '插件归属：未能归属到单个插件'
+      : input.packageName
+        ? `插件：${input.packageName}`
+        : '',
+    `原因：${input.reason}`,
+    input.exitCode != null ? `退出码：${input.exitCode}` : '',
+    input.signal ? `信号：${input.signal}` : '',
+    '',
+    '该次操作已失败。',
+  ];
+  return lines.filter((line, i, all) => line !== '' || (all[i - 1] !== '' && i !== 0)).join('\n').trim();
+}
 
 export interface WorkbenchPackageRelease {
   id: 'bundled-workbench';
@@ -69,7 +112,7 @@ export interface WorkbenchJob {
   updatedAt: string;
   canCancel: boolean;
   result?: { spaceId?: string; snapshotId?: string; runtimeVersion?: string; view?: WorkbenchView };
-  error?: { code: string; message: string };
+  error?: WorkbenchJobErrorInfo;
 }
 
 export type WorkbenchCommand =

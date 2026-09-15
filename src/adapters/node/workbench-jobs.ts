@@ -9,7 +9,9 @@ import { isExactRuntimeVersion } from "../../shared/runtime";
 import type {
   JobStatus,
   WorkbenchCommand,
+  WorkbenchFailureContext,
   WorkbenchJob,
+  WorkbenchJobErrorInfo,
   WorkbenchView,
 } from "../../shared/workbench";
 import { canonicalHome } from "./home-operation-lock";
@@ -24,8 +26,12 @@ export const WORKBENCH_JOB_ERROR = {
   "workbench/not-cancellable": "This job cannot be cancelled in its current phase.",
   "workbench/persist-failed": "The job could not be saved. The operation was not accepted.",
   "workbench/failed": "The job failed.",
-  "workbench/recovery-required": "A previous job did not finish and must be recovered.",
+  "workbench/unreadable": "The job record could not be read. Original bytes were left unchanged.",
+  "workbench/unsupported": "That command is not supported.",
 } as const;
+
+export const INTERRUPTED_JOB_MESSAGE =
+  "The previous run was interrupted. The result is unconfirmed; some changes may already have happened. The command was not replayed.";
 
 export type WorkbenchJobErrorCode = keyof typeof WORKBENCH_JOB_ERROR;
 
@@ -63,14 +69,10 @@ export class WorkbenchJobError extends Error {
   constructor(
     readonly code: WorkbenchJobErrorCode,
     message: string = WORKBENCH_JOB_ERROR[code],
+    readonly context?: WorkbenchFailureContext,
   ) {
     super(WORKBENCH_JOB_ERROR[code] || sanitizeJobText(message));
   }
-}
-
-function requiresRecovery(error: unknown): boolean {
-  return error instanceof WorkbenchJobError &&
-    (error.code === "workbench/persist-failed" || error.code === "workbench/recovery-required");
 }
 
 export class WorkbenchJobAbortError extends Error {
@@ -112,7 +114,7 @@ interface StoredJob {
   updatedAt: string;
   canCancel: boolean;
   result?: WorkbenchJobResult;
-  error?: { code: string; message: string };
+  error?: WorkbenchJobErrorInfo;
 }
 
 /**
@@ -122,10 +124,8 @@ interface StoredJob {
  * canonical Home (supervisor / HomeController). This module does not create a
  * process lock and must not contend with HomeController ownership.
  *
- * Leftover queued/running records and unreadable files are marked
- * recovery-required and are not replayed. Runtime submits `recovery.resume`
- * and settles interrupted jobs with `settleRecovery` after checking the
- * real transaction journal.
+ * Leftover queued/running records become failed (interrupted, unconfirmed)
+ * and are not replayed. Unreadable files stay as original bytes.
  */
 export class WorkbenchJobStore {
   readonly home: string;
@@ -136,10 +136,8 @@ export class WorkbenchJobStore {
   private readonly persisted = new Map<string, string>();
   private readonly aborts = new Map<string, AbortController>();
   private readonly pendingResults = new Map<string, WorkbenchJobResult>();
-  /** Filenames kept as evidence; not overwritten except by settleRecovery. */
+  /** Filenames kept as evidence; never overwritten. */
   private readonly evidenceOnly = new Set<string>();
-  /** Blocks new non-resume work until every recovery-required job is settled. */
-  private recoveryHold = false;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(options: WorkbenchJobsOptions) {
@@ -148,6 +146,34 @@ export class WorkbenchJobStore {
     this.inject = options.inject;
     this.now = options.now ?? (() => new Date());
     this.loadFromDisk();
+  }
+
+  private markFailed(id: string, code: WorkbenchJobErrorCode, error?: WorkbenchJobErrorInfo): void {
+    const persistedJson = this.persisted.get(id);
+    const record = persistedJson
+      ? (JSON.parse(persistedJson) as StoredJob)
+      : this.records.get(id);
+    if (!record) return;
+    const phase = record.phase;
+    record.status = "failed";
+    record.phase = phase === "queued" || phase === "running" ? "failed" : phase;
+    record.canCancel = false;
+    record.updatedAt = this.isoNow();
+    record.error = error ?? {
+      code,
+      message: WORKBENCH_JOB_ERROR[code] ?? WORKBENCH_JOB_ERROR["workbench/failed"],
+    };
+    if (!record.message) record.message = record.error.message;
+    this.records.set(id, record);
+    if (!this.evidenceOnly.has(id)) {
+      try {
+        this.inject?.("write", record.id);
+        atomicWrite(join(this.jobsDir, `${record.id}.json`), `${JSON.stringify(record, null, 2)}\n`);
+        this.persisted.set(record.id, stableRecordJson(record));
+      } catch {
+        // Keep the in-memory failure. Public APIs still must not claim success.
+      }
+    }
   }
 
   submit(
@@ -178,13 +204,13 @@ export class WorkbenchJobStore {
 
   hasUnfinishedPlan(planId: string): boolean {
     return [...this.records.values()].some(job =>
-      ["queued", "running", "recovery-required"].includes(job.status) &&
+      ["queued", "running"].includes(job.status) &&
       job.command?.kind === "plan.execute" && job.command.planId === planId);
   }
 
   unfinishedPlanIds(): string[] {
     return [...new Set([...this.records.values()].flatMap(job =>
-      ["queued", "running", "recovery-required"].includes(job.status) && job.command?.kind === "plan.execute"
+      ["queued", "running"].includes(job.status) && job.command?.kind === "plan.execute"
         ? [job.command.planId] : []))];
   }
 
@@ -197,16 +223,10 @@ export class WorkbenchJobStore {
   }
 
   /**
-   * Record the real outcome of an interrupted job after the caller has
-   * inspected the transaction journal. Does not replay the original command.
-   * Caller must already hold Home run rights.
+   * Recovery settlement is not supported. Interrupted jobs stay failed.
    */
-  settleRecovery(id: string, settlement: WorkbenchJobSettle): Promise<WorkbenchJob> {
-    try {
-      return Promise.resolve(this.settleRecoverySync(id, settlement));
-    } catch (error) {
-      return Promise.reject(error);
-    }
+  settleRecovery(_id: string, _settlement: WorkbenchJobSettle): Promise<WorkbenchJob> {
+    return Promise.reject(new WorkbenchJobError("workbench/unsupported"));
   }
 
   whenIdle(): Promise<void> {
@@ -239,10 +259,6 @@ export class WorkbenchJobStore {
       }
       return publicJob(existing);
     }
-    if (this.recoveryHold && parsed.kind !== "recovery.resume") {
-      throw new WorkbenchJobError("workbench/recovery-required");
-    }
-
     const timestamp = this.isoNow();
     const record: StoredJob = {
       schemaVersion: SCHEMA_VERSION,
@@ -283,55 +299,6 @@ export class WorkbenchJobStore {
     throw new WorkbenchJobError("workbench/not-cancellable");
   }
 
-  private settleRecoverySync(id: string, settlement: WorkbenchJobSettle): WorkbenchJob {
-    const record = this.require(id);
-    if (record.status !== "recovery-required") {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    // An unreadable/unknown record has no transaction identity to settle.
-    // Preserve it for doctor/manual recovery rather than manufacturing history.
-    if (this.evidenceOnly.has(id) || record.command === null) {
-      throw new WorkbenchJobError("workbench/recovery-required");
-    }
-    if (!isPlainObject(settlement) || !isSettleStatus(settlement.status)) {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    const extra = Object.keys(settlement).filter((key) => !["status", "result", "message"].includes(key));
-    if (extra.length) throw new WorkbenchJobError("workbench/invalid-input");
-
-    let result: WorkbenchJobResult | undefined;
-    if (settlement.result !== undefined) {
-      result = parseStrictResult(settlement.result);
-      if (!result) throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    const message = settlement.message === undefined ? "" : parseMessage(settlement.message);
-
-    record.status = settlement.status;
-    record.phase = settlement.status;
-    record.canCancel = false;
-    record.updatedAt = this.isoNow();
-    record.message = sanitizeJobText(message);
-    record.result = undefined;
-    record.error = undefined;
-    if (settlement.status === "succeeded" && result && Object.keys(result).length) {
-      record.result = result;
-      if (result.spaceId && !record.affectedSpaceIds.includes(result.spaceId)) {
-        record.affectedSpaceIds = [...record.affectedSpaceIds, result.spaceId];
-      }
-    }
-    if (settlement.status === "failed") {
-      record.error = {
-        code: "workbench/failed",
-        message: WORKBENCH_JOB_ERROR["workbench/failed"],
-      };
-      if (!record.message) record.message = WORKBENCH_JOB_ERROR["workbench/failed"];
-    }
-    this.evidenceOnly.delete(record.id);
-    this.write(record);
-    this.releaseHoldIfClear();
-    return publicJob(record);
-  }
-
   private enqueue(task: () => Promise<void>): void {
     this.queue = this.queue.then(task, task);
   }
@@ -340,11 +307,6 @@ export class WorkbenchJobStore {
     try {
       const record = this.records.get(id);
       if (!record || record.status !== "queued") return;
-      if (this.recoveryHold && record.kind !== "recovery.resume") {
-        this.abandonQueued(record, "Cancelled because another job needs recovery.");
-        return;
-      }
-
       record.status = "running";
       record.phase = record.phase === "queued" ? "running" : record.phase;
       record.canCancel = false;
@@ -352,7 +314,7 @@ export class WorkbenchJobStore {
       try {
         this.write(record);
       } catch {
-        this.markRecovery(id);
+        this.markFailed(id, "workbench/persist-failed");
         return;
       }
 
@@ -377,12 +339,12 @@ export class WorkbenchJobStore {
             current.affectedSpaceIds = [...current.affectedSpaceIds, result.spaceId];
           }
         }
-        this.write(current);
-      } catch (error) {
-        if (requiresRecovery(error)) {
-          this.markRecovery(id);
-          return;
+        try {
+          this.write(current);
+        } catch {
+          this.markFailed(id, "workbench/persist-failed");
         }
+      } catch (error) {
         const current = this.records.get(id);
         if (!current || current.status !== "running") return;
         if (isAbortError(error) && abort.signal.aborted) {
@@ -403,17 +365,17 @@ export class WorkbenchJobStore {
         current.result = undefined;
         current.error = publicErrorFromUnknown(error);
         if (!current.message) current.message = current.error.message;
-        this.write(current);
+        try {
+          this.write(current);
+        } catch {
+          this.markFailed(id, "workbench/persist-failed", current.error);
+        }
       } finally {
         this.aborts.delete(id);
         this.pendingResults.delete(id);
       }
     } catch (error) {
-      if (requiresRecovery(error)) {
-        this.markRecovery(id);
-        return;
-      }
-      this.markRecovery(id);
+      this.markFailed(id, error instanceof WorkbenchJobError ? error.code : "workbench/failed");
     }
   }
 
@@ -469,7 +431,6 @@ export class WorkbenchJobStore {
       const path = join(this.jobsDir, name);
       this.loadOne(path, filenameId);
     }
-    if (this.hasUnresolvedRecovery()) this.enterRecoveryHold();
   }
 
   private listJobFilenames(): string[] | undefined {
@@ -478,16 +439,16 @@ export class WorkbenchJobStore {
       st = lstatSync(this.jobsDir);
     } catch (error) {
       if (isEnoent(error)) return undefined;
-      throw new WorkbenchJobError("workbench/recovery-required");
+      throw new WorkbenchJobError("workbench/unreadable");
     }
     if (st.isSymbolicLink() || !st.isDirectory()) {
-      throw new WorkbenchJobError("workbench/recovery-required");
+      throw new WorkbenchJobError("workbench/unreadable");
     }
     try {
       return readdirSync(this.jobsDir).filter((name) => name.endsWith(".json") && !name.endsWith(".tmp"));
     } catch (error) {
       if (isEnoent(error)) return undefined;
-      throw new WorkbenchJobError("workbench/recovery-required");
+      throw new WorkbenchJobError("workbench/unreadable");
     }
   }
 
@@ -535,16 +496,21 @@ export class WorkbenchJobStore {
     this.persisted.set(record.id, stableRecordJson(record));
     if (record.status === "queued" || record.status === "running") {
       const phase = record.phase;
-      record.status = "recovery-required";
+      record.status = "failed";
       record.phase = phase;
       record.canCancel = false;
       record.updatedAt = this.isoNow();
+      record.message = record.message || INTERRUPTED_JOB_MESSAGE;
+      record.error = {
+        code: "workbench/failed",
+        message: INTERRUPTED_JOB_MESSAGE,
+        pluginAttribution: "unknown",
+        stage: phase,
+        spaceId: record.affectedSpaceIds[0],
+      };
       try {
         this.write(record);
       } catch {
-        record.status = "recovery-required";
-        record.phase = phase;
-        record.canCancel = false;
         this.records.set(record.id, record);
       }
     }
@@ -553,7 +519,7 @@ export class WorkbenchJobStore {
   private rememberUnreadable(filenameId: string, phase: string): void {
     const id = this.unreadableId(filenameId);
     if (this.records.has(id)) return;
-    const record = recoveryStub(id, phase, this.isoNow());
+    const record = unreadableStub(id, phase, this.isoNow());
     this.records.set(id, record);
     this.evidenceOnly.add(id);
   }
@@ -592,38 +558,7 @@ export class WorkbenchJobStore {
     }
   }
 
-  private markRecovery(id: string): void {
-    const persistedJson = this.persisted.get(id);
-    const record = persistedJson
-      ? (JSON.parse(persistedJson) as StoredJob)
-      : this.records.get(id);
-    if (!record) return;
-    const phase = record.phase;
-    record.status = "recovery-required";
-    record.phase = phase;
-    record.canCancel = false;
-    record.updatedAt = this.isoNow();
-    this.records.set(id, record);
-    if (!this.evidenceOnly.has(id)) {
-      try {
-        this.inject?.("write", record.id);
-        atomicWrite(join(this.jobsDir, `${record.id}.json`), `${JSON.stringify(record, null, 2)}\n`);
-        this.persisted.set(record.id, stableRecordJson(record));
-      } catch {
-        // Keep the in-memory recovery mark. Public APIs still must not claim success.
-      }
-    }
-    this.enterRecoveryHold();
-  }
 
-  private enterRecoveryHold(): void {
-    this.recoveryHold = true;
-    for (const record of [...this.records.values()]) {
-      if (record.status !== "queued") continue;
-      if (record.kind === "recovery.resume") continue;
-      this.abandonQueued(record, "Cancelled because another job needs recovery.");
-    }
-  }
 
   private abandonQueued(record: StoredJob, message: string): void {
     record.status = "cancelled";
@@ -642,18 +577,6 @@ export class WorkbenchJobStore {
       if (message) current.message = message;
       this.records.set(record.id, current);
     }
-  }
-
-  private hasUnresolvedRecovery(): boolean {
-    for (const record of this.records.values()) {
-      if (record.status === "recovery-required") return true;
-    }
-    return false;
-  }
-
-  private releaseHoldIfClear(): void {
-    if (this.hasUnresolvedRecovery()) return;
-    this.recoveryHold = false;
   }
 
   private isoNow(): string {
@@ -676,8 +599,16 @@ function publicJob(record: StoredJob): WorkbenchJob {
   };
   if (record.result) job.result = publicResult(record.result);
   if (record.error) {
-    const code = isJobErrorCode(record.error.code) ? record.error.code : "workbench/failed";
-    job.error = { code, message: WORKBENCH_JOB_ERROR[code] };
+    job.error = publicErrorFromStored(record.error as unknown as Record<string, unknown>);
+    if (record.error.spaceId) job.error.spaceId = record.error.spaceId;
+    if (record.error.stage) job.error.stage = record.error.stage;
+    if (record.error.packageName) job.error.packageName = record.error.packageName;
+    if (record.error.pluginAttribution) job.error.pluginAttribution = record.error.pluginAttribution;
+    if (record.error.exitCode !== undefined) job.error.exitCode = record.error.exitCode;
+    if (record.error.signal !== undefined) job.error.signal = record.error.signal;
+    if (record.error.message && record.error.code === "workbench/failed" && record.error.message !== WORKBENCH_JOB_ERROR["workbench/failed"]) {
+      job.error.message = sanitizeJobText(record.error.message);
+    }
   }
   return job;
 }
@@ -736,13 +667,26 @@ function publicView(value: unknown): WorkbenchView | undefined {
   };
 }
 
-function publicErrorFromUnknown(error: unknown): { code: string; message: string } {
+function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
   if (error instanceof WorkbenchJobError) {
-    return { code: error.code, message: WORKBENCH_JOB_ERROR[error.code] };
+    const info: WorkbenchJobErrorInfo = {
+      code: isJobErrorCode(error.code) ? error.code : "workbench/failed",
+      message: WORKBENCH_JOB_ERROR[isJobErrorCode(error.code) ? error.code : "workbench/failed"],
+    };
+    if (error.context) {
+      if (error.context.spaceId) info.spaceId = error.context.spaceId;
+      if (error.context.stage) info.stage = error.context.stage;
+      if (error.context.packageName) info.packageName = error.context.packageName;
+      if (error.context.pluginAttribution) info.pluginAttribution = error.context.pluginAttribution;
+      if (error.context.exitCode !== undefined) info.exitCode = error.context.exitCode;
+      if (error.context.signal !== undefined) info.signal = error.context.signal;
+    }
+    return info;
   }
   return {
     code: "workbench/failed",
     message: WORKBENCH_JOB_ERROR["workbench/failed"],
+    pluginAttribution: "unknown",
   };
 }
 
@@ -782,10 +726,7 @@ function parseStoredJob(value: unknown, filenameId: string): StoredJob | null {
 
   const result = value.result !== undefined ? publicResult(value.result) : undefined;
   const error = isPlainObject(value.error) && typeof value.error.code === "string"
-    ? {
-        code: isJobErrorCode(value.error.code) ? value.error.code : "workbench/failed",
-        message: WORKBENCH_JOB_ERROR[isJobErrorCode(value.error.code) ? value.error.code : "workbench/failed"],
-      }
+    ? publicErrorFromStored(value.error)
     : undefined;
 
   return {
@@ -807,7 +748,24 @@ function parseStoredJob(value: unknown, filenameId: string): StoredJob | null {
   };
 }
 
-function recoveryStub(id: string, phase: string, timestamp: string): StoredJob {
+function publicErrorFromStored(value: Record<string, unknown>): WorkbenchJobErrorInfo {
+  const code = typeof value.code === "string" && isJobErrorCode(value.code) ? value.code : "workbench/failed";
+  const info: WorkbenchJobErrorInfo = {
+    code,
+    message: WORKBENCH_JOB_ERROR[code],
+  };
+  if (typeof value.spaceId === "string" && ENTITY_ID_RE.test(value.spaceId)) info.spaceId = value.spaceId;
+  if (typeof value.stage === "string" && value.stage.trim()) info.stage = value.stage.slice(0, 120);
+  if (typeof value.packageName === "string" && value.packageName.trim()) info.packageName = value.packageName.slice(0, 200);
+  if (value.pluginAttribution === "known" || value.pluginAttribution === "unknown") {
+    info.pluginAttribution = value.pluginAttribution;
+  }
+  if (typeof value.exitCode === "number" && Number.isInteger(value.exitCode)) info.exitCode = value.exitCode;
+  if (typeof value.signal === "string" && value.signal.trim()) info.signal = value.signal.slice(0, 32);
+  return info;
+}
+
+function unreadableStub(id: string, phase: string, timestamp: string): StoredJob {
   return {
     schemaVersion: SCHEMA_VERSION,
     id,
@@ -815,13 +773,19 @@ function recoveryStub(id: string, phase: string, timestamp: string): StoredJob {
     kind: "unknown",
     command: null,
     commandCanonical: null,
-    status: "recovery-required",
+    status: "failed",
     phase,
-    message: "",
+    message: WORKBENCH_JOB_ERROR["workbench/unreadable"],
     affectedSpaceIds: [],
     createdAt: timestamp,
     updatedAt: timestamp,
     canCancel: false,
+    error: {
+      code: "workbench/unreadable",
+      message: WORKBENCH_JOB_ERROR["workbench/unreadable"],
+      pluginAttribution: "unknown",
+      stage: phase,
+    },
   };
 }
 
@@ -858,11 +822,12 @@ function parseCommand(input: unknown): WorkbenchCommand {
       expectKeys(input, ["kind", "planId"]);
       return { kind, planId: parseEntityId(input.planId) };
     }
-    case "controller.acquire":
-    case "recovery.resume": {
+    case "controller.acquire": {
       expectKeys(input, ["kind"]);
       return { kind };
     }
+    case "recovery.resume":
+      throw new WorkbenchJobError("workbench/unsupported");
     default:
       throw new WorkbenchJobError("workbench/invalid-input");
   }
@@ -918,8 +883,7 @@ function parseStatus(value: unknown): JobStatus | undefined {
     value === "running" ||
     value === "succeeded" ||
     value === "failed" ||
-    value === "cancelled" ||
-    value === "recovery-required"
+    value === "cancelled"
   ) {
     return value;
   }
@@ -956,6 +920,7 @@ function affectedSpaceIds(command: WorkbenchCommand): string[] {
     case "space.create":
     case "plan.execute":
     case "controller.acquire":
+      return [];
     case "recovery.resume":
       return [];
   }

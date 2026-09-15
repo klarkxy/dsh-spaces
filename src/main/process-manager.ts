@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import { createConnection, createServer } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import { t } from "../shared/i18n";
+import { formatWorkbenchFailure } from "../shared/workbench";
 import type { ProfileStatus } from "../shared/types";
 import { ensureDshCli, runDsh, spawnNode } from "./dsh-cli";
 import { PatchWriter, PatchVerifyError } from "./patch-writer";
@@ -511,7 +512,19 @@ export class ProcessManager {
         abort.abort(new Error(t("errors.exitedBeforeReady")));
         return;
       }
-      this.fail(instance.name, t("errors.exitedUnexpectedly"));
+      const code = instance.child.exitCode;
+      const signal = instance.child.signalCode;
+      this.fail(
+        instance.name,
+        formatWorkbenchFailure({
+          spaceId: instance.name,
+          stage: "run",
+          pluginAttribution: "unknown",
+          reason: t("errors.exitedUnexpectedly"),
+          exitCode: code,
+          signal,
+        }),
+      );
     });
   }
 

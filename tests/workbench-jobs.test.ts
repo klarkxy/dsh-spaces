@@ -21,6 +21,7 @@ import {
   publicJobKeys,
   type WorkbenchJobHandler,
 } from "../src/adapters/node/workbench-jobs.ts";
+import { formatWorkbenchFailure } from "../src/shared/workbench.ts";
 import type { WorkbenchCommand } from "../src/shared/workbench.ts";
 
 const temps: string[] = [];
@@ -93,15 +94,24 @@ test("same request id concurrent submit runs the handler once", async () => {
   assert.equal(store.job("req-1").status, "succeeded");
 });
 
-test("uncertain maintenance keeps the interrupted job and blocks later side effects", async () => {
+test("handler failure is a failed job and does not block later work", async () => {
   const store = new WorkbenchJobStore({ home: tempHome() });
-  await store.submit(startCmd(), "uncertain", async () => { throw new WorkbenchJobError("workbench/recovery-required"); });
+  await store.submit(startCmd(), "uncertain", async () => {
+    throw new WorkbenchJobError("workbench/failed", WORKBENCH_JOB_ERROR["workbench/failed"], {
+      spaceId: "alpha",
+      stage: "start",
+      pluginAttribution: "unknown",
+    });
+  });
   await store.whenIdle();
-  assert.equal(store.job("uncertain").status, "recovery-required");
+  assert.equal(store.job("uncertain").status, "failed");
+  assert.equal(store.job("uncertain").error?.spaceId, "alpha");
+  assert.equal(store.job("uncertain").error?.pluginAttribution, "unknown");
   let called = false;
-  await assert.rejects(async () => store.submit(startCmd("beta"), "later", async () => { called = true; }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/recovery-required");
-  assert.equal(called, false);
+  await store.submit(startCmd("beta"), "later", async () => { called = true; });
+  await store.whenIdle();
+  assert.equal(called, true);
+  assert.equal(store.job("later").status, "succeeded");
 });
 
 test("same request id with a different payload is rejected", async () => {
@@ -258,7 +268,7 @@ test("ignoring abort keeps the handler's real result", async () => {
   assert.equal(done.result?.spaceId, "alpha");
 });
 
-test("startup leftover queued jobs are recovery-required and are not replayed", async () => {
+test("startup leftover queued jobs are failed interrupted and are not replayed", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   const createdAt = "2026-09-12T00:00:00.000Z";
@@ -292,11 +302,12 @@ test("startup leftover queued jobs are recovery-required and are not replayed", 
   await store.whenIdle();
   assert.equal(ran, 0);
   const job = store.job("legacy-1");
-  assert.equal(job.status, "recovery-required");
+  assert.equal(job.status, "failed");
   assert.equal(job.phase, "copy-files");
   assert.equal(job.requestId, "legacy-1");
   assert.equal(job.canCancel, false);
   assert.equal("command" in job, false);
+  assert.match(job.error?.message ?? "", /unconfirmed|interrupted/i);
   assert.equal(writes, 1);
 
   const onDisk = JSON.parse(readFileSync(jobFile(home, "legacy-1"), "utf8")) as {
@@ -304,32 +315,31 @@ test("startup leftover queued jobs are recovery-required and are not replayed", 
     phase: string;
     command: WorkbenchCommand;
   };
-  assert.equal(onDisk.status, "recovery-required");
+  assert.equal(onDisk.status, "failed");
   assert.equal(onDisk.phase, "copy-files");
   assert.deepEqual(onDisk.command, { kind: "space.start", spaceId: "alpha" });
 
   const same = await store.submit(startCmd("alpha"), "legacy-1", async () => {
     ran += 1;
   });
-  assert.equal(same.status, "recovery-required");
+  assert.equal(same.status, "failed");
   await store.whenIdle();
   assert.equal(ran, 0);
 
-  await assert.rejects(
-    () => store.submit(startCmd("beta"), "new-start", async () => {
-      ran += 1;
-    }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/recovery-required",
-  );
-
-  const resume = await store.submit({ kind: "recovery.resume" }, "resume-1", async () => {
+  await store.submit(startCmd("beta"), "new-start", async () => {
     ran += 1;
   });
   await store.whenIdle();
-  assert.equal(resume.kind, "recovery.resume");
-  assert.equal(store.job("resume-1").status, "succeeded");
   assert.equal(ran, 1);
-  assert.equal(store.job("legacy-1").status, "recovery-required");
+  assert.equal(store.job("new-start").status, "succeeded");
+
+  await assert.rejects(
+    () => store.submit({ kind: "recovery.resume" }, "resume-1", async () => {
+      ran += 1;
+    }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
+  assert.equal(store.job("legacy-1").status, "failed");
 });
 
 test("public job views omit internal fields; unknown errors stay static", async () => {
@@ -358,7 +368,7 @@ test("public job views omit internal fields; unknown errors stay static", async 
   assert.equal(encoded.includes("private-launch-token"), false);
 });
 
-test("a corrupt job file is recovery-required and the original bytes are kept", async () => {
+test("a corrupt job file is failed unreadable and the original bytes are kept", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   writeFileSync(jobFile(home, "broken-1"), "{not-json", "utf8");
@@ -366,7 +376,8 @@ test("a corrupt job file is recovery-required and the original bytes are kept", 
   const jobs = store.list();
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0]?.id, "broken-1");
-  assert.equal(jobs[0]?.status, "recovery-required");
+  assert.equal(jobs[0]?.status, "failed");
+  assert.equal(jobs[0]?.error?.code, "workbench/unreadable");
   assert.equal("command" in jobs[0]!, false);
   assert.equal(readFileSync(jobFile(home, "broken-1"), "utf8"), "{not-json");
 });
@@ -395,9 +406,9 @@ test("unreadable history cannot be settled into a fabricated terminal job", asyn
   writeFileSync(jobFile(home, "unknown"), "{broken", "utf8");
   const store = new WorkbenchJobStore({ home });
   await assert.rejects(() => store.settleRecovery("unknown", { status: "failed" }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/recovery-required");
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported");
   assert.equal(readFileSync(jobFile(home, "unknown"), "utf8"), "{broken");
-  assert.equal(new WorkbenchJobStore({ home }).job("unknown").status, "recovery-required");
+  assert.equal(new WorkbenchJobStore({ home }).job("unknown").status, "failed");
 });
 
 test("unknown command kinds and controller.acquire parse as contract input", async () => {
@@ -431,14 +442,15 @@ function validStoredJob(id: string, overrides: Record<string, unknown> = {}): Re
   };
 }
 
-test("unknown schemaVersion is recovery-required and does not look succeeded", async () => {
+test("unknown schemaVersion is failed unreadable and does not look succeeded", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   const raw = `${JSON.stringify(validStoredJob("future-1", { schemaVersion: 999 }), null, 2)}\n`;
   writeFileSync(jobFile(home, "future-1"), raw, "utf8");
   const store = new WorkbenchJobStore({ home });
   const job = store.job("future-1");
-  assert.equal(job.status, "recovery-required");
+  assert.equal(job.status, "failed");
+  assert.equal(job.error?.code, "workbench/unreadable");
   assert.notEqual(job.status, "succeeded");
   assert.equal(readFileSync(jobFile(home, "future-1"), "utf8"), raw);
 });
@@ -456,14 +468,14 @@ test("filename id mismatch does not overwrite another job file", async () => {
   writeFileSync(jobFile(home, "foo"), mismatched, "utf8");
   writeFileSync(jobFile(home, "bar"), legitimate, "utf8");
   const store = new WorkbenchJobStore({ home });
-  assert.equal(store.job("foo").status, "recovery-required");
+  assert.equal(store.job("foo").status, "failed");
   assert.equal(store.job("bar").status, "succeeded");
   assert.equal(store.job("bar").result?.spaceId, "kept");
   assert.equal(readFileSync(jobFile(home, "foo"), "utf8"), mismatched);
   assert.equal(readFileSync(jobFile(home, "bar"), "utf8"), legitimate);
 });
 
-test("missing command or invalid terminal result is recovery-required and keeps the file", async () => {
+test("missing command or invalid terminal result is failed unreadable and keeps the file", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   const missingCommand = validStoredJob("no-cmd");
@@ -475,8 +487,8 @@ test("missing command or invalid terminal result is recovery-required and keeps 
   writeFileSync(jobFile(home, "no-cmd"), missingRaw, "utf8");
   writeFileSync(jobFile(home, "path-ver"), pathResult, "utf8");
   const store = new WorkbenchJobStore({ home });
-  assert.equal(store.job("no-cmd").status, "recovery-required");
-  assert.equal(store.job("path-ver").status, "recovery-required");
+  assert.equal(store.job("no-cmd").status, "failed");
+  assert.equal(store.job("path-ver").status, "failed");
   assert.equal(readFileSync(jobFile(home, "no-cmd"), "utf8"), missingRaw);
   assert.equal(readFileSync(jobFile(home, "path-ver"), "utf8"), pathResult);
 });
@@ -491,11 +503,11 @@ test("a missing jobs directory is empty; only ENOENT counts as absent", async ()
   writeFileSync(join(blocked, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME), "not-a-dir", "utf8");
   assert.throws(
     () => new WorkbenchJobStore({ home: blocked }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/recovery-required",
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unreadable",
   );
 });
 
-test("persist failure on a running job freezes later queued work until settleRecovery", async () => {
+test("persist failure on a running job fails that job and does not freeze later work", async () => {
   const home = tempHome();
   const writes = new Map<string, number>();
   let secondSide = 0;
@@ -521,44 +533,25 @@ test("persist failure on a running job freezes later queued work until settleRec
   assert.equal(second.status, "queued");
   await store.whenIdle();
 
-  assert.equal(store.job("job-first").status, "recovery-required");
-  assert.equal(store.job("job-first").phase, "running");
-  assert.equal(store.job("job-second").status, "cancelled");
-  assert.equal(secondSide, 0);
+  assert.equal(store.job("job-first").status, "failed");
+  assert.equal(store.job("job-second").status, "succeeded");
+  assert.equal(secondSide, 1);
 
   await assert.rejects(
-    () => store.submit(startCmd("three"), "job-third", async () => {
-      secondSide += 1;
+    () => store.submit({ kind: "recovery.resume" }, "job-resume", async () => {
+      return { snapshotId: "snap-1" };
     }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/recovery-required",
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
   );
-
-  const resume = await store.submit({ kind: "recovery.resume" }, "job-resume", async () => {
-    return { snapshotId: "snap-1" };
-  });
-  await store.whenIdle();
-  assert.equal(store.job("job-resume").status, "succeeded");
-  assert.equal(resume.kind, "recovery.resume");
-  assert.equal(store.job("job-first").status, "recovery-required");
-
-  const settled = await store.settleRecovery("job-first", {
-    status: "failed",
-    message: "Interrupted start was rolled back from the journal.",
-  });
-  assert.equal(settled.status, "failed");
-  assert.equal(settled.error?.message, WORKBENCH_JOB_ERROR["workbench/failed"]);
-  assert.match(settled.message, /rolled back/i);
-
   await assert.rejects(
-    () => store.settleRecovery("job-second", { status: "cancelled" }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/invalid-input",
+    () => store.settleRecovery("job-first", { status: "failed" }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
   );
 
   const next = await store.submit(startCmd("three"), "job-third", async () => ({ spaceId: "three" }));
   await store.whenIdle();
   assert.equal(next.kind, "space.start");
   assert.equal(store.job("job-third").status, "succeeded");
-  assert.equal(secondSide, 0);
 });
 
 test("result and view projection drop path, token, and non-loopback origins", async () => {
@@ -673,7 +666,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
   assert.equal(JSON.stringify(store.job("proj-6")).includes("private-entry-token"), false);
 });
 
-test("settleRecovery rejects a path runtimeVersion instead of storing it", async () => {
+test("settleRecovery is unsupported and leftover jobs stay failed", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   writeFileSync(
@@ -682,20 +675,61 @@ test("settleRecovery rejects a path runtimeVersion instead of storing it", async
     "utf8",
   );
   const store = new WorkbenchJobStore({ home });
-  assert.equal(store.job("need-settle").status, "recovery-required");
+  assert.equal(store.job("need-settle").status, "failed");
+  assert.equal(store.job("need-settle").phase, "copy");
   await assert.rejects(
     () =>
       store.settleRecovery("need-settle", {
         status: "succeeded",
-        result: { runtimeVersion: "C:\\Users\\admin\\.dsh\\versions\\0.1.5-rc.1" },
+        result: { runtimeVersion: "0.1.5-rc.1", spaceId: "alpha" },
       }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/invalid-input",
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
   );
-  assert.equal(store.job("need-settle").status, "recovery-required");
-  const settled = await store.settleRecovery("need-settle", {
-    status: "succeeded",
-    result: { runtimeVersion: "0.1.5-rc.1", spaceId: "alpha" },
+  assert.equal(store.job("need-settle").status, "failed");
+});
+
+test("formatWorkbenchFailure names space, stage, plugin-or-unknown, and exit", () => {
+  const known = formatWorkbenchFailure({
+    spaceId: "coding",
+    stage: "加载插件",
+    packageName: "example-plugin@1.2.3",
+    pluginAttribution: "known",
+    reason: "缺少服务 example.database",
+    exitCode: 1,
   });
-  assert.equal(settled.status, "succeeded");
-  assert.equal(settled.result?.runtimeVersion, "0.1.5-rc.1");
+  assert.match(known, /空间 coding/);
+  assert.match(known, /阶段：加载插件/);
+  assert.match(known, /插件：example-plugin@1.2.3/);
+  assert.match(known, /退出码：1/);
+  assert.equal(known.includes("建议重新安装"), false);
+
+  const unknown = formatWorkbenchFailure({
+    spaceId: "coding",
+    stage: "run",
+    pluginAttribution: "unknown",
+    reason: "进程已退出",
+    signal: "SIGKILL",
+  });
+  assert.match(unknown, /未能归属到单个插件/);
+  assert.match(unknown, /SIGKILL/);
+});
+
+test("failure context is stored on the public job error", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(startCmd("coding"), "ctx-1", async () => {
+    throw new WorkbenchJobError("workbench/failed", WORKBENCH_JOB_ERROR["workbench/failed"], {
+      spaceId: "coding",
+      stage: "load-plugin",
+      packageName: "example-plugin@1.2.3",
+      pluginAttribution: "known",
+      exitCode: 1,
+    });
+  });
+  await store.whenIdle();
+  const job = store.job("ctx-1");
+  assert.equal(job.status, "failed");
+  assert.equal(job.error?.spaceId, "coding");
+  assert.equal(job.error?.stage, "load-plugin");
+  assert.equal(job.error?.packageName, "example-plugin@1.2.3");
+  assert.equal(job.error?.exitCode, 1);
 });
