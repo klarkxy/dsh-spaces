@@ -8,7 +8,7 @@ Fault policy: [let it crash](let-it-crash.md). Plugin combinations may fail. Spa
 
 The workbench is a local supervisor on `127.0.0.1` plus a dedicated manager profile. Ordinary workspaces keep their data and get a lightweight view bridge. They do not become a second Spaces manager.
 
-**Target policy / known implementation gap:** this page is the current user contract. Runtime code still contains rescue copy, restore commands, whole-Home snapshot restore, and Doctor `unlock` / `recover` / `rollback` until R1–R6. Those are not current product capabilities. Do not use them as the documented path. Current start still requires `--snapshot-worker` because that worker also runs runtime install and other non-restore IO; do not drop the flag until R4 extracts that execution path.
+Product restore commands are unsupported. Error surfaces keep **查看错误详情** / **复制脱敏日志**. Current start still requires `--snapshot-worker` because that worker also runs runtime install and other non-restore IO.
 
 Chinese: [中文](#dsh-spaces-工作台).
 
@@ -269,7 +269,7 @@ Production Home: add `--allow-real-home` and an explicit `--home`. Doctor does n
 
 工作台 = 绑定 `127.0.0.1` 的独立监督进程 + 专用管理 profile。普通工作空间原地接入，只装轻量视图桥，不会变成第二套 Spaces 管理器。
 
-**目标政策 / 已知实现差距：** 本页是现行用户契约。运行时在 R1–R6 完成前仍含救援文案、恢复命令、整 Home 快照恢复和 Doctor `unlock` / `recover` / `rollback`。它们不是当前产品能力。当前启动仍需要 `--snapshot-worker`，因为它同时承担运行时安装等非恢复 IO；R4 抽出该路径之前不要从可运行命令里删掉。
+公开恢复命令不受理。错误页只留 **查看错误详情** / **复制脱敏日志**。当前启动仍需要 `--snapshot-worker`，因为它同时承担运行时安装等非恢复 IO。
 
 ## 能做什么
 

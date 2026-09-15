@@ -4,7 +4,7 @@
 
 代码基线：本轮文档修订对照 `main@c89dc05`。任务 01 已实测，见 [task-01-write-scope.md](task-01-write-scope.md)。该测量仍有效，但不再作为恢复模块的建设前置，也不默认留到以后继续做恢复。
 
-活动账本：[../todo.md](../todo.md)。运行时迁移 R1–R6 在该账本中为待实施，不因本文档修订而宣称已完成。
+活动账本：[../todo.md](../todo.md)。R1–R6 与 Q 已在账本勾选；缺口见 [../q-coverage.md](../q-coverage.md)。
 
 ## 1. 目标与已定边界
 

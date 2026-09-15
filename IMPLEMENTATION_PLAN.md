@@ -1,6 +1,6 @@
 # DSH Spaces — 施工计划
 
-> **现行范围（2026-09-15）：** 故障政策是 [docs/let-it-crash.md](docs/let-it-crash.md)。活动任务账本是 [tasks/todo.md](tasks/todo.md)。当前直接交付是文档与任务修订（D）；运行时代码迁移是账本中的 R1–R6，未完成前不得声明运行时已符合 let it crash。
+> **现行范围：** 故障政策是 [docs/let-it-crash.md](docs/let-it-crash.md)。活动任务账本是 [tasks/todo.md](tasks/todo.md)。产品路径已按 let it crash 实施；矩阵缺口见 [tasks/q-coverage.md](tasks/q-coverage.md)。
 >
 > 健壮性阶段的有效验收是**错误传播与失败展示**：失败被如实报告，并且没有抢救。不再要求崩溃后通过 Supervisor 或 Doctor 恢复，也不再把恢复未完成列为阻塞。
 >

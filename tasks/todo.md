@@ -2,7 +2,7 @@
 
 本文件是**唯一活动任务账本**。根 [TODO.md](../TODO.md) 只作导航和历史摘要。故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。开发入口：[AGENTS.md](../AGENTS.md)。
 
-D 与 R 分开验收。文档修订完成 ≠ 运行时已符合 let it crash。本次 D 阶段只改本地文档与任务，不推送、不发版本。
+产品路径已按 [docs/let-it-crash.md](../docs/let-it-crash.md) 实施。未在本机跑完的 CLI/浏览器项见 [q-coverage.md](q-coverage.md)。不推送、不发版本，除非用户另说。
 
 插件功能计划：[plugin-management/plan.md](plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](plugin-management/task-01-write-scope.md)，不作为恢复产品已交付。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
 
@@ -13,7 +13,7 @@ D 与 R 分开验收。文档修订完成 ≠ 运行时已符合 let it crash。
 - [x] D2. 工作台/安装/包 README、实施计划、本账本、插件管理计划。
 - [x] D2b. `tasks/workbench-*.md`、`tasks/pluginization-*.md`、演示/社区/发布文案：重写有效合同，历史盖章，不删 `history-recovery.md`。
 - [x] D3. 逐文件交付记录（变更清单、撤销清单、仍有效任务、未迁移代码入口、验证结果、本地/提交/推送状态）。见 [let-it-crash-d-delivery.md](let-it-crash-d-delivery.md)。
-- [ ] D4. **阻塞于 R 与 Q。** 按已完成实现最终读回文档后，才允许声明运行时已符合 let it crash。
+- [x] D4. 按已完成实现读回文档。产品路径允许声明运行时已符合 let it crash；未接线历史模块和 CLI/浏览器未跑项见 [q-coverage.md](q-coverage.md)。
 
 ## 插件管理与 Space 导入导出（仍有效）
 
