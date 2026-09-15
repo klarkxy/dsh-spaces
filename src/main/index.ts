@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { atomicWrite } from "./atomic";
@@ -65,11 +65,13 @@ import {
   listAllProfilePlugins,
   listPluginLibrary,
   listProfilePlugins,
+  pluginAdd,
   pluginRemove,
   removeDownloadedPlugin,
   resolveInstallSpec,
   setSpacePlugin,
 } from "./plugin-ops";
+import { exportSpaceArchive, importSpaceArchive, writeSpaceArchiveFile } from "./space-share";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -348,6 +350,52 @@ function startMain(): void {
     });
   }
 
+  async function exportSpaceShare(name: string, includeConfig = false): Promise<string | null> {
+    if (!mainWindow) return null;
+    const profile = listProfiles().find((item) => item.name === name);
+    if (!profile || name === "web") throw new Error("The web space cannot be exported.");
+    const picked = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: `${profile.meta.displayName || name}.dshspace`,
+      filters: [{ name: "DSH space", extensions: ["dshspace"] }],
+    });
+    if (picked.canceled || !picked.filePath) return null;
+    const archive = exportSpaceArchive(dshHome, name, {
+      displayName: profile.meta.displayName,
+      icon: profile.meta.icon,
+      includeConfig,
+      dshVersion: runtimes.current()?.version ?? null,
+    });
+    writeSpaceArchiveFile(picked.filePath, archive);
+    return picked.filePath;
+  }
+
+  async function importSpaceShare(): Promise<Awaited<ReturnType<typeof importSpaceArchive>> | null> {
+    if (!mainWindow) return null;
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      filters: [{ name: "DSH space", extensions: ["dshspace"] }],
+      properties: ["openFile"],
+    });
+    const file = picked.filePaths[0];
+    if (picked.canceled || !file) return null;
+    const archive = readFileSync(file);
+    return importSpaceArchive(archive, {
+      listSpaceIds: () => listProfiles().map((row) => row.name),
+      createSpace: async (input) => {
+        await createProfile(dshHome, registry, patchWriter, input.name, input.displayName);
+        if (input.icon) registry.updateMeta(input.name, { icon: sanitizeSpaceIcon(input.icon) });
+      },
+      installPlugin: async (spaceId, spec) => {
+        await pluginAdd(dshHome, spaceId, spec);
+      },
+      dshVersion: runtimes.current()?.version ?? null,
+    }, {
+      writePatch: (spaceId, patch) => {
+        atomicWrite(join(dshHome, "profiles", spaceId, "cordis.patch.yml"), patch);
+        patchWriter.ensureWorkbenchPatch(spaceId);
+      },
+    });
+  }
+
   function popupProfileMenu(name: string): void {
     const profile = listProfiles().find((item) => item.name === name);
     if (!profile || !mainWindow) return;
@@ -403,7 +451,14 @@ function startMain(): void {
         label: t("menu.managePlugins"),
         click: () => uiCommand({ type: "plugins", name }),
       },
-      { label: currentSettings.locale === "en" ? "Diagnostics" : "诊断与配置恢复", click: () => uiCommand({ type: "diagnostics", name }) },
+      {
+        label: currentSettings.locale === "en" ? "Export space…" : "导出空间…",
+        enabled: name !== "web",
+        click: () => {
+          void exportSpaceShare(name).catch(reportError);
+        },
+      },
+      { label: currentSettings.locale === "en" ? "Diagnostics" : "诊断", click: () => uiCommand({ type: "diagnostics", name }) },
       { type: "separator" },
       {
         label: name === "web" ? t("menu.deleteDisabled") : t("menu.delete"),
@@ -612,6 +667,14 @@ function startMain(): void {
     });
     handle("showProfileMenu", (_event, name: string) => {
       popupProfileMenu(name);
+    });
+    handle("exportSpaceShare", async (_event, name: string, includeConfig?: boolean) => {
+      assertAvailable();
+      return exportSpaceShare(name, includeConfig === true);
+    });
+    handle("importSpaceShare", async () => {
+      assertAvailable();
+      return importSpaceShare();
     });
     handle(
       "createProfile",
