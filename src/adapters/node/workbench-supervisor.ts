@@ -554,9 +554,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
     }
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    if (this.recoveryRequired) {
-      throw new WorkbenchPublicError("workbench/unavailable");
-    }
     const job = await this.jobs.submit(command, requestId, (ctx) =>
       this.observeChildWork(() => this.runCommand(command, ctx)),
     );
@@ -700,7 +697,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
         this.recoveryRequired = true;
-        this.reasons = ["Manager initialization did not complete. Its local diagnostic record is available for recovery."];
+        this.reasons = ["Manager initialization did not complete. Its local diagnostic record is available."];
         atomicWrite(join(this.controlDir, "manager-bootstrap-error.json"), `${JSON.stringify({
           version: 1, at: this.now().toISOString(),
           detail: sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 4000),
@@ -1568,14 +1565,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private refreshRecovery(): void {
     const extra: string[] = [];
     if (!this.jobs?.list().some(job => job.status === "running")) {
-      if (this.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance must be recovered before new changes.");
+      if (this.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance journal is present.");
     }
 
     if (!this.cli) extra.push(WORKBENCH_ERROR["workbench/incompatible"]);
     if (this.managerId && this.managerInstall !== "manager") {
-      extra.push("The manager profile cannot be used until recovery.");
+      extra.push("The manager profile cannot be used.");
     }
-    if (this.unmanaged.size) extra.push("Leftover processes were not adopted. Recovery is required for those instances.");
+    if (this.unmanaged.size) extra.push("Leftover processes were not adopted.");
     if (this.maintenanceBlocked) extra.push("Owned processes could not be stopped. Run rights were kept.");
     this.reasons = [...new Set([
       ...this.reasons.filter(reason => !this.derivedRecoveryReasons.has(reason)),
@@ -1601,7 +1598,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private heldReasons(inspection: ReturnType<HomeController["inspect"]>): string[] {
     if (!inspection.held) return [];
     if ("owner" in inspection && inspection.liveness === "dead") {
-      return ["A previous controller is dead. Click acquire to reclaim proven-dead run rights."];
+      return ["A previous controller is dead. Run rights were not taken."];
     }
     if ("owner" in inspection && inspection.liveness === "ambiguous") {
       return ["Controller ownership is ambiguous and was not stolen."];

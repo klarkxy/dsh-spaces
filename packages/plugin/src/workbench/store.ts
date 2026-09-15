@@ -437,10 +437,6 @@ export class WorkbenchController {
     void this.submit({ kind: "controller.acquire" });
   };
 
-  resume = (): void => {
-    void this.submit({ kind: "recovery.resume" });
-  };
-
   setPluginQuery = (pluginQuery: string): void => this.patch({ pluginQuery });
   setPluginSpace = (pluginSpaceId: string): void => this.patch({ pluginSpaceId });
   setPluginCatalog = (pluginCatalogId: string, pluginVersion?: string): void => {
@@ -537,7 +533,7 @@ export class WorkbenchController {
   canMutate(): boolean {
     const state = this.ui.state;
     if (!state) return false;
-    return state.writable === true && !state.recoveryRequired;
+    return state.writable === true;
   }
 
   isBusy(): boolean {
@@ -740,11 +736,7 @@ export class WorkbenchController {
   }
 
   private async submit(command: WorkbenchCommand): Promise<void> {
-    if (
-      command.kind !== "controller.acquire" &&
-      command.kind !== "recovery.resume" &&
-      !this.canMutate()
-    ) {
+    if (command.kind !== "controller.acquire" && !this.canMutate()) {
       this.rejectReadonly();
       return;
     }

@@ -39,7 +39,7 @@ export const zh: Messages = {
 
   "crash.title": "这个空间已停止",
   "crash.fallback": "这个空间意外停止了。",
-  "crash.hint": "可以重启，或在左侧栏选另一个空间。",
+  "crash.hint": "查看错误详情 / 复制脱敏日志",
   "crash.restart": "重启",
 
   "empty.title": "点左侧空间开始",
@@ -135,7 +135,7 @@ export const zh: Messages = {
   "settings.pluginQueueBusy": "插件队列：{count} 个等待",
   "settings.pluginQueueBusyCurrent": "插件队列：{count} 个等待（{current}）",
   "settings.tabGeneral": "常规",
-  "settings.tabRuntime": "版本与恢复",
+  "settings.tabRuntime": "版本",
   "plugins.title": "插件",
   "plugins.tabManage": "管理",
   "plugins.tabMarket": "市场",

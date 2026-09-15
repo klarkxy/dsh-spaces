@@ -4,7 +4,7 @@ import { DSH_DEFAULT_VERSION, preferredTaggedVersion, type RuntimeCatalog } from
 import type { SnapshotMeta } from "@shared/snapshots";
 import type { UpgradePreview, UpgradePhase } from "@shared/upgrade";
 import { useI18n } from "../i18n";
-import { isDataOnlySnapshot, restoreOptionsFor } from "../recovery";
+import { isDataOnlySnapshot } from "../recovery";
 
 export function MaintenancePanel({
   onChanged,
@@ -21,12 +21,11 @@ export function MaintenancePanel({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [confirmation, setConfirmation] = useState<{ kind: "upgrade"; version: string; preview: UpgradePreview } | { kind: "restore" | "delete"; snapshot: SnapshotMeta } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ kind: "upgrade"; version: string; preview: UpgradePreview } | { kind: "delete"; snapshot: SnapshotMeta } | null>(null);
   const [phase, setPhase] = useState<UpgradePhase | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
-  const [dataOnlyAck, setDataOnlyAck] = useState(false);
   const refresh = async () => setState(await window.dshSpaces.getMaintenance());
-  // `changed` marks real mutations (snapshot create/restore/delete, upgrade apply);
+  // `changed` marks real mutations (snapshot create/delete, upgrade apply);
   // read-only queries and previews must not reset parent state or the fault view.
   const run = async (label: string, action: () => Promise<unknown>, success = "", changed = false) => {
     setBusy(label); setError(""); setNotice(""); setPhase(null);
@@ -59,11 +58,11 @@ export function MaintenancePanel({
     snapshot: say("备份当前状态", "Backing up current state"), install: say("准备运行版本", "Preparing runtime"),
     stage: say("准备官方插件", "Preparing official plugins"), verify: say("检查配置", "Checking configuration"),
     smoke: say("验证启动", "Checking startup"), commit: say("应用新版本", "Applying new version"),
-    rollback: say("恢复升级前状态", "Restoring previous state"), done: say("完成", "Done"),
+    rollback: say("升级未提交", "Upgrade was not committed"), done: say("完成", "Done"),
   };
-  const confirmSnapshot = (id: string, kind: "restore" | "delete") => void run(t("common.working"), async () => {
+  const confirmSnapshot = (id: string) => void run(t("common.working"), async () => {
     const snapshot = await window.dshSpaces.previewSnapshot(id);
-    setAcknowledged(false); setDataOnlyAck(false); setConfirmation({ kind, snapshot });
+    setAcknowledged(false); setConfirmation({ kind: "delete", snapshot });
   });
   const button = "rounded border px-3 py-1.5 text-sm disabled:opacity-40";
   const preferred = catalog ? preferredTaggedVersion(catalog) : undefined;
@@ -121,42 +120,25 @@ export function MaintenancePanel({
         <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{say("完整快照", "Full snapshots")}</h3>
           <button className={button} disabled={disabled || !state?.inventory.current} onClick={() => void run(say("正在停止空间并创建快照…", "Stopping spaces and creating snapshot…"), () => window.dshSpaces.createSnapshot(), say("快照已创建，空间保持停止。", "Snapshot created. Spaces remain stopped."), true)}>{say("停止空间并创建快照", "Stop spaces and create snapshot")}</button>
         </div>
-        <p className="my-2" style={{ color: "var(--text-muted)" }}>{say("包含配置、插件、聊天、存储和运行时。保留当前登录信息与外部源文件。恢复前会自动备份当前状态。", "Includes configuration, plugins, chats, storage and runtime. Current sign-in information and external source files are preserved. Restore first backs up the current state.")}</p>
+        <p className="my-2" style={{ color: "var(--text-muted)" }}>{say("包含配置、插件、聊天、存储和运行时。保留当前登录信息与外部源文件。快照不能用于恢复。", "Includes configuration, plugins, chats, storage and runtime. Current sign-in information and external source files are preserved. Snapshots cannot be restored.")}</p>
         {!state?.snapshots.length ? <p>{say("暂无快照。", "No snapshots yet.")}</p> : null}
         {state?.snapshots.map(row => {
           const dataOnly = isDataOnlySnapshot(row);
           return <div key={row.id} className="flex items-center justify-between gap-3 border-b py-3" style={{ borderColor: "var(--border)" }}>
           <div><p>{new Date(row.createdAt).toLocaleString()} · DSH {row.runtimeVersion}{dataOnly ? ` · ${say("仅数据备份（运行时缺失）", "Data-only backup (runtime missing)")}` : ""}</p><p style={{ color: "var(--text-muted)" }}>{row.profiles.join(", ")} · {(row.size / 1048576).toFixed(1)} MB{dataOnly ? ` · ${say("只保留数据，不能直接恢复运行环境。", "Keeps data only; not a restorable runtime environment.")}` : ""}</p></div>
-          <div className="flex shrink-0 gap-2">{dataOnly ? null : <button className={button} disabled={disabled} onClick={() => confirmSnapshot(row.id, "restore")}>{say("预览与恢复", "Preview and restore")}</button>}<button className={button} disabled={disabled} onClick={() => confirmSnapshot(row.id, "delete")}>{say("删除", "Delete")}</button></div>
+          <div className="flex shrink-0 gap-2"><button className={button} disabled={disabled} onClick={() => confirmSnapshot(row.id)}>{say("删除", "Delete")}</button></div>
         </div>;
         })}
       </section>
       {confirmation ? <section className="rounded border p-4" style={{ borderColor: "var(--accent)" }}>
-        <h3 className="font-semibold">{confirmation.kind === "upgrade" ? say(`切换到 ${confirmation.version}`, `Apply ${confirmation.version}`) : confirmation.kind === "restore" ? say("恢复此快照", "Restore this snapshot") : say("删除此快照", "Delete this snapshot")}</h3>
+        <h3 className="font-semibold">{confirmation.kind === "upgrade" ? say(`切换到 ${confirmation.version}`, `Apply ${confirmation.version}`) : say("删除此快照", "Delete this snapshot")}</h3>
         <p className="my-2 break-words">{confirmation.kind === "upgrade" ? say("受影响空间：", "Affected spaces: ") + (state?.profiles.join(", ") || "—") : `${new Date(confirmation.snapshot.createdAt).toLocaleString()} · DSH ${confirmation.snapshot.runtimeVersion} · ${confirmation.snapshot.profiles.join(", ")}`}</p>
         {confirmation.kind === "upgrade" ? <table className="my-3 w-full text-left text-xs"><thead><tr><th>{say("空间", "Space")}</th><th>{say("官方插件版本", "Official plugin versions")}</th><th>{say("保留的第三方插件", "Third-party plugins preserved")}</th></tr></thead><tbody>{confirmation.preview.profiles.map(row => <tr key={row.name}><td className="py-2">{row.name}</td><td>{row.official.map(plugin => `${plugin.name}: ${plugin.from || "—"} → ${plugin.to || "—"}`).join("; ")}</td><td>{row.thirdParty.join(", ") || "—"}</td></tr>)}</tbody></table> : null}
         <label className="my-3 flex items-start gap-2"><input type="checkbox" checked={acknowledged} disabled={disabled} onChange={event => setAcknowledged(event.target.checked)} />
-          <span>{confirmation.kind === "delete" ? say("确认永久删除这份快照。正在使用的快照无法删除。", "Permanently delete this snapshot. An active snapshot cannot be deleted.") : confirmation.kind === "restore" ? say("确认停止所有空间，用快照覆盖当前配置、插件和聊天，包括移除快照之后新增的数据。当前状态会先备份；恢复后不自动启动。", "Stop all spaces and replace current configuration, plugins and chats, including removing data created after this snapshot. Current state is backed up first; spaces will not automatically restart.") : say("确认停止所有空间，备份后协调更新官方插件。成功后空间保持停止；失败时恢复备份。", "Stop all spaces, take a snapshot, then update official plugins together. Spaces remain stopped on success; failure restores the backup.")}</span>
+          <span>{confirmation.kind === "delete" ? say("确认永久删除这份快照。正在使用的快照无法删除。", "Permanently delete this snapshot. An active snapshot cannot be deleted.") : say("确认停止所有空间，备份后协调更新官方插件。成功后空间保持停止；失败时保留失败现场。", "Stop all spaces, take a snapshot, then update official plugins together. Spaces remain stopped on success; failure keeps the failed state.")}</span>
         </label>
-        {confirmation.kind === "restore" && !state?.inventory.current ? (
-          <>
-            <p className="my-2 text-xs" style={{ color: "var(--warn)" }}>
-              {say("当前运行时损坏或丢失，无法备份：恢复前会先备份当前数据，但损坏/丢失的当前运行时无法备份；该备份保留数据，不是可直接恢复的完整运行环境。", "The current runtime is damaged or missing and cannot be backed up: your current data is still backed up before the restore, but that backup preserves data only — it is not a complete, directly restorable runtime environment.")}
-            </p>
-            <label className="my-3 flex items-start gap-2"><input type="checkbox" checked={dataOnlyAck} disabled={disabled} onChange={event => setDataOnlyAck(event.target.checked)} />
-              <span>{say("我已了解：这份备份仅保留数据。", "I understand this backup preserves data only.")}</span>
-            </label>
-          </>
-        ) : null}
-        <div className="flex gap-3"><button className={button} disabled={disabled || !acknowledged || (confirmation.kind === "restore" && !state?.inventory.current && !dataOnlyAck)} onClick={() => {
+        <div className="flex gap-3"><button className={button} disabled={disabled || !acknowledged} onClick={() => {
           const action = confirmation;
-          if (action.kind === "restore") {
-            const options = restoreOptionsFor(Boolean(state?.inventory.current), dataOnlyAck);
-            if (options === null) return;
-            setConfirmation(null);
-            void run(say("正在执行，请保持应用开启…", "Working. Keep the app open…"), () => window.dshSpaces.restoreSnapshot(action.snapshot.id, options), say("操作完成。", "Operation complete."), true);
-            return;
-          }
           setConfirmation(null);
           void run(say("正在执行，请保持应用开启…", "Working. Keep the app open…"), () => action.kind === "upgrade" ? window.dshSpaces.upgradeRuntime(action.version) : window.dshSpaces.deleteSnapshot(action.snapshot.id), say("操作完成。", "Operation complete."), true);
         }}>{say("确认执行", "Confirm")}</button><button className={button} disabled={disabled} onClick={() => setConfirmation(null)}>{say("取消", "Cancel")}</button></div>

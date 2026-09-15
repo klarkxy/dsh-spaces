@@ -568,28 +568,29 @@ body[data-chrome="1"] #banner,body[data-jobs="1"] #jobs{display:block}
 .job{display:flex;gap:.75rem;margin:.35rem 0}
 .job b{min-width:7rem}
 iframe{flex:1;border:0;width:100%;background:#000}
-#recovery{display:none;padding:1.5rem;max-width:48rem}
-body[data-mode="recovery"] #recovery{display:block}
-body[data-mode="live"] #recovery{display:none}
+#idle{display:none;padding:1.5rem;max-width:48rem}
+body[data-mode="idle"] #idle{display:block}
+body[data-mode="live"] #idle{display:none}
 #error{display:none;padding:.5rem 1rem;background:#3b1d1d;color:#fecaca}
 button{background:#3b82f6;color:#fff;border:0;border-radius:6px;padding:.45rem .8rem;margin-right:.5rem;cursor:pointer}
 button.secondary{background:#334155}
 ul{padding-left:1.2rem}
 </style>
 </head>
-<body data-mode="recovery">
+<body data-mode="idle">
 <div id="shell">
 <div id="error"></div>
-<div id="banner"><strong id="banner-title">稳定入口</strong><span id="banner-sub"></span></div>
+<div id="banner"><strong id="banner-title">工作台入口</strong><span id="banner-sub"></span></div>
 <div id="jobs"><div id="job-list"></div></div>
 <iframe id="manager-frame" title="spaces-hub" hidden></iframe>
-<main id="recovery">
-<h1 id="recovery-title">救援入口</h1>
+<main id="idle">
+<h1 id="idle-title">工作台入口</h1>
 <p>监督进程不随管理 profile 停机。关闭浏览器标签不会停止已启动的工作空间。</p>
+<p>查看错误详情</p>
 <ul id="reasons"></ul>
 <p>
 <button id="acquire">接管运行权</button>
-<button id="resume" class="secondary">检查并恢复</button>
+<button id="copy-logs" class="secondary">复制脱敏日志</button>
 <button id="refresh" class="secondary">刷新</button>
 </p>
 </main>
@@ -630,19 +631,27 @@ function visibleJobs(jobs) {
     job.status === "queued" || job.status === "running" ||
     job.status === "failed");
 }
+function jobLog(state) {
+  const lines = [];
+  for (const row of state.reasons || []) lines.push(String(row));
+  for (const job of state.jobs || []) {
+    lines.push([job.kind, job.status, job.phase, job.message, job.error && job.error.message].filter(Boolean).join(" · "));
+  }
+  return lines.join("\\n");
+}
 function applyState(state) {
   const manager = (state.spaces || []).find((row) => row.id === state.managerId);
-  const live = Boolean(manager && manager.status === "running" && !state.maintenance && !state.recoveryRequired);
+  const live = Boolean(manager && manager.status === "running" && !state.maintenance);
   const jobs = state.jobs || [];
   const active = state.maintenance || visibleJobs(jobs);
-  document.body.dataset.mode = live ? "live" : "recovery";
-  document.body.dataset.chrome = (!live || active || state.recoveryRequired) ? "1" : "0";
+  document.body.dataset.mode = live ? "live" : "idle";
+  document.body.dataset.chrome = (!live || active) ? "1" : "0";
   document.body.dataset.jobs = active ? "1" : "0";
-  document.getElementById("banner-title").textContent = live ? "工作台入口在线" : "管理环境不可用，稳定入口仍在线";
+  document.getElementById("banner-title").textContent = live ? "工作台入口在线" : "管理环境不可用，入口仍在线";
   document.getElementById("banner-sub").textContent = state.writable
     ? (state.maintenance ? "维护进行中" : "当前进程持有运行权")
     : "只读。接管前不会安装或启动管理环境。";
-  document.getElementById("recovery-title").textContent = state.recoveryRequired ? "需要恢复" : state.maintenance ? "维护中" : "救援入口";
+  document.getElementById("idle-title").textContent = state.maintenance ? "维护中" : "工作台入口";
   document.getElementById("reasons").innerHTML = (state.reasons || []).length
     ? state.reasons.map((row) => "<li>" + escapeHtml(row) + "</li>").join("")
     : "<li>管理进程未在运行。可查看任务进度或接管运行权。</li>";
@@ -676,22 +685,13 @@ document.getElementById("acquire").addEventListener("click", async () => {
     showError(error instanceof Error ? error.message : String(error));
   }
 });
-document.getElementById("resume").addEventListener("click", async () => {
+document.getElementById("copy-logs").addEventListener("click", async () => {
   try {
-    const submitted = await api("submit", { command: { kind: "recovery.resume" }, requestId: crypto.randomUUID() });
-    let current = submitted;
-    for (let i = 0; i < 120; i += 1) {
-      if (current.status !== "queued" && current.status !== "running") break;
-      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
-      current = await api("job", { id: submitted.id });
-    }
-    await refresh();
-    if (current.status !== "succeeded") {
-      showError(current.message || (current.error && current.error.message) || "Recovery is still required.");
-    }
+    const state = await api("state");
+    const text = jobLog(state);
+    if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
-    await refresh();
   }
 });
 void refresh();

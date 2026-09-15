@@ -513,14 +513,14 @@ test("stale failed handshake does not hide the still-selected ready space", asyn
   assert.equal(ui.visibleSpaceId, "alpha");
   assert.equal(ui.viewError?.spaceId, "beta");
   const html = ready(ctrl);
-  assert.ok(html.includes(t("zh", "app.retry")));
-  assert.ok(html.includes(t("zh", "app.diagnose")));
+  assert.ok(html.includes(t("zh", "app.errorDetails")));
+  assert.ok(html.includes(t("zh", "app.copyLogs")));
   assert.ok(html.includes(t("zh", "app.openIndependent")));
   assert.ok(html.includes('data-space-id="alpha"'));
   assert.ok(html.includes('data-visible="true"'));
 });
 
-test("readonly rejects mutations but still allows queries and acquire/resume", async () => {
+test("readonly rejects mutations but still allows queries and acquire", async () => {
   const api = fakeApi({
     state: async () =>
       state({
@@ -542,10 +542,8 @@ test("readonly rejects mutations but still allows queries and acquire/resume", a
   assert.equal(api.calls.some((item) => item.method === "plugins"), true);
   ctrl.acquire();
   await flush();
-  ctrl.resume();
-  await flush();
   const submits = api.calls.filter((item) => item.method === "submit").map((item) => (item.arg as { command: WorkbenchCommand }).command.kind);
-  assert.deepEqual(submits, ["controller.acquire", "recovery.resume"]);
+  assert.deepEqual(submits, ["controller.acquire"]);
   const html = ready(ctrl);
   assert.ok(html.includes("disabled"));
   assert.ok(html.includes(t("zh", "app.readonly")) || html.includes(t("zh", "app.recovery")));
@@ -719,6 +717,8 @@ test("SSR ready home shows management actions and plugin install wording", async
   await flush();
   const snap = ready(ctrl);
   assert.ok(snap.includes(t("zh", "snapshots.create")));
+  assert.ok(!snap.includes(t("zh", "snapshots.restore")));
+  assert.ok(!snap.includes("snapshot.restore"));
   ctrl.setHomeTab("runtime");
   await flush();
   const runtime = ready(ctrl);
@@ -741,7 +741,7 @@ test("workspace iframe src is only the authorized view and pending stays hidden"
   assert.ok(html.includes('hidden=""') || html.includes("hidden"));
 });
 
-test("RecoverySurface shows reasons, jobs, acquire and resume without a manager iframe", async () => {
+test("RecoverySurface shows reasons, jobs and acquire without a manager iframe", async () => {
   const api = fakeApi({
     state: async () =>
       state({
@@ -758,7 +758,8 @@ test("RecoverySurface shows reasons, jobs, acquire and resume without a manager 
   );
   assert.ok(html.includes(t("zh", "recovery.title")));
   assert.ok(html.includes(t("zh", "recovery.acquire")));
-  assert.ok(html.includes(t("zh", "recovery.resume")));
+  assert.ok(html.includes(t("zh", "app.copyLogs")));
+  assert.ok(html.includes(t("zh", "app.errorDetails")));
   assert.ok(!html.includes("<iframe"));
   const readyHtml = renderToStaticMarkup(
     React.createElement(WorkbenchView, {

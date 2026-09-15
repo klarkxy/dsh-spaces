@@ -45,9 +45,7 @@ import {
 } from "../shared/desktop-controller";
 import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
-import { RestoreSession } from "./restore-session";
 import type { MaintenanceView } from "../shared/maintenance-view";
-import type { RestoreSnapshotOptions } from "../shared/snapshots";
 import { readSettings, writeSettings } from "./hub-settings";
 import { applyNativeTheme, currentColorScheme } from "./native-theme";
 import { nodeExecutable, setPackageSource, setToolchainRoot, toolchainRoot } from "./toolchain";
@@ -195,24 +193,12 @@ function startMain(): void {
   const upgrades = new CoordinatedUpgrade({
     home: dshHome, profiles: () => registry.scanOnboarding().profiles.map(row => row.name),
     workerFile: join(__dirname, "snapshot-worker.mjs").replace("app.asar", "app.asar.unpacked"),
-    observeChild: () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Maintenance process identity needs recovery.")),
+    observeChild: () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Maintenance process identity could not be verified.")),
     stopAll: () => processes.stopAll(), drainPlugins: drainPluginQueue,
     snapshots, runtimes, runtimeDescriptor: () => describeRuntime(runtimes.current()),
     onProgress: (progress) => broadcast("maintenance-progress", progress),
   });
   let diagnostics = makeDiagnostics();
-  const restore = new RestoreSession({
-    snapshots,
-    runtimes,
-    applyRestoredSettings: () => {
-      currentSettings = readSettings(dshHome);
-      applyAppLocale(currentSettings.locale);
-      applyNativeTheme(currentSettings.theme);
-      processes.setPortRange(currentSettings.portStart, currentSettings.portEnd);
-      setPackageSource(currentSettings.packageSource);
-      diagnostics = makeDiagnostics();
-    },
-  });
 
   function makeDiagnostics(): DiagnosticsService {
     return new DiagnosticsService({
@@ -223,18 +209,20 @@ function startMain(): void {
   }
 
   function assertAvailable(): void {
-    restore.assertAvailable(quitInProgress);
+    if (quitInProgress) {
+      throw new Error("The application is exiting. Wait for shutdown to finish.");
+    }
   }
 
   async function mutate<T>(action: () => T | Promise<T>): Promise<T> {
     assertAvailable();
     return desktop.mutate(() => withChildObservation(
-      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity needs recovery.")), action));
+      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity could not be verified.")), action));
   }
 
   function runMaintenance<T>(label: string, action: () => Promise<T>): Promise<T> {
     return desktop.runMaintenance(label, () => withChildObservation(
-      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity needs recovery.")), async () => {
+      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity could not be verified.")), async () => {
       const result = await action();
       persistHomeToolchain();
       return result;
@@ -253,12 +241,8 @@ function startMain(): void {
       toolchainRoot: toolchainRoot(), boundAt: new Date().toISOString() }, null, 2)}\n`);
   }
 
-  async function finishRestore(): Promise<void> {
-    await restore.finishRestore();
-  }
-
   function maintenanceView(): MaintenanceView {
-    let error = restore.recoveryError;
+    let error = "";
     let inventory: MaintenanceView["inventory"] = { installed: [] };
     let stored: MaintenanceView["snapshots"] = [];
     try { inventory = runtimes.inventory(); } catch (err) { error ||= String(err); }
@@ -454,12 +438,7 @@ function startMain(): void {
     handle("upgradeRuntime", (_event, version: string) => {
       assertAvailable();
       return runMaintenance("upgrade", async () => {
-        try { await upgrades.upgrade(version); await finishRestore(); }
-        catch (err) {
-          try { await upgrades.recover(); await finishRestore(); }
-          catch (recovery) { restore.recoveryError = `Upgrade needs recovery: ${String(recovery)}`; }
-          throw err;
-        }
+        await upgrades.upgrade(version);
       });
     });
     handle("installRuntimeVersion", (_event, version: string) => {
@@ -474,14 +453,8 @@ function startMain(): void {
       });
     });
     handle("previewSnapshot", (_event, id: string) => snapshots.preview(id));
-    handle("restoreSnapshot", (_event, id: string, options?: RestoreSnapshotOptions) => {
-      if (quitInProgress) throw new Error("The application is exiting.");
-      return runMaintenance("snapshot-restore", async () => {
-        await drainPluginQueue(); await processes.stopAll();
-        await restore.restoreSnapshot(id, {
-          allowDataOnlyBackup: options?.allowDataOnlyBackup === true,
-        });
-      });
+    handle("restoreSnapshot", async () => {
+      throw new Error("Snapshot restore is not supported.");
     });
     handle("deleteSnapshot", (_event, id: string) => {
       assertAvailable();
@@ -722,19 +695,6 @@ function startMain(): void {
     setToolchainRoot(sharedResources?.toolchainRoot ?? join(app.getPath("userData"), "toolchain"));
     if (desktop.held) {
       await desktop.admitWrites();
-      if (desktop.writable) {
-        try {
-          await runMaintenance("startup-recovery", async () => {
-            await upgrades.recover();
-            await restore.recoverOnStartup();
-          });
-        } catch (err) {
-          if (!restore.recoveryError) {
-            restore.recoveryError = `Restore needs recovery before spaces can start: ${String(err)}`;
-          }
-          desktop.revokeAdmission("Interrupted restore must be recovered before new changes.");
-        }
-      }
     }
     registerIpc();
     if (process.env.DSH_SPACES_SMOKE === "1") {
@@ -778,7 +738,6 @@ function startMain(): void {
         },
       },
     );
-    if (restore.recoveryError) mainWindow.webContents.once("did-finish-load", () => reportError(restore.recoveryError));
     app.on("activate", () => {
       showMainWindow();
     });

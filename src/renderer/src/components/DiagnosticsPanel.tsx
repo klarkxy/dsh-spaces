@@ -4,7 +4,7 @@ import { DiagnosticsDialog } from "./DiagnosticsDialog";
 import { Card, Overlay } from "./Overlay";
 import { useI18n } from "../i18n";
 
-export function DiagnosticsPanel({ name, onClose, onChanged }: {
+export function DiagnosticsPanel({ name, onClose, onChanged: _onChanged }: {
   name: string; onClose: () => void; onChanged: () => Promise<unknown>;
 }) {
   const { t, locale } = useI18n();
@@ -48,10 +48,6 @@ export function DiagnosticsPanel({ name, onClose, onChanged }: {
       const request = sequence.current;
       const next = await window.dshSpaces.previewConfigBackup(name, id);
       if (sequence.current === request) setPreview(next);
-    })}
-    onRestore={(id) => void perform(async () => {
-      await window.dshSpaces.restoreConfigBackup(name, id);
-      setPreview(null); await refresh(); await onChanged();
     })}
   />;
 }

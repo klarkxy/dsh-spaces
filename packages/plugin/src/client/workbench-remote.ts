@@ -33,6 +33,7 @@ export const KNOWN_WORKBENCH_ERROR_CODES: ReadonlySet<string> = new Set([
   "workbench/conflict",
   "workbench/locked",
   "workbench/unavailable",
+  "workbench/unsupported",
   "workbench/recovery-required",
   "workbench/read-only",
   "workbench/forbidden",

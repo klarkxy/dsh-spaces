@@ -37,7 +37,7 @@ export const en = {
 
   "crash.title": "This space stopped",
   "crash.fallback": "This space stopped unexpectedly.",
-  "crash.hint": "Restart it, or pick a different space on the left.",
+  "crash.hint": "View error details / Copy redacted logs",
   "crash.restart": "Restart",
 
   "empty.title": "Pick a space to get started",
@@ -139,7 +139,7 @@ export const en = {
   "settings.pluginQueueBusy": "{count} plugin jobs waiting",
   "settings.pluginQueueBusyCurrent": "{count} plugin jobs waiting ({current})",
   "settings.tabGeneral": "General",
-  "settings.tabRuntime": "Versions and recovery",
+  "settings.tabRuntime": "Versions",
   "plugins.title": "Plugins",
   "plugins.tabManage": "Manage",
   "plugins.tabMarket": "Market",

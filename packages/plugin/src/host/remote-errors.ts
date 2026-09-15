@@ -12,6 +12,7 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
     "workbench/conflict": {};
     "workbench/locked": {};
     "workbench/unavailable": {};
+    "workbench/unsupported": {};
     "workbench/recovery-required": {};
     "workbench/read-only": {};
     "workbench/forbidden": {};
@@ -35,6 +36,7 @@ export const WORKBENCH_REMOTE_CODES = [
   "workbench/conflict",
   "workbench/locked",
   "workbench/unavailable",
+  "workbench/unsupported",
   "workbench/recovery-required",
   "workbench/read-only",
   "workbench/forbidden",
@@ -50,7 +52,8 @@ export const WORKBENCH_PUBLIC_ERROR: Record<WorkbenchRemoteCode, string> = {
   "workbench/conflict": "A job with this request already exists for a different command.",
   "workbench/locked": "Another workbench operation is already running.",
   "workbench/unavailable": "The workbench service could not complete this request.",
-  "workbench/recovery-required": "Workbench identity is damaged. Recovery is required.",
+  "workbench/unsupported": "That command is not supported.",
+  "workbench/recovery-required": "Workbench identity is damaged.",
   "workbench/read-only": "The workbench is read-only until control is acquired.",
   "workbench/forbidden": "This profile cannot perform that workbench action.",
   "workbench/not-cancellable": "This job cannot be cancelled in its current phase.",
