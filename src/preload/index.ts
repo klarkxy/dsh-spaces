@@ -94,6 +94,10 @@ const api = {
   selectProfile: (name: string): Promise<{ port: number }> => ipcRenderer.invoke("selectProfile", name),
   createProfile: (name: string, displayName?: string, icon?: string): Promise<ProfileRecord[]> =>
     ipcRenderer.invoke("createProfile", name, displayName, icon),
+  exportSpaceShare: (name: string, includeConfig?: boolean): Promise<string | null> =>
+    ipcRenderer.invoke("exportSpaceShare", name, includeConfig),
+  importSpaceShare: (): Promise<import("../shared/space-share").SpaceImportResult | null> =>
+    ipcRenderer.invoke("importSpaceShare"),
   pickSpaceIcon: (): Promise<string | null> => ipcRenderer.invoke("pickSpaceIcon"),
   updateMeta: (name: string, patch: Partial<SpaceMeta>): Promise<SpaceMeta> =>
     ipcRenderer.invoke("updateMeta", name, patch),

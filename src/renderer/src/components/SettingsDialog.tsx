@@ -38,6 +38,7 @@ export function SettingsDialog({
   const showQuitKeepHint = initial.quitBehavior === "keep" && !initial.quitKeepHintDismissed;
   const [packageSource, setPackageSource] = useState<PackageSource>(initial.packageSource);
   const [locale, setLocale] = useState<LocalePreference>(initial.locale);
+  const [shareNotice, setShareNotice] = useState("");
   const [theme, setTheme] = useState<ThemePreference>(initial.theme);
 
   // A maintenance action (e.g. snapshot create) rewrites settings on disk and
@@ -126,6 +127,36 @@ export function SettingsDialog({
             <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
               {t("settings.dshHomeHint")}
             </p>
+            <button
+              type="button"
+              className="btn-ghost mt-4 rounded px-3 py-1.5 text-sm"
+              onClick={() => {
+                void (async () => {
+                  setShareNotice("");
+                  const result = await window.dshSpaces.importSpaceShare();
+                  if (!result) return;
+                  const lines = [
+                    `definition: ${result.definition}`,
+                    `plugins: ${result.plugins}`,
+                    `start: ${result.start}`,
+                    ...result.errors,
+                    ...result.pendingManual.map((row) => `${row.packageName}: ${row.source}`),
+                  ];
+                  setShareNotice(lines.join("\n"));
+                  await onMaintenanceChanged();
+                })();
+              }}
+            >
+              {t("settings.importSpace")}
+            </button>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
+              {t("settings.importSpaceHint")}
+            </p>
+            {shareNotice ? (
+              <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-xs" role="status">
+                {shareNotice}
+              </pre>
+            ) : null}
             <div className="mt-4 grid grid-cols-2 gap-3">
               <label className="text-xs" style={{ color: "var(--text-label)" }}>
                 {t("settings.portStart")}
