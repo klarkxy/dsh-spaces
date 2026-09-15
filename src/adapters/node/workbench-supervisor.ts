@@ -645,12 +645,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     const inspection = this.controller.inspect();
     if (inspection.held) {
-      if ("owner" in inspection && inspection.liveness === "dead") {
-        const reclaimed = this.controller.reclaimDead();
-        if (!reclaimed.reclaimed) throw new WorkbenchPublicError("workbench/busy");
-      } else {
-        throw new WorkbenchPublicError("workbench/busy");
-      }
+      throw new WorkbenchPublicError("workbench/busy");
     }
     this.handle = this.controller.acquire("web", this.origin);
     this.sealing = false;

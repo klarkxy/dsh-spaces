@@ -235,16 +235,7 @@ export class CoordinatedUpgrade {
       } catch (killErr) {
         throw combine(err, killErr);
       }
-      if (this.readJournal()?.phase === "committing") {
-        this.progress("rollback");
-        try {
-          await this.rollbackSnapshot(snapshot.id);
-          this.clearJournal();
-          await this.discardStage();
-        } catch (rollbackErr) {
-          throw combine(err, rollbackErr);
-        }
-      } else if (!this.committed) {
+      if (!this.committed && this.readJournal()?.phase !== "committing") {
         this.clearJournal();
         await this.discardStage();
       }
@@ -254,58 +245,13 @@ export class CoordinatedUpgrade {
     }
   }
 
-  async restore(id: string, planId?: string): Promise<RestoreResult> {
-    this.committed = false;
-    this.assertClear();
-    this.progress("drain");
-    await (this.opts.drainPlugins ?? defaultDrainPlugins)();
-    this.progress("stop");
-    await this.opts.stopAll();
-    const result = await this.opts.snapshots.restore(id, this.opts.runtimeDescriptor(), { planId });
-    await this.opts.runtimes.selectExisting({
-      bin: this.opts.snapshots.runtimeBin(id),
-      version: result.restored.runtimeVersion,
-    });
-    await this.opts.snapshots.completeRestore();
-    this.progress("done");
-    return result;
+  async restore(_id: string, _planId?: string): Promise<RestoreResult> {
+    throw new Error("Snapshot restore is not supported.");
   }
 
-  async recover(options: { receiptPlanId?: string } = {}): Promise<{ upgradeRolledBack?: boolean; upgradePlanId?: string; restoreCompleted?: boolean;
+  async recover(_options: { receiptPlanId?: string } = {}): Promise<{ upgradeRolledBack?: boolean; upgradePlanId?: string; restoreCompleted?: boolean;
     restoreRolledBack?: boolean; restoreReceipt?: RestoreRecoveryReceipt }> {
-    this.committed = false;
-    await this.ensureCandidatesGone();
-    if (this.readJournal()?.phase === "committing") await this.restoreProfilesBackup();
-    const pending = (await this.opts.snapshots.recover()) ?? this.opts.snapshots.pendingRestore();
-    if (pending) {
-      await this.opts.runtimes.selectExisting({
-        bin: this.opts.snapshots.runtimeBin(pending.snapshotId),
-        version: pending.runtimeVersion,
-      });
-      await this.opts.snapshots.completeRestore();
-      this.clearJournal();
-      await this.discardStage();
-      return { restoreCompleted: true, restoreReceipt: this.opts.snapshots.recoveryReceipt?.() };
-    }
-    const journal = this.readJournal();
-    if (journal?.phase === "committing") {
-      this.progress("rollback");
-      await this.rollbackSnapshot(journal.snapshotId);
-      this.clearJournal();
-      await this.discardStage();
-      return { upgradeRolledBack: true, upgradePlanId: journal.planId };
-    }
-    this.clearJournal();
-    await this.discardStage();
-    if (journal?.phase === "preparing") return journal.planId
-      ? { upgradeRolledBack: true, upgradePlanId: journal.planId } : {};
-    const foundReceipt = options.receiptPlanId ? this.opts.snapshots.recoveryReceipt?.() : undefined;
-    const receipt = foundReceipt?.planId === options.receiptPlanId ? foundReceipt : undefined;
-    return receipt ? {
-      restoreCompleted: receipt.outcome === "completed",
-      restoreRolledBack: receipt.outcome === "rolled-back",
-      restoreReceipt: receipt,
-    } : {};
+    throw new Error("Upgrade recovery is not supported.");
   }
 
   private assertClear(): void {

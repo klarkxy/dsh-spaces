@@ -90,7 +90,7 @@ export class DiagnosticsService {
       logs: stored.entries.slice(),
       logError: stored.logError,
       backups: name === "web" ? [] : this.listBackups(name),
-      canRestore: profile.name !== "web" && profile.kind !== "root",
+      canRestore: false,
     };
   }
 
@@ -138,49 +138,8 @@ export class DiagnosticsService {
     return { ...meta, content };
   }
 
-  async restoreBackup(name: string, backupId: string): Promise<void> {
-    const profile = this.requireProfile(name);
-    this.assertRestorable(profile);
-    if (this.isMaintenance()) {
-      throw new Error("Cannot restore configuration while the app is in maintenance.");
-    }
-    const meta = this.statBackup(name, backupId);
-    if (meta.tooLarge) {
-      throw new Error(
-        `Backup ${backupId} is larger than 1 MiB (${meta.size} bytes). Refusing to restore or truncate.`,
-      );
-    }
-    const backupPath = this.resolvedBackupFile(name, backupId);
-    const candidate = readFileSync(backupPath, "utf8");
-    const profileDir = this.walkManaged(["profiles", name], false);
-    const patchPath = join(profileDir, "cordis.patch.yml");
-    this.assertManagedExistingDir(profileDir);
-    if (existsSync(patchPath)) this.assertRegularManagedFile(patchPath, "cordis.patch.yml");
-
-    await this.stop(name);
-
-    const hadCurrent = existsSync(patchPath);
-    if (hadCurrent) this.assertRegularManagedFile(patchPath, "cordis.patch.yml");
-    const original = hadCurrent ? readFileSync(patchPath, "utf8") : null;
-    if (hadCurrent && original !== null) {
-      this.backupCurrentPatch(patchPath, original);
-    }
-
-    atomicWrite(patchPath, candidate);
-    try {
-      this.writer.ensureWorkbenchPatch(name);
-      await this.verify(name);
-    } catch (err) {
-      const reason = errorMessage(err);
-      try {
-        this.rollbackPatch(patchPath, original);
-      } catch (rollbackErr) {
-        throw new Error(
-          `Configuration restore failed: ${reason}. Rollback failed: ${errorMessage(rollbackErr)}.`,
-        );
-      }
-      throw new Error(`Configuration restore failed: ${reason}. The previous configuration was restored.`);
-    }
+  async restoreBackup(_name: string, _backupId: string): Promise<void> {
+    throw new Error("Configuration restore is not supported.");
   }
 
   private requireProfile(name: string): ProfileRecord {
