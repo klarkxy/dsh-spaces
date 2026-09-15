@@ -1,3 +1,10 @@
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+隔离、鉴权、单写者、原子写、错误报告，以及用户主动的启动、停止、重启、安装、卸载和配置，仍有效。救援入口、检查并恢复、恢复中断任务、配置恢复、整 Home 恢复、Doctor `unlock`/`recover`/`rollback`、失败回滚、失败重试和中断续接 **已撤销**，不是延期，不勾成已完成。剩余运行时工作见账本 R1–R6（pending）。下文是当时实施与验收记录，不是现行恢复门槛。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # Workbench 维护分发验收脚本（审计重试交接）
 
 日期：2026-09-12。分支：`codex/spaces-pluginization`。只改本叶子两个文件。未改产品源码，未跑真实 DSH/Chromium。
@@ -6,7 +13,7 @@
 
 针对主 Agent 实跑 `all` 的测试缺陷做了验收脚本修正，**不是产品修复**。根上次结果：plugins 全过；`snapshot.create` 成功；`snapshot.restore` 查询 job 遇 `ECONNRESET` 即进入 catch/cleanup；`runtime.install` 查询 job 30s 超时同样截断。当时 snapshot 任务已到 reinitialize、runtime 仍在 install。
 
-本轮保持严格 FAIL，但长操作会在原 `JOB_MS`/`RUNTIME_MS` 内收齐终态再结束。不能声称 SnapshotExecutor / CoordinatedUpgrade / RuntimeStore 已修好。
+本轮保持严格 FAIL，但长操作会在原 `JOB_MS`/`RUNTIME_MS` 内收齐终态再结束。不能声称 SnapshotExecutor / CoordinatedUpgrade / RuntimeStore 已修好。现行验收改为：失败可见、无额外恢复性修改；`snapshot.restore` 成功不再是通过条件。
 
 ## 产物
 
@@ -62,7 +69,7 @@ node scripts/verify-workbench-maintenance-product.mjs --phase snapshot
 
 ## 覆盖 / 未覆盖
 
-覆盖项仍是 plugins 安装卸载读回、config restore 隔离变换、整 Home 快照恢复、runtime install+upgrade rc1、rc2 upgrade 拒绝、requestId 幂等、关浏览器不结束服务。
+现行覆盖：plugins 安装卸载读回、runtime install+upgrade rc1（提交前失败不切换指针）、rc2 upgrade 拒绝、requestId 幂等、关浏览器不结束服务。config restore 与整 Home 快照恢复成功：**已撤销**，不再作为本脚本通过条件。当时脚本仍调用那些 API，是 R4/R6 差距，不是继续验收恢复成功。
 
 本叶子未跑真实 DSH/Chromium。snapshot/runtime 产品响应性由另一叶子修，本脚本只避免测试自己截断证据。
 

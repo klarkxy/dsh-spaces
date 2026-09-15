@@ -1,6 +1,13 @@
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+隔离、鉴权、单写者、原子写、错误报告，以及用户主动的启动、停止、重启、安装、卸载和配置，仍有效。救援入口、检查并恢复、恢复中断任务、配置恢复、整 Home 恢复、Doctor `unlock`/`recover`/`rollback`、失败回滚、失败重试和中断续接 **已撤销**，不是延期，不勾成已完成。剩余运行时工作见账本 R1–R6（pending）。下文是当时实施与验收记录，不是现行恢复门槛。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # 标准插件安装与最新 CLI（2026-09-13）
 
-目标：用户经官方 dsh plugin --profile web add 安装预构建 Spaces 包，在普通 Web 中点“初始化 Spaces”，即可创建独立管理空间并进入工作台；不要求用户手动传 Home、CLI、tarball、worker 等内部路径。保留独立 supervisor、共享核心、单 Home 单写者与稳定救援入口。
+目标：用户经官方 dsh plugin --profile web add 安装预构建 Spaces 包，在普通 Web 中点“初始化 Spaces”，即可创建独立管理空间并进入工作台；不要求用户手动传 Home、CLI、tarball、worker 等内部路径。保留独立 supervisor、共享核心、单 Home 单写者与稳定入口。稳定救援入口作为产品能力 **已撤销**。初始化失败结束该次请求并说明原因，下次打开不自动补装、重建或续接。
 
 基线：C:/0 code/DSH Space，codex/spaces-recovery，HEAD dfe9ae0 加当前未提交恢复代码。原改动和用户两个 tgz 不得覆盖删除。源快照保存 .sandbox/plugin-standard-install/baseline/。
 
@@ -11,7 +18,7 @@
 1. 普通 profile 继续无 manager 写 remotes，不更改其 role 来绕过权限。新增 guide.initialize() 为显式、无路径参数初始化动作；页面加载/role/bootstrap 查询不应自动启动 supervisor。
 2. initialize 只接受已确认 Home/profile 身份、无损坏状态；复用现有 attach/lease/manager allocator，不偷取活跃控制权，不覆盖普通空间，不强停未知进程。已有 supervisor 则附着；已有 manager 但已停止则在明确动作后重启同一管理环境。
 3. 从已安装包内置 payload 定位 supervisor/view-bridge/worker，复制到 Home 外工具目录。初始化结果沿用安全 loopback handoff；重复点击合并，同 Home 重入不创建多个管理器。生产 Home 操作需实际用户点击授权，不能靠浏览器任意路径或全局关闭 Home 防护。
-4. 前端保持普通 DSH 页面和插件共存，仅管理 profile 使用工作台根视图。提示初始化/进入工作台、初始化中的进度与可重试失败；中英文。
+4. 前端保持普通 DSH 页面和插件共存，仅管理 profile 使用工作台根视图。提示初始化/进入工作台、初始化中的进度与失败原因；中英文。失败可重试作为产品入口 **已撤销**；用户再次点击是新请求。
 5. 发布 npm 预构建包，完整 exports/bundle/client/README/license/repository/keywords；保留 scoped 包与 monorepo，GitHub 根目录不冒充可安装插件。pnpm 命令作用户入口，已有 npm 锁和安装体系不顺手重构。
 
 ## 分工与顺序

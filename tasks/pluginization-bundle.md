@@ -1,5 +1,13 @@
 # Plugin bundle layer (`dsh.bundle.patch`)
 
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+官方 `dsh.bundle.patch` 安装/卸载、隔离、鉴权、单写者锁与错误报告仍有效。`snapshotRoot` 仍是可选配置；未配置时如实显示不可用。**restore-core、独立救援、恢复 CLI、Doctor recover/unlock/rollback、快照恢复、失败回滚不是现行需求。** 失败不得自动重装、重建或续跑。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
 日期：2026-09-12。叶子 `executor_bundle`。未跑 `npm pack` / 构建 / 真实 Host。
 
 后续主 Agent 已通过真实 CLI 安装、自动启用、同版本替换与同 profile 卸载验收，见 [可分发试用验收](pluginization-trial-acceptance.md)。本文件下文保留施工交接时的验证范围。

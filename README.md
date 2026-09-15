@@ -2,13 +2,15 @@
 
 **Spaces for DeepSeek Harness — switch your DSH workspaces like Discord servers.**
 
-> **This development branch is still under construction and acceptance. It is not a release.** Desktop isolation, safety, and license below still apply. The workbench is documented in [docs/workbench.md](docs/workbench.md).
+> **This development branch is still under construction and acceptance. It is not a release.** Desktop isolation, safety, and license below still apply. The workbench is documented in [docs/workbench.md](docs/workbench.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md).
 
 Plugin installation: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then open **工作台 → 初始化 Spaces** in ordinary DSH Web. Supported CLI: **0.1.5-rc.1 and 0.1.5-rc.2**. The local plugin is not yet published to npm.
 
-A desktop shell and a DSH-native workbench, sharing the same isolation and recovery core. The desktop rail embeds the official DSH Web UI. The workbench supervisor binds `127.0.0.1`, owns Home run rights, and embeds workspaces in iframes behind a 72px space rail. Community / open source. Desktop targets Windows / macOS / Linux.
+A desktop shell and a DSH-native workbench, sharing isolation, lifecycle management, and error reporting. The desktop rail embeds the official DSH Web UI. The workbench supervisor binds `127.0.0.1`, owns Home run rights, and embeds workspaces in iframes behind a 72px space rail. Community / open source. Desktop targets Windows / macOS / Linux.
 
-中文说明见下方 [中文](#dsh-spaces-中文)。
+DSH Spaces does **not** promise that arbitrary plugin combinations will run. Plugin errors, dependency conflicts, incompatible config, start failures, and process crashes are allowed outcomes. Spaces records the failure and reports the known cause, or says the cause is unknown. It does not recover a failed environment — not automatically, and not through a manual repair wizard.
+
+中文说明见下方 [中文](#dsh-spaces-中文).
 
 ## Why
 
@@ -32,31 +34,31 @@ Comparison checked against published documentation on 2026-09-08, not a performa
 
 - **No Spaces telemetry.** Model calls and installed plugins use their own network configuration.
 - **`web` isolation protection.** Spaces never applies storage-root overrides to `web` or migrates its existing chats.
-- **Backups.** Any write to `cordis.patch.yml` first copies `cordis.patch.yml.bak-<timestamp>`.
-- **Atomic writes.** `spaces.json` and patches use same-volume temp + rename (not `%TEMP%`).
-- **Start gate.** Workbenches run `dsh --profile <name> --dump-config` first. Missing/wrong row ids refuse to start (A8).
+- **Backups before write.** Any write to `cordis.patch.yml` first copies `cordis.patch.yml.bak-<timestamp>`. That is a pre-commit safety copy, not a product restore flow.
+- **Atomic writes.** `spaces.json` and patches use same-volume temp + rename (not `%TEMP%`). A failed prepare does not replace the previous file. That is not rollback of a committed result.
+- **Start gate.** Workbenches run `dsh --profile <name> --dump-config` first. Missing/wrong row ids refuse to start (A8). Refusal explains; it does not auto-correct the patch.
 - **Dev sandbox.** Unpackaged builds use `.sandbox/dsh-home`. Tests refuse the real `~/.dsh`.
 
 The supervisor and doctor use the same production-home guard: disposable Homes do not pass `--allow-real-home`; a Home you actually use must be an explicit `--home` plus that flag. Same Home: desktop and Web share one write lease. Closing a workbench browser tab does not stop instances; an explicit shutdown does. The supervisor does not claim every DSH process on the machine. Unregistered manual instances are a known gap — [external discovery](tasks/workbench-external-discovery.md).
 
-## Runtime upgrades and recovery
+## Failures
 
-Version 0.2.0 includes process lifecycle controls, tray behavior, diagnostics, and coordinated DSH upgrades with recoverable snapshots. App updates and DSH runtime upgrades are separate operations. Explicit runtime upgrades may update official base plugins in `web`, while its isolation patch remains protected. See the [acceptance record](tasks/fix-acceptance-2026-09-11.md) for tested desktop scenarios and platform limits.
+See [docs/let-it-crash.md](docs/let-it-crash.md). Spaces reports what happened (space, stage, plugin or unknown, reason, exit code or signal) in still-available UI or local output. Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management actions. They are not recovery.
 
-The workbench reuses whole-Home snapshots, plugin install/remove, and config restore through the supervisor. Final runtime upgrade, kill-fault recovery, CLI `0.1.5-rc.2` support, manager-plugin self-upgrade, and a new intro video are **still in acceptance** on this branch. Do not read this README as those items being done.
+**Target policy / known implementation gap:** this document describes the current product contract. Runtime code still contains restore commands, rescue copy, snapshot restore, and Doctor `unlock` / `recover` / `rollback` until tasks R1–R6. Those are not current requirements and must not be used as the documented user path. Do not read this README as “runtime already complies with let it crash.”
 
-Recovery normally saves a complete backup before replacing data. If the current runtime is missing or damaged, recovery requires explicit confirmation to preserve the current data without that runtime. Such backups are marked as data-only and cannot be applied as complete runtime snapshots. Recovery must finish before spaces can start or modify data. When the plugin cannot load, use standalone [doctor](packages/doctor/README.md).
+App updates and DSH runtime upgrades remain separate operations. Explicit runtime upgrades may update official base plugins in `web`, while its isolation patch remains protected. Candidate install that never switches the current pointer is a failed prepare, not a restore. After a committed switch, a later fault is reported in place; Spaces does not switch back.
 
 ## Requirements
 
 - Node 24 for contributing; the app also installs a managed Node, pnpm, and DSH CLI on first launch
 - Package source is selectable: China (npmmirror) or official (npmjs / nodejs.org)
 - Keep official base plugins matched to the selected CLI rather than independently following plugin dist-tags. First install uses `@deepseek-ai/dsh@0.1.5-rc.2`.
-- Workbench write gate is CLI **`0.1.5-rc.1` only**. Plugin peers on SDK `0.1.5-rc.2`; that is not CLI 2. Isolated candidate builds are in-repo verification, not a user bypass.
+- Workbench write gate is CLI **`0.1.5-rc.1` and `0.1.5-rc.2`**. Plugin peers on SDK `0.1.5-rc.2`; that is not CLI 2. Isolated candidate builds are in-repo verification, not a user bypass.
 
 ## Develop
 
-Desktop development still uses the sandbox Home. Workbench supervisor, packing, and product-Home flags: [docs/workbench.md](docs/workbench.md). Plugin roles (manager vs guide-only): [packages/plugin/README.md](packages/plugin/README.md).
+Desktop development still uses the sandbox Home. Workbench supervisor, packing, and product-Home flags: [docs/workbench.md](docs/workbench.md). Plugin roles (manager vs guide-only): [packages/plugin/README.md](packages/plugin/README.md). Current remaining work: [tasks/todo.md](tasks/todo.md).
 
 Do not install the full plugin into an ordinary profile as the way to get management. `npm run validate:distribution` / `validate:plugin` remain isolated checks; they are not the new architecture install path.
 
@@ -73,7 +75,7 @@ npm run dev
 
 Local supervisor (disposable Home, after `npm run build:spaces` and packing plugin + view-bridge tarballs to an absolute directory **outside** the packages):
 
-See the full command, including `--plugin-artifact`, `--view-bridge-artifact`, `--node`, `--snapshot-worker`, and `--control-tool-root`, in [docs/workbench.md](docs/workbench.md). Omitting those flags leaves the manager or iframe handshake incomplete.
+See the full command, including `--plugin-artifact`, `--view-bridge-artifact`, `--node`, `--snapshot-worker`, and `--control-tool-root`, in [docs/workbench.md](docs/workbench.md). Omitting those flags leaves the manager or iframe handshake incomplete. **Target policy / known implementation gap:** `--snapshot-worker` is still required by the current supervisor for runtime install and maintenance execution. It is not a documented restore product. Do not drop the flag from a working start command until R4 extracts the non-restore execution path.
 
 ## Build
 
@@ -94,9 +96,11 @@ MIT. See `LICENSE`.
 
 **Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
 
-> **本分支仍在施工和验收，不是一次发布。** 下面的桌面隔离、安全和许可证仍然有效。工作台（独立 `127.0.0.1` 监督进程、专用管理 profile、iframe 空间）见 [docs/workbench.md](docs/workbench.md)。不要把本地构建或 candidate 包当成已发布产品，或当成绕过官方 CLI 门禁的方法。
+> **本分支仍在施工和验收，不是一次发布。** 下面的桌面隔离、安全和许可证仍然有效。工作台（独立 `127.0.0.1` 监督进程、专用管理 profile、iframe 空间）见 [docs/workbench.md](docs/workbench.md)。故障政策见 [docs/let-it-crash.md](docs/let-it-crash.md)。不要把本地构建或 candidate 包当成已发布产品，或当成绕过官方 CLI 门禁的方法。
 
-桌面壳与 DSH 原生工作台共用隔离规则和恢复核心。桌面版左侧是官方 profile 图标栏，右侧内嵌官方 Web UI。工作台监督进程只绑 `127.0.0.1`，持有 Home 运行权，用 72px 空间栏嵌入各工作空间。桌面版面向 Windows / macOS / Linux。
+桌面壳与 DSH 原生工作台共用隔离规则、生命周期管理和错误报告。桌面版左侧是官方 profile 图标栏，右侧内嵌官方 Web UI。工作台监督进程只绑 `127.0.0.1`，持有 Home 运行权，用 72px 空间栏嵌入各工作空间。桌面版面向 Windows / macOS / Linux。
+
+插件由用户自由选择和组合。Spaces **不承诺**任意插件组合都能正常运行，也不负责把失败的环境修复成可运行状态。出错时如实记录并说明已知原因或明确未知。不提供自动或手动恢复。
 
 ## 数据规则
 
@@ -110,13 +114,15 @@ MIT. See `LICENSE`.
 
 ## 安全
 
-Spaces 不添加自己的遥测；上游 DSH 和插件遵循各自网络设置。`web` 不写工作台隔离 patch，但运行 DSH 会正常写入其配置和聊天。写工作台 patch 前保留备份；启动前用真实 `dump-config` 校验。工作台隔离聊天和存储，不是文件访问沙箱。开发测试默认使用 `.sandbox/dsh-home`，不要拿生产 `~/.dsh` 当试验 Home。
+Spaces 不添加自己的遥测；上游 DSH 和插件遵循各自网络设置。`web` 不写工作台隔离 patch，但运行 DSH 会正常写入其配置和聊天。写工作台 patch 前保留备份（提交前安全副本，不是产品恢复流程）；启动前用真实 `dump-config` 校验，校验失败就拒绝并说明原因，不自动改 patch。工作台隔离聊天和存储，不是文件访问沙箱。开发测试默认使用 `.sandbox/dsh-home`，不要拿生产 `~/.dsh` 当试验 Home。
 
 同一 Home 桌面和 Web 只有一个写控制者；关浏览器标签不停实例，设置里的「预览关闭」才停监督进程。监督进程不会接管本机所有未登记的手工 DSH。[外部发现缺口](tasks/workbench-external-discovery.md)。
 
-恢复快照前通常会完整备份当前状态。当前运行时损坏或丢失时，需要明确确认后，才能先保存当前数据再恢复；该备份会标为“仅数据备份”，不能作为完整运行环境直接恢复。恢复流程完成前，空间不能启动或修改数据。插件加载不了时用独立 [doctor](packages/doctor/README.md)。
+故障政策见 [docs/let-it-crash.md](docs/let-it-crash.md)。错误页只提供错误详情和脱敏日志；不提供救援入口、检查并恢复、恢复中断任务、配置恢复或整 Home 恢复。
 
-本分支已在隔离 Home 验证过基础 iframe / 稳定入口、部分主题、空间栏操作、桌面与 Web 运行权、插件与一次整 Home 快照恢复。最终运行时升级、kill 故障恢复、CLI `0.1.5-rc.2`、管理插件自升级和新视频仍在验收，不能当成已经完成。
+**目标政策 / 已知实现差距：** 本文是现行产品契约。运行时在 R1–R6 完成前仍含恢复命令、救援文案、快照恢复和 Doctor `unlock` / `recover` / `rollback`。它们不是当前产品能力，也不能当作文档化的用户路径。本文不宣称运行时已符合 let it crash。
+
+本分支已在隔离 Home 验证过基础 iframe / 稳定入口、部分主题、空间栏操作、桌面与 Web 运行权、插件安装。最终运行时升级、CLI `0.1.5-rc.2` 之外的兼容、管理插件自升级和新视频仍在验收，不能当成已经完成。历史上曾作为产品能力验收的整 Home 快照恢复、kill 故障恢复、配置恢复，自 2026-09-15 起不再是施工与发布门槛。
 
 ## 开发
 
@@ -129,7 +135,9 @@ npm run validate:isolation
 npm run dev
 ```
 
-`npm run dev` 使用 `.sandbox/dsh-home`。工作台监督进程的完整启动参数（plugin / view-bridge / node / snapshot-worker / control-tool-root，缺一不可）见 [docs/workbench.md](docs/workbench.md)。不要在应用占用同一套 sandbox profile 时跑隔离/生命周期脚本。
+`npm run dev` 使用 `.sandbox/dsh-home`。工作台监督进程的完整启动参数（plugin / view-bridge / node / snapshot-worker / control-tool-root，缺一不可）见 [docs/workbench.md](docs/workbench.md)。当前启动仍需要 `--snapshot-worker`，因为它同时承担运行时安装等非恢复执行；在 R4 抽出该能力之前不要从可运行教程里删掉。不要在应用占用同一套 sandbox profile 时跑隔离/生命周期脚本。
+
+活动任务账本：[tasks/todo.md](tasks/todo.md)。
 
 ## 构建
 

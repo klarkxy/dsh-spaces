@@ -1,5 +1,13 @@
 # Spaces plugin — runtime acceptance
 
+## Current contract (2026-09-15)
+
+Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md). Activity ledger: [todo.md](todo.md).
+
+Isolation, Host RPC, auth, lock, and error reporting remain. **Restore-core, independent rescue, restore CLI, Doctor recover/unlock/rollback, snapshot restore, desktop recovery, and fail-rollback are not current requirements.** They are **已撤销**, not deferred Phase 2 work. Remaining runtime work is R1–R6, pending.
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
 Owner: `scripts/verify-spaces-plugin.mjs` (this file). No product/Git/Bridge edits.
 
 Command: `node scripts/verify-spaces-plugin.mjs` (also wired as `npm run validate:plugin`).
@@ -66,8 +74,8 @@ Cleanup is `finally` only: stop the owned PID tree (`taskkill /PID /T /F` on Win
 ## What it does not prove
 
 - **Unknown-version read-only.** Only recorded if the live host already reports `capabilities.mode === "unknown-readonly"`. This CLI is 0.1.5-rc.1 (compatible). The script will not rewrite versions or stub a second runtime.
-- Plugin mutation, snapshot restore, runtime change (Phase 2).
-- Desktop recovery, Electron packaging.
+- Plugin mutation and runtime install/upgrade were out of this script. **Snapshot restore is 已撤销 (2026-09-15), not deferred Phase 2 work.**
+- Desktop recovery is **已撤销**. Electron packaging was out of this script.
 - Anything against production `~/.dsh`.
 
 ## Pending

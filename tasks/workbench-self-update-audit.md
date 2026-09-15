@@ -1,8 +1,15 @@
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+隔离、鉴权、单写者、原子写、错误报告，以及用户主动的启动、停止、重启、安装、卸载和配置，仍有效。救援入口、检查并恢复、恢复中断任务、配置恢复、整 Home 恢复、Doctor `unlock`/`recover`/`rollback`、失败回滚、失败重试和中断续接 **已撤销**，不是延期，不勾成已完成。剩余运行时工作见账本 R1–R6（pending）。下文是当时实施与验收记录，不是现行恢复门槛。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # 工作台自身升级审查（只读叶子）
 
 日期：2026-09-12。分支 `codex/spaces-pluginization`。范围：工作台（监督程序 + 管理 profile 的 `@dsh-spaces/plugin`）是否已有用户可用且安全的闭环。**不是** DSH CLI/`runtime.upgrade`。未启动真实 DSH、浏览器、服务或生产 Home。未改产品源码。
 
-结论：**没有用户可用且安全的工作台自升级闭环。** 现有事务覆盖 DSH runtime 整 Home 升级/回滚、工作空间插件变更、以及**首次**监督冷启动+管理包安装。监督进程不能热替换；已安装的管理包不会在后续冷启动中按新 artifact 刷新。不得把 `runtime.upgrade` 或 Electron `autoUpdater` 当成工作台自升级已完成。
+结论：**没有用户可用且安全的工作台自升级闭环。** 现有事务覆盖 DSH runtime 整 Home 升级（回滚作为产品能力已撤销）、工作空间插件变更、以及**首次**监督冷启动+管理包安装。监督进程不能热替换；已安装的管理包不会在后续冷启动中按新 artifact 刷新。不得把 `runtime.upgrade` 或 Electron `autoUpdater` 当成工作台自升级已完成。与恢复相关的缺口不再作为施工门槛；安全与正常更新缺口仍有效。
 
 ---
 
@@ -102,7 +109,7 @@ Electron `src/main/updater.ts` 6–13：打包桌面应用 `autoUpdater`，与�
 
 - 浏览器只给 catalogId + 精确版本；禁止 path/file/git/URL。
 - 服务端将 catalogId **解析为且仅允许** `@dsh-spaces/plugin`（或将来目录里受保护的官方工作台条目）。禁止任意插件/主题装进 manager。
-- `WorkbenchPlan.scope: "home"`；`destructive: true`；changes 必须写明：停全部 owned、整 Home 快照、替换管理包+view-bridge、监督冷启动、失败则 restore 该快照。
+- `WorkbenchPlan.scope: "home"`；`destructive: true`；changes 必须写明：停全部 owned、替换管理包+view-bridge、用户主动冷启动。失败则报告并保留现场。**失败则 restore 该快照：已撤销**（2026-09-15）。提交前候选失败不切换当前指针，不是回滚。
 - Job result 可沿用 `snapshotId` + 现有 `runtimeVersion` **不要**滥用；工作台身份用服务端日志/control 记录，不把磁盘路径回给浏览器。
 - 无后续发布版本时：服务端用当前 payloadRoot `packLocalArtifacts`（已存在），**不改 package 版本号**；预览 fingerprint 含 payload/plugin **content digest**。测试/验收可注入 artifact 路径，DTO 仍无路径。
 
@@ -114,14 +121,14 @@ Electron `src/main/updater.ts` 6–13：打包桌面应用 `autoUpdater`，与�
 
 1. **preview/plan/fingerprint/TTL** — `WorkbenchMaintenance.buildPlan` 现有计划文件（`PLAN_SCHEMA=1`，5 分钟，执行前重算 fingerprint）。fingerprint 增加：manager 包读回、hub 归档 digest、当前 tools dest digest、pending restore/upgrade journal（已有 journal 字段）。
 2. **`stopAll`** — 已有 ports。
-3. **`snapshots.create(currentRuntime, "workbench")`** — 已有 `runSnapshotCreate` / CoordinatedUpgrade 用的同一 SnapshotExecutor。这是**唯一**回滚源。
+3. **不要**把 `snapshots.create` / SnapshotExecutor 当作升级失败的回滚源。整 Home 快照恢复 **已撤销**。当时建议用它做唯一回滚源，不再作为可施工合同。
 4. **`writePluginMutation`** — 扩展 `expected`：允许 **仅此 kind** 对 manager 执行 `FULL_SPACES_PACKAGE`（及 view-bridge）的 install。其它 kind 仍 forbidden。失败标 `phase:failed`，不重放。
 5. **替换归档 + `pluginAdd`** — 复用 `installArtifact`（supervisor 857–863），**即使** `inspectManagerInstall==="manager"`。归档 id 保持 `dsh-spaces-plugin` / `dsh-spaces-view-bridge`，快照含 `hub/`。
 6. **读回** — 不能只查包名。至少：hub tgz digest、profile 依赖指向该归档、必要时解包 `package.json` name=`@dsh-spaces/plugin`。同版本换内容失败则保持 mutation 日志并走步骤 8。
 7. **control 标记（不是第二套回滚）** — 例如 `.dsh-spaces-control/workbench-upgrade.json`：`{schemaVersion:1, planId, snapshotId, pluginDigest, payloadDigest, phase:"plugin-committed"}`。然后 **`controller.shutdown` / `close()`**（已有 release 路径）。旧监督退出。
-8. **失败/中断恢复** — **只** `CoordinatedUpgrade.restore(snapshotId)` 或已有 `upgrades.recover()` 的 pending-restore 路径。不要回滚 tools 目录（content-addressed 残留无害）。restore 保留 `.dsh-spaces-control`，因此标记仍在：恢复后必须把标记标失败或删除，避免新监督误判。
-9. **冷启动** — 用户/桌面再次打开管理 profile：新插件内嵌 `lib/supervisor` → `bootstrapSupervisor` 附着失败（旧监督已死且 endpoint stale）→ 拷新 payload 到 `{version}-{newDigest}` → pack 新 tgz → spawn。新监督 `initWritable`：manager 已是 manager，**跳过** bootstrap 安装（此时包应已是新归档）。若读回 digest 与标记不一致：`recoveryRequired`，走步骤 8，不猜着再装。
-10. **结算** — 在 `settlementForRecoveredJob` / doctor 增加 **精确** `plan.kind==="workbench.upgrade"` 且 `snapshotId` 匹配：restore 完成 → job `failed`（“工作台升级被整 Home 快照回滚”）；仅当新监督 bearer ping 成功 **且** 管理包 digest 匹配才允许施工把该 job 标 `succeeded`。禁止按 kind 粗匹配。
+8. **失败/中断** — 报告失败或结果无法确认，保留标记与证据。**不要** `CoordinatedUpgrade.restore` / `upgrades.recover()`。整 Home 回滚 **已撤销**。不要回滚 tools 目录（content-addressed 残留无害）。
+9. **冷启动** — 仅用户主动再次打开管理 profile：附着失败则按正常冷启动拷 payload / spawn。digest 与标记不一致：显示错误并 fail closed，**不**设 `recoveryRequired`、不走恢复步骤。
+10. **结算** — job 终态 `succeeded` / `failed` / `cancelled`。禁止 restore 完成后把升级标成回滚成功。doctor 不 settle 恢复 job。
 
 **不要**调用 `CoordinatedUpgrade.upgrade()`。**不要**在旧监督进程内替换自己的可执行文件。
 

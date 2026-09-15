@@ -1,3 +1,4 @@
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # CLI rc.2 正式写门禁（Grok CLI 叶子交接）
 
 日期：2026-09-13。分支 `codex/spaces-recovery`。角色：Grok CLI 叶子。未 Git、未发布、未改账号/权限/provider、未启动真实 GUI/服务、未用真实 Home、未安装依赖、未写共享 lib 构建。未递归 Bridge。
@@ -10,7 +11,7 @@
 
 - `COMPATIBLE_DSH_CLI_VERSION` 仍是 `"0.1.5-rc.1"`（夹具/插件测试默认绑定版本，避免拖垮另一叶子的 `packages/plugin` 测试）。
 - `COMPATIBLE_DSH_CLI_VERSIONS` 现为 `["0.1.5-rc.1", "0.1.5-rc.2"]`。
-- `isCompatibleDshCliVersion` 是唯一写放行判断；`latest` / `next` / `0.1.5-rc.3` / `0.1.1-rc.2` 仍为未知，spaces 进入 `unknown-readonly`，监督器不绑定，doctor recover/rollback 仍 `RUNTIME_REFUSED`。
+- `isCompatibleDshCliVersion` 是唯一写放行判断；`latest` / `next` / `0.1.5-rc.3` / `0.1.1-rc.2` 仍为未知，spaces 进入 `unknown-readonly`，监督器不绑定。当时 doctor recover/rollback 对未知版本返回 `RUNTIME_REFUSED`；**recover/rollback 作为产品命令已撤销**（R5：不支持 + 非零退出），不是继续维护的写门禁分支。
 - 默认安装钉 **已经是** `DSH_DEFAULT_VERSION = "0.1.5-rc.2"`（`src/shared/runtime.ts` / `tests/dsh-cli.test.ts`，本叶子到达时主 Agent 已改；基线副本仍是 rc.1）。本叶子未再改该文件。
 - `src/main/runtime-store.ts` **未改**：它按精确版本安装任意候选，写门禁不在这里。维护层对不兼容版本仍可 `runtime.install`（unverified candidate），只有 `runtime.upgrade` / spaces mutate / supervisor bind / doctor write 走 `isCompatibleDshCliVersion`。
 
@@ -104,7 +105,7 @@ Doctor 写路径已随 `isCompatibleDshCliVersion` 自动放行 rc.2（`packages
 | `tests/workbench-supervisor.test.ts` | 夹具拒绝 shipped-web clone；新增可区分测试：web seed 无 `--from-default-profile`，manager 仍有 |
 | `tests/compatible-dsh-cli.test.ts` | 真实官方 bin：错误参数非 0，正确 dump 成功 |
 | `packages/doctor/src/common.ts` | 删除未引用 `WRITE_CLI_VERSION`；`VERIFY_CLI_VERSIONS` 派生自 `COMPATIBLE_DSH_CLI_VERSIONS` |
-| `packages/doctor/README.md` | verify/recover/rollback 均为 rc.1 与 rc.2 |
+| `packages/doctor/README.md` | 当时把 verify/recover/rollback 都写成 rc.1 与 rc.2；recover/rollback 现为已撤销产品命令（R5） |
 | `scripts/verify-workbench-rc2.mjs` | `PRODUCT_GATE`/`DEFAULT_RC2_BIN`/说明改为正式 rc.2，不用候选注入 |
 
 验证：`node --check scripts/verify-workbench-rc2.mjs`；`tests/compatible-dsh-cli.test.ts` + `tests/workbench-supervisor.test.ts` **30 passed / 0 failed**。真实 dump 证据：`.sandbox/plugin-cli-rc2-worker/dump-wrong-web.log`、`dump-web-seed.log`、`rework-tests.log`、`rework-results.json`。未 GUI/服务，未覆盖主 Agent Home。未改 `packages/plugin/src`、分发脚本、`build-workbench-candidate.mjs`、未再扩 `tests/workbench-doctor.test.ts`。

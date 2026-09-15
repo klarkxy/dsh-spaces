@@ -1,8 +1,22 @@
 # 工作台化实施记录
 
-状态：施工中。2026-09-12；分支 codex/spaces-pluginization；起点 5585060。用户批准完整 A—D 计划，Grok 施工，Codex 接口编排、整合、独立验收。不得把批次完成当成总目标完成。
+## 当前有效合同（2026-09-15）
 
-## 固定需求
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。接口合同：[workbench-contract.md](workbench-contract.md)。
+
+仍有效：专用 `spaces-hub`、72px 空间栏、独立 iframe、单写者、本机 `127.0.0.1`、独立监督进程、浏览器 DTO 不含路径/token、隔离 Home 验收、普通空间不承载完整管理器。
+
+已撤销为现行需求：救援/维护恢复页、整 Home 快照恢复、配置恢复、失败回滚、独立恢复 CLI、损坏即进入恢复模式、中断恢复、kill 后抢救成功。损坏或身份不明：拒绝相关控制并说明原因，保留原字节；不清锁、不接管。
+
+未完成项只剩：R1–R6 运行时去恢复；插件管理 02–03/07–11；取消永久版本白名单；外部发现缺口；主题失败如实记录；最终回归与新视频（不宣传恢复）。不得把下列历史批次完成当成总目标完成，也不得把恢复未完成继续列为阻塞。
+
+**目标政策 / 已知实现差距：** 源码仍含恢复状态机与入口，直至 R 完成。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
+状态：施工中（历史批次）。2026-09-12；分支 codex/spaces-pluginization；起点 5585060。用户批准完整 A—D 计划，Grok 施工，Codex 接口编排、整合、独立验收。不得把批次完成当成总目标完成。
+
+## 固定需求（当时）
 
 - 专用 spaces-hub 管理 profile，名称冲突时递增后缀，不覆盖旧 profile。原 profile 原地接入，保留数据和默认启动入口。
 - 72px 外层空间栏，独立 iframe 工作空间，保留草稿/滚动/会话，最后一次切换胜出，视图就绪后才切换，失败保留原空间。
@@ -114,7 +128,7 @@ root仍需：候选升级子进程跨崩溃身份记录/启动意图（Coordinat
 - rc2低层初跑真实CLI/两profile/轻桥注入/typedRPC通过，但错误要求guide-only profile存在旧spaces/overview而fail。Grok唯一重试 `task_9375bca97f`修脚本并补真正Chromium实验父页，session已关闭；新默认输出`.sandbox/workbench-rc2-retry`，仍需root串行执行。门禁仍rc1，rc2尚未支持。
 - Video Grok `task_de4452212f`完成初稿，sess_b12cad8991仍保留一次审查重试。只新增record/assemble-workbench-demo.mjs和实际任务文件 tasks/workbench-demo-video-worker.md（与派工记录文件名略不同）；无成片，必须最后真实录制/合成。配音四章约77秒已生成，不再重复mmx。最终主题测试应新Home重跑以安装最新UI产物，录制脚本从最新主题results读取Home。
 - 当前Grok活动：真实故障脚本 `task_61a65a84ff` / sess_a1c1c708b1，仅scripts/verify-workbench-crash.mjs、tests/fixtures/workbench-crash/{driver,snapshot-worker}.ts、任务文档，禁止实际服务，由root串行执行；只读外部手工实例发现调查 `task_0e9a5c080e` / sess_f04360b520，仅tasks/workbench-external-discovery.md。后者核实未装桥的外部DSH能否精确识别Home，当前仅控制记录可能不够，不能猜PID/全机DSH都算同Home。
-- 尚须审计/交付：完整升级与故障回滚/kill恢复；rc2候选与完整产品验证；双端最终通过；manager插件自身版本/内容升级入口（当前主要是其runtime/整Home维护，不能自动当完整自升级）；外部手工实例识别；真实认证失败/超时/崩溃/滚动会话保持边界；所有最终单测/类型/构建/分发/主题；新视频和窄提交。不将未验证项写成完成。
+- 尚须审计/交付：完整升级（候选准备与指针切换）；故障回滚/kill恢复 **已撤销**（2026-09-15）；rc2候选与完整产品验证；双端最终通过；manager插件自身版本/内容升级入口（当前主要是其runtime/整Home维护，不能自动当完整自升级，失败回滚已撤销）；外部手工实例识别；真实认证失败/超时/崩溃/滚动会话保持边界；所有最终单测/类型/构建/分发/主题；新视频和窄提交。不将未验证项写成完成。
 真实 SDK：C:/Users/admin/AppData/Local/Temp/spaces-runtime-install-fIEaas/versions/0.1.5-rc.1/node_modules/@deepseek-ai。
 Node：D:/Program Files/nodejs/node.exe。Playwright 包：C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright。
 最新 Spaces tgz：.sandbox/pluginization-delivery/dsh-spaces-plugin-0.2.0.tgz。
@@ -133,7 +147,7 @@ Node：D:/Program Files/nodejs/node.exe。Playwright 包：C:/Users/admin/.cache
 - 自升级只读审计 task_fd23ec9e38已完成关闭。`tasks/workbench-self-update-audit.md` 确认manager已安装则bootstrap提前return，不更新新artifact；目前缺完整Spaces插件自身更新闭环。DSH runtime升级不等同该功能。审计建议中的“维护中关闭监督再冷启动”不满足稳定入口要求，root不采纳该步骤；需在旧监督持续服务下完成manager包维护，自身执行器只下一次冷启动更新。
 - 文档Grok task_c8c4d1cae5 / sess_aa212772de：README、plugin/supervisor README、docs/workbench.md、taskdoc。异常浏览器脚本 task_25e27f4ea8 / sess_b379127f4e：新verify-workbench-browser-failures脚本及自有fixture/taskdoc；初始派工审批超时，原UUID重试成功，尚未真实运行。
 - 外部从未登记DSH无法映射Home，见 `tasks/workbench-external-discovery.md`。已向用户异步询问是否授权扩DSH实例登记/维护协议，还是本批保留此项阻断并交其余证据；不是允许猜PID、扫token或停生产实例。尚待回复，独立工作继续。
-- 总目标仍在施工：真实入口响应复验、真实restore/upgrade kill恢复、rc2完整候选及rc1→rc2升级、manager包自身更新、外部实例边界、最终全部回归/打包/桌面/主题/异常切换/新视频和剩余窄提交。不得以已有局部PASS宣称完成。
+- 总目标仍在施工：真实入口响应复验、rc2完整候选及rc1→rc2升级、manager包自身更新、外部实例边界、最终全部回归/打包/桌面/主题/异常切换/新视频和剩余窄提交。真实 restore/upgrade kill 恢复：**已撤销**（2026-09-15，改验失败可见且无抢救）。不得以已有局部PASS宣称完成。
 
 ## 本轮最终检查与审批阻碍（2026-09-13 00:00附近）
 
@@ -161,4 +175,4 @@ Node：D:/Program Files/nodejs/node.exe。Playwright 包：C:/Users/admin/.cache
 - 管理包真实验收脚本叶task_9dfc50c798/sess_ade58be929 completed，observed grok-4.6，初稿20自检，无真实测试。仅scripts/verify-workbench-package-upgrade.mjs、tests/fixtures/workbench-package/driver.ts、taskdoc；唯一审计重试尚未用，session保留。已知待修：旧manager没有新更新UI，成功要走独立维护页；driver“首包已安装”目前只检查旧文件存在，必须记本次真实成功add及前后hash；UI请求需抓exact plan/job响应，不能随便新plan.execute即认通过。
 - 独立维护页更新入口Grok正施工：task_c77e68a831/sess_c8bc9da82f，唯一持有src/adapters/node/workbench-http.ts的renderEntryPage段、新tests/workbench-entry-update.test.ts、新taskdoc。正常入口“维护”按钮+/?maintenance=1，保持manager iframe挂载；独立检查候选→预览→确认→持久job，旧manager/损坏manager也可更新。root暂停改该文件，等交接后审查并给上条验收叶一次聚焦重试。
 - 浏览器异常脚本root修：Windows创建时间显式ISO UTC，清理/故障触发前重验完整PID+父PID+精确创建时间；清理失败记录fail；认证只401/403并要求正常cookie先成功；提前崩溃不冒充timeout；Home必须真实路径等于theme成功Home。16 selfchecks PASS，仍未实跑。
-- 仍待：升级失败/kill最终闭环、自更新真实成功/回滚/旧UI引导及冷payload、rc2完整候选与rc1→rc2、外部实例协议选择、最终全套类型构建/打包/真实桌面/主题/异常切换/新版录像和窄提交。最新HEAD仍6247b22，大量未提交成果保留，无推送/发版/版本变更；既有4段mmx配音继续复用，勿重复生成。
+- 仍待：自更新真实成功安装及冷payload、rc2完整候选与rc1→rc2、外部实例协议选择、最终全套类型构建/打包/真实桌面/主题/异常切换/新版录像和窄提交。升级失败/kill最终闭环与自更新回滚：**已撤销**（2026-09-15，改验失败可见且无抢救）。最新HEAD仍6247b22，大量未提交成果保留，无推送/发版/版本变更；既有4段mmx配音继续复用，勿重复生成。
