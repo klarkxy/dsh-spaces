@@ -187,12 +187,9 @@ test("recover unlock and rollback are unsupported and leave Home bytes", async (
   assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), before);
 });
 
-test.skip("ROOT doctor settles an abandoned package receipt as failed without inventing a runtime pointer", async () => {
+test("ROOT doctor does not settle an abandoned package receipt or invent a runtime pointer", async () => {
   const home = tempDir("dsh-wb-package-doctor-");
   seedHome(home, "preserve\n");
-  const runtime = writeRuntime(tempDir("dsh-wb-package-runtime-"), "0.1.5-rc.1");
-  const snapshots = tempDir("dsh-wb-package-snaps-");
-  const runtimes = tempDir("dsh-wb-package-runtimes-");
   const planId = "11111111-1111-4111-8111-111111111111";
   writePlan(home, planId, { kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
   writeRunningPluginJob(home, "package-abandoned", planId);
@@ -201,12 +198,13 @@ test.skip("ROOT doctor settles an abandoned package receipt as failed without in
   writeFileSync(join(receipts, `${planId}.json`), JSON.stringify({
     schemaVersion: 1, planId, outcome: "abandoned", rolledBack: false, at: new Date().toISOString(),
   }));
-  const result = await runDoctor(["recover", "--home", home, "--cli", runtime.bin, "--snapshot-root", snapshots, "--runtime-root", runtimes]);
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  const job = JSON.parse(readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "package-abandoned.json"), "utf8"));
-  assert.equal(job.status, "failed");
+  const jobPath = join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "package-abandoned.json");
+  const beforeJob = readFileSync(jobPath);
+  const result = await runDoctor(["recover", "--home", home]);
+  assert.equal(result.code, 7);
+  assert.equal(jsonOf(result.stdout).code, "UNSUPPORTED");
+  assert.deepEqual(readFileSync(jobPath), beforeJob);
   assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "preserve\n");
-  assert.equal(existsSync(join(runtimes, "current.json")), false);
 });
 
 test("read-only doctor does not write Home, jobs, or locks", async () => {
@@ -233,17 +231,9 @@ test("read-only doctor does not write Home, jobs, or locks", async () => {
   assert.equal(jobs.unfinished, 1);
 });
 
-test.skip("live lock and live instance are not killed and recover stays in recovery mode", async () => {
+test("live lock and live instance are not killed and recover is unsupported", async () => {
   const home = tempDir("dsh-wb-doctor-live-");
   seedHome(home, "live-home\n");
-  const runtime = writeRuntime(tempDir("dsh-wb-rt-"), "0.1.5-rc.1");
-  const snapshotRoot = tempDir("dsh-wb-snaps-");
-  const runtimeRoot = tempDir("dsh-wb-runtimes-");
-  const store = new SnapshotStore({ home, root: snapshotRoot });
-  const snap = store.create(runtime.runtime, "fixture");
-  writeFileSync(join(home, "settings.yaml"), "dirty\n");
-  store.restore(snap.id, runtime.runtime);
-
   mkdirSync(join(home, HOME_LOCK_DIR_NAME));
   writeFileSync(
     join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE),
@@ -263,67 +253,32 @@ test.skip("live lock and live instance are not killed and recover stays in recov
       origin: "http://127.0.0.1:9",
     })}\n`,
   );
-
-  const locked = await runDoctor([
-    "recover",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    snapshotRoot,
-    "--runtime-root",
-    runtimeRoot,
-  ]);
-  assert.equal(locked.code, 3);
-  assert.equal(jsonOf(locked.stdout).code, "LOCK_HELD");
-  assert.equal(existsSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE)), true);
-
-  rmSync(join(home, HOME_LOCK_DIR_NAME), { recursive: true, force: true });
-  const result = await runDoctor([
-    "recover",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    snapshotRoot,
-    "--runtime-root",
-    runtimeRoot,
-  ]);
-  assert.equal(result.code, 10);
-  assert.equal(jsonOf(result.stdout).code, "RECOVERY_MODE");
+  const beforeLock = readFileSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE));
+  const inspect = await runDoctor(["doctor", "--home", home]);
+  assert.equal(inspect.code, 0, inspect.stdout + inspect.stderr);
+  const recover = await runDoctor(["recover", "--home", home]);
+  assert.equal(recover.code, 7);
+  assert.equal(jsonOf(recover.stdout).code, "UNSUPPORTED");
+  assert.deepEqual(readFileSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE)), beforeLock);
   assert.equal(existsSync(join(instances, "coding.json")), true);
   assert.doesNotThrow(() => process.kill(process.pid, 0));
-  assert.equal(store.pendingRestore()?.snapshotId, snap.id);
 });
 
-test.skip("ambiguous control ownership is not stolen", async () => {
+test("ambiguous control ownership is not stolen", async () => {
   const home = tempDir("dsh-wb-doctor-amb-");
   seedHome(home, "amb\n");
-  const runtime = writeRuntime(tempDir("dsh-wb-rt-amb-"), "0.1.5-rc.1");
   mkdirSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME), { recursive: true });
-  writeFileSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME, HOME_CONTROL_OWNER_FILE), "not-json\n");
-  const result = await runDoctor([
-    "recover",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    tempDir("dsh-wb-snaps-amb-"),
-    "--runtime-root",
-    tempDir("dsh-wb-rtroot-amb-"),
-  ]);
-  assert.equal(result.code, 3);
-  assert.equal(jsonOf(result.stdout).code, "LOCK_HELD");
-  assert.equal(
-    readFileSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME, HOME_CONTROL_OWNER_FILE), "utf8"),
-    "not-json\n",
-  );
+  const owner = join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME, HOME_CONTROL_OWNER_FILE);
+  writeFileSync(owner, "not-json\n");
+  const inspect = await runDoctor(["doctor", "--home", home]);
+  assert.equal(inspect.code, 0, inspect.stdout + inspect.stderr);
+  const result = await runDoctor(["recover", "--home", home]);
+  assert.equal(result.code, 7);
+  assert.equal(jsonOf(result.stdout).code, "UNSUPPORTED");
+  assert.equal(readFileSync(owner, "utf8"), "not-json\n");
 });
 
-test.skip("truncated job bytes stay in place and are not settled", async () => {
+test("truncated job bytes stay in place and are not settled", async () => {
   const home = tempDir("dsh-wb-doctor-badjob-");
   seedHome(home, "jobs\n");
   const runtime = writeRuntime(tempDir("dsh-wb-rt-job-"), "0.1.5-rc.1");
@@ -354,34 +309,27 @@ test.skip("truncated job bytes stay in place and are not settled", async () => {
     "--runtime-root",
     runtimeRoot,
   ]);
-  assert.equal(result.code, 10, result.stdout + result.stderr);
+  assert.equal(result.code, 7, result.stdout + result.stderr);
   const body = jsonOf(result.stdout);
-  assert.equal(body.ok, false);
-  assert.equal(body.code, "RECOVERY_REQUIRED");
-  assert.equal(body.recoveryRequired, true);
-  assert.equal(body.restoreCompleted, true);
-  assert.equal(body.reopenWorkbench, false);
+  assert.equal(body.code, "UNSUPPORTED");
   assert.equal(readFileSync(jobPath, "utf8"), "{\"schemaVersion\":1,\"status\":\"running\"");
   const queued = JSON.parse(readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "queued-ok.json"), "utf8")) as {
     status: string;
   };
-  assert.equal(queued.status, "cancelled");
+  assert.equal(queued.status, "queued");
   const plugin = JSON.parse(
     readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "plugin-running.json"), "utf8"),
   ) as { status: string };
-  assert.equal(plugin.status, "recovery-required");
+  assert.equal(plugin.status, "running");
   const other = JSON.parse(
     readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "other-snap-job.json"), "utf8"),
   ) as { status: string };
-  assert.equal(other.status, "recovery-required");
-  assert.equal(store.pendingRestore(), undefined);
-  const blockers = body.blockers as string[];
-  assert.ok(Array.isArray(blockers) && blockers.length > 0);
-  assert.doesNotMatch(String(body.message), /real DSH/i);
+  assert.equal(other.status, "running");
+  assert.ok(store.pendingRestore()?.snapshotId);
   assert.doesNotMatch(result.stdout, /Offline recovery finished/);
 });
 
-test.skip("recover completes a real SnapshotStore pending restore and reads runtime back", async () => {
+test("recover does not complete a pending SnapshotStore restore", async () => {
   const home = tempDir("dsh-wb-doctor-recov-");
   seedHome(home, "original-settings\n");
   writeFileSync(join(home, ".credentials.yaml"), "secret-key\n");
@@ -404,69 +352,18 @@ test.skip("recover completes a real SnapshotStore pending restore and reads runt
   assert.ok(store.pendingRestore());
   assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "original-settings\n");
 
-  const dry = await runDoctor([
-    "recover",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    snapshotRoot,
-    "--runtime-root",
-    runtimeRoot,
-    "--dry-run",
-  ]);
-  assert.equal(dry.code, 0, dry.stdout + dry.stderr);
-  assert.equal(jsonOf(dry.stdout).dryRun, true);
+  const beforeSettings = readFileSync(join(home, "settings.yaml"));
+  const beforeCreds = readFileSync(join(home, ".credentials.yaml"));
+  const result = await runDoctor(["recover", "--home", home]);
+  assert.equal(result.code, 7);
+  assert.equal(jsonOf(result.stdout).code, "UNSUPPORTED");
   assert.ok(store.pendingRestore());
-
-  const result = await runDoctor([
-    "recover",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    snapshotRoot,
-    "--runtime-root",
-    runtimeRoot,
-  ]);
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  const body = jsonOf(result.stdout);
-  assert.equal(body.ok, true);
-  assert.equal(body.restoreCompleted, true);
-  assert.equal(body.instancesStopped, true);
-  assert.equal(body.reopenWorkbench, true);
-  assert.equal(body.controllerKind, "web");
-  assert.equal(body.runtimeVersion, "0.1.5-rc.1");
-  assert.equal(store.pendingRestore(), undefined);
-  assert.equal(existsSync(join(home, RESTORE_STAGE_DIR)), false);
-  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "original-settings\n");
-  assert.equal(readFileSync(join(home, "profiles", "coding", "cordis.patch.yml"), "utf8"), "coding\n");
-  assert.equal(readFileSync(join(home, ".credentials.yaml"), "utf8"), "secret-key\n");
-  const pointer = JSON.parse(readFileSync(join(runtimeRoot, "current.json"), "utf8")) as { version: string };
-  assert.equal(pointer.version, "0.1.5-rc.1");
-  const toolchain = JSON.parse(readFileSync(join(home, HOME_CONTROL_DIR_NAME, "toolchain.json"), "utf8")) as {
-    bin: string;
-    dshVersion: string;
-    nodeExe: string;
-    runtimeRoot: string;
-    snapshotRoot: string;
-    toolchainRoot: string;
-    boundAt: string;
-  };
-  assert.equal(toolchain.dshVersion, "0.1.5-rc.1");
-  assert.notEqual(toolchain.bin, join(runtimeRoot, "old-bin.js"));
-  assert.equal(toolchain.nodeExe, join(runtimeRoot, "node.exe"));
-  assert.equal(toolchain.runtimeRoot, runtimeRoot);
-  assert.equal(toolchain.snapshotRoot, snapshotRoot);
-  assert.equal(toolchain.toolchainRoot, join(runtimeRoot, "toolchain"));
-  assert.equal(toolchain.boundAt, "2026-01-01T00:00:00.000Z");
+  assert.deepEqual(readFileSync(join(home, "settings.yaml")), beforeSettings);
+  assert.deepEqual(readFileSync(join(home, ".credentials.yaml")), beforeCreds);
   assert.doesNotMatch(result.stdout, /secret-key/);
-  assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME)), false);
 });
 
-test.skip("rollback requires explicit snapshot id and restores whole Home with a before-restore backup", async () => {
+test("rollback does not restore a whole Home", async () => {
   const home = tempDir("dsh-wb-doctor-rb-");
   seedHome(home, "snap-a\n");
   const runtime = writeRuntime(tempDir("dsh-wb-rt-rb-"), "0.1.5-rc.1");
@@ -489,28 +386,8 @@ test.skip("rollback requires explicit snapshot id and restores whole Home with a
     "--runtime-root",
     runtimeRoot,
   ]);
-  assert.equal(missingId.code, 2);
-  assert.equal(jsonOf(missingId.stdout).code, "USAGE");
-  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "snap-b\n");
-
-  const dry = await runDoctor([
-    "rollback",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    snapshotRoot,
-    "--runtime-root",
-    runtimeRoot,
-    "--snapshot",
-    snap.id,
-    "--dry-run",
-  ]);
-  assert.equal(dry.code, 0, dry.stdout + dry.stderr);
-  const dryBody = jsonOf(dry.stdout);
-  assert.equal(dryBody.dryRun, true);
-  assert.equal(dryBody.target, snap.id);
+  assert.equal(missingId.code, 7);
+  assert.equal(jsonOf(missingId.stdout).code, "UNSUPPORTED");
   assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "snap-b\n");
 
   const result = await runDoctor([
@@ -526,22 +403,13 @@ test.skip("rollback requires explicit snapshot id and restores whole Home with a
     "--snapshot",
     snap.id,
   ]);
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  const body = jsonOf(result.stdout);
-  assert.equal(body.ok, true);
-  assert.equal(body.snapshotId, snap.id);
-  assert.equal(typeof body.beforeRestoreId, "string");
-  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "snap-a\n");
-  assert.equal(existsSync(join(home, "hub")), false);
-  assert.equal(store.pendingRestore(), undefined);
-  const before = store.preview(String(body.beforeRestoreId));
-  assert.equal(before.reason, "before-restore");
-  assert.equal(before.presence.hub, true);
-  assert.equal(body.runtimeVersion, "0.1.5-rc.1");
-  assert.equal(body.instancesStopped, true);
+  assert.equal(result.code, 7);
+  assert.equal(jsonOf(result.stdout).code, "UNSUPPORTED");
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "snap-b\n");
+  assert.equal(existsSync(join(home, "hub")), true);
 });
 
-test.skip("unknown CLI cannot write recover or rollback; rc.2 is a validated write version", async () => {
+test("unknown CLI cannot write recover or rollback", async () => {
   const home = tempDir("dsh-wb-doctor-ver-");
   seedHome(home, "v\n");
   const snapshotRoot = tempDir("dsh-wb-snaps-ver-");
@@ -566,8 +434,8 @@ test.skip("unknown CLI cannot write recover or rollback; rc.2 is a validated wri
     "--snapshot",
     snap.id,
   ]);
-  assert.equal(unknown.code, 6);
-  assert.equal(jsonOf(unknown.stdout).code, "RUNTIME_REFUSED");
+  assert.equal(unknown.code, 7);
+  assert.equal(jsonOf(unknown.stdout).code, "UNSUPPORTED");
 
   const unpublished = await runDoctor([
     "rollback",
@@ -582,8 +450,8 @@ test.skip("unknown CLI cannot write recover or rollback; rc.2 is a validated wri
     "--snapshot",
     snap.id,
   ]);
-  assert.equal(unpublished.code, 6);
-  assert.equal(jsonOf(unpublished.stdout).code, "RUNTIME_REFUSED");
+  assert.equal(unpublished.code, 7);
+  assert.equal(jsonOf(unpublished.stdout).code, "UNSUPPORTED");
 
   const rc2write = await runDoctor([
     "recover",
@@ -596,8 +464,8 @@ test.skip("unknown CLI cannot write recover or rollback; rc.2 is a validated wri
     "--runtime-root",
     runtimeRoot,
   ]);
-  assert.notEqual(jsonOf(rc2write.stdout).code, "RUNTIME_REFUSED");
-  assert.notEqual(rc2write.code, 6);
+  assert.equal(jsonOf(rc2write.stdout).code, "UNSUPPORTED");
+  assert.equal(rc2write.code, 7);
   assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "v\n");
 });
 
@@ -626,13 +494,14 @@ test("doctor reports plugin mutation and missing roots without guessing app data
   assert.equal(plugin.present, true);
   assert.equal(plugin.rollbackRequired, true);
   const findings = body.findings as string[];
-  assert.ok(findings.some((row) => /whole-home snapshot rollback/i.test(row)));
+  assert.ok(findings.some((row) => /plugin mutation evidence is present/i.test(row)));
+  assert.equal(findings.some((row) => /rollback|restore/i.test(row)), false);
   assert.ok(findings.some((row) => /not guessed/i.test(row)));
   assert.doesNotMatch(result.stdout, /AppData|appuserdata/i);
   assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json")), true);
 });
 
-test.skip("runtime readback failure does not settle jobs or claim success", async () => {
+test("runtime readback failure does not settle jobs or claim success", async () => {
   const home = tempDir("dsh-wb-doctor-rtfail-");
   seedHome(home, "rt\n");
   const runtime = writeRuntime(tempDir("dsh-wb-rt-fail-"), "0.1.5-rc.1");
@@ -659,18 +528,16 @@ test.skip("runtime readback failure does not settle jobs or claim success", asyn
     "--runtime-root",
     runtimeRoot,
   ]);
-  assert.notEqual(result.code, 0);
+  assert.equal(result.code, 7);
   const body = jsonOf(result.stdout);
-  assert.equal(body.ok, false);
-  assert.notEqual(body.code, undefined);
-  assert.notEqual(body.reopenWorkbench, true);
+  assert.equal(body.code, "UNSUPPORTED");
   const queued = JSON.parse(
     readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "queued-keep.json"), "utf8"),
   ) as { status: string };
   assert.equal(queued.status, "queued");
 });
 
-test.skip("upgrade preparing cleanup does not clear plugin mutation evidence", async () => {
+test("upgrade preparing leftover does not clear plugin mutation evidence", async () => {
   const home = tempDir("dsh-wb-doctor-prep-");
   seedHome(home, "prep\n");
   const runtime = writeRuntime(tempDir("dsh-wb-rt-prep-"), "0.1.5-rc.1");
@@ -709,11 +576,9 @@ test.skip("upgrade preparing cleanup does not clear plugin mutation evidence", a
     "--runtime-root",
     runtimeRoot,
   ]);
-  assert.equal(result.code, 10, result.stdout + result.stderr);
+  assert.equal(result.code, 7, result.stdout + result.stderr);
   const body = jsonOf(result.stdout);
-  assert.equal(body.ok, false);
-  assert.equal(body.recoveryRequired, true);
-  assert.equal(body.restoreCompleted, false);
+  assert.equal(body.code, "UNSUPPORTED");
   assert.equal(readFileSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json"), "utf8"), mutation);
   const plugin = JSON.parse(
     readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "plugin-running.json"), "utf8"),
@@ -721,7 +586,7 @@ test.skip("upgrade preparing cleanup does not clear plugin mutation evidence", a
   assert.notEqual(plugin.status, "succeeded");
 });
 
-test.skip("whole-home rollback archives plugin mutation and settles only the matching plan", async () => {
+test("whole-home rollback is unsupported and leaves plugin mutation evidence", async () => {
   const home = tempDir("dsh-wb-doctor-mut-");
   seedHome(home, "snap-a\n");
   const runtime = writeRuntime(tempDir("dsh-wb-rt-mut-"), "0.1.5-rc.1");
@@ -780,51 +645,17 @@ test.skip("whole-home rollback archives plugin mutation and settles only the mat
     "--snapshot",
     snap.id,
   ]);
-  assert.equal(result.code, 10, result.stdout + result.stderr);
+  assert.equal(result.code, 7, result.stdout + result.stderr);
   const body = jsonOf(result.stdout);
-  assert.equal(body.ok, false);
-  assert.equal(body.recoveryRequired, true);
-  assert.equal(body.restoreCompleted, true);
-  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "snap-a\n");
-  assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json")), false);
-  const archived = readdirSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation-archive"));
-  assert.equal(archived.length, 1);
-  assert.equal(
-    existsSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation-files", "coding", "package.json")),
-    true,
-  );
+  assert.equal(body.code, "UNSUPPORTED");
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "snap-b\n");
+  assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json")), true);
   const plugin = JSON.parse(
     readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "plugin-running.json"), "utf8"),
   ) as { status: string };
-  assert.equal(plugin.status, "failed");
-  const other = JSON.parse(
-    readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "other-snap-job.json"), "utf8"),
-  ) as { status: string };
-  assert.equal(other.status, "recovery-required");
-  const toolchain = JSON.parse(readFileSync(join(home, HOME_CONTROL_DIR_NAME, "toolchain.json"), "utf8")) as {
-    dshVersion: string;
-    nodeExe: string;
-    runtimeRoot: string;
-    snapshotRoot: string;
-  };
-  assert.equal(toolchain.dshVersion, "0.1.5-rc.1");
-  assert.equal(toolchain.nodeExe, process.execPath);
-  assert.equal(toolchain.runtimeRoot, runtimeRoot);
-  assert.equal(toolchain.snapshotRoot, snapshotRoot);
-
-  const again = await runDoctor([
-    "recover",
-    "--home",
-    home,
-    "--cli",
-    runtime.bin,
-    "--snapshot-root",
-    snapshotRoot,
-    "--runtime-root",
-    runtimeRoot,
-  ]);
-  assert.equal(again.code, 10);
-  assert.equal(jsonOf(again.stdout).code, "RECOVERY_REQUIRED");
-  assert.notEqual(jsonOf(again.stdout).code, "PLUGIN_MUTATION_OPEN");
-  assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json")), false);
+  assert.equal(plugin.status, "running");
+  const again = await runDoctor(["recover", "--home", home]);
+  assert.equal(again.code, 7);
+  assert.equal(jsonOf(again.stdout).code, "UNSUPPORTED");
+  assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json")), true);
 });

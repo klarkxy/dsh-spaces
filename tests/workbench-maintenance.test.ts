@@ -76,7 +76,7 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-test.skip("ROOT abandoned package recovery cannot report successful update", async () => {
+test("ROOT abandoned package recovery cannot report successful update", async () => {
   let active = true;
   const packageUpgrade = {
     hasEvidence: () => active,
@@ -86,11 +86,9 @@ test.skip("ROOT abandoned package recovery cannot report successful update", asy
     },
   } as unknown as WorkbenchMaintenancePorts["packageUpgrade"];
   const { maintenance } = harness({ packageUpgrade });
-  await maintenance.recover();
-  const result = maintenance.recoveryOutcome();
-  assert.equal(result?.workbenchSucceeded, false);
-  assert.equal(result?.workbenchRolledBack, false);
-  assert.equal(result?.workbenchPlanId, "11111111-1111-4111-8111-111111111111");
+  await assert.rejects(() => maintenance.recover(), matchCode("workbench/forbidden"));
+  assert.equal(active, true);
+  assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
 test("preview hands space and controller actions to supervisor runtime", async () => {
@@ -436,7 +434,7 @@ test("cancel is honored before mutation and ignored after the irreversible point
   assert.deepEqual(state2.started, ["coding"]);
 });
 
-test.skip("recover reconciles a pending snapshot and refuses to wipe an unreadable upgrade journal", async () => {
+test("recover reconciles a pending snapshot and refuses to wipe an unreadable upgrade journal", async () => {
   let pending: {
     snapshotId: string;
     beforeRestoreId: string;
@@ -450,55 +448,52 @@ test.skip("recover reconciles a pending snapshot and refuses to wipe an unreadab
     binRelative: "bin.js",
     startedAt: "2026-09-12T00:00:00.000Z",
   };
+  let recoveredPending = false;
   const { maintenance, state } = harness({
     pendingRestore: () => pending,
     recoverUpgrade: async () => {
+      recoveredPending = true;
       pending = undefined;
       return { restoreCompleted: true };
     },
   });
-  await maintenance.recover(jobCtx());
-  const outcome = maintenance.recoveryOutcome();
-  assert.equal(outcome?.consistent, true);
-  assert.equal(outcome?.settleInterruptedJobs, true);
-  assert.equal(outcome?.restoreCompleted, true);
-  assert.equal(outcome?.snapshotId, "11111111-1111-1111-1111-111111111111");
-  assert.equal(state.reinitialized, 1);
-  assert.ok(state.order.indexOf("stopAll") < state.order.indexOf("recover"));
-  assert.ok(state.order.indexOf("recover") < state.order.indexOf("reinitialize"));
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
+  assert.equal(recoveredPending, false);
+  assert.ok(pending);
+  assert.equal(state.reinitialized, 0);
+  assert.equal(state.restoreCalls, 0);
+  assert.equal(maintenance.recoveryOutcome(), undefined);
 
   const blocked = harness();
   mkdirSync(join(blocked.home, UPGRADE_STAGE_DIR), { recursive: true });
   const journal = join(blocked.home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
   writeFileSync(journal, "{not-json");
+  const journalBefore = readFileSync(journal);
   let recovered = false;
   blocked.state.recoverUpgrade = async () => {
     recovered = true;
     return {};
   };
-  await assert.rejects(() => blocked.maintenance.recover(jobCtx()), matchCode("workbench/failed"));
+  await assert.rejects(() => blocked.maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
   assert.equal(recovered, false);
-  assert.equal(readFileSync(journal, "utf8"), "{not-json");
-  assert.equal(blocked.maintenance.recoveryOutcome()?.settleInterruptedJobs, false);
-  assert.equal(blocked.maintenance.recoveryOutcome()?.consistent, false);
+  assert.deepEqual(readFileSync(journal), journalBefore);
+  assert.equal(blocked.maintenance.recoveryOutcome(), undefined);
   assert.equal(blocked.state.reinitialized, 0);
-  assert.equal(blocked.state.maintenance.at(-1), true);
 });
 
-test.skip("unreadable pending restore is a conservative recover failure and does not settle jobs", async () => {
-  const { maintenance } = harness({
+test("unreadable pending restore is a conservative recover failure and does not settle jobs", async () => {
+  const { maintenance, state } = harness({
     pendingRestore: () => {
       throw new Error("unreadable restore record");
     },
   });
-  maintenance.recoveryOutcome();
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/failed"));
-  const outcome = maintenance.recoveryOutcome();
-  assert.equal(outcome?.consistent, false);
-  assert.equal(outcome?.settleInterruptedJobs, false);
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
+  assert.equal(maintenance.recoveryOutcome(), undefined);
+  assert.equal(state.restoreCalls, 0);
+  assert.equal(state.reinitialized, 0);
 });
 
-test.skip("recover resets a previous true outcome and empty journals do not settle unrelated jobs", async () => {
+test("recover resets a previous true outcome and empty journals do not settle unrelated jobs", async () => {
   let pending: {
     snapshotId: string;
     beforeRestoreId: string;
@@ -512,24 +507,23 @@ test.skip("recover resets a previous true outcome and empty journals do not sett
     binRelative: "bin.js",
     startedAt: "2026-09-12T00:00:00.000Z",
   };
+  let recovered = false;
   const { maintenance } = harness({
     pendingRestore: () => pending,
     recoverUpgrade: async () => {
+      recovered = true;
       pending = undefined;
       return { restoreCompleted: true };
     },
   });
-  await maintenance.recover(jobCtx());
-  assert.equal(maintenance.recoveryOutcome()?.settleInterruptedJobs, true);
-
-  await maintenance.recover(jobCtx());
-  const empty = maintenance.recoveryOutcome();
-  assert.equal(empty?.consistent, true);
-  assert.equal(empty?.settleInterruptedJobs, false);
-  assert.match(empty?.message ?? "", /not evaluated/i);
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
+  assert.equal(recovered, false);
+  assert.ok(pending);
+  assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
-test.skip("recover does not change pointers when stopAll fails", async () => {
+test("recover does not change pointers when stopAll fails", async () => {
   let recovered = false;
   const { maintenance, state } = harness({
     pendingRestore: () => ({
@@ -547,13 +541,15 @@ test.skip("recover does not change pointers when stopAll fails", async () => {
   state.stopAllImpl = async () => {
     throw new Error("stop failed");
   };
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/failed"));
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
   assert.equal(recovered, false);
   assert.equal(state.reinitialized, 0);
-  assert.equal(maintenance.recoveryOutcome()?.settleInterruptedJobs, false);
+  assert.equal(state.stopAll, 0);
+  assert.equal(state.restoreCalls, 0);
+  assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
-test.skip("upgrade stage rollback does not clear plugin-mutation evidence", async () => {
+test("upgrade stage rollback does not clear plugin-mutation evidence", async () => {
   const { home, maintenance, state } = harness();
   mkdirSync(join(home, UPGRADE_STAGE_DIR), { recursive: true });
   const journal = join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
@@ -571,19 +567,16 @@ test.skip("upgrade stage rollback does not clear plugin-mutation evidence", asyn
   })}\n`;
   mkdirSync(join(home, WORKBENCH_CONTROL_DIR_NAME), { recursive: true });
   writeFileSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE), mutation);
+  const journalBefore = readFileSync(journal);
   state.recoverUpgrade = async () => {
     rmSync(journal, { force: true });
     return { upgradeRolledBack: true };
   };
-  await maintenance.recover(jobCtx());
-  const outcome = maintenance.recoveryOutcome();
-  assert.equal(outcome?.upgradeRolledBack, true);
-  assert.equal(outcome?.restoreCompleted, false);
-  assert.equal(outcome?.settleInterruptedJobs, true);
-  assert.equal(outcome?.pluginPlanId, undefined);
-  assert.equal(outcome?.upgradePlanId, "plan-upgrade-1");
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
   assert.equal(readFileSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE), "utf8"), mutation);
-  assert.equal(state.reinitialized, 1);
+  assert.deepEqual(readFileSync(journal), journalBefore);
+  assert.equal(state.reinitialized, 0);
+  assert.equal(state.restoreCalls, 0);
 });
 
 test("runtime upgrade execute passes the stored plan id", async () => {
@@ -599,7 +592,7 @@ test("runtime upgrade execute passes the stored plan id", async () => {
   assert.equal(state.lastUpgradePlanId, plan.id);
 });
 
-test.skip("recover does not treat a junctioned profiles directory as readable home config", async () => {
+test("recover does not treat a junctioned profiles directory as readable home config", async () => {
   let pending: {
     snapshotId: string;
     beforeRestoreId: string;
@@ -613,9 +606,11 @@ test.skip("recover does not treat a junctioned profiles directory as readable ho
     binRelative: "bin.js",
     startedAt: "2026-09-12T00:00:00.000Z",
   };
-  const { home, maintenance } = harness({
+  let recovered = false;
+  const { home, maintenance, state } = harness({
     pendingRestore: () => pending,
     recoverUpgrade: async () => {
+      recovered = true;
       pending = undefined;
       return { restoreCompleted: true };
     },
@@ -626,10 +621,11 @@ test.skip("recover does not treat a junctioned profiles directory as readable ho
   rmSync(profiles, { recursive: true, force: true });
   mkdirSync(hidden, { recursive: true });
   symlinkSync(hidden, profiles, process.platform === "win32" ? "junction" : "dir");
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/failed"));
-  const outcome = maintenance.recoveryOutcome();
-  assert.equal(outcome?.settleInterruptedJobs, false);
-  assert.match(outcome?.message ?? "", /configuration could not be read/i);
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
+  assert.equal(recovered, false);
+  assert.ok(pending);
+  assert.equal(state.restoreCalls, 0);
+  assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
 test("plugin mutation failure keeps diagnostic files, stops the target, and does not fake a manifest rollback", async () => {
@@ -774,31 +770,78 @@ test("config restore preview is forbidden", async () => {
   );
 });
 
-test.skip("manager config restore reinitializes the manager; ordinary restore stays stopped", async () => {
-  const { maintenance, state } = harness();
-  state.backups = [{ id: "cordis.patch.yml.bak-1", createdAt: "2026-01-01T00:00:00.000Z", size: 10, tooLarge: false }];
-  const managerPlan = await maintenance.preview({
-    kind: "config.restore",
-    spaceId: "spaces-hub",
-    backupId: "cordis.patch.yml.bak-1",
-  });
-  await maintenance.execute(managerPlan.id, jobCtx());
-  assert.deepEqual(state.restored, ["spaces-hub"]);
-  assert.equal(state.reinitialized, 1);
-  assert.equal(state.started.includes("spaces-hub"), false);
+test("snapshot restore preview and execute are forbidden", async () => {
+  const { home, maintenance, state } = harness();
+  const snapshotId = "11111111-1111-1111-1111-111111111111";
+  const codingManifest = join(home, "profiles", "coding", "package.json");
+  const before = readFileSync(codingManifest);
+  await assert.rejects(
+    () => maintenance.preview({ kind: "snapshot.restore", snapshotId }),
+    matchCode("workbench/forbidden"),
+  );
+  assert.equal(state.restoreCalls, 0);
+  assert.equal(existsSync(join(home, WORKBENCH_CONTROL_DIR_NAME, "plans")), false);
+  assert.deepEqual(readFileSync(codingManifest), before);
 
-  state.reinitialized = 0;
-  state.started = [];
-  const ordinary = await maintenance.preview({
-    kind: "config.restore",
-    spaceId: "coding",
-    backupId: "cordis.patch.yml.bak-1",
-  });
-  await maintenance.execute(ordinary.id, jobCtx());
-  assert.deepEqual(state.restored, ["spaces-hub", "coding"]);
+  const planId = "plan-snapshot-restore";
+  const planDir = join(home, WORKBENCH_CONTROL_DIR_NAME, "plans");
+  mkdirSync(planDir, { recursive: true });
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  writeFileSync(
+    join(planDir, `${planId}.json`),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: planId,
+      public: {
+        id: planId,
+        kind: "snapshot.restore",
+        title: "Restore whole-home snapshot",
+        scope: "home",
+        affectedSpaceIds: [],
+        runningSpaceIds: [],
+        changes: [],
+        destructive: true,
+        expiresAt,
+      },
+      command: { kind: "snapshot.restore", snapshotId },
+      fingerprint: "fp",
+      createdAt: new Date().toISOString(),
+      expiresAt,
+      status: "previewed",
+    })}\n`,
+  );
+  await assert.rejects(() => maintenance.execute(planId, jobCtx()), matchCode("workbench/forbidden"));
+  assert.equal(state.restoreCalls, 0);
+  assert.deepEqual(readFileSync(codingManifest), before);
+});
+
+test("manager config restore reinitializes the manager; ordinary restore stays stopped", async () => {
+  const { home, maintenance, state } = harness();
+  state.backups = [{ id: "cordis.patch.yml.bak-1", createdAt: "2026-01-01T00:00:00.000Z", size: 10, tooLarge: false }];
+  const codingManifest = join(home, "profiles", "coding", "package.json");
+  const before = readFileSync(codingManifest);
+  await assert.rejects(
+    () =>
+      maintenance.preview({
+        kind: "config.restore",
+        spaceId: "spaces-hub",
+        backupId: "cordis.patch.yml.bak-1",
+      }),
+    matchCode("workbench/forbidden"),
+  );
+  await assert.rejects(
+    () =>
+      maintenance.preview({
+        kind: "config.restore",
+        spaceId: "coding",
+        backupId: "cordis.patch.yml.bak-1",
+      }),
+    matchCode("workbench/forbidden"),
+  );
+  assert.deepEqual(state.restored, []);
   assert.equal(state.reinitialized, 0);
   assert.equal(state.started.includes("coding"), false);
-  assert.equal(state.status.coding, "stopped");
+  assert.deepEqual(readFileSync(codingManifest), before);
 });
 
 test("unknown errors become the static public message and plans are not executed without the write lock", async () => {
@@ -843,6 +886,7 @@ interface HarnessState {
   order: string[];
   restored: string[];
   backups: Array<{ id: string; createdAt: string; size: number; tooLarge: boolean }>;
+  restoreCalls: number;
   onStop?: () => void;
   stopAllImpl?: () => Promise<void>;
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
@@ -879,6 +923,7 @@ function harness(overrides: {
     order: [],
     restored: [],
     backups: [],
+    restoreCalls: 0,
     pendingRestore: overrides.pendingRestore,
     recoverUpgrade: overrides.recoverUpgrade,
   };
@@ -919,7 +964,8 @@ function createMaintenance(
         throw new Error("snapshot create not stubbed");
       }),
       restore: async () => {
-        throw new Error("snapshot restore not stubbed");
+        state.restoreCalls += 1;
+        throw new Error("snapshot restore must not be called");
       },
       recover: async () => state.pendingRestore?.(),
       delete: async () => undefined,
@@ -1036,6 +1082,7 @@ function snapshotHarness() {
     order: [],
     restored: [],
     backups: [],
+    restoreCalls: 0,
   };
   const ports: WorkbenchMaintenancePorts = {
     home,
@@ -1142,6 +1189,7 @@ async function upgradeHarness() {
     order: [],
     restored: [],
     backups: [],
+    restoreCalls: 0,
   };
   const ports: WorkbenchMaintenancePorts = {
     home,

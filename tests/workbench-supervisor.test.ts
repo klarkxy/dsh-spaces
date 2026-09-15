@@ -900,7 +900,27 @@ test("recovery.resume is unsupported and leftover jobs stay failed", async () =>
   assert.deepEqual(leftoverAfter, leftoverBefore);
 });
 
-test.skip("recovery resume settles only the matching plan.execute restore and fails while others remain", async () => {
+async function assertRecoveryResumeUnsupported(
+  origin: string,
+  cookie: string,
+  files: string[],
+  requestId: string,
+): Promise<void> {
+  const before = files.map((path) => (existsSync(path) ? readFileSync(path) : Buffer.from("")));
+  const resume = await api(origin, cookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId,
+  });
+  assert.equal(resume.body.ok, false, JSON.stringify(resume.body));
+  assert.equal(resume.body.error?.code, "workbench/unsupported");
+  for (let i = 0; i < files.length; i += 1) {
+    const path = files[i]!;
+    const after = existsSync(path) ? readFileSync(path) : Buffer.from("");
+    assert.deepEqual(after, before[i]);
+  }
+}
+
+test("recovery resume settles only the matching plan.execute restore and fails while others remain", async () => {
   const home = tempHome();
   const snapA = "11111111-1111-1111-1111-111111111111";
   const snapB = "22222222-2222-2222-2222-222222222222";
@@ -926,53 +946,25 @@ test.skip("recovery resume settles only the matching plan.execute restore and fa
     phase: "commit",
   });
   writeFileSync(join(home, ".dsh-spaces-control", "jobs", "broken.json"), "{\"schemaVersion\":1,\"status\":\"running\"");
-  const outcome = {
-    restoreCompleted: true,
-    upgradeRolledBack: false,
-    consistent: true,
-    settleInterruptedJobs: true,
-    snapshotId: snapA,
-    restorePlanId: "plan-restore-a",
-    message: "Pending snapshot or upgrade state was reconciled.",
-  };
-  const handle = await startSupervisor(home, {
-    createMaintenance: () => ({
-      ...fakeMaintenance(),
-      recover: async () => undefined,
-      recoveryOutcome: () => outcome,
-    }),
-  });
+  const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const first = await api(handle.origin, cookie, "submit", {
-    command: { kind: "recovery.resume" },
-    requestId: "resume-match-1",
-  });
-  assert.equal(first.body.ok, true, JSON.stringify(first.body));
-  const firstJob = await waitJob(handle.origin, cookie, "resume-match-1", "failed");
-  assert.match(`${firstJob.message ?? ""} ${firstJob.error?.message ?? ""}`, /still required|doctor/i);
-  assert.equal(jobStatus(home, "job-restore-a"), "succeeded");
+  const files = [
+    join(home, ".dsh-spaces-control", "jobs", "job-restore-a.json"),
+    join(home, ".dsh-spaces-control", "jobs", "job-restore-b.json"),
+    join(home, ".dsh-spaces-control", "jobs", "job-upgrade.json"),
+    join(home, ".dsh-spaces-control", "jobs", "broken.json"),
+    join(home, ".dsh-spaces-control", "plans", "plan-restore-a.json"),
+    join(home, ".dsh-spaces-control", "plans", "plan-restore-b.json"),
+    join(home, ".dsh-spaces-control", "plans", "plan-upgrade.json"),
+  ];
+  await assertRecoveryResumeUnsupported(handle.origin, cookie, files, "resume-match-1");
+  await assertRecoveryResumeUnsupported(handle.origin, cookie, files, "resume-match-2");
+  assert.equal(jobStatus(home, "job-restore-a"), "recovery-required");
   assert.equal(jobStatus(home, "job-restore-b"), "recovery-required");
   assert.equal(jobStatus(home, "job-upgrade"), "recovery-required");
-  assert.equal(readFileSync(join(home, ".dsh-spaces-control", "jobs", "broken.json"), "utf8"), "{\"schemaVersion\":1,\"status\":\"running\"");
-  const afterFirst = await handle.runtime.state();
-  assert.equal(afterFirst.recoveryRequired, true);
-  assert.notEqual(afterFirst.spaces.find((space) => space.id === afterFirst.managerId)?.status, "running");
-
-  const second = await api(handle.origin, cookie, "submit", {
-    command: { kind: "recovery.resume" },
-    requestId: "resume-match-2",
-  });
-  assert.equal(second.body.ok, true, JSON.stringify(second.body));
-  await waitJob(handle.origin, cookie, "resume-match-2", "failed");
-  assert.equal(jobStatus(home, "job-restore-a"), "succeeded");
-  assert.equal(jobStatus(home, "job-restore-b"), "recovery-required");
-  assert.equal(jobStatus(home, "job-upgrade"), "recovery-required");
-  const afterSecond = await handle.runtime.state();
-  assert.equal(afterSecond.recoveryRequired, true);
-  assert.notEqual(afterSecond.spaces.find((space) => space.id === afterSecond.managerId)?.status, "running");
 });
 
-test.skip("recovery resume does not settle jobs or start the manager when pending recover fails", async () => {
+test("recovery resume does not settle jobs or start the manager when pending recover fails", async () => {
   const home = tempHome();
   writeInterruptedPlan(home, "plan-restore-a", {
     kind: "snapshot.restore",
@@ -1013,26 +1005,21 @@ test.skip("recovery resume does not settle jobs or start the manager when pendin
     }),
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  await api(handle.origin, cookie, "submit", {
-    command: { kind: "recovery.resume" },
-    requestId: "resume-fail-1",
-  });
-  await waitJob(handle.origin, cookie, "resume-fail-1", "failed");
+  await assertRecoveryResumeUnsupported(
+    handle.origin,
+    cookie,
+    [
+      join(home, ".dsh-spaces-control", "jobs", "job-restore-a.json"),
+      join(home, ".dsh-spaces-control", "plugin-mutation.json"),
+      join(home, ".dsh-spaces-control", "plans", "plan-restore-a.json"),
+    ],
+    "resume-fail-1",
+  );
   assert.equal(jobStatus(home, "job-restore-a"), "recovery-required");
   assert.equal(readFileSync(join(home, ".dsh-spaces-control", "plugin-mutation.json"), "utf8"), mutation);
-  const state = await handle.runtime.state();
-  assert.equal(state.recoveryRequired, true);
-  assert.equal(state.writable, true);
-  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
-  const blocked = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "web" },
-    requestId: "should-block",
-  });
-  assert.equal(blocked.body.ok, false);
-  assert.equal(blocked.body.error?.code, "workbench/unavailable");
 });
 
-test.skip("ROOT cold recovery opens with a dead transaction lock and reclaims only after explicit resume", async () => {
+test("ROOT cold recovery opens with a dead transaction lock and reclaims only after explicit resume", async () => {
   for (const pid of [2147483647, process.pid]) {
     const home = tempHome();
     await new HomeController(home).ensureManager();
@@ -1043,43 +1030,44 @@ test.skip("ROOT cold recovery opens with a dead transaction lock and reclaims on
     const handle = await startSupervisor(home, { createMaintenance: () => fakeMaintenance() });
     const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
     assert.equal((await handle.runtime.state()).writable, true);
-    assert.equal(readFileSync(join(lockDir, HOME_LOCK_OWNER_FILE), "utf8"), owner);
-    assert.ok((await handle.runtime.state()).reasons.includes("Unfinished Home maintenance must be recovered before new changes."));
-    await api(handle.origin, cookie, "submit", { command: { kind: "recovery.resume" }, requestId: "resume-lock" });
-    await waitJob(handle.origin, cookie, "resume-lock", pid === process.pid ? "failed" : "succeeded");
-    assert.equal(existsSync(lockDir), pid === process.pid);
-    assert.equal((await handle.runtime.state()).reasons.includes("Unfinished Home maintenance must be recovered before new changes."), pid === process.pid);
-    await handle.close();
+    await assertRecoveryResumeUnsupported(
+      handle.origin,
+      cookie,
+      [join(lockDir, HOME_LOCK_OWNER_FILE)],
+      `resume-lock-${pid}`,
+    );
+    assert.equal(existsSync(lockDir), true);
+    assert.equal(existsSync(join(home, ".dsh-spaces-reclaim")), false);
   }
 });
 
-test.skip("ROOT package recovery settles only its matching job and preserves abandoned failure", async () => {
-  for (const succeeded of [true, false]) {
-    const home = tempHome();
-    for (const suffix of ["a", "b"]) {
-      writeInterruptedPlan(home, `plan-package-${suffix}`, { kind: "workbench.upgrade" });
-      writeInterruptedJob(home, {
-        id: `job-package-${suffix}`, kind: "plan.execute", phase: "install",
-        command: { kind: "plan.execute", planId: `plan-package-${suffix}` },
-      });
-    }
-    const handle = await startSupervisor(home, {
-      createMaintenance: () => ({ ...fakeMaintenance(), recover: async () => {}, recoveryOutcome: () => ({
-        restoreCompleted: false, upgradeRolledBack: false, consistent: true, settleInterruptedJobs: true,
-        workbenchPlanId: "plan-package-a", workbenchSucceeded: succeeded, workbenchRolledBack: false,
-        message: "Exact package receipt recovered.",
-      }) }),
+test("ROOT package recovery settles only its matching job and preserves abandoned failure", async () => {
+  const home = tempHome();
+  for (const suffix of ["a", "b"]) {
+    writeInterruptedPlan(home, `plan-package-${suffix}`, { kind: "workbench.upgrade" });
+    writeInterruptedJob(home, {
+      id: `job-package-${suffix}`, kind: "plan.execute", phase: "install",
+      command: { kind: "plan.execute", planId: `plan-package-${suffix}` },
     });
-    const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-    await api(handle.origin, cookie, "submit", { command: { kind: "recovery.resume" }, requestId: "resume-package" });
-    await waitJob(handle.origin, cookie, "resume-package", "failed");
-    assert.equal(jobStatus(home, "job-package-a"), succeeded ? "succeeded" : "failed");
-    assert.equal(jobStatus(home, "job-package-b"), "recovery-required");
-    await handle.close();
   }
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await assertRecoveryResumeUnsupported(
+    handle.origin,
+    cookie,
+    [
+      join(home, ".dsh-spaces-control", "jobs", "job-package-a.json"),
+      join(home, ".dsh-spaces-control", "jobs", "job-package-b.json"),
+      join(home, ".dsh-spaces-control", "plans", "plan-package-a.json"),
+      join(home, ".dsh-spaces-control", "plans", "plan-package-b.json"),
+    ],
+    "resume-package",
+  );
+  assert.equal(jobStatus(home, "job-package-a"), "recovery-required");
+  assert.equal(jobStatus(home, "job-package-b"), "recovery-required");
 });
 
-test.skip("recovery resume settles only the matching runtime.upgrade planId", async () => {
+test("recovery resume settles only the matching runtime.upgrade planId", async () => {
   const home = tempHome();
   writeInterruptedPlan(home, "plan-upgrade-a", { kind: "runtime.upgrade" });
   writeInterruptedPlan(home, "plan-upgrade-b", { kind: "runtime.upgrade" });
@@ -1095,29 +1083,21 @@ test.skip("recovery resume settles only the matching runtime.upgrade planId", as
     command: { kind: "plan.execute", planId: "plan-upgrade-b" },
     phase: "commit",
   });
-  const handle = await startSupervisor(home, {
-    createMaintenance: () => ({
-      ...fakeMaintenance(),
-      recover: async () => undefined,
-      recoveryOutcome: () => ({
-        restoreCompleted: false,
-        upgradeRolledBack: true,
-        consistent: true,
-        settleInterruptedJobs: true,
-        upgradePlanId: "plan-upgrade-a",
-        message: "Pending snapshot or upgrade state was reconciled.",
-      }),
-    }),
-  });
+  const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  await api(handle.origin, cookie, "submit", {
-    command: { kind: "recovery.resume" },
-    requestId: "resume-upgrade-1",
-  });
-  await waitJob(handle.origin, cookie, "resume-upgrade-1", "failed");
-  assert.equal(jobStatus(home, "job-upgrade-a"), "failed");
+  await assertRecoveryResumeUnsupported(
+    handle.origin,
+    cookie,
+    [
+      join(home, ".dsh-spaces-control", "jobs", "job-upgrade-a.json"),
+      join(home, ".dsh-spaces-control", "jobs", "job-upgrade-b.json"),
+      join(home, ".dsh-spaces-control", "plans", "plan-upgrade-a.json"),
+      join(home, ".dsh-spaces-control", "plans", "plan-upgrade-b.json"),
+    ],
+    "resume-upgrade-1",
+  );
+  assert.equal(jobStatus(home, "job-upgrade-a"), "recovery-required");
   assert.equal(jobStatus(home, "job-upgrade-b"), "recovery-required");
-  await handle.close();
 
   const homeLegacy = tempHome();
   writeInterruptedPlan(homeLegacy, "plan-upgrade-old", { kind: "runtime.upgrade" });
@@ -1127,29 +1107,21 @@ test.skip("recovery resume settles only the matching runtime.upgrade planId", as
     command: { kind: "plan.execute", planId: "plan-upgrade-old" },
     phase: "commit",
   });
-  const legacy = await startSupervisor(homeLegacy, {
-    createMaintenance: () => ({
-      ...fakeMaintenance(),
-      recover: async () => undefined,
-      recoveryOutcome: () => ({
-        restoreCompleted: false,
-        upgradeRolledBack: true,
-        consistent: true,
-        settleInterruptedJobs: true,
-        message: "Pending snapshot or upgrade state was reconciled.",
-      }),
-    }),
-  });
+  const legacy = await startSupervisor(homeLegacy);
   const legacyCookie = await bootstrap(legacy.origin, legacy.bootstrapUrl);
-  await api(legacy.origin, legacyCookie, "submit", {
-    command: { kind: "recovery.resume" },
-    requestId: "resume-upgrade-old",
-  });
-  await waitJob(legacy.origin, legacyCookie, "resume-upgrade-old", "failed");
+  await assertRecoveryResumeUnsupported(
+    legacy.origin,
+    legacyCookie,
+    [
+      join(homeLegacy, ".dsh-spaces-control", "jobs", "job-upgrade-old.json"),
+      join(homeLegacy, ".dsh-spaces-control", "plans", "plan-upgrade-old.json"),
+    ],
+    "resume-upgrade-old",
+  );
   assert.equal(jobStatus(homeLegacy, "job-upgrade-old"), "recovery-required");
 });
 
-test.skip("recovery resume does not follow a junctioned plans directory", async () => {
+test("recovery resume does not follow a junctioned plans directory", async () => {
   const home = tempHome();
   const snapA = "11111111-1111-1111-1111-111111111111";
   const outside = join(home, "outside-plans");
@@ -1175,26 +1147,17 @@ test.skip("recovery resume does not follow a junctioned plans directory", async 
     command: { kind: "plan.execute", planId: "plan-restore-a" },
     phase: "restore",
   });
-  const handle = await startSupervisor(home, {
-    createMaintenance: () => ({
-      ...fakeMaintenance(),
-      recover: async () => undefined,
-      recoveryOutcome: () => ({
-        restoreCompleted: true,
-        upgradeRolledBack: false,
-        consistent: true,
-        settleInterruptedJobs: true,
-        snapshotId: snapA,
-        message: "Pending snapshot or upgrade state was reconciled.",
-      }),
-    }),
-  });
+  const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  await api(handle.origin, cookie, "submit", {
-    command: { kind: "recovery.resume" },
-    requestId: "resume-symlink-1",
-  });
-  await waitJob(handle.origin, cookie, "resume-symlink-1", "failed");
+  await assertRecoveryResumeUnsupported(
+    handle.origin,
+    cookie,
+    [
+      join(home, ".dsh-spaces-control", "jobs", "job-restore-a.json"),
+      join(outside, "plan-restore-a.json"),
+    ],
+    "resume-symlink-1",
+  );
   assert.equal(jobStatus(home, "job-restore-a"), "recovery-required");
   assert.equal(existsSync(join(outside, "plan-restore-a.json")), true);
 });

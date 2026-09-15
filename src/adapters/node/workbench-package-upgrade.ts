@@ -265,13 +265,13 @@ export class WorkbenchPackageUpgrade {
       return { snapshotId };
     } catch (error) {
       if (error instanceof ProcessTerminationError) throw error;
-      // Once settlement starts, preserve its evidence for retry. A failed receipt write
-      // or marker unlink must not turn a completed update into a second transaction.
+      // Once settlement starts, preserve its evidence. Do not restore or recover
+      // after a snapshot; report the original failure in place.
       if (marker.settlement) throw error;
-      if (marker.snapshotId) {
-        await this.rollback(marker, "execute");
-      } else {
+      try {
         this.settle(marker, "abandoned", false);
+      } catch {
+        // Settlement is best-effort evidence. Never replace the original failure.
       }
       throw error;
     }
@@ -283,47 +283,10 @@ export class WorkbenchPackageUpgrade {
    * Cold recover success/abandon does not start the manager; root reinitializes once.
    */
   async recover(
-    ctx: WorkbenchJobContext,
-    planId?: string,
+    _ctx: WorkbenchJobContext,
+    _planId?: string,
   ): Promise<WorkbenchPackageRecovery | undefined> {
-    if (planId !== undefined) requireUuid(planId, "planId");
-    const marker = this.peekMarker();
-    if (marker === "missing") {
-      if (!planId) return undefined;
-      const receipt = this.readReceipt(planId);
-      return receipt ? publicRecovery(receipt) : undefined;
-    }
-    if (marker === "invalid") {
-      throw new WorkbenchPackageUpgradeError(
-        "unavailable",
-        "The workbench package upgrade record requires offline inspection.",
-      );
-    }
-    this.assertMarkerHome(marker);
-    if (planId && marker.planId !== planId) return undefined;
-
-    if (marker.settlement) {
-      return this.finishSettledMarker(marker);
-    }
-    const receipt = this.readReceipt(marker.planId);
-    if (receipt) {
-      this.assertReceiptMatchesMarker(receipt, marker);
-      this.clearMarker();
-      return publicRecovery(receipt);
-    }
-
-    ctx.cancellable(false);
-    if (!marker.snapshotId) {
-      ctx.phase("abandon");
-      ctx.message("The workbench package plan never replaced manager packages.");
-      this.settle(marker, "abandoned", false);
-      return this.requireReceipt(marker.planId);
-    }
-
-    ctx.phase("restore");
-    ctx.message("Restoring the Home snapshot taken before the workbench package change.");
-    await this.rollback(marker, "recover");
-    return this.requireReceipt(marker.planId);
+    throw new WorkbenchPackageUpgradeError("unavailable", "Workbench package recovery is not supported.");
   }
 
   hasEvidence(): boolean {
@@ -333,28 +296,6 @@ export class WorkbenchPackageUpgrade {
     } catch (error) {
       return (error as NodeJS.ErrnoException).code !== "ENOENT";
     }
-  }
-
-  /**
-   * In-process execute rollback starts the manager once. Cold recover does not:
-   * root withMaintenance / resumeRecovery reinitializes after journals settle.
-   */
-  private async rollback(marker: UpgradeMarker, origin: "execute" | "recover"): Promise<void> {
-    const snapshotId = marker.snapshotId;
-    if (!snapshotId) {
-      throw new WorkbenchPackageUpgradeError("failed", "No snapshot is recorded for rollback.");
-    }
-    await this.options.stopAll();
-    const recovered = await this.options.upgrades.recover({ receiptPlanId: marker.planId });
-    const alreadyRestored =
-      recovered.restoreCompleted === true &&
-      typeof recovered.restoreReceipt?.snapshotId === "string" &&
-      recovered.restoreReceipt.snapshotId.toLowerCase() === snapshotId;
-    if (!alreadyRestored) {
-      await this.options.upgrades.restore(snapshotId, marker.planId);
-    }
-    if (origin === "execute") await this.options.reinitializeManager();
-    this.settle(marker, "rolled-back", true);
   }
 
   private settle(marker: UpgradeMarker, outcome: WorkbenchPackageOutcome, rolledBack: boolean): void {
@@ -791,7 +732,6 @@ function parseSettlement(value: unknown): UpgradeSettlement {
   };
   if (value.snapshotId !== undefined) settlement.snapshotId = requireUuid(text(value.snapshotId), "snapshotId");
   if ((outcome === "succeeded" || outcome === "rolled-back") && !settlement.snapshotId) throw new Error("missing snapshot evidence");
-  if (outcome === "abandoned" && settlement.snapshotId) throw new Error("abandoned transaction has snapshot evidence");
   return settlement;
 }
 

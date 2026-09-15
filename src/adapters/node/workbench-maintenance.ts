@@ -953,7 +953,7 @@ export class WorkbenchMaintenance {
       changes: [
         `Update the manager and view bridge from the bundled workbench package ${release.version}.`,
         "Stop all owned instances, including the manager, and create a whole-home snapshot.",
-        "A failed update restores the whole Home. Other workspaces are not restarted automatically.",
+        "A failed update stays failed in place. Other workspaces are not restarted automatically.",
         "The supervisor entry remains available. Its running program updates on the next cold start.",
       ], destructive: true, expiresAt,
     });
@@ -1003,7 +1003,7 @@ export class WorkbenchMaintenance {
       changes: [
         `Upgrade runtime from ${preview.currentVersion ?? this.currentVersionLabel()} to ${preview.version}.`,
         "Stop every owned workspace, including the manager.",
-        "Create a whole-home snapshot, stage, smoke, then commit. Failure rolls back the known snapshot.",
+        "Create a whole-home snapshot, stage, smoke, then commit. A failed update stays failed in place.",
         "Other workspaces are not started automatically after the upgrade.",
       ],
       destructive: true,

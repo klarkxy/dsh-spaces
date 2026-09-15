@@ -407,7 +407,7 @@ export function findingsFromInspect(input: {
     findings.push(
       input.plugin.unreadable
         ? "Plugin-mutation evidence is unreadable and was not treated as absent."
-        : "Plugin mutation evidence is present. Do not restore a single manifest; use a whole-home snapshot rollback.",
+        : "Plugin mutation evidence is present. Original bytes were left in place.",
     );
   }
   if (input.lock.held === true) findings.push("The home transaction lock is held or incomplete.");
@@ -416,10 +416,10 @@ export function findingsFromInspect(input: {
     findings.push("Manager identity is damaged and was not rebuilt.");
   }
   if (input.jobs.status === "recovery-required" || input.jobs.status === "unreadable") {
-    findings.push("Persistent workbench jobs need recovery and were not cleared.");
+    findings.push("Persistent workbench jobs are unfinished or unreadable and were not cleared.");
   }
   if ((input.instances.live as number) > 0 || (input.instances.ambiguous as number) > 0) {
-    findings.push("Leftover instances are live or identity-ambiguous. Recovery mode: directories were not swapped and PIDs were not killed.");
+    findings.push("Leftover instances are live or identity-ambiguous. Directories were not swapped and PIDs were not killed.");
   }
   if (Array.isArray(input.toolchain.missing) && input.toolchain.missing.length) {
     findings.push("Trusted snapshotRoot/runtimeRoot/cli fields are missing. Pass flags; production app data was not guessed.");
