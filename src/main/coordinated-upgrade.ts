@@ -256,10 +256,10 @@ export class CoordinatedUpgrade {
 
   private assertClear(): void {
     if (this.opts.snapshots.pendingRestore()) {
-      throw new Error("Unfinished restore is pending; call recover() first");
+      throw new Error("Unfinished restore evidence was reported. Writes are blocked.");
     }
     if (this.readJournal()) {
-      throw new Error("Unfinished upgrade is pending; call recover() first");
+      throw new Error("Unfinished upgrade evidence was reported. Writes are blocked.");
     }
   }
 

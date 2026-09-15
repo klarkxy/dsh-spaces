@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
+  SPACE_TEMPLATES_FILE,
   createSpaceFromTemplate,
   listSpaceTemplates,
   saveSpaceTemplate,
+  spaceTemplateId,
 } from "../src/main/space-templates.ts";
 
 const temps: string[] = [];
@@ -84,6 +86,79 @@ test("creating from a template copies plugins onto a new space only", async () =
   assert.deepEqual(created, ["lab"]);
   assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
   assert.equal(result.plugins, "completed");
+});
+
+test("corrupt template bytes fail instead of returning empty and are not overwritten", () => {
+  const dir = home();
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", SPACE_TEMPLATES_FILE);
+  const original = "{not-json";
+  writeFileSync(path, original);
+  assert.throws(() => listSpaceTemplates(dir), /invalid|unchanged/i);
+  writeProfile(dir, "coding");
+  assert.throws(() => saveSpaceTemplate(dir, "coding", "Dev"), /invalid|unchanged/i);
+  assert.equal(readFileSync(path, "utf8"), original);
+});
+
+test("invalid template fields fail instead of becoming a partial template", () => {
+  const dir = home();
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", SPACE_TEMPLATES_FILE);
+  writeFileSync(path, JSON.stringify({ templates: [{ id: "dev", name: "Dev", plugins: [] }] }));
+  assert.throws(() => listSpaceTemplates(dir), /invalid template|unchanged/i);
+});
+
+test("chinese names and truncated slugs get stable ids and do not overwrite a different template", () => {
+  const dir = home();
+  writeProfile(dir, "coding");
+  const first = saveSpaceTemplate(dir, "coding", "开发环境", { displayName: "Dev ZH" });
+  const second = saveSpaceTemplate(dir, "coding", "测试环境", { displayName: "Test ZH" });
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.id, spaceTemplateId("开发环境"));
+  assert.equal(listSpaceTemplates(dir).length, 2);
+  const longA = `${"a".repeat(40)}-one`;
+  const longB = `${"a".repeat(40)}-two`;
+  const a = saveSpaceTemplate(dir, "coding", longA, { displayName: "A" });
+  const b = saveSpaceTemplate(dir, "coding", longB, { displayName: "B" });
+  assert.notEqual(a.id, b.id);
+  assert.equal(listSpaceTemplates(dir).some((row) => row.name === longA), true);
+  assert.equal(listSpaceTemplates(dir).some((row) => row.name === longB), true);
+});
+
+test("saving the same logical template name updates that template only", () => {
+  const dir = home();
+  writeProfile(dir, "coding");
+  const first = saveSpaceTemplate(dir, "coding", "Dev", { displayName: "Original" });
+  const second = saveSpaceTemplate(dir, "coding", "Dev", { displayName: "Updated" });
+  assert.equal(second.id, first.id);
+  const listed = listSpaceTemplates(dir);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.displayName, "Updated");
+});
+
+test("template creation does not execute a mismatched installSpec", async () => {
+  const installed: string[] = [];
+  const result = await createSpaceFromTemplate(
+    {
+      id: "dev",
+      name: "Dev",
+      displayName: "Dev box",
+      plugins: [
+        { packageName: "good", resolvedVersion: "1.0.0", source: "npm", installSpec: "evil@1.0.0" },
+        { packageName: "ok", resolvedVersion: "1.0.0", source: "npm", installSpec: "ok@1.0.0" },
+      ],
+      createdAt: "2026-09-15T00:00:00.000Z",
+    },
+    "lab",
+    {
+      createSpace: async () => undefined,
+      installPlugin: async (_spaceId, spec) => {
+        installed.push(spec);
+      },
+    },
+  );
+  assert.deepEqual(installed, ["ok@1.0.0"]);
+  assert.equal(result.plugins, "pending-manual");
 });
 
 test("template install failure is reported and does not rewrite other spaces", async () => {

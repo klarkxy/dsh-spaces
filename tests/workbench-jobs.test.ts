@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  INTERRUPTED_JOB_MESSAGE,
   WORKBENCH_CONTROL_DIR_NAME,
   WORKBENCH_JOB_ERROR,
   WORKBENCH_JOBS_DIR_NAME,
@@ -307,7 +308,11 @@ test("startup leftover queued jobs are failed interrupted and are not replayed",
   assert.equal(job.requestId, "legacy-1");
   assert.equal(job.canCancel, false);
   assert.equal("command" in job, false);
-  assert.match(job.error?.message ?? "", /unconfirmed|interrupted/i);
+  assert.equal(job.message, INTERRUPTED_JOB_MESSAGE);
+  assert.equal(job.error?.message, INTERRUPTED_JOB_MESSAGE);
+  assert.match(job.message, /unconfirmed/i);
+  assert.match(job.message, /not replayed/i);
+  assert.equal(job.message.includes("copying"), false);
   assert.equal(writes, 1);
 
   const onDisk = JSON.parse(readFileSync(jobFile(home, "legacy-1"), "utf8")) as {

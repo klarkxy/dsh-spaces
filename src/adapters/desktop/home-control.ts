@@ -1,6 +1,6 @@
 import { MaintenanceGate } from "../../core/application/maintenance-gate";
 import { HomeOperationLock } from "../node/home-operation-lock";
-import { lstatSync, unlinkSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 
 export interface DesktopHomeControl {
@@ -21,23 +21,21 @@ export function createDesktopHomeControl(home: string): DesktopHomeControl {
       throw error;
     }
   };
-  const assertRecovered = () => {
-    if (hasPendingMutation()) throw new Error("A Spaces operation needs recovery. Inspect it with dsh-spaces doctor, or restore a complete snapshot before changing spaces.");
+  const assertNoUnfinishedEvidence = () => {
+    if (hasPendingMutation()) {
+      throw new Error("A Spaces operation left unfinished evidence. Writes are blocked.");
+    }
   };
   return {
     lock,
     maintenance,
     mutate<T>(action: () => T | Promise<T>): Promise<T> {
-      return maintenance.runMutation(async () => { assertRecovered(); return action(); });
+      return maintenance.runMutation(async () => { assertNoUnfinishedEvidence(); return action(); });
     },
     runMaintenance<T>(label: string, action: () => Promise<T>): Promise<T> {
       return maintenance.run(label, async () => {
-        // A full snapshot restore is an explicit recovery path. Shutdown must
-        // also remain available while new work is blocked.
-        if (label !== "snapshot-restore" && label !== "quit") assertRecovered();
-        const result = await action();
-        if (label === "snapshot-restore" && hasPendingMutation()) unlinkSync(journal);
-        return result;
+        if (label !== "quit") assertNoUnfinishedEvidence();
+        return action();
       });
     },
   };

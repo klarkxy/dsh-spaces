@@ -114,6 +114,18 @@ export class WorkbenchMaintenanceError extends Error {
   }
 }
 
+class PluginBatchItemError extends Error {
+  readonly name = "PluginBatchItemError";
+  constructor(
+    message: string,
+    readonly spaceId: string,
+    readonly packageName: string,
+    readonly stage: string,
+  ) {
+    super(message);
+  }
+}
+
 export type MaintenanceFetcher = (
   url: string,
   init?: { headers?: Record<string, string> },
@@ -1043,7 +1055,12 @@ export class WorkbenchMaintenance {
           }
         });
         if (batch.failed) {
-          throw new Error(batch.failed.error);
+          throw new PluginBatchItemError(
+            batch.failed.error,
+            batch.failed.item,
+            command.packageName,
+            "install",
+          );
         }
       },
     );
@@ -1155,22 +1172,32 @@ export class WorkbenchMaintenance {
         throw error;
       }
       this.failPluginMutation();
-      const row = expected[0];
+      const failedItem = error instanceof PluginBatchItemError ? error : undefined;
+      const row = failedItem
+        ? expected.find((item) => item.spaceId === failedItem.spaceId) ?? {
+            spaceId: failedItem.spaceId,
+            action: "install" as const,
+            packageName: failedItem.packageName,
+          }
+        : expected[0];
       const reason = error instanceof Error ? error.message : String(error);
-      const stage = row?.action === "remove" ? "remove" : row?.action === "install" ? "install" : "plugin";
+      const stage = failedItem?.stage
+        ?? (row?.action === "remove" ? "remove" : row?.action === "install" ? "install" : "plugin");
+      const packageName = failedItem?.packageName ?? row?.packageName;
+      const spaceId = failedItem?.spaceId ?? row?.spaceId;
       const message = formatWorkbenchFailure({
-        spaceId: row?.spaceId,
+        spaceId,
         stage,
-        packageName: row?.packageName,
-        pluginAttribution: row?.packageName ? "known" : "unknown",
+        packageName,
+        pluginAttribution: packageName ? "known" : "unknown",
         reason,
       });
       ctx.message(message);
       throw new WorkbenchJobError("workbench/failed", message, {
-        spaceId: row?.spaceId,
+        spaceId,
         stage,
-        packageName: row?.packageName,
-        pluginAttribution: row?.packageName ? "known" : "unknown",
+        packageName,
+        pluginAttribution: packageName ? "known" : "unknown",
       });
     }
     await this.startRequired(running);

@@ -71,7 +71,13 @@ import {
   resolveInstallSpec,
   setSpacePlugin,
 } from "./plugin-ops";
-import { exportSpaceArchive, importSpaceArchive, uniqueSpaceName, writeSpaceArchiveFile } from "./space-share";
+import {
+  exportSpaceArchive,
+  importSpaceArchive,
+  previewSpaceShare,
+  uniqueSpaceName,
+  writeSpaceArchiveFile,
+} from "./space-share";
 import { createSpaceFromTemplate, listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -351,22 +357,78 @@ function startMain(): void {
     });
   }
 
+  async function confirmExportIncludeConfig(name: string): Promise<boolean | null> {
+    if (!mainWindow) return null;
+    const zh = currentSettings.locale !== "en";
+    const asked = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      buttons: [
+        zh ? "仅插件组成" : "Plugins only",
+        zh ? "附带配置" : "Include config",
+        t("common.cancel"),
+      ],
+      cancelId: 2,
+      defaultId: 0,
+      title: t("menu.exportSpace"),
+      message: zh ? `导出 ${name} 为空间分享包？` : `Export ${name} as a space share?`,
+      detail: zh
+        ? "默认不附带配置。若附带配置，保存前会预览配置内容。"
+        : "Config is off by default. If you include it, you will preview the config before saving.",
+    });
+    if (asked.response === 2) return null;
+    return asked.response === 1;
+  }
+
+  function formatSharePreview(
+    name: string,
+    includeConfig: boolean,
+    patch?: string,
+  ): { archive: Buffer; text: string } {
+    const profile = listProfiles().find((item) => item.name === name);
+    const archive = exportSpaceArchive(dshHome, name, {
+      displayName: profile?.meta.displayName,
+      icon: profile?.meta.icon,
+      includeConfig,
+      dshVersion: runtimes.current()?.version ?? null,
+    });
+    const preview = previewSpaceShare(archive);
+    const lines = [
+      `plugins: ${
+        preview.plugins
+          .map((row) => `${row.packageName}@${row.resolvedVersion ?? "unknown"} (${row.source})`)
+          .join(", ") || "(none)"
+      }`,
+      preview.unknownSources.length ? `unknown/manual: ${preview.unknownSources.join(", ")}` : "",
+      `config: ${preview.hasConfig ? "yes" : "no"}`,
+      patch ? `--- config ---\n${patch.slice(0, 4000)}` : "",
+    ];
+    return { archive, text: lines.filter(Boolean).join("\n") };
+  }
+
   async function exportSpaceShare(name: string, includeConfig = false): Promise<string | null> {
     if (!mainWindow) return null;
     const profile = listProfiles().find((item) => item.name === name);
     if (!profile || name === "web") throw new Error("The web space cannot be exported.");
+    const patchPath = join(dshHome, "profiles", name, "cordis.patch.yml");
+    const patch = includeConfig && existsSync(patchPath) ? readFileSync(patchPath, "utf8") : undefined;
+    const previewed = formatSharePreview(name, includeConfig, patch);
+    const zh = currentSettings.locale !== "en";
+    const confirmed = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      buttons: [t("common.confirm"), t("common.cancel")],
+      cancelId: 1,
+      defaultId: 0,
+      title: t("menu.exportSpace"),
+      message: zh ? "导出预览" : "Export preview",
+      detail: previewed.text,
+    });
+    if (confirmed.response !== 0) return null;
     const picked = await dialog.showSaveDialog(mainWindow, {
       defaultPath: `${profile.meta.displayName || name}.dshspace`,
       filters: [{ name: "DSH space", extensions: ["dshspace"] }],
     });
     if (picked.canceled || !picked.filePath) return null;
-    const archive = exportSpaceArchive(dshHome, name, {
-      displayName: profile.meta.displayName,
-      icon: profile.meta.icon,
-      includeConfig,
-      dshVersion: runtimes.current()?.version ?? null,
-    });
-    writeSpaceArchiveFile(picked.filePath, archive);
+    writeSpaceArchiveFile(picked.filePath, previewed.archive);
     return picked.filePath;
   }
 
@@ -386,6 +448,7 @@ function startMain(): void {
         if (input.icon) registry.updateMeta(input.name, { icon: sanitizeSpaceIcon(input.icon) });
       },
       installPlugin: async (spaceId, spec) => {
+        desktop.assertDesktopPluginMutation([spaceId], spec);
         await pluginAdd(dshHome, spaceId, spec);
       },
       dshVersion: runtimes.current()?.version ?? null,
@@ -454,22 +517,24 @@ function startMain(): void {
       },
       {
         label: currentSettings.locale === "en" ? "Save as template" : "存为模板",
-        enabled: name !== "web",
+        enabled: name !== "web" && desktop.writable,
         click: () => {
-          try {
+          void mutate(() => {
             saveSpaceTemplate(dshHome, name, profile.meta.displayName || name, {
               displayName: profile.meta.displayName || name,
             });
-          } catch (err) {
-            reportError(err);
-          }
+          }).catch(reportError);
         },
       },
       {
-        label: currentSettings.locale === "en" ? "Export space…" : "导出空间…",
-        enabled: name !== "web",
+        label: t("menu.exportSpace"),
+        enabled: name !== "web" && desktop.writable,
         click: () => {
-          void exportSpaceShare(name).catch(reportError);
+          void mutate(async () => {
+            const include = await confirmExportIncludeConfig(profile.meta.displayName || name);
+            if (include === null) return;
+            await exportSpaceShare(name, include);
+          }).catch(reportError);
         },
       },
       { label: currentSettings.locale === "en" ? "Diagnostics" : "诊断", click: () => uiCommand({ type: "diagnostics", name }) },
@@ -701,6 +766,7 @@ function startMain(): void {
           await createProfile(dshHome, registry, patchWriter, input.name, input.displayName);
         },
         installPlugin: async (spaceId, spec) => {
+          desktop.assertDesktopPluginMutation([spaceId], spec);
           await pluginAdd(dshHome, spaceId, spec);
         },
       });

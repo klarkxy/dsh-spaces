@@ -80,6 +80,16 @@ test("t uses the requested locale and interpolates placeholders", () => {
   );
 });
 
+test("catalogs do not offer recovery actions", () => {
+  const banned = /call recover first|restore a snapshot|needs recovery|pending recovery/i;
+  for (const [key, text] of Object.entries(en)) {
+    assert.doesNotMatch(text, banned, key);
+  }
+  for (const [key, text] of Object.entries(zh)) {
+    assert.doesNotMatch(text, banned, key);
+  }
+});
+
 test("name errors shown to users are the same human copy, not a regex", () => {
   for (const locale of ["en", "zh"] as const) {
     const fromMain = t("errors.nameInvalid", undefined, locale);

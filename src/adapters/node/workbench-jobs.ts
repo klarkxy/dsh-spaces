@@ -500,7 +500,7 @@ export class WorkbenchJobStore {
       record.phase = phase;
       record.canCancel = false;
       record.updatedAt = this.isoNow();
-      record.message = record.message || INTERRUPTED_JOB_MESSAGE;
+      record.message = INTERRUPTED_JOB_MESSAGE;
       record.error = {
         code: "workbench/failed",
         message: INTERRUPTED_JOB_MESSAGE,

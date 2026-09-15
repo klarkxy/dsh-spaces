@@ -125,21 +125,14 @@ export class DesktopController {
   }
 
   /**
-   * User-explicit takeover. reclaimDead only after inspect proves dead.
-   * Live or ambiguous owners are refused. Writes stay sealed until admitWrites.
+   * User-explicit takeover. Dead, live, and ambiguous owners are all refused.
+   * The ownership record is left in place. Writes stay sealed until admitWrites.
    */
   acquireExplicit(): DesktopControllerState {
     if (this.handle) return this.emit();
     const existing = this.controller.inspect();
     if (existing.held) {
-      if ("owner" in existing && existing.liveness === "dead") {
-        const reclaimed = this.controller.reclaimDead();
-        if (!reclaimed.reclaimed) {
-          throw new DesktopReadOnlyError(acquireRefusal(existing, reclaimed.reason), this.state());
-        }
-      } else {
-        throw new DesktopReadOnlyError(acquireRefusal(existing), this.state());
-      }
+      throw new DesktopReadOnlyError(acquireRefusal(existing), this.state());
     }
     try {
       this.handle = this.controller.acquire("desktop");
@@ -228,7 +221,8 @@ export class DesktopController {
   /**
    * Block new work, wait for maintenance + plugin queue, stop this desktop's
    * instances, clear our views, then release the lease. A stop failure keeps
-   * the lease. Allowed during recovery so control is never stuck forever.
+   * the lease. Allowed while leftover evidence blocks ordinary writes so the
+   * lease is not stuck forever.
    */
   async release(): Promise<DesktopControllerState> {
     if (!this.handle) return this.emit();
@@ -275,7 +269,7 @@ export class DesktopController {
     }
     if (this.handle) {
       throw new DesktopReadOnlyError(
-        `Holding Home control pending recovery${suffix}. ${state.reasons[0] ?? "Ordinary writes are blocked."}`,
+        `Holding Home control. Fault or leftover evidence was reported${suffix}. ${state.reasons[0] ?? "Writes are blocked."}`,
         state,
       );
     }
@@ -427,7 +421,7 @@ export class DesktopController {
     } catch (error) {
       if (error instanceof HomeControlPathError) {
         throw new DesktopReadOnlyError(
-          "Holding Home control pending recovery. Manager identity is damaged or ambiguous and was not rebuilt.",
+          "Holding Home control. Fault or leftover evidence was reported. Manager identity is damaged or ambiguous and was not rebuilt.",
           this.state(),
         );
       }
@@ -468,7 +462,7 @@ function publicState(
       blocking,
       transferPending ? ["Handing off Home control. New writes are blocked."] : [],
       recoveryRequired && !transferPending
-        ? ["Holding Home control pending recovery. Ordinary writes are blocked."]
+        ? ["Holding Home control. Fault or leftover evidence was reported; writes are blocked."]
         : [],
     );
     return {
@@ -514,7 +508,11 @@ function publicState(
       };
     }
     if (inspection.liveness === "dead") {
-      return recoveryState(ownerKind, "The previous owner is dead; reclaim is required.", blocking);
+      return recoveryState(
+        ownerKind,
+        "The previous owner is dead. The ownership record was left in place and was not taken.",
+        blocking,
+      );
     }
     return recoveryState(ownerKind, "Owner process liveness is ambiguous and cannot be taken.", blocking);
   }
@@ -542,13 +540,11 @@ function heldReason(kind: DesktopControllerKind): string {
     : "Another desktop instance holds this Home.";
 }
 
-function acquireRefusal(inspection: HomeControlInspect, reclaimReason?: string): string {
-  if (reclaimReason === "owner-alive") return "The current owner is still alive.";
-  if (reclaimReason === "ambiguous") return "Owner process liveness is ambiguous and cannot be taken.";
-  if (reclaimReason === "incomplete") return "Control ownership is incomplete and cannot be taken.";
-  if (reclaimReason === "reclaim-in-progress") return "A reclaim is already in progress.";
+function acquireRefusal(inspection: HomeControlInspect): string {
   if (!inspection.held) return "Home control could not be acquired.";
-  if ("reclaim" in inspection && inspection.reclaim) return "A reclaim is already in progress.";
+  if ("reclaim" in inspection && inspection.reclaim) {
+    return "A leftover reclaim record is present. The ownership record was left in place and was not taken.";
+  }
   if ("incomplete" in inspection && inspection.incomplete) {
     return "Control ownership is incomplete and cannot be taken.";
   }
@@ -557,7 +553,9 @@ function acquireRefusal(inspection: HomeControlInspect, reclaimReason?: string):
   }
   if ("owner" in inspection) {
     if (inspection.liveness === "alive") return heldReason(inspection.owner.kind);
-    if (inspection.liveness === "dead") return "The previous owner is dead; reclaim is required.";
+    if (inspection.liveness === "dead") {
+      return "The previous owner is dead. The ownership record was left in place and was not taken.";
+    }
     return "Owner process liveness is ambiguous and cannot be taken.";
   }
   return "Home control could not be acquired.";

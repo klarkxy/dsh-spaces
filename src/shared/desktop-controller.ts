@@ -4,7 +4,7 @@ export type DesktopControllerKind = "desktop" | "web";
 
 export interface DesktopControllerState {
   ownerKind: DesktopControllerKind | null;
-  /** True while this desktop process holds the Home lease, including recovery. */
+  /** True while this desktop process holds the Home lease, including while leftover evidence blocks writes. */
   held: boolean;
   writable: boolean;
   recoveryRequired: boolean;
