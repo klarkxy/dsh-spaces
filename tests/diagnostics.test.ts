@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -17,7 +16,6 @@ import { DiagnosticsService } from "../src/main/diagnostics.ts";
 import { MAX_BACKUP_BYTES, MAX_LOG_BYTES, MAX_LOG_ENTRIES } from "../src/shared/diagnostics.ts";
 import { t } from "../src/shared/i18n/index.ts";
 import type { ProfileKind, ProfileRecord, ProfileStatus } from "../src/shared/types.ts";
-import { assertDumpPatched } from "../src/main/patch-writer.ts";
 
 const temps: string[] = [];
 
@@ -132,7 +130,7 @@ test("configuration restore is not supported", async () => {
   assert.equal(service.get("coding").canRestore, false);
 });
 
-test.skip("web can be diagnosed but configuration restore is refused", async () => {
+test("web can be diagnosed but configuration restore is refused", async () => {
   const home = fakeHome();
   mkdirSync(join(home, "profiles", "web"), { recursive: true });
   writeFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "[]\n", "utf8");
@@ -158,20 +156,15 @@ test.skip("web can be diagnosed but configuration restore is refused", async () 
   service.record("web", "lifecycle", "started");
   assert.equal(service.get("web").logs.at(-1)?.text, "started");
 
-  assert.throws(() => service.previewBackup("web", "cordis.patch.yml.bak-1"), {
-    message: t("errors.webSacred"),
-  });
-  await assert.rejects(() => service.restoreBackup("web", "cordis.patch.yml.bak-1"), {
-    message: t("errors.webSacred"),
-  });
+  await assert.rejects(() => service.restoreBackup("web", "cordis.patch.yml.bak-1"), /not supported/);
   assert.equal(stopped, 0);
   assert.equal(verified, 0);
   assert.equal(readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8"), "[]\n");
   assert.equal(readFileSync(join(home, "profiles", "web", "cordis.patch.yml.bak-1"), "utf8"), "[]\n");
 });
 
-test.skip("restore fills isolation, always verifies, rolls back on failure, and keeps old backups", async () => {
-  const { home, dir, serviceFor } = harness();
+test("configuration restore does not mutate patches or invoke stop/verify", async () => {
+  const { dir, serviceFor } = harness();
   const patchPath = join(dir, "cordis.patch.yml");
   const original = `- id: keep-me
   config:
@@ -193,60 +186,27 @@ test.skip("restore fills isolation, always verifies, rolls back on failure, and 
   const stop = async () => {
     stopped += 1;
   };
-  const verifyOk = async (name: string) => {
+  const verifyOk = async () => {
     verified += 1;
-    const dump = readFileSync(patchPath, "utf8");
-    assertDumpPatched(dump, name);
   };
 
-  await serviceFor({ stop, verify: verifyOk }).restoreBackup("coding", backupId);
-
-  assert.equal(stopped, 1);
-  assert.equal(verified, 1);
-  const restored = readFileSync(patchPath, "utf8");
-  assert.match(restored, /from-backup/);
-  assert.match(restored, /root: !!js dshHomePath\('hub\/coding\/sessions'\)/);
-  assert.match(restored, /root: !!js dshHomePath\('hub\/coding\/storages'\)/);
-  assert.equal(readFileSync(join(dir, backupId), "utf8"), backupBody);
-  const baks = readdirSync(dir).filter((name) => name.startsWith("cordis.patch.yml.bak-"));
-  assert.ok(baks.length >= 2);
-  assert.ok(baks.includes(backupId));
-
-  writeFileSync(patchPath, original, "utf8");
-  stopped = 0;
-  verified = 0;
   await assert.rejects(
-    () =>
-      serviceFor({
-        stop,
-        verify: async () => {
-          verified += 1;
-          throw new Error("dump mismatch");
-        },
-      }).restoreBackup("coding", backupId),
-    /Configuration restore failed: dump mismatch/,
+    () => serviceFor({ stop, verify: verifyOk }).restoreBackup("coding", backupId),
+    /not supported/,
   );
-  assert.equal(stopped, 1);
-  assert.equal(verified, 1);
+  assert.equal(stopped, 0);
+  assert.equal(verified, 0);
   assert.equal(readFileSync(patchPath, "utf8"), original);
   assert.equal(readFileSync(join(dir, backupId), "utf8"), backupBody);
-
-  await assert.rejects(
-    () => serviceFor({ stop, verify: verifyOk, maintenance: true }).restoreBackup("coding", backupId),
-    /maintenance/,
-  );
-  assert.equal(readFileSync(patchPath, "utf8"), original);
 
   const oversizedId = "cordis.patch.yml.bak-oversized";
   writeFileSync(join(dir, oversizedId), "x".repeat(MAX_BACKUP_BYTES + 8), "utf8");
-  const preview = serviceFor({ stop, verify: verifyOk }).previewBackup("coding", oversizedId);
-  assert.equal(preview.tooLarge, true);
-  assert.equal(preview.content, undefined);
   await assert.rejects(
     () => serviceFor({ stop, verify: verifyOk }).restoreBackup("coding", oversizedId),
-    /larger than 1 MiB/,
+    /not supported/,
   );
   assert.equal(readFileSync(patchPath, "utf8"), original);
+  assert.equal(readFileSync(join(dir, oversizedId), "utf8"), "x".repeat(MAX_BACKUP_BYTES + 8));
 });
 
 test("JSONL disk size stays at 256KiB including a single large record and oversized files are tailed", () => {
@@ -296,7 +256,7 @@ test("JSONL disk size stays at 256KiB including a single large record and oversi
   assert.match(reloaded.get("coding").logs.map((entry) => entry.text).join("\n"), /after-tail/);
 });
 
-test.skip("restore rolls back to missing and existing patch files without claiming a false restore", async () => {
+test("restore does not rewrite missing or existing patch files", async () => {
   const { dir, serviceFor } = harness();
   const patchPath = join(dir, "cordis.patch.yml");
   const backupId = "cordis.patch.yml.bak-invalid-mapping";
@@ -304,29 +264,13 @@ test.skip("restore rolls back to missing and existing patch files without claimi
   const original = readFileSync(patchPath, "utf8");
   assert.equal(existsSync(patchPath), true);
 
-  await assert.rejects(
-    () => serviceFor({}).restoreBackup("coding", backupId),
-    (err: unknown) => {
-      assert.match(String(err), /Configuration restore failed:/);
-      assert.match(String(err), /The previous configuration was restored/);
-      assert.equal(String(err).includes("Rollback failed"), false);
-      return true;
-    },
-  );
+  await assert.rejects(() => serviceFor({}).restoreBackup("coding", backupId), /not supported/);
   assert.equal(readFileSync(patchPath, "utf8"), original);
   assert.equal(readFileSync(join(dir, backupId), "utf8"), "invalid: mapping\n");
 
   rmSync(patchPath);
   assert.equal(existsSync(patchPath), false);
-  await assert.rejects(
-    () => serviceFor({}).restoreBackup("coding", backupId),
-    (err: unknown) => {
-      assert.match(String(err), /Configuration restore failed:/);
-      assert.match(String(err), /The previous configuration was restored/);
-      assert.equal(String(err).includes("Rollback failed"), false);
-      return true;
-    },
-  );
+  await assert.rejects(() => serviceFor({}).restoreBackup("coding", backupId), /not supported/);
   assert.equal(existsSync(patchPath), false);
   assert.equal(readFileSync(join(dir, backupId), "utf8"), "invalid: mapping\n");
 });

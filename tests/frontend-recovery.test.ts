@@ -35,11 +35,11 @@ test("runtimeMissing defaults to a normal snapshot; flagged rows are data-only",
   assert.equal(isDataOnlySnapshot(snapshot({ runtimeMissing: true })), true);
 });
 
-test.skip("restore options require an explicit ack when the current runtime is missing", () => {
+test("restore options are not offered", () => {
   assert.equal(restoreOptionsFor(true, false), undefined);
   assert.equal(restoreOptionsFor(true, true), undefined);
-  assert.equal(restoreOptionsFor(false, false), null);
-  assert.deepEqual(restoreOptionsFor(false, true), { allowDataOnlyBackup: true });
+  assert.equal(restoreOptionsFor(false, false), undefined);
+  assert.equal(restoreOptionsFor(false, true), undefined);
 });
 
 test("settingsFormKey is stable for equal settings and changes per edited field", () => {

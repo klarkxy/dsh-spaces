@@ -7,16 +7,13 @@ export function isDataOnlySnapshot(row: SnapshotMeta): boolean {
 }
 
 /**
- * Restore normally backs up the current runtime first. When no current runtime
- * resolves, the backup keeps data only — restore must not proceed until the user
- * explicitly acknowledges that. Returns null while the acknowledgement is missing.
+ * Snapshot restore is not a product path. Restore options are never offered.
  */
 export function restoreOptionsFor(
-  currentAvailable: boolean,
-  dataOnlyAcknowledged: boolean,
+  _currentAvailable: boolean,
+  _dataOnlyAcknowledged: boolean,
 ): RestoreSnapshotOptions | null | undefined {
-  if (currentAvailable) return undefined;
-  return dataOnlyAcknowledged ? { allowDataOnlyBackup: true } : null;
+  return undefined;
 }
 
 /**

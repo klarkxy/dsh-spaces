@@ -193,7 +193,7 @@ test("recover and restore are not supported", async (t) => {
   await assert.rejects(() => ctx.upgrade.restore("snap-1"), /not supported/);
 });
 
-test.skip("recover rebuilds the snapshot runtime after an interrupted commit and allows a later upgrade", async (t) => {
+test("recover does not rebuild after an interrupted commit", async (t) => {
   const ctx = await harness(t);
   const snap = ctx.snapshots.create(descriptor(ctx.runtimes), "upgrade");
   const stage = join(ctx.home, ".dsh-spaces-upgrade");
@@ -205,15 +205,10 @@ test.skip("recover rebuilds the snapshot runtime after an interrupted commit and
   renameSync(join(ctx.home, "profiles"), join(stage, "backup-profiles"));
   mkdirSync(join(ctx.home, "profiles", "web"), { recursive: true });
   writeFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "half-committed\n");
-  const recovered = await ctx.upgrade.recover();
-  assert.equal(recovered.upgradeRolledBack, true);
-  assert.equal(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
-  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
-  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
-  assert.equal(ctx.runtimes.current()?.bin, ctx.snapshots.runtimeBin(snap.id));
-  assert.equal(existsSync(stage), false);
-  const result = await ctx.upgrade.upgrade("0.9.9");
-  assert.equal(result.version, "0.9.9");
+  const patchBefore = readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"));
+  await assert.rejects(() => ctx.upgrade.recover(), /not supported/);
+  assert.deepEqual(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml")), patchBefore);
+  assert.equal(existsSync(join(stage, "journal.json")), true);
 });
 
 test("discarding a junctioned stage unlinks the junction without deleting the target tree", async (t) => {
@@ -227,19 +222,15 @@ test("discarding a junctioned stage unlinks the junction without deleting the ta
   assert.equal(lstatSync(stage).isSymbolicLink(), true);
 });
 
-test.skip("successful restore selects the snapshot runtime and completes pending state without network install", async (t) => {
+test("successful restore is not supported and does not rewrite live profiles", async (t) => {
   const ctx = await harness(t);
   await ctx.upgrade.upgrade("0.9.9");
   const snap = ctx.snapshots.list().find((row) => row.reason === "upgrade");
   assert.ok(snap);
   writeFileSync(join(ctx.home, "profiles", "coding", "cordis.patch.yml"), "after-upgrade\n");
   const installsBefore = ctx.installs.slice();
-  const result = await ctx.upgrade.restore(snap.id);
-  assert.equal(result.restored.id, snap.id);
-  assert.equal(ctx.snapshots.pendingRestore(), undefined);
-  assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "cordis.patch.yml"), "utf8"), isolationPatch("coding"));
-  assert.equal(ctx.runtimes.current()?.version, snap.runtimeVersion);
-  assert.equal(ctx.runtimes.current()?.bin, ctx.snapshots.runtimeBin(snap.id));
+  await assert.rejects(() => ctx.upgrade.restore(snap.id), /not supported/);
+  assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "cordis.patch.yml"), "utf8"), "after-upgrade\n");
   assert.deepEqual(ctx.installs, installsBefore);
 });
 
@@ -275,7 +266,7 @@ test("resolveOfficialVersions uses realpath and createRequire, and refuses range
   assert.throws(() => resolveOfficialVersions(rangeBin), /does not resolve installed/);
 });
 
-test.skip("upgrade accepts generated fallback links and preserves global patches and committed profiles on recovery", async (t) => {
+test("upgrade does not recover after a successful commit", async (t) => {
   const ctx = await harness(t);
   const current = descriptor(ctx.runtimes);
   const shared = join(ctx.home, "profiles", "node_modules");
@@ -290,12 +281,12 @@ test.skip("upgrade accepts generated fallback links and preserves global patches
     return mockCli(ctx, stagedHome, args);
   } });
   await ctx.upgrade.upgrade("0.9.9");
-  await ctx.upgrade.recover();
+  await assert.rejects(() => ctx.upgrade.recover(), /not supported/);
   assert.equal(ctx.runtimes.current()?.version, "0.9.9");
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
 });
 
-test.skip("restore recovery consumes only the requested receipt and leaves a later runtime selection alone", async t => {
+test("interrupted snapshot restore is not recovered by CoordinatedUpgrade", async t => {
   const ctx = await harness(t);
   const snapshotRoot = fakeDir(t, "dsh-receipt-");
   ctx.snapshots = new SnapshotStore({ home: ctx.home, root: snapshotRoot,
@@ -305,29 +296,17 @@ test.skip("restore recovery consumes only the requested receipt and leaves a lat
   writeFileSync(marker, "before-restore data\n");
   const planId = "12345678-1234-1234-1234-123456789abc";
   await assert.rejects(async () => ctx.snapshots.restore(snapshot.id, descriptor(ctx.runtimes), { planId }), /interrupted/);
-  ctx.snapshots = new SnapshotStore({ home: ctx.home, root: snapshotRoot });
   ctx.upgrade = makeUpgrade(ctx);
-  const recovered = await ctx.upgrade.recover({ receiptPlanId: planId });
-  assert.equal(recovered.restoreRolledBack, true);
-  assert.equal(recovered.restoreReceipt?.planId, planId);
+  await assert.rejects(() => ctx.upgrade.recover({ receiptPlanId: planId }), /not supported/);
   assert.equal(readFileSync(marker, "utf8"), "before-restore data\n");
-  assert.deepEqual(await ctx.upgrade.recover({ receiptPlanId: "22345678-1234-1234-1234-123456789abc" }), {});
-  await ctx.runtimes.install("0.9.9");
-  ctx.runtimes.select("0.9.9");
-  assert.deepEqual(await ctx.upgrade.recover(), {});
-  assert.equal(ctx.runtimes.current()?.version, "0.9.9");
 });
 
-test.skip("successful restore persists the exact plan for recovery after job persistence is interrupted", async t => {
+test("CoordinatedUpgrade restore is unsupported and does not persist a restore plan", async t => {
   const ctx = await harness(t);
   const snapshot = ctx.snapshots.create(descriptor(ctx.runtimes));
   const planId = "32345678-1234-1234-1234-123456789abc";
-  await ctx.upgrade.restore(snapshot.id, planId);
-  assert.equal(ctx.snapshots.pendingRestore(), undefined);
-  const recovered = await ctx.upgrade.recover({ receiptPlanId: planId });
-  assert.equal(recovered.restoreCompleted, true);
-  assert.equal(recovered.restoreReceipt?.planId, planId);
-  assert.equal(recovered.restoreReceipt?.snapshotId, snapshot.id);
+  await assert.rejects(() => ctx.upgrade.restore(snapshot.id, planId), /not supported/);
+  await assert.rejects(() => ctx.upgrade.recover({ receiptPlanId: planId }), /not supported/);
 });
 
 interface Harness {
