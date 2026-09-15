@@ -122,7 +122,7 @@ test("downloadPlugin fetches an npm tarball into the hub library", async () => {
   let urls: string[] = [];
   const entry = await downloadPlugin(
     dir,
-    { spec: "dsh-outline" },
+    { spec: "dsh-outline@1.2.3" },
     {
       fetchImpl: async (url) => {
         urls.push(url);
@@ -153,10 +153,89 @@ test("downloadPlugin fetches an npm tarball into the hub library", async () => {
   const bytes = readFileSync(join(dir, entry.tarball!));
   assert.deepEqual([...bytes], [1, 2, 3, 4]);
   assert.ok(urls.some((url) => url.includes("dsh-outline")));
-  const second = await downloadPlugin(dir, { spec: "dsh-outline" }, { fetchImpl: async () => {
+  const second = await downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { fetchImpl: async () => {
     throw new Error("should use cached tarball");
   } });
   assert.equal(second.id, entry.id);
+  assert.equal(entry.spec, "dsh-outline@1.2.3");
+  assert.ok(urls.some((url) => url.includes("dsh-outline-1.2.3.tgz")));
+  assert.equal(urls.some((url) => url.includes("9.9.9")), false);
+});
+
+test("downloadPlugin refuses a bare npm name and does not fetch latest", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  let fetched = false;
+  await assert.rejects(
+    downloadPlugin(dir, { spec: "dsh-outline" }, {
+      fetchImpl: async () => {
+        fetched = true;
+        throw new Error("should not fetch");
+      },
+    }),
+    /exact package version|精确包版本/,
+  );
+  assert.equal(fetched, false);
+});
+
+test("downloadPlugin fails when the requested version is missing and does not use latest", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const urls: string[] = [];
+  await assert.rejects(
+    downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, {
+      fetchImpl: async (url) => {
+        urls.push(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            name: "dsh-outline",
+            "dist-tags": { latest: "9.9.9" },
+            versions: { "9.9.9": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-9.9.9.tgz" } } },
+          }),
+          arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+        };
+      },
+    }),
+    /Download of|下载/,
+  );
+  assert.equal(urls.some((url) => url.endsWith(".tgz")), false);
+});
+
+test("downloadPlugin keeps two exact versions of the same package", async () => {
+  const dir = home();
+  const fetchVersion = (version: string): Parameters<typeof downloadPlugin>[2] => ({
+    fetchImpl: async (url) => {
+      if (!url.endsWith(".tgz")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            name: "dsh-outline",
+            versions: {
+              "1.0.0": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-1.0.0.tgz" } },
+              "2.0.0": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-2.0.0.tgz" } },
+            },
+          }),
+          arrayBuffer: async () => new ArrayBuffer(0),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+        arrayBuffer: async () => Uint8Array.from(version === "1.0.0" ? [1] : [2]).buffer,
+      };
+    },
+  });
+  const first = await downloadPlugin(dir, { spec: "dsh-outline@1.0.0" }, fetchVersion("1.0.0"));
+  const second = await downloadPlugin(dir, { spec: "dsh-outline@2.0.0" }, fetchVersion("2.0.0"));
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.spec, "dsh-outline@1.0.0");
+  assert.equal(second.spec, "dsh-outline@2.0.0");
+  assert.deepEqual([...readFileSync(join(dir, first.tarball!))], [1]);
+  assert.deepEqual([...readFileSync(join(dir, second.tarball!))], [2]);
 });
 
 test("downloadPlugin packs github specs with the injected packer", async () => {

@@ -94,7 +94,12 @@ export interface PluginCatalogSnapshot {
 
 export interface InstalledPlugin {
   name: string;
-  version?: string;
+  /** Requested dependency spec from package.json. Not proof of the installed bits. */
+  requestedSpec?: string;
+  /** Actual version from node_modules, or null when unknown. */
+  resolvedVersion?: string | null;
+  /** Display version: resolved, else omitted/unknown. */
+  version?: string | null;
   protected: boolean;
 }
 
@@ -116,7 +121,7 @@ export interface PluginManageRow {
   id: string;
   packageName: string;
   title: string;
-  version?: string;
+  version?: string | null;
   protected: boolean;
   enabled: boolean;
   inLibrary: boolean;
@@ -131,6 +136,8 @@ export interface PluginInstallRequest {
 export interface PluginDownloadRequest {
   catalogId?: string;
   spec?: string;
+  /** Exact npm version. Required for npm downloads; ignored for git specs. */
+  version?: string;
 }
 
 export interface PluginSpaceToggleRequest {

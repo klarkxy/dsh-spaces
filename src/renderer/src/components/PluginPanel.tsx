@@ -16,6 +16,7 @@ import {
   pluginDisplayName,
 } from "@shared/plugin";
 import type { MessageKey } from "@shared/i18n";
+import { isExactRuntimeVersion } from "@shared/runtime";
 import { useI18n } from "../i18n";
 import { Card, Overlay } from "./Overlay";
 
@@ -103,6 +104,7 @@ export function PluginPanel({
   const [tab, setTab] = useState<Tab>("manage");
   const [space, setSpace] = useState(fallback);
   const [spec, setSpec] = useState("");
+  const [exactVersion, setExactVersion] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [limit, setLimit] = useState(PAGE_SIZE);
@@ -347,7 +349,7 @@ export function PluginPanel({
                       <span className="min-w-0">
                         <span className="block truncate font-medium">
                           {row.title}
-                          {row.version ? ` @ ${row.version}` : ""}
+                          {` @ ${row.version || t("plugins.versionUnknown")}`}
                         </span>
                         {also.length > 0 ? (
                           <span className="mt-0.5 block text-xs" style={{ color: "var(--text-faint)" }}>
@@ -397,6 +399,19 @@ export function PluginPanel({
               {t("plugins.refresh")}
             </button>
           </div>
+          <label className="text-xs" style={{ color: "var(--text-label)" }}>
+            {t("plugins.exactVersion")}
+            <input
+              className="field mt-1"
+              placeholder="1.2.3"
+              value={exactVersion}
+              onChange={(event) => setExactVersion(event.target.value)}
+              aria-label={t("plugins.exactVersion")}
+            />
+            <span className="mt-1 block" style={{ color: "var(--text-faint)" }}>
+              {t("plugins.exactVersionHint")}
+            </span>
+          </label>
           <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("plugins.category")}>
             <button
               type="button"
@@ -484,10 +499,13 @@ export function PluginPanel({
                           <button
                             type="button"
                             className="btn-primary shrink-0 rounded-full px-3 py-1 text-xs"
-                            disabled={Boolean(busy)}
+                            disabled={Boolean(busy) || !isExactRuntimeVersion(exactVersion.trim())}
                             onClick={() =>
                               void run(t("busy.downloadPlugin"), async () => {
-                                await window.dshSpaces.downloadPlugin({ catalogId: entry.id });
+                                await window.dshSpaces.downloadPlugin({
+                                  catalogId: entry.id,
+                                  version: exactVersion.trim(),
+                                });
                               })
                             }
                           >

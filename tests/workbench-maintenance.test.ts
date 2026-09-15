@@ -265,7 +265,7 @@ test("exact npm id query returns a server-side catalog candidate without writing
   const rows = await maintenance.plugins("dsh-new-plugin");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].packageName, "dsh-new-plugin");
-  assert.equal(rows[0].version, "2.0.0");
+  assert.equal(rows[0].version, null);
   assert.equal(existsSync(join(home, "hub", CATALOG_CACHE_FILE)), false);
   const plan = await maintenance.preview({
     kind: "plugin.install",
@@ -633,6 +633,32 @@ test("plugin mutation failure keeps diagnostic files, stops the target, and does
   assert.equal(state.started.includes("coding"), false);
   assert.equal(state.status.coding, "stopped");
   assert.equal(existsSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE)), true);
+});
+
+test("plugin install failure names space, stage, and package", async () => {
+  const { maintenance } = harness({
+    pluginAdd: async () => {
+      throw new Error("cli exited 1: missing peer");
+    },
+  });
+  const plan = await maintenance.preview({
+    kind: "plugin.install",
+    spaceIds: ["coding"],
+    catalogId: "urzeye/dsh-outline",
+    version: "1.2.3",
+  });
+  await assert.rejects(
+    () => maintenance.execute(plan.id, jobCtx()),
+    (error: unknown) => {
+      assert.ok(error instanceof WorkbenchJobError);
+      assert.equal(error.context?.spaceId, "coding");
+      assert.equal(error.context?.packageName, "dsh-outline");
+      assert.equal(error.context?.pluginAttribution, "known");
+      assert.equal(error.context?.stage, "install");
+      assert.match(error.message, /The job failed/);
+      return true;
+    },
+  );
 });
 
 test("plugin lock mismatch fails verification and interrupted mutation stays open for recover", async () => {
@@ -1163,11 +1189,10 @@ function jobCtx(signal?: AbortSignal): WorkbenchJobContext {
   };
 }
 
-function matchCode(code: WorkbenchMaintenanceError["code"]) {
+function matchCode(code: WorkbenchMaintenanceError["code"] | WorkbenchJobError["code"]) {
   return (error: unknown) => {
-    assert.ok(error instanceof WorkbenchMaintenanceError);
+    assert.ok(error instanceof WorkbenchMaintenanceError || error instanceof WorkbenchJobError);
     assert.equal(error.code, code);
-    assert.equal(error.message, WORKBENCH_MAINTENANCE_ERROR[code]);
     return true;
   };
 }

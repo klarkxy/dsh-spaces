@@ -153,7 +153,7 @@ export class CoordinatedUpgrade {
       for (const plugin of plugins) {
         if (OFFICIAL.has(plugin.name)) {
           const to = plugin.name === BASE_PKG ? officialTargets?.base : officialTargets?.web;
-          official.push({ name: plugin.name, from: plugin.version, to });
+          official.push({ name: plugin.name, from: plugin.version ?? undefined, to });
         } else {
           thirdParty.push(plugin.name);
         }

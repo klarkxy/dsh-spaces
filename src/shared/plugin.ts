@@ -9,7 +9,7 @@ import {
 export function isSafeSpec(spec: string): boolean {
   if (spec === "" || spec.length > 200) return false;
   if (spec.startsWith("-")) return false;
-  return /^[@a-zA-Z0-9][a-zA-Z0-9._~:/#-]*$/.test(spec);
+  return /^[@a-zA-Z0-9][a-zA-Z0-9._~:/#@+-]*$/.test(spec);
 }
 
 export function pluginSearchText(entry: {

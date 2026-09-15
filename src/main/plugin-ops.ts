@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { t } from "../shared/i18n";
+import { formatWorkbenchFailure } from "../shared/workbench";
+import { isExactRuntimeVersion } from "../shared/runtime";
 import {
   PROTECTED_PLUGIN_PACKAGES,
   type InstalledPlugin,
@@ -89,6 +91,17 @@ export function listAllProfilePlugins(
   return result;
 }
 
+function readResolvedVersion(dshHome: string, space: string, packageName: string): string | null {
+  const pkg = join(profileDir(dshHome, space), "node_modules", ...packageName.split("/"), "package.json");
+  try {
+    const parsed = JSON.parse(readFileSync(pkg, "utf8")) as { version?: unknown };
+    const version = typeof parsed.version === "string" ? parsed.version : "";
+    return isExactRuntimeVersion(version) ? version : null;
+  } catch {
+    return null;
+  }
+}
+
 export function listProfilePlugins(dshHome: string, name: string): InstalledPlugin[] {
   assertProfile(dshHome, name);
   const manifest = readManifest(dshHome, name);
@@ -99,27 +112,30 @@ export function listProfilePlugins(dshHome: string, name: string): InstalledPlug
   for (const bundle of bundles) {
     if (seen.has(bundle)) continue;
     seen.add(bundle);
+    const requestedSpec = deps[bundle];
+    const resolvedVersion = readResolvedVersion(dshHome, name, bundle);
     list.push({
       name: bundle,
-      version: deps[bundle],
+      requestedSpec,
+      resolvedVersion,
+      version: resolvedVersion,
       protected: isProtectedPlugin(bundle),
     });
-  }
-  for (const [dep, version] of Object.entries(deps)) {
-    if (seen.has(dep)) continue;
-    seen.add(dep);
-    list.push({ name: dep, version, protected: isProtectedPlugin(dep) });
   }
   return list;
 }
 
-function pluginError(spec: string, code: number, stdout: string, stderr: string): Error {
+function pluginError(spaceId: string, spec: string, code: number, stdout: string, stderr: string): Error {
   const detail = (stderr || stdout).slice(0, 800);
-  const allowBuilds = /allowBuilds|prepare|ignored/i.test(detail)
-    ? t("errors.pluginAllowBuilds")
-    : "";
   return new Error(
-    `${t("errors.pluginAddFailed", { spec, code, detail })}${allowBuilds ? `\n${allowBuilds}` : ""}`,
+    formatWorkbenchFailure({
+      spaceId,
+      stage: "install",
+      packageName: spec,
+      pluginAttribution: "known",
+      reason: t("errors.pluginAddFailed", { spec, code, detail }),
+      exitCode: code,
+    }),
   );
 }
 
@@ -143,7 +159,7 @@ export async function pluginAdd(dshHome: string, name: string, spec: string): Pr
       ["plugin", "--profile", name, "add", cliTarget],
       { timeoutMs: PLUGIN_TIMEOUT_MS },
     );
-    if (code !== 0) throw pluginError(target, code, stdout, stderr);
+    if (code !== 0) throw pluginError(name, target, code, stdout, stderr);
   });
 }
 
@@ -163,10 +179,17 @@ export async function pluginRemove(dshHome: string, name: string, packageName: s
     );
     if (code !== 0) {
       throw new Error(
-        t("errors.pluginRemoveFailed", {
-          spec: packageName,
-          code,
-          detail: (stderr || stdout).slice(0, 800),
+        formatWorkbenchFailure({
+          spaceId: name,
+          stage: "remove",
+          packageName,
+          pluginAttribution: "known",
+          reason: t("errors.pluginRemoveFailed", {
+            spec: packageName,
+            code,
+            detail: (stderr || stdout).slice(0, 800),
+          }),
+          exitCode: code,
         }),
       );
     }
@@ -260,13 +283,35 @@ function npmPackageName(spec: string): string {
   return spec.split("@")[0] || spec;
 }
 
+export function parseNpmNameAndVersion(spec: string): { name: string; version: string } | null {
+  const trimmed = spec.trim();
+  if (!trimmed || isGitSpec(trimmed)) return null;
+  if (trimmed.startsWith("@")) {
+    const at = trimmed.indexOf("@", 1);
+    if (at < 0) return null;
+    const name = trimmed.slice(0, at);
+    const version = trimmed.slice(at + 1);
+    if (!name.includes("/") || !isExactRuntimeVersion(version)) return null;
+    return { name, version };
+  }
+  const at = trimmed.lastIndexOf("@");
+  if (at <= 0) return null;
+  const name = trimmed.slice(0, at);
+  const version = trimmed.slice(at + 1);
+  if (!name || name.includes("/") || !isExactRuntimeVersion(version)) return null;
+  return { name, version };
+}
+
 async function downloadNpmTarball(
   spec: string,
   destFile: string,
   fetchImpl: PluginFetcher,
-): Promise<{ packageName: string }> {
-  const name = npmPackageName(spec);
-  const url = npmPackumentUrl(currentPackageSource(), name);
+): Promise<{ packageName: string; version: string }> {
+  const parsed = parseNpmNameAndVersion(spec);
+  if (!parsed) {
+    throw new Error(t("errors.pluginNeedExactVersion"));
+  }
+  const url = npmPackumentUrl(currentPackageSource(), parsed.name);
   const response = await fetchImpl(url, { headers: { accept: "application/json" } });
   if (!response.ok) {
     throw new Error(t("errors.pluginDownloadFailed", { spec, detail: `HTTP ${response.status}` }));
@@ -276,9 +321,8 @@ async function downloadNpmTarball(
     "dist-tags"?: { latest?: string };
     versions?: Record<string, { dist?: { tarball?: string } }>;
   };
-  const latest = packument["dist-tags"]?.latest;
-  const tarball = latest ? packument.versions?.[latest]?.dist?.tarball : undefined;
-  const packageName = typeof packument.name === "string" && packument.name ? packument.name : name;
+  const tarball = packument.versions?.[parsed.version]?.dist?.tarball;
+  const packageName = typeof packument.name === "string" && packument.name ? packument.name : parsed.name;
   if (!tarball) {
     throw new Error(t("errors.pluginDownloadFailed", { spec, detail: "missing tarball" }));
   }
@@ -291,7 +335,7 @@ async function downloadNpmTarball(
     throw new Error(t("errors.pluginDownloadFailed", { spec, detail: "empty tarball" }));
   }
   await writeAtomicBin(destFile, bytes);
-  return { packageName };
+  return { packageName, version: parsed.version };
 }
 
 async function defaultGitPacker(spec: string, destFile: string): Promise<void> {
@@ -335,10 +379,24 @@ function resolveDownloadMeta(
     if (!isInstallableEntry(entry) || !entry.installSpec) {
       throw new Error(t("errors.pluginNotInstallable", { id: request.catalogId }));
     }
-    const spec = entry.installSpec;
-    const packageName = entry.packageName || spec.replace(/^github:[^/]+\//, "");
+    const packageName = entry.packageName || entry.installSpec.replace(/^github:[^/]+\//, "");
+    if (isGitSpec(entry.installSpec)) {
+      return {
+        id: entry.id,
+        spec: entry.installSpec,
+        packageName,
+        title: entry.packageName || entry.repo,
+        catalogId: entry.id,
+        source: "catalog",
+      };
+    }
+    const version = request.version?.trim() ?? "";
+    if (!isExactRuntimeVersion(version)) {
+      throw new Error(t("errors.pluginNeedExactVersion"));
+    }
+    const spec = `${packageName}@${version}`;
     return {
-      id: entry.id,
+      id: spec.toLowerCase(),
       spec,
       packageName,
       title: entry.packageName || entry.repo,
@@ -348,11 +406,25 @@ function resolveDownloadMeta(
   }
   const spec = request.spec?.trim() ?? "";
   if (!isSafeSpec(spec)) throw new Error(t("errors.pluginSpecInvalid", { spec }));
+  if (isGitSpec(spec)) {
+    return {
+      id: spec.toLowerCase(),
+      spec,
+      packageName: spec.replace(/^github:[^/]+\//, ""),
+      title: spec.replace(/^github:[^/]+\//, ""),
+      source: "manual",
+    };
+  }
+  const parsed = parseNpmNameAndVersion(spec);
+  if (!parsed) {
+    throw new Error(t("errors.pluginNeedExactVersion"));
+  }
+  const pinned = `${parsed.name}@${parsed.version}`;
   return {
-    id: spec.toLowerCase(),
-    spec,
-    packageName: spec.replace(/^github:[^/]+\//, ""),
-    title: spec.replace(/^github:[^/]+\//, ""),
+    id: pinned.toLowerCase(),
+    spec: pinned,
+    packageName: parsed.name,
+    title: parsed.name,
     source: "manual",
   };
 }
