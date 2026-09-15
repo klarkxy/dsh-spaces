@@ -338,7 +338,7 @@ test("lost progress persistence or uncertain child termination keeps the plan op
     const phase = ctx.phase;
     ctx.phase = value => { if (value === "install") throw failure; phase(value); };
     await assert.rejects(() => maintenance.execute(plan.id, ctx), (error: unknown) =>
-      error instanceof WorkbenchJobError && ["workbench/persist-failed", "workbench/recovery-required"].includes(error.code));
+      error instanceof WorkbenchJobError && ["workbench/persist-failed", "workbench/failed"].includes(error.code));
     assert.equal(JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`), "utf8")).status, "running");
     assert.equal(state.reinitialized, 0);
     assert.equal(state.maintenance.at(-1), true);

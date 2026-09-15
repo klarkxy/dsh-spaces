@@ -628,7 +628,7 @@ function renderJobs(jobs) {
 function visibleJobs(jobs) {
   return (jobs || []).some((job) =>
     job.status === "queued" || job.status === "running" ||
-    job.status === "recovery-required" || job.status === "failed");
+    job.status === "failed");
 }
 function applyState(state) {
   const manager = (state.spaces || []).find((row) => row.id === state.managerId);

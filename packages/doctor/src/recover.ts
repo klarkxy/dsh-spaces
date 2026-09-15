@@ -379,7 +379,8 @@ async function settleJobs(home: string, outcome: {
   const settled: Json[] = [];
   const remaining: Json[] = [];
   for (const job of store.list()) {
-    if (job.status !== "recovery-required") continue;
+    if (job.status !== "failed") continue;
+    // Offline doctor no longer settles jobs (let it crash). Keep listing failed leftovers.
 
     if (job.phase === "queued") {
       try {

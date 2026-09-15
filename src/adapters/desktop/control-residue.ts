@@ -11,7 +11,7 @@ export const HOME_UPGRADE_JOURNAL_FILE = "journal.json";
 export const HOME_MUTATION_JOURNAL = ".dsh-spaces-mutation.json";
 
 const TERMINAL_JOB_STATUS = new Set(["succeeded", "failed", "cancelled"]);
-const UNFINISHED_JOB_STATUS = new Set(["queued", "running", "recovery-required"]);
+const UNFINISHED_JOB_STATUS = new Set(["queued", "running"]);
 
 export interface VerifiedHomeToolchain {
   kind: "verified";

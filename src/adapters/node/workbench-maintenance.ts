@@ -518,7 +518,7 @@ export class WorkbenchMaintenance {
               return await upgrade.execute({ ...command, planId: stored.id }, ctx);
             } catch (error) {
               this.log("workbench package update", error);
-              if (upgrade.hasEvidence()) throw new WorkbenchJobError("workbench/recovery-required");
+              if (upgrade.hasEvidence()) throw new WorkbenchJobError("workbench/persist-failed");
               throw error;
             } finally {
               // The package transaction owns manager reinitialization. Do not run it twice.
@@ -1856,7 +1856,7 @@ export class WorkbenchMaintenance {
   }
 
   private fail(error: unknown, op: string, code: WorkbenchMaintenanceErrorCode = "workbench/failed"): never {
-    if (error instanceof ProcessTerminationError) throw new WorkbenchJobError("workbench/recovery-required");
+    if (error instanceof ProcessTerminationError) throw new WorkbenchJobError("workbench/failed");
     if (error instanceof WorkbenchJobError) throw error;
     if (error instanceof WorkbenchMaintenanceError || error instanceof WorkbenchJobAbortError) throw error;
     this.log(op, error);
@@ -1866,7 +1866,7 @@ export class WorkbenchMaintenance {
 
 function uncertainMaintenance(error: unknown): boolean {
   return error instanceof ProcessTerminationError || error instanceof WorkbenchJobError &&
-    (error.code === "workbench/persist-failed" || error.code === "workbench/recovery-required");
+    (error.code === "workbench/persist-failed" || error.code === "workbench/failed");
 }
 
 function parsePlanRequest(input: unknown): WorkbenchPlanRequest {

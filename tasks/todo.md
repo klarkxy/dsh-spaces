@@ -50,8 +50,8 @@ D 与 R 分开验收。文档修订完成 ≠ 运行时已符合 let it crash。
 
 以下在 D 完成后仍为 **pending**。完成前不得声明运行时已符合 let it crash。用户已有备份、快照和数据不因迁移被删除。
 
-- [ ] **R1** 让错误被准确报告，而不是被吞掉。入口：`src/shared/workbench.ts`、相关共享类型、`src/shared/spaces-control.ts`、`src/shared/types.ts`、`src/main/diagnostics.ts`，以及 Node、HTTP、IPC、Remote 和界面适配。沿用现有错误结构。至少表达发生在哪个空间、哪个阶段、已知涉及哪个包、具体错误、退出码或信号。异常只在必要边界捕获，补充上下文、脱敏和报告后继续传播失败。不能 catch 后给空配置、默认结果或假成功。无法确定插件归属时写「未能归属到单个插件」。
-- [ ] **R2** 取消任务恢复状态机。入口：`src/adapters/node/workbench-jobs.ts`、`src/shared/workbench.ts`、`tests/workbench-jobs.test.ts`。目标：`queued → running → succeeded / failed / cancelled`。删除 `recovery-required`、恢复冻结、`settleRecovery`、`recovery.resume`。进程中断后重开：读取原任务，展示中断失败或结果无法确认，保留最后阶段和证据，不重放、不对账。幂等请求保留。损坏或未知格式的任务文件保留原字节。
+- [x] **R1** 让错误被准确报告，而不是被吞掉。`WorkbenchFailureContext` + `formatWorkbenchFailure`；job.error 可带空间/阶段/插件或未知/退出码/信号。进程崩溃 lastError 使用同一格式。
+- [x] **R2** 取消任务恢复状态机。`queued → running → succeeded / failed / cancelled`。中断任务记 failed（未确认），不重放；损坏记录保留原字节；`settleRecovery` / `recovery.resume` 明确不支持。
 - [ ] **R3** Supervisor 管理正常操作，不管理故障复活。入口：`src/adapters/node/workbench-supervisor.ts`、相关 runtime/http/views、`home-controller.ts`、`src/main/process-manager.ts`、`packages/supervisor/src/**`、`packages/plugin/src/host/supervisor-bootstrap.ts`。删除故障触发的管理器重新拉起、补装依赖、重建身份、自动接管、恢复运行权、救援模式。已有独立入口仍在线时可以显示管理器失败；入口自己也崩溃时用已有 stderr、启动器或日志，不再搭看门狗。
 - [ ] **R4** 删除恢复业务链，保留正常安装和必要安全操作。入口：`workbench-maintenance.ts`、`coordinated-upgrade.ts`、`snapshot-store.ts`、`snapshot-executor.ts`、`snapshot-worker.ts`、`restore-session.ts`、`plugin-restore-point.ts`、`runtime-store.ts` 及关联服务。取消配置恢复、安装恢复点、整 Home 恢复、失败回滚、依赖环境拷回、journal 对账恢复、升级后自动回退。提交前失败未切换新结果不是回滚，可保留。不要整份删除 `snapshot-worker`：先保留运行时安装等非恢复执行，并同步打包和启动参数。公开 `recovery.resume`、`snapshot.restore`、`config.restore` 随实现一起移除。
 - [ ] **R5** Doctor 收缩为诊断，不再治病。入口：`packages/doctor/src/**`（`unlock` / `recover` / `rollback`）、对应 README 与 `tests/spaces-doctor.test.ts`、`tests/workbench-doctor.test.ts`。只保留能证明不改写环境的诊断与检查。旧恢复命令明确返回「不支持」和非零退出码，不能静默忽略，也不能转发到改名后的旧实现。诊断时不会清锁、改 job、写回运行时指针、重建配置或启动服务。
