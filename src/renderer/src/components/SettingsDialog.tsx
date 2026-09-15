@@ -29,7 +29,7 @@ export function SettingsDialog({
   onQuit: () => void;
   onMaintenanceChanged: () => Promise<unknown>;
 }) {
-  const { t, setPreference } = useI18n();
+  const { t, locale: appLocale, setPreference } = useI18n();
   const { setPreference: setThemePreference } = useTheme();
   const [tab, setTab] = useState<"general" | "runtime">(initialTab);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
@@ -157,6 +157,25 @@ export function SettingsDialog({
                 {shareNotice}
               </pre>
             ) : null}
+            <button
+              type="button"
+              className="btn-ghost mt-3 rounded px-3 py-1.5 text-sm"
+              onClick={() => {
+                void (async () => {
+                  const templates = await window.dshSpaces.listSpaceTemplates();
+                  const first = templates[0];
+                  if (!first) {
+                    setShareNotice("No templates.");
+                    return;
+                  }
+                  const result = await window.dshSpaces.createSpaceFromTemplate(first.id);
+                  setShareNotice(`template ${first.id}\nspace ${result.spaceId}\nplugins ${result.plugins}\n${result.errors.join("\n")}`);
+                  await onMaintenanceChanged();
+                })();
+              }}
+            >
+              {appLocale === "zh" ? "从模板创建" : "Create from template"}
+            </button>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <label className="text-xs" style={{ color: "var(--text-label)" }}>
                 {t("settings.portStart")}

@@ -238,6 +238,29 @@ test("plugin install and remove write profile files that listProfilePlugins can 
   assert.equal(listProfilePlugins(home, "coding").some((item) => item.name === "dsh-outline"), false);
 });
 
+test("batch plugin install stops at the first failure and does not run later spaces", async () => {
+  const { home, maintenance, state } = harness({
+    pluginAdd: async (dshHome, profile, spec) => {
+      if (profile === "notes") throw new Error("notes install failed");
+      await addFromTarball(dshHome, profile, spec);
+    },
+  });
+  writeManifest(home, "notes", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+  writeManifest(home, "lab", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+  state.status.notes = "stopped";
+  state.status.lab = "stopped";
+  const plan = await maintenance.preview({
+    kind: "plugin.install",
+    spaceIds: ["coding", "notes", "lab"],
+    catalogId: "urzeye/dsh-outline",
+    version: "1.2.3",
+  });
+  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
+  assert.equal(listProfilePlugins(home, "coding").some((item) => item.name === "dsh-outline"), true);
+  assert.equal(listProfilePlugins(home, "notes").some((item) => item.name === "dsh-outline"), false);
+  assert.equal(listProfilePlugins(home, "lab").some((item) => item.name === "dsh-outline"), false);
+});
+
 test("readonly plugin query does not sync the library or write the catalog cache", async () => {
   const { home, maintenance } = harness();
   const libraryPath = join(home, "hub", PLUGIN_LIBRARY_FILE);
@@ -943,11 +966,11 @@ function createMaintenance(
       if (!state.writable) throw new Error("owner missing C:\\\\Users\\\\admin\\\\.dsh");
     },
     validateSpace: (spaceId: string, allowManager?: boolean) => {
-      if (!["coding", "spaces-hub"].includes(spaceId)) throw new Error("unknown space");
+      if (!(spaceId in state.status) && !["coding", "spaces-hub"].includes(spaceId)) throw new Error("unknown space");
       if (!allowManager && spaceId === "spaces-hub") throw new Error("manager protected");
     },
     statusOf: (spaceId: string) => state.status[spaceId] ?? "stopped",
-    ownedSpaceIds: () => ["spaces-hub", "coding"],
+    ownedSpaceIds: () => [...new Set(["spaces-hub", "coding", ...Object.keys(state.status)])],
     stopSpace: async (spaceId: string) => {
       state.onStop?.();
       state.stopped.push(spaceId);

@@ -98,6 +98,10 @@ const api = {
     ipcRenderer.invoke("exportSpaceShare", name, includeConfig),
   importSpaceShare: (): Promise<import("../shared/space-share").SpaceImportResult | null> =>
     ipcRenderer.invoke("importSpaceShare"),
+  listSpaceTemplates: (): Promise<import("../shared/space-share").SpaceTemplate[]> =>
+    ipcRenderer.invoke("listSpaceTemplates"),
+  createSpaceFromTemplate: (templateId: string): Promise<import("../shared/space-share").CreateFromTemplateResult> =>
+    ipcRenderer.invoke("createSpaceFromTemplate", templateId),
   pickSpaceIcon: (): Promise<string | null> => ipcRenderer.invoke("pickSpaceIcon"),
   updateMeta: (name: string, patch: Partial<SpaceMeta>): Promise<SpaceMeta> =>
     ipcRenderer.invoke("updateMeta", name, patch),
