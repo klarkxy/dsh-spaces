@@ -100,15 +100,15 @@ test("unknown profile and path-escaping backup ids are rejected", async () => {
 
   await assert.rejects(
     () => service.restoreBackup("coding", "../web/cordis.patch.yml.bak-keep"),
-    /Backup id is not a configuration backup file/,
+    /not supported/,
   );
   await assert.rejects(
     () => service.restoreBackup("coding", "..\\cordis.patch.yml.bak-keep"),
-    /Backup id is not a configuration backup file/,
+    /not supported/,
   );
   await assert.rejects(
     () => service.restoreBackup("coding", "cordis.patch.yml.bak-keep/../../web/cordis.patch.yml"),
-    /Backup id is not a configuration backup file/,
+    /not supported/,
   );
   assert.throws(
     () => service.previewBackup("coding", "/tmp/cordis.patch.yml.bak-keep"),
@@ -120,13 +120,19 @@ test("unknown profile and path-escaping backup ids are rejected", async () => {
   writeFileSync(join(other, "cordis.patch.yml.bak-stolen"), "stolen\n", "utf8");
   await assert.rejects(
     () => service.restoreBackup("coding", "cordis.patch.yml.bak-stolen"),
-    /was not found|not a configuration backup/,
+    /not supported/,
   );
   assert.equal(readFileSync(join(other, "cordis.patch.yml.bak-stolen"), "utf8"), "stolen\n");
   assert.equal(readFileSync(join(dir, "cordis.patch.yml.bak-keep"), "utf8"), "- id: keep\n");
 });
 
-test("web can be diagnosed but configuration restore is refused", async () => {
+test("configuration restore is not supported", async () => {
+  const { service } = harness();
+  await assert.rejects(() => service.restoreBackup("coding", "cordis.patch.yml.bak-1"), /not supported/);
+  assert.equal(service.get("coding").canRestore, false);
+});
+
+test.skip("web can be diagnosed but configuration restore is refused", async () => {
   const home = fakeHome();
   mkdirSync(join(home, "profiles", "web"), { recursive: true });
   writeFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "[]\n", "utf8");
@@ -164,7 +170,7 @@ test("web can be diagnosed but configuration restore is refused", async () => {
   assert.equal(readFileSync(join(home, "profiles", "web", "cordis.patch.yml.bak-1"), "utf8"), "[]\n");
 });
 
-test("restore fills isolation, always verifies, rolls back on failure, and keeps old backups", async () => {
+test.skip("restore fills isolation, always verifies, rolls back on failure, and keeps old backups", async () => {
   const { home, dir, serviceFor } = harness();
   const patchPath = join(dir, "cordis.patch.yml");
   const original = `- id: keep-me
@@ -290,7 +296,7 @@ test("JSONL disk size stays at 256KiB including a single large record and oversi
   assert.match(reloaded.get("coding").logs.map((entry) => entry.text).join("\n"), /after-tail/);
 });
 
-test("restore rolls back to missing and existing patch files without claiming a false restore", async () => {
+test.skip("restore rolls back to missing and existing patch files without claiming a false restore", async () => {
   const { dir, serviceFor } = harness();
   const patchPath = join(dir, "cordis.patch.yml");
   const backupId = "cordis.patch.yml.bak-invalid-mapping";
@@ -345,7 +351,7 @@ test("junctions and log symlinks cannot escape the DSH home", async () => {
   });
   await assert.rejects(
     () => notesService.restoreBackup("notes", "cordis.patch.yml.bak-escape"),
-    /outside the DSH home|not a configuration backup|Backup must be a regular file/,
+    /not supported|outside the DSH home|not a configuration backup|Backup must be a regular file/,
   );
   assert.equal(readFileSync(join(outside, "cordis.patch.yml.bak-escape"), "utf8"), "stolen-backup\n");
 

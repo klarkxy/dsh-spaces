@@ -6,7 +6,7 @@ Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
 
 **Target policy:** standalone Node CLI for DSH Spaces **diagnostics**. It inspects a Home and prints what it can prove. It does not install DSH, start Electron, start services, recover, roll back, unlock, rewrite jobs, write runtime pointers, rebuild config, or default to `~/.dsh`.
 
-**Known implementation gap (R5, pending):** current binaries still implement `unlock` / `recover` / `rollback` and will mutate a Home if those commands are invoked. Those commands are **not** current product capability. After R5 they must return unsupported and a nonzero exit, without forwarding to a renamed old implementation. Do not document them as how to use doctor. Do not run them against a Home you care about.
+`unlock` / `recover` / `rollback` are not product commands. They return `UNSUPPORTED` and exit `7` without forwarding to the old recover implementation or rewriting Home.
 
 ```
 dsh-spaces doctor   --home <dir> [--cli <absolute-bin>]
@@ -19,7 +19,7 @@ dsh-spaces verify   --home <dir> --cli <absolute-bin> --profile <name>
 
 Treat any `verify` as a check only if you can prove it does not start services, write files, or trigger upstream mutation. A command is not “read-only” because of its name.
 
-Revoked product commands (must fail after R5; current binaries still execute them — 已知实现差距):
+Revoked product commands (exit `7`, code `UNSUPPORTED`, Home bytes unchanged):
 
 ```
 dsh-spaces unlock   --home <dir>

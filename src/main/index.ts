@@ -445,12 +445,8 @@ function startMain(): void {
     handle("getDiagnostics", (_event, name: string) => diagnostics.get(name));
     handle("quitApp", () => requestQuit());
     handle("previewConfigBackup", (_event, name: string, id: string) => diagnostics.previewBackup(name, id));
-    handle("restoreConfigBackup", (_event, name: string, id: string) => {
-      assertAvailable();
-      return runMaintenance("config-restore", async () => {
-        await drainPluginQueue();
-        await diagnostics.restoreBackup(name, id);
-      });
+    handle("restoreConfigBackup", async () => {
+      throw new Error("Configuration restore is not supported.");
     });
     handle("getMaintenance", () => maintenanceView());
     handle("getRuntimeCatalog", () => runtimes.catalog());

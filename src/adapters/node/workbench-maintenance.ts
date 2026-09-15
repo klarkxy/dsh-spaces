@@ -417,15 +417,8 @@ export class WorkbenchMaintenance {
     return await this.ports.packageUpgrade?.describe() ?? null;
   }
 
-  async recover(ctx?: WorkbenchJobContext): Promise<void> {
-    this.resetRecoveryOutcome();
-    this.assertWritable();
-    const context = ctx ?? silentJobContext();
-    try {
-      await this.ports.lock.run("workbench.recover", () => this.recoverLocked(context));
-    } catch (error) {
-      throw this.fail(error, "recover");
-    }
+  async recover(_ctx?: WorkbenchJobContext): Promise<void> {
+    throw new WorkbenchMaintenanceError("workbench/forbidden");
   }
 
   private assertWritable(): void {
@@ -483,22 +476,16 @@ export class WorkbenchMaintenance {
           return;
         case "snapshot.create":
           return await this.finishPlan(stored, () => withIrreversible(() => this.runSnapshotCreate(ctx)));
-        case "snapshot.restore": {
-          const snapshotId = stored.command.snapshotId;
-          return await this.finishPlan(stored, () => withIrreversible(() => this.runSnapshotRestore(snapshotId, ctx, stored.id)));
-        }
+        case "snapshot.restore":
+          throw new WorkbenchMaintenanceError("workbench/forbidden");
         case "snapshot.delete": {
           const snapshotId = stored.command.snapshotId;
           await withIrreversible(() => this.runSnapshotDelete(snapshotId, ctx));
           this.markPlan(stored, "succeeded");
           return;
         }
-        case "config.restore": {
-          const command = stored.command;
-          await withIrreversible(() => this.runConfigRestore(command, ctx));
-          this.markPlan(stored, "succeeded");
-          return;
-        }
+        case "config.restore":
+          throw new WorkbenchMaintenanceError("workbench/forbidden");
         case "runtime.install": {
           const version = stored.command.version;
           return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeInstall(version, ctx)));
@@ -701,11 +688,11 @@ export class WorkbenchMaintenance {
       case "snapshot.create":
         return this.planSnapshotCreate(id, createdAt, expiresAt);
       case "snapshot.restore":
-        return this.planSnapshotRestore(id, createdAt, expiresAt, request.snapshotId);
+        throw new WorkbenchMaintenanceError("workbench/forbidden");
       case "snapshot.delete":
         return this.planSnapshotDelete(id, createdAt, expiresAt, request.snapshotId);
       case "config.restore":
-        return this.planConfigRestore(id, createdAt, expiresAt, request);
+        throw new WorkbenchMaintenanceError("workbench/forbidden");
       case "runtime.install":
         return this.planRuntimeInstall(id, createdAt, expiresAt, request.version);
       case "runtime.upgrade":

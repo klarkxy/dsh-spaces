@@ -17,14 +17,13 @@ import {
   lexists,
   print,
 } from "./common.ts";
-import { inspectHome, recoveryBlocksVerify } from "./inspect.ts";
-import { runRecover, runRollback, runUnlock } from "./recover.ts";
+import { inspectHome } from "./inspect.ts";
 import { bindCli, resolveResources } from "./resources.ts";
 
 export async function main(argv: string[]): Promise<number> {
   try {
     const { command, flags } = parseArgv(argv);
-    if (!command) throw fail(EXIT.usage, "USAGE", "Commands: doctor, verify, unlock, recover, rollback.");
+    if (!command) throw fail(EXIT.usage, "USAGE", "Commands: doctor, verify. unlock, recover, and rollback are not supported.");
     const homeFlag = requireFlag(flags, "home", "Explicit --home is required; this CLI never uses ~/.dsh.");
     if (flags.allowRealHome === "1") authorizeProductHome(realpathSync(resolve(homeFlag)));
     const lock = new HomeOperationLock(homeFlag);
@@ -36,11 +35,16 @@ export async function main(argv: string[]): Promise<number> {
         ...inspectHome(lock, resources.cli, resources.toolchain, resources.cliError),
       });
     }
-    if (command === "unlock") return runUnlock(lock);
+    if (command === "unlock" || command === "recover" || command === "rollback") {
+      throw fail(
+        EXIT.unsupported,
+        "UNSUPPORTED",
+        "That command is not supported.",
+        { command },
+      );
+    }
     if (command === "verify") return await runVerify(lock, flags);
-    if (command === "recover") return await runRecover(lock, flags);
-    if (command === "rollback") return await runRollback(lock, flags);
-    throw fail(EXIT.usage, "USAGE", "Commands: doctor, verify, unlock, recover, rollback.");
+    throw fail(EXIT.usage, "USAGE", "Commands: doctor, verify. unlock, recover, and rollback are not supported.");
   } catch (error) {
     if (error instanceof Fail) return print(error.body, error.exit);
     const text = error instanceof Error ? error.message : "";
@@ -103,13 +107,6 @@ async function runVerify(lock: HomeOperationLock, flags: Record<string, string>)
   assertProfileName(profile);
   try {
     const dump = await lock.run("verify", async () => {
-      if (recoveryBlocksVerify(lock.home)) {
-        throw fail(
-          EXIT.recovery,
-          "RECOVERY_NEEDED",
-          "A previous space operation did not finish. Use Desktop recovery; doctor will not write during recovery.",
-        );
-      }
       assertProfile(lock.home, profile);
       const text = await dumpConfig(lock.home, cli.bin, profile);
       assertDumpPatched(text, profile);

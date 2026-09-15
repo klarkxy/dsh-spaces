@@ -151,41 +151,23 @@ test("doctor reports registry, journals, lock, and optional CLI metadata", async
   assert.doesNotMatch(result.stdout, /11111111-1111-1111-1111-111111111111/);
 });
 
-test("unlock refuses a live owner and incomplete residue", async () => {
-  const liveHome = tempDir("dsh-doctor-live-");
-  mkdirSync(join(liveHome, HOME_LOCK_DIR_NAME));
-  writeFileSync(
-    join(liveHome, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE),
-    `${JSON.stringify({ pid: process.pid, nonce: "abc", startedAt: "2026-01-01T00:00:00.000Z", label: "hold" })}\n`,
-  );
-  const live = await runDoctor(["unlock", "--home", liveHome]);
-  assert.equal(live.code, 3);
-  assert.equal(jsonOf(live.stdout).reason, "owner-alive");
-  assert.equal(existsSync(join(liveHome, HOME_LOCK_DIR_NAME)), true);
-
-  const incompleteHome = tempDir("dsh-doctor-incomplete-");
-  mkdirSync(join(incompleteHome, HOME_LOCK_DIR_NAME));
-  const incomplete = await runDoctor(["unlock", "--home", incompleteHome]);
-  assert.equal(incomplete.code, 3);
-  assert.equal(jsonOf(incomplete.stdout).reason, "incomplete");
-});
-
-test("unlock clears a dead owner and is a no-op when nothing is held", async () => {
-  const home = tempDir("dsh-doctor-dead-");
+test("unlock recover and rollback are unsupported and do not change Home bytes", async () => {
+  const home = tempDir("dsh-doctor-unsupported-");
   mkdirSync(join(home, HOME_LOCK_DIR_NAME));
-  writeFileSync(
-    join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE),
-    `${JSON.stringify({ pid: 999_999_999, nonce: "dead", startedAt: "2026-01-01T00:00:00.000Z", label: "stale" })}\n`,
-  );
-  const cleared = await runDoctor(["unlock", "--home", home]);
-  assert.equal(cleared.code, 0);
-  assert.equal(jsonOf(cleared.stdout).unlocked, true);
-  assert.equal(existsSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE)), false);
+  const owner = `${JSON.stringify({ pid: 999_999_999, nonce: "dead", startedAt: "2026-01-01T00:00:00.000Z", label: "stale" })}\n`;
+  writeFileSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE), owner);
+  mkdirSync(join(home, RESTORE_STAGE_DIR), { recursive: true });
+  writeFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "{}\n");
 
-  const idle = await runDoctor(["unlock", "--home", home]);
-  assert.equal(idle.code, 0);
-  assert.equal(jsonOf(idle.stdout).unlocked, false);
-  assert.equal(jsonOf(idle.stdout).reason, "not-held");
+  for (const command of ["unlock", "recover", "rollback"] as const) {
+    const result = await runDoctor([command, "--home", home]);
+    assert.equal(result.code, 7, command);
+    const body = jsonOf(result.stdout);
+    assert.equal(body.code, "UNSUPPORTED");
+    assert.equal(body.command, command);
+  }
+  assert.equal(readFileSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE), "utf8"), owner);
+  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
 });
 
 test("verify refuses paths, web, relative cli, unsupported versions, and held locks", async () => {
@@ -289,7 +271,7 @@ test("verify refuses a failing isolation dump without printing it", async () => 
   assert.doesNotMatch(failed.stdout, /id: other/);
 });
 
-test("verify refuses while mutation or restore journals exist", async () => {
+test("verify still inspects isolation when leftover journals exist", async () => {
   const home = tempDir("dsh-doctor-recov-");
   mkdirSync(join(home, "profiles", "coding"), { recursive: true });
   const cli = writeCli(tempDir("dsh-doctor-recov-cli-"), "0.1.5-rc.1", goodDump);
@@ -298,17 +280,9 @@ test("verify refuses while mutation or restore journals exist", async () => {
     `${JSON.stringify({ version: 1, op: "create", spaceId: "coding", phase: "patch" })}\n`,
   );
   const mutation = await runDoctor(["verify", "--home", home, "--cli", cli, "--profile", "coding"]);
-  assert.equal(mutation.code, 10);
-  assert.equal(jsonOf(mutation.stdout).code, "RECOVERY_NEEDED");
-  assert.equal(existsSync(join(home, ".dump-config-ran")), false);
-
-  rmSync(join(home, MUTATION_JOURNAL_NAME));
-  mkdirSync(join(home, RESTORE_STAGE_DIR), { recursive: true });
-  writeFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), `${JSON.stringify({ phase: "swapping" })}\n`);
-  const restore = await runDoctor(["verify", "--home", home, "--cli", cli, "--profile", "coding"]);
-  assert.equal(restore.code, 10);
-  assert.equal(jsonOf(restore.stdout).code, "RECOVERY_NEEDED");
-  assert.equal(existsSync(join(home, ".dump-config-ran")), false);
+  assert.equal(mutation.code, 0);
+  assert.equal(jsonOf(mutation.stdout).ok, true);
+  assert.equal(readFileSync(join(home, MUTATION_JOURNAL_NAME), "utf8").includes("coding"), true);
 });
 
 test("unlock and doctor report reclaim as blocked without stealing", async () => {
@@ -318,8 +292,8 @@ test("unlock and doctor report reclaim as blocked without stealing", async () =>
   assert.equal(viewed.code, 0);
   assert.deepEqual(jsonOf(viewed.stdout).lock, { held: true, reclaim: true });
   const unlocked = await runDoctor(["unlock", "--home", home]);
-  assert.equal(unlocked.code, 3);
-  assert.equal(jsonOf(unlocked.stdout).reason, "reclaim-in-progress");
+  assert.equal(unlocked.code, 7);
+  assert.equal(jsonOf(unlocked.stdout).code, "UNSUPPORTED");
   assert.equal(existsSync(join(home, HOME_RECLAIM_DIR_NAME)), true);
 });
 
@@ -355,22 +329,4 @@ setInterval(() => process.stdout.write("x".repeat(8192)), 5);`,
   assert.throws(() => process.kill(pid, 0));
 });
 
-test("recover and rollback refuse unknown journals or missing snapshot ids and keep bytes", async () => {
-  const home = tempDir("dsh-doctor-rec-");
-  mkdirSync(join(home, RESTORE_STAGE_DIR), { recursive: true });
-  writeFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "{}\n");
 
-  const recovered = await runDoctor(["recover", "--home", home]);
-  assert.equal(recovered.code, 10);
-  const recoveredBody = jsonOf(recovered.stdout);
-  assert.equal(recoveredBody.code, "RECOVERY_NEEDED");
-  assert.equal(recoveredBody.command, "recover");
-  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
-
-  const rolled = await runDoctor(["rollback", "--home", home]);
-  assert.equal(rolled.code, 2);
-  const rolledBody = jsonOf(rolled.stdout);
-  assert.equal(rolledBody.code, "USAGE");
-  assert.match(String(rolledBody.message), /snapshot/i);
-  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
-});

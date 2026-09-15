@@ -23,6 +23,7 @@ export const EXIT = {
   verify: 4,
   profile: 5,
   runtime: 6,
+  unsupported: 7,
   recovery: 10,
 } as const;
 

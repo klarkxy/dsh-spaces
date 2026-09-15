@@ -46,15 +46,15 @@ D 与 R 分开验收。文档修订完成 ≠ 运行时已符合 let it crash。
 
 勾选前按计划逐项保存验证证据。下一功能执行项为任务 02。
 
-## R：运行时代码迁移（待实施，本轮不执行）
+## R：运行时代码迁移
 
-以下在 D 完成后仍为 **pending**。完成前不得声明运行时已符合 let it crash。用户已有备份、快照和数据不因迁移被删除。
+完成前不得声明运行时已符合 let it crash。用户已有备份、快照和数据不因迁移被删除。
 
 - [x] **R1** 让错误被准确报告，而不是被吞掉。`WorkbenchFailureContext` + `formatWorkbenchFailure`；job.error 可带空间/阶段/插件或未知/退出码/信号。进程崩溃 lastError 使用同一格式。
 - [x] **R2** 取消任务恢复状态机。`queued → running → succeeded / failed / cancelled`。中断任务记 failed（未确认），不重放；损坏记录保留原字节；`settleRecovery` / `recovery.resume` 明确不支持。
-- [ ] **R3** Supervisor 管理正常操作，不管理故障复活。入口：`src/adapters/node/workbench-supervisor.ts`、相关 runtime/http/views、`home-controller.ts`、`src/main/process-manager.ts`、`packages/supervisor/src/**`、`packages/plugin/src/host/supervisor-bootstrap.ts`。删除故障触发的管理器重新拉起、补装依赖、重建身份、自动接管、恢复运行权、救援模式。已有独立入口仍在线时可以显示管理器失败；入口自己也崩溃时用已有 stderr、启动器或日志，不再搭看门狗。
-- [ ] **R4** 删除恢复业务链，保留正常安装和必要安全操作。入口：`workbench-maintenance.ts`、`coordinated-upgrade.ts`、`snapshot-store.ts`、`snapshot-executor.ts`、`snapshot-worker.ts`、`restore-session.ts`、`plugin-restore-point.ts`、`runtime-store.ts` 及关联服务。取消配置恢复、安装恢复点、整 Home 恢复、失败回滚、依赖环境拷回、journal 对账恢复、升级后自动回退。提交前失败未切换新结果不是回滚，可保留。不要整份删除 `snapshot-worker`：先保留运行时安装等非恢复执行，并同步打包和启动参数。公开 `recovery.resume`、`snapshot.restore`、`config.restore` 随实现一起移除。
-- [ ] **R5** Doctor 收缩为诊断，不再治病。入口：`packages/doctor/src/**`（`unlock` / `recover` / `rollback`）、对应 README 与 `tests/spaces-doctor.test.ts`、`tests/workbench-doctor.test.ts`。只保留能证明不改写环境的诊断与检查。旧恢复命令明确返回「不支持」和非零退出码，不能静默忽略，也不能转发到改名后的旧实现。诊断时不会清锁、改 job、写回运行时指针、重建配置或启动服务。
+- [x] **R3** Supervisor 管理正常操作，不管理故障复活。入口：`src/adapters/node/workbench-supervisor.ts`、相关 runtime/http/views、`home-controller.ts`、`src/main/process-manager.ts`、`packages/supervisor/src/**`、`packages/plugin/src/host/supervisor-bootstrap.ts`。删除故障触发的管理器重新拉起、补装依赖、重建身份、自动接管、恢复运行权、救援模式。已有独立入口仍在线时可以显示管理器失败；入口自己也崩溃时用已有 stderr、启动器或日志，不再搭看门狗。持锁（含死所有者）acquire 为 `workbench/busy`，不 `reclaimDead`。
+- [x] **R4** 删除恢复业务链，保留正常安装和必要安全操作。入口：`workbench-maintenance.ts`、`coordinated-upgrade.ts`、`snapshot-store.ts`、`snapshot-executor.ts`、`snapshot-worker.ts`、`restore-session.ts`、`plugin-restore-point.ts`、`runtime-store.ts` 及关联服务。取消配置恢复、安装恢复点、整 Home 恢复、失败回滚、依赖环境拷回、journal 对账恢复、升级后自动回退。提交前失败未切换新结果不是回滚，可保留。不要整份删除 `snapshot-worker`：先保留运行时安装等非恢复执行，并同步打包和启动参数。公开 `recovery.resume`、`snapshot.restore`、`config.restore` 产品入口明确失败。
+- [x] **R5** Doctor 收缩为诊断，不再治病。入口：`packages/doctor/src/**`（`unlock` / `recover` / `rollback`）、对应 README 与 `tests/spaces-doctor.test.ts`、`tests/workbench-doctor.test.ts`。只保留能证明不改写环境的诊断与检查。旧恢复命令明确返回「不支持」和非零退出码，不能静默忽略，也不能转发到改名后的旧实现。诊断时不会清锁、改 job、写回运行时指针、重建配置或启动服务。
 - [ ] **R6** 同步删除 UI、API、CLI 和构建里的残留。入口：`packages/plugin/src/workbench/**`、client/host、`src/renderer/**`、`src/preload/**`、i18n、`scripts/build-spaces.mjs`、`package.json`、打包资源。错误页只留错误详情、查看日志、复制脱敏日志。常规启停卸载留在正常管理位置。
 - [ ] **Q** 真实故障验收 E01–E18（见 `dsh-spaces-let-it-crash-plan.md` §8）。故障注入保留，改验「失败被如实报告，并且没有发生抢救」。不整组删除 `test:workbench:recovery`；逐项拆分，保留与恢复无关的有效覆盖。不靠假测试、放宽条件或跳过获得通过。
 
