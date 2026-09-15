@@ -73,8 +73,8 @@ node packages/supervisor/lib/index.js `
   --home $spacesHome `
   --bin C:\path\to\@deepseek-ai\dsh\lib\bin.js `
   --node "$env:ProgramFiles\nodejs\node.exe" `
-  --plugin-artifact $artifacts\dsh-spaces-plugin-0.2.0.tgz `
-  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.2.0.tgz `
+  --plugin-artifact $artifacts\dsh-spaces-plugin-0.3.0.tgz `
+  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.3.0.tgz `
   --control-tool-root $tools `
   --snapshot-worker "$(Resolve-Path packages\supervisor\lib\snapshot-worker.mjs)" `
   --snapshot-root $snapshots
@@ -116,8 +116,8 @@ node packages/supervisor/lib/index.js `
   --home $env:USERPROFILE\.dsh `
   --bin <abs-supported-dsh-bin.js> `
   --node <abs-node.exe> `
-  --plugin-artifact <abs>\dsh-spaces-plugin-0.2.0.tgz `
-  --view-bridge-artifact <abs>\dsh-spaces-view-bridge-0.2.0.tgz `
+  --plugin-artifact <abs>\dsh-spaces-plugin-0.3.0.tgz `
+  --view-bridge-artifact <abs>\dsh-spaces-view-bridge-0.3.0.tgz `
   --control-tool-root <abs-tools-outside-that-home> `
   --snapshot-worker <abs>\packages\supervisor\lib\snapshot-worker.mjs `
   --snapshot-root <abs-snapshots-outside-replaced-trees>
@@ -332,8 +332,8 @@ node packages/supervisor/lib/index.js `
   --home $spacesHome `
   --bin C:\path\to\@deepseek-ai\dsh\lib\bin.js `
   --node "$env:ProgramFiles\nodejs\node.exe" `
-  --plugin-artifact $artifacts\dsh-spaces-plugin-0.2.0.tgz `
-  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.2.0.tgz `
+  --plugin-artifact $artifacts\dsh-spaces-plugin-0.3.0.tgz `
+  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.3.0.tgz `
   --control-tool-root $tools `
   --snapshot-worker "$(Resolve-Path packages\supervisor\lib\snapshot-worker.mjs)" `
   --snapshot-root $snapshots

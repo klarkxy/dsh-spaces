@@ -18,7 +18,7 @@ Official CLI: **latest = `0.1.5-rc.1`**, **next = `0.1.5-rc.2`**. Both are in sc
 
 ```powershell
 pnpm run pack:plugin
-pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.2.0.tgz" --config.auto-install-peers=true
+pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.3.0.tgz" --config.auto-install-peers=true
 pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 web
 ```
 

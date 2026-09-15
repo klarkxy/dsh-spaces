@@ -85,52 +85,46 @@ test("worker completeRestore keeps transaction errors and does not drop pending 
   assert.equal(existsSync(join(home, RESTORE_STAGE_DIR)), true);
 });
 
-test("coordinated restore awaits async completeRestore and surfaces cleanup errors", async (t) => {
+test("coordinated restore is unsupported and never invokes snapshot mutation", async (t) => {
   const ctx = await upgradeHarness(t);
-  await ctx.upgrade.upgrade("0.9.9");
-  const snap = ctx.snapshots.list().find((row) => row.reason === "upgrade");
-  assert.ok(snap);
-  let cleanupOrder: string[] = [];
+  const calls: string[] = [];
+  const before = readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8");
   ctx.upgrade = makeUpgrade(ctx, {
     snapshots: {
-      create: (runtime, reason) => ctx.snapshots.create(runtime, reason),
-      restore: (id, runtime) => {
-        cleanupOrder.push("restore");
-        return ctx.snapshots.restore(id, runtime);
+      create: async () => {
+        calls.push("create");
+        throw new Error("snapshot create must not run");
+      },
+      restore: async () => {
+        calls.push("restore");
+        throw new Error("snapshot restore must not run");
       },
       completeRestore: async () => {
-        cleanupOrder.push("complete-start");
-        await delay(25);
-        ctx.snapshots.completeRestore();
-        cleanupOrder.push("complete-end");
+        calls.push("completeRestore");
       },
-      pendingRestore: () => ctx.snapshots.pendingRestore(),
-      recover: () => ctx.snapshots.recover(),
-      preview: (id) => ctx.snapshots.preview(id),
-      runtimeBin: (id) => ctx.snapshots.runtimeBin(id),
+      pendingRestore: () => undefined,
+      recover: async () => {
+        calls.push("recover");
+        return undefined;
+      },
+      preview: () => {
+        calls.push("preview");
+        throw new Error("snapshot preview must not run");
+      },
+      runtimeBin: () => {
+        calls.push("runtimeBin");
+        throw new Error("snapshot runtimeBin must not run");
+      },
     },
   });
-  const result = await ctx.upgrade.restore(snap.id);
-  assert.equal(result.restored.id, snap.id);
-  assert.deepEqual(cleanupOrder, ["restore", "complete-start", "complete-end"]);
-  assert.equal(ctx.snapshots.pendingRestore(), undefined);
-
-  const again = await ctx.snapshots.create(descriptor(ctx.runtimes), "upgrade");
-  ctx.upgrade = makeUpgrade(ctx, {
-    snapshots: {
-      create: (runtime, reason) => ctx.snapshots.create(runtime, reason),
-      restore: (id, runtime) => ctx.snapshots.restore(id, runtime),
-      completeRestore: async () => {
-        throw new Error("cleanup boom");
-      },
-      pendingRestore: () => ctx.snapshots.pendingRestore(),
-      recover: () => ctx.snapshots.recover(),
-      preview: (id) => ctx.snapshots.preview(id),
-      runtimeBin: (id) => ctx.snapshots.runtimeBin(id),
-    },
-  });
-  await assert.rejects(() => ctx.upgrade.restore(again.id), /cleanup boom/);
-  assert.ok(ctx.snapshots.pendingRestore());
+  await assert.rejects(
+    () => ctx.upgrade.restore("59ca7cee-0c06-4610-bc95-e86849247cef"),
+    /Snapshot restore is not supported/,
+  );
+  assert.deepEqual(calls, []);
+  assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8"), before);
+  assert.equal(ctx.stopped, false);
+  assert.equal(ctx.drained, false);
 });
 
 test("upgrade copy/rm through the snapshot worker keeps heartbeat and the same commit result", async (t) => {
@@ -192,23 +186,21 @@ test("worker copy failure leaves live profiles untouched", async (t) => {
   assert.equal(JSON.parse(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8")).dependencies[BASE], "0.1.1-rc.2");
 });
 
-test("recover discards a large stage off the event loop and unlinks a junction without deleting its target", async (t) => {
+test("upgrade recover is unsupported and leaves staged bytes and junction targets untouched", async (t) => {
   const worker = requireWorker();
   const ctx = await upgradeHarness(t, worker);
   const stage = join(ctx.home, ".dsh-spaces-upgrade");
   fillTree(stage, FILE_COUNT);
-  const pulse = await withHeartbeat(() => ctx.upgrade.recover());
-  assert.equal(existsSync(stage), false);
-  if (pulse.elapsed >= STALL_MS) {
-    assert.ok(pulse.during > 0, `discardStage blocked HTTP (${pulse.elapsed}ms, hits=${pulse.during})`);
-  }
+  await assert.rejects(() => ctx.upgrade.recover(), /Upgrade recovery is not supported/);
+  assert.equal(existsSync(join(stage, "b0", "f0.dat")), true);
 
+  rmChecked(stage);
   const outside = fakeDir(t, "dsh-outside-");
   writeFileSync(join(outside, "keep.txt"), "safe\n");
   linkDir(outside, stage);
-  await ctx.upgrade.recover();
+  await assert.rejects(() => ctx.upgrade.recover(), /Upgrade recovery is not supported/);
   assert.equal(readFileSync(join(outside, "keep.txt"), "utf8"), "safe\n");
-  assert.equal(existsSync(stage) && lstatSync(stage).isSymbolicLink(), false);
+  assert.equal(existsSync(stage) && lstatSync(stage).isSymbolicLink(), true);
 });
 
 test("runtime leftover staging rm keeps the HTTP heartbeat and still installs", async () => {

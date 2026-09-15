@@ -1,0 +1,14 @@
+{
+  "name": "dsh-sample-crash",
+  "version": "3.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js"],
+  "keywords": ["dsh-plugin", "crash"],
+  "description": "Sample plugin that throws on construct so the host can keep running.",
+  "license": "MIT"
+}

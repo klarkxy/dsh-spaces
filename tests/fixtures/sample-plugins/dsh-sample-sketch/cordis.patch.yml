@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-sample-sketch
+      name: dsh-sample-sketch
+      config: { surface: canvas }

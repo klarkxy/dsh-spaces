@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-sample-notes
+      name: dsh-sample-notes
+      config: {}

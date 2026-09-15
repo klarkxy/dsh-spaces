@@ -1,6 +1,6 @@
 {
   "name": "@dsh-spaces/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared DSH Spaces domain and application logic",
   "license": "MIT",
   "type": "module",

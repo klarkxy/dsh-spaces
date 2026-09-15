@@ -942,7 +942,7 @@ async function main() {
   // Stage identical bytes at a shell-safe path; still install through dsh plugin.
   const stage = mkdtempSync(join(tmpdir(), "spaces-dist-tgz-"));
   if (/[\s"'&|<>^()%!]/.test(stage)) throw new Error("DSH plugin CLI needs a shell-safe temp path; set TMP/TEMP to a path without spaces or shell metacharacters.");
-  const tarball = join(stage, "dsh-spaces-plugin-0.2.0.tgz");
+  const tarball = join(stage, "dsh-spaces-plugin-0.3.0.tgz");
   copyFileSync(originalTarball, tarball);
   const tarballHash = sha256File(tarball);
   if (tarballHash !== sha256File(originalTarball)) throw new Error("Staged tarball differs from the packed artifact");
