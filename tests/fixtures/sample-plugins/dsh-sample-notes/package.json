@@ -1,0 +1,17 @@
+{
+  "name": "dsh-sample-notes",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "cordis.patch.yml"],
+  "keywords": ["dsh-plugin", "notes"],
+  "description": "Host-only sample notes plugin for workbench install tests.",
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "license": "MIT"
+}

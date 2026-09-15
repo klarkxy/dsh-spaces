@@ -1,0 +1,14 @@
+{
+  "name": "dsh-sample-relay",
+  "version": "0.4.2",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js"],
+  "keywords": ["dsh-plugin", "tools"],
+  "description": "Tools-only sample relay plugin with no client UI.",
+  "license": "MIT"
+}

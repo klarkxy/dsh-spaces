@@ -61,7 +61,7 @@ import {
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ARTIFACT = join(REPO, ".sandbox", "spaces-themes-acceptance");
-const DEFAULT_SPACES_TGZ = join(REPO, ".sandbox", "pluginization-delivery", "dsh-spaces-plugin-0.2.0.tgz");
+const DEFAULT_SPACES_TGZ = join(REPO, ".sandbox", "pluginization-delivery", "dsh-spaces-plugin-0.3.0.tgz");
 const DEFAULT_PLAYWRIGHT =
   "C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright";
 const CANONICAL_SPACES = "@dsh-spaces/plugin";
@@ -179,7 +179,7 @@ function stageTarball(origin, stageName) {
   if (/[\s"'&|<>^()%!]/.test(stage)) {
     throw new Error("DSH plugin CLI needs a shell-safe temp path; set TMP/TEMP to a path without spaces or shell metacharacters.");
   }
-  const tarball = join(stage, "dsh-spaces-plugin-0.2.0.tgz");
+  const tarball = join(stage, "dsh-spaces-plugin-0.3.0.tgz");
   copyFileSync(origin, tarball);
   const hash = sha256File(tarball);
   if (hash !== sha256File(origin)) throw new Error("Staged Spaces tarball differs from the delivery artifact");

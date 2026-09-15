@@ -34,8 +34,8 @@ node packages/supervisor/lib/index.js `
   --home D:\dsh-workbench-dev\home `
   --bin D:\path\to\@deepseek-ai\dsh\bin.js `
   --node D:\path\to\node.exe `
-  --plugin-artifact D:\dsh-packages\dsh-spaces-plugin-0.2.0.tgz `
-  --view-bridge-artifact D:\dsh-packages\dsh-spaces-view-bridge-0.2.0.tgz `
+  --plugin-artifact D:\dsh-packages\dsh-spaces-plugin-0.3.0.tgz `
+  --view-bridge-artifact D:\dsh-packages\dsh-spaces-view-bridge-0.3.0.tgz `
   --control-tool-root D:\dsh-workbench-dev\tools `
   --snapshot-worker <abs-repo>\packages\supervisor\lib\snapshot-worker.mjs `
   --snapshot-root D:\dsh-workbench-dev\snapshots

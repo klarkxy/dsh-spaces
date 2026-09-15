@@ -1,0 +1,22 @@
+{
+  "name": "dsh-sample-sketch",
+  "version": "2.1.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml"],
+  "keywords": ["dsh-plugin", "client", "sketch"],
+  "description": "Sample plugin with a web client inject for workbench install tests.",
+  "dsh": {
+    "client": {
+      "inject": ["@deepseek-ai/dsh-client-ui-renderer"],
+      "platform": "web"
+    },
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "license": "MIT"
+}
