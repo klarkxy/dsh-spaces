@@ -1,3 +1,10 @@
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+隔离、鉴权、单写者、原子写、错误报告，以及用户主动的启动、停止、重启、安装、卸载和配置，仍有效。救援入口、检查并恢复、恢复中断任务、配置恢复、整 Home 恢复、Doctor `unlock`/`recover`/`rollback`、失败回滚、失败重试和中断续接 **已撤销**，不是延期，不勾成已完成。剩余运行时工作见账本 R1–R6（pending）。下文是当时实施与验收记录，不是现行恢复门槛。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # 工作台管理包更新验收脚本（叶子交接）
 
 日期：2026-09-13。分支 `codex/spaces-pluginization`。只改三个指定文件。未 Git / 发布 / 真实 DSH / 浏览器 / 联网。本叶只做语法与安全 self-check。
@@ -41,9 +48,9 @@ Home：只允许 network-acceptance 的 `phases.runtime.home`，或本脚本在 
 - 公共 DTO 断言不含 path/token/cookie/bootstrap
 - 浏览器：稳定入口引导按钮（`#acquire` / DSH Continue|继续|稍后配置）→ Runtime 页 `[data-workbench-package]` → `[data-workbench-upgrade]` preview → 计划对话框确认。不 mock、不 `route.fulfill`。Playwright cookie 来自 bootstrap 导航，不 `addCookies({url, path})`。
 
-success 读回：关键 lib 与 `lib/supervisor/{manifest.json,index.js,snapshot-worker.mjs}` 哈希变化、整 Home 快照、入口 3s 内心跳、manager 恢复、普通空间仍停、原 job 持久 `succeeded`。
+success 读回（现行）：关键 lib 与 `lib/supervisor/{manifest.json,index.js,snapshot-worker.mjs}` 哈希变化、入口 3s 内心跳、普通空间仍停、原 job 持久 `succeeded`。整 Home 快照与 “manager 恢复”不是通过条件。
 
-rollback 读回：before/after 关键文件哈希一致（manager package/lib/supervisor payload、用户 marker、current runtime）、原 job `failed`、入口存活、manager 重新出现、receipt `rolled-back`。
+rollback 读回：**已撤销**（2026-09-15）。升级失败应保持失败现场并报告；不要求 before/after 哈希一致、不要求 receipt `rolled-back`、不把管理器再拉起来当通过。当时脚本仍测回滚，是 R4/R6 差距。
 
 ## 5. 本叶子验证
 

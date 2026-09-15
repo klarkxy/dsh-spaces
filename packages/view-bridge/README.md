@@ -2,6 +2,8 @@
 
 Lightweight DSH Host plugin for ordinary workspace iframes. It only does the parent handshake. It does not create a manager, start a supervisor, or expose workbench writes.
 
+Handshake or origin failure is reported as a view error. The bridge does not reconnect, restart the supervisor, or recover the parent. Independent origin checks stay. Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
+
 This package is **not** the user install unit. Users add the prebuilt `@dsh-spaces/plugin` tarball to ordinary `web`, then click **初始化 Spaces** / **Initialize Spaces**. The supervisor copies this payload onto ordinary spaces. See [plugin standard install](../../docs/plugin-standard-install.md).
 
 `@dsh-spaces/supervisor` stays private. Do not `npm publish` this repo root. This scoped package is not on the npm registry yet — there is no `pnpm add @dsh-spaces/view-bridge` from npmjs.

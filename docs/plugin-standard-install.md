@@ -1,6 +1,8 @@
 # Standard plugin install
 
-用户入口：在当前项目运行 `pnpm run pack:plugin`，执行它打印的插件安装命令，再启动 DSH Web，打开左侧“工作台”并点击“初始化 Spaces”。无需手动传入管理器、worker 或数据目录路径。
+用户入口：在当前项目运行 `pnpm run pack:plugin`，执行它打印的插件安装命令，再启动 DSH Web，打开左侧“工作台”并点击“初始化 Spaces”。无需手动传入管理器、worker 或数据目录路径。故障政策见 [let it crash](let-it-crash.md)。
+
+初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。
 
 本轮默认使用最新发布的 **0.1.5-rc.2**，同时兼容 rc.1。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add <完整包路径> --config.auto-install-peers=true` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 web` 启动。
 
@@ -20,7 +22,7 @@ pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add "$env:TEMP\dsh-spa
 pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 web
 ```
 
-In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click **初始化 Spaces / Initialize Spaces**. That is an explicit `guide.initialize()` with no path arguments. The independent supervisor creates `spaces-hub` and hands off. This is **not** a misinstall.
+In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click **初始化 Spaces / Initialize Spaces**. That is an explicit `guide.initialize()` with no path arguments. The independent supervisor creates `spaces-hub` and hands off. This is **not** a misinstall. If initialization fails, that request ends and the page reports the failure; the next visit does not silently finish it.
 
 若只想试用，可先在同一终端设置 `$env:DSH_HOME = Join-Path $env:TEMP "dsh-spaces-try"`，再执行安装和启动。若已设置 `DSH_PACK_DEST`，请使用打包输出的实际路径。
 

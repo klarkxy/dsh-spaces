@@ -1,3 +1,4 @@
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # Spaces 使用介绍录像（叶子交接）
 
 日期：2026-09-12。分支 `codex/spaces-pluginization`。Grok 施工，主 Agent 编排验收。本叶只新增录制脚本、本记录和 `.sandbox/spaces-demo-video/**`；未改产品源码、既有验收脚本、包清单或 Git。未调用 mmx / 配音。未碰生产 `~/.dsh`，未输入 API key，未发模型消息。

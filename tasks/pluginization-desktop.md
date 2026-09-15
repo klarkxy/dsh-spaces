@@ -1,5 +1,13 @@
 # Desktop Electron smoke (pluginization)
 
+## Current contract (2026-09-15)
+
+Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md). Activity ledger: [todo.md](todo.md).
+
+Isolation, auth, single-writer lock, lifecycle start/stop/restart, and error reporting remain. **Restore-core, independent rescue, restore CLI, Doctor recover/unlock/rollback, snapshot restore UI, and fail-rollback are not current requirements.** Remaining: Snapshot restore UI not run — **已撤销** (2026-09-15), not a deferred leaf. Remaining runtime work is R1–R6, pending.
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
 Script: `scripts/verify-spaces-desktop.mjs`\
 Command: `node --import tsx scripts/verify-spaces-desktop.mjs`\
 Result: **pass** (exit 0, ~68s)

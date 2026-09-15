@@ -1,3 +1,10 @@
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+隔离、鉴权、单写者、原子写、错误报告，以及用户主动的启动、停止、重启、安装、卸载和配置，仍有效。救援入口、检查并恢复、恢复中断任务、配置恢复、整 Home 恢复、Doctor `unlock`/`recover`/`rollback`、失败回滚、失败重试和中断续接 **已撤销**，不是延期，不勾成已完成。剩余运行时工作见账本 R1–R6（pending）。下文是当时实施与验收记录，不是现行恢复门槛。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # 工作台用户文档叶子交接
 
 状态：文档施工已落地。2026-09-12。HEAD `5911e60` 只读对照。未 Git、未发版、未改版本、未改源码/测试、未改 doctor README、未启动 DSH/浏览器/录制、未做网络检索。
@@ -44,13 +51,13 @@
 
 ### 4. 验收边界（按派工事实，未重跑）
 
-写入为「已在隔离 Home 验证」而非产品完成：双 iframe/管理停机稳定入口；竹青/EternalNight/显式 XP 适配+内层聊天；草稿/切换/创建改名图标排序重启删除/刷新；win-unpacked 双端运行权；插件 install/remove/config restore；一次整 Home 快照恢复。
+写入为「已在隔离 Home 验证」而非产品完成：双 iframe/管理停机稳定入口；竹青/EternalNight/显式 XP 适配+内层聊天；草稿/切换/创建改名图标排序重启删除/刷新；win-unpacked 双端运行权；插件 install/remove。当时还验证过 config restore 与一次整 Home 快照恢复；那些作为产品能力 **已撤销**，不得再写进现行用户文档。
 
-明确未完成：最终 runtime 升级、kill 故障恢复、rc2 正式支持、管理插件自升级、最终回归与新视频。Catppuccin 原主题缺依赖失败不包装修复。CLI 门禁仅 `0.1.5-rc.1`；SDK `0.1.5-rc.2` 不是 CLI 2；candidate 不是绕门禁教程。外部未登记 DSH 缺口链到 `tasks/workbench-external-discovery.md`。
+明确未完成（现行）：最终 runtime 升级（候选准备与指针切换，不是失败回滚）、rc2 之外兼容、管理插件自升级的真实安装、最终回归与新视频。Catppuccin 原主题缺依赖失败不包装修复。kill 故障恢复：**已撤销**（2026-09-15，改验失败可见且无抢救）。CLI 门禁 `0.1.5-rc.1` / `0.1.5-rc.2`；SDK `0.1.5-rc.2` 不是 CLI 2；candidate 不是绕门禁教程。外部未登记 DSH 缺口链到 `tasks/workbench-external-discovery.md`。
 
 ### 5. 保留未改
 
-根 README 的 Why / vs Launcher / Safety 条目 / 桌面升级与恢复原则 / Requirements 主体 / 开发 sandbox 命令 / Build / License / 中文数据规则与安全主体。doctor README 未动。
+根 README 的 Why / vs Launcher / Safety 条目 / Requirements 主体 / 开发 sandbox 命令 / Build / License / 中文数据规则与安全主体，在 2026-09-15 let it crash 修订中已去掉恢复原则。doctor README 目标改为只诊断。
 
 ## 验证（实际做了什么）
 

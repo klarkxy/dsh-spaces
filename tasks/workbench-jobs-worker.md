@@ -1,5 +1,19 @@
 # Workbench jobs（A2 叶子交接）
 
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。接口：[workbench-contract.md](workbench-contract.md)。实现任务：**R2 pending**。
+
+目标状态：`queued → running → succeeded / failed / cancelled`。
+
+删除作为产品要求：`recovery-required`、恢复冻结、`settleRecovery`、`recovery.resume`、先结算恢复再允许普通任务。
+
+进程中断后重开：读取原任务，展示中断失败或结果无法确认，保留最后阶段和证据，不重放命令，不对账修补。幂等 `requestId` 仍保留。损坏 JSON 或未知 schema 只报告无法读取，保留原字节。
+
+**已知实现差距：** 下列签名与冻结策略描述的是 2026-09-12 已落地的代码，不是现行合同。R2 删除前不得把恢复 hold 当成新功能继续扩建。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
 日期：2026-09-12。分支：`codex/spaces-pluginization`。组合 Store/Runner，不持有 Home 运行权，不启动 HTTP/DSH/Playwright。本叶不是整体维护实现。
 
 ## 结论

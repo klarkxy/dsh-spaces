@@ -1,3 +1,7 @@
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
+现行通过条件（取代下文“恢复成功 / recovery.resume / doctor 回滚”）：kill 后失败可见、无自动恢复、无额外 spawn/恢复调用。`test:workbench:recovery` 不得整组删除；与恢复无关的覆盖保留。本叶未跑真实 DSH 的事实不变。
+
 # Workbench 真实维护崩溃验收（审查重试交接）
 
 日期：2026-09-12。分支：`codex/spaces-pluginization`。角色：独立叶子。未改 runtime/Node/desktop 生产文件、未 Git。未启动真实 DSH/Chromium/CLI 服务。

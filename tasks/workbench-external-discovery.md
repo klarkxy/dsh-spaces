@@ -1,10 +1,17 @@
+## 当前有效合同（2026-09-15）
+
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。活动账本：[todo.md](todo.md)。
+
+隔离、鉴权、单写者、原子写、错误报告，以及用户主动的启动、停止、重启、安装、卸载和配置，仍有效。救援入口、检查并恢复、恢复中断任务、配置恢复、整 Home 恢复、Doctor `unlock`/`recover`/`rollback`、失败回滚、失败重试和中断续接 **已撤销**，不是延期，不勾成已完成。剩余运行时工作见账本 R1–R6（pending）。下文是当时实施与验收记录，不是现行恢复门槛。
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # 外部未登记 DSH 发现审查（只读叶）
 
 状态：只读结论，供 root 审计。2026-09-12。未改产品、未启动/停止真实 DSH 或浏览器、未读生产配置/凭据/完整环境、未改权限、未安装工具、未 Git、未做本机进程实验。`profile-boot` 两文件已由 root 排除 pid/lock，本叶不复述。
 
 ## 结论
 
-**DSH 没有 Home 级 PID/端口/profile 进程登记，也没有未认证的发现端点。** 真实缺口成立：Supervisor 只能看见自己写进 `{canonicalHome}/.dsh-spaces-control/instances` 的记录；普通手工 `dsh --profile …`（未装 view-bridge、从未被本监督 spawn）对工作台不可见，整 Home 快照/恢复/升级仍会替换 `sessions/` 与 `hub/`，而 `stopAll` 不会停那些进程。
+**DSH 没有 Home 级 PID/端口/profile 进程登记，也没有未认证的发现端点。** 真实缺口成立：Supervisor 只能看见自己写进 `{canonicalHome}/.dsh-spaces-control/instances` 的记录；普通手工 `dsh --profile …`（未装 view-bridge、从未被本监督 spawn）对工作台不可见。`stopAll` 不会停那些进程。整 Home 快照/恢复作为产品能力 **已撤销**，不得为了“列表完整”去接管或误杀外部进程。用户主动的 runtime 升级若会改 `sessions/` 与 `hub/`，仍不能把未登记实例当成已管理。
 
 Windows 上 **没有已依赖的官方只读 API 能把任意 DSH 进程精确映射到 `DSH_HOME`**。CIM `Win32_Process.CommandLine` 通常只有 `--profile`（及可选 `--port`/`--host`）；`DSH_HOME` 由环境传入，不在 CommandLine。官方环境 API 只读调用方自身或用户/系统注册表，不读他进程 PEB。因此：
 
@@ -17,10 +24,10 @@ Windows 上 **没有已依赖的官方只读 API 能把任意 DSH 进程精确�
 
 计划与合同要求：
 
-- 损坏或身份不明只进恢复，不猜测清锁，不接管外部实例（`tasks/workbench-implementation.md`）。
+- 损坏或身份不明：报告无法读取或拒绝相关控制，不猜测清锁，不接管外部实例。**不**进入恢复模式（`tasks/workbench-implementation.md` 现行合同）。
 - `managed=false` 的外部实例只能查看，不能 start/stop/restart/adopt（`tasks/workbench-contract.md`）。
 - 维护停机回调只能停所有权已知的实例，禁止自动强杀（`WorkbenchMaintenancePorts.stopSpace` 注释）。
-- 整 Home 快照/恢复不能误碰仍由外部实例写入的资料。
+- 整 Home 快照/恢复 **已撤销**。不得为清理外部实例而恢复 Home，也不得把恢复当成发现缺口的补救。
 
 当前实现只覆盖 **监督自己留下的 instance JSON**，不覆盖 **从未登记的手工进程**。
 

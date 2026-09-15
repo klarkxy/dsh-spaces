@@ -1,5 +1,13 @@
 # Shared core extraction (bounded)
 
+## Current contract (2026-09-15)
+
+Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md). Activity ledger: [todo.md](todo.md).
+
+Isolation, registry rules, maintenance admission, auth, single-writer lock, and error reporting remain. **Restore-core, independent rescue, restore CLI, Doctor recover/unlock/rollback, and fail-rollback are not current requirements.** Remaining runtime work is R1–R6, pending. The `restore-session` / `ports/restore` extraction below is a 2026-09-11 implementation fact, not a product to keep building.
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
 Worker scope: `src/core/**`, `src/main/{patch-writer,profile-registry,maintenance-gate,restore-session}.ts`, `tests/spaces-core.test.ts`, this file.
 
 No DSH SDK/plugin transport research. No `src/main/index.ts`. No Node lock implementation or Desktop wiring.

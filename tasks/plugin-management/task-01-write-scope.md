@@ -2,7 +2,11 @@
 
 Date: 2026-09-15. Status: measured on this machine; later tasks 02–11 are not done.
 
-This is the task 01 experiment, not the 2026-09-13/14 rc.1/rc.2 standard-install acceptance and not a whole-Home snapshot restore.
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
+This is the task 01 **measurement**, not the 2026-09-13/14 rc.1/rc.2 standard-install acceptance and not a whole-Home snapshot restore. The write-scope evidence stays. Offline copy-back was an experiment on a disposable Home; it is **not** a restore-module prerequisite, and it is **not** a default later restore product. Current plugin-management work continues from task 02 without building restore.
+
+Fault policy: [let it crash](../../docs/let-it-crash.md).
 
 Probe: `scripts/verify-plugin-install-write-scope.mjs`  
 Record format: `src/main/plugin-restore-point.ts`  

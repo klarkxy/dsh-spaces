@@ -1,10 +1,14 @@
 # @dsh-spaces/supervisor
 
-> **This branch is still under construction and acceptance. It is not a release.** User flows: [docs/workbench.md](../../docs/workbench.md).
+> **This branch is still under construction and acceptance. It is not a release.** User flows: [docs/workbench.md](../../docs/workbench.md). Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
 
 Independent workbench supervisor. It binds `127.0.0.1`, holds Home run rights, and serves the stable entry plus `POST /api/workbench/<method>`.
 
 This package is Node-only. Browser callers never receive filesystem paths, CLI commands, child launch tokens, or the host bearer.
+
+The supervisor manages **normal** operations: bind locally, authenticate, enforce single-writer, run user commands, query real state, start/stop spaces the user asked for. It does not resurrect a failed manager, reinstall dependencies, rebuild identity, auto-take-over, restore run rights, or enter rescue mode.
+
+**Target policy / known implementation gap:** current binaries still serve rescue copy and restore APIs until R3–R6. Those are not current product requirements. `--snapshot-worker` is still required for the current runtime-install / long-IO path; do not drop it from a working start command until R4 extracts the non-restore execution.
 
 中文见 [中文](#中文)。
 
@@ -12,10 +16,10 @@ This package is Node-only. Browser callers never receive filesystem paths, CLI c
 
 - Dedicated manager profile `spaces-hub` (or `spaces-hub-N`). Existing ordinary profiles are attached in place; an ordinary profile already using the reserved name is **not** overwritten.
 - `@dsh-spaces/plugin` on the manager only; `@dsh-spaces/view-bridge` on ordinary spaces.
-- Stable entry at `origin`. Closing a browser tab does not stop instances. Stopping the manager does not stop this process — the same origin becomes the rescue / maintenance page (**接管运行权**, **检查并恢复**, **刷新**).
-- One writer per Home. Desktop on the same Home stays read-only until it takes over.
+- Stable entry at `origin`. Closing a browser tab does not stop instances. Stopping the manager does not stop this process — if the entry is still alive it can show the manager’s real failure (**查看错误详情**, **复制脱敏日志**). If this process itself dies, use stderr / launcher / existing logs. There is no watchdog.
+- One writer per Home. Desktop on the same Home stays read-only until it takes over. Live or unclear owners are refused.
 
-Official write gate: DSH CLI **`0.1.5-rc.1`**. SDK `0.1.5-rc.2` is not CLI 2. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
+Official write gate: DSH CLI **`0.1.5-rc.1` and `0.1.5-rc.2`**. SDK `0.1.5-rc.2` is not CLI 2. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
 
 ## Launch (runnable local build)
 
@@ -37,7 +41,7 @@ node packages/supervisor/lib/index.js `
   --snapshot-root D:\dsh-workbench-dev\snapshots
 ```
 
-Do not omit `--plugin-artifact`, `--view-bridge-artifact`, `--node`, `--snapshot-worker`, or `--control-tool-root`. Without the two tarballs the manager profile cannot finish installing and ordinary iframes have no handshake. `--bin` must be CLI `0.1.5-rc.1` (`--cli` is an alias). Paths must be absolute. The browser must not be asked to supply them.
+Do not omit `--plugin-artifact`, `--view-bridge-artifact`, `--node`, `--snapshot-worker`, or `--control-tool-root`. Without the two tarballs the manager profile cannot finish installing and ordinary iframes have no handshake. `--bin` must be a supported CLI (`--cli` is an alias). Paths must be absolute. The browser must not be asked to supply them.
 
 Prefer `packages/supervisor/lib/index.js` after `build:spaces`. Running the TypeScript entry with plain `node` will not compile.
 
@@ -58,7 +62,7 @@ A Home you already use (writes that Home — not a tutorial):
 --allow-real-home --home <abs-your-home>
 ```
 
-plus the same artifact / worker / tools flags, with tools and snapshots **outside** snapshot-replaced trees. `--allow-real-home` authorizes this process only.
+plus the same artifact / worker / tools flags, with tools and snapshots **outside** trees the current binary still treats as replaceable. `--allow-real-home` authorizes this process only.
 
 Omit `--port` to reuse `{home}/.dsh-spaces-control/entry-port.json` when valid. `--port 0` always takes a new ephemeral port. Always `127.0.0.1`.
 
@@ -85,22 +89,22 @@ await handle.close();
 
 `supervisorCliArgs(options)` rebuilds the argv for a child spawn (`--bin`, not `--cli`).
 
-A manager Host that already has this plugin attached will spawn the same argv (see `packages/plugin/src/host/supervisor-bootstrap.ts`): `--home --bin --node --plugin-artifact --view-bridge-artifact --control-tool-root --snapshot-worker` and optional `--snapshot-root` / `--allow-real-home`. Ordinary workspaces only attach; they do not cold-start a second controller.
+A manager Host that already has this plugin attached will spawn the same argv (see `packages/plugin/src/host/supervisor-bootstrap.ts`): `--home --bin --node --plugin-artifact --view-bridge-artifact --control-tool-root --snapshot-worker` and optional `--snapshot-root` / `--allow-real-home`. Ordinary workspaces only attach; they do not cold-start a second controller. A failed initialization ends that request; the next page open does not silently complete it.
 
 ## Flags (all Node-only paths)
 
 | Flag | Meaning |
 |---|---|
 | `--home` | Canonical DSH home. Required. Refuses `~/.dsh` unless `--allow-real-home`. |
-| `--bin` / `--cli` | Selected DSH `bin.js`. Version from the adjacent package.json; write gate `0.1.5-rc.1` only. |
+| `--bin` / `--cli` | Selected DSH `bin.js`. Version from the adjacent package.json; write gate `0.1.5-rc.1` / `0.1.5-rc.2`. |
 | `--node` | Node executable used to spawn DSH. Pass explicitly. |
 | `--port` | Listen port. Omit to reuse saved `entry-port.json`. `0` picks an ephemeral port. Always `127.0.0.1`. |
-| `--control-tool-root` | Toolchain / payload copies outside snapshot-replaced trees. Product cold start uses `{parent(home)}/.dsh-spaces-tools`. |
+| `--control-tool-root` | Toolchain / payload copies outside trees the current binary still treats as replaceable. Product cold start uses `{parent(home)}/.dsh-spaces-tools`. |
 | `--supervisor-asset-root` | Optional static assets for the stable entry. |
 | `--plugin-artifact` | File path of packed `@dsh-spaces/plugin` for the manager profile. Required for manager bootstrap. |
 | `--view-bridge-artifact` | File path of packed `@dsh-spaces/view-bridge` for ordinary spaces. Required for iframe handshake. |
-| `--snapshot-worker` | `snapshot-worker.mjs` used for maintenance and runtime install. |
-| `--snapshot-root` | Snapshot directory. Default: sibling `{parent}/{homeName}-snapshots` (not inside Home). Must stay outside `profiles` / `hub` / `sessions` / `storages` / `.dsh-spaces-restore`. |
+| `--snapshot-worker` | `snapshot-worker.mjs` used for current runtime install and long IO. Not a restore product. Required until R4. |
+| `--snapshot-root` | Directory the current binary may still use for snapshot files. Default: sibling `{parent}/{homeName}-snapshots` (not inside Home). Must stay outside `profiles` / `hub` / `sessions` / `storages` / `.dsh-spaces-restore`. Applying snapshots as disaster recovery is revoked. |
 | `--allow-real-home` | Flag with no value. Opt in for a Home you intend to manage. |
 
 Root build/manifest wiring is owned by the integrating agent. This package does not rewrite the desktop Electron entry.
@@ -121,8 +125,8 @@ Private `{home}/.dsh-spaces-control/endpoint.json` is `{version:1,origin,bearer}
 
 # 中文
 
-独立工作台监督进程，只绑 `127.0.0.1`。完整可运行命令（含 plugin / view-bridge / node / worker / tools，缺一不可）见 [docs/workbench.md](../../docs/workbench.md)。
+独立工作台监督进程，只绑 `127.0.0.1`。完整可运行命令（含 plugin / view-bridge / node / worker / tools，缺一不可）见 [docs/workbench.md](../../docs/workbench.md)。故障政策见 [docs/let-it-crash.md](../../docs/let-it-crash.md)。
 
-开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。默认快照目录是 Home 的兄弟 `{上一级}/{Home名}-snapshots`，不是 Home 内部文件夹。
+开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。默认快照目录是 Home 的兄弟 `{上一级}/{Home名}-snapshots`，不是 Home 内部文件夹。当前启动仍需要 `--snapshot-worker`，因为它同时承担运行时安装；这不是恢复产品。
 
-关标签不停实例；管理 profile 停掉后同一入口仍是救援页。浏览器不得提交这些路径。写门禁 CLI `0.1.5-rc.1`。未登记的手工 DSH 不会被接管。
+关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。写门禁 CLI `0.1.5-rc.1` / `0.1.5-rc.2`。未登记的手工 DSH 不会被接管。

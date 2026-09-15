@@ -1,3 +1,4 @@
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
 # Catppuccin × Spaces peer 冲突（审计）
 
 日期：2026-09-12。本叶未改 `scripts/verify-spaces-themes.mjs` / distribution、未改已有 theme profile、未启动 Host/浏览器。

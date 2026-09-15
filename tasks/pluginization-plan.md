@@ -1,13 +1,21 @@
 # Spaces pluginization — Phase 0 + Phase 1
 
+## Current policy (2026-09-15)
+
+Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md). Activity ledger: [todo.md](todo.md).
+
+Shared isolation, Host plugin, thin desktop, diagnostics, single-writer lock, and fail-closed unknown state remain. **Restore-core, independent rescue, restore CLI, snapshot restore, and Doctor recover/rollback/unlock are not current requirements.** Phase 2/3 must not be built as a recovery product. Remaining runtime work is R1–R6, pending.
+
+> 历史记录：以下内容描述当时实施与验收情况。涉及修复、恢复、回滚或救援的产品要求，已由 2026-09-15 的 [`docs/let-it-crash.md`](../docs/let-it-crash.md) 取代，不再作为当前施工与发布门槛。历史事实和原始证据不因此改写。
+
 Source: user-approved direction in “评估插件化必要性”, conversation `6aa38ae2-c7fc-83ec-8054-15d81964ac72`.
 Branch: `codex/spaces-pluginization`, based on `dfe9ae0ed760ee1e6fe9e9d9e5d057e9451981b7`.
 
 ## Delivery scope
 
-Extract host-independent domain/application/ports and reusable Node adapters. Keep all existing Electron features and storage formats. Ship a real installable DSH Host + Web plugin with an additive sidebar entry and independent main panel. Its first API exposes observation, diagnostics and creation/verification of non-host spaces. Preserve independent desktop recovery and add a minimal standalone doctor entry point.
+Extract host-independent domain/application/ports and reusable Node adapters. Keep all existing Electron features and storage formats. Ship a real installable DSH Host + Web plugin with an additive sidebar entry and independent main panel. Its first API exposes observation, diagnostics and creation/verification of non-host spaces. Preserve independent desktop lifecycle and add a minimal standalone doctor **diagnostics** entry point. Desktop recovery and doctor recover/rollback are historical Phase 0/1 facts, not current requirements.
 
-Web lifecycle control, plugin changes, snapshot restore and runtime changes belong to Phase 2 after transaction/lease/fault-injection maturity. Multi-space browser embedding belongs to a separate Phase 3 design. Neither is silently enabled in this MVP.
+If Phase 2 continues, it is Web lifecycle control, plugin install/remove, and runtime install/upgrade **without** snapshot restore, rollback, rescue, or interrupted-job resume. **Snapshot restore is 已撤销 (2026-09-15), not deferred Phase 2 work.** Multi-space browser embedding belongs to a separate Phase 3 design. Neither is silently enabled in this MVP.
 
 ## Ownership
 
@@ -45,7 +53,7 @@ Web lifecycle control, plugin changes, snapshot restore and runtime changes belo
 - [x] Integrate and independently audit.
 - [x] Complete automated and real runtime acceptance.
 
-Final evidence and explicit limits: [pluginization-acceptance.md](pluginization-acceptance.md). Phase 0/1 are implemented; Phase 2/3 remain deferred. The standalone doctor provides diagnostics, bounded verification and explicit dead-lock reclamation; full recover/rollback remain in the desktop application.
+Final evidence and explicit limits: [pluginization-acceptance.md](pluginization-acceptance.md). Phase 0/1 are implemented. Phase 2, if continued, is lifecycle/plugin/runtime **without** restore. Snapshot restore, Doctor recover/unlock/rollback, and desktop recovery are **已撤销** (2026-09-15), not later-phase work. Current binaries still contain them (R5). Phase 3 multi-space embedding remains a separate design.
 
 ## 2026-09-12 continuation — distributable preview
 
@@ -56,7 +64,7 @@ User requests Grok construction with Codex orchestration and acceptance. Preserv
 - Grok `distribution_windows_package`: desktop smoke script supporting a packaged executable and real UI checks. Task `task_0145580b53`, session `sess_9f846651b5`.
 - All workers use the executor role instructions through Bridge, Grok default configured model with requested high effort (user model override); no history fork, no Git ownership, no production data or publication. Codex owns shared manifests, build output, integration, final report and local Git delivery. Real browser/Electron acceptance runs serially.
 
-Completion gates: installed artifact RPC/UI; clean uninstall and official UI recovery; Chinese/English behavior; unknown-runtime behavior where an actual compatible-to-load unsupported runtime is available; actual packaged Windows runtime; updated evidence and reviewable local commits. Do not claim untested installer OS registration or untested platforms as accepted.
+Completion gates: installed artifact RPC/UI; clean uninstall so the official DSH UI remains usable (that is ordinary uninstall, not product restore); Chinese/English behavior; unknown-runtime behavior where an actual compatible-to-load unsupported runtime is available; actual packaged Windows runtime; updated evidence and reviewable local commits. Do not claim untested installer OS registration or untested platforms as accepted. Snapshot restore is not a completion gate.
 
 Completed local acceptance on 2026-09-12: 89 focused tests, TypeScript/build, real Chinese/English browser flow, official CLI add/reinstall/remove with automatic bundle activation, same-profile official RPC after removal, real CLI 0.1.5-rc.2 read-only refusals with unchanged config, and actual Windows installer payload running with `app.isPackaged === true`. See [trial acceptance](pluginization-trial-acceptance.md). Grok added the bundle in `task_bb40507f9e`; the distribution audit correction was `task_c7dcbc522c`. Codex tightened missing-target/error-code and uninstall-overlay checks and addressed the observed upstream shell-path forwarding failure in the acceptance harness.
 
