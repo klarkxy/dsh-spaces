@@ -8,7 +8,7 @@ This package is Node-only. Browser callers never receive filesystem paths, CLI c
 
 The supervisor manages **normal** operations: bind locally, authenticate, enforce single-writer, run user commands, query real state, start/stop spaces the user asked for. It does not resurrect a failed manager, reinstall dependencies, rebuild identity, auto-take-over, restore run rights, or enter rescue mode.
 
-**Target policy / known implementation gap:** current binaries still serve rescue copy and restore APIs until R3–R6. Those are not current product requirements. `--snapshot-worker` is still required for the current runtime-install / long-IO path; do not drop it from a working start command until R4 extracts the non-restore execution.
+Public restore APIs fail explicitly. `--snapshot-worker` is still required for the current runtime-install / long-IO path.
 
 中文见 [中文](#中文)。
 

@@ -4,7 +4,7 @@
 >
 > 现行故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。开发入口：[AGENTS.md](AGENTS.md)、[CONTRIBUTING.md](CONTRIBUTING.md)。
 >
-> 2026-09-15：恢复、修补、失败回退类待办已撤销，不是延期，也不勾成已完成。仍有效的是隔离、生命周期、错误报告、插件状态/导入导出/批量失败终止，以及待实施的运行时迁移 R1–R6。
+> 2026-09-15：恢复、修补、失败回退类待办已撤销。R1–R6 / Q / 插件 02–03、07–11 已在活动账本勾选。未在本机用官方 CLI/浏览器跑完的项见 [tasks/q-coverage.md](tasks/q-coverage.md)。
 >
 > 配套文档：`REQUIREMENTS.md`（需求与验收）、`IMPLEMENTATION_PLAN.md`（阶段计划与技术栈，早期记录）。
 > 历史阶段按当时完成情况保留勾选。禁止跳过隔离阶段。

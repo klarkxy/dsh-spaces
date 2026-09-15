@@ -45,7 +45,7 @@ The supervisor and doctor use the same production-home guard: disposable Homes d
 
 See [docs/let-it-crash.md](docs/let-it-crash.md). Spaces reports what happened (space, stage, plugin or unknown, reason, exit code or signal) in still-available UI or local output. Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management actions. They are not recovery.
 
-**Target policy / known implementation gap:** this document describes the current product contract. Runtime code still contains restore commands, rescue copy, snapshot restore, and Doctor `unlock` / `recover` / `rollback` until tasks R1–R6. Those are not current requirements and must not be used as the documented user path. Do not read this README as “runtime already complies with let it crash.”
+Runtime product paths follow [docs/let-it-crash.md](docs/let-it-crash.md). Public restore APIs fail explicitly. Remaining CLI/browser matrix gaps: [tasks/q-coverage.md](tasks/q-coverage.md).
 
 App updates and DSH runtime upgrades remain separate operations. Explicit runtime upgrades may update official base plugins in `web`, while its isolation patch remains protected. Candidate install that never switches the current pointer is a failed prepare, not a restore. After a committed switch, a later fault is reported in place; Spaces does not switch back.
 
@@ -120,7 +120,7 @@ Spaces 不添加自己的遥测；上游 DSH 和插件遵循各自网络设置�
 
 故障政策见 [docs/let-it-crash.md](docs/let-it-crash.md)。错误页只提供错误详情和脱敏日志；不提供救援入口、检查并恢复、恢复中断任务、配置恢复或整 Home 恢复。
 
-**目标政策 / 已知实现差距：** 本文是现行产品契约。运行时在 R1–R6 完成前仍含恢复命令、救援文案、快照恢复和 Doctor `unlock` / `recover` / `rollback`。它们不是当前产品能力，也不能当作文档化的用户路径。本文不宣称运行时已符合 let it crash。
+产品路径已按 [docs/let-it-crash.md](docs/let-it-crash.md) 报告失败、不恢复。未在本机跑完的 CLI/浏览器项见 [tasks/q-coverage.md](tasks/q-coverage.md)。
 
 本分支已在隔离 Home 验证过基础 iframe / 稳定入口、部分主题、空间栏操作、桌面与 Web 运行权、插件安装。最终运行时升级、CLI `0.1.5-rc.2` 之外的兼容、管理插件自升级和新视频仍在验收，不能当成已经完成。历史上曾作为产品能力验收的整 Home 快照恢复、kill 故障恢复、配置恢复，自 2026-09-15 起不再是施工与发布门槛。
 
