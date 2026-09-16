@@ -52,8 +52,6 @@ import type {
   WorkbenchView,
 } from "../../shared/workbench";
 import {
-  COMPATIBLE_DSH_CLI_VERSION,
-  COMPATIBLE_DSH_CLI_VERSIONS,
   isCompatibleDshCliVersion,
   NodeSpacesControl,
   bindDshCli,
@@ -96,7 +94,7 @@ import {
 } from "./workbench-http";
 
 export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./workbench-http";
-export { COMPATIBLE_DSH_CLI_VERSION, COMPATIBLE_DSH_CLI_VERSIONS, isCompatibleDshCliVersion };
+export { isCompatibleDshCliVersion };
 
 const SPACES_PLUGIN = "@dsh-spaces/plugin";
 const VIEW_ENV = {
@@ -134,7 +132,7 @@ export const WORKBENCH_ERROR = {
   "workbench/busy": "Another controller already holds run rights for this home.",
   "workbench/unmanaged": "This instance is not managed here. It can be viewed only.",
   "workbench/protected": "The web profile and manager space cannot be changed this way.",
-  "workbench/incompatible": `The bound DSH CLI is not a supported version (${COMPATIBLE_DSH_CLI_VERSIONS.join(", ")}).`,
+  "workbench/incompatible": "The bound DSH CLI could not be validated as an exact installed version.",
   "workbench/failed": "The workbench request failed.",
   "workbench/maintenance": "That maintenance action is not available yet.",
 } as const;
@@ -1885,10 +1883,7 @@ function bindSelectedCli(bin: string): BoundCli {
     throw new WorkbenchPublicError("workbench/incompatible", "The selected DSH CLI could not be bound from disk.");
   }
   if (!isCompatibleDshCliVersion(bound.version)) {
-    throw new WorkbenchPublicError(
-      "workbench/incompatible",
-      `Supported CLI is ${COMPATIBLE_DSH_CLI_VERSIONS.join(", ")}; ${bound.version} is not enabled.`,
-    );
+    throw new WorkbenchPublicError("workbench/incompatible");
   }
   return bound;
 }

@@ -269,7 +269,7 @@ test("catalog fetches the user-selected official or china registry", async () =>
   assert.equal(headers[0]?.["user-agent"], "dsh-spaces");
   assert.equal(catalog.distTags.latest, "0.0.1-rc.1");
   assert.ok(catalog.versions.some((row) => row.version === "0.1.1-rc.2"));
-  assert.equal(preferredTaggedVersion(catalog), "0.1.1-rc.2");
+  assert.equal(preferredTaggedVersion(catalog), "0.0.1-rc.1");
   assert.equal(china.current(), undefined);
   await official.catalog();
   assert.equal(seen[1], npmPackumentUrl("official", "@deepseek-ai/dsh"));
@@ -296,7 +296,7 @@ test("catalog retries a dropped registry connection and surfaces the socket caus
   });
   const catalog = await runtime.catalog();
   assert.equal(attempts, 3);
-  assert.equal(preferredTaggedVersion(catalog), "0.1.5-rc.2");
+  assert.equal(preferredTaggedVersion(catalog), "0.1.5-rc.1");
 
   let notFound = 0;
   await assert.rejects(

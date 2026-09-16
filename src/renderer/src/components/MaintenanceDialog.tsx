@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { MaintenanceView } from "@shared/maintenance-view";
-import { DSH_DEFAULT_VERSION, preferredTaggedVersion, type RuntimeCatalog } from "@shared/runtime";
+import { DSH_DEFAULT_CHANNEL, preferredTaggedVersion, type RuntimeCatalog } from "@shared/runtime";
 import type { SnapshotMeta } from "@shared/snapshots";
 import type { UpgradePreview, UpgradePhase } from "@shared/upgrade";
 import { useI18n } from "../i18n";
@@ -41,7 +41,7 @@ export function MaintenancePanel({
       try {
         const next = await window.dshSpaces.getRuntimeCatalog();
         setCatalog(next);
-        setVersion((current) => current || preferredTaggedVersion(next) || DSH_DEFAULT_VERSION);
+        setVersion((current) => current || preferredTaggedVersion(next) || "");
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -84,9 +84,9 @@ export function MaintenancePanel({
           <button className={button} disabled={disabled} onClick={() => void run(say("正在查询版本…", "Fetching versions…"), async () => {
             const next = await window.dshSpaces.getRuntimeCatalog();
             setCatalog(next);
-            setVersion((current) => current || preferredTaggedVersion(next) || DSH_DEFAULT_VERSION);
+            setVersion((current) => current || preferredTaggedVersion(next) || "");
           }, say("已刷新可用版本。", "Available versions updated."))}>{say("查询可用版本", "Check available versions")}</button>
-          <input aria-label={say("精确版本号", "Exact version")} className="field w-auto max-w-[12rem]" list="dsh-runtime-versions" value={version} onChange={event => setVersion(event.target.value)} placeholder={DSH_DEFAULT_VERSION} disabled={disabled} />
+          <input aria-label={say("精确版本号", "Exact version")} className="field w-auto max-w-[12rem]" list="dsh-runtime-versions" value={version} onChange={event => setVersion(event.target.value)} placeholder={DSH_DEFAULT_CHANNEL} disabled={disabled} />
           <datalist id="dsh-runtime-versions">{catalog?.versions.map(row => <option key={row.version} value={row.version} />)}</datalist>
           <button className={button} disabled={disabled || !version} onClick={() => void run(say("正在安装版本…", "Installing version…"), () => window.dshSpaces.installRuntimeVersion(version), say("版本已安装，当前运行版本未变。", "Version installed. The active runtime is unchanged."))}>{say("安装", "Install")}</button>
         </div>

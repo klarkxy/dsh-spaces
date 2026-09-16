@@ -21,7 +21,7 @@ Chinese: [中文](#dsh-spaces-工作台).
 - One writer per Home. Desktop and Web can share the same Home; the other side stays read-only until you take over.
 - Long jobs persist across refresh as the **same** job. Refresh reads that job; it does not replay the command. Interrupted jobs show interrupted failure or “result cannot be confirmed.” Spaces does not resume them.
 
-Official write gate: DSH CLI **`0.1.5-rc.1` and `0.1.5-rc.2`**. The plugin peers on SDK `0.1.5-rc.2`; that is not “CLI 2”. Isolated candidate builds are a verification channel for this repo, not a user tutorial for bypassing the gate.
+Default DSH channel is official **`latest`**. First install and upgrade candidates resolve that tag to an exact version and pin it. Any exact installed CLI can bind; a version number that Spaces has not tested is not by itself read-only. Plugin peers on SDK `0.1.5-rc.2` for this repo's build; that is not a CLI allowlist. Isolated candidate builds are a verification channel for this repo, not a user tutorial.
 
 ## Still being accepted
 
@@ -32,7 +32,6 @@ Those historical runs also exercised config restore and one whole-Home snapshot 
 Not complete — do not document these as done:
 
 - Final runtime upgrade (candidate prepare and pointer switch; not fail-rollback)
-- Compatibility beyond the explicitly supported rc.1 and rc.2
 - Manager plugin self-upgrade (runtime / whole-Home maintenance is not that)
 - Final regression matrix and a new intro video
 - Catppuccin: the original theme still fails because of missing dependencies. That is not wrapped as a Spaces fix.
@@ -68,7 +67,7 @@ npm run build:spaces
 npm pack ./packages/plugin --ignore-scripts --pack-destination $artifacts
 npm pack ./packages/view-bridge --ignore-scripts --pack-destination $artifacts
 
-# --bin must be the selected DSH CLI bin.js whose adjacent package.json is 0.1.5-rc.1 or 0.1.5-rc.2
+# --bin must be the selected DSH CLI bin.js whose adjacent package.json is an exact version
 node packages/supervisor/lib/index.js `
   --home $spacesHome `
   --bin C:\path\to\@deepseek-ai\dsh\lib\bin.js `
@@ -85,7 +84,7 @@ Required for a working manager and iframe handshake **with the current superviso
 | Flag | Why it is required |
 |---|---|
 | `--home` | Canonical DSH Home. Absolute. |
-| `--bin` (alias `--cli`) | Bound DSH `bin.js`. Write gate accepts `0.1.5-rc.1` and `0.1.5-rc.2`. |
+| `--bin` (alias `--cli`) | Bound DSH `bin.js`. Adjacent `package.json` must be an exact version. |
 | `--node` | Node used to spawn DSH. If omitted the supervisor falls back to `process.execPath`; pass it anyway so the CLI you intend is the one that runs. |
 | `--plugin-artifact` | Packed `@dsh-spaces/plugin` tarball. Without it, manager bootstrap cannot finish. |
 | `--view-bridge-artifact` | Packed `@dsh-spaces/view-bridge` tarball. Ordinary spaces need this for the iframe handshake. |
@@ -280,7 +279,7 @@ Production Home: add `--allow-real-home` and an explicit `--home`. Doctor does n
 - 同一 Home 只有一个写控制者。桌面和 Web 可共用 Home，另一端只读，直到你明确接管。
 - 长任务刷新后读取**同一个**任务，不重放命令。中断任务显示中断失败或结果无法确认。不续跑。
 
-正式写门禁：DSH CLI **`0.1.5-rc.1` 和 `0.1.5-rc.2`**。插件 peer 的 SDK `0.1.5-rc.2` 不是「CLI 2」。仓库里的 candidate 构建只是隔离验证通道，不是给用户绕门禁的教程。
+默认跟随官方 **`latest`**。首次安装和升级候选会把该 tag 解析成精确版本再钉住。任意已安装的精确 CLI 都可以绑定；Spaces 没测过的版本号本身不会变成只读。本仓库插件 peer 的 SDK `0.1.5-rc.2` 不是 CLI 白名单。仓库里的 candidate 构建只是隔离验证通道。
 
 ## 尚未写进「已完成」的部分
 
@@ -291,7 +290,6 @@ Production Home: add `--allow-real-home` and an explicit `--home`. Doctor does n
 不能写成已经完成：
 
 - 运行时升级的候选准备与指针切换（不是失败回滚）
-- 超出 rc.1 / rc.2 的其它 CLI 兼容性
 - 管理插件自身升级的真实安装（接口与管理页仍在补实测）
 - 最终回归和新介绍视频
 - Catppuccin 原主题缺依赖仍然失败，不能包装成 Spaces 已修复
@@ -327,7 +325,7 @@ npm run build:spaces
 npm pack ./packages/plugin --ignore-scripts --pack-destination $artifacts
 npm pack ./packages/view-bridge --ignore-scripts --pack-destination $artifacts
 
-# --bin 必须是相邻 package.json 为 0.1.5-rc.1 或 0.1.5-rc.2 的 DSH bin.js
+# --bin 必须是相邻 package.json 为精确版本号的 DSH bin.js
 node packages/supervisor/lib/index.js `
   --home $spacesHome `
   --bin C:\path\to\@deepseek-ai\dsh\lib\bin.js `
@@ -344,7 +342,7 @@ node packages/supervisor/lib/index.js `
 | 参数 | 作用 |
 |---|---|
 | `--home` | 规范 DSH Home，绝对路径 |
-| `--bin`（别名 `--cli`） | 绑定的 DSH `bin.js`，写门禁 `0.1.5-rc.1` / `0.1.5-rc.2` |
+| `--bin`（别名 `--cli`） | 绑定的 DSH `bin.js`，相邻 `package.json` 必须是精确版本 |
 | `--node` | 用来拉起 DSH 的 Node。省略时退回 `process.execPath`，请显式传入以免用错 |
 | `--plugin-artifact` | 打好的 `@dsh-spaces/plugin` tarball。没有它管理 profile 装不完 |
 | `--view-bridge-artifact` | 打好的 `@dsh-spaces/view-bridge` tarball。普通空间 iframe 握手需要 |

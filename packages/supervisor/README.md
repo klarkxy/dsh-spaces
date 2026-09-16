@@ -19,7 +19,7 @@ Public restore APIs fail explicitly. `--snapshot-worker` is still required for t
 - Stable entry at `origin`. Closing a browser tab does not stop instances. Stopping the manager does not stop this process — if the entry is still alive it can show the manager’s real failure (**查看错误详情**, **复制脱敏日志**). If this process itself dies, use stderr / launcher / existing logs. There is no watchdog.
 - One writer per Home. Desktop on the same Home stays read-only until it takes over. Live or unclear owners are refused.
 
-Official write gate: DSH CLI **`0.1.5-rc.1` and `0.1.5-rc.2`**. SDK `0.1.5-rc.2` is not CLI 2. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
+Default DSH channel is official **`latest`**, pinned to the resolved exact version. Any exact installed CLI can bind. SDK `0.1.5-rc.2` is this repo's plugin peer, not a CLI allowlist. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
 
 ## Launch (runnable local build)
 
@@ -96,7 +96,7 @@ A manager Host that already has this plugin attached will spawn the same argv (s
 | Flag | Meaning |
 |---|---|
 | `--home` | Canonical DSH home. Required. Refuses `~/.dsh` unless `--allow-real-home`. |
-| `--bin` / `--cli` | Selected DSH `bin.js`. Version from the adjacent package.json; write gate `0.1.5-rc.1` / `0.1.5-rc.2`. |
+| `--bin` / `--cli` | Selected DSH `bin.js`. Version from the adjacent package.json; must be an exact version. |
 | `--node` | Node executable used to spawn DSH. Pass explicitly. |
 | `--port` | Listen port. Omit to reuse saved `entry-port.json`. `0` picks an ephemeral port. Always `127.0.0.1`. |
 | `--control-tool-root` | Toolchain / payload copies outside trees the current binary still treats as replaceable. Product cold start uses `{parent(home)}/.dsh-spaces-tools`. |
@@ -129,4 +129,4 @@ Private `{home}/.dsh-spaces-control/endpoint.json` is `{version:1,origin,bearer}
 
 开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。默认快照目录是 Home 的兄弟 `{上一级}/{Home名}-snapshots`，不是 Home 内部文件夹。当前启动仍需要 `--snapshot-worker`，因为它同时承担运行时安装；这不是恢复产品。
 
-关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。写门禁 CLI `0.1.5-rc.1` / `0.1.5-rc.2`。未登记的手工 DSH 不会被接管。
+关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。默认跟随官方 `latest` 并钉住精确版本。未登记的手工 DSH 不会被接管。

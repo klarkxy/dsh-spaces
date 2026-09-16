@@ -27,22 +27,21 @@ jobs:
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
       - run: npm run build:spaces
-      - name: Install DSH CLI 0.1.5-rc.1 (latest) and 0.1.5-rc.2 (next)
+      - name: Install official DSH CLI (latest)
         run: |
           pnpm --version
-          npm install -g @deepseek-ai/dsh@0.1.5-rc.1
-          npm install --prefix "${{ runner.temp }}/dsh-next" @deepseek-ai/dsh@0.1.5-rc.2
+          npm install -g @deepseek-ai/dsh@latest
           dsh --version
-          node "${{ runner.temp }}/dsh-next/node_modules/@deepseek-ai/dsh/lib/bin.js" --version
       - name: Official CLI integration check
-        env:
-          DSH_TEST_RC2_BIN: ${{ runner.temp }}/dsh-next/node_modules/@deepseek-ai/dsh/lib/bin.js
-        run: node --import tsx --test tests/compatible-dsh-cli.test.ts
+        shell: pwsh
+        run: |
+          $bin = Join-Path ((npm root -g).Trim()) "@deepseek-ai/dsh/lib/bin.js"
+          $env:DSH_TEST_CLI_BIN = $bin
+          node --import tsx --test tests/compatible-dsh-cli.test.ts
       - name: Pack preflight
         run: node scripts/pack-spaces-plugin.mjs --preflight
       - name: Standard-install static evidence
         env:
-          DSH_TEST_RC2_BIN: ${{ runner.temp }}/dsh-next/node_modules/@deepseek-ai/dsh/lib/bin.js
           DSH_TEST_OUTPUT: ${{ runner.temp }}/plugin-standard-install
         run: node scripts/verify-plugin-standard-install.mjs --preflight
       - name: Setup sandbox profiles
@@ -59,10 +58,6 @@ jobs:
   plugin-install:
     runs-on: windows-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        cli: ["0.1.5-rc.1", "0.1.5-rc.2"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -72,20 +67,20 @@ jobs:
       - run: npm ci
       - run: npm run build:spaces
       - run: npx playwright install chromium
-      - name: Install exact CLI and package manager for acceptance
-        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@${{ matrix.cli }} pnpm@10.29.2 --no-audit --no-fund
+      - name: Install official latest CLI and package manager for acceptance
+        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@latest pnpm@10.29.2 --no-audit --no-fund
       - name: Standard plugin installation in a fresh Home
         env:
           DSH_TEST_BIN: ${{ runner.temp }}/plugin-tools/node_modules/@deepseek-ai/dsh/lib/bin.js
           DSH_TEST_PNPM_CJS: ${{ runner.temp }}/plugin-tools/node_modules/pnpm/bin/pnpm.cjs
-          DSH_TEST_OUTPUT: ${{ runner.temp }}/plugin-install-${{ matrix.cli }}
-          DSH_PACK_DEST: ${{ runner.temp }}/plugin-pack-${{ matrix.cli }}
+          DSH_TEST_OUTPUT: ${{ runner.temp }}/plugin-install-latest
+          DSH_PACK_DEST: ${{ runner.temp }}/plugin-pack-latest
         run: npm run validate:plugin-install
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: plugin-install-${{ matrix.cli }}
+          name: plugin-install-latest
           path: |
-            ${{ runner.temp }}/plugin-install-${{ matrix.cli }}/*.json
-            ${{ runner.temp }}/plugin-install-${{ matrix.cli }}/*.log
-            ${{ runner.temp }}/plugin-install-${{ matrix.cli }}/*.png
+            ${{ runner.temp }}/plugin-install-latest/*.json
+            ${{ runner.temp }}/plugin-install-latest/*.log
+            ${{ runner.temp }}/plugin-install-latest/*.png

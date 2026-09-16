@@ -4,7 +4,7 @@ import { spawnObserved } from "./owned-process-record";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { t } from "../shared/i18n";
-import { DSH_DEFAULT_VERSION, DSH_RUNTIME_PACKAGE } from "../shared/runtime";
+import { DSH_DEFAULT_CHANNEL, DSH_RUNTIME_PACKAGE } from "../shared/runtime";
 import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../shared/types";
 import { npmRegistry } from "./package-source";
 import { terminateProcessTree } from "./terminate-process";
@@ -21,7 +21,7 @@ import {
   toolchainEnv,
 } from "./toolchain";
 
-export const DSH_CLI_SPEC = `${DSH_RUNTIME_PACKAGE}@${DSH_DEFAULT_VERSION}`;
+export const DSH_CLI_SPEC = `${DSH_RUNTIME_PACKAGE}@${DSH_DEFAULT_CHANNEL}`;
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 let cachedBin: string | undefined;

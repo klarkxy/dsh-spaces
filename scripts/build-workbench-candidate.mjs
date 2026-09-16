@@ -2,7 +2,7 @@
  * Audit-only rc.2 candidate packages.
  *
  * Builds into `.sandbox/workbench-rc2-candidate/packages` only. Does not
- * rewrite the official COMPATIBLE_DSH_CLI_VERSIONS array, official
+ * rewrite the official CLI bind gate, official
  * package libs, CLI/SDK package.json versions, or claim product support.
  *
  * Usage:
@@ -19,9 +19,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const at = path => resolve(root, path);
-const CANDIDATE_CLI = '0.1.5-rc.2';
-const OFFICIAL_CLI = '0.1.5-rc.1';
-const ARRAY_PATTERN = /export const COMPATIBLE_DSH_CLI_VERSIONS = \[([^\]]+)\] as const;/;
 const GATE_SOURCE = 'src/adapters/node/spaces-control.ts';
 const candidateRoot = at('.sandbox/workbench-rc2-candidate');
 const candidatePackages = join(candidateRoot, 'packages');
@@ -44,32 +41,6 @@ const OFFICIAL_PACKAGE_JSON = [
   'packages/supervisor/package.json',
   'packages/doctor/package.json',
 ];
-
-function injectCandidateCliVersions(source, filePath) {
-  const match = source.match(ARRAY_PATTERN);
-  if (!match) throw new Error(`candidate onLoad: COMPATIBLE_DSH_CLI_VERSIONS not found in ${filePath}`);
-  if (match[1].includes(CANDIDATE_CLI)) {
-    throw new Error(`candidate onLoad: refusing to patch a source file that already lists ${CANDIDATE_CLI}`);
-  }
-  return source.replace(
-    ARRAY_PATTERN,
-    `export const COMPATIBLE_DSH_CLI_VERSIONS = [${match[1].trim()}, ${JSON.stringify(CANDIDATE_CLI)}] as const;`,
-  );
-}
-
-const candidateVersionsPlugin = {
-  name: 'candidate-compatible-cli-versions',
-  setup(buildApi) {
-    buildApi.onLoad({ filter: /[\\/]spaces-control\.ts$/ }, async args => {
-      const source = await readFile(args.path, 'utf8');
-      return {
-        contents: injectCandidateCliVersions(source, args.path),
-        loader: 'ts',
-        resolveDir: dirname(args.path),
-      };
-    });
-  },
-};
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -104,16 +75,11 @@ async function hashPaths(paths) {
 }
 
 function assertOfficialGate(source, label) {
-  if (!source.includes(`export const COMPATIBLE_DSH_CLI_VERSION = "${OFFICIAL_CLI}";`)) {
-    throw new Error(`${label}: official COMPATIBLE_DSH_CLI_VERSION is not ${OFFICIAL_CLI}`);
+  if (source.includes('COMPATIBLE_DSH_CLI_VERSIONS')) {
+    throw new Error(`${label}: official source still has a CLI version allowlist`);
   }
-  const match = source.match(ARRAY_PATTERN);
-  if (!match) throw new Error(`${label}: official COMPATIBLE_DSH_CLI_VERSIONS array missing`);
-  if (match[1].includes(CANDIDATE_CLI)) {
-    throw new Error(`${label}: official source array must not list ${CANDIDATE_CLI}`);
-  }
-  if (match[1].trim() !== 'COMPATIBLE_DSH_CLI_VERSION') {
-    throw new Error(`${label}: official array must remain [COMPATIBLE_DSH_CLI_VERSION]`);
+  if (!source.includes('return isExactRuntimeVersion(version);')) {
+    throw new Error(`${label}: official bind gate must accept any exact CLI version`);
   }
 }
 
@@ -174,7 +140,6 @@ async function buildNode({ entryPoints, outfile, outdir, banner, external }) {
     entryPoints,
     ...(outfile ? { outfile } : {}),
     ...(outdir ? { outdir } : {}),
-    plugins: [candidateVersionsPlugin],
   });
 }
 
@@ -291,8 +256,8 @@ const entries = [
 for (const entry of entries) nodeCheck(join(candidatePackages, entry));
 
 const supervisorJs = await readFile(join(candidatePackages, 'supervisor/lib/index.js'), 'utf8');
-if (!supervisorJs.includes(CANDIDATE_CLI) || !supervisorJs.includes(OFFICIAL_CLI)) {
-  throw new Error('candidate supervisor bundle did not receive in-memory rc.2 injection');
+if (supervisorJs.includes('COMPATIBLE_DSH_CLI_VERSIONS')) {
+  throw new Error('candidate supervisor bundle still contains a CLI version allowlist');
 }
 const pluginSupervisorJs = await readFile(join(candidatePackages, 'plugin/lib/supervisor/index.js'), 'utf8');
 if (pluginSupervisorJs !== supervisorJs) {
@@ -314,12 +279,12 @@ const manifest = {
   candidate: true,
   claimsSupport: false,
   productSupported: false,
-  allowedTestCliVersions: [OFFICIAL_CLI, CANDIDATE_CLI],
+  allowedTestCliVersions: [],
   sourceGitRevision: gitRevision(),
   packageRoot: candidatePackages,
   env: { DSH_TEST_PACKAGE_ROOT: candidatePackages },
   hashes: packageHashes,
-  note: 'Audit-only experimental channel. Does not enable official 0.1.5-rc.2 support.',
+  note: 'Audit-only experimental channel. Product bind accepts any exact official CLI version.',
 };
 await writeFile(join(candidateRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 process.stdout.write(`candidate packages: ${candidatePackages}\n`);

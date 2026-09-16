@@ -252,8 +252,11 @@ export class WorkbenchHostRuntime {
     }
     const argv = this.options.argv ?? process.argv;
     const runtime = typeof argv[1] === "string" ? bindDshCli(argv[1]) : null;
-    if (!runtime || !isCompatibleDshCliVersion(runtime.version)) {
-      return this.initializeFailure(["The bound DSH CLI is not a supported version. Spaces was not initialized."]);
+    if (!runtime) {
+      return this.initializeFailure(["The bound DSH CLI could not be validated from the current process."]);
+    }
+    if (!isCompatibleDshCliVersion(runtime.version)) {
+      return this.initializeFailure(["The bound DSH CLI is not an exact installed version. Spaces was not initialized."]);
     }
     return null;
   }

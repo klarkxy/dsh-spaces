@@ -170,11 +170,11 @@ test("unlock recover and rollback are unsupported and do not change Home bytes",
   assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
 });
 
-test("verify refuses paths, web, relative cli, unsupported versions, and held locks", async () => {
+test("verify refuses paths, web, relative cli, non-exact versions, and held locks", async () => {
   const home = tempDir("dsh-doctor-verify-");
   mkdirSync(join(home, "profiles", "coding"), { recursive: true });
   mkdirSync(join(home, "profiles", "web"), { recursive: true });
-  const badVersion = writeCli(tempDir("dsh-doctor-old-"), "0.1.1-rc.2", goodDump);
+  const badVersion = writeCli(tempDir("dsh-doctor-old-"), "latest", goodDump);
   const goodCli = writeCli(tempDir("dsh-doctor-ok-"), "0.1.5-rc.2", goodDump);
 
   const pathName = await runDoctor(["verify", "--home", home, "--cli", goodCli, "--profile", "../coding"]);

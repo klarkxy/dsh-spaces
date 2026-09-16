@@ -13,7 +13,7 @@ dsh-spaces doctor   --home <dir> [--cli <absolute-bin>]
 dsh-spaces verify   --home <dir> --cli <absolute-bin> --profile <name>
 ```
 
-`--home` is required. `--cli` must be an absolute path to a bound DSH CLI. `verify` accepts DSH CLI `0.1.5-rc.1` and `0.1.5-rc.2`. Unknown versions are refused.
+`--home` is required. `--cli` must be an absolute path to a bound DSH CLI whose adjacent `package.json` is an exact version. Tags such as `latest` are refused.
 
 `doctor` is intended to be read-only: it should never call `unlockDead()`, `reclaimDead()`, or `WorkbenchJobStore` writes. It reports registry, journals, plugin-mutation evidence, transaction lock, run-control, manager identity, persistent jobs, and leftover instances. Unreadable or future schemas keep their original bytes. Permission failures are not treated as absence. Public JSON does not include CLI paths, tokens, cookies, or config secrets.
 

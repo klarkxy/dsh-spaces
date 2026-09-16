@@ -802,7 +802,7 @@ test("shutdown persists the job then releases rights without deadlocking on when
   }
 });
 
-test("rc.2 CLI is admitted; unknown versions stay out; CLI flags stay Node-only paths", async () => {
+test("exact CLI versions are admitted; tags stay unbound; CLI flags stay Node-only paths", async () => {
   const rc2Home = tempHome();
   const rc2 = writeFakeCli(rc2Home, "0.1.5-rc.2");
   const admitted = await startSupervisor(rc2Home, { bin: rc2 });
@@ -810,16 +810,24 @@ test("rc.2 CLI is admitted; unknown versions stay out; CLI flags stay Node-only 
   const state = await api(admitted.origin, cookie, "state");
   const value = state.body.value as { dshVersion: string | null; reasons: string[] };
   assert.equal(value.dshVersion, "0.1.5-rc.2");
-  assert.doesNotMatch(value.reasons.join(" "), /not a supported version|not the supported/i);
+  assert.doesNotMatch(value.reasons.join(" "), /not a supported version|not the supported|exact installed version/i);
+
+  const laterHome = tempHome();
+  const laterBin = writeFakeCli(laterHome, "0.1.5-rc.3");
+  const later = await startSupervisor(laterHome, { bin: laterBin });
+  const laterCookie = await bootstrap(later.origin, later.bootstrapUrl);
+  const laterState = await api(later.origin, laterCookie, "state");
+  const laterValue = laterState.body.value as { dshVersion: string | null; reasons: string[] };
+  assert.equal(laterValue.dshVersion, "0.1.5-rc.3");
 
   const unknownHome = tempHome();
-  const unknownBin = writeFakeCli(unknownHome, "0.1.5-rc.3");
+  const unknownBin = writeFakeCli(unknownHome, "latest");
   const blocked = await startSupervisor(unknownHome, { bin: unknownBin });
   const blockedCookie = await bootstrap(blocked.origin, blocked.bootstrapUrl);
   const blockedState = await api(blocked.origin, blockedCookie, "state");
   const blockedValue = blockedState.body.value as { dshVersion: string | null; reasons: string[] };
   assert.equal(blockedValue.dshVersion, null);
-  assert.match(blockedValue.reasons.join(" "), /0\.1\.5-rc\.1, 0\.1\.5-rc\.2|supported version/i);
+  assert.match(blockedValue.reasons.join(" "), /could not be bound|exact installed version/i);
 
   const parsed = parseSupervisorArgs([
     "--home",

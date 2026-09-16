@@ -1,7 +1,8 @@
 import type { PackageSource } from "./types";
 
 export const DSH_RUNTIME_PACKAGE = "@deepseek-ai/dsh";
-export const DSH_DEFAULT_VERSION = "0.1.5-rc.2";
+/** Official npm dist-tag used for first install. Resolved to an exact version, then pinned. */
+export const DSH_DEFAULT_CHANNEL = "latest";
 
 /** Where the active CLI binary came from. Independent of npm dist-tags. */
 export type RuntimeOrigin = "store" | "managed" | "system" | "snapshot";
@@ -54,18 +55,8 @@ export function isExactRuntimeVersion(version: string): boolean {
   return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z.-]+)?$/.test(version);
 }
 
-const CHANNEL_TAGS = ["latest", "next"] as const;
-
-/** Newest `latest` or `next` tag. Ignores stale `latest` when `next` is newer. */
+/** Exact version currently published as the official `latest` dist-tag. */
 export function preferredTaggedVersion(catalog: RuntimeCatalog): string | undefined {
-  const tagged = new Set(
-    CHANNEL_TAGS.map((tag) => catalog.distTags[tag]).filter(isExactRuntimeVersion),
-  );
-  if (tagged.size === 0) return undefined;
-  for (const row of catalog.versions) {
-    if (tagged.has(row.version)) return row.version;
-  }
-  const latest = catalog.distTags.latest;
-  if (latest && tagged.has(latest)) return latest;
-  return CHANNEL_TAGS.map((tag) => catalog.distTags[tag]).find((version) => tagged.has(version));
+  const latest = catalog.distTags[DSH_DEFAULT_CHANNEL];
+  return latest && isExactRuntimeVersion(latest) ? latest : undefined;
 }

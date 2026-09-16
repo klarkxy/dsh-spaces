@@ -103,7 +103,7 @@ function requireFlag(flags: Record<string, string>, name: string, message: strin
 async function runVerify(lock: HomeOperationLock, flags: Record<string, string>): Promise<number> {
   const profile = requireFlag(flags, "profile", "verify requires --profile.");
   const cli = bindCli(requireFlag(flags, "cli", "verify requires an absolute --cli path."), true);
-  if (!cli.allowedVerify) throw fail(EXIT.runtime, "RUNTIME_REFUSED", "Only DSH CLI 0.1.5-rc.1 and 0.1.5-rc.2 can verify.");
+  if (!cli.allowedVerify) throw fail(EXIT.runtime, "RUNTIME_REFUSED", "The --cli path is not an exact DSH CLI version.");
   assertProfileName(profile);
   try {
     const dump = await lock.run("verify", async () => {

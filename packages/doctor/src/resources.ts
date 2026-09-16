@@ -2,12 +2,11 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { HOME_CONTROL_DIR_NAME } from "../../../src/adapters/node/home-controller.ts";
 import { atomicWrite } from "../../../src/main/atomic.ts";
-import { isCompatibleDshCliVersion, COMPATIBLE_DSH_CLI_VERSIONS } from "../../../src/adapters/node/spaces-control.ts";
+import { isCompatibleDshCliVersion } from "../../../src/adapters/node/spaces-control.ts";
 import {
   CONTROL_TOOLCHAIN_FILE,
   EXIT,
   Fail,
-  VERIFY_CLI_VERSIONS,
   fail,
   inspectNamedDir,
   inspectNamedFile,
@@ -50,7 +49,7 @@ export function bindCli(cli: string, required: boolean): BoundCli {
     return {
       bin: realpathSync(bin),
       version: pkg.version,
-      allowedVerify: VERIFY_CLI_VERSIONS.has(pkg.version),
+      allowedVerify: isCompatibleDshCliVersion(pkg.version),
       allowedWrite: isCompatibleDshCliVersion(pkg.version),
     };
   } catch (error) {
@@ -179,7 +178,7 @@ export function requireWriteResources(resources: ResolvedResources, command: str
     throw fail(
       EXIT.runtime,
       "RUNTIME_REFUSED",
-      `Only validated DSH CLI versions (${COMPATIBLE_DSH_CLI_VERSIONS.join(", ")}) can recover or roll back.`,
+      "The --cli path is not an exact DSH CLI version.",
       { command, version: resources.cli.version },
     );
   }

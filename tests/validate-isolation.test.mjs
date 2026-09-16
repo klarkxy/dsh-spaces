@@ -55,3 +55,57 @@ test("isolation gate exchanges one launch token and reuses its session cookie", 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("isolation gate falls back from session.list to session/list after HTTP 404", async () => {
+  const secret = randomUUID();
+  const cookie = `dsh-auth-fixture=${randomUUID()}`;
+  const server = createServer(async (req, res) => {
+    if (req.method === "GET" && req.url === `/?token=${secret}`) {
+      res.writeHead(303, { location: "/", "set-cookie": `${cookie}; HttpOnly; SameSite=Strict` });
+      res.end();
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/session.list") {
+      for await (const _chunk of req) {
+        // Drain the request before the typed-transport 404.
+      }
+      res.writeHead(404);
+      res.end("not found");
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/session/list") {
+      if (req.headers.cookie !== cookie) {
+        res.writeHead(401);
+        res.end("unauthorized");
+        return;
+      }
+      for await (const _chunk of req) {
+        // Drain the request before replying, like the real local API.
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ result: { ok: true, value: { items: [] } } }));
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const dir = mkdtempSync(join(tmpdir(), "dsh-isolation-list-"));
+  const log = join(dir, "web.log");
+  writeFileSync(log, `dsh web: http://127.0.0.1:${address.port}/?token=${secret}\n`);
+  try {
+    const authenticated = await waitForApi(address.port, log, 2_000);
+    assert.equal(authenticated, cookie);
+    assert.deepEqual(await rpc(address.port, "session.list", {}, authenticated), { items: [] });
+  } finally {
+    await new Promise((resolveClose, rejectClose) => {
+      server.close((error) => error ? rejectClose(error) : resolveClose());
+    });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

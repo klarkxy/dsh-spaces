@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { DSH_CLI_SPEC, dshBinCandidates, findDshBin, resetDshBinCache, setManagedCliPrefix } from "../src/main/dsh-cli.ts";
-import { DSH_DEFAULT_VERSION } from "../src/shared/runtime.ts";
+import { DSH_DEFAULT_CHANNEL } from "../src/shared/runtime.ts";
 
 const temps: string[] = [];
 
@@ -29,9 +29,9 @@ afterEach(() => {
   }
 });
 
-test("managed CLI install pins the current default DSH version", () => {
-  assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_VERSION}`);
-  assert.equal(DSH_DEFAULT_VERSION, "0.1.5-rc.2");
+test("managed CLI install follows the official latest dist-tag", () => {
+  assert.equal(DSH_DEFAULT_CHANNEL, "latest");
+  assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_CHANNEL}`);
 });
 
 test("candidates prefer the managed prefix over a global npm root", () => {

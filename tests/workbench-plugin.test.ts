@@ -740,10 +740,10 @@ test("snapshotRoot inside replaced Home entries is rejected", () => {
   assert.equal(validateSnapshotRoot(home, outside), outside);
 });
 
-test("initialize rejects unknown CLI before manager allocation or startup", async () => {
+test("initialize rejects a CLI that cannot be bound before manager allocation or startup", async () => {
   const home = tempDir("dsh-init-unknown-");
   writeProfile(home, "web");
-  const bin = writeCli(home, "0.1.5-rc.3");
+  const bin = writeCli(home, "latest");
   let attempts = 0;
   const runtime = new WorkbenchHostRuntime({
     ...identityInput(home, "web", { argv: [process.execPath, bin, "--profile", "web"] }),

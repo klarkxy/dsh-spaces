@@ -4,7 +4,7 @@ DSH-native Spaces workbench, with a dedicated manager and an independent local s
 
 Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment.
 
-当前为本地预构建包，尚未发布到 npm。支持 CLI **0.1.5-rc.1 / 0.1.5-rc.2**，默认使用最新发布的 rc.2；SDK peer 为 rc.2。CLI 和 SDK 的版本含义不同。
+当前为本地预构建包，尚未发布到 npm。默认跟随官方 CLI **`latest`** 并钉住所选精确版本。本仓库 SDK peer 为 `0.1.5-rc.2`，那不是 CLI 白名单。
 
 ## Install from this checkout
 
@@ -14,7 +14,7 @@ pnpm run pack:plugin
 
 Run the printed `dsh plugin --profile web add <tarball> --config.auto-install-peers=true` command, then `dsh web`. In the ordinary DSH sidebar choose **工作台 / Workbench**, then **初始化 Spaces / Initialize Spaces**.
 
-No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2` in place of `dsh`. Package output defaults to `%TEMP%/dsh-spaces-pack`, outside package trees. Windows local tarball paths must not contain spaces; the pack script checks this and never requires a pre-existing `$artifacts` variable.
+No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@latest` in place of `dsh`. Package output defaults to `%TEMP%/dsh-spaces-pack`, outside package trees. Windows local tarball paths must not contain spaces; the pack script checks this and never requires a pre-existing `$artifacts` variable.
 
 初始化使用当前 DSH Home。普通页面保持原有界面，只有用户点击初始化后才创建管理空间和启动监督程序；失败会显示原因，该次请求结束，下次打开不会自动补装或续接。再次进入时点击“进入工作台”。只需在一个已有 Web profile 安装完整入口，工作台新建的空间自动使用轻量 view-bridge。
 

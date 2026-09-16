@@ -7,7 +7,6 @@ import { afterEach, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   COMPATIBLE_DSH_CLI_VERSION,
-  COMPATIBLE_DSH_CLI_VERSIONS,
   isCompatibleDshCliVersion,
   NodeSpacesControl,
   SpacesPublicError,
@@ -48,21 +47,18 @@ function writeWeb(home: string): void {
   writeFileSync(join(dir, "cordis.patch.yml"), "[]\n");
 }
 
-test("formal compatible CLI array is rc.1 and rc.2; unknown versions stay out", () => {
+test("exact CLI versions can bind; tags and junk stay out", () => {
   assert.equal(COMPATIBLE_DSH_CLI_VERSION, "0.1.5-rc.1");
-  assert.deepEqual([...COMPATIBLE_DSH_CLI_VERSIONS], ["0.1.5-rc.1", "0.1.5-rc.2"]);
   assert.equal(isCompatibleDshCliVersion("0.1.5-rc.1"), true);
   assert.equal(isCompatibleDshCliVersion("0.1.5-rc.2"), true);
-  assert.equal(isCompatibleDshCliVersion("0.1.5-rc.3"), false);
-  assert.equal(isCompatibleDshCliVersion("0.1.1-rc.2"), false);
+  assert.equal(isCompatibleDshCliVersion("0.1.5-rc.3"), true);
+  assert.equal(isCompatibleDshCliVersion("0.1.1-rc.2"), true);
   assert.equal(isCompatibleDshCliVersion("latest"), false);
   assert.equal(isCompatibleDshCliVersion("next"), false);
+  assert.equal(isCompatibleDshCliVersion("1.0.0; rm -rf /"), false);
   const source = readFileSync(SOURCE, "utf8");
-  assert.match(source, /export const COMPATIBLE_DSH_CLI_VERSION = "0\.1\.5-rc\.1";/);
-  assert.match(
-    source,
-    /export const COMPATIBLE_DSH_CLI_VERSIONS = \[COMPATIBLE_DSH_CLI_VERSION, "0\.1\.5-rc\.2"\] as const;/,
-  );
+  assert.match(source, /return isExactRuntimeVersion\(version\);/);
+  assert.doesNotMatch(source, /COMPATIBLE_DSH_CLI_VERSIONS/);
 });
 
 function control(home: string, bin: string, extra: Partial<ConstructorParameters<typeof NodeSpacesControl>[0]> = {}) {
@@ -83,7 +79,7 @@ function control(home: string, bin: string, extra: Partial<ConstructorParameters
   });
 }
 
-test("src gate admits rc.2 writes while unknown versions stay unknown-readonly", async () => {
+test("src gate admits exact CLI writes; tags stay unbound and read-only", async () => {
   const rc2Home = tempDir("dsh-cli-gate-rc2-");
   writeWeb(rc2Home);
   const rc2 = writeCli(rc2Home, "0.1.5-rc.2");
@@ -120,32 +116,64 @@ test("src gate admits rc.2 writes while unknown versions stay unknown-readonly",
   const created = await admitted.create({ name: "notes" });
   assert.equal(created.id, "notes");
 
-  const unknownHome = tempDir("dsh-cli-gate-unknown-");
-  writeWeb(unknownHome);
-  const unknown = control(unknownHome, writeCli(unknownHome, "0.1.5-rc.3"));
-  const blocked = await unknown.overview();
+  const laterHome = tempDir("dsh-cli-gate-later-");
+  writeWeb(laterHome);
+  const later = control(laterHome, writeCli(laterHome, "0.1.5-rc.3"), {
+    runCli: async (args) => {
+      const name = args[args.indexOf("--profile") + 1];
+      if (args.includes("--from-default-profile")) {
+        const dir = join(laterHome, "profiles", name);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+          join(dir, "package.json"),
+          `${JSON.stringify({
+            name: `dsh-profile-${name}`,
+            dsh: { profile: { bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"] } },
+          })}\n`,
+        );
+        writeFileSync(
+          join(dir, "cordis.patch.yml"),
+          `- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('hub/${name}/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/${name}/storages')\n`,
+        );
+      }
+      return {
+        code: 0,
+        stdout: `- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('hub/${name}/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/${name}/storages')\n`,
+        stderr: "",
+      };
+    },
+  });
+  const laterOverview = await later.overview();
+  assert.equal(laterOverview.capabilities.mode, "verified-full");
+  assert.equal(laterOverview.capabilities.canCreate, true);
+  assert.equal(laterOverview.capabilities.dshVersion, "0.1.5-rc.3");
+
+  const tagHome = tempDir("dsh-cli-gate-tag-");
+  writeWeb(tagHome);
+  const tagged = control(tagHome, writeCli(tagHome, "latest"));
+  const blocked = await tagged.overview();
   assert.equal(blocked.capabilities.mode, "unknown-readonly");
   assert.equal(blocked.capabilities.canCreate, false);
   assert.equal(blocked.capabilities.canVerify, false);
-  assert.equal(blocked.capabilities.dshVersion, "0.1.5-rc.3");
-  await assert.rejects(() => unknown.create({ name: "notes" }), (error: unknown) => {
+  assert.equal(blocked.capabilities.dshVersion, null);
+  await assert.rejects(() => tagged.create({ name: "notes" }), (error: unknown) => {
     assert.ok(error instanceof SpacesPublicError);
     assert.equal(error.code, "spaces/read-only");
     return true;
   });
 });
 
-const OFFICIAL_RC2_BIN = process.env.DSH_TEST_RC2_BIN;
+const OFFICIAL_CLI_BIN = process.env.DSH_TEST_CLI_BIN || process.env.DSH_TEST_RC2_BIN;
 
-test("real official rc.2 refuses cloning shipped web onto itself and accepts dump-config seed", {
-  skip: !OFFICIAL_RC2_BIN && "Set DSH_TEST_RC2_BIN to run the optional official CLI integration test",
+test("real official CLI refuses cloning shipped web onto itself and accepts dump-config seed", {
+  skip: !OFFICIAL_CLI_BIN && "Set DSH_TEST_CLI_BIN to run the optional official CLI integration test",
 }, () => {
-  assert.ok(OFFICIAL_RC2_BIN);
-  assert.equal(existsSync(OFFICIAL_RC2_BIN), true);
+  assert.ok(OFFICIAL_CLI_BIN);
+  assert.equal(existsSync(OFFICIAL_CLI_BIN), true);
   const wrongHome = tempDir("dsh-cli-wrong-web-");
   const wrong = spawnSync(
     process.execPath,
-    [OFFICIAL_RC2_BIN, "--profile", "web", "--from-default-profile", "web", "--dump-config"],
+    [OFFICIAL_CLI_BIN, "--profile", "web", "--from-default-profile", "web", "--dump-config"],
     { env: { ...process.env, DSH_HOME: wrongHome }, encoding: "utf8", windowsHide: true, timeout: 60_000 },
   );
   assert.notEqual(wrong.status, 0);
@@ -157,7 +185,7 @@ test("real official rc.2 refuses cloning shipped web onto itself and accepts dum
   const okHome = tempDir("dsh-cli-web-seed-");
   const ok = spawnSync(
     process.execPath,
-    [OFFICIAL_RC2_BIN, "--profile", "web", "--dump-config"],
+    [OFFICIAL_CLI_BIN, "--profile", "web", "--dump-config"],
     { env: { ...process.env, DSH_HOME: okHome }, encoding: "utf8", windowsHide: true, timeout: 60_000 },
   );
   assert.equal(ok.status, 0, `${ok.stderr}\n${ok.stdout}`);
