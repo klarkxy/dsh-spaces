@@ -212,14 +212,57 @@ async function waitForPort(port, timeoutMs) {
   throw new Error(`port ${port} not ready within ${timeoutMs}ms`);
 }
 
-async function waitForApi(port, timeoutMs) {
+export function announcedUrl(logPath, port) {
+  const text = readFileSync(logPath, "utf8").slice(-16_384);
+  const announced = text.match(/dsh web:\s*(https?:\/\/[^\s\x1b]+)(?=[\s\x1b])/)?.[1];
+  if (!announced) return undefined;
+  const endpoint = new URL(announced);
+  if (
+    endpoint.protocol !== "http:" ||
+    endpoint.hostname !== HOST ||
+    Number(endpoint.port) !== port ||
+    endpoint.username ||
+    endpoint.password ||
+    endpoint.pathname !== "/"
+  ) {
+    throw new Error(`profile announced an unexpected endpoint instead of localhost port ${port}`);
+  }
+  return endpoint.href;
+}
+
+export async function sessionCookie(url) {
+  const endpoint = new URL(url);
+  if (!endpoint.searchParams.has("token")) return undefined;
+  const response = await fetch(endpoint, { redirect: "manual" });
+  const setCookies = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : [response.headers.get("set-cookie")].filter(Boolean);
+  await response.body?.cancel();
+  const cookie = setCookies
+    .map((value) => value.split(";", 1)[0])
+    .find((value) => /^dsh-auth-[^=]+=.+$/.test(value));
+  if (response.status !== 303 || response.headers.get("location") !== "/" || !cookie) {
+    throw new Error("DSH browser authentication failed");
+  }
+  return cookie;
+}
+
+export async function waitForApi(port, logPath, timeoutMs) {
   await waitForPort(port, timeoutMs);
   const start = Date.now();
+  let url;
+  while (Date.now() - start < timeoutMs) {
+    url = announcedUrl(logPath, port);
+    if (url) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!url) throw new Error(`profile on port ${port} did not announce its API endpoint`);
+  const cookie = await sessionCookie(url);
   let last = "no attempt";
   while (Date.now() - start < timeoutMs) {
     try {
-      await rpc(port, "session.list", {});
-      return;
+      await rpc(port, "session.list", {}, cookie);
+      return cookie;
     } catch (err) {
       last = err.message;
       await new Promise((r) => setTimeout(r, 400));
@@ -228,7 +271,7 @@ async function waitForApi(port, timeoutMs) {
   throw new Error(`api on port ${port} not ready within ${timeoutMs}ms (${last})`);
 }
 
-async function rpc(port, method, payload = {}) {
+export async function rpc(port, method, payload = {}, cookie) {
   const origin = `http://${HOST}:${port}`;
   const rpcId = randomUUID();
   const res = await fetch(`${origin}/api/${method}`, {
@@ -236,6 +279,7 @@ async function rpc(port, method, payload = {}) {
     headers: {
       "content-type": "application/json",
       origin,
+      ...(cookie ? { cookie } : {}),
     },
     body: JSON.stringify({
       type: "client-request",
@@ -358,6 +402,7 @@ async function main() {
   mkdirSync(logDir, { recursive: true });
 
   const handles = [];
+  const cookies = new Map();
   const created = [];
   let failed = false;
 
@@ -380,14 +425,16 @@ async function main() {
       info(`started ${profile.name} pid=${handle.pid} port=${profile.port}`);
     }
 
-    for (const profile of PROFILES) {
-      await waitForApi(profile.port, READY_TIMEOUT_MS);
+    for (let i = 0; i < PROFILES.length; i += 1) {
+      const profile = PROFILES[i];
+      const cookie = await waitForApi(profile.port, handles[i].logPath, READY_TIMEOUT_MS);
+      cookies.set(profile.name, cookie);
       info(`${profile.name} API ready`);
     }
 
     for (const profile of PROFILES) {
       const cwd = workspaceDir(args.home, profile.name);
-      const value = await rpc(profile.port, "session.create", { cwd });
+      const value = await rpc(profile.port, "session.create", { cwd }, cookies.get(profile.name));
       created.push({ ...profile, sessionId: value.sessionId, cwd });
       info(`${profile.name} created ${value.sessionId}`);
     }
@@ -397,7 +444,7 @@ async function main() {
 
     const lists = {};
     for (const profile of PROFILES) {
-      const value = await rpc(profile.port, "session.list", {});
+      const value = await rpc(profile.port, "session.list", {}, cookies.get(profile.name));
       lists[profile.name] = value.items ?? [];
     }
 
@@ -564,7 +611,9 @@ async function main() {
   console.log("\nISOLATION GATE: PASS");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
