@@ -271,32 +271,51 @@ export async function waitForApi(port, logPath, timeoutMs) {
   throw new Error(`api on port ${port} not ready within ${timeoutMs}ms (${last})`);
 }
 
+function rpcAttempts(method, payload) {
+  const attempts = [{ method, payload }];
+  if (method.includes(".") && !method.includes("/")) {
+    attempts.push({
+      method: method.replaceAll(".", "/"),
+      payload: { args: { _request: payload && Object.keys(payload).length ? payload : {} } },
+    });
+  }
+  return attempts;
+}
+
 export async function rpc(port, method, payload = {}, cookie) {
   const origin = `http://${HOST}:${port}`;
-  const rpcId = randomUUID();
-  const res = await fetch(`${origin}/api/${method}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      origin,
-      ...(cookie ? { cookie } : {}),
-    },
-    body: JSON.stringify({
-      type: "client-request",
-      rpcId,
-      method,
-      payload,
-    }),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`${method} HTTP ${res.status}: ${text.slice(0, 400)}`);
+  let last = `${method} HTTP 0`;
+  for (const attempt of rpcAttempts(method, payload)) {
+    const rpcId = randomUUID();
+    const res = await fetch(`${origin}/api/${attempt.method}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin,
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify({
+        type: "client-request",
+        rpcId,
+        method: attempt.method,
+        payload: attempt.payload,
+      }),
+    });
+    const text = await res.text();
+    if (res.status === 404 && attempt.method === method && attempt.method.includes(".")) {
+      last = `${method} HTTP 404: ${text.slice(0, 400)}`;
+      continue;
+    }
+    if (!res.ok) {
+      throw new Error(`${method} HTTP ${res.status}: ${text.slice(0, 400)}`);
+    }
+    const body = JSON.parse(text);
+    if (!body?.result?.ok) {
+      throw new Error(`${method} RPC error: ${text.slice(0, 800)}`);
+    }
+    return body.result.value;
   }
-  const body = JSON.parse(text);
-  if (!body?.result?.ok) {
-    throw new Error(`${method} RPC error: ${text.slice(0, 800)}`);
-  }
-  return body.result.value;
+  throw new Error(last);
 }
 
 async function stopProcess(handle) {

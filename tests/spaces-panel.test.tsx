@@ -529,7 +529,7 @@ test("SSR: restricted capabilities render the reasons and disable creation", () 
           canCreate: false,
           canVerify: false,
           reasons: [
-            "The bound DSH CLI is not a known compatible version.",
+            "The bound DSH CLI is not an exact installed version.",
             "Spaces are read-only until the host identity and runtime are confirmed.",
           ],
         }),
@@ -539,7 +539,7 @@ test("SSR: restricted capabilities render the reasons and disable creation", () 
       },
     }),
   );
-  assert.ok(html.includes("The bound DSH CLI is not a known compatible version."));
+  assert.ok(html.includes("The bound DSH CLI is not an exact installed version."));
   assert.ok(html.includes("Spaces are read-only until the host identity and runtime are confirmed."));
   assert.ok(html.includes("Unknown runtime — read-only"));
   // Create form disabled, and no verify button for a non-verifiable mode.
@@ -668,7 +668,7 @@ test("SSR zh: buttons, empty, host lock, capability limit, diagnostics, names st
           mode: "unknown-readonly",
           canCreate: false,
           canVerify: false,
-          reasons: ["The bound DSH CLI is not a known compatible version."],
+          reasons: ["The bound DSH CLI is not an exact installed version."],
         }),
         spaces: [hostSpace, alpha],
         error: "The current host space cannot be modified this way.",
@@ -693,7 +693,7 @@ test("SSR zh: buttons, empty, host lock, capability limit, diagnostics, names st
   assert.ok(html.includes(zh.createDenied));
   assert.ok(html.includes(zh.hostDenied));
   assert.ok(html.includes(zh.modeReadonly));
-  assert.ok(html.includes("已绑定的 DSH CLI 不是已知兼容版本。"));
+  assert.ok(html.includes("已绑定的 DSH CLI 不是精确安装版本。"));
   assert.ok(html.includes("没有当前组合配置证据时，隔离不会标记为已验证。"));
   assert.ok(!html.includes(zh.verify));
   assert.ok(html.includes(">Host Space</h3>"));

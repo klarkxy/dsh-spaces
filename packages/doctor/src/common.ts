@@ -1,9 +1,7 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMPATIBLE_DSH_CLI_VERSIONS } from "../../../src/adapters/node/spaces-control.ts";
 
-export const VERIFY_CLI_VERSIONS = new Set<string>(COMPATIBLE_DSH_CLI_VERSIONS);
 export const STDOUT_LIMIT = 256 * 1024;
 export const MUTATION_JOURNAL = ".dsh-spaces-mutation.json";
 export const UPGRADE_STAGE_DIR = ".dsh-spaces-upgrade";

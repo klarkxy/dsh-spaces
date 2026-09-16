@@ -51,11 +51,12 @@ import {
   type HomeLockInspect,
 } from "./home-operation-lock";
 
+/** Fixture exact version for tests. Not a product allowlist. */
 export const COMPATIBLE_DSH_CLI_VERSION = "0.1.5-rc.1";
-export const COMPATIBLE_DSH_CLI_VERSIONS = [COMPATIBLE_DSH_CLI_VERSION, "0.1.5-rc.2"] as const;
 
+/** Any exact npm version can bind. Tags, ranges, and junk stay out. */
 export function isCompatibleDshCliVersion(version: string): boolean {
-  return (COMPATIBLE_DSH_CLI_VERSIONS as readonly string[]).includes(version);
+  return isExactRuntimeVersion(version);
 }
 
 export const DSH_CLI_PACKAGE = "@deepseek-ai/dsh";
@@ -86,7 +87,7 @@ export const DIAGNOSTIC = {
   },
   runtimeIncompatible: {
     code: "RUNTIME_INCOMPATIBLE",
-    message: "The bound DSH CLI is not a known compatible version.",
+    message: "The bound DSH CLI is not an exact installed version.",
   },
   loaderMissing: {
     code: "LOADER_MISSING",

@@ -92,7 +92,7 @@ const en = {
   "diag.hostIdentityUnconfirmed":
     "Host identity could not be confirmed from DSH home, loader root, and invocation profile.",
   "diag.runtimeUnbound": "The bound DSH CLI could not be validated from the current process.",
-  "diag.runtimeIncompatible": "The bound DSH CLI is not a known compatible version.",
+  "diag.runtimeIncompatible": "The bound DSH CLI is not an exact installed version.",
   "diag.loaderMissing": "Required loader service is not available.",
   "diag.liveConfigUnverified": "Current host configuration roots could not be verified.",
   "diag.recoveryNeeded": "A previous space mutation did not finish.",
@@ -175,7 +175,7 @@ const zh: Record<SpacesMessageKey, string> = {
   "error.operationFailed": "无法完成该空间操作。",
   "diag.hostIdentityUnconfirmed": "无法从 DSH Home、加载器根目录和调用配置确认宿主身份。",
   "diag.runtimeUnbound": "无法从当前进程校验已绑定的 DSH CLI。",
-  "diag.runtimeIncompatible": "已绑定的 DSH CLI 不是已知兼容版本。",
+  "diag.runtimeIncompatible": "已绑定的 DSH CLI 不是精确安装版本。",
   "diag.loaderMissing": "所需的加载器服务不可用。",
   "diag.liveConfigUnverified": "无法验证当前宿主配置根目录。",
   "diag.recoveryNeeded": "上一次空间变更未完成。",

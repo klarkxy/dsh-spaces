@@ -4,13 +4,13 @@
 
 初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。
 
-本轮默认使用最新发布的 **0.1.5-rc.2**，同时兼容 rc.1。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add <完整包路径> --config.auto-install-peers=true` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 web` 启动。
+默认使用官方 **`latest`**。安装时解析成精确版本并钉住。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@latest plugin --profile web add <完整包路径> --config.auto-install-peers=true` 安装，再用 `pnpm dlx @deepseek-ai/dsh@latest web` 启动。
 
 标准安装已在独立测试目录完成 rc.1 / rc.2 真实浏览器验收。`@dsh-spaces/plugin` **尚未发布到 npm**；当前发布账号未登录，因此现在使用本地预构建包安装。详细证据见 [验收记录](../tasks/plugin-standard-install.md)。
 
 The distribution unit is the prebuilt **plugin tarball** (supervisor + view-bridge payload inside). `@dsh-spaces/supervisor` stays private.
 
-Official CLI: **latest = `0.1.5-rc.1`**, **next = `0.1.5-rc.2`**. Both are in scope. Changing the allowed-version list is not an install.
+Official CLI channel: **`latest`**. Spaces pins the resolved exact version. An untested version number is not by itself read-only.
 
 ## User steps (pnpm)
 
@@ -18,8 +18,8 @@ Official CLI: **latest = `0.1.5-rc.1`**, **next = `0.1.5-rc.2`**. Both are in sc
 
 ```powershell
 pnpm run pack:plugin
-pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.3.0.tgz" --config.auto-install-peers=true
-pnpm dlx @deepseek-ai/dsh@0.1.5-rc.2 web
+pnpm dlx @deepseek-ai/dsh@latest plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.3.0.tgz" --config.auto-install-peers=true
+pnpm dlx @deepseek-ai/dsh@latest web
 ```
 
 In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click **初始化 Spaces / Initialize Spaces**. That is an explicit `guide.initialize()` with no path arguments. The independent supervisor creates `spaces-hub` and hands off. This is **not** a misinstall. If initialization fails, that request ends and the page reports the failure; the next visit does not silently finish it.

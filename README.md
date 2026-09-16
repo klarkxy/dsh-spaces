@@ -4,7 +4,7 @@
 
 > **This development branch is still under construction and acceptance. It is not a release.** Desktop isolation, safety, and license below still apply. The workbench is documented in [docs/workbench.md](docs/workbench.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md).
 
-Plugin installation: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then open **工作台 → 初始化 Spaces** in ordinary DSH Web. Supported CLI: **0.1.5-rc.1 and 0.1.5-rc.2**. The local plugin is not yet published to npm.
+Plugin installation: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then open **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI channel: official **`latest`**, pinned to the resolved exact version. The local plugin is not yet published to npm.
 
 A desktop shell and a DSH-native workbench, sharing isolation, lifecycle management, and error reporting. The desktop rail embeds the official DSH Web UI. The workbench supervisor binds `127.0.0.1`, owns Home run rights, and embeds workspaces in iframes behind a 72px space rail. Community / open source. Desktop targets Windows / macOS / Linux.
 
@@ -53,8 +53,8 @@ App updates and DSH runtime upgrades remain separate operations. Explicit runtim
 
 - Node 24 for contributing; the app also installs a managed Node, pnpm, and DSH CLI on first launch
 - Package source is selectable: China (npmmirror) or official (npmjs / nodejs.org)
-- Keep official base plugins matched to the selected CLI rather than independently following plugin dist-tags. First install uses `@deepseek-ai/dsh@0.1.5-rc.2`.
-- Workbench write gate is CLI **`0.1.5-rc.1` and `0.1.5-rc.2`**. Plugin peers on SDK `0.1.5-rc.2`; that is not CLI 2. Isolated candidate builds are in-repo verification, not a user bypass.
+- Keep official base plugins matched to the selected CLI rather than independently following plugin dist-tags. First install uses `@deepseek-ai/dsh@latest` and pins the resolved exact version.
+- Workbench write gate accepts any exact installed DSH CLI version. Tags such as `latest` / `next` are not a bound version. Plugin peers on SDK `0.1.5-rc.2` for this repo's build; that is not a CLI allowlist. Isolated candidate builds are in-repo verification, not a user bypass.
 
 ## Develop
 
@@ -122,7 +122,7 @@ Spaces 不添加自己的遥测；上游 DSH 和插件遵循各自网络设置�
 
 产品路径已按 [docs/let-it-crash.md](docs/let-it-crash.md) 报告失败、不恢复。未在本机跑完的 CLI/浏览器项见 [tasks/q-coverage.md](tasks/q-coverage.md)。
 
-本分支已在隔离 Home 验证过基础 iframe / 稳定入口、部分主题、空间栏操作、桌面与 Web 运行权、插件安装。最终运行时升级、CLI `0.1.5-rc.2` 之外的兼容、管理插件自升级和新视频仍在验收，不能当成已经完成。历史上曾作为产品能力验收的整 Home 快照恢复、kill 故障恢复、配置恢复，自 2026-09-15 起不再是施工与发布门槛。
+本分支已在隔离 Home 验证过基础 iframe / 稳定入口、部分主题、空间栏操作、桌面与 Web 运行权、插件安装。默认跟随官方 `latest` 并钉住所选精确版本；未知版本号本身不再导致只读。最终运行时升级、管理插件自升级和新视频仍在验收，不能当成已经完成。历史上曾作为产品能力验收的整 Home 快照恢复、kill 故障恢复、配置恢复，自 2026-09-15 起不再是施工与发布门槛。
 
 ## 开发
 

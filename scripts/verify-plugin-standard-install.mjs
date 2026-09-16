@@ -11,7 +11,7 @@
  *   node scripts/verify-plugin-standard-install.mjs --preflight
  *   node scripts/verify-plugin-standard-install.mjs
  *
- * Env: DSH_TEST_BIN, DSH_TEST_RC2_BIN, DSH_TEST_OUTPUT, DSH_TEST_PLAYWRIGHT,
+ * Env: DSH_TEST_BIN, DSH_TEST_CLI_BIN, DSH_TEST_OUTPUT, DSH_TEST_PLAYWRIGHT,
  * DSH_TEST_PNPM_CJS, DSH_PACK_DEST.
  *
  * --preflight is syntax/static/safe mocks only: no DSH web, no supervisor,
@@ -63,7 +63,7 @@ const PACK_SCRIPT = join(REPO, "scripts", "pack-spaces-plugin.mjs");
 const PLUGIN_DIR = join(REPO, "packages", "plugin");
 const CANONICAL_NAME = "@dsh-spaces/plugin";
 const WEB_PROFILE = "web";
-const ACCEPTED_CLI = new Set(["0.1.5-rc.1", "0.1.5-rc.2"]);
+const EXACT_CLI = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;
 const INIT_BUTTON = /^(初始化 Spaces|Initialize Spaces)$/;
 const ENTER_BUTTON = /^(进入工作台|Enter workbench)$/;
 const SIDEBAR_TAB = /^(工作台|Workbench)$/;
@@ -83,7 +83,7 @@ const report = {
   pageErrors: [],
   consoleErrors: [],
   rpcErrors: [],
-  cli: { latest: "0.1.5-rc.1", next: "0.1.5-rc.2" },
+  cli: { channel: "latest" },
 };
 
 function redact(value) {
@@ -132,7 +132,7 @@ function resolveDshBin(envName = "DSH_TEST_BIN") {
   const fromGlobal = globalRoot ? dshBinFromPackage(join(globalRoot, "@deepseek-ai", "dsh")) : null;
   if (fromGlobal) return fromGlobal;
   throw new Error(
-    "Official DSH CLI not found. Install the global package (@deepseek-ai/dsh@0.1.5-rc.1 latest or @0.1.5-rc.2 next) or set DSH_TEST_BIN to that package's lib/bin.js. This script does not guess a machine-local Temp path.",
+    "Official DSH CLI not found. Install the global package (@deepseek-ai/dsh@latest) or set DSH_TEST_BIN to that package's lib/bin.js. This script does not guess a machine-local Temp path.",
   );
 }
 
@@ -172,8 +172,8 @@ async function loadPlaywright() {
 
 function inspectCli(bin, label) {
   const version = cliVersion(bin);
-  if (!ACCEPTED_CLI.has(version)) {
-    throw new Error(`${label} is ${version}; accepted write/install CLIs are 0.1.5-rc.1 (latest) and 0.1.5-rc.2 (next)`);
+  if (!version || version === "latest" || version === "next" || !EXACT_CLI.test(version)) {
+    throw new Error(`${label} did not report an exact DSH CLI version (${version || "empty"})`);
   }
   return version;
 }
@@ -636,21 +636,8 @@ async function preflight() {
   } catch (error) {
     info(String(error.message));
   }
-  let rc2 = null;
-  try {
-    const bin = resolveDshBin("DSH_TEST_RC2_BIN");
-    if (bin) {
-      const version = inspectCli(bin, "DSH_TEST_RC2_BIN");
-      rc2 = { bin, version };
-      pass(`resolved next CLI ${version} from DSH_TEST_RC2_BIN`);
-    }
-  } catch (error) {
-    info(String(error.message));
-  }
-
   report.status = "preflight";
   report.cli.resolved = cli;
-  report.cli.rc2 = rc2;
   report.scope =
     "static/mocks only: manifests, nested-tgz detector, pack dry-run contents, Home/path guards. Did not boot DSH web, supervisor, or Playwright.";
   pass("serial run contract: Playwright clicks Initialize Spaces with no path args; rail is asserted on the manager iframe; shutdown uses this Home only");
@@ -674,7 +661,7 @@ async function main() {
   const bin = resolveDshBin();
   const version = inspectCli(bin, "selected DSH CLI");
   report.cli.resolved = { bin, version };
-  pass(`using official CLI ${version} (latest=0.1.5-rc.1, next=0.1.5-rc.2)`);
+  pass(`using official CLI ${version} (channel=latest)`);
 
   const packDest = join(tmpdir(), "dsh-spaces-standard-install-pack");
   assertNoSpaces(packDest, "staged pack dest");

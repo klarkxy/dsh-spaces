@@ -100,10 +100,10 @@ function control(home: string, extra: Partial<ConstructorParameters<typeof NodeS
   });
 }
 
-test("unknown CLI version is unknown-readonly and cannot mutate", async () => {
+test("a CLI that cannot be bound stays unknown-readonly and cannot mutate", async () => {
   const home = tempDir("dsh-spaces-host-ver-");
   writeWeb(home);
-  const bin = writeCli(home, "0.0.9");
+  const bin = writeCli(home, "latest");
   const spaces = control(home, { argv: [process.execPath, bin, "--profile", "web"] });
   const overview = await spaces.overview();
   assert.equal(overview.capabilities.mode, "unknown-readonly");
