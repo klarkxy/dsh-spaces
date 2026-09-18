@@ -13,4 +13,4 @@ It does not install plugins, start another Supervisor, or operate another Space.
 
 `openSpaceLlmBridge` freezes one catalog/policy snapshot for the process. `attachOfficialLlm` registers the official `llm` service and `llm-pi-ai` adapter; it does not replace that adapter. `installManagedRequestGuard` rejects hijacked managed routes at the `llm/stream` boundary.
 
-This package is not the user install unit yet. Later phases pack it with the standard plugin flow.
+This package is the Host-side install unit for a Space that has explicitly joined shared connections. Standard plugin add / desktop distribution pack it. Missing official `llm-pi-ai` is reported, not silently installed. Uninstalling or leaving shared access does not delete the Home catalog or credentials.

@@ -6,8 +6,10 @@ import type {
   SharedSelection,
   SpaceLlmPolicy,
 } from "../core/domain/llm-connections";
+import type { LlmShareManifest, LlmShareMapping } from "../core/domain/llm-share";
 
 export type { SharedAuth, SharedModelRef, SharedSelection, SpaceLlmPolicy };
+export type { LlmShareManifest, LlmShareMapping, LlmShareRequirement } from "../core/domain/llm-share";
 import type { WorkbenchJob, WorkbenchSpace } from "./workbench";
 
 export type RedactedConnection = Omit<SharedConnection, "auth"> & {
@@ -30,6 +32,9 @@ export const LLM_API_METHODS = [
   "updateSpaceDefault",
   "listLocalCandidates",
   "adoptLocal",
+  "previewShare",
+  "importedRequirements",
+  "mapImported",
   "applyPlan",
   "operationStatus",
 ] as const;
@@ -45,6 +50,7 @@ export const LLM_WRITE_API_METHODS = [
   "updateSpacePolicy",
   "updateSpaceDefault",
   "adoptLocal",
+  "mapImported",
   "applyPlan",
 ] as const;
 
@@ -155,6 +161,16 @@ export type LlmLocalCandidatesResult = {
   candidates: LlmLocalCandidate[];
 };
 
+export type LlmSharePreviewResult = LlmShareManifest & {
+  spaceId: string;
+};
+
+export type LlmImportedRequirementsResult = {
+  spaceId: string;
+  mappingRequired: boolean;
+  manifest: LlmShareManifest | null;
+};
+
 export type LlmApiRequest =
   | { method: "describe" }
   | { method: "previewChange"; draft: LlmConnectionDraft; expectedRevision: number }
@@ -176,6 +192,14 @@ export type LlmApiRequest =
       displayName: string;
       expectedRevision: number;
       copyCredential: true;
+    }
+  | { method: "previewShare"; spaceId: string }
+  | { method: "importedRequirements"; spaceId: string }
+  | {
+      method: "mapImported";
+      spaceId: string;
+      mappings: LlmShareMapping[];
+      expectedRevision: number;
     }
   | {
       method: "applyPlan";
@@ -217,6 +241,8 @@ export type LlmApiResult =
   | LlmSpacePolicyResult
   | LlmSpaceDefaultResult
   | LlmLocalCandidatesResult
+  | LlmSharePreviewResult
+  | LlmImportedRequirementsResult
   | LlmDiscoverResult
   | LlmTestResult
   | LlmOperationStatusResult

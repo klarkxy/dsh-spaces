@@ -214,6 +214,9 @@ export function SettingsDialog({
                     `start: ${result.start}`,
                     ...result.errors,
                     ...result.pendingManual.map((row) => `${row.packageName}: ${row.source}`),
+                    result.llm?.mappingRequired
+                      ? `llm mapping required: ${result.llm.requirements.map((row) => row.displayName).join(", ")}`
+                      : "",
                   ];
                   setShareNotice(lines.join("\n"));
                   await onMaintenanceChanged();

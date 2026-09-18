@@ -1,4 +1,5 @@
 import type { ConnectionId } from "../domain/llm-connections";
+import type { LlmShareManifest } from "../domain/llm-share";
 import type { LlmLocalCandidate, LlmSpaceObservation } from "../../shared/llm-api";
 
 export type LlmInstanceRecord = LlmSpaceObservation & {
@@ -56,4 +57,7 @@ export interface LlmSpaceSettingsPort {
   listLocal(spaceId: string): Promise<LlmLocalCandidate[]>;
   readLocalProvider(spaceId: string, routeId: string): Promise<Record<string, unknown>>;
   readCopyableSecret(spaceId: string, routeId: string): Promise<string | undefined>;
+  readImport?(spaceId: string): Promise<LlmShareManifest | null>;
+  writeImport?(spaceId: string, manifest: LlmShareManifest): Promise<void>;
+  clearImport?(spaceId: string): Promise<void>;
 }

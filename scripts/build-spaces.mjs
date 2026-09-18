@@ -54,6 +54,11 @@ if (!process.argv.includes('--core-only')) {
   await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
     entryPoints: ['packages/llm-bridge/src/index.ts'], outfile: 'packages/llm-bridge/lib/index.js' });
   await copyFile(at('LICENSE'), at('packages/llm-bridge/LICENSE'));
+  await mkdir(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true });
+  await copyFile(at('packages/llm-bridge/lib/index.js'), at('packages/plugin/lib/llm-bridge/lib/index.js'));
+  for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
+    await copyFile(at(`packages/llm-bridge/${file}`), at(`packages/plugin/lib/llm-bridge/${file}`));
+  }
 
   await buildNodeCli('packages/supervisor/src/index.ts', 'packages/supervisor/lib/index.js');
   await build({ ...common, platform: 'node', banner: { js: nodeRequire },

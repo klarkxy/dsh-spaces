@@ -26,6 +26,7 @@ import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "../../
 import { archiveAbsPath } from "../../main/plugin-library";
 import { pluginAdd } from "../../main/plugin-ops";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "../../main/process-manager";
+import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
 import { ProfileRegistry } from "../../main/profile-registry";
 import { describeRuntime, readRuntimeRef } from "../../main/runtime-descriptor";
 import { RuntimeStore } from "../../main/runtime-store";
@@ -176,6 +177,7 @@ export interface WorkbenchSupervisorOptions {
   supervisorAssetRoot?: string;
   pluginArtifact?: string;
   viewBridgeArtifact?: string;
+  llmBridgeArtifact?: string;
   snapshotWorkerFile?: string;
   snapshotRoot?: string;
   runtimeRoot?: string;
@@ -454,14 +456,27 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         expectKeys(body, ["spaceId"]);
         return this.backups(parseSpaceName(body.spaceId));
       case "llm":
-        return this.llmHost.dispatch(body);
+        return this.dispatchLlm(body);
       case "llmCredential":
         return this.llmHost.dispatchCredential(body);
     }
   }
 
   async llm(request: LlmApiRequest): Promise<LlmApiResult> {
-    return this.llmHost.dispatch(request) as Promise<LlmApiResult>;
+    return this.dispatchLlm(request) as Promise<LlmApiResult>;
+  }
+
+  private async dispatchLlm(body: unknown): Promise<unknown> {
+    const result = await this.llmHost.dispatch(body);
+    const request = body as { method?: string; spaceId?: string; shared?: { mode?: string } };
+    if (
+      typeof request.spaceId === "string" &&
+      (request.method === "mapImported" ||
+        (request.method === "updateSpacePolicy" && request.shared?.mode && request.shared.mode !== "none"))
+    ) {
+      await this.installLlmBridgeIfExplicit(request.spaceId);
+    }
+    return result;
   }
 
   entryPage(): string {
@@ -914,6 +929,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           ...(options.env as NodeJS.ProcessEnv | undefined),
           DSH_HOME: this.home,
           ...this.childViewEnv(profile),
+          ...writeSpaceLlmLaunchSnapshot(this.home, profile),
         };
         const spawnFn = injected.spawn ?? children.spawn;
         const port = Number(args[args.indexOf("--port") + 1]);
@@ -1224,6 +1240,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         shared: { mode: "all" },
         expectedRevision: 0,
       });
+      await this.installLlmBridgeIfExplicit(name);
     }
     return { spaceId: name };
   }
@@ -1844,6 +1861,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (profileHasViewBridge(this.home, profileId)) return;
     await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
   }
+
+  private async installLlmBridgeIfExplicit(profileId: string): Promise<void> {
+    if (!this.options.llmBridgeArtifact) return;
+    if (profileId === "web" || profileId === this.managerId) return;
+    if (profileHasLlmBridge(this.home, profileId)) return;
+    await this.installArtifact(profileId, this.options.llmBridgeArtifact, "dsh-spaces-llm-bridge");
+  }
 }
 
 export async function createWorkbenchSupervisor(
@@ -1914,6 +1938,9 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   if (flags["view-bridge-artifact"]) {
     options.viewBridgeArtifact = requirePath(flags["view-bridge-artifact"], "--view-bridge-artifact");
   }
+  if (flags["llm-bridge-artifact"]) {
+    options.llmBridgeArtifact = requirePath(flags["llm-bridge-artifact"], "--llm-bridge-artifact");
+  }
   if (flags["snapshot-worker"]) options.snapshotWorkerFile = requirePath(flags["snapshot-worker"], "--snapshot-worker");
   if (flags["snapshot-root"]) options.snapshotRoot = requirePath(flags["snapshot-root"], "--snapshot-root");
   return options;
@@ -1928,6 +1955,7 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.supervisorAssetRoot) args.push("--supervisor-asset-root", options.supervisorAssetRoot);
   if (options.pluginArtifact) args.push("--plugin-artifact", options.pluginArtifact);
   if (options.viewBridgeArtifact) args.push("--view-bridge-artifact", options.viewBridgeArtifact);
+  if (options.llmBridgeArtifact) args.push("--llm-bridge-artifact", options.llmBridgeArtifact);
   if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
   if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
   return args;
@@ -1944,6 +1972,7 @@ function flagName(token: string): string | undefined {
     "--supervisor-asset-root": "supervisor-asset-root",
     "--plugin-artifact": "plugin-artifact",
     "--view-bridge-artifact": "view-bridge-artifact",
+    "--llm-bridge-artifact": "llm-bridge-artifact",
     "--snapshot-worker": "snapshot-worker",
     "--snapshot-root": "snapshot-root",
   };
@@ -2113,6 +2142,22 @@ function markHandledPlan(home: string, planId: string, status: "succeeded" | "fa
     atomicWrite(path, `${JSON.stringify(parsed, null, 2)}\n`);
   } catch {
     /* keep original plan bytes */
+  }
+}
+
+function profileHasLlmBridge(home: string, profileId: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(home, "profiles", profileId, "package.json"), "utf8")) as {
+      dependencies?: Record<string, unknown>;
+      dsh?: { profile?: { bundles?: unknown } };
+    };
+    const names = [
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...(Array.isArray(pkg.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : []),
+    ];
+    return names.some((name) => typeof name === "string" && /llm-bridge/i.test(name));
+  } catch {
+    return false;
   }
 }
 

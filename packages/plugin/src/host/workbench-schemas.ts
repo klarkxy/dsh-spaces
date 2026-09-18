@@ -476,6 +476,18 @@ export const llmApiRequestSchema = z.discriminatedUnion("method", [
     })
     .strict(),
   z.object({ method: z.literal("operationStatus"), operationId: requestIdSchema }).strict(),
+  z.object({ method: z.literal("previewShare"), spaceId: spaceIdSchema }).strict(),
+  z.object({ method: z.literal("importedRequirements"), spaceId: spaceIdSchema }).strict(),
+  z
+    .object({
+      method: z.literal("mapImported"),
+      spaceId: spaceIdSchema,
+      mappings: z
+        .array(z.object({ requirementId: z.string().min(1).max(80), connectionId: connectionIdSchema }).strict())
+        .max(256),
+      expectedRevision: z.number().int().nonnegative(),
+    })
+    .strict(),
 ]);
 
 const redactedConnectionSchema = z
@@ -602,6 +614,58 @@ export const llmApiResultSchema = z.union([
             .strict(),
         )
         .max(256),
+    })
+    .strict(),
+  z
+    .object({
+      spaceId: spaceIdSchema,
+      schemaVersion: z.literal(1),
+      kind: z.literal("dsh-space-llm-requirements"),
+      sourceSharedMode: z.enum(["none", "all", "selected"]),
+      requirements: z
+        .array(
+          z
+            .object({
+              requirementId: z.string(),
+              displayName: z.string(),
+              protocol: z.string(),
+              endpoint: z.string(),
+              modelIds: z.array(z.string()).max(1000),
+              authKind: z.enum(["api-key", "none"]),
+              usedAsDefault: z.boolean(),
+            })
+            .strict(),
+        )
+        .max(256),
+      defaultRequirementId: z.string().nullable(),
+      adapterRequired: z.literal("llm-pi-ai"),
+      note: z.string(),
+    })
+    .strict(),
+  z
+    .object({
+      spaceId: spaceIdSchema,
+      mappingRequired: z.boolean(),
+      manifest: z
+        .object({
+          schemaVersion: z.literal(1),
+          kind: z.literal("dsh-space-llm-requirements"),
+          sourceSharedMode: z.enum(["none", "all", "selected"]),
+          requirements: z.array(z.object({
+            requirementId: z.string(),
+            displayName: z.string(),
+            protocol: z.string(),
+            endpoint: z.string(),
+            modelIds: z.array(z.string()).max(1000),
+            authKind: z.enum(["api-key", "none"]),
+            usedAsDefault: z.boolean(),
+          }).strict()).max(256),
+          defaultRequirementId: z.string().nullable(),
+          adapterRequired: z.literal("llm-pi-ai"),
+          note: z.string(),
+        })
+        .strict()
+        .nullable(),
     })
     .strict(),
   z.object({ ok: z.literal(true), modelId: z.string(), billed: z.literal(true) }).strict(),

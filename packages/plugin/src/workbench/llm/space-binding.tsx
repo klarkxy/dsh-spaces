@@ -1,6 +1,7 @@
 import React, { useEffect, useState, type ReactElement } from "react";
 import type {
   LlmDescribeResult,
+  LlmImportedRequirementsResult,
   LlmLocalCandidate,
   LlmSpaceDefaultResult,
   LlmSpacePolicyResult,
@@ -38,19 +39,24 @@ export function SpaceBindingPanel({
   const [error, setError] = useState<string | null>(null);
   const [adoptSecret, setAdoptSecret] = useState("");
   const [adoptId, setAdoptId] = useState<string | null>(null);
+  const [imported, setImported] = useState<LlmImportedRequirementsResult | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
   const [applyIds, setApplyIds] = useState<string[]>(describe.pendingRestartSpaceIds);
 
   const load = async (spaceId: string): Promise<void> => {
     setError(null);
     try {
-      const [nextPolicy, nextDefault, nextLocals] = await Promise.all([
+      const [nextPolicy, nextDefault, nextLocals, nextImported] = await Promise.all([
         client.spacePolicy(spaceId),
         client.spaceDefault(spaceId),
         client.listLocalCandidates(spaceId),
+        client.importedRequirements(spaceId),
       ]);
       setPolicy(nextPolicy);
       setDefaults(nextDefault);
       setLocals(nextLocals.candidates);
+      setImported(nextImported);
+      setMapping({});
     } catch (caught) {
       setError(errorText(locale, caught));
     }
@@ -214,6 +220,53 @@ export function SpaceBindingPanel({
           )}
         </fieldset>
       )}
+      <div>
+        <h5>{t(locale, "llm.mapTitle")}</h5>
+        <p className="dsh-wb-muted">{t(locale, "llm.mapHint")}</p>
+        {!imported?.mappingRequired || !imported.manifest ? (
+          <p className="dsh-wb-muted">{t(locale, "llm.mapEmpty")}</p>
+        ) : (
+          <>
+            {imported.manifest.requirements.map((requirement) => (
+              <label key={requirement.requirementId} className="dsh-wb-field">
+                {requirement.displayName} · {requirement.protocol} · {requirement.endpoint}
+                <select
+                  value={mapping[requirement.requirementId] ?? ""}
+                  disabled={!writable}
+                  onChange={(event) =>
+                    setMapping((current) => ({ ...current, [requirement.requirementId]: event.target.value }))
+                  }
+                >
+                  <option value="">{t(locale, "llm.mapNone")}</option>
+                  {describe.connections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <button
+              type="button"
+              className="dsh-wb-btn primary"
+              disabled={!writable || !policy}
+              onClick={() => {
+                if (!policy || !imported.manifest) return;
+                const mappings = imported.manifest.requirements.flatMap((requirement) => {
+                  const connectionId = mapping[requirement.requirementId];
+                  return connectionId ? [{ requirementId: requirement.requirementId, connectionId }] : [];
+                });
+                void client
+                  .mapImported(selected, mappings, policy.policy.revision)
+                  .then(() => load(selected).then(onChanged))
+                  .catch((caught) => setError(errorText(locale, caught)));
+              }}
+            >
+              {t(locale, "llm.mapApply")}
+            </button>
+          </>
+        )}
+      </div>
       <div>
         <h5>{t(locale, "llm.localGroup")}</h5>
         {locals.length === 0 ? <p className="dsh-wb-muted">{t(locale, "llm.localEmpty")}</p> : null}

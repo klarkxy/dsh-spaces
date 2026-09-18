@@ -80,6 +80,8 @@ import {
 } from "./space-share";
 import { createSpaceFromTemplate, listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
 import { createDesktopLlmHost } from "./desktop-llm";
+import { FileLlmSpaceSettings } from "../adapters/node/llm-space-settings";
+import { writeSpaceLlmLaunchSnapshot } from "../adapters/node/llm-snapshot";
 import type { LlmApiRequest, LlmCredentialRequest } from "../shared/llm-api";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -115,6 +117,7 @@ function startMain(): void {
   });
   const processes = new ProcessManager(dshHome, patchWriter, settings.portStart, settings.portEnd, {
     spawn: cooperativeChildren.spawn,
+    extraEnv: (name) => writeSpaceLlmLaunchSnapshot(dshHome, name),
     kill: async (pid, kind) => {
       if (kind === "term") return cooperativeChildren.stop(pid);
       return createDesktopProcessKill(() => allowForceKill)(pid, kind);
@@ -396,17 +399,23 @@ function startMain(): void {
     return asked.response === 1;
   }
 
-  function formatSharePreview(
+  async function formatSharePreview(
     name: string,
     includeConfig: boolean,
     patch?: string,
-  ): { archive: Buffer; text: string } {
+  ): Promise<{ archive: Buffer; text: string }> {
     const profile = listProfiles().find((item) => item.name === name);
+    const shared = await desktopLlm.llm({ method: "previewShare", spaceId: name }).catch(() => null);
+    const llm =
+      shared && typeof shared === "object" && "requirements" in shared && "adapterRequired" in shared
+        ? shared
+        : undefined;
     const archive = exportSpaceArchive(dshHome, name, {
       displayName: profile?.meta.displayName,
       icon: profile?.meta.icon,
       includeConfig,
       dshVersion: runtimes.current()?.version ?? null,
+      llm,
     });
     const preview = previewSpaceShare(archive);
     const lines = [
@@ -417,6 +426,7 @@ function startMain(): void {
       }`,
       preview.unknownSources.length ? `unknown/manual: ${preview.unknownSources.join(", ")}` : "",
       `config: ${preview.hasConfig ? "yes" : "no"}`,
+      preview.llmMappingRequired ? `llm requirements: ${preview.llmRequirements.length} (mapping required)` : "llm: none",
       patch ? `--- config ---\n${patch.slice(0, 4000)}` : "",
     ];
     return { archive, text: lines.filter(Boolean).join("\n") };
@@ -428,7 +438,7 @@ function startMain(): void {
     if (!profile || name === "web") throw new Error("The web space cannot be exported.");
     const patchPath = join(dshHome, "profiles", name, "cordis.patch.yml");
     const patch = includeConfig && existsSync(patchPath) ? readFileSync(patchPath, "utf8") : undefined;
-    const previewed = formatSharePreview(name, includeConfig, patch);
+    const previewed = await formatSharePreview(name, includeConfig, patch);
     const zh = currentSettings.locale !== "en";
     const confirmed = await dialog.showMessageBox(mainWindow, {
       type: "info",
@@ -467,6 +477,10 @@ function startMain(): void {
       installPlugin: async (spaceId, spec) => {
         desktop.assertDesktopPluginMutation([spaceId], spec);
         await pluginAdd(dshHome, spaceId, spec);
+      },
+      writeLlmShare: async (spaceId, manifest) => {
+        const settings = new FileLlmSpaceSettings(dshHome);
+        await settings.writeImport(spaceId, manifest);
       },
       dshVersion: runtimes.current()?.version ?? null,
     }, {
