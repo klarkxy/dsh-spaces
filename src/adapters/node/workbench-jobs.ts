@@ -14,6 +14,7 @@ import type {
   WorkbenchJobErrorInfo,
   WorkbenchView,
 } from "../../shared/workbench";
+import { LlmConfigError } from "../../core/domain/llm-connections";
 import { canonicalHome } from "./home-operation-lock";
 
 export const WORKBENCH_CONTROL_DIR_NAME = ".dsh-spaces-control";
@@ -668,6 +669,13 @@ function publicView(value: unknown): WorkbenchView | undefined {
 }
 
 function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
+  if (error instanceof LlmConfigError) {
+    return {
+      code: error.code,
+      message: sanitizeJobText(error.message),
+      ...(typeof error.details.spaceId === "string" ? { spaceId: error.details.spaceId, stage: "apply" } : { stage: "apply" }),
+    };
+  }
   if (error instanceof WorkbenchJobError) {
     const info: WorkbenchJobErrorInfo = {
       code: isJobErrorCode(error.code) ? error.code : "workbench/failed",
@@ -789,8 +797,11 @@ function unreadableStub(id: string, phase: string, timestamp: string): StoredJob
   };
 }
 
+const SECRET_COMMAND_KEYS = new Set(["key", "apiKey", "secret", "credential", "token", "authorization"]);
+
 function parseCommand(input: unknown): WorkbenchCommand {
   if (!isPlainObject(input)) throw new WorkbenchJobError("workbench/invalid-input");
+  assertCommandHasNoSecrets(input);
   const kind = input.kind;
   switch (kind) {
     case "space.create": {
@@ -828,8 +839,71 @@ function parseCommand(input: unknown): WorkbenchCommand {
     }
     case "recovery.resume":
       throw new WorkbenchJobError("workbench/unsupported");
+    case "llm.apply": {
+      expectKeys(input, ["kind", "spaceIds", "catalogRevision", "observations"]);
+      const spaceIds = parseStringArray(input.spaceIds);
+      if (!spaceIds || spaceIds.length === 0) throw new WorkbenchJobError("workbench/invalid-input");
+      for (const spaceId of spaceIds) parseEntityId(spaceId);
+      if (!Number.isInteger(input.catalogRevision) || Number(input.catalogRevision) < 0) {
+        throw new WorkbenchJobError("workbench/invalid-input");
+      }
+      const observations = parseApplyObservations(input.observations);
+      return {
+        kind,
+        spaceIds,
+        catalogRevision: Number(input.catalogRevision),
+        observations,
+      };
+    }
     default:
       throw new WorkbenchJobError("workbench/invalid-input");
+  }
+}
+
+function parseApplyObservations(value: unknown): Extract<WorkbenchCommand, { kind: "llm.apply" }>["observations"] {
+  if (!Array.isArray(value)) throw new WorkbenchJobError("workbench/invalid-input");
+  return value.map((item) => {
+    if (!isPlainObject(item)) throw new WorkbenchJobError("workbench/invalid-input");
+    expectKeys(item, ["spaceId", "status", "generation", "catalogRevision", "busy"]);
+    parseEntityId(item.spaceId);
+    const status = item.status;
+    if (
+      status !== "running" &&
+      status !== "starting" &&
+      status !== "stopping" &&
+      status !== "stopped" &&
+      status !== "crashed" &&
+      status !== "unknown"
+    ) {
+      throw new WorkbenchJobError("workbench/invalid-input");
+    }
+    if (typeof item.busy !== "boolean" || !Number.isInteger(item.generation)) {
+      throw new WorkbenchJobError("workbench/invalid-input");
+    }
+    if (item.catalogRevision !== null && (!Number.isInteger(item.catalogRevision) || Number(item.catalogRevision) < 0)) {
+      throw new WorkbenchJobError("workbench/invalid-input");
+    }
+    return {
+      spaceId: String(item.spaceId),
+      status,
+      generation: Number(item.generation),
+      catalogRevision: item.catalogRevision === null ? null : Number(item.catalogRevision),
+      busy: item.busy,
+    };
+  });
+}
+
+function assertCommandHasNoSecrets(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertCommandHasNoSecrets(item);
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  for (const [key, nested] of Object.entries(value)) {
+    if (SECRET_COMMAND_KEYS.has(key)) {
+      throw new WorkbenchJobError("workbench/invalid-input");
+    }
+    assertCommandHasNoSecrets(nested);
   }
 }
 
@@ -923,6 +997,8 @@ function affectedSpaceIds(command: WorkbenchCommand): string[] {
       return [];
     case "recovery.resume":
       return [];
+    case "llm.apply":
+      return [...command.spaceIds];
   }
 }
 

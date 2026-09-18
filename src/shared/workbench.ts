@@ -1,4 +1,5 @@
 /** Browser-safe workbench contracts. Never carry file paths, cookies or child launch tokens. */
+import type { LlmApiRequest, LlmApiResult, LlmSpaceObservation } from './llm-api';
 import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './spaces-control';
 
 export type WorkbenchRole = 'manager' | 'workspace' | 'uninitialized';
@@ -123,7 +124,8 @@ export type WorkbenchCommand =
   | { kind: 'space.verify'; spaceId: string }
   | { kind: 'plan.execute'; planId: string }
   | { kind: 'controller.acquire' }
-  | { kind: 'recovery.resume' };
+  | { kind: 'recovery.resume' }
+  | { kind: 'llm.apply'; spaceIds: string[]; catalogRevision: number; observations: LlmSpaceObservation[] };
 
 export type WorkbenchPlanRequest =
   | { kind: 'space.stop' | 'space.restart'; spaceId: string }
@@ -195,4 +197,6 @@ export interface WorkbenchApi {
   /** Optional for older adapters; candidates are bound by the local supervisor. */
   workbenchPackage?(): Promise<WorkbenchPackageRelease | null>;
   backups(spaceId: string): Promise<WorkbenchBackup[]>;
+  /** Redacted global LLM management. Secrets use the Host-only llmCredential HTTP method. */
+  llm?(request: LlmApiRequest): Promise<LlmApiResult>;
 }

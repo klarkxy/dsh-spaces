@@ -2,7 +2,7 @@
 
 版本：1.0
 日期：2026-09-18
-状态：待实施的设计与验收契约，不代表功能已实现。
+状态：P0–P3 已在仓库落地；P4–P6 仍待实施。本文件仍是验收契约。
 项目核对基线：`klarkxy/dsh-spaces@861cf4e9a2025da15fbc3bf0e3560f9817499a82`。
 建议施工分支：`feat/global-llm-connections`。
 建议入库路径：`docs/plans/global-llm-connections.md`；任务入口：`tasks/global-llm.md`。
