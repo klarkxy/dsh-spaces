@@ -136,7 +136,7 @@ export interface PluginInstallRequest {
 export interface PluginDownloadRequest {
   catalogId?: string;
   spec?: string;
-  /** Exact npm version. Required for npm downloads; ignored for git specs. */
+  /** Exact npm version to pin. Omit to resolve and pin current latest. Ignored for git specs. */
   version?: string;
 }
 

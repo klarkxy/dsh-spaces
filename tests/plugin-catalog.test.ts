@@ -17,7 +17,13 @@ import {
   type CatalogFetcher,
 } from "../src/main/plugin-catalog.ts";
 import { parseCatalogUrl, readSettings, writeSettings as saveSettings } from "../src/main/hub-settings.ts";
-import { formatCount, isGitSpec, matchesPluginQuery, pluginDisplayName } from "../src/shared/plugin.ts";
+import {
+  formatCount,
+  isBareNpmPackageName,
+  isGitSpec,
+  matchesPluginQuery,
+  pluginDisplayName,
+} from "../src/shared/plugin.ts";
 import { DEFAULT_HUB_SETTINGS, DEFAULT_PLUGIN_CATALOG_URL } from "../src/shared/types.ts";
 
 const temps: string[] = [];
@@ -63,6 +69,14 @@ test("formatCount and pluginDisplayName match store-style cards", () => {
     "dsh-web-ui-all",
   );
   assert.equal(pluginDisplayName({ id: "liustack/modlens", repo: "liustack/modlens" }), "modlens");
+});
+
+test("isBareNpmPackageName accepts names and rejects tags or git specs", () => {
+  assert.equal(isBareNpmPackageName("dsh-outline"), true);
+  assert.equal(isBareNpmPackageName("@nanmicoder/dsh-plugin-market"), true);
+  assert.equal(isBareNpmPackageName("dsh-outline@1.2.3"), false);
+  assert.equal(isBareNpmPackageName("dsh-outline@latest"), false);
+  assert.equal(isBareNpmPackageName("github:example/git-bundle"), false);
 });
 
 test("plugin search matches tokenized names without pinning aliases", () => {

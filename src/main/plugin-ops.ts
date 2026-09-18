@@ -13,7 +13,7 @@ import {
 import { enqueuePlugin, runDsh } from "./dsh-cli";
 import { assertNotRealHome } from "./home-guard";
 import { npmPackumentUrl } from "./package-source";
-import { isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases } from "../shared/plugin";
+import { isBareNpmPackageName, isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases } from "../shared/plugin";
 import { lookupCatalogEntry } from "./plugin-catalog";
 import {
   archiveAbsPath,
@@ -369,10 +369,21 @@ async function defaultGitPacker(spec: string, destFile: string): Promise<void> {
   }
 }
 
-function resolveDownloadMeta(
-  dshHome: string,
-  request: PluginDownloadRequest,
-): { id: string; spec: string; packageName: string; title: string; catalogId?: string; source: PluginLibraryEntry["source"] } {
+type DownloadMeta = {
+  id: string;
+  spec: string;
+  packageName: string;
+  title: string;
+  catalogId?: string;
+  source: PluginLibraryEntry["source"];
+};
+
+function npmPin(packageName: string, version: string): Pick<DownloadMeta, "id" | "spec" | "packageName"> {
+  const spec = `${packageName}@${version}`;
+  return { id: spec.toLowerCase(), spec, packageName };
+}
+
+function resolveDownloadDraft(dshHome: string, request: PluginDownloadRequest): DownloadMeta {
   if (request.catalogId) {
     const entry = lookupCatalogEntry(dshHome, request.catalogId);
     if (!entry) throw new Error(t("errors.pluginCatalogMissing", { id: request.catalogId }));
@@ -391,14 +402,27 @@ function resolveDownloadMeta(
       };
     }
     const version = request.version?.trim() ?? "";
-    if (!isExactRuntimeVersion(version)) {
-      throw new Error(t("errors.pluginNeedExactVersion"));
+    if (version) {
+      if (!isExactRuntimeVersion(version)) {
+        throw new Error(t("errors.pluginNeedExactVersion"));
+      }
+      return {
+        ...npmPin(packageName, version),
+        title: entry.packageName || entry.repo,
+        catalogId: entry.id,
+        source: "catalog",
+      };
     }
-    const spec = `${packageName}@${version}`;
+    const name = isBareNpmPackageName(packageName)
+      ? packageName
+      : isBareNpmPackageName(entry.installSpec)
+        ? entry.installSpec
+        : "";
+    if (!name) throw new Error(t("errors.pluginNeedExactVersion"));
     return {
-      id: spec.toLowerCase(),
-      spec,
-      packageName,
+      id: name.toLowerCase(),
+      spec: name,
+      packageName: name,
       title: entry.packageName || entry.repo,
       catalogId: entry.id,
       source: "catalog",
@@ -416,16 +440,53 @@ function resolveDownloadMeta(
     };
   }
   const parsed = parseNpmNameAndVersion(spec);
-  if (!parsed) {
+  if (parsed) {
+    return { ...npmPin(parsed.name, parsed.version), title: parsed.name, source: "manual" };
+  }
+  if (!isBareNpmPackageName(spec)) {
     throw new Error(t("errors.pluginNeedExactVersion"));
   }
-  const pinned = `${parsed.name}@${parsed.version}`;
   return {
-    id: pinned.toLowerCase(),
-    spec: pinned,
-    packageName: parsed.name,
-    title: parsed.name,
+    id: spec.toLowerCase(),
+    spec,
+    packageName: spec,
+    title: spec,
     source: "manual",
+  };
+}
+
+async function resolveNpmLatest(
+  name: string,
+  fetchImpl: PluginFetcher,
+): Promise<{ packageName: string; version: string }> {
+  const url = npmPackumentUrl(currentPackageSource(), name);
+  const response = await fetchImpl(url, { headers: { accept: "application/json" } });
+  if (!response.ok) {
+    throw new Error(t("errors.pluginDownloadFailed", { spec: name, detail: `HTTP ${response.status}` }));
+  }
+  const packument = (await response.json()) as {
+    name?: unknown;
+    "dist-tags"?: { latest?: unknown };
+    versions?: Record<string, { dist?: { tarball?: string } }>;
+  };
+  const packageName = typeof packument.name === "string" && packument.name ? packument.name : name;
+  const latest = typeof packument["dist-tags"]?.latest === "string" ? packument["dist-tags"].latest : "";
+  const tarball = packument.versions?.[latest]?.dist?.tarball;
+  if (!isExactRuntimeVersion(latest) || !tarball) {
+    throw new Error(t("errors.pluginLatestMissing", { name: packageName }));
+  }
+  return { packageName, version: latest };
+}
+
+async function pinDownloadMeta(draft: DownloadMeta, fetchImpl: PluginFetcher): Promise<DownloadMeta> {
+  if (isGitSpec(draft.spec) || parseNpmNameAndVersion(draft.spec)) return draft;
+  const pinned = await resolveNpmLatest(draft.packageName, fetchImpl);
+  const spec = `${pinned.packageName}@${pinned.version}`;
+  return {
+    ...draft,
+    id: spec.toLowerCase(),
+    spec,
+    packageName: pinned.packageName,
   };
 }
 
@@ -435,36 +496,38 @@ export async function downloadPlugin(
   options: { fetchImpl?: PluginFetcher; packGit?: GitPacker } = {},
 ): Promise<PluginLibraryEntry> {
   assertNotRealHome(dshHome);
-  const meta = resolveDownloadMeta(dshHome, request);
-  const existing = lookupLibraryEntry(dshHome, meta.id);
-  const dest = archiveAbsPath(dshHome, meta.id);
-  if (existing?.tarball && existsSync(resolve(dshHome, existing.tarball))) {
-    return existing;
-  }
-  await enqueuePlugin(t("queue.pluginDownload", { spec: meta.spec }), async () => {
+  const fetchImpl = options.fetchImpl ?? defaultFetcher();
+  const draft = resolveDownloadDraft(dshHome, request);
+  return enqueuePlugin(t("queue.pluginDownload", { spec: draft.spec }), async () => {
+    const meta = await pinDownloadMeta(draft, fetchImpl);
+    const existing = lookupLibraryEntry(dshHome, meta.id);
+    const dest = archiveAbsPath(dshHome, meta.id);
+    if (existing?.tarball && existsSync(resolve(dshHome, existing.tarball))) {
+      return existing;
+    }
     if (isGitSpec(meta.spec)) {
       const pack = options.packGit ?? defaultGitPacker;
       await pack(meta.spec, dest);
     } else {
-      const fetched = await downloadNpmTarball(meta.spec, dest, options.fetchImpl ?? defaultFetcher());
+      const fetched = await downloadNpmTarball(meta.spec, dest, fetchImpl);
       if (fetched.packageName) meta.packageName = fetched.packageName;
     }
     if (!existsSync(dest)) {
       throw new Error(t("errors.pluginDownloadFailed", { spec: meta.spec, detail: "no file" }));
     }
+    const entry: PluginLibraryEntry = {
+      id: meta.id,
+      spec: meta.spec,
+      packageName: meta.packageName,
+      title: meta.title,
+      catalogId: meta.catalogId,
+      tarball: archiveRelPath(meta.id),
+      source: meta.source,
+      downloadedAt: new Date().toISOString(),
+    };
+    upsertLibraryEntry(dshHome, entry);
+    return entry;
   });
-  const entry: PluginLibraryEntry = {
-    id: meta.id,
-    spec: meta.spec,
-    packageName: meta.packageName,
-    title: meta.title,
-    catalogId: meta.catalogId,
-    tarball: archiveRelPath(meta.id),
-    source: meta.source,
-    downloadedAt: new Date().toISOString(),
-  };
-  upsertLibraryEntry(dshHome, entry);
-  return entry;
 }
 
 export async function removeDownloadedPlugin(

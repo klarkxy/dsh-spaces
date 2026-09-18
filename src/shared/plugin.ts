@@ -12,6 +12,18 @@ export function isSafeSpec(spec: string): boolean {
   return /^[@a-zA-Z0-9][a-zA-Z0-9._~:/#@+-]*$/.test(spec);
 }
 
+/** npm package name with no version, tag, or range. */
+export function isBareNpmPackageName(name: string): boolean {
+  if (!isSafeSpec(name) || isGitSpec(name)) return false;
+  if (name.startsWith("@")) {
+    const rest = name.slice(1);
+    if (rest.includes("@") || rest.includes(":")) return false;
+    const parts = rest.split("/");
+    return parts.length === 2 && Boolean(parts[0]) && Boolean(parts[1]);
+  }
+  return !name.includes("@") && !name.includes("/") && !name.includes(":");
+}
+
 export function pluginSearchText(entry: {
   id: string;
   repo: string;
