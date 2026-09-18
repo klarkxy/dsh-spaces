@@ -284,7 +284,9 @@ test("frozen snapshot keeps the old endpoint; a hijacked Space does not take dow
       },
       1,
     );
-    await assert.rejects(() => streamPing(alpha.ctx, route, "demo-large"), { code: LLM_ERROR.MANAGED_ROUTE_CONFLICT });
+    await assert.rejects(async () => await streamPing(alpha.ctx, route, "demo-large"), {
+      code: LLM_ERROR.MANAGED_ROUTE_CONFLICT,
+    });
     assert.equal(await streamPing(beta.ctx, route, "demo-large"), "hello-first");
     assert.equal(second.hits.length, 0);
   } finally {
@@ -334,7 +336,7 @@ test("missing shared record does not use a same-name environment variable", asyn
   });
   try {
     await attachOfficialLlm(space.ctx, space.settings);
-    await assert.rejects(() => streamPing(space.ctx, compileManagedRouteId(connectionId), "demo-large"), {
+    await assert.rejects(async () => await streamPing(space.ctx, compileManagedRouteId(connectionId), "demo-large"), {
       code: "MISSING_CREDENTIAL",
     });
     assert.equal(mock.hits.length, 0);
