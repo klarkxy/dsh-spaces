@@ -2,7 +2,7 @@
 
 版本：1.0
 日期：2026-09-18
-状态：P0–P5 已在仓库落地；P6 仍待实施。本文件仍是验收契约。
+状态：P0–P6 已在仓库落地。本文件仍是验收契约。未跑平台与 A25 限制见 [acceptance](../compat/global-llm-acceptance.md)。
 项目核对基线：`klarkxy/dsh-spaces@861cf4e9a2025da15fbc3bf0e3560f9817499a82`。
 建议施工分支：`feat/global-llm-connections`。
 建议入库路径：`docs/plans/global-llm-connections.md`；任务入口：`tasks/global-llm.md`。

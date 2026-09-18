@@ -381,11 +381,22 @@ function ConnectionEditor({
         <>
           <label className="dsh-wb-field">
             {t(locale, "llm.displayName")}
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required />
+            <input
+              data-llm-field="displayName"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              required
+            />
           </label>
           <label className="dsh-wb-field">
             {t(locale, "llm.baseURL")}
-            <input value={baseURL} onChange={(event) => setBaseURL(event.target.value)} required autoComplete="off" />
+            <input
+              data-llm-field="baseURL"
+              value={baseURL}
+              onChange={(event) => setBaseURL(event.target.value)}
+              required
+              autoComplete="off"
+            />
           </label>
           <label className="dsh-wb-field">
             {t(locale, "llm.apiKey")}
@@ -405,6 +416,7 @@ function ConnectionEditor({
         <>
           <div className="dsh-wb-row">
             <input
+              data-llm-field="modelId"
               value={manualModel}
               onChange={(event) => setManualModel(event.target.value)}
               placeholder={t(locale, "llm.modelId")}

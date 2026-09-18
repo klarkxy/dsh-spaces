@@ -66,8 +66,10 @@ Do not install the full plugin into an ordinary profile as the way to get manage
 npm install
 node scripts/setup-sandbox.mjs
 npm test
+npm run test:llm
 npm run typecheck
 npm run validate:isolation
+npm run validate:llm:secrets
 npm run dev
 ```
 
@@ -130,8 +132,10 @@ Spaces 不添加自己的遥测；上游 DSH 和插件遵循各自网络设置�
 npm install
 node scripts/setup-sandbox.mjs
 npm test
+npm run test:llm
 npm run typecheck
 npm run validate:isolation
+npm run validate:llm:secrets
 npm run dev
 ```
 

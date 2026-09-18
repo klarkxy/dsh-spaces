@@ -33,7 +33,7 @@ So before this change, every profile that shared `DSH_HOME` shared one settings 
 | Data | Authority | Consumer | Writer |
 |---|---|---|---|
 | Shared connections and model catalog | `<home>/.dsh-spaces-control/llm/catalog.json` | Joined Spaces | Home write owner |
-| Shared keys | `<home>/.dsh-spaces-control/llm/credentials.yaml` | Host-side llm-bridge | Secret-only global API (later phases) |
+| Shared keys | `<home>/.dsh-spaces-control/llm/credentials.yaml` | Host-side llm-bridge | Secret-only `llmCredential` API |
 | Space binding | `<space data root>/llm-policy.json` | That Space's bridge | Authorized policy update |
 | Workbench local settings | `hub/<name>/settings.yaml` | That Space | Official settings writes in that Space |
 | Workbench local credentials | `hub/<name>/.credentials.yaml` | That Space | Official local credential writes |
@@ -50,7 +50,8 @@ Official `SettingsProvider` resolves `schema defaults → composition base → u
 
 `llm-pi-ai@0.1.5-rc.2` calls `settings.installSection(...)`, which registers with `base: entry`. `SpacesFileSettingsProvider` overrides the public `register()` method and merges selected shared routes into that base for `llm-pi-ai` (and the applicable global default into `agent-default-model`). Other namespaces pass through.
 
-## What P0 did not run
+## What this matrix did not run
 
-- Full official CLI `dsh --profile` processes talking to a paid model.
+- Full official CLI `dsh --profile` web-app processes talking to a paid model.
+- Windows ACL inspection of the credential file. POSIX mode `0600` / directory `0700` is proven against the official writer.
 - `rc.1` shared-LLM enablement. Unjoined Spaces on any exact CLI version keep their previous non-LLM behavior.
