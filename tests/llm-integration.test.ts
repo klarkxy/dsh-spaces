@@ -114,7 +114,7 @@ test("three processes stream one shared official route while web stays unjoined"
   const route = compileManagedRouteId(connectionId);
   const aText = await call(alpha, { op: "stream", provider: route, model: "demo-large" });
   const bText = await call(beta, { op: "stream", provider: route, model: "demo-large" });
-  assert.equal(aText.ok, true);
+  assert.equal(aText.ok, true, JSON.stringify(aText));
   assert.equal(bText.ok, true);
   assert.equal(aText.result.text, "hello-shared-v1");
   assert.equal(bText.result.text, "hello-shared-v1");

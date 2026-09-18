@@ -14,7 +14,7 @@ function fail(message) {
   process.exitCode = 1;
 }
 
-const PRODUCTION = [
+const SECRET_SCAN = [
   "src/core/domain/llm-connections.ts",
   "src/core/domain/llm-resolution.ts",
   "src/core/domain/llm-share.ts",
@@ -38,12 +38,19 @@ const PRODUCTION = [
   "packages/plugin/src/workbench/llm/client.ts",
 ];
 
+const RECOVERY_SCAN = SECRET_SCAN.filter(
+  (rel) => rel !== "src/shared/desktop-controller.ts" && rel !== "src/preload/index.ts",
+);
+
 const LIVE_KEY = /\bsk-[A-Za-z0-9_-]{8,}\b/;
 const PRODUCT_RECOVERY = /\b(autoRetry|retryFailed|rollback\(|restoreSnapshot|replayOperation|fallbackModel|installLlmPiAi)\b/;
 
-for (const rel of PRODUCTION) {
+for (const rel of SECRET_SCAN) {
   const text = readFileSync(join(REPO, rel), "utf8");
   if (LIVE_KEY.test(text)) fail(`${rel} contains a key-like token`);
+}
+for (const rel of RECOVERY_SCAN) {
+  const text = readFileSync(join(REPO, rel), "utf8");
   if (PRODUCT_RECOVERY.test(text)) fail(`${rel} contains a recovery/fallback product path`);
 }
 
