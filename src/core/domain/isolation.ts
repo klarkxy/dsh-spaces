@@ -12,6 +12,8 @@ import { t } from "../../shared/i18n";
 
 export const SESSION_ROW_ID = "session-persistence-jsonl";
 export const STORAGE_ROW_ID = "storage-json";
+export const SETTINGS_ROW_ID = "settings";
+export const CREDENTIALS_ROW_ID = "credentials";
 
 const JS_TAG = "tag:yaml.org,2002:js";
 const DSH_HOME_PATH_RE = /^dshHomePath\(\s*(['"])([^'"]+)\1\s*\)$/;
@@ -44,8 +46,20 @@ export function isolationExpr(name: string, kind: "sessions" | "storages"): stri
   return `dshHomePath('hub/${name}/${kind}')`;
 }
 
+export function configPathExpr(name: string, filename: "settings.yaml" | ".credentials.yaml"): string {
+  return `dshHomePath('hub/${name}/${filename}')`;
+}
+
 export function patchTextLooksIsolated(text: string, name: string): boolean {
   return text.includes(`hub/${name}/sessions`) && text.includes(`hub/${name}/storages`);
+}
+
+export function patchTextLooksConfigIsolated(text: string, name: string): boolean {
+  return (
+    patchTextLooksIsolated(text, name) &&
+    text.includes(`hub/${name}/settings.yaml`) &&
+    text.includes(`hub/${name}/.credentials.yaml`)
+  );
 }
 
 export function applyIsolationPatch(original: string, name: string, source: string): string {
@@ -56,21 +70,41 @@ export function applyIsolationPatch(original: string, name: string, source: stri
   const seq = requireSeq(doc, source);
   const sessionRows = rowsWithId(seq, SESSION_ROW_ID);
   const storageRows = rowsWithId(seq, STORAGE_ROW_ID);
+  const settingsRows = rowsWithId(seq, SETTINGS_ROW_ID);
+  const credentialsRows = rowsWithId(seq, CREDENTIALS_ROW_ID);
   if (sessionRows.length > 1) {
     throw new PatchVerifyError(duplicateRowMessage(SESSION_ROW_ID, source));
   }
   if (storageRows.length > 1) {
     throw new PatchVerifyError(duplicateRowMessage(STORAGE_ROW_ID, source));
   }
+  if (settingsRows.length > 1) {
+    throw new PatchVerifyError(duplicateRowMessage(SETTINGS_ROW_ID, source));
+  }
+  if (credentialsRows.length > 1) {
+    throw new PatchVerifyError(duplicateRowMessage(CREDENTIALS_ROW_ID, source));
+  }
 
-  upsertIsolationRow(seq, sessionRows[0], SESSION_ROW_ID, isolationExpr(name, "sessions"));
-  upsertIsolationRow(seq, storageRows[0], STORAGE_ROW_ID, isolationExpr(name, "storages"));
+  upsertJsConfigField(seq, sessionRows[0], SESSION_ROW_ID, "root", isolationExpr(name, "sessions"));
+  upsertJsConfigField(seq, storageRows[0], STORAGE_ROW_ID, "root", isolationExpr(name, "storages"));
+  upsertJsConfigField(seq, settingsRows[0], SETTINGS_ROW_ID, "path", configPathExpr(name, "settings.yaml"));
+  upsertJsConfigField(
+    seq,
+    credentialsRows[0],
+    CREDENTIALS_ROW_ID,
+    "path",
+    configPathExpr(name, ".credentials.yaml"),
+  );
 
   const body = doc.toString({ lineWidth: 0 });
   return body.endsWith("\n") ? body : `${body}\n`;
 }
 
 export function extractRoot(dump: string, id: string): string | null {
+  return extractConfigField(dump, id, "root");
+}
+
+export function extractConfigField(dump: string, id: string, field: string): string | null {
   const doc = parsePatchDocument(dump, "dump-config");
   const seq = requireSeq(doc, "dump-config");
   const rows = rowsWithId(seq, id);
@@ -80,9 +114,9 @@ export function extractRoot(dump: string, id: string): string | null {
   if (rows.length === 0) return null;
   const config = rows[0].get("config", true);
   if (!isMap(config)) return null;
-  const root = config.get("root", true);
-  if (root == null) return null;
-  return formatRoot(root);
+  const value = config.get(field, true);
+  if (value == null) return null;
+  return formatRoot(value);
 }
 
 export function assertDumpPatched(dump: string, name: string): void {
@@ -106,6 +140,34 @@ export function assertDumpPatched(dump: string, name: string): void {
   }
 }
 
+/** Session/storage plus per-space settings and credentials paths. */
+export function assertDumpConfigIsolated(dump: string, name: string): void {
+  assertDumpPatched(dump, name);
+  const settingsPath = extractConfigField(dump, SETTINGS_ROW_ID, "path");
+  const credentialsPath = extractConfigField(dump, CREDENTIALS_ROW_ID, "path");
+  if (!settingsPath) {
+    throw new PatchVerifyError(t("errors.missingDumpRow", { id: SETTINGS_ROW_ID, name }));
+  }
+  if (!credentialsPath) {
+    throw new PatchVerifyError(t("errors.missingDumpRow", { id: CREDENTIALS_ROW_ID, name }));
+  }
+  if (!isExpectedIsolationPath(settingsPath, name, "settings.yaml")) {
+    throw new PatchVerifyError(
+      t("errors.dumpPathMismatch", { id: SETTINGS_ROW_ID, actual: settingsPath, name, file: "settings.yaml" }),
+    );
+  }
+  if (!isExpectedIsolationPath(credentialsPath, name, ".credentials.yaml")) {
+    throw new PatchVerifyError(
+      t("errors.dumpPathMismatch", {
+        id: CREDENTIALS_ROW_ID,
+        actual: credentialsPath,
+        name,
+        file: ".credentials.yaml",
+      }),
+    );
+  }
+}
+
 export function isExpectedIsolationRoot(
   actual: string,
   name: string,
@@ -113,6 +175,17 @@ export function isExpectedIsolationRoot(
 ): boolean {
   const expectedRel = `hub/${name}/${kind}`;
   // A string that looks like an expression is not an evaluated DSH home path.
+  if (!actual.startsWith("!!js ")) return false;
+  const match = actual.slice(5).trim().match(DSH_HOME_PATH_RE);
+  return match?.[2] === expectedRel;
+}
+
+export function isExpectedIsolationPath(
+  actual: string,
+  name: string,
+  filename: "settings.yaml" | ".credentials.yaml",
+): boolean {
+  const expectedRel = `hub/${name}/${filename}`;
   if (!actual.startsWith("!!js ")) return false;
   const match = actual.slice(5).trim().match(DSH_HOME_PATH_RE);
   return match?.[2] === expectedRel;
@@ -152,42 +225,48 @@ function rowsWithId(seq: YAMLSeq, id: string): YAMLMap[] {
   return rows;
 }
 
-function upsertIsolationRow(seq: YAMLSeq, existing: YAMLMap | undefined, id: string, expr: string): void {
+function upsertJsConfigField(
+  seq: YAMLSeq,
+  existing: YAMLMap | undefined,
+  id: string,
+  field: string,
+  expr: string,
+): void {
   if (existing) {
-    setRoot(existing, expr);
+    setJsConfigField(existing, field, expr);
     return;
   }
   const row = new YAMLMap();
   row.set("id", id);
   const config = new YAMLMap();
-  setRootOnConfig(config, expr);
+  setJsFieldOnConfig(config, field, expr);
   row.set("config", config);
   seq.add(row);
 }
 
-function setRoot(row: YAMLMap, expr: string): void {
+function setJsConfigField(row: YAMLMap, field: string, expr: string): void {
   const configNode = row.get("config", true);
   if (isMap(configNode)) {
-    setRootOnConfig(configNode, expr);
+    setJsFieldOnConfig(configNode, field, expr);
     return;
   }
   if (configNode != null) {
     throw new PatchVerifyError(`Cannot safely update dynamic or non-mapping config for ${row.get("id")}`);
   }
   const config = new YAMLMap();
-  setRootOnConfig(config, expr);
+  setJsFieldOnConfig(config, field, expr);
   row.set("config", config);
 }
 
-function setRootOnConfig(config: YAMLMap, expr: string): void {
-  const current = config.get("root", true);
+function setJsFieldOnConfig(config: YAMLMap, field: string, expr: string): void {
+  const current = config.get(field, true);
   if (isScalar(current)) {
     // Mutating the existing node retains its comments, anchors and quoting style.
     current.value = expr;
     current.tag = JS_TAG;
   } else {
-    if (current != null) throw new PatchVerifyError("Cannot safely replace a non-scalar root");
-    config.set("root", jsScalar(expr));
+    if (current != null) throw new PatchVerifyError(`Cannot safely replace a non-scalar ${field}`);
+    config.set(field, jsScalar(expr));
   }
 }
 
