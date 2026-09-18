@@ -139,7 +139,11 @@ export const en = {
   "settings.pluginQueueBusy": "{count} plugin jobs waiting",
   "settings.pluginQueueBusyCurrent": "{count} plugin jobs waiting ({current})",
   "settings.tabGeneral": "General",
+  "settings.tabLlm": "Models and connections",
   "settings.tabRuntime": "Versions",
+  "create.useSharedLlm": "Use global connections",
+  "create.useSharedLlmHint":
+    "This space will see current and later shared connections after the next start. Existing spaces stay unchanged unless you join them.",
   "plugins.title": "Plugins",
   "plugins.tabManage": "Manage",
   "plugins.tabMarket": "Market",

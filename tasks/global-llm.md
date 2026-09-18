@@ -38,9 +38,16 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] `llm.apply` jobs are secret-free; busy/unknown Spaces refuse apply; batch A keep / B fail / C skip.
 - [x] Explicit discover/test with 15s / 2 MiB / no-redirect / 1000-model bounds.
 
+## P4 — global model center and Space selection
+
+- [x] Workbench settings → Models and connections (list, four-step editor, discover/test copy, delete preview).
+- [x] Space binding: all / selected / none, inherit or choose default, local vs shared groups.
+- [x] New-space wizard preselects use-global; web and existing spaces stay unjoined unless submitted.
+- [x] Manager-Host `llmCredential` remote for Key / draft discover; secrets stay off StoredJob.
+- [x] Desktop settings tab and create checkbox reuse the same DTO and Host service.
+
 ## Later phases
 
-- P4 global model center UI
 - P5 explicit adoption and secret-free export
 - P6 release gates
 

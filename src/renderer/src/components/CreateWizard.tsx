@@ -17,12 +17,13 @@ export function CreateWizard({
   error: string;
   progress: CreateProgress | null;
   onCancel: () => void;
-  onSubmit: (name: string, displayName: string, icon?: string) => void;
+  onSubmit: (name: string, displayName: string, icon?: string, useSharedLlm?: boolean) => void;
 }) {
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [icon, setIcon] = useState("");
+  const [useSharedLlm, setUseSharedLlm] = useState(true);
   const [localError, setLocalError] = useState("");
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export function CreateWizard({
       setLocalError(t("create.nameReserved", { name: trimmed }));
       return;
     }
-    onSubmit(trimmed, displayName.trim() || trimmed, icon || undefined);
+    onSubmit(trimmed, displayName.trim() || trimmed, icon || undefined, useSharedLlm);
   };
 
   return (
@@ -80,6 +81,16 @@ export function CreateWizard({
           value={displayName}
           onChange={(event) => setDisplayName(event.target.value)}
         />
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={useSharedLlm}
+            disabled={busy}
+            onChange={(event) => setUseSharedLlm(event.target.checked)}
+          />
+          {t("create.useSharedLlm")}
+        </label>
+        <p className="faint mt-1 text-xs">{t("create.useSharedLlmHint")}</p>
         <p className="label mt-3 text-xs">{t("create.icon")}</p>
         <SpaceIconPicker icon={icon} disabled={busy} onChange={setIcon} />
         {busy && progress ? (

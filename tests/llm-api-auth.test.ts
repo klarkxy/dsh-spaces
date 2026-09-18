@@ -19,7 +19,8 @@ import {
   type GlobalLlmCatalog,
   type SpaceLlmPolicy,
 } from "../src/core/domain/llm-connections.ts";
-import type { LlmInstanceRecord, LlmOperationRecord, LlmOperationStore, LlmProbePort } from "../src/core/ports/llm-runtime.ts";
+import type { LlmInstanceRecord, LlmOperationRecord, LlmOperationStore, LlmProbePort, LlmSpaceSettingsPort, SpaceDefaultModel } from "../src/core/ports/llm-runtime.ts";
+import type { LlmLocalCandidate } from "../src/shared/llm-api.ts";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../src/core/ports/llm-store.ts";
 import { emptyPolicy } from "../src/core/domain/llm-connections.ts";
 
@@ -164,6 +165,31 @@ class MemoryInstances {
   }
 }
 
+class MemorySpaceSettings implements LlmSpaceSettingsPort {
+  defaults = new Map<string, SpaceDefaultModel>();
+  locals = new Map<string, LlmLocalCandidate[]>();
+  providers = new Map<string, Record<string, unknown>>();
+  secrets = new Map<string, string>();
+  async readDefault(spaceId: string) {
+    return this.defaults.get(spaceId) ?? null;
+  }
+  async writeDefault(spaceId: string, value: SpaceDefaultModel | null) {
+    if (value === null) this.defaults.delete(spaceId);
+    else this.defaults.set(spaceId, value);
+  }
+  async listLocal(spaceId: string) {
+    return this.locals.get(spaceId) ?? [];
+  }
+  async readLocalProvider(_spaceId: string, routeId: string) {
+    const config = this.providers.get(routeId);
+    if (!config) throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "local connection was not found");
+    return config;
+  }
+  async readCopyableSecret(_spaceId: string, routeId: string) {
+    return this.secrets.get(routeId);
+  }
+}
+
 function noneDraft(displayName = "共享接口") {
   return {
     displayName,
@@ -208,6 +234,7 @@ function hostOf(input: {
       discover: async () => ({ models: [{ id: "demo-large" }], truncated: false }),
       test: async ({ modelId }) => ({ ok: true as const, modelId }),
     },
+    spaceSettings: new MemorySpaceSettings(),
     assertWritable: () => {
       if (input.writable === false) {
         throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");

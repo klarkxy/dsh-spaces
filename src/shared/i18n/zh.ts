@@ -135,7 +135,11 @@ export const zh: Messages = {
   "settings.pluginQueueBusy": "插件队列：{count} 个等待",
   "settings.pluginQueueBusyCurrent": "插件队列：{count} 个等待（{current}）",
   "settings.tabGeneral": "常规",
+  "settings.tabLlm": "模型与连接",
   "settings.tabRuntime": "版本",
+  "create.useSharedLlm": "使用全局连接",
+  "create.useSharedLlmHint":
+    "该空间下次启动后可以看到当前以及之后新建的共享连接。已有空间不会自动接入。",
   "plugins.title": "插件",
   "plugins.tabManage": "管理",
   "plugins.tabMarket": "市场",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   HubSettings,
   LocalePreference,
@@ -13,6 +13,10 @@ import { LocaleSelect } from "./LocaleSelect";
 import { MaintenancePanel } from "./MaintenanceDialog";
 import { Card, Overlay } from "./Overlay";
 import { SpaceSharePanel, type SpaceShareChoice } from "./SpaceSharePanel";
+import { LlmModelCenter } from "@workbench/llm/center";
+import { createWorkbenchLlmClient } from "@workbench/llm/client";
+import { WORKBENCH_CSS } from "@workbench/styles";
+import type { ProfileRecord } from "@shared/types";
 
 export function SettingsDialog({
   initial,
@@ -22,18 +26,21 @@ export function SettingsDialog({
   onSave,
   onQuit,
   onMaintenanceChanged,
+  writable = true,
 }: {
   initial: HubSettings;
   dshHome: string;
-  initialTab?: "general" | "runtime";
+  initialTab?: "general" | "runtime" | "llm";
   onCancel: () => void;
   onSave: (settings: HubSettings) => void;
   onQuit: () => void;
   onMaintenanceChanged: () => Promise<unknown>;
+  writable?: boolean;
 }) {
   const { t, locale: appLocale, setPreference } = useI18n();
   const { setPreference: setThemePreference } = useTheme();
-  const [tab, setTab] = useState<"general" | "runtime">(initialTab);
+  const [tab, setTab] = useState<"general" | "runtime" | "llm">(initialTab);
+  const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [portStart, setPortStart] = useState(String(initial.portStart));
   const [portEnd, setPortEnd] = useState(String(initial.portEnd));
@@ -138,6 +145,18 @@ export function SettingsDialog({
           <button
             type="button"
             className="pb-1 text-sm disabled:opacity-40"
+            style={tabStyle(tab === "llm")}
+            disabled={maintenanceBusy}
+            onClick={() => {
+              setTab("llm");
+              void window.dshSpaces.listProfiles().then(setProfiles);
+            }}
+          >
+            {t("settings.tabLlm")}
+          </button>
+          <button
+            type="button"
+            className="pb-1 text-sm disabled:opacity-40"
             style={tabStyle(tab === "runtime")}
             disabled={maintenanceBusy && tab !== "runtime"}
             onClick={() => setTab("runtime")}
@@ -145,6 +164,9 @@ export function SettingsDialog({
             {t("settings.tabRuntime")}
           </button>
         </div>
+        {tab === "llm" && (
+          <DesktopLlmTab locale={appLocale === "zh" ? "zh" : "en"} writable={writable} profiles={profiles} />
+        )}
         {tab === "general" ? (
           <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
             <LocaleSelect value={locale} onChange={changeLocale} />
@@ -311,5 +333,45 @@ export function SettingsDialog({
         </div>
       </Card>
     </Overlay>
+  );
+}
+
+function DesktopLlmTab({
+  locale,
+  writable,
+  profiles,
+}: {
+  locale: "zh" | "en";
+  writable: boolean;
+  profiles: ProfileRecord[];
+}) {
+  const client = useMemo(
+    () =>
+      createWorkbenchLlmClient(
+        {
+          llm: (request) => window.dshSpaces.llm(request),
+          llmCredential: (request) => window.dshSpaces.llmCredential(request),
+        },
+        () => crypto.randomUUID(),
+      ),
+    [],
+  );
+  return (
+    <div className="dsh-workbench mt-4 min-h-0 flex-1 overflow-y-auto" style={{ height: "auto", background: "transparent" }}>
+      <style>{WORKBENCH_CSS}</style>
+      <LlmModelCenter
+        locale={locale}
+        writable={writable}
+        client={client}
+        spaces={profiles.map((row) => ({
+          spaceId: row.name,
+          displayName: row.meta.displayName || row.name,
+          status:
+            row.status === "starting" || row.status === "running" || row.status === "crashed" ? row.status : "stopped",
+          generation: 0,
+        }))}
+        uuid={() => crypto.randomUUID()}
+      />
+    </div>
   );
 }

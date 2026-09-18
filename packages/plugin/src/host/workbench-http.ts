@@ -2,7 +2,7 @@ import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../../src/shared/space-icon";
 import type { WorkbenchApi } from "../../../../src/shared/workbench";
-import type { LlmApiResult } from "../../../../src/shared/llm-api";
+import type { LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
 import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
 import {
   backupsResultSchema,
@@ -23,6 +23,7 @@ import {
   workbenchSpaceDetailSchema,
   llmApiRequestSchema,
   llmApiResultSchema,
+  llmCredentialRequestSchema,
 } from "./workbench-schemas";
 import { parseSupervisorHandoffPath } from "./loopback";
 import type { SupervisorEndpoint } from "./supervisor-endpoint";
@@ -42,6 +43,7 @@ export const WORKBENCH_HTTP_METHODS = [
   "workbenchPackage",
   "backups",
   "llm",
+  "llmCredential",
 ] as const;
 
 export type WorkbenchHttpMethod = (typeof WORKBENCH_HTTP_METHODS)[number];
@@ -89,6 +91,8 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
     workbenchPackage: () => call("workbenchPackage", {}, workbenchPackageResultSchema),
     backups: (spaceId) => call("backups", { spaceId: spaceIdSchema.parse(spaceId) }, backupsResultSchema),
     llm: (request) => call("llm", llmApiRequestSchema.parse(request), llmApiResultSchema) as Promise<LlmApiResult>,
+    llmCredential: (request: LlmCredentialRequest) =>
+      call("llmCredential", llmCredentialRequestSchema.parse(request), llmApiResultSchema) as Promise<LlmApiResult>,
   };
 }
 

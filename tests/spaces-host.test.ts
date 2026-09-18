@@ -459,6 +459,7 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
       "workbench/workbenchPackage",
       "workbench/backups",
       "workbench/llm",
+      "workbench/llmCredential",
     ],
   );
   assert.equal(TYPERT_REMOTE.package, "@dsh-spaces/plugin");

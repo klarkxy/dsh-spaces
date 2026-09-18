@@ -1,5 +1,5 @@
 /** Browser-safe workbench contracts. Never carry file paths, cookies or child launch tokens. */
-import type { LlmApiRequest, LlmApiResult, LlmSpaceObservation } from './llm-api';
+import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest, LlmSpaceObservation } from './llm-api';
 import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './spaces-control';
 
 export type WorkbenchRole = 'manager' | 'workspace' | 'uninitialized';
@@ -117,7 +117,7 @@ export interface WorkbenchJob {
 }
 
 export type WorkbenchCommand =
-  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string } }
+  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; useSharedLlm?: boolean } }
   | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string }
   | { kind: 'space.reorder'; spaceIds: string[] }
   | { kind: 'space.start'; spaceId: string }
@@ -199,4 +199,9 @@ export interface WorkbenchApi {
   backups(spaceId: string): Promise<WorkbenchBackup[]>;
   /** Redacted global LLM management. Secrets use the Host-only llmCredential HTTP method. */
   llm?(request: LlmApiRequest): Promise<LlmApiResult>;
+  /**
+   * Manager-Host-only secret writes. The payload lives for the request only:
+   * it is not a StoredJob, not logged, and not returned to workspace profiles.
+   */
+  llmCredential?(request: LlmCredentialRequest): Promise<LlmApiResult>;
 }

@@ -302,6 +302,9 @@ export const WORKBENCH_CSS = `
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+.dsh-wb-llm, .dsh-wb-llm-editor, .dsh-wb-llm-spaces { display: flex; flex-direction: column; gap: 12px; }
+.dsh-wb-llm table { font-size: 12px; }
+.dsh-wb-llm fieldset { border: 1px solid var(--wb-border); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 @media (prefers-reduced-motion: reduce) {
   .dsh-workbench * { transition: none !important; animation: none !important; }
 }

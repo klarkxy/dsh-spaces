@@ -6,6 +6,8 @@ import type {
   SharedSelection,
   SpaceLlmPolicy,
 } from "../core/domain/llm-connections";
+
+export type { SharedAuth, SharedModelRef, SharedSelection, SpaceLlmPolicy };
 import type { WorkbenchJob, WorkbenchSpace } from "./workbench";
 
 export type RedactedConnection = Omit<SharedConnection, "auth"> & {
@@ -24,6 +26,10 @@ export const LLM_API_METHODS = [
   "testConnection",
   "spacePolicy",
   "updateSpacePolicy",
+  "spaceDefault",
+  "updateSpaceDefault",
+  "listLocalCandidates",
+  "adoptLocal",
   "applyPlan",
   "operationStatus",
 ] as const;
@@ -37,17 +43,21 @@ export const LLM_WRITE_API_METHODS = [
   "discoverModels",
   "testConnection",
   "updateSpacePolicy",
+  "updateSpaceDefault",
+  "adoptLocal",
   "applyPlan",
 ] as const;
 
 export const LLM_CREDENTIAL_METHOD = "saveConnectionWithCredential" as const;
+export const LLM_CREDENTIAL_DISCOVER_METHOD = "discoverModels" as const;
+export const LLM_CREDENTIAL_ADOPT_METHOD = "adoptLocal" as const;
 
 export type LlmConnectionDraft = {
   id?: string;
   displayName: string;
   enabled?: boolean;
   providerConfig: Record<string, unknown>;
-  auth: SharedAuth;
+  auth?: SharedAuth;
 };
 
 export type LlmConnectionSecretDraft = Omit<LlmConnectionDraft, "auth">;
@@ -122,6 +132,29 @@ export type LlmOperationStatusResult = {
   leftoverRecordId?: string;
 };
 
+export type LlmSpaceDefaultResult = {
+  spaceId: string;
+  source: "local" | "global" | "none";
+  inheritGlobal: boolean;
+  local: { provider: string; model: string } | null;
+  global: SharedModelRef | null;
+  effective: { provider: string; model: string; origin: "local" | "global" } | null;
+};
+
+export type LlmLocalCandidate = {
+  routeId: string;
+  displayName: string;
+  api?: string;
+  origin: string;
+  modelIds: string[];
+  credentialCopy: "available" | "reenter" | "unsupported";
+};
+
+export type LlmLocalCandidatesResult = {
+  spaceId: string;
+  candidates: LlmLocalCandidate[];
+};
+
 export type LlmApiRequest =
   | { method: "describe" }
   | { method: "previewChange"; draft: LlmConnectionDraft; expectedRevision: number }
@@ -133,6 +166,17 @@ export type LlmApiRequest =
   | { method: "testConnection"; connectionId: string; modelId: string; authorize: true }
   | { method: "spacePolicy"; spaceId: string }
   | { method: "updateSpacePolicy"; spaceId: string; shared: SharedSelection; expectedRevision: number }
+  | { method: "spaceDefault"; spaceId: string }
+  | { method: "updateSpaceDefault"; spaceId: string; model: SharedModelRef | null }
+  | { method: "listLocalCandidates"; spaceId: string }
+  | {
+      method: "adoptLocal";
+      spaceId: string;
+      routeId: string;
+      displayName: string;
+      expectedRevision: number;
+      copyCredential: true;
+    }
   | {
       method: "applyPlan";
       spaceIds: string[];
@@ -142,13 +186,28 @@ export type LlmApiRequest =
     }
   | { method: "operationStatus"; operationId: string };
 
-export type LlmCredentialRequest = {
-  method: typeof LLM_CREDENTIAL_METHOD;
-  draft: LlmConnectionSecretDraft;
-  secret: string;
-  expectedRevision: number;
-  operationId: string;
-};
+export type LlmCredentialRequest =
+  | {
+      method: typeof LLM_CREDENTIAL_METHOD;
+      draft: LlmConnectionSecretDraft;
+      secret: string;
+      expectedRevision: number;
+      operationId: string;
+    }
+  | {
+      method: typeof LLM_CREDENTIAL_DISCOVER_METHOD;
+      draft: LlmConnectionSecretDraft;
+      secret: string;
+    }
+  | {
+      method: typeof LLM_CREDENTIAL_ADOPT_METHOD;
+      spaceId: string;
+      routeId: string;
+      displayName: string;
+      secret: string;
+      expectedRevision: number;
+      operationId: string;
+    };
 
 export type LlmApiResult =
   | LlmDescribeResult
@@ -156,6 +215,8 @@ export type LlmApiResult =
   | LlmDeletePreview
   | LlmCatalogResult
   | LlmSpacePolicyResult
+  | LlmSpaceDefaultResult
+  | LlmLocalCandidatesResult
   | LlmDiscoverResult
   | LlmTestResult
   | LlmOperationStatusResult

@@ -15,7 +15,7 @@ import type {
 } from "../../../../src/shared/workbench";
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
 import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
-import type { LlmApiRequest, LlmApiResult } from "../../../../src/shared/llm-api";
+import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
 import type { WorkbenchHostRuntime } from "./runtime";
 
 /**
@@ -100,6 +100,14 @@ export class WorkbenchManagerHost extends TypertRemoteService {
     return this.guard((api) => {
       if (!api.llm) throw new Error("workbench/unsupported");
       return api.llm(request);
+    });
+  }
+
+  @Remote("llmCredential")
+  async llmCredential(request: LlmCredentialRequest): Promise<LlmApiResult> {
+    return this.guard((api) => {
+      if (!api.llmCredential) throw new Error("workbench/unsupported");
+      return api.llmCredential(request);
     });
   }
 

@@ -3,26 +3,35 @@ import type {
   LlmApiRequest,
   LlmCatalogResult,
   LlmConnectionDraft,
+  LlmConnectionSecretDraft,
   LlmCredentialRequest,
   LlmDescribeResult,
   LlmDiscoverResult,
+  LlmLocalCandidatesResult,
   LlmOperationStatusResult,
+  LlmSpaceDefaultResult,
   LlmSpaceObservation,
   LlmSpacePolicyResult,
 } from "../../shared/llm-api";
-import { isLlmWriteMethod, LLM_CREDENTIAL_METHOD } from "../../shared/llm-api";
+import {
+  isLlmWriteMethod,
+  LLM_CREDENTIAL_ADOPT_METHOD,
+  LLM_CREDENTIAL_DISCOVER_METHOD,
+  LLM_CREDENTIAL_METHOD,
+} from "../../shared/llm-api";
 import type { WorkbenchCommand, WorkbenchJob } from "../../shared/workbench";
 import {
   createConnectionId,
   LLM_ERROR,
   LlmConfigError,
+  compileManagedRouteId,
   normalizeConnectionId,
   PINNED_LLM_PI_AI_PROTOCOLS,
   type ConnectionId,
   type SharedModelRef,
 } from "../domain/llm-connections";
 import { policyBindsConnection } from "../domain/llm-resolution";
-import type { LlmInstanceStatusPort, LlmOperationStore, LlmProbePort } from "../ports/llm-runtime";
+import type { LlmInstanceStatusPort, LlmOperationStore, LlmProbePort, LlmSpaceSettingsPort } from "../ports/llm-runtime";
 import {
   assertNoSecretPayload,
   GlobalLlmService,
@@ -47,6 +56,7 @@ export type GlobalLlmHostOptions = {
   operations: LlmOperationStore;
   instances: LlmInstanceStatusPort;
   probe: LlmProbePort;
+  spaceSettings: LlmSpaceSettingsPort;
   assertWritable: () => void;
   submitApply: (command: LlmApplyCommand, requestId: string) => Promise<WorkbenchJob>;
   readSecret: (recordId: string) => Promise<string | undefined>;
@@ -87,6 +97,17 @@ export class GlobalLlmHost {
       case "updateSpacePolicy":
         await this.options.service.updateSpacePolicy(request.spaceId, request.shared, request.expectedRevision);
         return this.spacePolicy(request.spaceId);
+      case "spaceDefault":
+        return this.spaceDefault(request.spaceId);
+      case "updateSpaceDefault":
+        this.options.assertWritable();
+        return this.updateSpaceDefault(request.spaceId, request.model);
+      case "listLocalCandidates":
+        return this.listLocalCandidates(request.spaceId);
+      case "adoptLocal":
+        return this.adoptLocal(request.spaceId, request.routeId, request.displayName, request.expectedRevision, {
+          copyCredential: true,
+        });
       case "applyPlan":
         return this.applyPlan(request);
       case "operationStatus":
@@ -97,6 +118,15 @@ export class GlobalLlmHost {
   async dispatchCredential(payload: unknown): Promise<unknown> {
     const request = parseCredentialRequest(payload);
     this.options.assertWritable();
+    if (request.method === LLM_CREDENTIAL_DISCOVER_METHOD) {
+      return this.discoverModelsWithSecret(request.draft, request.secret);
+    }
+    if (request.method === LLM_CREDENTIAL_ADOPT_METHOD) {
+      return this.adoptLocal(request.spaceId, request.routeId, request.displayName, request.expectedRevision, {
+        secret: request.secret,
+        operationId: request.operationId,
+      });
+    }
     return this.saveConnectionWithCredential(request);
   }
 
@@ -137,7 +167,9 @@ export class GlobalLlmHost {
     return this.catalogResult(catalog, model?.connectionId);
   }
 
-  async saveConnectionWithCredential(request: LlmCredentialRequest): Promise<LlmCatalogResult> {
+  async saveConnectionWithCredential(
+    request: Extract<LlmCredentialRequest, { method: typeof LLM_CREDENTIAL_METHOD }>,
+  ): Promise<LlmCatalogResult> {
     assertNoSecretPayload(request.draft);
     const existing = await this.options.operations.get(request.operationId);
     if (existing?.status === "committed") {
@@ -245,6 +277,108 @@ export class GlobalLlmHost {
     }
     await this.options.probe.test({ ...resolved, modelId });
     return { ok: true as const, modelId, billed: true as const };
+  }
+
+  private async spaceDefault(spaceId: string): Promise<LlmSpaceDefaultResult> {
+    await this.options.service.spacePolicy(spaceId);
+    const catalog = await this.options.service.readCatalog();
+    const local = await this.options.spaceSettings.readDefault(spaceId);
+    const global = catalog.defaultModel;
+    if (local) {
+      return {
+        spaceId,
+        source: "local",
+        inheritGlobal: false,
+        local,
+        global,
+        effective: { provider: local.provider, model: local.model, origin: "local" },
+      };
+    }
+    if (global) {
+      const policy = await this.options.service.spacePolicy(spaceId);
+      if (policyBindsConnection(policy, global.connectionId)) {
+        return {
+          spaceId,
+          source: "global",
+          inheritGlobal: true,
+          local: null,
+          global,
+          effective: {
+            provider: compileManagedRouteId(global.connectionId),
+            model: global.modelId,
+            origin: "global",
+          },
+        };
+      }
+    }
+    return { spaceId, source: "none", inheritGlobal: true, local: null, global, effective: null };
+  }
+
+  private async updateSpaceDefault(spaceId: string, model: SharedModelRef | null): Promise<LlmSpaceDefaultResult> {
+    await this.options.service.spacePolicy(spaceId);
+    if (model === null) {
+      await this.options.spaceSettings.writeDefault(spaceId, null);
+      return this.spaceDefault(spaceId);
+    }
+    const connection = await this.options.service.requireConnection(model.connectionId);
+    const models = Array.isArray(connection.providerConfig.models)
+      ? connection.providerConfig.models.flatMap((item) =>
+          item && typeof item === "object" && "id" in item && typeof item.id === "string" ? [item.id] : [],
+        )
+      : [];
+    if (!models.includes(model.modelId)) {
+      throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "space default model is not in the connection catalog", {
+        modelId: model.modelId,
+      });
+    }
+    await this.options.spaceSettings.writeDefault(spaceId, {
+      provider: compileManagedRouteId(model.connectionId),
+      model: model.modelId,
+    });
+    return this.spaceDefault(spaceId);
+  }
+
+  private async listLocalCandidates(spaceId: string): Promise<LlmLocalCandidatesResult> {
+    await this.options.service.spacePolicy(spaceId);
+    return {
+      spaceId,
+      candidates: await this.options.spaceSettings.listLocal(spaceId),
+    };
+  }
+
+  private async adoptLocal(
+    spaceId: string,
+    routeId: string,
+    displayName: string,
+    expectedRevision: number,
+    options: { copyCredential?: boolean; secret?: string; operationId?: string },
+  ): Promise<LlmCatalogResult> {
+    await this.options.service.spacePolicy(spaceId);
+    const providerConfig = await this.options.spaceSettings.readLocalProvider(spaceId, routeId);
+    const secret =
+      options.secret ??
+      (options.copyCredential ? await this.options.spaceSettings.readCopyableSecret(spaceId, routeId) : undefined);
+    if (!secret) {
+      throw new LlmConfigError(LLM_ERROR.CREDENTIAL_MISSING, "local credential cannot be copied; re-enter the key", {
+        spaceId,
+      });
+    }
+    const operationId = options.operationId ?? createConnectionId();
+    return this.saveConnectionWithCredential({
+      method: LLM_CREDENTIAL_METHOD,
+      draft: { displayName, providerConfig },
+      secret,
+      expectedRevision,
+      operationId,
+    });
+  }
+
+  private async discoverModelsWithSecret(draft: LlmConnectionSecretDraft, secret: string): Promise<LlmDiscoverResult> {
+    assertNoSecretPayload(draft);
+    const api = typeof draft.providerConfig.api === "string" ? draft.providerConfig.api : "";
+    const baseURL = typeof draft.providerConfig.baseURL === "string" ? draft.providerConfig.baseURL : "";
+    const result = await this.options.probe.discover({ api, baseURL, apiKey: secret });
+    return result;
   }
 
   private async spacePolicy(spaceId: string): Promise<LlmSpacePolicyResult> {
@@ -362,7 +496,7 @@ export class GlobalLlmHost {
     const api = typeof draft.providerConfig.api === "string" ? draft.providerConfig.api : "";
     const baseURL = typeof draft.providerConfig.baseURL === "string" ? draft.providerConfig.baseURL : "";
     let apiKey: string | undefined;
-    if (draft.auth.kind === "api-key") {
+    if (draft.auth?.kind === "api-key") {
       apiKey = await this.options.readSecret(draft.auth.credentialRecordId);
       if (!apiKey) {
         throw new LlmConfigError(LLM_ERROR.CREDENTIAL_MISSING, "draft credential record is not readable");
@@ -469,6 +603,29 @@ export function parseLlmApiRequest(payload: unknown): LlmApiRequest {
     case "operationStatus":
       expectKeys(body, ["method", "operationId"]);
       return { method, operationId: parseRequestId(body.operationId) };
+    case "spaceDefault":
+    case "listLocalCandidates":
+      expectKeys(body, ["method", "spaceId"]);
+      return { method, spaceId: parseSpaceId(body.spaceId) };
+    case "updateSpaceDefault":
+      expectKeys(body, ["method", "spaceId", "model"]);
+      return { method, spaceId: parseSpaceId(body.spaceId), model: parseModel(body.model) };
+    case "adoptLocal":
+      expectKeys(body, ["method", "spaceId", "routeId", "displayName", "expectedRevision", "copyCredential"]);
+      if (body.copyCredential !== true) {
+        throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "adoptLocal requires explicit copyCredential: true");
+      }
+      if (typeof body.routeId !== "string" || typeof body.displayName !== "string") {
+        throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "adoptLocal requires routeId and displayName");
+      }
+      return {
+        method,
+        spaceId: parseSpaceId(body.spaceId),
+        routeId: body.routeId,
+        displayName: body.displayName,
+        expectedRevision: parseRevision(body.expectedRevision),
+        copyCredential: true,
+      };
     default:
       throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "unknown llm method");
   }
@@ -476,17 +633,35 @@ export function parseLlmApiRequest(payload: unknown): LlmApiRequest {
 
 export function parseCredentialRequest(payload: unknown): LlmCredentialRequest {
   const body = expectObject(payload);
-  expectKeys(body, ["method", "draft", "secret", "expectedRevision", "operationId"]);
-  if (body.method !== LLM_CREDENTIAL_METHOD) {
-    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llmCredential only accepts saveConnectionWithCredential");
-  }
   if (typeof body.secret !== "string" || body.secret.length === 0) {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "credential secret must be a non-empty string");
   }
-  const draft = parseSecretDraft(body.draft);
+  if (body.method === LLM_CREDENTIAL_DISCOVER_METHOD) {
+    expectKeys(body, ["method", "draft", "secret"]);
+    return { method: LLM_CREDENTIAL_DISCOVER_METHOD, draft: parseSecretDraft(body.draft), secret: body.secret };
+  }
+  if (body.method === LLM_CREDENTIAL_ADOPT_METHOD) {
+    expectKeys(body, ["method", "spaceId", "routeId", "displayName", "secret", "expectedRevision", "operationId"]);
+    if (typeof body.routeId !== "string" || typeof body.displayName !== "string") {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "adoptLocal requires routeId and displayName");
+    }
+    return {
+      method: LLM_CREDENTIAL_ADOPT_METHOD,
+      spaceId: parseSpaceId(body.spaceId),
+      routeId: body.routeId,
+      displayName: body.displayName,
+      secret: body.secret,
+      expectedRevision: parseRevision(body.expectedRevision),
+      operationId: parseRequestId(body.operationId),
+    };
+  }
+  expectKeys(body, ["method", "draft", "secret", "expectedRevision", "operationId"]);
+  if (body.method !== LLM_CREDENTIAL_METHOD) {
+    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llmCredential method is not supported");
+  }
   return {
     method: LLM_CREDENTIAL_METHOD,
-    draft,
+    draft: parseSecretDraft(body.draft),
     secret: body.secret,
     expectedRevision: parseRevision(body.expectedRevision),
     operationId: parseRequestId(body.operationId),
@@ -495,7 +670,7 @@ export function parseCredentialRequest(payload: unknown): LlmCredentialRequest {
 
 function parseDraft(value: unknown): LlmConnectionDraft {
   const draft = expectObject(value);
-  expectKeys(draft, ["displayName", "providerConfig", "auth"], ["id", "enabled"]);
+  expectKeys(draft, ["displayName", "providerConfig"], ["id", "enabled", "auth"]);
   assertNoSecretPayload(draft);
   if (typeof draft.displayName !== "string" || draft.displayName === "") {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "displayName is required");
@@ -508,11 +683,11 @@ function parseDraft(value: unknown): LlmConnectionDraft {
     displayName: draft.displayName,
     ...(typeof draft.enabled === "boolean" ? { enabled: draft.enabled } : {}),
     providerConfig: draft.providerConfig as Record<string, unknown>,
-    auth: parseAuth(draft.auth),
+    ...(draft.auth !== undefined ? { auth: parseAuth(draft.auth) } : {}),
   };
 }
 
-function parseSecretDraft(value: unknown): LlmCredentialRequest["draft"] {
+function parseSecretDraft(value: unknown): LlmConnectionSecretDraft {
   const draft = expectObject(value);
   expectKeys(draft, ["displayName", "providerConfig"], ["id", "enabled", "auth"]);
   assertNoSecretPayload(draft);

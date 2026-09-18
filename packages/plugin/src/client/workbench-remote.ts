@@ -1,5 +1,5 @@
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
-import type { LlmApiRequest, LlmApiResult } from "../../../../src/shared/llm-api";
+import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
 import type {
   WorkbenchApi,
@@ -138,6 +138,8 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
     workbenchPackage: () => callRemote<WorkbenchPackageRelease | null>(connection, "workbench/workbenchPackage", {}, undefined, true),
     backups: (spaceId) => callRemote<WorkbenchBackup[]>(connection, "workbench/backups", { spaceId }),
     llm: (request: LlmApiRequest) => callRemote<LlmApiResult>(connection, "workbench/llm", { request }),
+    llmCredential: (request: LlmCredentialRequest) =>
+      callRemote<LlmApiResult>(connection, "workbench/llmCredential", { request }),
   };
 }
 

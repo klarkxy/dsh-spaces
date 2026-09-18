@@ -29,7 +29,7 @@ export type ConnectionDraft = {
   displayName: string;
   enabled?: boolean;
   providerConfig: Record<string, unknown>;
-  auth: SharedAuth;
+  auth?: SharedAuth;
 };
 
 export type ConnectionSecretDraft = Omit<ConnectionDraft, "auth">;
@@ -296,7 +296,11 @@ export class GlobalLlmService {
         api: String(providerConfig.api),
       });
     }
-    if (draft.auth.kind === "api-key" && !parseManagedRecordKey(draft.auth.credentialRecordId)) {
+    const auth = draft.auth ?? existing?.auth;
+    if (!auth) {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "new connections require auth");
+    }
+    if (auth.kind === "api-key" && !parseManagedRecordKey(auth.credentialRecordId)) {
       throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "saveConnection only accepts a managed credential record id");
     }
     return parseConnection({
@@ -306,7 +310,7 @@ export class GlobalLlmService {
       enabled: draft.enabled !== false,
       backend: "llm-pi-ai",
       providerConfig,
-      auth: draft.auth,
+      auth,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });

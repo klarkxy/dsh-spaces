@@ -377,6 +377,18 @@ export function assertPublicEndpoint(url: string): void {
   }
 }
 
+/** Origin + path only. Never include userinfo, query, or fragment. */
+export function redactEndpoint(baseURL: unknown): string {
+  if (typeof baseURL !== "string" || baseURL.trim() === "") return "";
+  try {
+    const parsed = new URL(baseURL);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return `${parsed.protocol}//${parsed.host}${path}`;
+  } catch {
+    return "";
+  }
+}
+
 function parseAuth(value: unknown): SharedAuth {
   if (!isRecord(value) || typeof value.kind !== "string") {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "connection auth is required");

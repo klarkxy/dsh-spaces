@@ -177,6 +177,7 @@ const createInputSchema = z
     name: spaceIdSchema,
     displayName: displayNameSchema.optional(),
     icon: iconSchema.optional(),
+    useSharedLlm: z.boolean().optional(),
   })
   .strict();
 
@@ -415,7 +416,7 @@ const llmDraftSchema = z
     displayName: z.string().min(1).max(80),
     enabled: z.boolean().optional(),
     providerConfig: z.record(z.string(), z.unknown()),
-    auth: llmAuthSchema,
+    auth: llmAuthSchema.optional(),
   })
   .strict();
 const llmModelRefSchema = z.object({ connectionId: connectionIdSchema, modelId: z.string().min(1).max(200) }).strict();
@@ -450,6 +451,19 @@ export const llmApiRequestSchema = z.discriminatedUnion("method", [
       spaceId: spaceIdSchema,
       shared: llmSelectionSchema,
       expectedRevision: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z.object({ method: z.literal("spaceDefault"), spaceId: spaceIdSchema }).strict(),
+  z.object({ method: z.literal("updateSpaceDefault"), spaceId: spaceIdSchema, model: llmModelRefSchema.nullable() }).strict(),
+  z.object({ method: z.literal("listLocalCandidates"), spaceId: spaceIdSchema }).strict(),
+  z
+    .object({
+      method: z.literal("adoptLocal"),
+      spaceId: spaceIdSchema,
+      routeId: z.string().min(1).max(200),
+      displayName: z.string().min(1).max(80),
+      expectedRevision: z.number().int().nonnegative(),
+      copyCredential: z.literal(true),
     })
     .strict(),
   z
@@ -554,6 +568,42 @@ export const llmApiResultSchema = z.union([
       connectionId: connectionIdSchema.optional(),
     })
     .strict(),
+  z
+    .object({
+      spaceId: spaceIdSchema,
+      source: z.enum(["local", "global", "none"]),
+      inheritGlobal: z.boolean(),
+      local: z.object({ provider: z.string(), model: z.string() }).strict().nullable(),
+      global: llmModelRefSchema.nullable(),
+      effective: z
+        .object({
+          provider: z.string(),
+          model: z.string(),
+          origin: z.enum(["local", "global"]),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      spaceId: spaceIdSchema,
+      candidates: z
+        .array(
+          z
+            .object({
+              routeId: z.string(),
+              displayName: z.string(),
+              api: z.string().optional(),
+              origin: z.string(),
+              modelIds: z.array(z.string()).max(1000),
+              credentialCopy: z.enum(["available", "reenter", "unsupported"]),
+            })
+            .strict(),
+        )
+        .max(256),
+    })
+    .strict(),
   z.object({ ok: z.literal(true), modelId: z.string(), billed: z.literal(true) }).strict(),
   z
     .object({
@@ -565,4 +615,43 @@ export const llmApiResultSchema = z.union([
     })
     .strict(),
   workbenchJobSchema,
+]);
+
+const llmSecretDraftSchema = z
+  .object({
+    id: connectionIdSchema.optional(),
+    displayName: z.string().min(1).max(80),
+    enabled: z.boolean().optional(),
+    providerConfig: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
+export const llmCredentialRequestSchema = z.discriminatedUnion("method", [
+  z
+    .object({
+      method: z.literal("saveConnectionWithCredential"),
+      draft: llmSecretDraftSchema,
+      secret: z.string().min(1).max(16_384),
+      expectedRevision: z.number().int().nonnegative(),
+      operationId: requestIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      method: z.literal("discoverModels"),
+      draft: llmSecretDraftSchema,
+      secret: z.string().min(1).max(16_384),
+    })
+    .strict(),
+  z
+    .object({
+      method: z.literal("adoptLocal"),
+      spaceId: spaceIdSchema,
+      routeId: z.string().min(1).max(200),
+      displayName: z.string().min(1).max(80),
+      secret: z.string().min(1).max(16_384),
+      expectedRevision: z.number().int().nonnegative(),
+      operationId: requestIdSchema,
+    })
+    .strict(),
 ]);

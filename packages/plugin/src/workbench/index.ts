@@ -22,3 +22,5 @@ export {
 export { validateWorkbenchIcon, KNOWN_GLYPHS } from "./icons";
 export { t, defaultWorkbenchLocale, type WorkbenchLocale } from "./i18n";
 export { WORKBENCH_STORAGE_KEY, readPersist, writePersist, persistLooksSafe } from "./persistence";
+export { LlmModelCenter } from "./llm/center";
+export { createWorkbenchLlmClient, type LlmUiClient, type LlmUiSpace } from "./llm/client";

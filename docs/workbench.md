@@ -48,7 +48,7 @@ Unregistered DSH processes that were never started by this supervisor are not re
 
 Unpackaged desktop and tests refuse the real `~/.dsh` unless the process is explicitly authorized. Paths on the supervisor CLI stay on the Node process. The browser never submits filesystem paths, CLI commands, or launch tokens.
 
-Shared LLM connections are a Home-level catalog, not `web` settings. New workbench patches also isolate `settings` and `credentials` under `hub/<name>/`. Management uses `POST /api/workbench/llm` for redacted commands and `POST /api/workbench/llmCredential` for the Key; apply plans persist as secret-free `llm.apply` jobs. See [the global LLM plan](plans/global-llm-connections.md) and [the P0 compatibility matrix](compat/global-llm-matrix.md).
+Shared LLM connections are a Home-level catalog, not `web` settings. New workbench patches also isolate `settings` and `credentials` under `hub/<name>/`. Management uses `POST /api/workbench/llm` for redacted commands and `POST /api/workbench/llmCredential` for the Key; apply plans persist as secret-free `llm.apply` jobs. The manager UI is **Settings → Models and connections** (桌面同一入口). New spaces can opt in to all shared connections; web and existing spaces stay unjoined until an explicit bind. See [the global LLM plan](plans/global-llm-connections.md) and [the P0 compatibility matrix](compat/global-llm-matrix.md).
 
 ## Build, pack, start (from this repo)
 

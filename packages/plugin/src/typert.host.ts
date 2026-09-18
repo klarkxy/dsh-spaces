@@ -25,6 +25,7 @@ import {
   workbenchViewSchema,
   llmApiRequestSchema,
   llmApiResultSchema,
+  llmCredentialRequestSchema,
 } from "./host/workbench-schemas";
 
 export {
@@ -192,6 +193,13 @@ export const TYPERT = {
       [param("request", llmApiRequestSchema, "@dsh-spaces/plugin/types#LlmApiRequest")],
       result("@dsh-spaces/plugin/types#LlmApiResult", llmApiResultSchema),
     ),
+    invocation(
+      "workbench",
+      "llmCredential",
+      managerFile,
+      [param("request", llmCredentialRequestSchema, "@dsh-spaces/plugin/types#LlmCredentialRequest")],
+      result("@dsh-spaces/plugin/types#LlmApiResult", llmApiResultSchema),
+    ),
   ],
   model: {
     services: [],
@@ -216,5 +224,6 @@ export const MANAGER_METHODS = [
   "workbenchPackage",
   "backups",
   "llm",
+  "llmCredential",
 ] as const;
 export const SPACES_READ_METHODS = ["overview", "detail"] as const;

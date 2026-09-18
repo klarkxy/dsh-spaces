@@ -14,6 +14,7 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../../../src/shared/workbench";
+import { createWorkbenchLlmClient, type LlmUiClient } from "./llm/client";
 import { validateWorkbenchIcon } from "./icons";
 import { localizeError, t, type WorkbenchLocale, type WorkbenchMessageKey } from "./i18n";
 import {
@@ -78,6 +79,7 @@ export interface WorkbenchUiState {
   commandError: string | null;
   commandPending: boolean;
   homeTab: HomeTab;
+  settingsTab: "general" | "llm";
   detail: SpaceDetail | null;
   detailStatus: "idle" | "loading" | "ready" | "error";
   backups: WorkbenchBackup[];
@@ -184,6 +186,7 @@ export class WorkbenchController {
       commandError: null,
       commandPending: false,
       homeTab: "overview",
+      settingsTab: "general",
       detail: null,
       detailStatus: "idle",
       backups: [],
@@ -316,7 +319,26 @@ export class WorkbenchController {
     this.patch({ overlay: { type: "icon", spaceId } });
   };
 
-  openSettings = (): void => this.patch({ overlay: { type: "settings" } });
+  openSettings = (): void => this.patch({ overlay: { type: "settings" }, settingsTab: "general" });
+
+  setSettingsTab = (settingsTab: "general" | "llm"): void => {
+    this.patch({ settingsTab });
+  };
+
+  private cachedLlmClient: LlmUiClient | null = null;
+
+  llmClient = (): LlmUiClient => {
+    this.cachedLlmClient ??= createWorkbenchLlmClient(this.api, this.env.uuid);
+    return this.cachedLlmClient;
+  };
+
+  llmSpaces = (): import("./llm/client").LlmUiSpace[] =>
+    (this.ui.state?.spaces ?? []).map((space) => ({
+      spaceId: space.id,
+      displayName: space.displayName,
+      status: space.status,
+      generation: space.generation,
+    }));
 
   openDetail = (spaceId: string): void => {
     this.patch({ overlay: { type: "detail", spaceId } });
@@ -331,7 +353,7 @@ export class WorkbenchController {
 
   closePlan = (): void => this.patch({ pendingPlan: null, planError: null });
 
-  createSpace = (input: { name: string; displayName?: string; icon?: string }): void => {
+  createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean }): void => {
     const name = input.name.trim().toLowerCase();
     if (!NAME_RE.test(name)) {
       this.patch({ commandError: this.msg("app.nameInvalid") });
@@ -348,7 +370,12 @@ export class WorkbenchController {
     }
     void this.submit({
       kind: "space.create",
-      input: { name, displayName: input.displayName?.trim() || undefined, icon: icon.icon || undefined },
+      input: {
+        name,
+        displayName: input.displayName?.trim() || undefined,
+        icon: icon.icon || undefined,
+        ...(input.useSharedLlm === undefined ? {} : { useSharedLlm: input.useSharedLlm }),
+      },
     });
     this.patch({ overlay: null });
   };
