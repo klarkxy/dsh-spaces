@@ -71,4 +71,4 @@ npm run typecheck:spaces
 npm run test:spaces
 ```
 
-P0 did not spawn full `dsh --profile` web-app processes for a paid model request. The multi-process proof uses three Node processes, each with the published `0.1.5-rc.2` settings and credentials providers.
+P0 evidence on this branch: `npm run test:llm` 16/16 pass; `tsc -p tsconfig.spaces.json` clean. The multi-process proof uses three Node processes, each with the published `0.1.5-rc.2` settings and credentials providers. It did not spawn full `dsh --profile` web-app processes for a paid model request.
