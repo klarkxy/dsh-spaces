@@ -23,9 +23,15 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] `mode=all` is a live reference; disabled selected bindings still block delete.
 - [x] Credential write then failed catalog publish leaves the original catalog and reports the leftover record.
 
+## P2 — official adapter streaming
+
+- [x] Freeze a catalog/policy snapshot per Space process.
+- [x] Attach official `llm` + `llm-pi-ai` without replacing the adapter.
+- [x] `llm/stream` guard refuses hijacked managed routes.
+- [x] Two Spaces stream one shared mock through the official adapter; local same-name models stay distinct.
+
 ## Later phases
 
-- P2 official adapter streaming through the bridge
 - P3 management APIs and apply plan
 - P4 global model center UI
 - P5 explicit adoption and secret-free export

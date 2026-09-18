@@ -12,4 +12,11 @@ export {
   SHARED_CREDENTIAL_SOURCE,
   type SharedCredentialLookup,
 } from "./credentials-provider";
+export { installManagedRequestGuard, type BridgeStatusReader } from "./request-guard";
+export {
+  freezeSpaceSnapshot,
+  openSpaceLlmBridge,
+  type OpenedSpaceLlmBridge,
+} from "./space-bridge";
+export { attachOfficialLlm } from "./official-host";
 export { LLM_ERROR, LlmConfigError, sharedReadOnlyError, managedRouteConflictError, missingSharedCredentialError } from "./errors";
