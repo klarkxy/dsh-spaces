@@ -4,7 +4,9 @@
  * Proves the package is packable and embedded in the plugin payload list.
  * Does not install into a live DSH Home and does not touch ~/.dsh.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LLM_REQUIRED, PLUGIN_REQUIRED } from "./pack-spaces-plugin.mjs";
@@ -30,5 +32,23 @@ for (const rel of LLM_REQUIRED) {
   }
   if (!existsSync(join(LLM_DIR, rel))) fail(`missing ${rel}`);
 }
+const dest = mkdtempSync(join(tmpdir(), "dsh-llm-dist-"));
+const packed = spawnSync("npm", ["pack", "--ignore-scripts", "--pack-destination", dest], {
+  cwd: LLM_DIR,
+  encoding: "utf8",
+});
+if (packed.status !== 0) fail(`npm pack llm-bridge failed: ${packed.stderr}`);
+else {
+  const name = packed.stdout.trim().split("\n").at(-1) ?? "";
+  if (!/dsh-spaces-llm-bridge-.*\.tgz/.test(name)) fail(`unexpected pack name ${name}`);
+  const listed = spawnSync("tar", ["-tzf", join(dest, name)], { encoding: "utf8" });
+  if (listed.status !== 0) fail(`could not list ${name}`);
+  for (const rel of ["package.json", "README.md", "LICENSE", "cordis.patch.yml"]) {
+    if (!listed.stdout.includes(`package/${rel}`)) fail(`packed tarball missing ${rel}`);
+  }
+  if (/credentials\.yaml|catalog\.json|\bsk-/.test(listed.stdout)) fail("packed tarball listed a secret-bearing path");
+  rmSync(dest, { recursive: true, force: true });
+}
+
 if (process.exitCode) process.exit(process.exitCode);
 console.log("PASS  llm-bridge distribution contract");

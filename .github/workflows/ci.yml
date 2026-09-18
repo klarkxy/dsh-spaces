@@ -25,6 +25,9 @@ jobs:
       - run: npm test
       - run: npm run test:spaces
       - run: npm run test:llm
+      - run: npm run test:llm:integration
+      - run: npm run validate:llm:secrets
+      - run: npm run validate:llm:distribution
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
       - run: npm run build:spaces
@@ -68,6 +71,7 @@ jobs:
       - run: npm ci
       - run: npm run build:spaces
       - run: npx playwright install chromium
+      - run: npm run test:llm:browser
       - name: Install official latest CLI and package manager for acceptance
         run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@latest pnpm@10.29.2 --no-audit --no-fund
       - name: Standard plugin installation in a fresh Home

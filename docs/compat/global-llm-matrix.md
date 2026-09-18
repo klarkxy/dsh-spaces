@@ -59,7 +59,7 @@ Inspection used the published npm tarballs, not the upstream default-branch sour
 
 | CLI / SDK | Shared LLM | Unjoined Space |
 |---|---|---|
-| `0.1.5-rc.2` | enable after P0–P6 gates | unchanged |
+| `0.1.5-rc.2` | enable; P0–P6 gates are in-repo | unchanged |
 | `0.1.5-rc.1` | refuse this new capability | unchanged; do not break |
 | unknown exact version | refuse this new capability | unchanged |
 
@@ -67,8 +67,11 @@ Inspection used the published npm tarballs, not the upstream default-branch sour
 
 ```sh
 npm run test:llm
+npm run test:llm:integration
+npm run test:llm:browser
+npm run validate:llm:secrets
+npm run validate:llm:distribution
 npm run typecheck:spaces
-npm run test:spaces
 ```
 
-P0 evidence on this branch: `npm run test:llm` 16/16 pass; `tsc -p tsconfig.spaces.json` clean. The multi-process proof uses three Node processes, each with the published `0.1.5-rc.2` settings and credentials providers. It did not spawn full `dsh --profile` web-app processes for a paid model request.
+P6 evidence: unit + three-process official adapter stream + browser model-center + secret/distribution scanners. The multi-process proof uses three Node processes with published `0.1.5-rc.2` settings, credentials, `llm`, and `llm-pi-ai`. It did not spawn full `dsh --profile` web-app processes for a paid model request. Windows ACL inspection is not claimed from a POSIX agent. See [acceptance](global-llm-acceptance.md).
