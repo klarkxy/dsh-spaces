@@ -33,6 +33,7 @@ import { gunzipSync } from "node:zlib";
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_DIR = join(REPO, "packages", "plugin");
 const VIEW_DIR = join(REPO, "packages", "view-bridge");
+const LLM_DIR = join(REPO, "packages", "llm-bridge");
 const SUPERVISOR_DIR = join(REPO, "packages", "supervisor");
 const PACK_MS = 60_000;
 
@@ -53,6 +54,10 @@ const PLUGIN_REQUIRED = [
   "lib/view-bridge/cordis.patch.yml",
   "lib/view-bridge/lib/index.js",
   "lib/view-bridge/lib/client.js",
+  "lib/llm-bridge/package.json",
+  "lib/llm-bridge/LICENSE",
+  "lib/llm-bridge/cordis.patch.yml",
+  "lib/llm-bridge/lib/index.js",
 ];
 
 const VIEW_REQUIRED = [
@@ -62,6 +67,14 @@ const VIEW_REQUIRED = [
   "cordis.patch.yml",
   "lib/index.js",
   "lib/client.js",
+];
+
+const LLM_REQUIRED = [
+  "package.json",
+  "README.md",
+  "LICENSE",
+  "cordis.patch.yml",
+  "lib/index.js",
 ];
 
 const FORBIDDEN_PACKED = [
@@ -321,6 +334,12 @@ function preflightOnDisk() {
     directory: "packages/view-bridge",
     keywords: ["dsh-plugin", "deepseek-harness"],
   });
+  const llmPkg = readPkg(LLM_DIR);
+  assertManifest(llmPkg, {
+    name: "@dsh-spaces/llm-bridge",
+    directory: "packages/llm-bridge",
+    keywords: ["dsh-plugin", "deepseek-harness"],
+  });
   if (supervisorPkg.private !== true) {
     throw new Error("@dsh-spaces/supervisor must stay private; the plugin tarball is the distribution unit");
   }
@@ -334,13 +353,17 @@ function preflightOnDisk() {
   for (const rel of VIEW_REQUIRED) {
     if (!existsSync(join(VIEW_DIR, rel))) missing.push(`packages/view-bridge/${rel}`);
   }
+  for (const rel of LLM_REQUIRED) {
+    if (!existsSync(join(LLM_DIR, rel))) missing.push(`packages/llm-bridge/${rel}`);
+  }
   if (missing.length) {
     throw new Error(`prebuilt entries missing (run npm run build:spaces from the repo root): ${missing.join(", ")}`);
   }
   const pluginStray = warnStrayTarballs(PLUGIN_DIR, "packages/plugin");
   const viewStray = warnStrayTarballs(VIEW_DIR, "packages/view-bridge");
+  warnStrayTarballs(LLM_DIR, "packages/llm-bridge");
   const dest = defaultPackDest();
-  if (inside(PLUGIN_DIR, dest) || inside(VIEW_DIR, dest) || inside(SUPERVISOR_DIR, dest)) {
+  if (inside(PLUGIN_DIR, dest) || inside(VIEW_DIR, dest) || inside(LLM_DIR, dest) || inside(SUPERVISOR_DIR, dest)) {
     throw new Error(`pack destination is inside a package tree: ${dest}`);
   }
   nestedTgzFixture();
@@ -379,23 +402,27 @@ async function main() {
   if (preflightOnly) {
     const pluginDry = runNpmPack(nodeExe, npmCli, PLUGIN_DIR, dest, { dryRun: true });
     const viewDry = runNpmPack(nodeExe, npmCli, VIEW_DIR, dest, { dryRun: true });
+    const llmDry = runNpmPack(nodeExe, npmCli, LLM_DIR, dest, { dryRun: true });
     assertPackedFiles("@dsh-spaces/plugin", pluginDry.files, PLUGIN_REQUIRED);
     assertPackedFiles("@dsh-spaces/view-bridge", viewDry.files, VIEW_REQUIRED);
+    assertPackedFiles("@dsh-spaces/llm-bridge", llmDry.files, LLM_REQUIRED);
     pass("preflight dry-run file lists include prebuilt payload and exclude nested tarballs");
     const preview = join(dest, pluginDry.filename);
     printAddCommand(preview);
     console.log("(preflight: command path is the destination filename; tarball is not written)");
-    return { status: "preflight", dest, plugin: pluginDry, view: viewDry };
+    return { status: "preflight", dest, plugin: pluginDry, view: viewDry, llm: llmDry };
   }
 
   const plugin = packOne(nodeExe, npmCli, PLUGIN_DIR, dest, PLUGIN_REQUIRED, "@dsh-spaces/plugin");
   const view = packOne(nodeExe, npmCli, VIEW_DIR, dest, VIEW_REQUIRED, "@dsh-spaces/view-bridge");
+  const llm = packOne(nodeExe, npmCli, LLM_DIR, dest, LLM_REQUIRED, "@dsh-spaces/llm-bridge");
   const command = printAddCommand(plugin.path);
   const report = {
     status: "packed",
     dest,
     plugin,
     view,
+    llm,
     add: command,
     unpublished: true,
     note: `${pluginPkg.name}@${pluginPkg.version} is the distribution unit. Supervisor stays private. Not on npm.`,
@@ -415,6 +442,7 @@ if (import.meta.main) {
 export {
   PLUGIN_REQUIRED,
   VIEW_REQUIRED,
+  LLM_REQUIRED,
   defaultPackDest,
   assertNoSpaces,
   listTarEntries,

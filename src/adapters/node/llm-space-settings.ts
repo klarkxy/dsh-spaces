@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseDocument, isMap, isScalar, isSeq, type YAMLMap } from "yaml";
 import {
@@ -11,10 +11,12 @@ import {
 import { atomicWrite } from "../../main/atomic";
 import type { LlmLocalCandidate } from "../../shared/llm-api";
 import type { LlmSpaceSettingsPort } from "../../core/ports/llm-runtime";
+import { parseLlmShareManifest, type LlmShareManifest } from "../../core/domain/llm-share";
 import { assertSafeSpaceId, spaceDataRoot } from "./llm-policy-store";
 
 export const AGENT_DEFAULT_MODEL_NAMESPACE = "agent-default-model";
 export const LLM_PI_AI_NAMESPACE = "llm-pi-ai";
+export const LLM_IMPORT_FILENAME = "llm-import.json";
 
 export type SpaceDefaultModel = {
   provider: string;
@@ -222,5 +224,23 @@ export class FileLlmSpaceSettings implements LlmSpaceSettingsPort {
 
   async readCopyableSecret(spaceId: string, routeId: string) {
     return readCopyableLocalSecret(this.home, spaceId, routeId);
+  }
+
+  async readImport(spaceId: string): Promise<LlmShareManifest | null> {
+    const path = join(spaceDataRoot(this.home, spaceId), LLM_IMPORT_FILENAME);
+    if (!existsSync(path)) return null;
+    return parseLlmShareManifest(JSON.parse(readFileSync(path, "utf8")) as unknown);
+  }
+
+  async writeImport(spaceId: string, manifest: LlmShareManifest): Promise<void> {
+    const parsed = parseLlmShareManifest(manifest);
+    const path = join(spaceDataRoot(this.home, spaceId), LLM_IMPORT_FILENAME);
+    atomicWrite(path, `${JSON.stringify(parsed, null, 2)}\n`);
+  }
+
+  async clearImport(spaceId: string): Promise<void> {
+    const path = join(spaceDataRoot(this.home, spaceId), LLM_IMPORT_FILENAME);
+    if (!existsSync(path)) return;
+    unlinkSync(path);
   }
 }

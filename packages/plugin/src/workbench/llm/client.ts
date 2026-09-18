@@ -9,8 +9,11 @@ import type {
   LlmDeletePreview,
   LlmDescribeResult,
   LlmDiscoverResult,
+  LlmImportedRequirementsResult,
   LlmLocalCandidatesResult,
   LlmOperationStatusResult,
+  LlmShareMapping,
+  LlmSharePreviewResult,
   LlmSpaceDefaultResult,
   LlmSpaceObservation,
   LlmSpacePolicyResult,
@@ -55,6 +58,9 @@ export interface LlmUiClient {
     expectedRevision: number,
     copyCredential: true,
   ): Promise<LlmCatalogResult>;
+  previewShare(spaceId: string): Promise<LlmSharePreviewResult>;
+  importedRequirements(spaceId: string): Promise<LlmImportedRequirementsResult>;
+  mapImported(spaceId: string, mappings: LlmShareMapping[], expectedRevision: number): Promise<LlmSpacePolicyResult>;
   adoptLocalWithSecret(
     spaceId: string,
     routeId: string,
@@ -128,6 +134,20 @@ function asDefault(result: LlmApiResult): LlmSpaceDefaultResult {
   return result as LlmSpaceDefaultResult;
 }
 
+function asShare(result: LlmApiResult): LlmSharePreviewResult {
+  if (!result || typeof result !== "object" || !("requirements" in result) || !("adapterRequired" in result)) {
+    throw new Error("workbench/unavailable");
+  }
+  return result as LlmSharePreviewResult;
+}
+
+function asImported(result: LlmApiResult): LlmImportedRequirementsResult {
+  if (!result || typeof result !== "object" || !("mappingRequired" in result)) {
+    throw new Error("workbench/unavailable");
+  }
+  return result as LlmImportedRequirementsResult;
+}
+
 function asLocals(result: LlmApiResult): LlmLocalCandidatesResult {
   if (!result || typeof result !== "object" || !("candidates" in result)) {
     throw new Error("workbench/unavailable");
@@ -188,6 +208,10 @@ export function createWorkbenchLlmClient(api: Pick<WorkbenchApi, "llm" | "llmCre
     spaceDefault: async (spaceId) => asDefault(await llm({ method: "spaceDefault", spaceId })),
     updateSpaceDefault: async (spaceId, model) => asDefault(await llm({ method: "updateSpaceDefault", spaceId, model })),
     listLocalCandidates: async (spaceId) => asLocals(await llm({ method: "listLocalCandidates", spaceId })),
+    previewShare: async (spaceId) => asShare(await llm({ method: "previewShare", spaceId })),
+    importedRequirements: async (spaceId) => asImported(await llm({ method: "importedRequirements", spaceId })),
+    mapImported: async (spaceId, mappings, expectedRevision) =>
+      asPolicy(await llm({ method: "mapImported", spaceId, mappings, expectedRevision })),
     adoptLocal: async (spaceId, routeId, displayName, expectedRevision, copyCredential) =>
       asCatalog(await llm({ method: "adoptLocal", spaceId, routeId, displayName, expectedRevision, copyCredential })),
     adoptLocalWithSecret: async (spaceId, routeId, displayName, secret, expectedRevision, operationId) =>

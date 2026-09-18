@@ -1,0 +1,3 @@
+bundle:
+  - id: dsh-spaces-llm-bridge
+    name: '@dsh-spaces/llm-bridge'

@@ -25,10 +25,16 @@
   },
   "type": "module",
   "main": "./lib/index.js",
-  "files": ["lib", "README.md", "LICENSE"],
+  "files": ["lib", "README.md", "LICENSE", "cordis.patch.yml"],
   "exports": {
     ".": "./lib/index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
