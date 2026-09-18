@@ -4,6 +4,7 @@ export * from "../../../src/core/domain/llm-connections";
 export * from "../../../src/core/domain/llm-resolution";
 export * from "../../../src/core/application/maintenance-gate";
 export * from "../../../src/core/application/restore-session";
+export * from "../../../src/core/application/global-llm-service";
 export type * from "../../../src/core/ports/operation-lock";
 export type * from "../../../src/core/ports/restore";
 export type * from "../../../src/core/ports/llm-store";
