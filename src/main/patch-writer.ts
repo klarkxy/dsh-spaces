@@ -14,13 +14,20 @@ import { runDsh } from "./dsh-cli";
 export {
   SESSION_ROW_ID,
   STORAGE_ROW_ID,
+  SETTINGS_ROW_ID,
+  CREDENTIALS_ROW_ID,
   PatchForbiddenError,
   PatchVerifyError,
   applyIsolationPatch,
   assertDumpPatched,
+  assertDumpConfigIsolated,
+  configPathExpr,
+  extractConfigField,
   extractRoot,
+  isExpectedIsolationPath,
   isExpectedIsolationRoot,
   isolationExpr,
+  patchTextLooksConfigIsolated,
   patchTextLooksIsolated,
 } from "../core/domain/isolation";
 

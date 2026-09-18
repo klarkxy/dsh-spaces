@@ -259,6 +259,7 @@ export const zh: Messages = {
   "errors.processStillRunning": "停止后 {name} 仍在运行。",
   "errors.missingDumpRow": "{name} 的 dump-config 中缺少 {id}",
   "errors.dumpRootMismatch": "{id} 的 root 为 {actual}，期望 hub/{name}/{kind}",
+  "errors.dumpPathMismatch": "{id} 的 path 为 {actual}，期望 hub/{name}/{file}",
   "errors.dumpConfigFailed": "dump-config 退出码 {code}：{detail}",
   "errors.pluginAddFailed": "plugin add {spec} 失败（{code}）：{detail}",
   "errors.pluginRemoveFailed": "plugin remove {spec} 失败（{code}）：{detail}",
