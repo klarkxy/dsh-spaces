@@ -30,7 +30,9 @@ async function main(): Promise<void> {
     ? await startLocalSettings(config.settingsPath, config.home, config.snapshot)
     : await startPlainSettings(config.settingsPath, config.home);
   settings.settings.register("spaces-theme", THEME_SCHEMA);
-  settings.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
+  if (!config.snapshot) {
+    settings.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
+  }
   settings.settings.register("agent-default-model", AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {
     base: { provider: "xai-oauth", model: "grok-4.5" },
   });
