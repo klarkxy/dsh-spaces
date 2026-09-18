@@ -38,14 +38,14 @@ export async function openSpaceLlmBridge(input: {
     path: input.settingsPath,
     dshHome: input.dshHome,
     watch: false,
-    shared: input.snapshot ?? undefined,
   });
+  const settings = ctx.settings as SpacesFileSettingsProvider;
+  if (input.snapshot) settings.replaceSharedSnapshot(input.snapshot);
   await localCtx.plugin(LocalCredentialProvider, {
     path: input.localCredentialsPath,
     dshHome: input.dshHome,
     watch: false,
   });
-  const settings = ctx.settings as SpacesFileSettingsProvider;
   const credentials = new SpacesCredentialsProvider(
     ctx,
     localCtx.credentials as LocalCredentialProvider,
