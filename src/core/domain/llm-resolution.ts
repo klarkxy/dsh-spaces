@@ -5,7 +5,9 @@ import {
   isManagedRouteId,
   LLM_ERROR,
   LlmConfigError,
+  normalizeConnectionId,
   parseManagedRecordKey,
+  type ConnectionId,
   type GlobalLlmCatalog,
   type LlmSharedSnapshot,
   type SharedConnection,
@@ -40,6 +42,19 @@ export function selectSharedConnections(
           return connection;
         });
   return selected.filter((connection) => connection.enabled);
+}
+
+export function policyBindsConnection(policy: SpaceLlmPolicy, connectionId: ConnectionId): boolean {
+  const id = normalizeConnectionId(connectionId);
+  if (policy.shared.mode === "all") return true;
+  if (policy.shared.mode === "selected") return policy.shared.connectionIds.includes(id);
+  return false;
+}
+
+export function boundConnectionIds(catalog: GlobalLlmCatalog, policy: SpaceLlmPolicy): ConnectionId[] {
+  if (policy.shared.mode === "none") return [];
+  if (policy.shared.mode === "all") return Object.keys(catalog.connections);
+  return [...policy.shared.connectionIds];
 }
 
 export function snapshotForSpace(
