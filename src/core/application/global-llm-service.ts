@@ -20,6 +20,7 @@ import {
 } from "../domain/llm-connections";
 import { boundConnectionIds, policyBindsConnection } from "../domain/llm-resolution";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore, SpaceBindingRef } from "../ports/llm-store";
+import type { RedactedConnection } from "../../shared/llm-api";
 
 const SECRET_DRAFT_KEYS = ["key", "apiKey", "secret", "credential", "token"] as const;
 
@@ -33,10 +34,7 @@ export type ConnectionDraft = {
 
 export type ConnectionSecretDraft = Omit<ConnectionDraft, "auth">;
 
-export type RedactedConnection = Omit<SharedConnection, "auth"> & {
-  auth: { kind: "none" } | { kind: "api-key"; configured: true };
-  routeId: string;
-};
+export type { RedactedConnection };
 
 export type ChangePreview = {
   catalogRevision: number;
@@ -65,6 +63,15 @@ export class GlobalLlmService {
       defaultModel: catalog.defaultModel,
       connections: Object.values(catalog.connections).map(redactConnection),
     };
+  }
+
+  async readCatalog(): Promise<GlobalLlmCatalog> {
+    return this.catalogStore.read();
+  }
+
+  async requireConnection(connectionId: ConnectionId): Promise<SharedConnection> {
+    const catalog = await this.catalogStore.read();
+    return this.requireExistingConnection(catalog, connectionId);
   }
 
   async spacePolicy(spaceId: string): Promise<SpaceLlmPolicy> {

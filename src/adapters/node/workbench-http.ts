@@ -17,6 +17,8 @@ export const WORKBENCH_API_METHODS = [
   "runtimes",
   "workbenchPackage",
   "backups",
+  "llm",
+  "llmCredential",
 ] as const;
 export type WorkbenchApiMethod = (typeof WORKBENCH_API_METHODS)[number];
 
@@ -475,15 +477,43 @@ function deny(res: ServerResponse, status: number, code: string, message: string
   json(res, status, { ok: false, error: { code, message } });
 }
 
-function publicError(error: unknown): { code: string; message: string } {
+function publicError(error: unknown): { code: string; message: string; details?: Record<string, string | number> } {
   if (error && typeof error === "object" && "code" in error && "message" in error) {
     const code = String((error as { code: unknown }).code);
     const message = String((error as { message: unknown }).message);
-    if (code.startsWith("workbench/") || code.startsWith("spaces/")) {
-      return { code, message };
+    if (code.startsWith("workbench/") || code.startsWith("spaces/") || code.startsWith("LLM_")) {
+      const details = "details" in error ? safeLlmDetails((error as { details?: unknown }).details) : undefined;
+      return details ? { code, message, details } : { code, message };
     }
   }
   return { code: "workbench/failed", message: "The workbench request failed." };
+}
+
+const SAFE_LLM_DETAIL_KEYS = new Set([
+  "connectionId",
+  "spaceId",
+  "expected",
+  "actual",
+  "leftoverRecordId",
+  "count",
+  "recordId",
+  "field",
+  "api",
+  "modelId",
+  "succeeded",
+  "skipped",
+  "operationId",
+  "status",
+]);
+
+function safeLlmDetails(value: unknown): Record<string, string | number> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string | number> = {};
+  for (const [key, nested] of Object.entries(value)) {
+    if (!SAFE_LLM_DETAIL_KEYS.has(key)) continue;
+    if (typeof nested === "string" || typeof nested === "number") out[key] = nested;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function sendChildBootstrap(res: ServerResponse, minted: ViewBootstrap): void {

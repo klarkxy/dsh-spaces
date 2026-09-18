@@ -2,7 +2,8 @@ import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../../src/shared/space-icon";
 import type { WorkbenchApi } from "../../../../src/shared/workbench";
-import { WORKBENCH_PUBLIC_ERROR, type WorkbenchRemoteCode } from "./remote-errors";
+import type { LlmApiResult } from "../../../../src/shared/llm-api";
+import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
 import {
   backupsResultSchema,
   jobIdSchema,
@@ -20,6 +21,8 @@ import {
   workbenchStateSchema,
   workbenchViewSchema,
   workbenchSpaceDetailSchema,
+  llmApiRequestSchema,
+  llmApiResultSchema,
 } from "./workbench-schemas";
 import { parseSupervisorHandoffPath } from "./loopback";
 import type { SupervisorEndpoint } from "./supervisor-endpoint";
@@ -38,6 +41,7 @@ export const WORKBENCH_HTTP_METHODS = [
   "runtimes",
   "workbenchPackage",
   "backups",
+  "llm",
 ] as const;
 
 export type WorkbenchHttpMethod = (typeof WORKBENCH_HTTP_METHODS)[number];
@@ -84,6 +88,7 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
     runtimes: () => call("runtimes", {}, workbenchRuntimeListSchema),
     workbenchPackage: () => call("workbenchPackage", {}, workbenchPackageResultSchema),
     backups: (spaceId) => call("backups", { spaceId: spaceIdSchema.parse(spaceId) }, backupsResultSchema),
+    llm: (request) => call("llm", llmApiRequestSchema.parse(request), llmApiResultSchema) as Promise<LlmApiResult>,
   };
 }
 
@@ -171,6 +176,9 @@ function remoteFromSupervisorError(error: unknown): RemoteError {
     const code = (error as { code: string }).code;
     if (code in WORKBENCH_PUBLIC_ERROR) {
       return publicError(code as WorkbenchRemoteCode);
+    }
+    if (code in LLM_PUBLIC_ERROR) {
+      return new RemoteError(code as LlmRemoteCode, LLM_PUBLIC_ERROR[code as LlmRemoteCode], {});
     }
   }
   return publicError("workbench/unavailable");

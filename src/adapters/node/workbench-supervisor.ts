@@ -92,6 +92,11 @@ import {
   type WorkbenchHttpRuntime,
   type ViewBootstrap,
 } from "./workbench-http";
+import { createHomeLlmHost } from "./llm-host";
+import { GlobalLlmHost, type LlmApplyCommand } from "../../core/application/global-llm-host";
+import { LLM_ERROR, LlmConfigError } from "../../core/domain/llm-connections";
+import type { LlmInstanceRecord } from "../../core/ports/llm-runtime";
+import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
 
 export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./workbench-http";
 export { isCompatibleDshCliVersion };
@@ -271,6 +276,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private holdManagerStart = false;
   private readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   private readonly pidAlive: PidAliveFn;
+  private readonly llmApplied = new Map<string, number>();
+  private readonly llmBusy = new Set<string>();
+  readonly llmHost: GlobalLlmHost;
 
   constructor(options: WorkbenchSupervisorOptions) {
     this.options = { ...options };
@@ -289,6 +297,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.now = options.now ?? (() => new Date());
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.pidAlive = options.pidAlive ?? defaultPidAlive;
+    this.llmHost = createHomeLlmHost(this.home, {
+      listSpaceIds: async () => this.homeProfileNames(),
+      instances: {
+        list: async () => this.listLlmInstances(),
+        get: async (spaceId) => this.listLlmInstances().find((row) => row.spaceId === spaceId),
+        markApplied: async (spaceId, catalogRevision) => {
+          this.llmApplied.set(spaceId, catalogRevision);
+        },
+      },
+      assertWritable: () => this.assertLlmWritable(),
+      submitApply: (command, requestId) => this.submitLlmApply(command, requestId),
+    });
   }
 
   cookieName(): string {
@@ -433,7 +453,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "backups":
         expectKeys(body, ["spaceId"]);
         return this.backups(parseSpaceName(body.spaceId));
+      case "llm":
+        return this.llmHost.dispatch(body);
+      case "llmCredential":
+        return this.llmHost.dispatchCredential(body);
     }
+  }
+
+  async llm(request: LlmApiRequest): Promise<LlmApiResult> {
+    return this.llmHost.dispatch(request) as Promise<LlmApiResult>;
   }
 
   entryPage(): string {
@@ -1162,6 +1190,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         throw new WorkbenchPublicError("workbench/unsupported");
       case "controller.acquire":
         return undefined;
+      case "llm.apply":
+        return this.runLlmApply(command, ctx);
     }
   }
 
@@ -1245,6 +1275,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     current.origin = childOrigin;
     if (id !== this.managerId) this.workspaceOrigins.add(childOrigin);
     this.writeInstanceRecord(id, port, gen);
+    this.llmApplied.set(id, await this.llmHost.catalogRevision());
     return {
       spaceId: id,
       view: {
@@ -1545,6 +1576,46 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private assertWritable(): void {
     if (!this.handle) throw new WorkbenchPublicError("workbench/read-only");
     if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
+  }
+
+  private assertLlmWritable(): void {
+    if (!this.handle) {
+      throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");
+    }
+    if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
+  }
+
+  private async submitLlmApply(command: LlmApplyCommand, requestId: string): Promise<WorkbenchJob> {
+    this.assertWritable();
+    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+    return this.jobs.submit(command, requestId, (ctx) =>
+      this.observeChildWork(() => this.runLlmApply(command, ctx)),
+    );
+  }
+
+  private async runLlmApply(command: LlmApplyCommand, ctx: WorkbenchJobContext): Promise<void> {
+    ctx.phase("apply");
+    await this.llmHost.executeApply(command, async (spaceId) => {
+      ctx.message(`restart ${spaceId}`);
+      const id = this.requireManaged(spaceId);
+      await this.stopOwned(id);
+      await this.startSpace(id, ctx);
+    });
+  }
+
+  private listLlmInstances(): LlmInstanceRecord[] {
+    return this.homeProfileNames().map((id) => {
+      const leftover = this.unmanaged.has(id);
+      const status = leftover ? "unknown" : this.publicStatus(id);
+      return {
+        spaceId: id,
+        status,
+        generation: this.generations.get(id) ?? 0,
+        catalogRevision: this.llmApplied.get(id) ?? null,
+        policyRevision: null,
+        busy: this.llmBusy.has(id),
+      };
+    });
   }
 
   private role(): WorkbenchState["role"] {
