@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -109,7 +109,8 @@ test("official settings writes to a managed route are rejected", async () => {
   space.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
   const route = compileManagedRouteId(connection.id);
   await assert.rejects(
-    () => space.settings.update("llm-pi-ai", { providers: { [route]: { baseURL: "http://127.0.0.1:1/forged" } } }),
+    async () =>
+      space.settings.update("llm-pi-ai", { providers: { [route]: { baseURL: "http://127.0.0.1:1/forged" } } }),
     { code: LLM_ERROR.SHARED_CONNECTION_READ_ONLY },
   );
   const llm = space.settings.get("llm-pi-ai") as { providers: Record<string, { baseURL?: string }> };
@@ -179,7 +180,9 @@ test("shared credential resolve uses the record and ignores a same-name environm
     await assert.rejects(() => bridged.credentials.set(credentialRef(ref), "nope"), {
       code: LLM_ERROR.SHARED_CONNECTION_READ_ONLY,
     });
-    assert.doesNotMatch(readFileSync(join(root, "local.yaml"), "utf8"), /sk-shared-record|sk-from-env/);
+    if (existsSync(join(root, "local.yaml"))) {
+      assert.doesNotMatch(readFileSync(join(root, "local.yaml"), "utf8"), /sk-shared-record|sk-from-env/);
+    }
   } finally {
     delete process.env[ref];
   }

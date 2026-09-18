@@ -101,8 +101,9 @@ test("web stays unjoined while A and B consume one shared connection from separa
   assert.match(aFiles.result.settings, /color: red/);
   assert.match(bFiles.result.settings, /color: blue/);
   assert.match(webFiles.result.settings, /color: web/);
-  assert.doesNotMatch(aFiles.result.settings, /sk-shared-once|spaces-llm-/);
-  assert.doesNotMatch(bFiles.result.settings, /sk-shared-once|spaces-llm-/);
+  assert.doesNotMatch(aFiles.result.settings, /sk-shared-once|apiKeyEnv|127\.0\.0\.1:9/);
+  assert.doesNotMatch(bFiles.result.settings, /sk-shared-once|apiKeyEnv|127\.0\.0\.1:9/);
+  assert.match(aFiles.result.settings, new RegExp(route));
   assert.doesNotMatch(aFiles.result.credentials, /sk-shared-once/);
   assert.doesNotMatch(bFiles.result.credentials, /sk-shared-once/);
   assert.doesNotMatch(webFiles.result.settings, /spaces-llm-/);
