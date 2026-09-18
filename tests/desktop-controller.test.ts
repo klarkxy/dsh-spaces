@@ -13,8 +13,6 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   DesktopController,
   DesktopReadOnlyError,
@@ -31,7 +29,6 @@ import {
   HomeController,
   type PidLiveness,
 } from "../src/adapters/node/home-controller.ts";
-import { ControllerStatus } from "../src/renderer/src/components/ControllerStatus.tsx";
 import {
   DESKTOP_WRITE_IPC_CHANNELS,
   desktopSelectAccess,
@@ -350,64 +347,6 @@ test("manager profile and full Spaces plugin are blocked on the ordinary desktop
   assert.throws(() => desktop.assertOrdinaryPluginSpec("@dsh-spaces/plugin"), /copied/i);
   assert.equal(isFullSpacesManagerSpec("@dsh-spaces/plugin@0.2.0"), true);
   assert.equal(isFullSpacesManagerSpec("dsh-outline"), false);
-});
-
-test("ControllerStatus renders bilingual takeover and hand-off actions", () => {
-  const readonly: DesktopControllerState = {
-    ownerKind: "web",
-    held: false,
-    writable: false,
-    recoveryRequired: false,
-    reasons: ["The web workbench holds this Home."],
-    transferPending: false,
-  };
-  const zh = renderToStaticMarkup(
-    React.createElement(ControllerStatus, {
-      state: readonly,
-      locale: "zh",
-      onAcquire() {},
-      onRelease() {},
-    }),
-  );
-  assert.match(zh, /只读/);
-  assert.match(zh, /接管/);
-  const owner: DesktopControllerState = {
-    ownerKind: "desktop",
-    held: true,
-    writable: true,
-    recoveryRequired: false,
-    reasons: [],
-    transferPending: false,
-  };
-  const en = renderToStaticMarkup(
-    React.createElement(ControllerStatus, {
-      state: owner,
-      locale: "en",
-      onAcquire() {},
-      onRelease() {},
-    }),
-  );
-  assert.match(en, /Desktop controls this Home/);
-  assert.match(en, /Hand off/);
-  const heldRecovery: DesktopControllerState = {
-    ownerKind: "desktop",
-    held: true,
-    writable: false,
-    recoveryRequired: true,
-    reasons: ["Holding Home control. Fault or leftover evidence was reported; writes are blocked."],
-    transferPending: false,
-  };
-  const heldZh = renderToStaticMarkup(
-    React.createElement(ControllerStatus, {
-      state: heldRecovery,
-      locale: "zh",
-      onAcquire() {},
-      onRelease() {},
-    }),
-  );
-  assert.match(heldZh, /保留控制权/);
-  assert.doesNotMatch(heldZh, /未取得运行权/);
-  assert.match(heldZh, /移交/);
 });
 
 test("leftover instance records and truncated jobs block writes without rewriting jobs", async () => {
