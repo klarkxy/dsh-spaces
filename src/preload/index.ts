@@ -92,8 +92,13 @@ const api = {
   stopProfile: (name: string): Promise<void> => ipcRenderer.invoke("stopProfile", name),
   restartProfile: (name: string): Promise<{ port: number }> => ipcRenderer.invoke("restartProfile", name),
   selectProfile: (name: string): Promise<{ port: number }> => ipcRenderer.invoke("selectProfile", name),
-  createProfile: (name: string, displayName?: string, icon?: string): Promise<ProfileRecord[]> =>
-    ipcRenderer.invoke("createProfile", name, displayName, icon),
+  createProfile: (name: string, displayName?: string, icon?: string, useSharedLlm?: boolean): Promise<ProfileRecord[]> =>
+    ipcRenderer.invoke("createProfile", name, displayName, icon, useSharedLlm),
+  llm: (request: import("../shared/llm-api").LlmApiRequest): Promise<import("../shared/llm-api").LlmApiResult> =>
+    ipcRenderer.invoke("llm", request),
+  llmCredential: (
+    request: import("../shared/llm-api").LlmCredentialRequest,
+  ): Promise<import("../shared/llm-api").LlmApiResult> => ipcRenderer.invoke("llmCredential", request),
   exportSpaceShare: (name: string, includeConfig?: boolean): Promise<string | null> =>
     ipcRenderer.invoke("exportSpaceShare", name, includeConfig),
   importSpaceShare: (): Promise<import("../shared/space-share").SpaceImportResult | null> =>

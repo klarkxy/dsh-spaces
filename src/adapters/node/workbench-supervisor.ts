@@ -1196,7 +1196,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async createSpace(
-    input: { name: string; displayName?: string; icon?: string },
+    input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean },
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchJob["result"]> {
     ctx.phase("create");
@@ -1216,6 +1216,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         await this.ensureViewBridge(name);
       }
     });
+    if (input.useSharedLlm === true) {
+      ctx.phase("llm-policy");
+      await this.llmHost.dispatch({
+        method: "updateSpacePolicy",
+        spaceId: name,
+        shared: { mode: "all" },
+        expectedRevision: 0,
+      });
+    }
     return { spaceId: name };
   }
 

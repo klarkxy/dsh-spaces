@@ -582,13 +582,13 @@ export default function App() {
             error={error}
             progress={progress}
             onCancel={() => setOverlay(null)}
-            onSubmit={(name, displayName, icon) => {
+            onSubmit={(name, displayName, icon, useSharedLlm) => {
               if (!writable) {
                 refuseWrite();
                 return;
               }
               void run(t("busy.create", { name }), async () => {
-                await window.dshSpaces.createProfile(name, displayName, icon);
+                await window.dshSpaces.createProfile(name, displayName, icon, useSharedLlm);
                 setOverlay(null);
               });
             }}
@@ -602,6 +602,7 @@ export default function App() {
             onQuit={() => void run(t("tray.quit"), () => window.dshSpaces.quitApp())}
             onCancel={() => setOverlay(null)}
             onMaintenanceChanged={refreshAfterMaintenance}
+            writable={writable}
             onSave={(next) => {
               if (!writable) {
                 refuseWrite();

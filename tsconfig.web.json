@@ -15,8 +15,14 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/renderer/src/*"],
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["src/shared/*"],
+      "@workbench/*": ["packages/plugin/src/workbench/*"]
     }
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*"]
+  "include": [
+    "src/renderer/src/**/*",
+    "src/shared/**/*",
+    "src/core/domain/llm-connections.ts",
+    "packages/plugin/src/workbench/**/*"
+  ]
 }

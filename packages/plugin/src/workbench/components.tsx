@@ -10,6 +10,7 @@ import type {
 } from "../../../../src/shared/workbench";
 import { glyphPath, isDataImageIcon, KNOWN_GLYPHS } from "./icons";
 import { t, type WorkbenchLocale } from "./i18n";
+import { LlmModelCenter } from "./llm/center";
 import type { HomeTab, WorkbenchController, WorkbenchUiState } from "./store";
 import { WORKBENCH_CSS } from "./styles";
 import type { ViewFrameState } from "./view-session";
@@ -920,12 +921,14 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
   const nameRef = useRef<HTMLInputElement>(null);
   const displayRef = useRef<HTMLInputElement>(null);
   const iconRef = useRef<string>("");
+  const sharedRef = useRef<HTMLInputElement>(null);
   const submit = (event: FormEvent): void => {
     event.preventDefault();
     controller.createSpace({
       name: nameRef.current?.value ?? "",
       displayName: displayRef.current?.value,
       icon: iconRef.current,
+      useSharedLlm: sharedRef.current?.checked !== false,
     });
   };
   return (
@@ -941,6 +944,11 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
           {t(locale, "create.displayName")}
           <input ref={displayRef} name="displayName" autoComplete="off" />
         </label>
+        <label className="dsh-wb-field">
+          <input ref={sharedRef} type="checkbox" name="useSharedLlm" defaultChecked />
+          {t(locale, "create.useSharedLlm")}
+        </label>
+        <p className="dsh-wb-muted">{t(locale, "create.useSharedLlmHint")}</p>
         <IconPicker locale={locale} onChange={(icon) => (iconRef.current = icon)} />
         <div className="dsh-wb-actions">
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
@@ -1078,31 +1086,64 @@ function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
   const writable = controller.canMutate();
   return (
     <div className="dsh-wb-overlay">
-      <div className="dsh-wb-dialog" role="dialog" aria-labelledby="dsh-wb-settings-title">
+      <div className="dsh-wb-dialog wide" role="dialog" aria-labelledby="dsh-wb-settings-title">
         <h2 id="dsh-wb-settings-title" className="dsh-wb-title">
           {t(locale, "settings.title")}
         </h2>
-        <p>{t(locale, "settings.locale")}</p>
-        <LanguageSwitch locale={locale} onChange={controller.setLocale} />
-        <p className="dsh-wb-muted">{t(locale, "settings.shutdownHint")}</p>
-        <div className="dsh-wb-actions">
+        <div className="dsh-wb-tabs" role="tablist">
           <button
             type="button"
-            className="dsh-wb-btn"
-            disabled={!writable}
-            onClick={() => controller.preview({ kind: "controller.release" })}
+            className="dsh-wb-tab"
+            role="tab"
+            aria-selected={ui.settingsTab === "general"}
+            onClick={() => controller.setSettingsTab("general")}
           >
-            {t(locale, "settings.release")}
+            {t(locale, "settings.tabGeneral")}
           </button>
           <button
             type="button"
-            className="dsh-wb-btn danger"
-            disabled={!writable}
-            onClick={() => controller.preview({ kind: "controller.shutdown" })}
+            className="dsh-wb-tab"
+            role="tab"
+            aria-selected={ui.settingsTab === "llm"}
+            onClick={() => controller.setSettingsTab("llm")}
           >
-            {t(locale, "settings.exit")}
+            {t(locale, "settings.tabLlm")}
           </button>
         </div>
+        {ui.settingsTab === "general" && (
+          <>
+            <p>{t(locale, "settings.locale")}</p>
+            <LanguageSwitch locale={locale} onChange={controller.setLocale} />
+            <p className="dsh-wb-muted">{t(locale, "settings.shutdownHint")}</p>
+            <div className="dsh-wb-actions">
+              <button
+                type="button"
+                className="dsh-wb-btn"
+                disabled={!writable}
+                onClick={() => controller.preview({ kind: "controller.release" })}
+              >
+                {t(locale, "settings.release")}
+              </button>
+              <button
+                type="button"
+                className="dsh-wb-btn danger"
+                disabled={!writable}
+                onClick={() => controller.preview({ kind: "controller.shutdown" })}
+              >
+                {t(locale, "settings.exit")}
+              </button>
+            </div>
+          </>
+        )}
+        {ui.settingsTab === "llm" && (
+          <LlmModelCenter
+            locale={locale}
+            writable={writable}
+            client={controller.llmClient()}
+            spaces={controller.llmSpaces()}
+            uuid={crypto.randomUUID.bind(crypto)}
+          />
+        )}
         <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
           {t(locale, "app.close")}
         </button>

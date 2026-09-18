@@ -1,5 +1,5 @@
 import type { ConnectionId } from "../domain/llm-connections";
-import type { LlmSpaceObservation } from "../../shared/llm-api";
+import type { LlmLocalCandidate, LlmSpaceObservation } from "../../shared/llm-api";
 
 export type LlmInstanceRecord = LlmSpaceObservation & {
   policyRevision: number | null;
@@ -43,4 +43,17 @@ export type LlmProbeTestInput = LlmProbeDiscoverInput & {
 export interface LlmProbePort {
   discover(input: LlmProbeDiscoverInput): Promise<{ models: Array<{ id: string; name?: string }>; truncated: boolean }>;
   test(input: LlmProbeTestInput): Promise<{ ok: true; modelId: string }>;
+}
+
+export type SpaceDefaultModel = {
+  provider: string;
+  model: string;
+};
+
+export interface LlmSpaceSettingsPort {
+  readDefault(spaceId: string): Promise<SpaceDefaultModel | null>;
+  writeDefault(spaceId: string, value: SpaceDefaultModel | null): Promise<void>;
+  listLocal(spaceId: string): Promise<LlmLocalCandidate[]>;
+  readLocalProvider(spaceId: string, routeId: string): Promise<Record<string, unknown>>;
+  readCopyableSecret(spaceId: string, routeId: string): Promise<string | undefined>;
 }

@@ -79,6 +79,8 @@ import {
   writeSpaceArchiveFile,
 } from "./space-share";
 import { createSpaceFromTemplate, listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
+import { createDesktopLlmHost } from "./desktop-llm";
+import type { LlmApiRequest, LlmCredentialRequest } from "../shared/llm-api";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -208,6 +210,21 @@ function startMain(): void {
     onProgress: (progress) => broadcast("maintenance-progress", progress),
   });
   let diagnostics = makeDiagnostics();
+  const desktopLlm = createDesktopLlmHost(dshHome, {
+    listSpaceIds: () => [...new Set(["web", ...listProfiles().map((row) => row.name)])],
+    statusOf: (spaceId) => {
+      const status = processes.statusOf(spaceId);
+      if (status === "running" || status === "starting" || status === "stopped" || status === "crashed") {
+        return status;
+      }
+      return "unknown";
+    },
+    generationOf: () => 0,
+    restart: async (spaceId) => {
+      if (spaceId !== "web") await processes.restart(spaceId);
+    },
+    assertWritable: () => desktop.assertWritable("llm"),
+  });
 
   function makeDiagnostics(): DiagnosticsService {
     return new DiagnosticsService({
@@ -773,15 +790,31 @@ function startMain(): void {
     });
     handle(
       "createProfile",
-      async (_event, name: string, displayName: string | undefined, icon: string | undefined) => {
+      async (
+        _event,
+        name: string,
+        displayName: string | undefined,
+        icon: string | undefined,
+        useSharedLlm?: boolean,
+      ) => {
         desktop.assertMutableProfile(name, "create");
         await createProfile(dshHome, registry, patchWriter, name, displayName, (progress) => {
           broadcast("create-progress", progress);
         });
         if (icon) registry.updateMeta(name, { icon: sanitizeSpaceIcon(icon) });
+        if (useSharedLlm === true) {
+          await desktopLlm.llm({
+            method: "updateSpacePolicy",
+            spaceId: name,
+            shared: { mode: "all" },
+            expectedRevision: 0,
+          });
+        }
         return listProfiles();
       },
     );
+    handle("llm", (_event, request: LlmApiRequest) => desktopLlm.llm(request));
+    handle("llmCredential", (_event, request: LlmCredentialRequest) => desktopLlm.llmCredential(request));
     handle("setOverlayOpen", (_event, open: boolean) => {
       views?.setOverlayOpen(open);
     });

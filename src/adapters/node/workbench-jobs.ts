@@ -907,14 +907,18 @@ function assertCommandHasNoSecrets(value: unknown): void {
   }
 }
 
-function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string } {
+function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean } {
   if (!isPlainObject(input)) throw new WorkbenchJobError("workbench/invalid-input");
-  expectKeys(input, ["name"], ["displayName", "icon"]);
+  expectKeys(input, ["name"], ["displayName", "icon", "useSharedLlm"]);
   const name = parseOptionalString(input.name);
   if (!name) throw new WorkbenchJobError("workbench/invalid-input");
-  const parsed: { name: string; displayName?: string; icon?: string } = { name };
+  const parsed: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean } = { name };
   if (input.displayName !== undefined) parsed.displayName = parseOptionalString(input.displayName);
   if (input.icon !== undefined) parsed.icon = parseOptionalString(input.icon);
+  if (input.useSharedLlm !== undefined) {
+    if (typeof input.useSharedLlm !== "boolean") throw new WorkbenchJobError("workbench/invalid-input");
+    parsed.useSharedLlm = input.useSharedLlm;
+  }
   return parsed;
 }
 
