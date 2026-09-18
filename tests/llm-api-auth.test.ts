@@ -23,6 +23,7 @@ import type { LlmInstanceRecord, LlmOperationRecord, LlmOperationStore, LlmProbe
 import type { LlmLocalCandidate } from "../src/shared/llm-api.ts";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../src/core/ports/llm-store.ts";
 import { emptyPolicy } from "../src/core/domain/llm-connections.ts";
+import type { LlmShareManifest } from "../src/core/domain/llm-share.ts";
 
 const temps: string[] = [];
 const servers: Server[] = [];
@@ -170,6 +171,7 @@ class MemorySpaceSettings implements LlmSpaceSettingsPort {
   locals = new Map<string, LlmLocalCandidate[]>();
   providers = new Map<string, Record<string, unknown>>();
   secrets = new Map<string, string>();
+  imports = new Map<string, LlmShareManifest>();
   async readDefault(spaceId: string) {
     return this.defaults.get(spaceId) ?? null;
   }
@@ -187,6 +189,15 @@ class MemorySpaceSettings implements LlmSpaceSettingsPort {
   }
   async readCopyableSecret(_spaceId: string, routeId: string) {
     return this.secrets.get(routeId);
+  }
+  async readImport(spaceId: string) {
+    return this.imports.get(spaceId) ?? null;
+  }
+  async writeImport(spaceId: string, manifest: LlmShareManifest) {
+    this.imports.set(spaceId, manifest);
+  }
+  async clearImport(spaceId: string) {
+    this.imports.delete(spaceId);
   }
 }
 
@@ -210,6 +221,7 @@ function hostOf(input: {
   operations?: MemoryOperationStore;
   instances?: MemoryInstances;
   probe?: LlmProbePort;
+  spaceSettings?: MemorySpaceSettings;
   restart?: (spaceId: string) => Promise<void>;
 }) {
   const credentials = input.credentials ?? new MemoryCredentialStore();
@@ -226,6 +238,7 @@ function hostOf(input: {
     restarted.push(spaceId);
   });
   let created: GlobalLlmHost;
+  const spaceSettings = input.spaceSettings ?? new MemorySpaceSettings();
   created = new GlobalLlmHost({
     service,
     operations,
@@ -234,7 +247,7 @@ function hostOf(input: {
       discover: async () => ({ models: [{ id: "demo-large" }], truncated: false }),
       test: async ({ modelId }) => ({ ok: true as const, modelId }),
     },
-    spaceSettings: new MemorySpaceSettings(),
+    spaceSettings,
     assertWritable: () => {
       if (input.writable === false) {
         throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");
@@ -257,7 +270,7 @@ function hostOf(input: {
     },
     readSecret: (recordId) => credentials.readSecret(recordId),
   });
-  return { host: created, credentials, instances, operations, restarted, service };
+  return { host: created, credentials, instances, operations, restarted, service, spaceSettings };
 }
 
 async function startFakeApi(host: GlobalLlmHost, workspaceOrigin?: string) {
@@ -698,6 +711,61 @@ test("testConnection requires authorize and does not send chat history", async (
   assert.match(hits[0]?.url ?? "", /chat\/completions/);
   assert.match(hits[0]?.body ?? "", /"ping"/);
   assert.equal((hits[0]?.body ?? "").includes("user chat"), false);
+});
+
+test("imported requirements stay unmapped until an explicit local connection is chosen", async () => {
+  const { host, spaceSettings } = hostOf();
+  const saved = await host.dispatch({
+    method: "saveConnection",
+    draft: noneDraft(),
+    expectedRevision: 0,
+  });
+  const connectionId = (saved as { connectionId?: string }).connectionId;
+  assert.ok(connectionId);
+  spaceSettings.imports.set("alpha", {
+    schemaVersion: 1,
+    kind: "dsh-space-llm-requirements",
+    sourceSharedMode: "selected",
+    requirements: [
+      {
+        requirementId: "11111111-1111-4111-8111-111111111111",
+        displayName: "共享接口",
+        protocol: "openai-completions",
+        endpoint: "http://127.0.0.1:9/v1",
+        modelIds: ["demo-large"],
+        authKind: "api-key",
+        usedAsDefault: false,
+      },
+    ],
+    defaultRequirementId: null,
+    adapterRequired: "llm-pi-ai",
+    note: "Source connection IDs are local to the exporting Home and are not valid references here. Map each requirement to a connection on this Home. Unmapped requirements stay unavailable.",
+  });
+  const pending = await host.dispatch({ method: "importedRequirements", spaceId: "alpha" });
+  assert.equal((pending as { mappingRequired: boolean }).mappingRequired, true);
+  await assert.rejects(
+    () =>
+      host.dispatch({
+        method: "mapImported",
+        spaceId: "alpha",
+        mappings: [
+          {
+            requirementId: "11111111-1111-4111-8111-111111111111",
+            connectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          },
+        ],
+        expectedRevision: 0,
+      }),
+    (error: unknown) => error instanceof LlmConfigError && error.code === LLM_ERROR.MODEL_NOT_FOUND,
+  );
+  const mapped = await host.dispatch({
+    method: "mapImported",
+    spaceId: "alpha",
+    mappings: [{ requirementId: "11111111-1111-4111-8111-111111111111", connectionId }],
+    expectedRevision: 0,
+  });
+  assert.equal((mapped as { policy: { shared: { mode: string } } }).policy.shared.mode, "selected");
+  assert.equal(spaceSettings.imports.has("alpha"), false);
 });
 
 function listen(server: Server): Promise<string> {

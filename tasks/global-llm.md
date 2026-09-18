@@ -46,9 +46,16 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] Manager-Host `llmCredential` remote for Key / draft discover; secrets stay off StoredJob.
 - [x] Desktop settings tab and create checkbox reuse the same DTO and Host service.
 
+## P5 — explicit adoption, share, and packaging
+
+- [x] Single-connection adopt stays explicit; original local route is kept; env/OAuth is not copied.
+- [x] Space share packages exclude keys, credential records, catalog files, and Home-local refs.
+- [x] Import writes a secret-free requirement list and requires mapping on the receiving Home.
+- [x] `@dsh-spaces/llm-bridge` is a packable DSH plugin embedded in the plugin payload.
+- [x] Leaving shared access does not delete the Home catalog or credentials.
+
 ## Later phases
 
-- P5 explicit adoption and secret-free export
 - P6 release gates
 
 Do not add retries, fallbacks, restore entry points, or a second settings copy per Space.

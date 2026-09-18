@@ -7,8 +7,10 @@ import type {
   LlmCredentialRequest,
   LlmDescribeResult,
   LlmDiscoverResult,
+  LlmImportedRequirementsResult,
   LlmLocalCandidatesResult,
   LlmOperationStatusResult,
+  LlmSharePreviewResult,
   LlmSpaceDefaultResult,
   LlmSpaceObservation,
   LlmSpacePolicyResult,
@@ -30,6 +32,7 @@ import {
   type ConnectionId,
   type SharedModelRef,
 } from "../domain/llm-connections";
+import { applyLlmShareMapping, buildLlmShareManifest, type LlmShareMapping } from "../domain/llm-share";
 import { policyBindsConnection } from "../domain/llm-resolution";
 import type { LlmInstanceStatusPort, LlmOperationStore, LlmProbePort, LlmSpaceSettingsPort } from "../ports/llm-runtime";
 import {
@@ -108,6 +111,12 @@ export class GlobalLlmHost {
         return this.adoptLocal(request.spaceId, request.routeId, request.displayName, request.expectedRevision, {
           copyCredential: true,
         });
+      case "previewShare":
+        return this.previewShare(request.spaceId);
+      case "importedRequirements":
+        return this.importedRequirements(request.spaceId);
+      case "mapImported":
+        return this.mapImported(request.spaceId, request.mappings, request.expectedRevision);
       case "applyPlan":
         return this.applyPlan(request);
       case "operationStatus":
@@ -336,6 +345,46 @@ export class GlobalLlmHost {
       model: model.modelId,
     });
     return this.spaceDefault(spaceId);
+  }
+
+  private async previewShare(spaceId: string): Promise<LlmSharePreviewResult> {
+    await this.options.service.spacePolicy(spaceId);
+    const catalog = await this.options.service.readCatalog();
+    const policy = await this.options.service.spacePolicy(spaceId);
+    const spaceDefault = await this.options.spaceSettings.readDefault(spaceId);
+    return {
+      spaceId,
+      ...buildLlmShareManifest({ catalog, policy, spaceDefault }),
+    };
+  }
+
+  private async importedRequirements(spaceId: string): Promise<LlmImportedRequirementsResult> {
+    await this.options.service.spacePolicy(spaceId);
+    const manifest = (await this.options.spaceSettings.readImport?.(spaceId)) ?? null;
+    return {
+      spaceId,
+      mappingRequired: Boolean(manifest && manifest.requirements.length > 0),
+      manifest,
+    };
+  }
+
+  private async mapImported(
+    spaceId: string,
+    mappings: LlmShareMapping[],
+    expectedRevision: number,
+  ): Promise<LlmSpacePolicyResult> {
+    const stored = await this.options.spaceSettings.readImport?.(spaceId);
+    if (!stored) {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "this space has no imported LLM requirements to map");
+    }
+    const catalog = await this.options.service.readCatalog();
+    const applied = applyLlmShareMapping({ manifest: stored, mappings, catalog });
+    await this.options.service.updateSpacePolicy(spaceId, applied.shared, expectedRevision);
+    if (applied.defaultModel) {
+      await this.updateSpaceDefault(spaceId, applied.defaultModel);
+    }
+    await this.options.spaceSettings.clearImport?.(spaceId);
+    return this.spacePolicy(spaceId);
   }
 
   private async listLocalCandidates(spaceId: string): Promise<LlmLocalCandidatesResult> {
@@ -610,6 +659,18 @@ export function parseLlmApiRequest(payload: unknown): LlmApiRequest {
     case "updateSpaceDefault":
       expectKeys(body, ["method", "spaceId", "model"]);
       return { method, spaceId: parseSpaceId(body.spaceId), model: parseModel(body.model) };
+    case "previewShare":
+    case "importedRequirements":
+      expectKeys(body, ["method", "spaceId"]);
+      return { method, spaceId: parseSpaceId(body.spaceId) };
+    case "mapImported":
+      expectKeys(body, ["method", "spaceId", "mappings", "expectedRevision"]);
+      return {
+        method,
+        spaceId: parseSpaceId(body.spaceId),
+        mappings: parseMappings(body.mappings),
+        expectedRevision: parseRevision(body.expectedRevision),
+      };
     case "adoptLocal":
       expectKeys(body, ["method", "spaceId", "routeId", "displayName", "expectedRevision", "copyCredential"]);
       if (body.copyCredential !== true) {
@@ -778,6 +839,20 @@ function parseObservations(value: unknown): LlmSpaceObservation[] {
       catalogRevision: row.catalogRevision === null ? null : Number(row.catalogRevision),
       busy: row.busy,
     };
+  });
+}
+
+function parseMappings(value: unknown): LlmShareMapping[] {
+  if (!Array.isArray(value)) {
+    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llm share mappings must be an array");
+  }
+  return value.map((item) => {
+    const row = expectObject(item);
+    expectKeys(row, ["requirementId", "connectionId"]);
+    if (typeof row.requirementId !== "string" || typeof row.connectionId !== "string") {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llm share mapping requires requirementId and connectionId");
+    }
+    return { requirementId: row.requirementId, connectionId: row.connectionId };
   });
 }
 

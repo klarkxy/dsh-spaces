@@ -15,6 +15,12 @@ import {
   type SpaceSharePreview,
 } from "../shared/space-share";
 import {
+  LLM_SHARE_FILENAME,
+  assertShareSecretFree,
+  parseLlmShareManifest,
+  type LlmShareManifest,
+} from "../core/domain/llm-share";
+import {
   PROFILE_NAME_RE,
   PROTECTED_PLUGIN_PACKAGES,
   type InstalledPlugin,
@@ -36,6 +42,7 @@ export interface SpaceSharePorts {
   listSpaceIds(): string[];
   dshVersion?: string | null;
   now?: () => Date;
+  writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
 }
 
 export interface PluginShareContext {
@@ -153,7 +160,8 @@ export function buildSpaceShare(input: {
   library?: PluginLibraryEntry[];
   dshHome?: string;
   spaceId?: string;
-}): { manifest: SpaceShareManifest; plugins: SpaceSharePlugin[]; patch?: string } {
+  llm?: LlmShareManifest;
+}): { manifest: SpaceShareManifest; plugins: SpaceSharePlugin[]; patch?: string; llm?: LlmShareManifest } {
   const context: PluginShareContext = {
     library: input.library,
     dshHome: input.dshHome,
@@ -172,6 +180,7 @@ export function buildSpaceShare(input: {
     },
     plugins,
     patch: input.includeConfig && input.patch ? input.patch : undefined,
+    llm: input.llm,
   };
 }
 
@@ -179,6 +188,7 @@ export function packSpaceShare(share: {
   manifest: SpaceShareManifest;
   plugins: SpaceSharePlugin[];
   patch?: string;
+  llm?: LlmShareManifest;
 }): Buffer {
   const entries = [
     { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest, null, 2)}\n`) },
@@ -187,6 +197,13 @@ export function packSpaceShare(share: {
   if (share.patch) {
     entries.push({ name: "profile.patch.yml", data: Buffer.from(share.patch) });
   }
+  if (share.llm) {
+    entries.push({
+      name: LLM_SHARE_FILENAME,
+      data: Buffer.from(`${JSON.stringify(share.llm, null, 2)}\n`),
+    });
+  }
+  assertShareSecretFree(entries);
   return packZip(entries);
 }
 
@@ -268,8 +285,11 @@ export function parseSpaceShare(archive: Buffer): {
   manifest: SpaceShareManifest;
   plugins: SpaceSharePlugin[];
   patch?: string;
+  llm?: LlmShareManifest;
 } {
-  const files = new Map(unpackZip(archive).map((entry) => [entry.name, entry.data]));
+  const unpacked = unpackZip(archive);
+  assertShareSecretFree(unpacked);
+  const files = new Map(unpacked.map((entry) => [entry.name, entry.data]));
   const manifestRaw = files.get("manifest.json");
   const pluginsRaw = files.get("plugins.json");
   if (!manifestRaw || !pluginsRaw) throw new Error("The space share is missing manifest.json or plugins.json.");
@@ -278,7 +298,9 @@ export function parseSpaceShare(archive: Buffer): {
   if (!Array.isArray(pluginsJson)) throw new Error("The space share plugins list is invalid.");
   const plugins = pluginsJson.map((row, index) => assertSharePlugin(row, index));
   const patch = files.get("profile.patch.yml")?.toString("utf8");
-  return { manifest, plugins, patch };
+  const llmRaw = files.get(LLM_SHARE_FILENAME);
+  const llm = llmRaw ? parseLlmShareManifest(JSON.parse(llmRaw.toString("utf8")) as unknown) : undefined;
+  return { manifest, plugins, patch, llm };
 }
 
 export function validateImportedPatch(patch: string, spaceId: string): string {
@@ -303,6 +325,8 @@ export function previewSpaceShare(archive: Buffer): SpaceSharePreview {
     plugins: parsed.plugins,
     hasConfig: Boolean(parsed.patch),
     unknownSources: parsed.plugins.filter((row) => row.source === "unknown" || row.source === "manual" || row.source === "git").map((row) => row.packageName),
+    llmMappingRequired: Boolean(parsed.llm && parsed.llm.requirements.length > 0),
+    llmRequirements: parsed.llm?.requirements ?? [],
   };
 }
 
@@ -325,6 +349,7 @@ export function exportSpaceArchive(
     library: readPluginLibrary(dshHome),
     dshHome,
     spaceId,
+    llm: options.llm,
   });
   return packSpaceShare(share);
 }
@@ -407,6 +432,23 @@ export async function importSpaceArchive(
         spaceId: name,
         errors: [error instanceof Error ? error.message : String(error)],
         pendingManual: [],
+        llm: llmImportResult(parsed.llm),
+      };
+    }
+  }
+
+  if (parsed.llm && ports.writeLlmShare) {
+    try {
+      await ports.writeLlmShare(name, parsed.llm);
+    } catch (error) {
+      return {
+        definition: "imported",
+        plugins: "not-run",
+        start: "not-run",
+        spaceId: name,
+        errors: [error instanceof Error ? error.message : String(error)],
+        pendingManual: [],
+        llm: llmImportResult(parsed.llm),
       };
     }
   }
@@ -438,6 +480,16 @@ export async function importSpaceArchive(
     spaceId: name,
     errors,
     pendingManual,
+    llm: llmImportResult(parsed.llm),
+  };
+}
+
+function llmImportResult(manifest: LlmShareManifest | undefined): SpaceImportResult["llm"] {
+  if (!manifest || manifest.requirements.length === 0) return undefined;
+  return {
+    mappingRequired: true,
+    requirements: manifest.requirements,
+    mapped: false,
   };
 }
 

@@ -23,6 +23,8 @@
     "src/renderer/src/**/*",
     "src/shared/**/*",
     "src/core/domain/llm-connections.ts",
+    "src/core/domain/llm-share.ts",
+    "src/core/domain/llm-resolution.ts",
     "packages/plugin/src/workbench/**/*"
   ]
 }

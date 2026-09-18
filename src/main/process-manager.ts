@@ -23,6 +23,7 @@ export interface ProcessRuntime {
   ensureCli: () => Promise<string>;
   prepareHome: (home: string) => Promise<void>;
   fetch: typeof fetch;
+  extraEnv?: (name: string) => NodeJS.ProcessEnv;
   kill: (pid: number, kind: KillKind) => Promise<void>;
   readyTimeoutMs: number;
   fetchTimeoutMs: number;
@@ -432,7 +433,7 @@ export class ProcessManager {
       const child = this.runtime.spawn(
         [bin, "--profile", name, "--no-open", "--host", "127.0.0.1", "--port", String(port)],
         {
-          env: { DSH_HOME: this.dshHome },
+          env: { DSH_HOME: this.dshHome, ...this.runtime.extraEnv?.(name) },
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
           detached: process.platform !== "win32",
