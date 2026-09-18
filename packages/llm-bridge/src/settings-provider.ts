@@ -80,10 +80,6 @@ export class SpacesFileSettingsProvider extends FileSettingsProvider {
     return super.mutate(ns as never, ops, expectedRevision);
   }
 
-  protected override async load(): Promise<Record<string, unknown>> {
-    return this.sanitizeDocument(await super.load());
-  }
-
   protected override publish(doc: Record<string, unknown>, source?: SettingsUpdateSource): void {
     super.publish(this.sanitizeDocument(doc), source);
   }
