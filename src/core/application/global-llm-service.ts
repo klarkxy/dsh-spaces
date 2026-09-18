@@ -105,8 +105,10 @@ export class GlobalLlmService {
       throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "saveConnectionWithCredential requires a non-empty secret");
     }
     const catalog = await this.requireRevision(expectedRevision);
-    const existing = draft.id ? this.requireExistingConnection(catalog, draft.id) : undefined;
-    const id = existing?.id ?? createConnectionId();
+    const requestedId = draft.id ? normalizeConnectionId(draft.id) : undefined;
+    if (requestedId) this.assertNotRetired(catalog, requestedId);
+    const existing = requestedId ? catalog.connections[requestedId] : undefined;
+    const id = existing?.id ?? requestedId ?? createConnectionId();
     const recordId = nextCredentialRecordId(id, existing?.auth);
     await this.credentialStore.writeRecord({ recordId, secret });
     const info = await this.credentialStore.describe(recordId);

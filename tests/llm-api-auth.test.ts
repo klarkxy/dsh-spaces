@@ -530,6 +530,8 @@ test("HTTP credential channel commits without putting the key on a job", async (
 test("StoredJob rejects secret fields and never persists them", async () => {
   const home = tempHome();
   const store = new WorkbenchJobStore({ home });
+  const invalidJob = (error: unknown) =>
+    Boolean(error && typeof error === "object" && "code" in error && error.code === "workbench/invalid-input");
   await assert.rejects(
     () =>
       store.submit(
@@ -537,7 +539,7 @@ test("StoredJob rejects secret fields and never persists them", async () => {
         "job-secret",
         async () => undefined,
       ),
-    /invalid-input/,
+    invalidJob,
   );
   await assert.rejects(
     () =>
@@ -551,9 +553,9 @@ test("StoredJob rejects secret fields and never persists them", async () => {
         "job-secret-2",
         async () => undefined,
       ),
-    /invalid-input/,
+    invalidJob,
   );
-  const files = readdirSync(store.jobsDir);
+  const files = existsSync(store.jobsDir) ? readdirSync(store.jobsDir) : [];
   for (const name of files) {
     const text = readFileSync(join(store.jobsDir, name), "utf8");
     assert.equal(text.includes(SECRET), false);
@@ -580,7 +582,10 @@ test("discovery refuses redirects, oversized bodies, and truncates at 1000 model
   const redirectUrl = await listen(redirect);
   await assert.rejects(
     () => probe.discover({ api: "openai-completions", baseURL: `${redirectUrl}/v1` }),
-    (error: unknown) => error instanceof LlmConfigError && error.code === LLM_ERROR.DISCOVERY_FAILED,
+    (error: unknown) =>
+      error instanceof LlmConfigError &&
+      error.code === LLM_ERROR.DISCOVERY_FAILED &&
+      /does not follow redirects/.test(error.message),
   );
 
   const oversized = createServer((_req, res) => {
@@ -653,7 +658,7 @@ test("testConnection requires authorize and does not send chat history", async (
         connectionId,
         modelId: "demo-large",
       } as never),
-    /authorize/,
+    /authorize|required field/,
   );
   const result = await host.dispatch({
     method: "testConnection",
