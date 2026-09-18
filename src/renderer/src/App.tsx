@@ -15,7 +15,6 @@ import {
   desktopSelectAccess,
   shouldDesktopAutoLaunch,
   type DesktopControllerState,
-  type DesktopReleaseSpace,
 } from "@shared/desktop-controller";
 import {
   defaultSpaceName,
@@ -24,14 +23,12 @@ import {
   shouldShowStartingCard,
 } from "@shared/restore-selected";
 import { CliSetup } from "./components/CliSetup";
-import { ControllerStatus } from "./components/ControllerStatus";
 import { CreateWizard } from "./components/CreateWizard";
 import { DeleteDialog } from "./components/DeleteDialog";
 import { DiagnosticsPanel } from "./components/DiagnosticsPanel";
 import { EmptyMain, IdleMain, StartingMain } from "./components/EmptyMain";
 import { IconDialog, RenameDialog } from "./components/MetaDialogs";
 import { Onboarding } from "./components/Onboarding";
-import { Card, Overlay } from "./components/Overlay";
 import { PluginDialog } from "./components/PluginPanel";
 import { Rail } from "./components/Rail";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -70,7 +67,6 @@ export default function App() {
   const [packageSource, setPackageSource] = useState<PackageSource>(inferPackageSource());
   const [runtimeFault, setRuntimeFault] = useState<string | null>(null);
   const [controller, setController] = useState<DesktopControllerState | null>(null);
-  const [releasePreview, setReleasePreview] = useState<DesktopReleaseSpace[] | null>(null);
   const suppressAutoLaunch = useRef(false);
   const defaultLaunch = useRef<string | null>(null);
   const writable = controller?.writable === true;
@@ -215,7 +211,7 @@ export default function App() {
   }, [controller]);
 
   const cliBusy = Boolean(writable && !runtimeFault && cli.state !== "ready");
-  const overlayOpen = overlay !== null || cliBusy || releasePreview !== null;
+  const overlayOpen = overlay !== null || cliBusy;
   useEffect(() => {
     void window.dshSpaces.setOverlayOpen(overlayOpen);
   }, [overlayOpen]);
@@ -353,35 +349,6 @@ export default function App() {
             : undefined
         }
       />
-      {controller ? (
-        <div
-          className="pointer-events-none absolute top-0 z-[60] flex h-8 items-center justify-end"
-          style={{
-            left: window.dshSpaces.platform === "darwin" ? 168 : 132,
-            right: window.dshSpaces.platform === "darwin" ? 12 : 148,
-          }}
-        >
-          <div className="pointer-events-auto max-w-full">
-            <ControllerStatus
-              state={controller}
-              locale={locale === "zh" ? "zh" : "en"}
-              busy={Boolean(busy)}
-              onAcquire={() =>
-                void run(locale === "zh" ? "接管" : "Take over", async () => {
-                  const next = await window.dshSpaces.acquireController();
-                  setController(next);
-                  if (next.writable) await refresh();
-                })
-              }
-              onRelease={() => {
-                void window.dshSpaces.previewControllerRelease().then(setReleasePreview).catch((err: unknown) => {
-                  setError(visibleError(err instanceof Error ? err.message : String(err)));
-                });
-              }}
-            />
-          </div>
-        </div>
-      ) : null}
       <div className="flex min-h-0 flex-1">
         <Rail
         profiles={profiles}
@@ -719,50 +686,6 @@ export default function App() {
               </ul>
             </div>
           </div>
-        ) : null}
-        {releasePreview ? (
-          <Overlay onBackdrop={() => setReleasePreview(null)}>
-            <Card className="w-[420px]">
-              <h2 className="text-lg font-semibold">
-                {locale === "zh" ? "移交将停止这些空间" : "Hand-off will stop these spaces"}
-              </h2>
-              <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
-                {locale === "zh"
-                  ? "仅停止本桌面持有的实例，不会停止 Web 工作台的外部进程。优雅停止失败会保留运行权。"
-                  : "Only this desktop's instances stop. External web-workbench processes are left running. A graceful stop failure keeps the lease."}
-              </p>
-              {releasePreview.length === 0 ? (
-                <p className="mt-3 text-sm" style={{ color: "var(--text-faint)" }}>
-                  {locale === "zh" ? "当前没有本桌面正在运行的空间。" : "No desktop-owned spaces are running."}
-                </p>
-              ) : (
-                <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm">
-                  {releasePreview.map((space) => (
-                    <li key={space.name}>
-                      {space.displayName} ({space.status})
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-4 flex justify-end gap-2">
-                <button type="button" className="btn-ghost rounded px-3 py-1.5 text-sm" onClick={() => setReleasePreview(null)}>
-                  {locale === "zh" ? "取消" : "Cancel"}
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary rounded px-3 py-1.5 text-sm"
-                  onClick={() => {
-                    setReleasePreview(null);
-                    void run(locale === "zh" ? "移交" : "Hand off", async () => {
-                      setController(await window.dshSpaces.releaseController());
-                    });
-                  }}
-                >
-                  {locale === "zh" ? "确认移交" : "Confirm hand-off"}
-                </button>
-              </div>
-            </Card>
-          </Overlay>
         ) : null}
         </main>
       </div>
