@@ -215,6 +215,11 @@ export function credentialRevisionOf(auth: SharedAuth): number | null {
   return parseManagedRecordKey(auth.credentialRecordId)?.credentialRevision ?? null;
 }
 
+export function nextCredentialRecordId(connectionId: ConnectionId, auth?: SharedAuth): string {
+  const current = auth ? credentialRevisionOf(auth) ?? 0 : 0;
+  return compileManagedRecordKey(connectionId, current + 1);
+}
+
 export function emptyCatalog(): GlobalLlmCatalog {
   return {
     schemaVersion: LLM_CATALOG_SCHEMA_VERSION,

@@ -16,8 +16,10 @@ import {
   sanitizeProviderConfig,
 } from "../src/core/domain/llm-connections.ts";
 import {
+  boundConnectionIds,
   compileSharedProviderProfile,
   mergeSharedProvidersIntoBase,
+  policyBindsConnection,
   resolveDefaultModel,
   selectSharedConnections,
 } from "../src/core/domain/llm-resolution.ts";
@@ -129,4 +131,31 @@ test("mode none keeps the space off the shared catalog", () => {
   const shared = connection();
   catalog.connections[shared.id] = shared as never;
   assert.deepEqual(selectSharedConnections(catalog, emptyPolicy()), []);
+});
+
+test("mode all binds every current connection including disabled ones", () => {
+  const catalog = emptyCatalog();
+  const live = connection();
+  const stopped = connection({ enabled: false });
+  catalog.connections[live.id] = live as never;
+  catalog.connections[stopped.id] = stopped as never;
+  const policy = { schemaVersion: 1, revision: 1, shared: { mode: "all" as const } };
+  assert.equal(policyBindsConnection(policy, live.id), true);
+  assert.equal(policyBindsConnection(policy, stopped.id), true);
+  assert.deepEqual(selectSharedConnections(catalog, policy).map((item) => item.id), [live.id]);
+  assert.deepEqual(new Set(boundConnectionIds(catalog, policy)), new Set([live.id, stopped.id]));
+});
+
+test("mode selected still binds a disabled connection by id", () => {
+  const catalog = emptyCatalog();
+  const stopped = connection({ enabled: false });
+  catalog.connections[stopped.id] = stopped as never;
+  const policy = {
+    schemaVersion: 1,
+    revision: 1,
+    shared: { mode: "selected" as const, connectionIds: [stopped.id] },
+  };
+  assert.equal(policyBindsConnection(policy, stopped.id), true);
+  assert.deepEqual(selectSharedConnections(catalog, policy), []);
+  assert.deepEqual(boundConnectionIds(catalog, policy), [stopped.id]);
 });

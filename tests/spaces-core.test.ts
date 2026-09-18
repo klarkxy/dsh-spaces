@@ -53,6 +53,7 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
     "domain/llm-resolution.ts",
     "application/maintenance-gate.ts",
     "application/restore-session.ts",
+    "application/global-llm-service.ts",
     "ports/operation-lock.ts",
     "ports/restore.ts",
     "ports/llm-store.ts",

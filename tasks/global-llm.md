@@ -14,9 +14,17 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] Contract tests plus a three-process prototype (`web` unjoined, A/B joined).
 - [ ] Full official CLI multi-profile run against a live adapter stream (P2).
 
+## P1 — catalog, policy, and CAS
+
+- [x] Persist one catalog original under `.dsh-spaces-control/llm/catalog.json`.
+- [x] Persist Space policy next to that Space's data root; web uses the Home root.
+- [x] Persist shared secrets in the official credential document, records only.
+- [x] Stable IDs, schema validation, atomic write, revision conflict, delete reference checks.
+- [x] `mode=all` is a live reference; disabled selected bindings still block delete.
+- [x] Credential write then failed catalog publish leaves the original catalog and reports the leftover record.
+
 ## Later phases
 
-- P1 catalog / policy stores and CAS
 - P2 official adapter streaming through the bridge
 - P3 management APIs and apply plan
 - P4 global model center UI
