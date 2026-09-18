@@ -60,7 +60,7 @@
 
 ## 全局 LLM 连接库
 
-独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../docs/plans/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1 已实现 catalog / policy / 凭据记录与 CAS。P2–P6 未完成。
+独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../docs/plans/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1 已实现 catalog / policy / 凭据记录与 CAS；P2 已把共享连接接到官方适配器流式调用。P3–P6 未完成。
 
 ## 其它仍有效、与恢复无关的未完成项
 
