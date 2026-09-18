@@ -67,9 +67,9 @@ const FORBIDDEN_SHARE_ENTRY = [
 const SECRET_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /SPACES_LLM_[0-9A-F]{32}_R[1-9][0-9]*_API_KEY/g, reason: "managed credential reference" },
   { re: /spaces-llm\/conn-[0-9a-f]{32}-rev-[1-9][0-9]*/g, reason: "credential record id" },
-  { re: /["']?apiKey(?:Env)?["']?\s*[:=]\s*["'][^"'\s]+["']/gi, reason: "apiKey field" },
+  { re: /["']?apiKey(?:Env)?["']?\s*[:=]\s*["']?[^"'\s]+["']?/gi, reason: "apiKey field" },
   { re: /Authorization:\s*Bearer\s+\S+/gi, reason: "authorization header" },
-  { re: /\bsk-[A-Za-z0-9_-]{12,}\b/g, reason: "key-like token" },
+  { re: /\bsk-[A-Za-z0-9_-]{8,}\b/g, reason: "key-like token" },
   { re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g, reason: "private key block" },
   { re: /(?:^|[\s"'=])(?:\/(?:home|Users|root|opt|var)\/|[A-Za-z]:\\)/g, reason: "absolute path" },
 ];

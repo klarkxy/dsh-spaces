@@ -223,7 +223,7 @@ function hostOf(input: {
   probe?: LlmProbePort;
   spaceSettings?: MemorySpaceSettings;
   restart?: (spaceId: string) => Promise<void>;
-}) {
+} = {}) {
   const credentials = input.credentials ?? new MemoryCredentialStore();
   const instances = input.instances ?? new MemoryInstances();
   const operations = input.operations ?? new MemoryOperationStore();
@@ -715,12 +715,13 @@ test("testConnection requires authorize and does not send chat history", async (
 
 test("imported requirements stay unmapped until an explicit local connection is chosen", async () => {
   const { host, spaceSettings } = hostOf();
-  const saved = await host.dispatch({
+  await host.dispatch({
     method: "saveConnection",
     draft: noneDraft(),
     expectedRevision: 0,
   });
-  const connectionId = (saved as { connectionId?: string }).connectionId;
+  const described = (await host.dispatch({ method: "describe" })) as { connections: Array<{ id: string }> };
+  const connectionId = described.connections[0]?.id;
   assert.ok(connectionId);
   spaceSettings.imports.set("alpha", {
     schemaVersion: 1,
