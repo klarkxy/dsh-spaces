@@ -24,6 +24,7 @@ jobs:
       - run: npm run typecheck:spaces
       - run: npm test
       - run: npm run test:spaces
+      - run: npm run test:llm
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
       - run: npm run build:spaces

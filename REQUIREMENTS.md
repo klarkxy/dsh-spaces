@@ -55,8 +55,8 @@ DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name
 
 ### 2.2 隔离语义
 
-- **隔离**（per-profile）：插件 bundle、`cordis.patch.yml`、会话、工作区分组视图。
-- **共享**（home 级，官方原意）：API Key（`.credentials.yaml`）、`settings.yaml`、Agent 预设——一个机器身份，多套工作空间。
+- **隔离**（per-profile）：插件 bundle、`cordis.patch.yml`、会话、工作区分组视图、以及工作台自己的 `settings.yaml` / `.credentials.yaml`。
+- **共享**（Spaces 控制 Home 级）：全局 LLM 连接库（catalog + 独立凭据）。`web` 继续使用官方 home 级 `settings.yaml` / `.credentials.yaml`，除非用户显式接入共享连接。不共享整份 settings，不把 Key 复制进每个 Space。
 - **关键布局约束**：工作台数据根必须放在默认树的**兄弟目录**（`$DSH_HOME/hub/`），绝不能嵌在 `$DSH_HOME/sessions/` 下面——否则 `web` 的持久化扫描器会把工作台会话吃进去，隔离穿透。
 
 ## 3. 功能需求
@@ -162,7 +162,7 @@ $DSH_HOME/profiles/<name>/
 ### 5.4 数据目录实测形态
 - `$DSH_HOME/sessions/`：按工作区路径编码命名的目录（两级结构），内含 `session.jsonl.zstd`（zstd 压缩 JSONL）。
 - `$DSH_HOME/storages/`：`workspace.json`（工作区分组）、`session_projcache.json`（投影缓存，`writeIntervalMs: 5000`）。
-- home 级共享文件：`.credentials.yaml`、`settings.yaml`、`.anonymous-user-id` 等——**全部不碰**。
+- `web` 的 home 级文件：`.credentials.yaml`、`settings.yaml`、`.anonymous-user-id` 等——**全部不碰**。工作台 Space 的 settings / credentials 改走 `hub/<name>/` 独立路径，不写回 `web`。
 - **工作台覆盖后**：会话落在 `$DSH_HOME/hub/<name>/sessions/`，`workspace.json` 和 `session_projcache.json` 都跟随 `storage-json` 根，落在 `$DSH_HOME/hub/<name>/storages/`。无需额外覆盖 projection-cache。
 - 覆盖后的目录由 dsh 在首次写入时自动创建，脚本不必预先 mkdir。
 

@@ -269,6 +269,7 @@ export const en = {
   "errors.processStillRunning": "{name} is still running after stop.",
   "errors.missingDumpRow": "Missing row {id} in dump-config for {name}",
   "errors.dumpRootMismatch": "{id} root is {actual}, expected hub/{name}/{kind}",
+  "errors.dumpPathMismatch": "{id} path is {actual}, expected hub/{name}/{file}",
   "errors.dumpConfigFailed": "dump-config exited {code}: {detail}",
   "errors.pluginAddFailed": "plugin add {spec} failed ({code}): {detail}",
   "errors.pluginRemoveFailed": "plugin remove {spec} failed ({code}): {detail}",

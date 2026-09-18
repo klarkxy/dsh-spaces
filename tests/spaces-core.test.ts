@@ -10,10 +10,15 @@ import {
   PatchForbiddenError,
   PatchVerifyError,
   applyIsolationPatch,
+  assertDumpConfigIsolated,
   assertDumpPatched,
+  configPathExpr,
+  extractConfigField,
   extractRoot,
+  isExpectedIsolationPath,
   isExpectedIsolationRoot,
   isolationExpr,
+  patchTextLooksConfigIsolated,
   patchTextLooksIsolated,
 } from "../src/core/domain/isolation.ts";
 import {
@@ -44,10 +49,13 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
   const files = [
     "domain/isolation.ts",
     "domain/registry.ts",
+    "domain/llm-connections.ts",
+    "domain/llm-resolution.ts",
     "application/maintenance-gate.ts",
     "application/restore-session.ts",
     "ports/operation-lock.ts",
     "ports/restore.ts",
+    "ports/llm-store.ts",
   ];
   const forbidden = /from ["'](?:node:fs|node:process|electron|react|react\/jsx-runtime|cordis)/;
   for (const file of files) {
@@ -57,12 +65,24 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
 
 test("isolation expressions and dump verification stay host-independent", () => {
   assert.equal(isolationExpr("coding", "sessions"), "dshHomePath('hub/coding/sessions')");
+  assert.equal(configPathExpr("coding", "settings.yaml"), "dshHomePath('hub/coding/settings.yaml')");
   assert.equal(
     isExpectedIsolationRoot("!!js dshHomePath('hub/coding/sessions')", "coding", "sessions"),
     true,
   );
   assert.equal(isExpectedIsolationRoot("dshHomePath('hub/coding/sessions')", "coding", "sessions"), false);
+  assert.equal(
+    isExpectedIsolationPath("!!js dshHomePath('hub/coding/settings.yaml')", "coding", "settings.yaml"),
+    true,
+  );
   assert.equal(patchTextLooksIsolated("hub/coding/sessions\nhub/coding/storages", "coding"), true);
+  assert.equal(
+    patchTextLooksConfigIsolated(
+      "hub/coding/sessions\nhub/coding/storages\nhub/coding/settings.yaml\nhub/coding/.credentials.yaml",
+      "coding",
+    ),
+    true,
+  );
 
   const dump = `
 - id: session-persistence-jsonl
@@ -78,6 +98,10 @@ test("isolation expressions and dump verification stay host-independent", () => 
   const patched = applyIsolationPatch("- id: keep-me\n  config:\n    foo: 1\n", "coding", "patch");
   assert.match(patched, /hub\/coding\/sessions/);
   assert.match(patched, /hub\/coding\/storages/);
+  assert.match(patched, /hub\/coding\/settings\.yaml/);
+  assert.match(patched, /hub\/coding\/\.credentials\.yaml/);
+  assert.equal(extractConfigField(patched, "settings", "path"), "!!js dshHomePath('hub/coding/settings.yaml')");
+  assert.doesNotThrow(() => assertDumpConfigIsolated(patched, "coding"));
   assert.throws(
     () =>
       applyIsolationPatch(

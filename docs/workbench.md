@@ -48,6 +48,8 @@ Unregistered DSH processes that were never started by this supervisor are not re
 
 Unpackaged desktop and tests refuse the real `~/.dsh` unless the process is explicitly authorized. Paths on the supervisor CLI stay on the Node process. The browser never submits filesystem paths, CLI commands, or launch tokens.
 
+Shared LLM connections are a Home-level catalog, not `web` settings. New workbench patches also isolate `settings` and `credentials` under `hub/<name>/`. See [the global LLM plan](plans/global-llm-connections.md) and [the P0 compatibility matrix](compat/global-llm-matrix.md).
+
 ## Build, pack, start (from this repo)
 
 Run these from the repository root after `npm install`. `npm run build:spaces` writes `packages/*/lib`. Pack **outside** the package trees (never into `packages/plugin`).

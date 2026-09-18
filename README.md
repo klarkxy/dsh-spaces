@@ -14,7 +14,7 @@ DSH Spaces does **not** promise that arbitrary plugin combinations will run. Plu
 
 ## Why
 
-Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Running two profiles at once can race the same JSONL files. DSH Spaces keeps **one shared identity** (API keys, `settings.yaml`) and gives every workbench its own session/storage roots under `$DSH_HOME/hub/<name>/`. Plugin discovery is in Hub settings (NanmiCoder catalog schema, MIT); installs still run `dsh plugin --profile <name> add` into the spaces you select.
+Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Running two profiles at once can race the same JSONL files. DSH Spaces gives every workbench its own session, storage, settings, and local credential files under `$DSH_HOME/hub/<name>/`. Shared LLM connections live in a Home-level catalog, not in `web` settings. `web` stays on the official home `settings.yaml` unless it is explicitly joined. Plugin discovery is in Hub settings (NanmiCoder catalog schema, MIT); installs still run `dsh plugin --profile <name> add` into the spaces you select.
 
 `web` is the unique home profile. Spaces never writes its isolation patch. Pre-Hub chats stay there; explicitly requested plugin operations may update its plugin installation.
 
@@ -105,10 +105,10 @@ MIT. See `LICENSE`.
 ## 数据规则
 
 - `web` 是唯一根 profile，使用官方默认 `$DSH_HOME/sessions/` 与 `$DSH_HOME/storages/`，**永不打 patch**。Hub 安装前的聊天都归它。
-- 其它 profile 都是工作台：双 root 覆盖到 `$DSH_HOME/hub/<name>/sessions` 与 `.../storages`（默认树的**兄弟**目录，禁止嵌进 `sessions/`）。
-- 已有非 web profile 首次确认后自动转换（备份 `cordis.patch.yml` 再写 dual-root）。插件栈不动。会话列表从空开始。
+- 其它 profile 都是工作台：会话、存储、settings 和本地凭据覆盖到 `$DSH_HOME/hub/<name>/`（默认树的**兄弟**目录，禁止嵌进 `sessions/`）。
+- 已有非 web profile 首次确认后自动转换（备份 `cordis.patch.yml` 再写 isolation patch）。插件栈不动。会话列表从空开始。
 - 转换时固定提示：**「你的历史聊天统一由 web 维护，工作台从全新会话开始」**。
-- 共享家目录身份：API Key、`settings.yaml`、Agent 预设。不做迁移、不做多套 `DSH_HOME`。
+- 共享的是 Spaces 全局 LLM 连接库，不是整份 `settings.yaml`。`web` 继续用官方 home 配置，除非显式接入。不做 Key 复制、不做多套 `DSH_HOME`。
 - 插件**发现**在 Hub 设置里（NanmiCoder 目录 schema，MIT）。安装仍是对勾选工作台跑 `dsh plugin --profile <name> add`，不是全局一份插件栈。
 - 管理工作台是专用 profile `spaces-hub`（重名递增后缀），不是往普通 `coding` profile 里装完整 Spaces。普通空间只装轻量 view-bridge。误装完整插件只会看到「返回工作台」。流程见 [工作台说明](docs/workbench.md)。
 

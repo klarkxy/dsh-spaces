@@ -56,13 +56,19 @@ function writePatch(name) {
   const path = join(HOME, "profiles", name, "cordis.patch.yml");
   writeFileSync(
     path,
-    `# DSH Spaces workbench isolation: dual-root overlay.
+    `# DSH Spaces workbench isolation: session, storage, settings, and credentials paths.
 - id: session-persistence-jsonl
   config:
     root: !!js dshHomePath('hub/${name}/sessions')
 - id: storage-json
   config:
     root: !!js dshHomePath('hub/${name}/storages')
+- id: settings
+  config:
+    path: !!js dshHomePath('hub/${name}/settings.yaml')
+- id: credentials
+  config:
+    path: !!js dshHomePath('hub/${name}/.credentials.yaml')
 `,
     "utf8",
   );

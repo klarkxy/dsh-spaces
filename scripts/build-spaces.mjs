@@ -51,6 +51,10 @@ if (!process.argv.includes('--core-only')) {
   await buildClient('@dsh-spaces/view-bridge', 'packages/view-bridge/src/client.ts', 'packages/view-bridge/lib/client.js');
   await copyFile(at('LICENSE'), at('packages/view-bridge/LICENSE'));
 
+  await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
+    entryPoints: ['packages/llm-bridge/src/index.ts'], outfile: 'packages/llm-bridge/lib/index.js' });
+  await copyFile(at('LICENSE'), at('packages/llm-bridge/LICENSE'));
+
   await buildNodeCli('packages/supervisor/src/index.ts', 'packages/supervisor/lib/index.js');
   await build({ ...common, platform: 'node', banner: { js: nodeRequire },
     entryPoints: ['src/main/snapshot-worker.ts'], outfile: 'packages/supervisor/lib/snapshot-worker.mjs' });

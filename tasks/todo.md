@@ -58,6 +58,10 @@
 - [x] **R6** 同步删除 UI、API、CLI 和构建里的残留。入口：`packages/plugin/src/workbench/**`、client/host、`src/renderer/**`、`src/preload/**`、i18n、`scripts/build-spaces.mjs`、`package.json`、打包资源。错误页只留错误详情、查看日志、复制脱敏日志。常规启停卸载留在正常管理位置。
 - [x] **Q** 真实故障验收 E01–E18（见 `dsh-spaces-let-it-crash-plan.md` §8）。故障注入保留，改验「失败被如实报告，并且没有发生抢救」。不整组删除 `test:workbench:recovery`；逐项拆分，保留与恢复无关的有效覆盖。不靠假测试、放宽条件或跳过获得通过。未在本机跑到的 CLI/浏览器项见 [q-coverage.md](q-coverage.md)。
 
+## 全局 LLM 连接库
+
+独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../docs/plans/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1–P6 未完成。
+
 ## 其它仍有效、与恢复无关的未完成项
 
 - [x] 取消永久精确版本白名单（兼容看接口与实际能力；未知版本号本身不应直接导致只读）。见 [handoff-2026-09-14.md](handoff-2026-09-14.md)。默认跟随官方 `latest`；每次安装/升级仍固定解析后的具体版本。已测试版本作为证据，不新增长期兼容分支。
