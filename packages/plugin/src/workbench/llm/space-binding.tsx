@@ -231,6 +231,7 @@ export function SpaceBindingPanel({
               <label key={requirement.requirementId} className="dsh-wb-field">
                 {requirement.displayName} · {requirement.protocol} · {requirement.endpoint}
                 <select
+                  data-llm-map-select="true"
                   value={mapping[requirement.requirementId] ?? ""}
                   disabled={!writable}
                   onChange={(event) =>
@@ -249,6 +250,7 @@ export function SpaceBindingPanel({
             <button
               type="button"
               className="dsh-wb-btn primary"
+              data-llm-map-apply="true"
               disabled={!writable || !policy}
               onClick={() => {
                 if (!policy || !imported.manifest) return;

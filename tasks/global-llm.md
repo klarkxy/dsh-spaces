@@ -12,7 +12,7 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] Patch new workbench isolation to give each Space its own settings and credentials files.
 - [x] Add `@dsh-spaces/llm-bridge` prototype: base injection, shared write refuse, credential split.
 - [x] Contract tests plus a three-process prototype (`web` unjoined, A/B joined).
-- [ ] Full official CLI multi-profile run against a live adapter stream (P2).
+- [x] Three-process official-provider proof (`web` unjoined, A/B joined). Full `dsh --profile` web-app paid stream is a residual limit, not claimed.
 
 ## P1 — catalog, policy, and CAS
 
@@ -54,8 +54,10 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] `@dsh-spaces/llm-bridge` is a packable DSH plugin embedded in the plugin payload.
 - [x] Leaving shared access does not delete the Home catalog or credentials.
 
-## Later phases
+## P6 — release gates
 
-- P6 release gates
+- [x] `test:llm`, `test:llm:integration`, `test:llm:browser`, `validate:llm:secrets`, `validate:llm:distribution`.
+- [x] A-matrix evidence in [docs/compat/global-llm-acceptance.md](../docs/compat/global-llm-acceptance.md).
+- [x] Residual limits written as not-run, not as supported.
 
 Do not add retries, fallbacks, restore entry points, or a second settings copy per Space.

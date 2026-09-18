@@ -5,9 +5,12 @@ import z from "@deepseek-ai/schemastery";
 import { Config as LlmPiAiConfig } from "@deepseek-ai/dsh-llm-pi-ai";
 import { AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA } from "@deepseek-ai/dsh-agent-default-model";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
+import { createUserMessage, type StreamChunk } from "@deepseek-ai/dsh-llm";
 import { SpacesCredentialsProvider } from "../../packages/llm-bridge/src/credentials-provider.ts";
-import { startBridgedCredentials, startLocalCredentials, startLocalSettings, startPlainSettings } from "./llm-official.ts";
-import { compileManagedRouteId, type LlmSharedSnapshot } from "../../src/core/domain/llm-connections.ts";
+import { attachOfficialLlm } from "../../packages/llm-bridge/src/official-host.ts";
+import type { SpacesFileSettingsProvider } from "../../packages/llm-bridge/src/settings-provider.ts";
+import { startLocalCredentials, startLocalSettings, startPlainSettings } from "./llm-official.ts";
+import { compileManagedRouteId, LLM_ERROR, type LlmSharedSnapshot } from "../../src/core/domain/llm-connections.ts";
 import { snapshotCredentialRef } from "../../src/core/domain/llm-resolution.ts";
 
 type WorkerConfig = {
@@ -35,14 +38,13 @@ async function main(): Promise<void> {
   const sharedLookup = config.sharedCredentialsPath
     ? await sharedLookupFromFile(config.sharedCredentialsPath, config.home)
     : { describe: async () => ({ configured: false }), readSecret: async () => undefined };
+  const localCredentials = await startLocalCredentials(config.credentialsPath, config.home);
   const credentials = config.snapshot
-    ? (await startBridgedCredentials({
-        localPath: config.credentialsPath,
-        localHome: config.home,
-        shared: sharedLookup,
-        snapshot: config.snapshot,
-      })).credentials
-    : (await startLocalCredentials(config.credentialsPath, config.home)).credentials;
+    ? new SpacesCredentialsProvider(settings.ctx, localCredentials.credentials, sharedLookup, config.snapshot)
+    : localCredentials.credentials;
+  if (config.snapshot) {
+    await attachOfficialLlm(settings.ctx, settings.settings as SpacesFileSettingsProvider);
+  }
 
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -56,6 +58,7 @@ async function main(): Promise<void> {
         snapshot: config.snapshot,
         settingsPath: config.settingsPath,
         credentialsPath: config.credentialsPath,
+        llm: (settings.ctx as { llm?: { stream(options: object): AsyncIterable<StreamChunk> } }).llm,
       });
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, result }));
@@ -103,6 +106,7 @@ async function dispatch(
     snapshot: LlmSharedSnapshot | null;
     settingsPath: string;
     credentialsPath: string;
+    llm?: { stream(options: object): AsyncIterable<StreamChunk> };
   },
 ) {
   switch (body.op) {
@@ -150,6 +154,31 @@ async function dispatch(
         settings: existsSync(ctx.settingsPath) ? readFileSync(ctx.settingsPath, "utf8") : "",
         credentials: existsSync(ctx.credentialsPath) ? readFileSync(ctx.credentialsPath, "utf8") : "",
       };
+    case "stream": {
+      if (!ctx.llm) {
+        throw Object.assign(new Error("The official adapter is not available in this space."), {
+          code: LLM_ERROR.ADAPTER_MISSING,
+        });
+      }
+      let text = "";
+      for await (const chunk of ctx.llm.stream({
+        provider: body.provider,
+        model: body.model,
+        messages: [
+          createUserMessage({
+            content: [{ type: "text", text: "ping" }],
+            source: { kind: "user" },
+          }),
+        ],
+      })) {
+        if (chunk.type === "text-delta") text += chunk.text;
+        if (chunk.type === "finish" && (chunk.reason.kind === "error" || chunk.reason.kind === "aborted")) {
+          const failure = chunk.reason.failure;
+          throw Object.assign(new Error(failure.message), { code: failure.code, status: failure.status });
+        }
+      }
+      return { text };
+    }
     default:
       throw new Error(`unknown op ${body.op}`);
   }

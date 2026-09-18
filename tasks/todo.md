@@ -60,7 +60,7 @@
 
 ## 全局 LLM 连接库
 
-独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../docs/plans/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1 已实现 catalog / policy / 凭据记录与 CAS；P2 已把共享连接接到官方适配器流式调用；P3 已露出脱敏管理 API、独立凭据通道和无秘密 apply 计划。P4 已露出全局模型中心与 Space 绑定 UI（Web / 桌面）。P5 已实现显式接管、无秘密分享映射和 llm-bridge 打包。P6 未完成。
+独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../docs/plans/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1 已实现 catalog / policy / 凭据记录与 CAS；P2 已把共享连接接到官方适配器流式调用；P3 已露出脱敏管理 API、独立凭据通道和无秘密 apply 计划。P4 已露出全局模型中心与 Space 绑定 UI（Web / 桌面）。P5 已实现显式接管、无秘密分享映射和 llm-bridge 打包。P6 已加上发布门禁、秘密扫描和 A 矩阵证据；未跑平台与 A25 见 [global-llm-acceptance.md](../docs/compat/global-llm-acceptance.md)。
 
 ## 其它仍有效、与恢复无关的未完成项
 

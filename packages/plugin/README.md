@@ -22,7 +22,7 @@ No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@latest` in place
 
 - Standard `dsh.bundle.patch` and `cordis.patch.yml` let the official CLI maintain the profile's bundle list.
 - `dsh.client` and `./client` supply the Web client through DSH's module loader and shared React.
-- The tarball includes supervisor, snapshot worker, and view-bridge payloads. Users do not need a second package or this source checkout at runtime.
+- The tarball includes supervisor, snapshot worker, view-bridge, and llm-bridge payloads. Users do not need a second package or this source checkout at runtime. `llm-bridge` is installed only when a Space explicitly joins shared connections.
 - The supervisor allocates the manager under the existing Home locks; ordinary profiles never gain manager write remotes.
 - Unknown CLI versions, damaged identity, and another controller's lease are refused before initialization writes. Concurrent callers share startup but receive separate one-time handoffs.
 
