@@ -233,6 +233,9 @@ export function PluginPanel({
           ? t("plugins.sourceSeed")
           : "";
 
+  const versionPin = exactVersion.trim();
+  const versionPinInvalid = versionPin.length > 0 && !isExactRuntimeVersion(versionPin);
+
   const spaceLabel = (name: string) =>
     profiles.find((profile) => profile.name === name)?.meta.displayName || name;
 
@@ -399,19 +402,6 @@ export function PluginPanel({
               {t("plugins.refresh")}
             </button>
           </div>
-          <label className="text-xs" style={{ color: "var(--text-label)" }}>
-            {t("plugins.exactVersion")}
-            <input
-              className="field mt-1"
-              placeholder="1.2.3"
-              value={exactVersion}
-              onChange={(event) => setExactVersion(event.target.value)}
-              aria-label={t("plugins.exactVersion")}
-            />
-            <span className="mt-1 block" style={{ color: "var(--text-faint)" }}>
-              {t("plugins.exactVersionHint")}
-            </span>
-          </label>
           <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("plugins.category")}>
             <button
               type="button"
@@ -499,12 +489,12 @@ export function PluginPanel({
                           <button
                             type="button"
                             className="btn-primary shrink-0 rounded-full px-3 py-1 text-xs"
-                            disabled={Boolean(busy) || !isExactRuntimeVersion(exactVersion.trim())}
+                            disabled={Boolean(busy) || versionPinInvalid}
                             onClick={() =>
                               void run(t("busy.downloadPlugin"), async () => {
                                 await window.dshSpaces.downloadPlugin({
                                   catalogId: entry.id,
-                                  version: exactVersion.trim(),
+                                  ...(isExactRuntimeVersion(versionPin) ? { version: versionPin } : {}),
                                 });
                               })
                             }
@@ -571,6 +561,19 @@ export function PluginPanel({
             </button>
             {advanced ? (
               <div className="mt-2 flex flex-col gap-2">
+                <label className="text-xs" style={{ color: "var(--text-label)" }}>
+                  {t("plugins.exactVersion")}
+                  <input
+                    className="field mt-1"
+                    placeholder="1.2.3"
+                    value={exactVersion}
+                    onChange={(event) => setExactVersion(event.target.value)}
+                    aria-label={t("plugins.exactVersion")}
+                  />
+                  <span className="mt-1 block" style={{ color: "var(--text-faint)" }}>
+                    {t("plugins.exactVersionHint")}
+                  </span>
+                </label>
                 <div className="flex gap-2">
                   <input
                     className="field flex-1"

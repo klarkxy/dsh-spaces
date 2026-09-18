@@ -154,10 +154,12 @@ export const en = {
   "plugins.marketHint":
     "Browse the public DSH catalog. Download here, then turn plugins on per space in Manage.",
   "plugins.spec": "Package spec",
-  "plugins.specHint": "npm name@version or github:owner/repo. Not a shell command.",
+  "plugins.specHint":
+    "npm name, name@exact-version, or github:owner/repo. Not a shell command. A bare name resolves current latest and pins it.",
   "plugins.versionUnknown": "unknown",
-  "plugins.exactVersion": "Exact version",
-  "plugins.exactVersionHint": "Downloads that version only. It will not fall back to latest.",
+  "plugins.exactVersion": "Pin version (optional)",
+  "plugins.exactVersionHint":
+    "Leave empty to download current latest and pin that version. A filled version is downloaded as-is; a missing version is not replaced.",
   "plugins.downloadSpec": "Download",
   "plugins.search": "Search plugins",
   "plugins.searchHint": "Search plugins, e.g. notify, terminal, memory…",
@@ -277,7 +279,8 @@ export const en = {
   "errors.pluginCatalogMissing": "Catalog has no entry {id}",
   "errors.pluginNotInstallable": "{id} is not one-click installable",
   "errors.pluginNeedTarget": "Select at least one space",
-  "errors.pluginNeedExactVersion": "An exact package version is required. latest is not used.",
+  "errors.pluginNeedExactVersion": "Version must be an exact number, not latest or a range.",
+  "errors.pluginLatestMissing": "Could not resolve the current latest version for {name}.",
   "errors.pluginLibraryMissing": "No local plugin {id}",
   "errors.pluginDownloadFailed": "Download of {spec} failed: {detail}",
   "errors.pluginPackFailed": "Packing {spec} failed ({code}): {detail}",
