@@ -1,5 +1,6 @@
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { SpaceDetail, SpacesOverview } from "../../../src/shared/spaces-control";
+import type { LlmApiRequest, LlmApiResult } from "../../../src/shared/llm-api";
 import type {
   WorkbenchBackup,
   WorkbenchCommand,
@@ -47,6 +48,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     runtimes: () => Promise<RemoteResult<WorkbenchRuntime[]>>;
     workbenchPackage: () => Promise<RemoteResult<WorkbenchPackageRelease | null>>;
     backups: (spaceId: string) => Promise<RemoteResult<WorkbenchBackup[]>>;
+    llm: (request: LlmApiRequest) => Promise<RemoteResult<LlmApiResult>>;
   }
   interface TypertRemoteMap {
     "workbenchGuide/role": () => Promise<RemoteResult<WorkbenchGuideRole>>;
@@ -68,6 +70,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "workbench/runtimes": () => Promise<RemoteResult<WorkbenchRuntime[]>>;
     "workbench/workbenchPackage": () => Promise<RemoteResult<WorkbenchPackageRelease | null>>;
     "workbench/backups": (spaceId: string) => Promise<RemoteResult<WorkbenchBackup[]>>;
+    "workbench/llm": (request: LlmApiRequest) => Promise<RemoteResult<LlmApiResult>>;
   }
   interface TypertRemoteNamespaceMap {
     workbenchGuide: TypertRemoteNamespace$workbenchGuide;

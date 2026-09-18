@@ -14,7 +14,8 @@ import type {
   WorkbenchView,
 } from "../../../../src/shared/workbench";
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
-import { WORKBENCH_PUBLIC_ERROR, type WorkbenchRemoteCode } from "./remote-errors";
+import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
+import type { LlmApiRequest, LlmApiResult } from "../../../../src/shared/llm-api";
 import type { WorkbenchHostRuntime } from "./runtime";
 
 /**
@@ -94,15 +95,28 @@ export class WorkbenchManagerHost extends TypertRemoteService {
     return this.guard((api) => api.workbenchPackage?.() ?? Promise.resolve(null));
   }
 
+  @Remote("llm")
+  async llm(request: LlmApiRequest): Promise<LlmApiResult> {
+    return this.guard((api) => {
+      if (!api.llm) throw new Error("workbench/unsupported");
+      return api.llm(request);
+    });
+  }
+
   private async guard<T>(action: (api: Awaited<ReturnType<WorkbenchHostRuntime["managerApi"]>>) => Promise<T>): Promise<T> {
     try {
       const api = await this.runtime.managerApi();
       return await action(api);
     } catch (error) {
       if (error instanceof RemoteError) throw error;
-      const code = error instanceof Error && error.message.startsWith("workbench/") ? error.message : "";
+      const code = error instanceof Error && (error.message.startsWith("workbench/") || error.message.startsWith("LLM_"))
+        ? error.message
+        : "";
       if (code in WORKBENCH_PUBLIC_ERROR) {
         throw new RemoteError(code as WorkbenchRemoteCode, WORKBENCH_PUBLIC_ERROR[code as WorkbenchRemoteCode], {});
+      }
+      if (code in LLM_PUBLIC_ERROR) {
+        throw new RemoteError(code as LlmRemoteCode, LLM_PUBLIC_ERROR[code as LlmRemoteCode], {});
       }
       throw new RemoteError("workbench/unavailable", WORKBENCH_PUBLIC_ERROR["workbench/unavailable"], {});
     }

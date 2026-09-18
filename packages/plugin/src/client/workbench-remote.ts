@@ -1,4 +1,5 @@
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
+import type { LlmApiRequest, LlmApiResult } from "../../../../src/shared/llm-api";
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
 import type {
   WorkbenchApi,
@@ -45,6 +46,22 @@ export const KNOWN_WORKBENCH_ERROR_CODES: ReadonlySet<string> = new Set([
   "spaces/already-exists",
   "spaces/locked",
   "spaces/unavailable",
+  "LLM_REVISION_CONFLICT",
+  "LLM_WRITE_OWNER_REQUIRED",
+  "LLM_CONFIG_INVALID",
+  "LLM_UNSUPPORTED_RUNTIME",
+  "LLM_UNSUPPORTED_PROTOCOL",
+  "LLM_ADAPTER_MISSING",
+  "LLM_MODEL_NOT_FOUND",
+  "LLM_CONNECTION_IN_USE",
+  "LLM_SHARED_CONNECTION_READ_ONLY",
+  "LLM_MANAGED_ROUTE_CONFLICT",
+  "LLM_CREDENTIAL_MISSING",
+  "LLM_CREDENTIAL_WRITE_FAILED",
+  "LLM_DISCOVERY_FAILED",
+  "LLM_SPACE_BUSY",
+  "LLM_APPLY_FAILED",
+  "LLM_RESULT_UNKNOWN",
 ]);
 
 export class WorkbenchRemoteError extends Error {
@@ -120,6 +137,7 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
     runtimes: () => callRemote<WorkbenchRuntime[]>(connection, "workbench/runtimes", {}),
     workbenchPackage: () => callRemote<WorkbenchPackageRelease | null>(connection, "workbench/workbenchPackage", {}, undefined, true),
     backups: (spaceId) => callRemote<WorkbenchBackup[]>(connection, "workbench/backups", { spaceId }),
+    llm: (request: LlmApiRequest) => callRemote<LlmApiResult>(connection, "workbench/llm", { request }),
   };
 }
 

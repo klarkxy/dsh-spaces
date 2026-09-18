@@ -23,6 +23,8 @@ import {
   workbenchSpaceDetailSchema,
   workbenchStateSchema,
   workbenchViewSchema,
+  llmApiRequestSchema,
+  llmApiResultSchema,
 } from "./host/workbench-schemas";
 
 export {
@@ -183,6 +185,13 @@ export const TYPERT = {
       [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/backups:spaceId")],
       result("@dsh-spaces/plugin/types#WorkbenchBackup[]", backupsResultSchema),
     ),
+    invocation(
+      "workbench",
+      "llm",
+      managerFile,
+      [param("request", llmApiRequestSchema, "@dsh-spaces/plugin/types#LlmApiRequest")],
+      result("@dsh-spaces/plugin/types#LlmApiResult", llmApiResultSchema),
+    ),
   ],
   model: {
     services: [],
@@ -206,5 +215,6 @@ export const MANAGER_METHODS = [
   "runtimes",
   "workbenchPackage",
   "backups",
+  "llm",
 ] as const;
 export const SPACES_READ_METHODS = ["overview", "detail"] as const;

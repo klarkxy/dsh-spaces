@@ -30,9 +30,16 @@ Fault policy: [docs/let-it-crash.md](../docs/let-it-crash.md).
 - [x] `llm/stream` guard refuses hijacked managed routes.
 - [x] Two Spaces stream one shared mock through the official adapter; local same-name models stay distinct.
 
+## P3 — management APIs and apply plan
+
+- [x] Supervisor/HTTP `llm` (redacted) and `llmCredential` (secret-only) methods.
+- [x] Write owner required; workspace origins cannot call management APIs.
+- [x] Operation status `committed` / `not-found` / `unknown`; lost responses are not replayed.
+- [x] `llm.apply` jobs are secret-free; busy/unknown Spaces refuse apply; batch A keep / B fail / C skip.
+- [x] Explicit discover/test with 15s / 2 MiB / no-redirect / 1000-model bounds.
+
 ## Later phases
 
-- P3 management APIs and apply plan
 - P4 global model center UI
 - P5 explicit adoption and secret-free export
 - P6 release gates
