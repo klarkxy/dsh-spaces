@@ -11,4 +11,6 @@ It does four things:
 
 It does not install plugins, start another Supervisor, or operate another Space. Shared routes stay out of the Space user settings file. Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
 
-This package is not the user install unit yet. P0 pins the official `0.1.5-rc.2` seams; later phases pack it with the standard plugin flow.
+`openSpaceLlmBridge` freezes one catalog/policy snapshot for the process. `attachOfficialLlm` registers the official `llm` service and `llm-pi-ai` adapter; it does not replace that adapter. `installManagedRequestGuard` rejects hijacked managed routes at the `llm/stream` boundary.
+
+This package is not the user install unit yet. Later phases pack it with the standard plugin flow.
