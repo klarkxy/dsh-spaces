@@ -75,7 +75,7 @@ export class GlobalLlmService {
   async previewChange(draft: ConnectionDraft, expectedRevision: number): Promise<ChangePreview> {
     assertNoSecretPayload(draft);
     const catalog = await this.requireRevision(expectedRevision);
-    const next = this.buildConnection(catalog, draft);
+    const next = this.buildConnection(catalog, draft, { allowNewId: false });
     return {
       catalogRevision: catalog.revision,
       connectionId: next.id,
@@ -85,28 +85,7 @@ export class GlobalLlmService {
   }
 
   async saveConnection(draft: ConnectionDraft, expectedRevision: number): Promise<GlobalLlmCatalog> {
-    assertNoSecretPayload(draft);
-    const catalog = await this.requireRevision(expectedRevision);
-    const next = this.buildConnection(catalog, draft);
-    if (next.auth.kind === "api-key") {
-      const info = await this.credentialStore.describe(next.auth.credentialRecordId);
-      if (!info.configured) {
-        throw new LlmConfigError(LLM_ERROR.CREDENTIAL_MISSING, "catalog cannot publish an unreadable credential record", {
-          recordId: next.auth.credentialRecordId,
-        });
-      }
-    }
-    if (catalog.defaultModel && catalog.defaultModel.connectionId === next.id) {
-      assertDefaultStillValid({ ...catalog, connections: { ...catalog.connections, [next.id]: next } }, catalog.defaultModel);
-    }
-    return this.catalogStore.write(
-      {
-        ...catalog,
-        connections: { ...catalog.connections, [next.id]: next },
-        revision: catalog.revision + 1,
-      },
-      expectedRevision,
-    );
+    return this.commitConnection(draft, expectedRevision, { allowNewId: false });
   }
 
   async saveConnectionWithCredential(
@@ -119,7 +98,7 @@ export class GlobalLlmService {
       throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "saveConnectionWithCredential requires a non-empty secret");
     }
     const catalog = await this.requireRevision(expectedRevision);
-    const existing = draft.id ? this.existingConnection(catalog, draft.id) : undefined;
+    const existing = draft.id ? this.requireExistingConnection(catalog, draft.id) : undefined;
     const id = existing?.id ?? createConnectionId();
     const recordId = nextCredentialRecordId(id, existing?.auth);
     await this.credentialStore.writeRecord({ recordId, secret });
@@ -130,9 +109,10 @@ export class GlobalLlmService {
       });
     }
     try {
-      return await this.saveConnection(
+      return await this.commitConnection(
         { ...draft, id, auth: { kind: "api-key", credentialRecordId: recordId } },
         expectedRevision,
+        { allowNewId: existing == null },
       );
     } catch (error) {
       throw withLeftoverRecord(error, recordId);
@@ -225,6 +205,35 @@ export class GlobalLlmService {
     return out;
   }
 
+  private async commitConnection(
+    draft: ConnectionDraft,
+    expectedRevision: number,
+    options: { allowNewId: boolean },
+  ): Promise<GlobalLlmCatalog> {
+    assertNoSecretPayload(draft);
+    const catalog = await this.requireRevision(expectedRevision);
+    const next = this.buildConnection(catalog, draft, options);
+    if (next.auth.kind === "api-key") {
+      const info = await this.credentialStore.describe(next.auth.credentialRecordId);
+      if (!info.configured) {
+        throw new LlmConfigError(LLM_ERROR.CREDENTIAL_MISSING, "catalog cannot publish an unreadable credential record", {
+          recordId: next.auth.credentialRecordId,
+        });
+      }
+    }
+    if (catalog.defaultModel && catalog.defaultModel.connectionId === next.id) {
+      assertDefaultStillValid({ ...catalog, connections: { ...catalog.connections, [next.id]: next } }, catalog.defaultModel);
+    }
+    return this.catalogStore.write(
+      {
+        ...catalog,
+        connections: { ...catalog.connections, [next.id]: next },
+        revision: catalog.revision + 1,
+      },
+      expectedRevision,
+    );
+  }
+
   private async requireKnownSpace(spaceId: string): Promise<void> {
     const ids = await this.listSpaceIds();
     if (!ids.includes(spaceId)) {
@@ -243,13 +252,9 @@ export class GlobalLlmService {
     return catalog;
   }
 
-  private existingConnection(catalog: GlobalLlmCatalog, rawId: string): SharedConnection {
+  private requireExistingConnection(catalog: GlobalLlmCatalog, rawId: string): SharedConnection {
     const id = normalizeConnectionId(rawId);
-    if (catalog.retiredConnectionIds.includes(id)) {
-      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "retired connection ids cannot be reused", {
-        connectionId: id,
-      });
-    }
+    this.assertNotRetired(catalog, id);
     const existing = catalog.connections[id];
     if (!existing) {
       throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "connection does not exist", { connectionId: id });
@@ -257,14 +262,24 @@ export class GlobalLlmService {
     return existing;
   }
 
-  private buildConnection(catalog: GlobalLlmCatalog, draft: ConnectionDraft): SharedConnection {
+  private buildConnection(
+    catalog: GlobalLlmCatalog,
+    draft: ConnectionDraft,
+    options: { allowNewId: boolean },
+  ): SharedConnection {
     const now = new Date().toISOString();
-    const existing = draft.id ? this.existingConnection(catalog, draft.id) : undefined;
-    const id = existing?.id ?? createConnectionId();
-    if (catalog.retiredConnectionIds.includes(id)) {
-      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "retired connection ids cannot be reused", {
-        connectionId: id,
-      });
+    let existing: SharedConnection | undefined;
+    let id: ConnectionId;
+    if (draft.id) {
+      id = normalizeConnectionId(draft.id);
+      this.assertNotRetired(catalog, id);
+      existing = catalog.connections[id];
+      if (!existing && !options.allowNewId) {
+        throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "connection does not exist", { connectionId: id });
+      }
+    } else {
+      id = createConnectionId();
+      this.assertNotRetired(catalog, id);
     }
     const providerConfig = sanitizeProviderConfig(draft.providerConfig);
     if (typeof providerConfig.api === "string" && !isPinnedProtocol(providerConfig.api)) {
@@ -286,6 +301,14 @@ export class GlobalLlmService {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
+  }
+
+  private assertNotRetired(catalog: GlobalLlmCatalog, id: ConnectionId): void {
+    if (catalog.retiredConnectionIds.includes(id)) {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "retired connection ids cannot be reused", {
+        connectionId: id,
+      });
+    }
   }
 }
 
