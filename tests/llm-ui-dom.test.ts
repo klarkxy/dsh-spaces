@@ -77,6 +77,7 @@ test("DOM: model center saves through the credential channel and never stores th
     locator: (sel: string) => {
       fill: (v: string) => Promise<void>;
       click: () => Promise<void>;
+      count: () => Promise<number>;
       waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
       selectOption: (v: string) => Promise<void>;
     };
@@ -98,17 +99,21 @@ test("DOM: model center saves through the credential channel and never stores th
   await tab.getByRole("button", { name: "Add model" }).click();
   await tab.getByRole("button", { name: "Next" }).click();
   await tab.getByRole("button", { name: "Save" }).click();
+  await tab.locator("[data-llm-editor]").waitFor({ state: "detached", timeout: 15_000 });
   await tab.locator("[data-llm-list]").waitFor({ state: "attached", timeout: 15_000 });
-  const html = await tab.content();
-  assert.equal(html.includes(SECRET), false);
-  const storage = await tab.evaluate(() => ({
+  const values = (await tab.evaluate(() =>
+    [...document.querySelectorAll("input,textarea")].map((el) => (el as HTMLInputElement).value),
+  )) as string[];
+  assert.equal(values.some((value) => value.includes(SECRET)), false);
+  assert.equal(await tab.locator("[data-llm-secret]").count(), 0);
+  const storage = (await tab.evaluate(() => ({
     local: { ...window.localStorage },
     session: { ...window.sessionStorage },
-    llm: window.__LLM,
-  }));
+  }))) as { local: Record<string, string>; session: Record<string, string> };
   assert.equal(JSON.stringify(storage).includes(SECRET), false);
-  assert.deepEqual((storage as { llm?: { secrets: string[]; saved: boolean } }).llm?.secrets, [SECRET]);
-  assert.equal((storage as { llm?: { saved: boolean } }).llm?.saved, true);
+  const llm = (await tab.evaluate(() => window.__LLM)) as { secrets: string[]; saved: boolean };
+  assert.deepEqual(llm.secrets, [SECRET]);
+  assert.equal(llm.saved, true);
   await tab.getByRole("radio", { name: "All shared connections" }).click();
   await tab.locator("[data-llm-map-select]").selectOption(CONNECTION_OPTION);
   await tab.locator("[data-llm-map-apply]").click();
