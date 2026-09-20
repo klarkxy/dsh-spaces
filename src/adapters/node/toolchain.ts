@@ -5,9 +5,9 @@ import { type ChildProcess } from "node:child_process";
 import { spawnObserved } from "./owned-process-record";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { t } from "../shared/i18n";
-import type { PackageSource, RuntimeStatus } from "../shared/types";
-import { inferPackageSource } from "../shared/types";
+import { t } from "../../shared/i18n";
+import type { PackageSource, RuntimeStatus } from "../../shared/types";
+import { inferPackageSource } from "../../shared/types";
 import { atomicWrite, renameDirectoryAsync } from "./atomic";
 import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
 import {

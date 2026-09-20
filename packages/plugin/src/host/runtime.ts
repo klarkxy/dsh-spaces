@@ -70,7 +70,7 @@ export class WorkbenchHostRuntime {
   hint(): WorkbenchHostHint {
     return {
       role: this.identity.role,
-      recoveryRequired: this.identity.recoveryRequired,
+      unavailable: this.identity.recoveryRequired,
     };
   }
 
@@ -79,7 +79,7 @@ export class WorkbenchHostRuntime {
       role: this.identity.role,
       profileId: this.identity.profileId,
       managerId: this.identity.managerId,
-      recoveryRequired: this.identity.recoveryRequired,
+      unavailable: this.identity.recoveryRequired,
       reasons: [...this.identity.reasons],
     };
   }
@@ -89,11 +89,9 @@ export class WorkbenchHostRuntime {
       return {
         ok: false,
         connected: false,
-        recoveryRequired: true,
+        unavailable: true,
         origin: null,
-        reasons: this.identity.reasons.length
-          ? this.identity.reasons
-          : ["Workbench identity is damaged. Recovery is required."],
+        reasons: this.identity.reasons.length ? this.identity.reasons : [IDENTITY_DAMAGED],
       };
     }
     const home = this.identity.home;
@@ -101,7 +99,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: false,
         connected: false,
-        recoveryRequired: false,
+        unavailable: false,
         origin: null,
         reasons: this.identity.reasons.length ? this.identity.reasons : ["Host identity could not be confirmed."],
       };
@@ -110,7 +108,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: true,
         connected: true,
-        recoveryRequired: false,
+        unavailable: false,
         origin: this.endpoint.origin,
         reasons: [],
       };
@@ -132,7 +130,7 @@ export class WorkbenchHostRuntime {
         available: false,
         origin: null,
         path: null,
-        recoveryRequired: boot.recoveryRequired,
+        unavailable: boot.unavailable,
         reasons: boot.reasons,
       };
     }
@@ -160,7 +158,7 @@ export class WorkbenchHostRuntime {
       pending = started;
     }
     const boot = await pending;
-    if (!boot.connected) return this.initializeFailure(boot.reasons, boot.recoveryRequired);
+    if (!boot.connected) return this.initializeFailure(boot.reasons, boot.unavailable);
     // Share startup, never a single-use handoff token across browser requests.
     if (!this.endpoint) {
       const attached = await attachExistingSupervisor({ home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch });
@@ -178,7 +176,7 @@ export class WorkbenchHostRuntime {
     while (Date.now() < deadline) {
       try {
         const state = await this.api!.state();
-        if (state.role === "manager" && !state.recoveryRequired &&
+        if (state.role === "manager" && state.availability !== "unavailable" &&
             state.spaces.some(space => space.id === state.managerId && space.status === "running")) return null;
         if (state.reasons.length) reasons = state.reasons;
       } catch {
@@ -196,11 +194,23 @@ export class WorkbenchHostRuntime {
     if (this.api && this.endpoint && (await pingSupervisorState(this.endpoint, this.options.fetch))) {
       return this.api;
     }
-    const boot = await this.bootstrap();
-    if (!boot.ok || !this.api) {
-      throw new Error("workbench/unavailable");
+    const home = this.identity.home;
+    if (!home) throw new Error("workbench/unavailable");
+    const pending = inflight.get(resolve(home));
+    if (pending) {
+      await pending;
+      if (this.api) return this.api;
     }
-    return this.api;
+    const attached = await attachExistingSupervisor({
+      home,
+      allowRealHome: this.options.allowRealHome === true,
+      fetch: this.options.fetch,
+    });
+    if ("endpoint" in attached) {
+      this.remember(attached.endpoint);
+      return this.api!;
+    }
+    throw new Error("workbench/unavailable");
   }
 
   private async runInitialize(home: string): Promise<WorkbenchBootstrapResult> {
@@ -211,7 +221,7 @@ export class WorkbenchHostRuntime {
     });
     if ("endpoint" in attached) {
       this.remember(attached.endpoint);
-      return { ok: true, connected: true, recoveryRequired: false, origin: attached.endpoint.origin, reasons: [] };
+      return { ok: true, connected: true, unavailable: false, origin: attached.endpoint.origin, reasons: [] };
     }
     if ("blocked" in attached) {
       return this.initializeFailure(attached.reasons);
@@ -235,7 +245,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: false,
         connected: false,
-        recoveryRequired: true,
+        unavailable: true,
         origin: null,
         path: null,
         managerId: this.currentManagerId(),
@@ -266,7 +276,7 @@ export class WorkbenchHostRuntime {
     return {
       ok: target.available,
       connected: Boolean(this.endpoint),
-      recoveryRequired: false,
+      unavailable: false,
       origin: target.origin,
       path: target.path,
       managerId,
@@ -280,7 +290,7 @@ export class WorkbenchHostRuntime {
         available: false,
         origin: null,
         path: null,
-        recoveryRequired: false,
+        unavailable: false,
         reasons: [ENTRY_UNAVAILABLE],
       };
     }
@@ -290,7 +300,7 @@ export class WorkbenchHostRuntime {
         available: true,
         origin: this.endpoint.origin,
         path,
-        recoveryRequired: false,
+        unavailable: false,
         reasons: [],
       };
     } catch {
@@ -298,7 +308,7 @@ export class WorkbenchHostRuntime {
         available: false,
         origin: this.endpoint.origin,
         path: null,
-        recoveryRequired: false,
+        unavailable: false,
         reasons: [HANDOFF_FAILED],
       };
     }
@@ -308,11 +318,11 @@ export class WorkbenchHostRuntime {
     return this.identity.managerId;
   }
 
-  private initializeFailure(reasons: string[], recoveryRequired = false): WorkbenchInitializeResult {
+  private initializeFailure(reasons: string[], unavailable = false): WorkbenchInitializeResult {
     return {
       ok: false,
       connected: false,
-      recoveryRequired,
+      unavailable,
       origin: null,
       path: null,
       managerId: this.currentManagerId(),
@@ -326,7 +336,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: false,
         connected: false,
-        recoveryRequired: false,
+        unavailable: false,
         origin: null,
         reasons: ["Host identity could not be confirmed."],
       };
@@ -341,7 +351,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: true,
         connected: true,
-        recoveryRequired: false,
+        unavailable: false,
         origin: attached.endpoint.origin,
         reasons: [],
       };
@@ -350,7 +360,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: false,
         connected: false,
-        recoveryRequired: this.identity.recoveryRequired,
+        unavailable: this.identity.recoveryRequired,
         origin: null,
         reasons: attached.reasons,
       };
@@ -373,7 +383,7 @@ export class WorkbenchHostRuntime {
       return {
         ok: false,
         connected: false,
-        recoveryRequired: this.identity.recoveryRequired,
+        unavailable: this.identity.recoveryRequired,
         origin: null,
         reasons: result.reasons,
       };
@@ -382,7 +392,7 @@ export class WorkbenchHostRuntime {
     return {
       ok: true,
       connected: true,
-      recoveryRequired: false,
+      unavailable: false,
       origin: result.origin,
       reasons: [],
     };

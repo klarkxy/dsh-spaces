@@ -69,6 +69,12 @@ export const workbenchJobErrorSchema = z
   .object({
     code: z.string().min(1).max(128),
     message: z.string().max(500),
+    spaceId: spaceIdSchema.optional(),
+    stage: z.string().min(1).max(120).optional(),
+    packageName: z.string().min(1).max(214).optional(),
+    pluginAttribution: z.enum(["known", "unknown"]).optional(),
+    exitCode: z.number().int().nullable().optional(),
+    signal: z.string().min(1).max(32).nullable().optional(),
   })
   .strict();
 
@@ -130,7 +136,7 @@ export const workbenchStateSchema = z
     managerId: z.union([spaceIdSchema, z.null()]),
     owner: z
       .object({
-        kind: z.enum(["supervisor", "desktop"]),
+        kind: z.enum(["web", "desktop"]),
         since: isoDateSchema,
       })
       .strict()
@@ -362,7 +368,7 @@ export const workbenchGuideRoleSchema = z
     role: workbenchRoleSchema,
     profileId: z.union([spaceIdSchema, z.null()]),
     managerId: z.union([spaceIdSchema, z.null()]),
-    recoveryRequired: z.boolean(),
+    unavailable: z.boolean(),
     reasons: reasonsSchema,
   })
   .strict();
@@ -371,7 +377,7 @@ export const workbenchBootstrapResultSchema = z
   .object({
     ok: z.boolean(),
     connected: z.boolean(),
-    recoveryRequired: z.boolean(),
+    unavailable: z.boolean(),
     origin: z.union([loopbackOrigin, z.null()]),
     reasons: reasonsSchema,
   })
@@ -382,7 +388,7 @@ export const workbenchReturnTargetSchema = z
     available: z.boolean(),
     origin: z.union([loopbackOrigin, z.null()]),
     path: z.union([entryPathSchema, z.null()]),
-    recoveryRequired: z.boolean(),
+    unavailable: z.boolean(),
     reasons: reasonsSchema,
   })
   .strict();
@@ -391,7 +397,7 @@ export const workbenchInitializeResultSchema = z
   .object({
     ok: z.boolean(),
     connected: z.boolean(),
-    recoveryRequired: z.boolean(),
+    unavailable: z.boolean(),
     origin: z.union([loopbackOrigin, z.null()]),
     path: z.union([entryPathSchema, z.null()]),
     managerId: z.union([spaceIdSchema, z.null()]),
@@ -402,7 +408,7 @@ export const workbenchInitializeResultSchema = z
 export const workbenchHostHintSchema = z
   .object({
     role: workbenchRoleSchema,
-    recoveryRequired: z.boolean(),
+    unavailable: z.boolean(),
   })
   .strict();
 

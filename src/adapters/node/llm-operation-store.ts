@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite } from "../../main/atomic";
+import { atomicWrite } from "./atomic";
 import { LLM_ERROR, LlmConfigError, normalizeConnectionId } from "../../core/domain/llm-connections";
 import type { LlmOperationRecord, LlmOperationStore } from "../../core/ports/llm-runtime";
 import { withExclusiveDir } from "./llm-file-lock";

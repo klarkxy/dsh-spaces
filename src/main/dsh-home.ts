@@ -1,9 +1,9 @@
 import { app } from "electron";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertNotRealHome, realDshHome } from "./home-guard";
+import { assertNotRealHome, realDshHome } from "../adapters/node/home-guard";
 
-export { assertNotRealHome, realDshHome } from "./home-guard";
+export { assertNotRealHome, realDshHome } from "../adapters/node/home-guard";
 
 /**
  * Resolve DSH_HOME.

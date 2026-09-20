@@ -215,7 +215,7 @@ await copyExisting(at('packages/view-bridge/cordis.patch.yml'), join(candidatePa
 await mkdir(join(candidatePackages, 'supervisor/lib'), { recursive: true });
 await buildNodeCli('packages/supervisor/src/index.ts', join(candidatePackages, 'supervisor/lib/index.js'));
 await buildNode({
-  entryPoints: ['src/main/snapshot-worker.ts'],
+  entryPoints: ['src/adapters/node/snapshot-worker.ts'],
   outfile: join(candidatePackages, 'supervisor/lib/snapshot-worker.mjs'),
   banner: nodeRequire,
 });

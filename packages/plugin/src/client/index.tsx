@@ -25,13 +25,13 @@ export const inject = ["slots", "connection"];
 
 /**
  * Manager profiles replace the DSH root with WorkbenchApp.
- * Ordinary / uninitialized / recovery profiles only add a guide panel
+ * Ordinary / uninitialized / identity-blocked profiles only add a guide panel
  * (initialize or enter). No second rail, no management write UI.
  */
 export function apply(ctx: Context): void {
   const connection: ConnectionHandle = ctx.get("connection");
   const hint = readHostHint();
-  if (hint?.role === "manager" && !hint.recoveryRequired) {
+  if (hint?.role === "manager" && !hint.unavailable) {
     const api = createWorkbenchRemote(connection);
     ctx.slots.inject("root", () =>
       ctx.slots.register({ name: "root", priority: -1 }, () => createElement(WorkbenchApp, { api })),
@@ -76,16 +76,102 @@ const primaryButtonStyle = (busy: boolean): CSSProperties => ({
   color: "#fff",
   cursor: busy ? "progress" : "pointer",
 });
-const secondaryButtonStyle: CSSProperties = {
+const alertStyle: CSSProperties = { color: "var(--dsw-alias-danger, #d1242f)" };
+const copyButtonStyle: CSSProperties = {
   padding: "8px 14px",
-  marginLeft: "8px",
   borderRadius: "8px",
   border: "1px solid var(--dsw-alias-border-primary, #d0d7de)",
   background: "transparent",
   color: "var(--dsw-alias-label-primary, #1f2328)",
   cursor: "pointer",
 };
-const alertStyle: CSSProperties = { color: "var(--dsw-alias-danger, #d1242f)" };
+
+export type GuidePanelMode = "loading" | "failed" | "blocked" | "init" | "init-failed" | "enter" | "enter-failed";
+
+export interface GuidePanelViewProps {
+  locale: SpacesLocale;
+  mode: GuidePanelMode;
+  error: string | null;
+  status: string | null;
+  busy: "role" | "enter" | "initialize" | null;
+  onEnter?: () => void;
+  onInitialize?: () => void;
+}
+
+/** Pure view for SSR tests. Error cards never include retry or reinitialize actions. */
+export function GuidePanelView({
+  locale,
+  mode,
+  error,
+  status,
+  busy,
+  onEnter,
+  onInitialize,
+}: GuidePanelViewProps): ReactElement {
+  const copy = (key: Parameters<typeof guideText>[1]) => guideText(locale, key);
+  const detail = error ? publicGuideDetail(error) : null;
+  const action =
+    mode === "init"
+      ? {
+          name: "initialize" as const,
+          label: busy === "initialize" ? copy("initBusy") : copy("initAction"),
+          onClick: onInitialize,
+          busy: busy === "initialize",
+        }
+      : mode === "enter"
+        ? {
+            name: "enter" as const,
+            label: busy === "enter" ? copy("enterBusy") : copy("enterAction"),
+            onClick: onEnter,
+            busy: busy === "enter",
+          }
+        : null;
+  return createElement(
+    "div",
+    {
+      className: "dsh-spaces-return",
+      "data-dsh-spaces-guide": mode,
+      style: panelStyle,
+    },
+    createElement("h1", { style: { fontSize: "20px", margin: "0 0 8px" } }, guideTitle(locale, mode)),
+    createElement("p", { style: bodyStyle }, guideBody(locale, mode)),
+    mode === "loading" ? createElement("p", { role: "status" }, copy("loading")) : null,
+    action
+      ? createElement(
+          "button",
+          {
+            type: "button",
+            "data-dsh-spaces-action": action.name,
+            disabled: busy !== null,
+            onClick: action.onClick,
+            style: primaryButtonStyle(action.busy),
+          },
+          action.label,
+        )
+      : null,
+    status ? createElement("p", { role: "status" }, status) : null,
+    detail
+      ? createElement(
+          "div",
+          { "data-dsh-spaces-error": mode },
+          createElement("p", { role: "alert", style: alertStyle }, detail),
+          createElement(
+            "button",
+            {
+              type: "button",
+              "data-dsh-spaces-copy": "details",
+              style: copyButtonStyle,
+              onClick: () => {
+                const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+                void clipboard?.writeText(detail);
+              },
+            },
+            copy("copyDetails"),
+          ),
+        )
+      : null,
+  );
+}
 
 export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }): ReactElement {
   const locale = inferSpacesLocale();
@@ -93,7 +179,6 @@ export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }):
   const [busy, setBusy] = useState<"role" | "enter" | "initialize" | null>("role");
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [enterFailed, setEnterFailed] = useState(false);
 
   const loadRole = useCallback(async () => {
     setBusy("role");
@@ -102,13 +187,13 @@ export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }):
     try {
       const next = await guide.role();
       setRole(next);
-      if (next.recoveryRequired) setEnterFailed(false);
+      if (next.unavailable) setError(next.reasons[0] || guideText(locale, "blockedBody"));
     } catch (caught) {
       setError(displayWorkbenchMessage(caught));
     } finally {
       setBusy(null);
     }
-  }, [guide]);
+  }, [guide, locale]);
 
   useEffect(() => {
     void loadRole();
@@ -135,21 +220,18 @@ export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }):
     if (busy) return;
     setBusy("enter");
     setError(null);
-    setEnterFailed(false);
     setStatus(guideText(locale, "enterProgress"));
     void (async () => {
       try {
         const boot = await guide.bootstrap();
-        if (boot.recoveryRequired) {
-          setError(guideText(locale, "recoveryBody"));
-          setEnterFailed(false);
+        if (boot.unavailable) {
+          setError(boot.reasons[0] || guideText(locale, "blockedBody"));
           return;
         }
         const target = await guide.returnTarget();
-        if (!navigateTo(target.origin, target.path, target.reasons)) setEnterFailed(true);
+        navigateTo(target.origin, target.path, target.reasons);
       } catch (caught) {
         setError(displayWorkbenchMessage(caught));
-        setEnterFailed(true);
       } finally {
         setBusy(null);
         setStatus(null);
@@ -165,9 +247,8 @@ export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }):
     void (async () => {
       try {
         const result = await guide.initialize();
-        if (result.recoveryRequired) {
-          setError(result.reasons[0] || guideText(locale, "recoveryBody"));
-          setEnterFailed(false);
+        if (result.unavailable) {
+          setError(result.reasons[0] || guideText(locale, "blockedBody"));
           return;
         }
         if (result.managerId && role) {
@@ -175,13 +256,11 @@ export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }):
         }
         if (!result.ok) {
           setError(result.reasons[0] || guideText(locale, "unavailable"));
-          setEnterFailed(true);
-        } else if (!navigateTo(result.origin, result.path, result.reasons)) {
-          setEnterFailed(true);
+        } else {
+          navigateTo(result.origin, result.path, result.reasons);
         }
       } catch (caught) {
         setError(displayWorkbenchMessage(caught));
-        setEnterFailed(true);
       } finally {
         setBusy(null);
         setStatus(null);
@@ -189,97 +268,49 @@ export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }):
     })();
   }, [busy, guide, locale, navigateTo, role]);
 
-  const mode = guideMode(role, busy, error);
-  const copy = (key: Parameters<typeof guideText>[1]) => guideText(locale, key);
-  const disabled = busy !== null;
-  const primaryLabel =
-    mode === "enter"
-      ? busy === "enter"
-        ? copy("enterBusy")
-        : copy("enterAction")
-      : busy === "initialize"
-        ? copy("initBusy")
-        : error
-          ? copy("retry")
-          : copy("initAction");
-
-  return createElement(
-    "div",
-    {
-      className: "dsh-spaces-return",
-      "data-dsh-spaces-guide": mode,
-      style: panelStyle,
-    },
-    createElement("h1", { style: { fontSize: "20px", margin: "0 0 8px" } }, guideTitle(locale, mode)),
-    createElement("p", { style: bodyStyle }, guideBody(locale, mode, !role && Boolean(error))),
-    mode === "loading"
-      ? createElement("p", { role: "status" }, copy("loading"))
-      : mode === "recovery"
-        ? createElement(
-            "button",
-            { type: "button", disabled, onClick: loadRole, style: primaryButtonStyle(false) },
-            copy("retry"),
-          )
-        : mode === "failed"
-          ? createElement(
-              "button",
-              { type: "button", disabled, onClick: loadRole, style: primaryButtonStyle(false) },
-              copy("retry"),
-            )
-          : createElement(
-              "div",
-              null,
-              createElement(
-                "button",
-                {
-                  type: "button",
-                  disabled,
-                  onClick: mode === "enter" ? onEnter : onInitialize,
-                  style: primaryButtonStyle(busy === "enter" || busy === "initialize"),
-                },
-                primaryLabel,
-              ),
-              mode === "enter" && enterFailed
-                ? createElement(
-                    "button",
-                    {
-                      type: "button",
-                      disabled,
-                      onClick: onInitialize,
-                      style: secondaryButtonStyle,
-                    },
-                    busy === "initialize" ? copy("initBusy") : copy("startAction"),
-                  )
-                : null,
-            ),
-    status ? createElement("p", { role: "status" }, status) : null,
-    error ? createElement("p", { role: "alert", style: alertStyle }, error) : null,
-  );
+  return createElement(GuidePanelView, {
+    locale,
+    mode: guideMode(role, busy, error),
+    error,
+    status,
+    busy,
+    onEnter,
+    onInitialize,
+  });
 }
 
-function guideMode(
+export function guideMode(
   role: WorkbenchGuideRole | null,
   busy: "role" | "enter" | "initialize" | null,
   error: string | null,
-): "loading" | "failed" | "recovery" | "init" | "enter" {
-  if (role) {
-    if (role.recoveryRequired) return "recovery";
-    return role.managerId ? "enter" : "init";
-  }
-  if (error && busy !== "role") return "failed";
+): GuidePanelMode {
+  if (busy === "role" && !role) return "loading";
+  if (role?.unavailable) return "blocked";
+  if (!role && error) return "failed";
+  if (role && error) return role.managerId ? "enter-failed" : "init-failed";
+  if (role?.managerId) return "enter";
+  if (role) return "init";
   return "loading";
 }
 
-function guideTitle(locale: SpacesLocale, mode: ReturnType<typeof guideMode>): string {
-  if (mode === "recovery") return guideText(locale, "recoveryTitle");
+function guideTitle(locale: SpacesLocale, mode: GuidePanelMode): string {
+  if (mode === "blocked" || mode === "enter-failed") return guideText(locale, "blockedTitle");
   if (mode === "enter") return guideText(locale, "enterTitle");
+  if (mode === "failed") return guideText(locale, "blockedTitle");
   return guideText(locale, "initTitle");
 }
 
-function guideBody(locale: SpacesLocale, mode: ReturnType<typeof guideMode>, roleFailed: boolean): string {
-  if (mode === "recovery") return guideText(locale, "recoveryBody");
-  if (mode === "failed" || roleFailed) return guideText(locale, "roleFailed");
+function guideBody(locale: SpacesLocale, mode: GuidePanelMode): string {
+  if (mode === "blocked") return guideText(locale, "blockedBody");
+  if (mode === "failed") return guideText(locale, "roleFailed");
+  if (mode === "init-failed" || mode === "enter-failed") return guideText(locale, "unavailable");
   if (mode === "enter") return guideText(locale, "enterBody");
   if (mode === "loading") return guideText(locale, "loading");
   return guideText(locale, "initBody");
+}
+
+function publicGuideDetail(text: string): string {
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._\-+=/]{16,}/g, "Bearer [redacted]")
+    .replace(/(?:[A-Za-z]:\\|\\\\)[^\s"'`<>]+/g, "[path]");
 }

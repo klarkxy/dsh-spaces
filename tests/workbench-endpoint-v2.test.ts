@@ -91,7 +91,7 @@ function v2State(epoch: string) {
     availability: "ready" as const,
     role: "manager" as const,
     managerId: "spaces-hub",
-    owner: { kind: "supervisor" as const, since: SINCE },
+    owner: { kind: "web" as const, since: SINCE },
     writable: true,
     mode: "verified-full" as const,
     dshVersion: "0.1.5-rc.1",

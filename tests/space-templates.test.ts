@@ -9,7 +9,7 @@ import {
   listSpaceTemplates,
   saveSpaceTemplate,
   spaceTemplateId,
-} from "../src/main/space-templates.ts";
+} from "../src/adapters/node/space-templates.ts";
 
 const temps: string[] = [];
 

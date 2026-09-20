@@ -9,8 +9,8 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { atomicWrite } from "../../main/atomic";
-import { assertNotRealHome, isInsideRealHome } from "../../main/home-guard";
+import { atomicWrite } from "./atomic";
+import { assertNotRealHome, isInsideRealHome } from "./home-guard";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 
 export const COMPONENT_PAYLOAD_SCHEMA_VERSION = 2 as const;
@@ -54,7 +54,7 @@ export const COMPONENT_PAYLOAD_ENTRIES: Record<ComponentPayloadName, string> = {
 };
 
 export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, readonly string[]> = {
-  supervisor: ["lib/supervisor/package.json", "lib/supervisor/index.js"],
+  supervisor: ["lib/supervisor/package.json", "lib/supervisor/index.js", "lib/supervisor/launcher.mjs"],
   "manager-plugin": [
     "package.json",
     "cordis.patch.yml",
@@ -137,7 +137,7 @@ export function validateComponentPayload(payloadRootLib: string): ValidatedCompo
   const roots = resolvePayloadRoots(payloadRootLib);
   const manifestPath = joinFromRel(roots.packageRoot, COMPONENT_PAYLOAD_MANIFEST_REL);
   const listed = readRegularFile(roots.packageRoot, COMPONENT_PAYLOAD_MANIFEST_REL);
-  const parsed = parseManifest(JSON.parse(listed.bytes.toString("utf8")));
+  const parsed = parseComponentPayloadManifest(JSON.parse(listed.bytes.toString("utf8")));
   assertDeclaredFiles(roots.packageRoot, parsed, manifestPath);
   return freezeResult(parsed, roots);
 }
@@ -262,7 +262,7 @@ function freezeResult(manifest: ComponentPayloadManifest, roots: PayloadRoots): 
   };
 }
 
-function parseManifest(value: unknown): ComponentPayloadManifest {
+export function parseComponentPayloadManifest(value: unknown): ComponentPayloadManifest {
   if (!isPlainObject(value)) throw fail("Component payload manifest is not an object.");
   if (!("schemaVersion" in value)) throw fail("Component payload schemaVersion must be 2.");
   if (value.schemaVersion !== COMPONENT_PAYLOAD_SCHEMA_VERSION) {

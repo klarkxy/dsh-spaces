@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ProfileRegistry } from '../src/main/profile-registry.ts';
-import { writeSettings } from '../src/main/hub-settings.ts';
+import { ProfileRegistry } from '../src/adapters/node/profile-registry.ts';
+import { writeSettings } from '../src/adapters/node/hub-settings.ts';
 import { DEFAULT_HUB_SETTINGS } from '../src/shared/types.ts';
 
 const require=createRequire(import.meta.url);

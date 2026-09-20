@@ -5,15 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CooperativeChildren } from "../src/adapters/node/cooperative-children.ts";
-import { observeMaintenanceChild, ownsObservedChild, withChildObservation } from "../src/main/owned-process-record.ts";
+import { observeMaintenanceChild, ownsObservedChild, withChildObservation } from "../src/adapters/node/owned-process-record.ts";
 import {
   CONTROL_INSTANCES_DIR_NAME,
   CONTROL_JOBS_DIR_NAME,
   HOME_MUTATION_JOURNAL,
   inspectControlResidue,
-} from "../src/adapters/desktop/control-residue.ts";
+} from "../src/adapters/node/control-residue.ts";
 import { HOME_CONTROL_DIR_NAME } from "../src/adapters/node/home-controller.ts";
-import { runProcess } from "../src/main/toolchain.ts";
+import { runProcess } from "../src/adapters/node/toolchain.ts";
 
 test("package-manager child identity is journaled in its async Home scope and removed on exit", async () => {
   const home = mkdtempSync(join(tmpdir(), "spaces-observed-cli-"));

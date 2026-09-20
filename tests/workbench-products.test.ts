@@ -6,11 +6,11 @@ import { afterEach, test } from "node:test";
 import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
 import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/workbench-products.ts";
 import type { WorkbenchJobContext } from "../src/adapters/node/workbench-jobs.ts";
-import { upsertLibraryEntry } from "../src/main/plugin-library.ts";
-import { CATALOG_CACHE_FILE } from "../src/main/plugin-catalog.ts";
-import { packSpaceShare, pluginToShare } from "../src/main/space-share.ts";
-import { packZip } from "../src/main/space-share-zip.ts";
-import { SPACE_TEMPLATES_FILE } from "../src/main/space-templates.ts";
+import { archiveRelPath, upsertLibraryEntry } from "../src/adapters/node/plugin-library.ts";
+import { CATALOG_CACHE_FILE } from "../src/adapters/node/plugin-catalog.ts";
+import { packSpaceShare, pluginToShare } from "../src/adapters/node/space-share.ts";
+import { packZip } from "../src/adapters/node/space-share-zip.ts";
+import { SPACE_TEMPLATES_FILE } from "../src/adapters/node/space-templates.ts";
 import { emptyCatalog, emptyPolicy } from "../src/core/domain/llm-connections.ts";
 import { buildLlmShareManifest } from "../src/core/domain/llm-share.ts";
 import type { LlmApiResult } from "../src/shared/llm-api.ts";
@@ -365,6 +365,93 @@ test("library remove refuses plugins still in use", async () => {
   const service = createService(dir, { spaces: [space("coding")] });
   const { ctx } = jobCtx();
   await assert.rejects(service.execute({ kind: "plugin.library.remove", libraryId: "dsh-outline" }, ctx), /installed|仍安装/);
+});
+
+test("library installedIn distinguishes exact cache versions", async () => {
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const older = `${pkg}@0.3.0`;
+  const candidate = `${pkg}@0.3.1-test.1`;
+  mkdirSync(join(dir, "hub", "plugins"), { recursive: true });
+  writeFileSync(join(dir, archiveRelPath(older)), "old");
+  writeFileSync(join(dir, archiveRelPath(candidate)), "candidate");
+  writeProfile(dir, "coding", [pkg], { [pkg]: older }, { [pkg]: "0.3.0" });
+  writeProfile(dir, "notes", [pkg], { [pkg]: candidate }, { [pkg]: "0.3.1-test.1" });
+  upsertLibraryEntry(dir, {
+    id: older,
+    spec: older,
+    packageName: pkg,
+    title: pkg,
+    tarball: archiveRelPath(older),
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  upsertLibraryEntry(dir, {
+    id: candidate,
+    spec: candidate,
+    packageName: pkg,
+    title: pkg,
+    tarball: archiveRelPath(candidate),
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  const service = createService(dir, { spaces: [space("coding"), space("notes")] });
+  const result = await service.read({ method: "library" });
+  assert.equal(result.method, "library");
+  if (result.method !== "library") return;
+  const byId = new Map(result.items.map((item) => [item.id, item]));
+  assert.deepEqual(byId.get(older)?.installedIn, ["coding"]);
+  assert.deepEqual(byId.get(candidate)?.installedIn, ["notes"]);
+});
+
+test("library remove deletes an unused exact candidate while an older exact install stays", async () => {
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const older = `${pkg}@0.3.0`;
+  const candidate = `${pkg}@0.3.1-test.1`;
+  mkdirSync(join(dir, "hub", "plugins"), { recursive: true });
+  const oldInstallTar = join(dir, "hub", "plugins", "dsh-spaces-plugin.tgz");
+  writeFileSync(oldInstallTar, "old-install");
+  writeFileSync(join(dir, archiveRelPath(older)), "old");
+  writeFileSync(join(dir, archiveRelPath(candidate)), "candidate");
+  writeProfile(
+    dir,
+    "coding",
+    [pkg],
+    { [pkg]: "file:../../hub/plugins/dsh-spaces-plugin.tgz" },
+    { [pkg]: "0.3.0" },
+  );
+  upsertLibraryEntry(dir, {
+    id: older,
+    spec: older,
+    packageName: pkg,
+    title: pkg,
+    tarball: archiveRelPath(older),
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  upsertLibraryEntry(dir, {
+    id: candidate,
+    spec: candidate,
+    packageName: pkg,
+    title: pkg,
+    tarball: archiveRelPath(candidate),
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  const service = createService(dir, { spaces: [space("coding")] });
+  const { ctx } = jobCtx();
+  const outcome = await service.execute({ kind: "plugin.library.remove", libraryId: candidate }, ctx);
+  assert.equal(outcome.kind, "plugin.library.remove");
+  if (outcome.kind !== "plugin.library.remove") return;
+  assert.equal(outcome.libraryId, candidate);
+  assert.equal(existsSync(join(dir, archiveRelPath(candidate))), false);
+  assert.equal(existsSync(join(dir, archiveRelPath(older))), true);
+  assert.equal(existsSync(oldInstallTar), true);
+  await assert.rejects(
+    service.execute({ kind: "plugin.library.remove", libraryId: older }, ctx),
+    /installed|仍安装/,
+  );
 });
 
 test("share export returns a secret-free archive and a safe filename", async () => {

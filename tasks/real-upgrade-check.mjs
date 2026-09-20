@@ -3,14 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { RuntimeStore } from '../src/main/runtime-store.ts';
-import { SnapshotStore } from '../src/main/snapshot-store.ts';
-import { CoordinatedUpgrade } from '../src/main/coordinated-upgrade.ts';
-import { ProcessManager } from '../src/main/process-manager.ts';
-import { PatchWriter } from '../src/main/patch-writer.ts';
-import { describeRuntime, readRuntimeRef } from '../src/main/runtime-descriptor.ts';
-import { setSelectedDshResolver } from '../src/main/dsh-cli.ts';
-import { dshSessionCookie, dshSessionList } from '../src/main/dsh-endpoint.ts';
+import { RuntimeStore } from '../src/adapters/node/runtime-store.ts';
+import { SnapshotStore } from '../src/adapters/node/snapshot-store.ts';
+import { CoordinatedUpgrade } from '../src/adapters/node/coordinated-upgrade.ts';
+import { ProcessManager } from '../src/adapters/node/process-manager.ts';
+import { PatchWriter } from '../src/adapters/node/patch-writer.ts';
+import { describeRuntime, readRuntimeRef } from '../src/adapters/node/runtime-descriptor.ts';
+import { setSelectedDshResolver } from '../src/adapters/node/dsh-cli.ts';
+import { dshSessionCookie, dshSessionList } from '../src/adapters/node/dsh-endpoint.ts';
 
 // A successful real-runtime-install run supplies the candidate. No mock installer,
 // CLI, network response, snapshot implementation, or readiness probe is used here.

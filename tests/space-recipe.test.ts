@@ -13,7 +13,7 @@ import {
   validateImportedPatch,
 } from "../src/core/application/space-recipe.ts";
 import { LLM_SHARE_NOTE } from "../src/core/domain/llm-share.ts";
-import { SPACE_TEMPLATES_FILE, createSpaceFromTemplate, listSpaceTemplates } from "../src/main/space-templates.ts";
+import { SPACE_TEMPLATES_FILE, createSpaceFromTemplate, listSpaceTemplates } from "../src/adapters/node/space-templates.ts";
 import {
   FULL_SPACES_PACKAGE,
   isFullSpacesManagerSpec,

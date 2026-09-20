@@ -8,7 +8,7 @@ import {
   redactEndpoint,
   sanitizeProviderConfig,
 } from "../../core/domain/llm-connections";
-import { atomicWrite } from "../../main/atomic";
+import { atomicWrite } from "./atomic";
 import type { LlmLocalCandidate } from "../../shared/llm-api";
 import type { LlmSpaceSettingsPort } from "../../core/ports/llm-runtime";
 import { parseLlmShareManifest, type LlmShareManifest } from "../../core/domain/llm-share";

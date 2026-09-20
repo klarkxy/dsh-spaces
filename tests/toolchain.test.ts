@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { findNodeDir, setToolchainRoot, writeToolchainConfig } from "../src/main/toolchain.ts";
-import { nodeArchiveName } from "../src/main/package-source.ts";
+import { findNodeDir, setToolchainRoot, writeToolchainConfig } from "../src/adapters/node/toolchain.ts";
+import { nodeArchiveName } from "../src/adapters/node/package-source.ts";
 
 const temps: string[] = [];
 

@@ -7,7 +7,7 @@ import { afterEach, test } from "node:test";
 import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
 import { OfficialLlmProbe, LLM_DISCOVERY_MAX_BYTES, LLM_DISCOVERY_MAX_MODELS } from "../src/adapters/node/llm-probe.ts";
 import { FileLlmOperationStore, llmOperationsPath } from "../src/adapters/node/llm-operation-store.ts";
-import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
+import { WorkbenchJobError, WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { GlobalLlmHost } from "../src/core/application/global-llm-host.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import {
@@ -28,6 +28,8 @@ import type { LlmShareManifest } from "../src/core/domain/llm-share.ts";
 const temps: string[] = [];
 const servers: Server[] = [];
 const SECRET = "sk-live-global-never-in-jobs";
+const EPOCH = "a".repeat(64);
+const STALE_EPOCH = "b".repeat(64);
 
 afterEach(async () => {
   for (const server of servers.splice(0)) {
@@ -161,6 +163,7 @@ class MemoryInstances {
       catalogRevision: 0,
       policyRevision: 0,
       busy: false,
+      serviceEpoch: EPOCH,
       ...patch,
     });
   }
@@ -239,6 +242,24 @@ function hostOf(input: {
   });
   let created: GlobalLlmHost;
   const spaceSettings = input.spaceSettings ?? new MemorySpaceSettings();
+  const applyByRequestId = new Map<
+    string,
+    {
+      fingerprint: string;
+      job: {
+        id: string;
+        requestId: string;
+        kind: "llm.apply";
+        status: "succeeded";
+        phase: string;
+        message: string;
+        affectedSpaceIds: string[];
+        createdAt: string;
+        updatedAt: string;
+        canCancel: boolean;
+      };
+    }
+  >();
   created = new GlobalLlmHost({
     service,
     operations,
@@ -254,12 +275,20 @@ function hostOf(input: {
       }
     },
     submitApply: async (command, requestId) => {
+      const fingerprint = JSON.stringify(command);
+      const existing = applyByRequestId.get(requestId);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) {
+          throw new WorkbenchJobError("workbench/conflict");
+        }
+        return existing.job;
+      }
       await created.executeApply(command, restart);
-      return {
+      const job = {
         id: requestId,
         requestId,
-        kind: "llm.apply",
-        status: "succeeded",
+        kind: "llm.apply" as const,
+        status: "succeeded" as const,
         phase: "succeeded",
         message: "",
         affectedSpaceIds: command.spaceIds,
@@ -267,6 +296,8 @@ function hostOf(input: {
         updatedAt: "2026-09-18T00:00:00.000Z",
         canCancel: false,
       };
+      applyByRequestId.set(requestId, { fingerprint, job });
+      return job;
     },
     readSecret: (recordId) => credentials.readSecret(recordId),
   });
@@ -433,6 +464,7 @@ test("apply plan keeps A, stops at B, and leaves C unexecuted", async () => {
           generation: 1,
           catalogRevision: 0,
           busy: false,
+          serviceEpoch: EPOCH,
         })),
       }),
     (error: unknown) =>
@@ -468,8 +500,8 @@ test("busy or unknown spaces refuse apply before any restart", async () => {
         catalogRevision: 1,
         requestId: "apply-busy",
         observations: [
-          { spaceId: "alpha", status: "running", generation: 1, catalogRevision: 0, busy: false },
-          { spaceId: "beta", status: "running", generation: 1, catalogRevision: 0, busy: true },
+          { spaceId: "alpha", status: "running", generation: 1, catalogRevision: 0, busy: false, serviceEpoch: EPOCH },
+          { spaceId: "beta", status: "running", generation: 1, catalogRevision: 0, busy: true, serviceEpoch: EPOCH },
         ],
       }),
     (error: unknown) => error instanceof LlmConfigError && error.code === LLM_ERROR.SPACE_BUSY,
@@ -488,13 +520,133 @@ test("busy or unknown spaces refuse apply before any restart", async () => {
         catalogRevision: 1,
         requestId: "apply-unknown",
         observations: [
-          { spaceId: "alpha", status: "running", generation: 1, catalogRevision: 0, busy: false },
-          { spaceId: "beta", status: "unknown", generation: 1, catalogRevision: 0, busy: false },
+          { spaceId: "alpha", status: "running", generation: 1, catalogRevision: 0, busy: false, serviceEpoch: EPOCH },
+          { spaceId: "beta", status: "unknown", generation: 1, catalogRevision: 0, busy: false, serviceEpoch: EPOCH },
         ],
       }),
     (error: unknown) => error instanceof LlmConfigError && error.code === LLM_ERROR.APPLY_FAILED,
   );
   assert.deepEqual(ran, []);
+});
+
+test("applyPlan rejects missing or stale serviceEpoch before any restart", async () => {
+  const instances = new MemoryInstances();
+  instances.put("alpha");
+  const ran: string[] = [];
+  const { host } = hostOf({
+    writable: true,
+    instances,
+    restart: async (spaceId) => {
+      ran.push(spaceId);
+    },
+  });
+  await host.dispatch({ method: "saveConnection", draft: noneDraft(), expectedRevision: 0 });
+  await assert.rejects(
+    () =>
+      host.dispatch({
+        method: "applyPlan",
+        spaceIds: ["alpha"],
+        catalogRevision: 1,
+        requestId: "apply-missing-epoch",
+        observations: [{ spaceId: "alpha", status: "running", generation: 1, catalogRevision: 0, busy: false }],
+      }),
+    (error: unknown) => error instanceof LlmConfigError && error.code === LLM_ERROR.CONFIG_INVALID,
+  );
+  assert.deepEqual(ran, []);
+  await assert.rejects(
+    () =>
+      host.dispatch({
+        method: "applyPlan",
+        spaceIds: ["alpha"],
+        catalogRevision: 1,
+        requestId: "apply-old-epoch",
+        observations: [
+          {
+            spaceId: "alpha",
+            status: "running",
+            generation: 1,
+            catalogRevision: 0,
+            busy: false,
+            serviceEpoch: STALE_EPOCH,
+          },
+        ],
+      }),
+    (error: unknown) => error instanceof LlmConfigError && error.code === LLM_ERROR.APPLY_FAILED,
+  );
+  assert.deepEqual(ran, []);
+  assert.equal(instances.rows.get("alpha")?.catalogRevision, 0);
+});
+
+test("duplicate applyPlan returns the original job after apply changes observations", async () => {
+  const instances = new MemoryInstances();
+  instances.put("alpha");
+  const { host, restarted } = hostOf({ writable: true, instances });
+  await host.dispatch({ method: "saveConnection", draft: noneDraft(), expectedRevision: 0 });
+  const request = {
+    method: "applyPlan" as const,
+    spaceIds: ["alpha"],
+    catalogRevision: 1,
+    requestId: "review-repeat-apply",
+    observations: [
+      {
+        spaceId: "alpha",
+        status: "running" as const,
+        generation: 1,
+        catalogRevision: 0,
+        busy: false,
+        serviceEpoch: EPOCH,
+      },
+    ],
+  };
+  const first = (await host.dispatch(request)) as { id: string; requestId: string; status: string };
+  assert.equal(first.status, "succeeded");
+  assert.equal(first.id, "review-repeat-apply");
+  assert.equal(instances.rows.get("alpha")?.catalogRevision, 1);
+  assert.deepEqual(restarted, ["alpha"]);
+  const second = (await host.dispatch(request)) as { id: string; requestId: string };
+  assert.equal(second.id, first.id);
+  assert.equal(second.requestId, first.requestId);
+  assert.deepEqual(restarted, ["alpha"]);
+  assert.equal(instances.rows.get("alpha")?.catalogRevision, 1);
+});
+
+test("same applyPlan requestId with a different command is rejected", async () => {
+  const instances = new MemoryInstances();
+  instances.put("alpha");
+  instances.put("beta");
+  const { host, restarted } = hostOf({ writable: true, instances });
+  await host.dispatch({ method: "saveConnection", draft: noneDraft(), expectedRevision: 0 });
+  const observation = (spaceId: string) => ({
+    spaceId,
+    status: "running" as const,
+    generation: 1,
+    catalogRevision: 0,
+    busy: false,
+    serviceEpoch: EPOCH,
+  });
+  const first = (await host.dispatch({
+    method: "applyPlan",
+    spaceIds: ["alpha"],
+    catalogRevision: 1,
+    requestId: "review-apply-fingerprint",
+    observations: [observation("alpha")],
+  })) as { id: string };
+  assert.equal(first.id, "review-apply-fingerprint");
+  assert.deepEqual(restarted, ["alpha"]);
+  await assert.rejects(
+    () =>
+      host.dispatch({
+        method: "applyPlan",
+        spaceIds: ["beta"],
+        catalogRevision: 1,
+        requestId: "review-apply-fingerprint",
+        observations: [observation("beta")],
+      }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/conflict",
+  );
+  assert.deepEqual(restarted, ["alpha"]);
+  assert.equal(instances.rows.get("alpha")?.catalogRevision, 1);
+  assert.equal(instances.rows.get("beta")?.catalogRevision, 0);
 });
 
 test("HTTP maps a missing write owner to LLM_WRITE_OWNER_REQUIRED", async () => {

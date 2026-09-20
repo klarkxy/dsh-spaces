@@ -12,9 +12,9 @@ import {
   pluginToShare,
   previewSpaceShare,
   uniqueSpaceName,
-} from "../src/main/space-share.ts";
-import { PLUGIN_LIBRARY_FILE } from "../src/main/plugin-library.ts";
-import { packZip } from "../src/main/space-share-zip.ts";
+} from "../src/adapters/node/space-share.ts";
+import { PLUGIN_LIBRARY_FILE } from "../src/adapters/node/plugin-library.ts";
+import { packZip } from "../src/adapters/node/space-share-zip.ts";
 import type { InstalledPlugin } from "../src/shared/types.ts";
 
 const temps: string[] = [];

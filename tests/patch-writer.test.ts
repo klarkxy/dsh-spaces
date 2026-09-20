@@ -10,7 +10,7 @@ import {
   PatchWriter,
   assertDumpPatched,
   extractRoot,
-} from "../src/main/patch-writer.ts";
+} from "../src/adapters/node/patch-writer.ts";
 
 const temps: string[] = [];
 

@@ -1,7 +1,9 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { InstalledPlugin, PluginLibraryEntry } from "../shared/types";
-import { pluginAliases } from "../shared/plugin";
+import { fileURLToPath } from "node:url";
+import type { InstalledPlugin, PluginLibraryEntry } from "../../shared/types";
+import { isBareNpmPackageName, pluginAliases } from "../../shared/plugin";
+import { isExactRuntimeVersion } from "../../shared/runtime";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 
@@ -108,12 +110,98 @@ export function lookupLibraryEntry(dshHome: string, id: string): PluginLibraryEn
 }
 
 export function spacesUsingPlugin(
+  dshHome: string,
   installed: Record<string, InstalledPlugin[]>,
   entry: PluginLibraryEntry,
 ): string[] {
+  const aliases = pluginAliases(entry);
+  const pinned = exactPinnedVersion(entry);
+  const tarballAbs = entry.tarball ? resolve(dshHome, entry.tarball) : undefined;
   return Object.entries(installed)
-    .filter(([, list]) => list.some((item) => pluginAliases(entry).includes(item.name)))
+    .filter(([space, list]) =>
+      list.some((item) => pluginUsesLibraryEntry(dshHome, space, item, aliases, pinned, tarballAbs)),
+    )
     .map(([name]) => name);
+}
+
+function exactPinnedVersion(entry: PluginLibraryEntry): string | undefined {
+  if (!isBareNpmPackageName(entry.packageName)) return undefined;
+  const prefix = `${entry.packageName}@`;
+  const spec = entry.spec.trim();
+  if (!spec.startsWith(prefix)) return undefined;
+  const version = spec.slice(prefix.length);
+  return isExactRuntimeVersion(version) ? version : undefined;
+}
+
+function pluginUsesLibraryEntry(
+  dshHome: string,
+  space: string,
+  item: InstalledPlugin,
+  aliases: string[],
+  pinned: string | undefined,
+  tarballAbs: string | undefined,
+): boolean {
+  if (!aliases.includes(item.name)) return false;
+  if (item.requestedSpec && isFileSpec(item.requestedSpec)) {
+    const referenced = resolveRequestedArchive(dshHome, space, item.requestedSpec);
+    if (!referenced) return true;
+    if (tarballAbs && sameArchiveIdentity(referenced, tarballAbs) !== false) return true;
+  }
+  if (!pinned) return true;
+  const actual = item.resolvedVersion ?? item.version;
+  if (typeof actual !== "string" || !isExactRuntimeVersion(actual)) return true;
+  return actual === pinned;
+}
+
+function isFileSpec(spec: string): boolean {
+  return /^file:/i.test(spec.trim().replace(/^["']+|["']+$/g, ""));
+}
+
+function requestedFilePath(spec: string): string | undefined {
+  const trimmed = spec.trim().replace(/^["']+|["']+$/g, "");
+  if (!isFileSpec(trimmed)) return undefined;
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      return fileURLToPath(trimmed);
+    } catch {
+      return undefined;
+    }
+  }
+  const rest = trimmed.slice(5);
+  return rest.trim() ? rest : undefined;
+}
+
+function resolveRequestedArchive(dshHome: string, space: string, spec: string): string | undefined {
+  const path = requestedFilePath(spec);
+  if (!path || path.includes("\0")) return undefined;
+  const homeRoot = resolve(dshHome);
+  const base = resolve(dshHome, "profiles", space);
+  const baseRel = relative(homeRoot, base);
+  if (!baseRel || baseRel.startsWith("..") || isAbsolute(baseRel)) return undefined;
+  return isAbsolute(path) ? resolve(path) : resolve(base, path);
+}
+
+function sameResolvedPath(left: string, right: string): boolean {
+  const a = resolve(left);
+  const b = resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function sameArchiveIdentity(left: string, right: string): boolean | undefined {
+  if (sameResolvedPath(left, right)) return true;
+  let canonicalLeft: string;
+  let canonicalRight: string;
+  try {
+    canonicalLeft = realpathSync(left);
+  } catch {
+    return undefined;
+  }
+  try {
+    canonicalRight = realpathSync(right);
+  } catch {
+    return undefined;
+  }
+  return sameResolvedPath(canonicalLeft, canonicalRight) ? true : false;
 }
 
 export function removeLibraryEntry(dshHome: string, id: string): PluginLibraryEntry[] {

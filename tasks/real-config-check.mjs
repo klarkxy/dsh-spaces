@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PatchWriter, assertDumpPatched } from '../src/main/patch-writer.ts';
+import { PatchWriter, assertDumpPatched } from '../src/adapters/node/patch-writer.ts';
 
 const bin = process.env.DSH_TEST_BIN ?? join(process.env.APPDATA, 'dsh-spaces', 'dsh-cli', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
 assert.ok(existsSync(bin), 'Set DSH_TEST_BIN to an installed official DSH CLI');

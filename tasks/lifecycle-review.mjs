@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ProcessManager } from '../src/main/process-manager.ts';
+import { ProcessManager } from '../src/adapters/node/process-manager.ts';
 
 const unhandled = [];
 process.on('unhandledRejection', err => unhandled.push(String(err)));

@@ -231,7 +231,9 @@ export class GlobalLlmHost {
   }
 
   async applyPlan(request: Extract<LlmApiRequest, { method: "applyPlan" }>): Promise<WorkbenchJob> {
-    await this.assertApplyReady(request.spaceIds, request.catalogRevision, request.observations);
+    this.assertApplyCommand(request.spaceIds, request.observations);
+    // submitApply owns requestId idempotence. Mutable observation CAS stays in executeApply
+    // so a replay after a successful apply still returns the original job.
     return this.options.submitApply(
       {
         kind: "llm.apply",
@@ -244,13 +246,7 @@ export class GlobalLlmHost {
   }
 
   async executeApply(command: LlmApplyCommand, restart: (spaceId: string) => Promise<void>): Promise<void> {
-    const catalog = await this.options.service.describe();
-    if (catalog.revision !== command.catalogRevision) {
-      throw new LlmConfigError(LLM_ERROR.REVISION_CONFLICT, "catalog revision moved before apply", {
-        expected: command.catalogRevision,
-        actual: catalog.revision,
-      });
-    }
+    await this.assertApplyReady(command.spaceIds, command.catalogRevision, command.observations);
     const result = await runBatch(command.spaceIds, async (spaceId) => {
       const current = await this.requireKnownIdle(spaceId);
       if (current.status === "stopped" || current.status === "crashed") {
@@ -459,6 +455,19 @@ export class GlobalLlmHost {
     return pending;
   }
 
+  private assertApplyCommand(spaceIds: string[], observations: LlmSpaceObservation[]): Map<string, LlmSpaceObservation> {
+    if (new Set(spaceIds).size !== spaceIds.length) {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "applyPlan space ids must be unique");
+    }
+    const observed = new Map(observations.map((row) => [row.spaceId, row]));
+    for (const spaceId of spaceIds) {
+      if (!observed.get(spaceId)) {
+        throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "applyPlan is missing an observation", { spaceId });
+      }
+    }
+    return observed;
+  }
+
   private async assertApplyReady(
     spaceIds: string[],
     catalogRevision: number,
@@ -471,22 +480,14 @@ export class GlobalLlmHost {
         actual: catalog.revision,
       });
     }
-    if (new Set(spaceIds).size !== spaceIds.length) {
-      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "applyPlan space ids must be unique");
-    }
-    const observed = new Map(observations.map((row) => [row.spaceId, row]));
+    const observed = this.assertApplyCommand(spaceIds, observations);
     for (const spaceId of spaceIds) {
       const row = observed.get(spaceId);
       if (!row) {
         throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "applyPlan is missing an observation", { spaceId });
       }
       const current = await this.requireKnownIdle(spaceId);
-      if (
-        current.status !== row.status ||
-        current.generation !== row.generation ||
-        current.busy !== row.busy ||
-        current.catalogRevision !== row.catalogRevision
-      ) {
+      if (!observationsEqual(current, row)) {
         throw new LlmConfigError(LLM_ERROR.APPLY_FAILED, "observed space state no longer matches", { spaceId });
       }
     }
@@ -814,7 +815,7 @@ function parseObservations(value: unknown): LlmSpaceObservation[] {
   }
   return value.map((item) => {
     const row = expectObject(item);
-    expectKeys(row, ["spaceId", "status", "generation", "catalogRevision", "busy"]);
+    expectKeys(row, ["spaceId", "status", "generation", "catalogRevision", "busy", "serviceEpoch"]);
     const status = row.status;
     if (
       status !== "running" &&
@@ -832,14 +833,29 @@ function parseObservations(value: unknown): LlmSpaceObservation[] {
     if (row.catalogRevision !== null && (!Number.isInteger(row.catalogRevision) || Number(row.catalogRevision) < 0)) {
       throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "observation catalogRevision is not valid");
     }
+    if (typeof row.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(row.serviceEpoch)) {
+      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "observation serviceEpoch is not valid");
+    }
     return {
       spaceId: parseSpaceId(row.spaceId),
       status,
       generation: Number(row.generation),
       catalogRevision: row.catalogRevision === null ? null : Number(row.catalogRevision),
       busy: row.busy,
+      serviceEpoch: row.serviceEpoch,
     };
   });
+}
+
+export function observationsEqual(current: LlmSpaceObservation, observed: LlmSpaceObservation): boolean {
+  return (
+    current.spaceId === observed.spaceId &&
+    current.status === observed.status &&
+    current.generation === observed.generation &&
+    current.busy === observed.busy &&
+    current.catalogRevision === observed.catalogRevision &&
+    current.serviceEpoch === observed.serviceEpoch
+  );
 }
 
 function parseMappings(value: unknown): LlmShareMapping[] {

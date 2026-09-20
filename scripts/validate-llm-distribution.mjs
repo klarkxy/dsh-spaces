@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LLM_REQUIRED, PLUGIN_REQUIRED } from "./pack-spaces-plugin.mjs";
+import { resolveNpmCli } from "./verify-spaces-distribution.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LLM_DIR = join(REPO, "packages", "llm-bridge");
@@ -33,11 +34,12 @@ for (const rel of LLM_REQUIRED) {
   if (!existsSync(join(LLM_DIR, rel))) fail(`missing ${rel}`);
 }
 const dest = mkdtempSync(join(tmpdir(), "dsh-llm-dist-"));
-const packed = spawnSync("npm", ["pack", "--ignore-scripts", "--pack-destination", dest], {
+const packed = spawnSync(process.execPath, [resolveNpmCli(process.execPath), "pack", "--ignore-scripts", "--pack-destination", dest], {
   cwd: LLM_DIR,
   encoding: "utf8",
+  windowsHide: true,
 });
-if (packed.status !== 0) fail(`npm pack llm-bridge failed: ${packed.stderr}`);
+if (packed.status !== 0) fail(`npm pack llm-bridge failed: ${packed.error?.message || packed.stderr || packed.stdout}`);
 else {
   const name = packed.stdout.trim().split("\n").at(-1) ?? "";
   if (!/dsh-spaces-llm-bridge-.*\.tgz/.test(name)) fail(`unexpected pack name ${name}`);

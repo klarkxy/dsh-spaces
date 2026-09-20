@@ -23,6 +23,10 @@ const NODE_EXE = join(tmpdir(), "verified-node.exe");
 const CLI_BIN = join(tmpdir(), "verified-cli", "bin.js");
 
 const STATE_VALUE = {
+  protocolVersion: 2,
+  serviceEpoch: "a".repeat(64),
+  revision: "b".repeat(64),
+  availability: "ready",
   role: "manager",
   managerId: "spaces-hub",
   owner: null,
@@ -30,7 +34,6 @@ const STATE_VALUE = {
   mode: "verified-full",
   dshVersion: "0.1.5-rc.1",
   maintenance: false,
-  recoveryRequired: false,
   reasons: [],
   spaces: [],
   jobs: [],

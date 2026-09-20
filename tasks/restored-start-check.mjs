@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { join, relative, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
-import { RuntimeStore } from '../src/main/runtime-store.ts';
-import { ProcessManager } from '../src/main/process-manager.ts';
-import { PatchWriter } from '../src/main/patch-writer.ts';
-import { setSelectedDshResolver } from '../src/main/dsh-cli.ts';
-import { setToolchainRoot } from '../src/main/toolchain.ts';
+import { RuntimeStore } from '../src/adapters/node/runtime-store.ts';
+import { ProcessManager } from '../src/adapters/node/process-manager.ts';
+import { PatchWriter } from '../src/adapters/node/patch-writer.ts';
+import { setSelectedDshResolver } from '../src/adapters/node/dsh-cli.ts';
+import { setToolchainRoot } from '../src/adapters/node/toolchain.ts';
 const [home, testRoot, sessionId] = process.argv.slice(2);
 assert.ok(home && testRoot && sessionId, 'Usage: restored-start-check.mjs <temporary-home> <test-root> <original-session-id>');
 for (const path of [home, testRoot]) {

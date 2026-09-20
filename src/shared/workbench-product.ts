@@ -2,6 +2,7 @@
 import type { ConfigBackupMeta, DiagnosticLogEntry } from './diagnostics';
 import type { SpaceImportResult, SpaceSharePreview, SpaceTemplate } from './space-share';
 import type { LocalePreference, PackageSource, PluginCatalogSnapshot, PluginLibrarySource, ThemePreference } from './types';
+import type { WorkbenchPackageRelease } from './workbench';
 
 export const MAX_WORKBENCH_SHARE_BYTES = 8 * 1024 * 1024;
 export const MAX_WORKBENCH_SHARE_BASE64 = Math.ceil(MAX_WORKBENCH_SHARE_BYTES / 3) * 4;
@@ -59,6 +60,7 @@ export type WorkbenchProductResult = (
 ) & { observation: WorkbenchProductObservation };
 
 export type WorkbenchProductCommand =
+  | { kind: 'workbench.prepare'; version?: string }
   | { kind: 'settings.update'; settings: WorkbenchHomeSettings }
   | { kind: 'catalog.refresh'; url?: string }
   | { kind: 'plugin.download'; catalogId?: string; spec?: string; version?: string }
@@ -69,6 +71,7 @@ export type WorkbenchProductCommand =
 
 /** This is safe to persist in succeeded or partially failed jobs. */
 export type WorkbenchProductOutcome =
+  | { kind: 'workbench.prepare'; candidate: WorkbenchPackageRelease }
   | { kind: 'settings.update'; settings: WorkbenchHomeSettings }
   | { kind: 'catalog.refresh'; count: number }
   | { kind: 'plugin.download'; item: WorkbenchLibraryItem }
@@ -77,6 +80,6 @@ export type WorkbenchProductOutcome =
   | { kind: 'template.create' | 'space.import'; import: SpaceImportResult };
 
 export function isWorkbenchProductCommand(value: { kind: string }): value is WorkbenchProductCommand {
-  return ['settings.update', 'catalog.refresh', 'plugin.download', 'plugin.library.remove',
+  return ['workbench.prepare', 'settings.update', 'catalog.refresh', 'plugin.download', 'plugin.library.remove',
     'template.save', 'template.create', 'space.import'].includes(value.kind);
 }

@@ -6,6 +6,7 @@ import type {
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchMutationContext,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -15,6 +16,7 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../../../src/shared/workbench";
+import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../../src/shared/workbench-product";
 import type {
   WorkbenchBootstrapResult,
   WorkbenchGuideApi,
@@ -124,13 +126,15 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
   return {
     state: () => callRemote<WorkbenchState>(connection, "workbench/state", {}),
     detail: (spaceId) => callRemote<SpaceDetail>(connection, "workbench/detail", { spaceId }),
-    submit: (command: WorkbenchCommand, requestId: string) =>
-      callRemote<WorkbenchJob>(connection, "workbench/submit", { command, requestId }),
+    submit: (command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext) =>
+      callRemote<WorkbenchJob>(connection, "workbench/submit", { command, requestId, context }),
     job: (id) => callRemote<WorkbenchJob>(connection, "workbench/job", { id }),
     cancel: (id) => callRemote<WorkbenchJob>(connection, "workbench/cancel", { id }),
     view: (spaceId) => callRemote<WorkbenchView>(connection, "workbench/view", { spaceId }),
-    preview: (request: WorkbenchPlanRequest) =>
-      callRemote<WorkbenchPlan>(connection, "workbench/preview", { request }),
+    preview: (request: WorkbenchPlanRequest, context: WorkbenchMutationContext) =>
+      callRemote<WorkbenchPlan>(connection, "workbench/preview", { request, context }),
+    product: (request: WorkbenchProductRequest) =>
+      callRemote<WorkbenchProductResult>(connection, "workbench/product", { request }),
     plugins: (query) => callRemote<WorkbenchPlugin[]>(connection, "workbench/plugins", { query }),
     snapshots: () => callRemote<WorkbenchSnapshot[]>(connection, "workbench/snapshots", {}),
     snapshot: (id) => callRemote<WorkbenchSnapshot>(connection, "workbench/snapshot", { id }),
@@ -159,10 +163,10 @@ export function displayWorkbenchMessage(error: unknown): string {
 export function readHostHint(globalObject: Record<string, unknown> | undefined = globalThis as unknown as Record<string, unknown>): WorkbenchHostHint | null {
   const raw = globalObject?.[HOST_HINT_GLOBAL];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const row = raw as { role?: unknown; recoveryRequired?: unknown };
+  const row = raw as { role?: unknown; unavailable?: unknown };
   if (row.role !== "manager" && row.role !== "workspace" && row.role !== "uninitialized") return null;
-  if (typeof row.recoveryRequired !== "boolean") return null;
-  return { role: row.role, recoveryRequired: row.recoveryRequired };
+  if (typeof row.unavailable !== "boolean") return null;
+  return { role: row.role, unavailable: row.unavailable };
 }
 
 export function isTrustedLoopbackHref(origin: string, path: string): string | null {

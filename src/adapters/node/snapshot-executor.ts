@@ -10,7 +10,7 @@ import type {
   RestoreResult,
   SnapshotMeta,
   SnapshotRuntime,
-} from "../shared/snapshots";
+} from "../../shared/snapshots";
 import type { SnapshotRestoreOptions } from "./snapshot-store";
 
 export type SnapshotWorkerOperation =

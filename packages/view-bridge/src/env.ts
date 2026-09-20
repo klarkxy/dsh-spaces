@@ -5,15 +5,19 @@ export const VIEW_ENV = {
   spaceId: "DSH_SPACES_VIEW_ID",
   generation: "DSH_SPACES_VIEW_GENERATION",
   channel: "DSH_SPACES_VIEW_CHANNEL",
+  serviceEpoch: "DSH_SPACES_VIEW_SERVICE_EPOCH",
 } as const;
 
 export const VIEW_HINT_GLOBAL = "__DSH_SPACES_VIEW__";
+
+const SERVICE_EPOCH_RE = /^[a-f0-9]{64}$/;
 
 export interface ViewHandshakeConfig {
   parentOrigin: string;
   spaceId: string;
   generation: number;
   channel: string;
+  serviceEpoch: string;
 }
 
 export function parseLoopbackOrigin(raw: string): string | null {
@@ -53,13 +57,19 @@ export function parseViewSpaceId(raw: string): string | null {
   return raw;
 }
 
+export function parseViewServiceEpoch(raw: string): string | null {
+  if (typeof raw !== "string" || !SERVICE_EPOCH_RE.test(raw)) return null;
+  return raw;
+}
+
 export function parseViewEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>): ViewHandshakeConfig | null {
   const parentOrigin = parseLoopbackOrigin(String(env[VIEW_ENV.parentOrigin] ?? ""));
   const spaceId = parseViewSpaceId(String(env[VIEW_ENV.spaceId] ?? ""));
   const generation = parseExactInteger(String(env[VIEW_ENV.generation] ?? ""));
   const channel = parseViewChannel(String(env[VIEW_ENV.channel] ?? ""));
-  if (!parentOrigin || !spaceId || generation === null || !channel) return null;
-  return { parentOrigin, spaceId, generation, channel };
+  const serviceEpoch = parseViewServiceEpoch(String(env[VIEW_ENV.serviceEpoch] ?? ""));
+  if (!parentOrigin || !spaceId || generation === null || !channel || !serviceEpoch) return null;
+  return { parentOrigin, spaceId, generation, channel, serviceEpoch };
 }
 
 export function parseViewHint(value: unknown): ViewHandshakeConfig | null {
@@ -67,11 +77,13 @@ export function parseViewHint(value: unknown): ViewHandshakeConfig | null {
   const row = value as Record<string, unknown>;
   if (typeof row.parentOrigin !== "string" || typeof row.spaceId !== "string") return null;
   if (typeof row.generation !== "number" || typeof row.channel !== "string") return null;
+  if (typeof row.serviceEpoch !== "string") return null;
   const parentOrigin = parseLoopbackOrigin(row.parentOrigin);
   const spaceId = parseViewSpaceId(row.spaceId);
   const channel = parseViewChannel(row.channel);
-  if (!parentOrigin || !spaceId || !Number.isSafeInteger(row.generation) || !channel) return null;
-  return { parentOrigin, spaceId, generation: row.generation, channel };
+  const serviceEpoch = parseViewServiceEpoch(row.serviceEpoch);
+  if (!parentOrigin || !spaceId || !Number.isSafeInteger(row.generation) || !channel || !serviceEpoch) return null;
+  return { parentOrigin, spaceId, generation: row.generation, channel, serviceEpoch };
 }
 
 export function readViewHint(
