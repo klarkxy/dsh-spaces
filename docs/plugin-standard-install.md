@@ -6,7 +6,7 @@
 
 默认使用官方 **`latest`**。安装时解析成精确版本并钉住。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@latest plugin --profile web add <完整包路径> --config.auto-install-peers=true` 安装，再用 `pnpm dlx @deepseek-ai/dsh@latest web` 启动。
 
-标准安装已在独立测试目录完成 rc.1 / rc.2 真实浏览器验收。`@dsh-spaces/plugin` **尚未发布到 npm**；当前发布账号未登录，因此现在使用本地预构建包安装。详细证据见 [验收记录](../tasks/plugin-standard-install.md)。
+现行验收脚本是 `scripts/verify-plugin-standard-install.mjs`（`pnpm run validate:plugin-install`）。本次完整安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/merge-execution.md)。历史 rc.1 / rc.2 浏览器记录见 [tasks/plugin-standard-install.md](../tasks/plugin-standard-install.md)，不替代当前版本验证。`@dsh-spaces/plugin` **尚未发布到 npm**；现在使用本地预构建包。
 
 The distribution unit is the prebuilt **plugin tarball** (supervisor + view-bridge payload inside). `@dsh-spaces/supervisor` stays private.
 
@@ -34,7 +34,7 @@ Windows CLI `0.1.5-rc.1` splits tarball paths that contain spaces. `pnpm run pac
 
 | Status | Meaning |
 | --- | --- |
-| **Local tarball acceptance** | `pnpm run pack:plugin` → `dsh plugin --profile web add` → `dsh web` → Initialize. The recorded result of `pnpm run validate:plugin-install` determines acceptance; the command itself is not proof. |
+| **Local tarball acceptance** | `pnpm run pack:plugin` → `dsh plugin --profile web add` → `dsh web` → Initialize. The recorded result of `pnpm run validate:plugin-install` determines acceptance. See the current [merge acceptance record](../tasks/merge-execution.md); the command itself is not proof. |
 | **Community listing, pending** | Marketplace search/install once the scoped package is owned and published. Not done. |
 | **Not a release** | GitHub root is the monorepo. A CI pack artifact is for review, not `npm publish`. Desktop tags stay on the Release workflow. |
 
