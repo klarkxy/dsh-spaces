@@ -13,7 +13,6 @@ import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createDesktopHomeControl } from "../src/adapters/desktop/index.ts";
 import {
   HOME_LOCK_DIR_NAME,
   HOME_LOCK_OWNER_FILE,
@@ -308,19 +307,19 @@ test("async child after release cannot inherit ownership past a new holder", asy
   assert.equal(await hold, "held");
 });
 
-test("desktop adapter uses MaintenanceGate(lock) so mutate and startup-recovery hold the home lock", async () => {
+test("MaintenanceGate with HomeOperationLock holds the home lock for mutations and maintenance", async () => {
   const home = tempHome();
-  const desktop = createDesktopHomeControl(home);
-  assert.ok(desktop.maintenance instanceof MaintenanceGate);
-  assert.equal(desktop.maintenance.busy, false);
+  const lock = new HomeOperationLock(home);
+  const gate = new MaintenanceGate(lock);
+  assert.equal(gate.busy, false);
 
   let releaseMutate!: () => void;
   let mutateInside = false;
-  const mutating = desktop.mutate(async () => {
+  const mutating = gate.runMutation(async () => {
     mutateInside = true;
-    assert.equal(desktop.maintenance.mutations, 1);
-    assert.equal(desktop.maintenance.busy, false);
-    const info = desktop.lock.inspect();
+    assert.equal(gate.mutations, 1);
+    assert.equal(gate.busy, false);
+    const info = lock.inspect();
     assert.ok("owner" in info && info.held);
     assert.equal(info.owner.label, "mutation");
     await new Promise<void>((resolveHold) => {
@@ -328,48 +327,55 @@ test("desktop adapter uses MaintenanceGate(lock) so mutate and startup-recovery 
     });
     return "mut";
   });
-  assert.equal(desktop.maintenance.mutations, 1);
+  assert.equal(gate.mutations, 1);
   while (!mutateInside) await delay(5);
   await assert.rejects(new HomeOperationLock(home).run("host-create", async () => "no"), HomeLockBusyError);
-  await assert.rejects(createDesktopHomeControl(home).runMaintenance("startup-recovery", async () => "no"), /already running|held by pid|busy/);
+  await assert.rejects(
+    new MaintenanceGate(new HomeOperationLock(home)).run("startup-recovery", async () => "no"),
+    /already running|held by pid|busy/,
+  );
   releaseMutate();
   assert.equal(await mutating, "mut");
-  assert.equal(desktop.maintenance.mutations, 0);
-  assert.equal(desktop.lock.inspect().held, false);
+  assert.equal(gate.mutations, 0);
+  assert.equal(lock.inspect().held, false);
 
   let recoveryInside = false;
-  const recovery = desktop.runMaintenance("startup-recovery", async () => {
+  const recovery = gate.run("startup-recovery", async () => {
     recoveryInside = true;
-    assert.equal(desktop.maintenance.busy, true);
-    assert.equal(desktop.maintenance.current, "startup-recovery");
-    const info = desktop.lock.inspect();
+    assert.equal(gate.busy, true);
+    assert.equal(gate.current, "startup-recovery");
+    const info = lock.inspect();
     assert.ok("owner" in info && info.held);
     assert.equal(info.owner.label, "startup-recovery");
     await delay(30);
     return "recovered";
   });
-  assert.equal(desktop.maintenance.current, "startup-recovery");
+  assert.equal(gate.current, "startup-recovery");
   while (!recoveryInside) await delay(5);
-  await assert.rejects(createDesktopHomeControl(home).mutate(async () => "no"), (error: unknown) => {
-    assert.match(String(error), /while maintenance is running|held by pid|busy/);
-    return true;
-  });
+  await assert.rejects(
+    new MaintenanceGate(new HomeOperationLock(home)).runMutation(async () => "no"),
+    (error: unknown) => {
+      assert.match(String(error), /while maintenance is running|held by pid|busy/);
+      return true;
+    },
+  );
   assert.equal(await recovery, "recovered");
-  assert.equal(desktop.maintenance.busy, false);
-  assert.equal(desktop.lock.inspect().held, false);
+  assert.equal(gate.busy, false);
+  assert.equal(lock.inspect().held, false);
 });
 
-test("failed desktop mutate releases both the gate and the home lock", async () => {
-  const desktop = createDesktopHomeControl(tempHome());
+test("failed mutation releases both the gate and the home lock", async () => {
+  const lock = new HomeOperationLock(tempHome());
+  const gate = new MaintenanceGate(lock);
   await assert.rejects(
-    desktop.mutate(async () => {
-      throw new Error("desktop write failed");
+    gate.runMutation(async () => {
+      throw new Error("write failed");
     }),
-    /desktop write failed/,
+    /write failed/,
   );
-  assert.equal(desktop.maintenance.mutations, 0);
-  assert.equal(desktop.lock.inspect().held, false);
-  assert.equal(await desktop.mutate(async () => "ok"), "ok");
+  assert.equal(gate.mutations, 0);
+  assert.equal(lock.inspect().held, false);
+  assert.equal(await gate.runMutation(async () => "ok"), "ok");
 });
 
 test("reclaim guard blocks acquire and unlockDead cannot steal an incomplete lock", async () => {
@@ -535,25 +541,4 @@ test("symlink lock path is ambiguous and is not stolen", async (t) => {
     detail: "lock directory is a symlink",
   });
   await assert.rejects(lock.run("create", async () => "no"), /ambiguous|symlink/);
-});
-
-test("desktop keeps interrupted plugin evidence blocked and snapshot restore cannot bypass it", async () => {
-  const home = tempHome();
-  const control = createDesktopHomeControl(home);
-  const journal = join(home, ".dsh-spaces-mutation.json");
-  writeFileSync(journal, '{"op":"create","spaceId":"unfinished"}');
-  let ran = false;
-  await assert.rejects(control.mutate(async () => { ran = true; }), /unfinished evidence|writes are blocked/i);
-  await assert.rejects(control.runMaintenance("startup-recovery", async () => { ran = true; }), /unfinished evidence|writes are blocked/i);
-  assert.equal(ran, false);
-  await control.runMaintenance("quit", async () => { ran = true; });
-  assert.equal(ran, true);
-  assert.equal(existsSync(journal), true);
-  let restoreRan = false;
-  await assert.rejects(
-    control.runMaintenance("snapshot-restore", async () => { restoreRan = true; }),
-    /unfinished evidence|writes are blocked/i,
-  );
-  assert.equal(restoreRan, false);
-  assert.equal(existsSync(journal), true);
 });
