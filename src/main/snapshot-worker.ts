@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync, rmdirSync, realpathSync, unlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
+import { runRuntimeInstallation } from "../adapters/node/runtime-installation";
 import { renameDirectory } from "./atomic";
 import { authorizeProductHome, samePath } from "./home-guard";
 import {
@@ -11,11 +12,8 @@ import {
   type SnapshotRestoreOptions,
 } from "./snapshot-store";
 import type { SnapshotRuntime } from "../shared/snapshots";
-import { RuntimeStore } from "./runtime-store";
 import type { RuntimeRef } from "../shared/runtime";
 import type { PackageSource } from "../shared/types";
-import { setToolchainRoot } from "./toolchain";
-import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
 import { ProcessTerminationError } from "./terminate-process";
 
 type SnapshotWorkerOperation =
@@ -70,14 +68,14 @@ try {
 
 function dispatch(data: typeof input): unknown {
   if (data.operation === "runtimeInstall") {
-    setToolchainRoot(data.toolchainRoot!);
-    const runtimes = new RuntimeStore({ root: data.runtimeRoot!, snapshotRoot: data.root,
-      source: () => data.packageSource!, legacy: () => data.legacy });
-    let journalFailed = false;
-    return withChildObservation(() => observeMaintenanceChild(data.home, () => { journalFailed = true; }), async () => {
-      const installed = await runtimes.install(data.version!);
-      if (journalFailed) throw new ProcessTerminationError("Maintenance child journal needs recovery.");
-      return installed;
+    return runRuntimeInstallation({
+      home: data.home,
+      runtimeRoot: data.runtimeRoot!,
+      version: data.version!,
+      packageSource: data.packageSource!,
+      snapshotRoot: data.root,
+      legacy: data.legacy,
+      toolchainRoot: data.toolchainRoot,
     });
   }
   if (data.operation === "copyLinkedTree") {
@@ -100,16 +98,16 @@ function dispatch(data: typeof input): unknown {
     clearRuntimeFallback(data.profiles!, data.runtimeRoot!);
     return undefined;
   }
+  if (data.operation === "restore" || data.operation === "recover" || data.operation === "completeRestore") {
+    throw new Error("Snapshot restore is not supported.");
+  }
   const store = new SnapshotStore({ home: data.home, root: data.root! });
   if (data.operation === "create") return store.create(data.runtime!, data.reason);
-  if (data.operation === "restore") return store.restore(data.id!, data.runtime, data.options);
-  if (data.operation === "recover") return store.recover();
-  if (data.operation === "completeRestore") {
-    store.completeRestore();
+  if (data.operation === "delete") {
+    store.delete(data.id!);
     return undefined;
   }
-  store.delete(data.id!);
-  return undefined;
+  throw new Error(`Unsupported snapshot worker operation: ${data.operation}`);
 }
 
 function removeTreeContained(root: string, target: string): void {

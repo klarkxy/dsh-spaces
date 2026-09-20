@@ -101,6 +101,8 @@ test("failure before commit leaves live profiles untouched and kills registered 
     windowsHide: true,
   });
   child.unref();
+  const pid = child.pid;
+  assert.ok(pid, "candidate process had no pid");
   t.after(() => {
     if (child.exitCode === null && child.signalCode === null && child.pid) {
       try {
@@ -117,7 +119,7 @@ test("failure before commit leaves live profiles untouched and kills registered 
     },
   });
   await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /smoke failed/);
-  assert.notEqual(child.exitCode === null && child.signalCode === null, true);
+  assertCandidateStopped(child, pid);
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
   assert.equal(ctx.restores, 0);
@@ -138,21 +140,119 @@ test("workbench with web plugin fails dump when isolation roots are missing", as
   assert.ok(ctx.dumps.includes("web"));
 });
 
-test("commit rename and retarget failures restore old profiles and snapshot runtime", async (t) => {
-  for (const op of ["commit:backup", "commit:swap", "commit:retarget"]) {
-    const ctx = await harness(t);
-    ctx.upgrade = makeUpgrade(ctx, {
-      inject: (hook) => {
-        if (hook === op) throw new Error(`fail ${op}`);
-      },
-    });
-    await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), new RegExp(`fail ${op}`));
-    assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
-    assert.equal(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
-    assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
-    assert.equal(ctx.snapshots.pendingRestore(), undefined);
-    assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
-  }
+test("commit:backup failure leaves live profiles and selected runtime unchanged", async (t) => {
+  const ctx = await harness(t);
+  ctx.upgrade = makeUpgrade(ctx, {
+    inject: (hook) => {
+      if (hook === "commit:backup") throw new Error("fail commit:backup");
+    },
+  });
+  await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /fail commit:backup/);
+  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+  assert.deepEqual(ctx.selectCalls, []);
+  assert.deepEqual(ctx.selectExistingCalls, []);
+  assert.equal(ctx.restores, 0);
+  assert.equal(readJournal(ctx.home).phase, "committing");
+  assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
+  await assertUnfinishedBlocksReplay(ctx);
+  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+});
+
+test("commit:swap failure keeps the moved backup and does not restore it onto live", async (t) => {
+  const ctx = await harness(t);
+  ctx.upgrade = makeUpgrade(ctx, {
+    inject: (hook) => {
+      if (hook === "commit:swap") throw new Error("fail commit:swap");
+    },
+  });
+  await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /fail commit:swap/);
+  assert.equal(existsSync(join(ctx.home, "profiles")), false);
+  assert.equal(readProfileManifest(backupProfiles(ctx.home), "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(readFileSync(join(backupProfiles(ctx.home), "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
+  assert.equal(readProfileManifest(join(ctx.home, ".dsh-spaces-upgrade", "home", "profiles"), "coding").dependencies?.[BASE], "0.2.0");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+  assert.deepEqual(ctx.selectCalls, []);
+  assert.deepEqual(ctx.selectExistingCalls, []);
+  assert.equal(ctx.restores, 0);
+  assert.equal(readJournal(ctx.home).phase, "committing");
+  assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
+  await assertUnfinishedBlocksReplay(ctx);
+  assert.equal(existsSync(join(ctx.home, "profiles")), false);
+  assert.equal(readProfileManifest(backupProfiles(ctx.home), "coding").dependencies?.[BASE], "0.1.1-rc.2");
+});
+
+test("commit:retarget failure keeps published live and backup and does not select the old runtime", async (t) => {
+  const ctx = await harness(t);
+  ctx.upgrade = makeUpgrade(ctx, {
+    inject: (hook) => {
+      if (hook === "commit:retarget") throw new Error("fail commit:retarget");
+    },
+  });
+  await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /fail commit:retarget/);
+  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
+  assert.equal(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
+  assert.equal(readProfileManifest(backupProfiles(ctx.home), "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+  assert.deepEqual(ctx.selectCalls, []);
+  assert.deepEqual(ctx.selectExistingCalls, []);
+  assert.equal(ctx.restores, 0);
+  assert.equal(readJournal(ctx.home).phase, "committing");
+  assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
+  await assertUnfinishedBlocksReplay(ctx);
+  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
+  assert.equal(readProfileManifest(backupProfiles(ctx.home), "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+});
+
+test("commit:select failure keeps published live and backup and does not select the old runtime", async (t) => {
+  const ctx = await harness(t);
+  ctx.upgrade = makeUpgrade(ctx, {
+    inject: (hook) => {
+      if (hook === "commit:select") throw new Error("fail commit:select");
+    },
+  });
+  await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /fail commit:select/);
+  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
+  assert.equal(readProfileManifest(backupProfiles(ctx.home), "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+  assert.deepEqual(ctx.selectCalls, []);
+  assert.deepEqual(ctx.selectExistingCalls, []);
+  assert.equal(ctx.restores, 0);
+  assert.equal(readJournal(ctx.home).phase, "committing");
+  await assertUnfinishedBlocksReplay(ctx);
+  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
+  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
+});
+
+test("unknown or corrupt upgrade journal original bytes are preserved and block later upgrades", async (t) => {
+  const corrupt = await harness(t);
+  const corruptPath = journalPath(corrupt.home);
+  mkdirSync(dirname(corruptPath), { recursive: true });
+  const garbage = Buffer.from("{not-json\n", "utf8");
+  writeFileSync(corruptPath, garbage);
+  await assert.rejects(() => corrupt.upgrade.upgrade("0.9.9"), /Unfinished upgrade evidence/);
+  assert.deepEqual(readFileSync(corruptPath), garbage);
+  assert.equal(readManifest(corrupt.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.equal(corrupt.runtimes.current()?.version, "0.1.1-rc.2");
+  assert.deepEqual(corrupt.installs, []);
+
+  const unknown = await harness(t);
+  const unknownPath = journalPath(unknown.home);
+  mkdirSync(dirname(unknownPath), { recursive: true });
+  const unknownBytes = Buffer.from(`${JSON.stringify({
+    phase: "rollback",
+    snapshotId: "snap-unknown",
+    version: "0.9.9",
+    startedAt: "2026-01-01T00:00:00.000Z",
+  }, null, 2)}\n`);
+  writeFileSync(unknownPath, unknownBytes);
+  await assert.rejects(() => unknown.upgrade.upgrade("0.9.9"), /Unfinished upgrade evidence/);
+  assert.deepEqual(readFileSync(unknownPath), unknownBytes);
+  assert.equal(readManifest(unknown.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
+  assert.deepEqual(unknown.installs, []);
 });
 
 test("kill failure keeps stage and journal and does not restore or delete live profiles", async (t) => {
@@ -322,6 +422,8 @@ interface Harness {
   smokeHomes: string[];
   restores: number;
   installs: string[];
+  selectCalls: string[];
+  selectExistingCalls: Array<{ bin: string; version: string }>;
 }
 
 async function harness(t: { after: (fn: () => void) => void }): Promise<Harness> {
@@ -352,11 +454,28 @@ async function harness(t: { after: (fn: () => void) => void }): Promise<Harness>
     smokeHomes: [],
     restores: 0,
     installs: [],
+    selectCalls: [],
+    selectExistingCalls: [],
   };
   const install = runtimes.install.bind(runtimes);
   runtimes.install = async (version: string) => {
     ctx.installs.push(version);
     return install(version);
+  };
+  const select = runtimes.select.bind(runtimes);
+  runtimes.select = (version: string) => {
+    ctx.selectCalls.push(version);
+    return select(version);
+  };
+  const selectExisting = runtimes.selectExisting.bind(runtimes);
+  runtimes.selectExisting = async (ref) => {
+    ctx.selectExistingCalls.push({ bin: ref.bin, version: ref.version });
+    return selectExisting(ref);
+  };
+  const restore = snapshots.restore.bind(snapshots);
+  snapshots.restore = (id, currentRuntime, options) => {
+    ctx.restores += 1;
+    return restore(id, currentRuntime, options);
   };
   ctx.upgrade = makeUpgrade(ctx);
   return ctx;
@@ -545,10 +664,49 @@ function readManifest(home: string, name: string): {
   dependencies?: Record<string, string>;
   dsh?: { profile?: { bundles?: string[] } };
 } {
-  return JSON.parse(readFileSync(join(home, "profiles", name, "package.json"), "utf8")) as {
+  return readProfileManifest(join(home, "profiles"), name);
+}
+
+function readProfileManifest(profilesRoot: string, name: string): {
+  dependencies?: Record<string, string>;
+  dsh?: { profile?: { bundles?: string[] } };
+} {
+  return JSON.parse(readFileSync(join(profilesRoot, name, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
     dsh?: { profile?: { bundles?: string[] } };
   };
+}
+
+function journalPath(home: string): string {
+  return join(home, ".dsh-spaces-upgrade", "journal.json");
+}
+
+function backupProfiles(home: string): string {
+  return join(home, ".dsh-spaces-upgrade", "backup-profiles");
+}
+
+function readJournal(home: string): { phase: string; snapshotId: string; version: string } {
+  return JSON.parse(readFileSync(journalPath(home), "utf8")) as {
+    phase: string;
+    snapshotId: string;
+    version: string;
+  };
+}
+
+async function assertUnfinishedBlocksReplay(ctx: Harness): Promise<void> {
+  const journalBefore = readFileSync(journalPath(ctx.home));
+  const installsBefore = ctx.installs.slice();
+  const pluginAddsBefore = ctx.pluginAdds.slice();
+  const selectBefore = ctx.selectCalls.slice();
+  const selectExistingBefore = ctx.selectExistingCalls.slice();
+  const restoresBefore = ctx.restores;
+  await assert.rejects(() => makeUpgrade(ctx).upgrade("0.9.9"), /Unfinished upgrade evidence/);
+  assert.deepEqual(readFileSync(journalPath(ctx.home)), journalBefore);
+  assert.deepEqual(ctx.installs, installsBefore);
+  assert.deepEqual(ctx.pluginAdds, pluginAddsBefore);
+  assert.deepEqual(ctx.selectCalls, selectBefore);
+  assert.deepEqual(ctx.selectExistingCalls, selectExistingBefore);
+  assert.equal(ctx.restores, restoresBefore);
 }
 
 function isolationPatch(name: string): string {
@@ -577,6 +735,21 @@ function isInsidePath(root: string, target: string): boolean {
   const r = resolve(root).toLowerCase();
   const t = resolve(target).toLowerCase();
   return t === r || t.startsWith(`${r}\\`) || t.startsWith(`${r}/`);
+}
+
+function assertCandidateStopped(child: { exitCode: number | null; signalCode: NodeJS.Signals | null }, pid: number): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  // terminateProcessTree already waited for the child 'exit' event. On Windows the
+  // ChildProcess fields can still be null for a tick after the OS process is gone.
+  assert.throws(
+    () => process.kill(pid, 0),
+    (err: unknown) => {
+      const code = (err as NodeJS.ErrnoException).code;
+      const message = err instanceof Error ? err.message : String(err);
+      return code === "ESRCH" || /ESRCH|no such process/i.test(message);
+    },
+    `candidate process ${pid} is still alive after stop`,
+  );
 }
 
 function fakeDir(t: { after: (fn: () => void) => void }, prefix: string): string {
