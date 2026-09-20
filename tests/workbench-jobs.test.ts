@@ -93,6 +93,17 @@ test("same request id concurrent submit runs the handler once", async () => {
   assert.equal(store.job("req-1").status, "succeeded");
 });
 
+test("uncertain maintenance keeps the interrupted job and blocks later side effects", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(startCmd(), "uncertain", async () => { throw new WorkbenchJobError("workbench/recovery-required"); });
+  await store.whenIdle();
+  assert.equal(store.job("uncertain").status, "recovery-required");
+  let called = false;
+  await assert.rejects(async () => store.submit(startCmd("beta"), "later", async () => { called = true; }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/recovery-required");
+  assert.equal(called, false);
+});
+
 test("same request id with a different payload is rejected", async () => {
   const store = new WorkbenchJobStore({ home: tempHome() });
   const gate = latch();

@@ -3,15 +3,18 @@ import { parse as parseYaml } from "yaml";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { atomicWrite } from "../../main/atomic";
+import { applyXpEmbedCompatibility, XP_EMBED_COMPATIBILITY_NOTE, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from "./xp-compatibility";
 import { assertNotRealHome } from "../../main/home-guard";
 import { CATALOG_CACHE_FILE, lookupCatalogEntry, parseAnyCatalog, seedCatalog } from "../../main/plugin-catalog";
 import {
@@ -33,12 +36,14 @@ import {
 } from "../../main/plugin-ops";
 import { npmPackumentUrl } from "../../main/package-source";
 import { currentPackageSource } from "../../main/toolchain";
+import { ProcessTerminationError } from "../../main/terminate-process";
+import { WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { BACKUP_FILE_PREFIX, type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
 import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES } from "../../shared/types";
-import type { SnapshotMeta } from "../../shared/snapshots";
+import type { RestoreRecoveryReceipt, SnapshotMeta } from "../../shared/snapshots";
 import type {
   WorkbenchBackup,
   WorkbenchJob,
@@ -46,6 +51,7 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime,
+  WorkbenchPackageRelease,
   WorkbenchSnapshot,
 } from "../../shared/workbench";
 import {
@@ -130,6 +136,8 @@ export interface WorkbenchMaintenanceOptions {
 
 export interface WorkbenchRecoveryOutcome {
   restoreCompleted: boolean;
+  restoreRolledBack?: boolean;
+  restorePlanId?: string;
   upgradeRolledBack: boolean;
   /**
    * Snapshot/upgrade/plugin-mutation journals were inspected and are in a known-good state.
@@ -143,6 +151,15 @@ export interface WorkbenchRecoveryOutcome {
    */
   settleInterruptedJobs: boolean;
   message: string;
+  /** Pending restore id captured before recover. Bind settlement to this snapshot only. */
+  snapshotId?: string;
+  /** Plugin-mutation plan id, only when a whole-home restore completed. */
+  pluginPlanId?: string;
+  /** Upgrade journal plan id captured before recover. Bind settlement to this plan only. */
+  upgradePlanId?: string;
+  workbenchPlanId?: string;
+  workbenchRolledBack?: boolean;
+  workbenchSucceeded?: boolean;
 }
 
 type ResolvedCommand =
@@ -161,7 +178,8 @@ type ResolvedCommand =
   | { kind: "snapshot.delete"; snapshotId: string }
   | { kind: "config.restore"; spaceId: string; backupId: string }
   | { kind: "runtime.install"; version: string }
-  | { kind: "runtime.upgrade"; version: string };
+  | { kind: "runtime.upgrade"; version: string }
+  | { kind: "workbench.upgrade"; catalogId: "bundled-workbench"; version: string; expectedDigest: string };
 
 type PlanStatus = "previewed" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -395,6 +413,10 @@ export class WorkbenchMaintenance {
     }
   }
 
+  async workbenchPackage(): Promise<WorkbenchPackageRelease | null> {
+    return await this.ports.packageUpgrade?.describe() ?? null;
+  }
+
   async recover(ctx?: WorkbenchJobContext): Promise<void> {
     this.resetRecoveryOutcome();
     this.assertWritable();
@@ -463,7 +485,7 @@ export class WorkbenchMaintenance {
           return await this.finishPlan(stored, () => withIrreversible(() => this.runSnapshotCreate(ctx)));
         case "snapshot.restore": {
           const snapshotId = stored.command.snapshotId;
-          return await this.finishPlan(stored, () => withIrreversible(() => this.runSnapshotRestore(snapshotId, ctx)));
+          return await this.finishPlan(stored, () => withIrreversible(() => this.runSnapshotRestore(snapshotId, ctx, stored.id)));
         }
         case "snapshot.delete": {
           const snapshotId = stored.command.snapshotId;
@@ -471,21 +493,44 @@ export class WorkbenchMaintenance {
           this.markPlan(stored, "succeeded");
           return;
         }
-        case "config.restore":
-          await withIrreversible(() => this.runConfigRestore(stored.command, ctx));
+        case "config.restore": {
+          const command = stored.command;
+          await withIrreversible(() => this.runConfigRestore(command, ctx));
           this.markPlan(stored, "succeeded");
           return;
+        }
         case "runtime.install": {
           const version = stored.command.version;
           return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeInstall(version, ctx)));
         }
         case "runtime.upgrade": {
           const version = stored.command.version;
-          return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeUpgrade(version, ctx)));
+          const planId = stored.id;
+          return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeUpgrade(version, ctx, planId)));
+        }
+        case "workbench.upgrade": {
+          const upgrade = this.ports.packageUpgrade;
+          if (!upgrade) throw new WorkbenchMaintenanceError("workbench/unsupported");
+          const command = stored.command;
+          return await this.finishPlan(stored, () => withIrreversible(async () => {
+            this.ports.setMaintenance(true);
+            try {
+              return await upgrade.execute({ ...command, planId: stored.id }, ctx);
+            } catch (error) {
+              this.log("workbench package update", error);
+              if (upgrade.hasEvidence()) throw new WorkbenchJobError("workbench/recovery-required");
+              throw error;
+            } finally {
+              // The package transaction owns manager reinitialization. Do not run it twice.
+              if (!upgrade.hasEvidence()) this.ports.setMaintenance(false);
+            }
+          }));
         }
       }
     } catch (error) {
-      if (error instanceof WorkbenchJobAbortError && !irreversible) {
+      if (uncertainMaintenance(error)) {
+        this.ports.setMaintenance(true);
+      } else if (error instanceof WorkbenchJobAbortError && !irreversible) {
         this.markPlan(stored, "cancelled");
       } else {
         this.markPlan(stored, "failed");
@@ -504,10 +549,50 @@ export class WorkbenchMaintenance {
     ctx.phase("inspect");
     ctx.message("Inspecting unfinished restore and upgrade state.");
     ctx.cancellable(false);
+    const packageUpgrade = this.ports.packageUpgrade;
+    if (packageUpgrade) {
+      const active = packageUpgrade.hasEvidence();
+      const planIds = (this.ports.unfinishedPlanIds?.() ?? []).filter(id => {
+        try { return this.readPlan(id).command.kind === "workbench.upgrade"; }
+        catch { return false; }
+      });
+      if (active || planIds.length) {
+        this.ports.setMaintenance(true);
+        const candidates: Array<string | undefined> = active ? [undefined] : planIds;
+        for (const planId of candidates) {
+          const result = await packageUpgrade.recover(ctx, planId);
+          if (!result) continue;
+          if (packageUpgrade.hasEvidence() || !this.liveHomeConsistent() || !this.homeConfigReadable()) {
+            throw new WorkbenchMaintenanceError("workbench/failed");
+          }
+          this.verifyRecoveredRuntime();
+          this.recovery = {
+            restoreCompleted: false, upgradeRolledBack: false,
+            consistent: true, settleInterruptedJobs: true,
+            workbenchPlanId: result.planId, workbenchRolledBack: result.rolledBack,
+            workbenchSucceeded: result.outcome === "succeeded",
+            message: "The workbench package transaction was reconciled using its own plan evidence.",
+          };
+          this.ports.setMaintenance(false);
+          return;
+        }
+      }
+    }
     const pending = this.inspectPendingRestore();
     const journal = this.readUpgradeJournal();
     const pluginMutation = this.readPluginMutation();
     const runningPlan = this.hasRunningPlan();
+    let receipt: RestoreRecoveryReceipt | undefined;
+    try { receipt = this.ports.snapshots.recoveryReceipt?.(); }
+    catch {
+      this.setFailedRecovery("Restore recovery evidence is unreadable and was left in place.");
+      this.keepMaintenanceFlag();
+      throw new WorkbenchMaintenanceError("workbench/failed");
+    }
+    const pendingSnapshotId = pending.status === "pending" ? pending.value?.snapshotId : undefined;
+    const expectedRuntimeVersion = pending.status === "pending" ? pending.value?.runtimeVersion : undefined;
+    const pluginPlanId = pluginMutation.status === "open" ? pluginMutation.planId : undefined;
+    const upgradePlanId = journal.status === "preparing" || journal.status === "committing" ? journal.planId : undefined;
 
     if (pending.status === "unreadable" || journal.status === "unreadable" || journal.status === "unknown" || pluginMutation.status === "unreadable") {
       this.log("recover refused to clear unreadable maintenance metadata", pending.error ?? journal.error);
@@ -516,7 +601,9 @@ export class WorkbenchMaintenance {
       throw new WorkbenchMaintenanceError("workbench/failed");
     }
 
-    const needsHomeRecover = pending.status === "pending" || journal.status === "preparing" || journal.status === "committing";
+    const receiptPlanId = pending.value?.planId ??
+      (receipt?.planId && this.ports.hasUnfinishedPlan?.(receipt.planId) ? receipt.planId : undefined);
+    const needsHomeRecover = pending.status === "pending" || Boolean(receiptPlanId) || journal.status === "preparing" || journal.status === "committing";
     if (!needsHomeRecover) {
       if (pluginMutation.status === "open" || runningPlan) {
         this.setFailedRecovery("A plugin or plan mutation did not finish. Interrupted work was not replayed or cancelled.");
@@ -544,9 +631,9 @@ export class WorkbenchMaintenance {
     }
 
     ctx.phase("recover");
-    let result: { restoreCompleted?: boolean; upgradeRolledBack?: boolean };
+    let result: Awaited<ReturnType<WorkbenchMaintenancePorts["upgrades"]["recover"]>>;
     try {
-      result = await this.ports.upgrades.recover();
+      result = await this.ports.upgrades.recover({ receiptPlanId });
     } catch (error) {
       this.log("upgrades.recover", error);
       this.setFailedRecovery("Snapshot or upgrade recovery failed. Diagnostic journals were left in place.");
@@ -559,17 +646,42 @@ export class WorkbenchMaintenance {
       this.setFailedRecovery("Snapshot or upgrade journals are still ambiguous.");
       throw new WorkbenchMaintenanceError("workbench/failed");
     }
-    if (pluginMutation.status === "open") this.clearPluginMutation();
+    const restoredNow = result.restoreCompleted === true && pending.status === "pending";
+    if (pluginMutation.status === "open") {
+      if (restoredNow) {
+        this.clearPluginMutation();
+      } else if (result.upgradeRolledBack !== true) {
+        this.setFailedRecovery("Upgrade staging was cleared, but plugin mutation evidence is still unresolved.");
+        throw new WorkbenchMaintenanceError("workbench/failed");
+      }
+    }
+
+    if (result.restoreCompleted === true || result.restoreRolledBack === true || result.upgradeRolledBack === true) {
+      if (!this.homeConfigReadable()) {
+        this.setFailedRecovery("Home configuration could not be read after recovery. Jobs were not settled.");
+        throw new WorkbenchMaintenanceError("workbench/failed");
+      }
+      const recoveredReceipt = result.restoreReceipt;
+      const expected = result.restoreRolledBack && recoveredReceipt
+        ? this.ports.snapshots.preview(recoveredReceipt.beforeRestoreId).runtimeVersion
+        : result.restoreCompleted ? recoveredReceipt?.runtimeVersion ?? expectedRuntimeVersion : undefined;
+      this.verifyRecoveredRuntime(expected);
+    }
 
     ctx.phase("reinitialize");
     await this.ports.reinitializeManager();
     this.ports.setMaintenance(false);
     this.recovery = {
       restoreCompleted: result.restoreCompleted === true,
+      restoreRolledBack: result.restoreRolledBack === true,
+      restorePlanId: result.restoreReceipt?.planId,
       upgradeRolledBack: result.upgradeRolledBack === true,
       consistent: true,
       settleInterruptedJobs: true,
       message: "Pending snapshot or upgrade state was reconciled.",
+      snapshotId: result.restoreReceipt?.snapshotId ?? pendingSnapshotId,
+      pluginPlanId: restoredNow ? pluginPlanId : undefined,
+      upgradePlanId: result.upgradeRolledBack === true ? result.upgradePlanId ?? upgradePlanId : undefined,
     };
   }
 
@@ -598,6 +710,8 @@ export class WorkbenchMaintenance {
         return this.planRuntimeInstall(id, createdAt, expiresAt, request.version);
       case "runtime.upgrade":
         return this.planRuntimeUpgrade(id, createdAt, expiresAt, request.version);
+      case "workbench.upgrade":
+        return this.planWorkbenchUpgrade(id, createdAt, expiresAt, request);
       default:
         throw new WorkbenchMaintenanceError("workbench/runtime-handoff");
     }
@@ -629,6 +743,7 @@ export class WorkbenchMaintenance {
         ? `Stop and restart running workspaces: ${runningSpaceIds.join(", ")}.`
         : "No running workspace needs to stop.",
       "The plugin change is not a hot reload; restart is required.",
+      ...(packageName === XP_PACKAGE_NAME && version === XP_SUPPORTED_VERSION ? [XP_EMBED_COMPATIBILITY_NOTE] : []),
     ];
     return this.storeable(id, createdAt, expiresAt, command, {
       kind: "plugin.install",
@@ -833,6 +948,28 @@ export class WorkbenchMaintenance {
     });
   }
 
+  private async planWorkbenchUpgrade(
+    id: string, createdAt: string, expiresAt: string,
+    request: Extract<WorkbenchPlanRequest, { kind: "workbench.upgrade" }>,
+  ): Promise<StoredPlan> {
+    const release = await this.workbenchPackage();
+    if (!release || !release.updateAvailable) throw new WorkbenchMaintenanceError("workbench/unsupported");
+    if (request.catalogId !== release.id || request.version !== release.version) {
+      throw new WorkbenchMaintenanceError("workbench/stale");
+    }
+    const affectedSpaceIds = this.owned();
+    return this.storeable(id, createdAt, expiresAt, { ...request, expectedDigest: release.digest }, {
+      kind: "workbench.upgrade", title: `Update workbench to ${release.version}`,
+      scope: "home", affectedSpaceIds, runningSpaceIds: this.runningOf(affectedSpaceIds),
+      changes: [
+        `Update the manager and view bridge from the bundled workbench package ${release.version}.`,
+        "Stop all owned instances, including the manager, and create a whole-home snapshot.",
+        "A failed update restores the whole Home. Other workspaces are not restarted automatically.",
+        "The supervisor entry remains available. Its running program updates on the next cold start.",
+      ], destructive: true, expiresAt,
+    });
+  }
+
   private planRuntimeInstall(id: string, createdAt: string, expiresAt: string, version: string): StoredPlan {
     const exact = requireExactVersion(version);
     const command: ResolvedCommand = { kind: "runtime.install", version: exact };
@@ -912,6 +1049,9 @@ export class WorkbenchMaintenance {
         ctx.message(`Installing ${command.packageName}@${command.version}.`);
         for (const spaceId of command.spaceIds) {
           await this.pluginAddImpl(this.ports.home, spaceId, spec);
+          if (command.packageName === XP_PACKAGE_NAME && command.version === XP_SUPPORTED_VERSION) {
+            applyXpEmbedCompatibility(this.ports.home, spaceId);
+          }
         }
       },
     );
@@ -1045,7 +1185,7 @@ export class WorkbenchMaintenance {
     });
   }
 
-  private async runSnapshotRestore(snapshotId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJobResult> {
+  private async runSnapshotRestore(snapshotId: string, ctx: WorkbenchJobContext, planId: string): Promise<WorkbenchJobResult> {
     return this.withMaintenance(ctx, async () => {
       ctx.phase("stop");
       ctx.cancellable(true);
@@ -1056,7 +1196,7 @@ export class WorkbenchMaintenance {
       ctx.cancellable(false);
       ctx.phase("restore");
       ctx.message("Restoring the whole-home snapshot.");
-      await this.ports.upgrades.restore(snapshotId);
+      await this.ports.upgrades.restore(snapshotId, planId);
       ctx.result({ snapshotId });
       return { snapshotId };
     });
@@ -1103,7 +1243,7 @@ export class WorkbenchMaintenance {
     return { runtimeVersion: installed.version };
   }
 
-  private async runRuntimeUpgrade(version: string, ctx: WorkbenchJobContext): Promise<WorkbenchJobResult> {
+  private async runRuntimeUpgrade(version: string, ctx: WorkbenchJobContext, planId: string): Promise<WorkbenchJobResult> {
     if (!this.ports.isCompatibleRuntime(version)) {
       throw new WorkbenchMaintenanceError("workbench/unsupported");
     }
@@ -1113,7 +1253,14 @@ export class WorkbenchMaintenance {
       this.throwIfAborted(ctx);
       ctx.cancellable(false);
       ctx.message(`Upgrading runtime to ${version}.`);
-      const result = await this.ports.upgrades.upgrade(version);
+      const unsubscribe = this.ports.upgrades.onProgress?.(progress => {
+        ctx.phase(progress.phase);
+        // The phase is a fixed enum; CLI details can contain private paths.
+        ctx.message(`Runtime maintenance: ${progress.phase}.`);
+      });
+      let result;
+      try { result = await this.ports.upgrades.upgrade(version, planId); }
+      finally { unsubscribe?.(); }
       ctx.phase("done");
       ctx.result({ runtimeVersion: result.version, snapshotId: result.snapshotId });
       return { runtimeVersion: result.version, snapshotId: result.snapshotId };
@@ -1130,6 +1277,10 @@ export class WorkbenchMaintenance {
       this.ports.setMaintenance(false);
       return result;
     } catch (error) {
+      if (uncertainMaintenance(error)) {
+        this.ports.setMaintenance(true);
+        throw error;
+      }
       if (this.liveHomeConsistent()) {
         try {
           await this.ports.reinitializeManager();
@@ -1469,7 +1620,11 @@ export class WorkbenchMaintenance {
     const ts = this.now().toISOString();
     if (status === "running") plan.startedAt = ts;
     if (status === "succeeded" || status === "failed" || status === "cancelled") plan.finishedAt = ts;
-    this.writePlan(plan);
+    try { this.writePlan(plan); }
+    catch (error) {
+      this.log("plan settlement persistence", error);
+      throw new WorkbenchJobError("workbench/persist-failed");
+    }
   }
 
   private planPath(id: string): string {
@@ -1486,7 +1641,7 @@ export class WorkbenchMaintenance {
     error?: unknown;
   } {
     try {
-      const pending = this.ports.snapshots.pendingRestore();
+      const pending = this.ports.snapshots.pendingRestore() ?? this.ports.snapshots.restoreJournal?.();
       return pending ? { status: "pending", value: pending } : { status: "none" };
     } catch (error) {
       this.log("pendingRestore", error);
@@ -1537,6 +1692,9 @@ export class WorkbenchMaintenance {
   }
 
   private writePluginMutation(planId: string, spaceIds: string[], expected: PluginMutationExpected[]): void {
+    if (this.readPluginMutation().status !== "none") {
+      throw new WorkbenchMaintenanceError("workbench/conflict");
+    }
     const filesRoot = this.pluginMutationFilesDir();
     for (const spaceId of spaceIds) this.copyProfileEvidence(spaceId, join(filesRoot, spaceId));
     const journal: PluginMutationJournal = {
@@ -1569,16 +1727,48 @@ export class WorkbenchMaintenance {
     if (existsSync(files)) rmSync(files, { recursive: true, force: true });
   }
 
-  private readPluginMutation(): { status: "none" | "open" | "unreadable" } {
+  private readPluginMutation(): { status: "none" | "open" | "unreadable"; planId?: string } {
     const path = this.pluginMutationPath();
     if (!existsSync(path)) return { status: "none" };
     try {
       const parsed = JSON.parse(readFileSync(path, "utf8")) as PluginMutationJournal;
       if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.spaceIds)) return { status: "unreadable" };
-      if (parsed.phase === "prepared" || parsed.phase === "mutating" || parsed.phase === "failed") return { status: "open" };
+      if (parsed.phase === "prepared" || parsed.phase === "mutating" || parsed.phase === "failed") {
+        return {
+          status: "open",
+          planId: typeof parsed.planId === "string" && parsed.planId.trim() ? parsed.planId : undefined,
+        };
+      }
       return { status: "unreadable" };
     } catch {
       return { status: "unreadable" };
+    }
+  }
+
+  private homeConfigReadable(): boolean {
+    return (
+      containedHomeEntry(this.ports.home, ["settings.yaml"], "file") ||
+      containedHomeEntry(this.ports.home, ["profiles"], "dir") ||
+      containedHomeEntry(this.ports.home, ["hub", "spaces.json"], "file")
+    );
+  }
+
+  private verifyRecoveredRuntime(expectedVersion?: string): void {
+    let current: { version?: string } | undefined;
+    try {
+      current = this.ports.currentRuntime();
+    } catch (error) {
+      this.log("currentRuntime after recover", error);
+      this.setFailedRecovery("The current runtime pointer could not be read after recovery. Jobs were not settled.");
+      throw new WorkbenchMaintenanceError("workbench/failed");
+    }
+    if (!current?.version) {
+      this.setFailedRecovery("The current runtime pointer is missing after recovery. Jobs were not settled.");
+      throw new WorkbenchMaintenanceError("workbench/failed");
+    }
+    if (expectedVersion && current.version !== expectedVersion) {
+      this.setFailedRecovery("Runtime pointer did not match the restored snapshot.");
+      throw new WorkbenchMaintenanceError("workbench/failed");
     }
   }
 
@@ -1628,13 +1818,24 @@ export class WorkbenchMaintenance {
     return false;
   }
 
-  private readUpgradeJournal(): { status: "none" | "preparing" | "committing" | "unreadable" | "unknown"; error?: unknown } {
+  private readUpgradeJournal(): {
+    status: "none" | "preparing" | "committing" | "unreadable" | "unknown";
+    planId?: string;
+    error?: unknown;
+  } {
     const path = join(this.ports.home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
-    if (!existsSync(path)) return { status: "none" };
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as { phase?: unknown };
-      if (parsed.phase === "preparing" || parsed.phase === "committing") return { status: parsed.phase };
-      return { status: "unknown" };
+      const st = lstatSync(path);
+      if (st.isSymbolicLink() || !st.isFile()) return { status: "unreadable" };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "none" };
+      return { status: "unreadable", error };
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { phase?: unknown; planId?: unknown };
+      if (parsed.phase !== "preparing" && parsed.phase !== "committing") return { status: "unknown" };
+      const planId = typeof parsed.planId === "string" && PLAN_ID_RE.test(parsed.planId) ? parsed.planId : undefined;
+      return { status: parsed.phase, planId };
     } catch (error) {
       return { status: "unreadable", error };
     }
@@ -1655,10 +1856,17 @@ export class WorkbenchMaintenance {
   }
 
   private fail(error: unknown, op: string, code: WorkbenchMaintenanceErrorCode = "workbench/failed"): never {
+    if (error instanceof ProcessTerminationError) throw new WorkbenchJobError("workbench/recovery-required");
+    if (error instanceof WorkbenchJobError) throw error;
     if (error instanceof WorkbenchMaintenanceError || error instanceof WorkbenchJobAbortError) throw error;
     this.log(op, error);
     throw new WorkbenchMaintenanceError(code);
   }
+}
+
+function uncertainMaintenance(error: unknown): boolean {
+  return error instanceof ProcessTerminationError || error instanceof WorkbenchJobError &&
+    (error.code === "workbench/persist-failed" || error.code === "workbench/recovery-required");
 }
 
 function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
@@ -1720,6 +1928,11 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(input, ["kind", "version"]);
       return { kind, version: requireExactVersion(input.version) };
     }
+    case "workbench.upgrade": {
+      expectKeys(input, ["kind", "catalogId", "version"]);
+      if (input.catalogId !== "bundled-workbench") throw new WorkbenchMaintenanceError("workbench/invalid-input");
+      return { kind, catalogId: "bundled-workbench", version: requireExactVersion(input.version) };
+    }
     case "controller.release":
     case "controller.shutdown": {
       expectKeys(input, ["kind"]);
@@ -1750,6 +1963,8 @@ function requestFromCommand(command: ResolvedCommand): WorkbenchPlanRequest {
     case "runtime.install":
     case "runtime.upgrade":
       return { kind: command.kind, version: command.version };
+    case "workbench.upgrade":
+      return { kind: command.kind, catalogId: command.catalogId, version: command.version };
   }
 }
 
@@ -1884,6 +2099,40 @@ function sortKeys(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+function sameResolved(a: string, b: string): boolean {
+  return resolve(a).toLowerCase() === resolve(b).toLowerCase();
+}
+
+function containedHomeEntry(home: string, parts: string[], kind: "file" | "dir"): boolean {
+  let current = home;
+  for (const part of parts) {
+    if (!part || part === "." || part === ".." || /[\\/]/.test(part)) return false;
+    const next = join(current, part);
+    try {
+      const st = lstatSync(next);
+      if (st.isSymbolicLink()) return false;
+      current = next;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const st = lstatSync(current);
+    if (kind === "file") {
+      if (!st.isFile()) return false;
+      readFileSync(current, "utf8");
+    } else if (!st.isDirectory()) {
+      return false;
+    }
+    const real = realpathSync(current);
+    const root = resolve(home);
+    const prefix = root.endsWith(sep) ? root : root + sep;
+    return sameResolved(real, current) && (sameResolved(real, root) || real.toLowerCase().startsWith(prefix.toLowerCase()));
+  } catch {
+    return false;
+  }
 }
 
 function publicPlugin(row: WorkbenchPlugin): WorkbenchPlugin {

@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawnObserved } from "../../main/owned-process-record";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   existsSync,
@@ -51,6 +52,12 @@ import {
 } from "./home-operation-lock";
 
 export const COMPATIBLE_DSH_CLI_VERSION = "0.1.5-rc.1";
+export const COMPATIBLE_DSH_CLI_VERSIONS = [COMPATIBLE_DSH_CLI_VERSION] as const;
+
+export function isCompatibleDshCliVersion(version: string): boolean {
+  return (COMPATIBLE_DSH_CLI_VERSIONS as readonly string[]).includes(version);
+}
+
 export const DSH_CLI_PACKAGE = "@deepseek-ai/dsh";
 export const MUTATION_JOURNAL_NAME = ".dsh-spaces-mutation.json";
 export const CLI_OUTPUT_CAP = 256 * 1024;
@@ -369,7 +376,7 @@ export class NodeSpacesControl implements SpacesControlApi {
 
     if (!identity.confirmed || !identity.hostSpaceId) reasons.push(DIAGNOSTIC.hostIdentityUnconfirmed.message);
     if (!runtime) reasons.push(DIAGNOSTIC.runtimeUnbound.message);
-    else if (runtime.version !== COMPATIBLE_DSH_CLI_VERSION) reasons.push(DIAGNOSTIC.runtimeIncompatible.message);
+    else if (!isCompatibleDshCliVersion(runtime.version)) reasons.push(DIAGNOSTIC.runtimeIncompatible.message);
     if (!this.loaderPresent()) reasons.push(DIAGNOSTIC.loaderMissing.message);
     else if (!liveOk) reasons.push(DIAGNOSTIC.liveConfigUnverified.message);
     if (this.blockingJournal(journal)) reasons.push(DIAGNOSTIC.recoveryNeeded.message);
@@ -382,8 +389,8 @@ export class NodeSpacesControl implements SpacesControlApi {
       this.lockResidue(lock) ||
       layout === "recovery" ||
       registry === "corrupt";
-    const versionUnknown = !runtime || runtime.version !== COMPATIBLE_DSH_CLI_VERSION;
-    const knownRuntime = Boolean(runtime && runtime.version === COMPATIBLE_DSH_CLI_VERSION);
+    const versionUnknown = !runtime || !isCompatibleDshCliVersion(runtime.version);
+    const knownRuntime = Boolean(runtime && isCompatibleDshCliVersion(runtime.version));
     const lockedLive = this.liveForeignLock(lock);
 
     let mode: SpacesMode;
@@ -677,7 +684,8 @@ export class NodeSpacesControl implements SpacesControlApi {
   }
 
   private runtimeCompatible(): boolean {
-    return this.boundRuntime()?.version === COMPATIBLE_DSH_CLI_VERSION;
+    const runtime = this.boundRuntime();
+    return runtime !== null && isCompatibleDshCliVersion(runtime.version);
   }
 
   private argv(): readonly string[] {
@@ -1041,7 +1049,7 @@ export function spawnBoundCli(
   timeoutMs = DEFAULT_CLI_TIMEOUT_MS,
 ): Promise<BoundCliResult> {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(execPath, [bin, ...args], {
+    const child = spawnObserved(execPath, [bin, ...args], {
       env: { ...env, DSH_HOME: home },
       windowsHide: true,
       shell: false,

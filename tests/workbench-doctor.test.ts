@@ -175,6 +175,28 @@ function writeRunningPluginJob(home: string, id: string, planId = "plan-plugin-1
   );
 }
 
+test("ROOT doctor settles an abandoned package receipt as failed without inventing a runtime pointer", async () => {
+  const home = tempDir("dsh-wb-package-doctor-");
+  seedHome(home, "preserve\n");
+  const runtime = writeRuntime(tempDir("dsh-wb-package-runtime-"), "0.1.5-rc.1");
+  const snapshots = tempDir("dsh-wb-package-snaps-");
+  const runtimes = tempDir("dsh-wb-package-runtimes-");
+  const planId = "11111111-1111-4111-8111-111111111111";
+  writePlan(home, planId, { kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  writeRunningPluginJob(home, "package-abandoned", planId);
+  const receipts = join(home, HOME_CONTROL_DIR_NAME, "workbench-upgrade-receipts");
+  mkdirSync(receipts, { recursive: true });
+  writeFileSync(join(receipts, `${planId}.json`), JSON.stringify({
+    schemaVersion: 1, planId, outcome: "abandoned", rolledBack: false, at: new Date().toISOString(),
+  }));
+  const result = await runDoctor(["recover", "--home", home, "--cli", runtime.bin, "--snapshot-root", snapshots, "--runtime-root", runtimes]);
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  const job = JSON.parse(readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "package-abandoned.json"), "utf8"));
+  assert.equal(job.status, "failed");
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "preserve\n");
+  assert.equal(existsSync(join(runtimes, "current.json")), false);
+});
+
 test("read-only doctor does not write Home, jobs, or locks", async () => {
   const home = tempDir("dsh-wb-doctor-ro-");
   seedHome(home, "keep\n");

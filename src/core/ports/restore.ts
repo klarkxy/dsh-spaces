@@ -8,7 +8,7 @@ export interface RestoreSessionSnapshots {
     options?: RestoreBackupOptions,
   ): unknown | Promise<unknown>;
   pendingRestore(): { snapshotId: string; runtimeVersion: string } | undefined;
-  completeRestore(): void;
+  completeRestore(): void | Promise<void>;
   runtimeBin(id: string): string;
 }
 

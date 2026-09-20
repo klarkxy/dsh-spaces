@@ -10,8 +10,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_BIN, resolveNpmCli, resolvePnpmCjs, writePnpmShim, isolatedEnv, runDsh, run, refuseRealHome, stopOwned, rpc, assertRpcOk } from './verify-spaces-distribution.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const packageRoot = resolve(process.env.DSH_TEST_PACKAGE_ROOT || join(root, 'packages'));
 const withThemes = process.argv.includes('--themes');
-const output = join(root, '.sandbox', withThemes ? 'workbench-product-themes' : 'workbench-product');
+const withNegative = process.argv.includes('--negative');
+const output = resolve(process.env.DSH_TEST_OUTPUT || join(root, '.sandbox', withThemes ? 'workbench-product-themes' : 'workbench-product'));
 const node = process.execPath;
 const bin = process.env.DSH_TEST_BIN || DEFAULT_BIN;
 const playwrightPath = process.env.DSH_TEST_PLAYWRIGHT || 'C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
@@ -48,7 +50,7 @@ async function main() {
   mkdirSync(packDir, { recursive: true });
   const npm = resolveNpmCli(node);
   const pack = name => {
-    const result = run(node, [npm, 'pack', join(root, 'packages', name), '--json', '--ignore-scripts', '--pack-destination', packDir], {
+    const result = run(node, [npm, 'pack', join(packageRoot, name), '--json', '--ignore-scripts', '--pack-destination', packDir], {
       cwd: root, env, timeoutMs: 60000, label: `pack ${name}`,
     });
     const rows = JSON.parse(result);
@@ -62,10 +64,10 @@ async function main() {
   runDsh(node, bin, home, tooling, ['--profile', 'web', '--dump-config'], 180000, 'seed base web', join(output, 'seed.log'));
   const originalDefault = readFileSync(join(home, 'profiles', 'web', 'package.json'), 'utf8');
   pass('fresh official web profile seeded without copying user data');
-  const supervisor = spawn(node, [join(root, 'packages/supervisor/lib/index.js'),
+  const supervisor = spawn(node, [join(packageRoot, 'supervisor/lib/index.js'),
     '--home', home, '--bin', bin, '--node', node, '--port', '0',
     '--plugin-artifact', plugin, '--view-bridge-artifact', bridge,
-    '--snapshot-worker', join(root, 'packages/supervisor/lib/snapshot-worker.mjs'),
+    '--snapshot-worker', join(packageRoot, 'supervisor/lib/snapshot-worker.mjs'),
     '--control-tool-root', join(output, 'tools'), '--snapshot-root', join(output, 'snapshots')],
   { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let launchOutput = '', stderr = '';
@@ -142,7 +144,9 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     page = await context.newPage();
-    page.on('pageerror', error => console.log(`BROWSER ${redact(error.message)}`));
+    const browserErrors = [];
+    page.on('pageerror', error => { browserErrors.push(redact(error.message)); console.log(`BROWSER ${redact(error.message)}`); });
+    page.on('console', message => { if (message.type() === 'error') browserErrors.push(redact(message.text())); });
     await page.goto(bootstrapUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await until(() => page.url() === `${origin}/`, 'clean stable entry URL');
     api = async (method, payload = {}) => {
@@ -246,6 +250,45 @@ async function main() {
         assert.ok((await visited.get(name).locator('[contenteditable="true"]').first().innerText()).includes(`unsent draft ${name}`));
       }
       pass('XP cannot take over the outer rail; switching back retains unsent drafts in both other theme spaces');
+    }
+    if (withNegative) {
+      await job({ kind: 'space.create', input: { name: 'misinstalled', displayName: '误装测试' } });
+      runDsh(node, bin, home, tooling, ['plugin', '--profile', 'misinstalled', 'add', '"file:../../hub/plugins/dsh-spaces-plugin.tgz"'], 180000, 'manual full Spaces install', join(output, 'misinstalled.log'));
+      await managerFrame.getByRole('button', { name: '误装测试', exact: true }).first().click();
+      await until(async () => (await api('state')).spaces.find(row => row.id === 'misinstalled')?.status === 'running', 'misinstalled profile started');
+      const view = await api('view', { spaceId: 'misinstalled' });
+      await until(() => page.frames().some(frame => frame.url().startsWith(view.origin + '/')), 'misinstalled view');
+      const child = page.frames().find(frame => frame.url().startsWith(view.origin + '/'));
+      const cookies = (await context.cookies(view.origin)).map(row => `${row.name}=${row.value}`).join('; ');
+      const role = assertRpcOk(await rpc(Number(new URL(view.origin).port), cookies, 'workbenchGuide/role', {}), 'ordinary guide role');
+      assert.equal(role.role, 'workspace');
+      const denied = await rpc(Number(new URL(view.origin).port), cookies, 'workbench/submit', {
+        command: { kind: 'space.create', input: { name: 'must-not-exist' } }, requestId: randomUUID(),
+      });
+      assert.notEqual(denied.body?.result?.ok, true);
+      assert.equal(existsSync(join(home, 'profiles', 'must-not-exist')), false);
+      assert.equal(await child.locator('.dsh-wb-rail').count(), 0);
+      pass('native CLI full Spaces misinstall exposes a guide only, no management writes or nested rail');
+
+      if (withThemes) {
+        await managerFrame.getByRole('button', { name: '竹青', exact: true }).first().click();
+        await managerFrame.locator('.dsh-wb-rail button[aria-current="true"]').filter({ hasText: '竹青' }).waitFor();
+        await job({ kind: 'space.create', input: { name: 'catppuccin', displayName: 'Catppuccin 失败案例' } });
+        const matches = await api('plugins', { query: 'dsh-catppuccin' });
+        const entry = matches.find(row => row.packageName === 'dsh-catppuccin');
+        assert.ok(entry);
+        const plan = await api('preview', { request: { kind: 'plugin.install', spaceIds: ['catppuccin'], catalogId: entry.id, version: '0.2.3' } });
+        await job({ kind: 'plan.execute', planId: plan.id });
+        const errorStart = browserErrors.length;
+        await managerFrame.getByRole('button', { name: 'Catppuccin 失败案例', exact: true }).first().click();
+        await managerFrame.locator('.dsh-wb-banner[role="alert"]').waitFor({ timeout: 65000 });
+        assert.ok(await managerFrame.locator('.dsh-wb-rail button[aria-current="true"]').filter({ hasText: '竹青' }).count());
+        const evidence = browserErrors.slice(errorStart).filter(error => /dsh-client-runtime|catppuccin/i.test(error));
+        assert.ok(evidence.length, 'retain the real Catppuccin client loading failure');
+        report.expectedFailures = [{ space: 'catppuccin', version: '0.2.3', evidence }];
+        await page.screenshot({ path: join(output, 'catppuccin-failure-preserves-zhuqing.png') });
+        pass('Catppuccin remains a real client-loading failure; original selected space and outer navigation survive');
+      }
     }
     await page.screenshot({ path: join(output, 'workbench-two-spaces.png') });
     const beforeStop = await api('state');

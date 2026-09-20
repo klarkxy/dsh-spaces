@@ -4,6 +4,7 @@ import type {
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchPackageRelease,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -90,6 +91,8 @@ export interface WorkbenchUiState {
   snapshotsStatus: "idle" | "loading" | "ready" | "error";
   runtimes: WorkbenchRuntime[];
   runtimesStatus: "idle" | "loading" | "ready" | "error";
+  workbenchPackage: WorkbenchPackageRelease | null;
+  workbenchPackageStatus: "idle" | "loading" | "ready" | "error";
 }
 
 function defaultOpenUrl(url: string): void {
@@ -153,6 +156,8 @@ export class WorkbenchController {
   private stateGeneration = 0;
   private restoreId: string | null;
   private notedCreates = new Set<string>();
+  private awaitingPackagePlanId: string | null = null;
+  private awaitingPackageJobId: string | null = null;
   private ui: WorkbenchUiState;
 
   constructor(
@@ -192,6 +197,8 @@ export class WorkbenchController {
       snapshotsStatus: "idle",
       runtimes: [],
       runtimesStatus: "idle",
+      workbenchPackage: null,
+      workbenchPackageStatus: "idle",
     };
   }
 
@@ -231,6 +238,7 @@ export class WorkbenchController {
     if (homeTab === "plugins" && this.ui.pluginsStatus === "idle") void this.searchPlugins("");
     if (homeTab === "snapshots" && this.ui.snapshotsStatus === "idle") void this.loadSnapshots();
     if (homeTab === "runtime" && this.ui.runtimesStatus === "idle") void this.loadRuntimes();
+    if (homeTab === "runtime" && this.ui.workbenchPackageStatus === "idle") void this.loadWorkbenchPackage();
   };
 
   selectHome = (): void => {
@@ -395,6 +403,10 @@ export class WorkbenchController {
       this.patch({ planError: this.msg("app.managerProtected"), pendingPlan: null });
       return;
     }
+    if (request.kind === "workbench.upgrade") {
+      this.previewWorkbenchUpgrade();
+      return;
+    }
     void this.runPreview(request);
   };
 
@@ -403,6 +415,10 @@ export class WorkbenchController {
     if (!pending) {
       this.patch({ planError: this.msg("app.noPlan") });
       return;
+    }
+    if (pending.request.kind === "workbench.upgrade" || pending.plan.kind === "workbench.upgrade") {
+      this.awaitingPackagePlanId = pending.plan.id;
+      this.awaitingPackageJobId = null;
     }
     this.patch({ pendingPlan: null, overlay: null });
     void this.submit({ kind: "plan.execute", planId: pending.plan.id });
@@ -473,6 +489,22 @@ export class WorkbenchController {
     }, () => this.patch({ runtimesStatus: "error" }));
   };
 
+  loadWorkbenchPackage = (): Promise<void> => {
+    const loader = this.api.workbenchPackage;
+    if (typeof loader !== "function") {
+      this.patch({ workbenchPackage: null, workbenchPackageStatus: "ready" });
+      return Promise.resolve();
+    }
+    this.patch({ workbenchPackageStatus: "loading" });
+    return this.wrap(async () => {
+      const release = await loader();
+      this.patch({
+        workbenchPackage: release?.id === "bundled-workbench" ? release : null,
+        workbenchPackageStatus: "ready",
+      });
+    }, () => this.patch({ workbenchPackage: null, workbenchPackageStatus: "error" }));
+  };
+
   loadDetail = (spaceId: string): Promise<void> => {
     this.patch({ detailStatus: "loading" });
     return this.wrap(async () => {
@@ -506,6 +538,10 @@ export class WorkbenchController {
     const state = this.ui.state;
     if (!state) return false;
     return state.writable === true && !state.recoveryRequired;
+  }
+
+  isBusy(): boolean {
+    return this.ui.commandPending || this.hasActiveJobs() || this.ui.state?.maintenance === true;
   }
 
   isManagerId(spaceId: string): boolean {
@@ -559,7 +595,10 @@ export class WorkbenchController {
       viewError: this.views.viewError,
     });
     if (selectedWasRemoved) this.writePersist();
-    for (const item of state.jobs) this.noteCreated(item, true);
+    for (const item of state.jobs) {
+      this.noteCreated(item, true);
+      this.onUpgradeJobUpdate(item);
+    }
     const restoreId = this.restoreId;
     if (restoreId) {
       this.restoreId = null;
@@ -712,6 +751,9 @@ export class WorkbenchController {
     const requestId = this.env.uuid();
     await this.wrap(async () => {
       const job = await this.api.submit(command, requestId);
+      if (command.kind === "plan.execute" && command.planId === this.awaitingPackagePlanId) {
+        this.awaitingPackageJobId = job.id;
+      }
       this.mergeJob(job);
       this.noteCreated(job);
       await this.poll();
@@ -725,6 +767,7 @@ export class WorkbenchController {
     jobs.unshift(job);
     this.patch({ state: { ...state, jobs } });
     this.noteCreated(job);
+    this.onUpgradeJobUpdate(job);
   }
 
   private noteCreated(job: WorkbenchJob, fromSnapshot = false): void {
@@ -765,6 +808,33 @@ export class WorkbenchController {
 
   private rejectReadonly(): void {
     this.patch({ commandError: localizeError(this.ui.locale, "workbench/read-only"), pendingPlan: null });
+  }
+
+  private previewWorkbenchUpgrade(): void {
+    if (this.ui.state?.maintenance || this.hasActiveJobs()) {
+      this.patch({
+        planError: localizeError(this.ui.locale, "workbench/locked"),
+        pendingPlan: null,
+      });
+      return;
+    }
+    const pkg = this.ui.workbenchPackage;
+    if (!pkg || pkg.id !== "bundled-workbench" || !pkg.updateAvailable) return;
+    void this.runPreview({
+      kind: "workbench.upgrade",
+      catalogId: "bundled-workbench",
+      version: pkg.version,
+    });
+  }
+
+  private onUpgradeJobUpdate(job: WorkbenchJob): void {
+    if (!this.awaitingPackageJobId || job.id !== this.awaitingPackageJobId) return;
+    if (ACTIVE_JOB.has(job.status)) return;
+    if ((this.ui.state?.jobs ?? []).some((item) => ACTIVE_JOB.has(item.status))) return;
+    this.awaitingPackagePlanId = null;
+    this.awaitingPackageJobId = null;
+    this.patch({ workbenchPackageStatus: "idle" });
+    if (this.ui.homeTab === "runtime") void this.loadWorkbenchPackage();
   }
 
   private touchesManagerPlugins(request: WorkbenchPlanRequest): boolean {

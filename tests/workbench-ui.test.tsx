@@ -8,6 +8,7 @@ import type {
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchPackageRelease,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -305,6 +306,13 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
     },
     ...overrides,
   };
+  if (api.workbenchPackage) {
+    const original = api.workbenchPackage.bind(api);
+    api.workbenchPackage = async () => {
+      calls.push({ method: "workbenchPackage", arg: undefined });
+      return original();
+    };
+  }
   return api;
 }
 
@@ -969,4 +977,201 @@ test("handshake timeout fails pending without stealing the committed view", asyn
   });
   assert.equal(ctrl.getSnapshot().selected, "alpha");
   assert.equal(ctrl.getSnapshot().visibleSpaceId, "alpha");
+});
+
+function packageRelease(partial: Partial<WorkbenchPackageRelease> = {}): WorkbenchPackageRelease {
+  return {
+    id: "bundled-workbench",
+    version: "0.2.0",
+    installedVersion: "0.1.0",
+    digest: "c0ffee" + "ab".repeat(29),
+    updateAvailable: true,
+    ...partial,
+  };
+}
+
+function upgradeButton(html: string): string {
+  const match = html.match(/<button[^>]*data-workbench-upgrade="true"[^>]*>/);
+  assert.ok(match, "missing workbench upgrade button");
+  return match[0];
+}
+
+test("runtime tab shows a workbench update region and previews bundled-workbench with candidate version", async () => {
+  const digest = "c0ffee" + "ab".repeat(29);
+  const api = fakeApi({
+    workbenchPackage: async () => packageRelease({ digest }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  assert.equal(api.calls.filter((item) => item.method === "workbenchPackage").length, 0);
+  ctrl.setHomeTab("runtime");
+  await flush();
+  assert.equal(api.calls.filter((item) => item.method === "workbenchPackage").length, 1);
+  await ctrl.poll();
+  assert.equal(api.calls.filter((item) => item.method === "workbenchPackage").length, 1);
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-workbench-package="true"'));
+  assert.ok(html.includes(t("zh", "workbenchPackage.title")));
+  assert.ok(html.includes(t("zh", "workbenchPackage.hint")));
+  assert.ok(html.includes(t("zh", "workbenchPackage.consequences")));
+  assert.ok(html.includes('data-installed-version="0.1.0"'));
+  assert.ok(html.includes('data-candidate-version="0.2.0"'));
+  assert.ok(!html.includes(digest));
+  assert.ok(!upgradeButton(html).includes("disabled"));
+  ctrl.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.deepEqual(api.calls.find((item) => item.method === "preview")?.arg, {
+    kind: "workbench.upgrade",
+    catalogId: "bundled-workbench",
+    version: "0.2.0",
+  });
+  const planHtml = ready(ctrl);
+  assert.ok(planHtml.includes(t("zh", "plan.title")));
+  assert.ok(planHtml.includes('data-plan-id="plan-1"'));
+  ctrl.confirmPlan();
+  await flush();
+  const executed = api.calls.find((item) => item.method === "submit");
+  assert.deepEqual((executed?.arg as { command: WorkbenchCommand }).command, {
+    kind: "plan.execute",
+    planId: "plan-1",
+  });
+  assert.equal(ctrl.getSnapshot().selected, "home");
+});
+
+test("old adapter or null candidate explains that this entry has no manager package update", async () => {
+  const missing = controller(fakeApi());
+  await missing.poll();
+  missing.setHomeTab("runtime");
+  await flush();
+  const missingHtml = ready(missing);
+  assert.ok(missingHtml.includes('data-workbench-package-unavailable="true"'));
+  assert.ok(missingHtml.includes(t("zh", "workbenchPackage.none")));
+  assert.ok(!missingHtml.includes('data-workbench-upgrade="true"'));
+  missing.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.equal(missing.getSnapshot().pendingPlan, null);
+
+  const emptyApi = fakeApi({
+    workbenchPackage: async () => null,
+  });
+  const empty = controller(emptyApi);
+  await empty.poll();
+  empty.setHomeTab("runtime");
+  await flush();
+  assert.equal(emptyApi.calls.filter((item) => item.method === "workbenchPackage").length, 1);
+  const emptyHtml = ready(empty);
+  assert.ok(emptyHtml.includes(t("zh", "workbenchPackage.none")));
+  assert.ok(!emptyHtml.includes('data-workbench-upgrade="true"'));
+  empty.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.equal(emptyApi.calls.filter((item) => item.method === "preview").length, 0);
+});
+
+test("readonly and recovery block workbench upgrade writes", async () => {
+  const api = fakeApi({
+    state: async () =>
+      state({
+        writable: false,
+        recoveryRequired: true,
+        reasons: ["owner held by desktop"],
+      }),
+    workbenchPackage: async () => packageRelease(),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(upgradeButton(html).includes("disabled"));
+  ctrl.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.equal(api.calls.filter((item) => item.method === "preview").length, 0);
+  assert.equal(api.calls.filter((item) => item.method === "submit").length, 0);
+  assert.equal(ctrl.getSnapshot().pendingPlan, null);
+
+  const busyApi = fakeApi({
+    state: async () => state({ maintenance: true, jobs: [job({ status: "running", kind: "workbench.upgrade" })] }),
+    workbenchPackage: async () => packageRelease(),
+  });
+  const busy = controller(busyApi);
+  await busy.poll();
+  busy.setHomeTab("runtime");
+  await flush();
+  assert.ok(upgradeButton(ready(busy)).includes("disabled"));
+  busy.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.equal(busyApi.calls.filter((item) => item.method === "preview").length, 0);
+  assert.equal(busy.getSnapshot().planError, t("zh", "app.locked"));
+});
+
+test("same-version content update stays enabled; identical candidate is disabled", async () => {
+  const digest = "dd" + "ef".repeat(31);
+  const contentApi = fakeApi({
+    workbenchPackage: async () =>
+      packageRelease({
+        version: "0.2.0",
+        installedVersion: "0.2.0",
+        digest,
+        updateAvailable: true,
+      }),
+  });
+  const content = controller(contentApi);
+  await content.poll();
+  content.setHomeTab("runtime");
+  await flush();
+  const contentHtml = ready(content);
+  assert.ok(contentHtml.includes('data-content-update="true"'));
+  assert.ok(contentHtml.includes(t("zh", "workbenchPackage.contentUpdate")));
+  assert.ok(!contentHtml.includes(digest));
+  assert.ok(!upgradeButton(contentHtml).includes("disabled"));
+  content.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.deepEqual(contentApi.calls.find((item) => item.method === "preview")?.arg, {
+    kind: "workbench.upgrade",
+    catalogId: "bundled-workbench",
+    version: "0.2.0",
+  });
+
+  const sameApi = fakeApi({
+    workbenchPackage: async () =>
+      packageRelease({
+        version: "0.2.0",
+        installedVersion: "0.2.0",
+        updateAvailable: false,
+      }),
+  });
+  const same = controller(sameApi);
+  await same.poll();
+  same.setHomeTab("runtime");
+  await flush();
+  const sameHtml = ready(same);
+  assert.ok(sameHtml.includes(t("zh", "workbenchPackage.current")));
+  assert.ok(!sameHtml.includes('data-content-update="true"'));
+  assert.ok(upgradeButton(sameHtml).includes("disabled"));
+  same.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.equal(sameApi.calls.filter((item) => item.method === "preview").length, 0);
+});
+
+test("workbench package reloads after a confirmed upgrade reaches a terminal job", async () => {
+  let packageCalls = 0;
+  const api = fakeApi({
+    workbenchPackage: async () => {
+      packageCalls += 1;
+      return packageRelease({ updateAvailable: packageCalls === 1 });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  assert.equal(packageCalls, 1);
+  ctrl.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  ctrl.confirmPlan();
+  await flush();
+  assert.equal(packageCalls, 2);
+  const html = ready(ctrl);
+  assert.ok(upgradeButton(html).includes("disabled"));
+  assert.ok(html.includes(t("zh", "workbenchPackage.current")));
 });

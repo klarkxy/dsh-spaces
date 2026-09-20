@@ -226,6 +226,7 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("config.restore"), spaceId: spaceIdSchema, backupId: jobIdSchema }).strict(),
   z.object({ kind: z.literal("runtime.install"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("runtime.upgrade"), version: exactVersionSchema }).strict(),
+  z.object({ kind: z.literal("workbench.upgrade"), catalogId: z.literal("bundled-workbench"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("controller.release") }).strict(),
   z.object({ kind: z.literal("controller.shutdown") }).strict(),
 ]);
@@ -247,6 +248,7 @@ export const workbenchPlanSchema = z
       "config.restore",
       "runtime.install",
       "runtime.upgrade",
+      "workbench.upgrade",
       "controller.release",
       "controller.shutdown",
     ]),
@@ -273,6 +275,14 @@ export const workbenchPluginSchema = z
   .strict();
 
 export const workbenchPluginListSchema = z.array(workbenchPluginSchema).max(256);
+
+export const workbenchPackageResultSchema = z.object({
+  id: z.literal("bundled-workbench"),
+  version: exactVersionSchema,
+  installedVersion: exactVersionSchema.nullable(),
+  digest: z.string().regex(/^[a-f0-9]{64}$/),
+  updateAvailable: z.boolean(),
+}).strict().nullable();
 
 export const workbenchSnapshotSchema = z
   .object({

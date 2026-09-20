@@ -6,6 +6,7 @@ import type { DiagnosticsService } from '../../main/diagnostics';
 import type { HomeOperationLock } from './home-operation-lock';
 import type { ProfileStatus } from '../../shared/types';
 import type { SnapshotRuntime } from '../../shared/snapshots';
+import type { WorkbenchPackageUpgrade } from './workbench-package-upgrade';
 
 /** Node-only composition boundary; all paths and process authority stay here. */
 export interface WorkbenchMaintenancePorts {
@@ -15,8 +16,11 @@ export interface WorkbenchMaintenancePorts {
   snapshots: SnapshotExecutor;
   runtimes: RuntimeStore;
   upgrades: CoordinatedUpgrade;
+  packageUpgrade?: WorkbenchPackageUpgrade;
   diagnostics: DiagnosticsService;
   managerId(): string | null;
+  hasUnfinishedPlan?(planId: string): boolean;
+  unfinishedPlanIds?(): string[];
   assertWritable(): void;
   validateSpace(spaceId: string, allowManager?: boolean): void;
   statusOf(spaceId: string): ProfileStatus;

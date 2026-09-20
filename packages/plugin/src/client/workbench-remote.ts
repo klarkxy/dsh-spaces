@@ -9,6 +9,7 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime,
+  WorkbenchPackageRelease,
   WorkbenchSnapshot,
   WorkbenchState,
   WorkbenchView,
@@ -83,6 +84,7 @@ async function callRemote<T>(
   endpoint: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
+  allowNull = false,
 ): Promise<T> {
   let result;
   try {
@@ -92,6 +94,7 @@ async function callRemote<T>(
   }
   if (!result.ok) throw sanitizeBackendError(result.error);
   if (Array.isArray(result.value)) return result.value as T;
+  if (allowNull && result.value === null) return null as T;
   if (result.value === null || typeof result.value !== "object") {
     throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE);
   }
@@ -113,6 +116,7 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
     snapshots: () => callRemote<WorkbenchSnapshot[]>(connection, "workbench/snapshots", {}),
     snapshot: (id) => callRemote<WorkbenchSnapshot>(connection, "workbench/snapshot", { id }),
     runtimes: () => callRemote<WorkbenchRuntime[]>(connection, "workbench/runtimes", {}),
+    workbenchPackage: () => callRemote<WorkbenchPackageRelease | null>(connection, "workbench/workbenchPackage", {}, undefined, true),
     backups: (spaceId) => callRemote<WorkbenchBackup[]>(connection, "workbench/backups", { spaceId }),
   };
 }

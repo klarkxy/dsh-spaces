@@ -40,7 +40,7 @@ export class RestoreSession {
         bin: this.opts.snapshots.runtimeBin(pending.snapshotId),
         version: pending.runtimeVersion,
       });
-      this.opts.snapshots.completeRestore();
+      await this.opts.snapshots.completeRestore();
       const leftover = this.opts.snapshots.pendingRestore();
       if (leftover) {
         throw new Error(`Restore cleanup left a pending restore of ${leftover.snapshotId}`);

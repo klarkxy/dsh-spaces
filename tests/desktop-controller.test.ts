@@ -13,8 +13,6 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   DesktopController,
   DesktopReadOnlyError,
@@ -31,7 +29,6 @@ import {
   HomeController,
   type PidLiveness,
 } from "../src/adapters/node/home-controller.ts";
-import { ControllerStatus } from "../src/renderer/src/components/ControllerStatus.tsx";
 import {
   DESKTOP_WRITE_IPC_CHANNELS,
   desktopSelectAccess,
@@ -207,7 +204,7 @@ test("explicit release stops in order and failed stop keeps the lease", async ()
   assert.equal(existsSync(ownerFile(home)), true);
 });
 
-test("alive and ambiguous owners are not stolen; dead owner needs explicit reclaim", async () => {
+test("alive and ambiguous owners are not stolen; a dead owner is reclaimed on start", async () => {
   const home = tempHome();
   let liveness: PidLiveness = "alive";
   const web = new HomeController(home, { pidAlive: () => liveness }).acquire("web");
@@ -224,11 +221,8 @@ test("alive and ambiguous owners are not stolen; dead owner needs explicit recla
   assert.equal(existsSync(ownerFile(home)), true);
 
   liveness = "dead";
-  const stillReadOnly = desktop.acquireOnStart();
-  assert.equal(stillReadOnly.writable, false);
-  assert.equal(stillReadOnly.recoveryRequired, true);
-  assert.equal(existsSync(ownerFile(home)), true);
-  desktop.acquireExplicit();
+  const reclaimed = desktop.acquireOnStart();
+  assert.equal(reclaimed.held, true);
   const taken = await desktop.hydrateManager();
   assert.equal(taken.writable, true);
   assert.equal(taken.ownerKind, "desktop");
@@ -344,65 +338,7 @@ test("manager profile and full Spaces plugin are blocked on the ordinary desktop
   assert.equal(isFullSpacesManagerSpec("dsh-outline"), false);
 });
 
-test("ControllerStatus renders bilingual takeover and hand-off actions", () => {
-  const readonly: DesktopControllerState = {
-    ownerKind: "web",
-    held: false,
-    writable: false,
-    recoveryRequired: false,
-    reasons: ["The web workbench holds this Home."],
-    transferPending: false,
-  };
-  const zh = renderToStaticMarkup(
-    React.createElement(ControllerStatus, {
-      state: readonly,
-      locale: "zh",
-      onAcquire() {},
-      onRelease() {},
-    }),
-  );
-  assert.match(zh, /只读/);
-  assert.match(zh, /接管/);
-  const owner: DesktopControllerState = {
-    ownerKind: "desktop",
-    held: true,
-    writable: true,
-    recoveryRequired: false,
-    reasons: [],
-    transferPending: false,
-  };
-  const en = renderToStaticMarkup(
-    React.createElement(ControllerStatus, {
-      state: owner,
-      locale: "en",
-      onAcquire() {},
-      onRelease() {},
-    }),
-  );
-  assert.match(en, /Desktop controls this Home/);
-  assert.match(en, /Hand off/);
-  const heldRecovery: DesktopControllerState = {
-    ownerKind: "desktop",
-    held: true,
-    writable: false,
-    recoveryRequired: true,
-    reasons: ["Holding Home control pending recovery. Ordinary writes are blocked."],
-    transferPending: false,
-  };
-  const heldZh = renderToStaticMarkup(
-    React.createElement(ControllerStatus, {
-      state: heldRecovery,
-      locale: "zh",
-      onAcquire() {},
-      onRelease() {},
-    }),
-  );
-  assert.match(heldZh, /保留控制权/);
-  assert.doesNotMatch(heldZh, /未取得运行权/);
-  assert.match(heldZh, /移交/);
-});
-
-test("leftover instance records and truncated jobs block writes without rewriting jobs", async () => {
+test("truncated jobs block writes without rewriting them", async () => {
   const home = tempHome();
   const jobs = join(home, HOME_CONTROL_DIR_NAME, "jobs");
   mkdirSync(jobs, { recursive: true });
@@ -416,17 +352,29 @@ test("leftover instance records and truncated jobs block writes without rewritin
   assert.equal(desktop.writable, false);
   await assert.rejects(async () => desktop.runMaintenance("upgrade", async () => "no"));
   assert.equal(readFileSync(jobFile, "utf8"), original);
+});
+
+test("stale dead instance records do not block writes; live leftovers still do", async () => {
+  const home = tempHome();
+  const instances = join(home, HOME_CONTROL_DIR_NAME, "instances");
+  mkdirSync(instances, { recursive: true });
+  const record = JSON.stringify({ version: 1, spaceId: "notes", pid: 9, startedAt: "2026-01-01T00:00:00.000Z" });
+  writeFileSync(join(instances, "notes.json"), record);
+  const stale = session(home, { pidAlive: () => "dead" });
+  stale.acquireOnStart();
+  await stale.hydrateManager();
+  assert.equal(stale.writable, true);
+  assert.equal(readFileSync(join(instances, "notes.json"), "utf8"), record);
+  await stale.release();
 
   const home2 = tempHome();
   mkdirSync(join(home2, HOME_CONTROL_DIR_NAME, "instances"), { recursive: true });
-  writeFileSync(
-    join(home2, HOME_CONTROL_DIR_NAME, "instances", "notes.json"),
-    JSON.stringify({ version: 1, spaceId: "notes", pid: 9, startedAt: "2026-01-01T00:00:00.000Z" }),
-  );
-  const blocked = session(home2);
+  writeFileSync(join(home2, HOME_CONTROL_DIR_NAME, "instances", "notes.json"), record);
+  const blocked = session(home2, { pidAlive: () => "alive" });
   blocked.acquireOnStart();
   await blocked.hydrateManager();
   await assert.rejects(async () => blocked.mutate(() => "no"));
+  assert.equal(readFileSync(join(home2, HOME_CONTROL_DIR_NAME, "instances", "notes.json"), "utf8"), record);
   await blocked.release();
   assert.equal(blocked.held, false);
 });

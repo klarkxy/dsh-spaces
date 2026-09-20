@@ -15,6 +15,7 @@ export const WORKBENCH_API_METHODS = [
   "snapshots",
   "snapshot",
   "runtimes",
+  "workbenchPackage",
   "backups",
 ] as const;
 export type WorkbenchApiMethod = (typeof WORKBENCH_API_METHODS)[number];
@@ -624,13 +625,18 @@ function renderJobs(jobs) {
     escapeHtml(job.message || "") + "</span></div>"
   ).join("");
 }
+function visibleJobs(jobs) {
+  return (jobs || []).some((job) =>
+    job.status === "queued" || job.status === "running" ||
+    job.status === "recovery-required" || job.status === "failed");
+}
 function applyState(state) {
   const manager = (state.spaces || []).find((row) => row.id === state.managerId);
   const live = Boolean(manager && manager.status === "running" && !state.maintenance && !state.recoveryRequired);
   const jobs = state.jobs || [];
-  const active = state.maintenance || jobs.some((job) => job.status === "queued" || job.status === "running");
+  const active = state.maintenance || visibleJobs(jobs);
   document.body.dataset.mode = live ? "live" : "recovery";
-  document.body.dataset.chrome = (!live || active) ? "1" : "0";
+  document.body.dataset.chrome = (!live || active || state.recoveryRequired) ? "1" : "0";
   document.body.dataset.jobs = active ? "1" : "0";
   document.getElementById("banner-title").textContent = live ? "工作台入口在线" : "管理环境不可用，稳定入口仍在线";
   document.getElementById("banner-sub").textContent = state.writable
@@ -672,10 +678,20 @@ document.getElementById("acquire").addEventListener("click", async () => {
 });
 document.getElementById("resume").addEventListener("click", async () => {
   try {
-    await api("submit", { command: { kind: "recovery.resume" }, requestId: crypto.randomUUID() });
+    const submitted = await api("submit", { command: { kind: "recovery.resume" }, requestId: crypto.randomUUID() });
+    let current = submitted;
+    for (let i = 0; i < 120; i += 1) {
+      if (current.status !== "queued" && current.status !== "running") break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+      current = await api("job", { id: submitted.id });
+    }
     await refresh();
+    if (current.status !== "succeeded") {
+      showError(current.message || (current.error && current.error.message) || "Recovery is still required.");
+    }
   } catch (error) {
     showError(error instanceof Error ? error.message : String(error));
+    await refresh();
   }
 });
 void refresh();
