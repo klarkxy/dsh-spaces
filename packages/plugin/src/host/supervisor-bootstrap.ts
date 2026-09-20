@@ -116,12 +116,9 @@ export async function bootstrapSupervisor(
     };
   }
   if ("blocked" in attached) return fail(attached.reasons);
+  if ("stale" in attached) return fail(attached.reasons);
   if (options.allowColdStart === false) {
-    const reasons =
-      "stale" in attached
-        ? attached.reasons
-        : ["No running workbench was found. This profile does not start a second controller."];
-    return fail(reasons);
+    return fail(["No running workbench was found. This profile does not start a second controller."]);
   }
 
   const argv = options.argv ?? process.argv;

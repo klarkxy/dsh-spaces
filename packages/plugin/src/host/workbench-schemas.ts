@@ -2,7 +2,24 @@ import { z } from "zod";
 import { SNAPSHOT_ID_RE } from "../../../../src/shared/snapshots";
 import { isExactRuntimeVersion } from "../../../../src/shared/runtime";
 import { MAX_SPACE_ICON_DATA_URL_CHARS } from "../../../../src/shared/space-icon";
+import {
+  workbenchMutationContextSchema,
+  workbenchProductCommandSchema,
+  workbenchProductOutcomeSchema,
+  workbenchProductRequestSchema,
+  workbenchProductResultSchema,
+} from "../../../../src/shared/workbench-product-schemas";
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "./loopback";
+
+export {
+  workbenchMutationContextSchema as mutationContextSchema,
+  workbenchProductCommandSchema,
+  workbenchProductOutcomeSchema,
+  workbenchProductRequestSchema,
+  workbenchProductResultSchema,
+};
+
+const hex64Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const spaceIdSchema = z
   .string()
@@ -66,6 +83,7 @@ const entryPathSchema = z
 
 export const workbenchViewSchema = z
   .object({
+    serviceEpoch: hex64Schema,
     spaceId: spaceIdSchema,
     generation: z.number().int(),
     origin: loopbackOrigin,
@@ -81,6 +99,7 @@ export const workbenchJobResultSchema = z
     snapshotId: snapshotIdSchema.optional(),
     runtimeVersion: exactVersionSchema.optional(),
     view: workbenchViewSchema.optional(),
+    product: workbenchProductOutcomeSchema.optional(),
   })
   .strict();
 
@@ -103,11 +122,15 @@ export const workbenchJobSchema = z
 
 export const workbenchStateSchema = z
   .object({
+    protocolVersion: z.literal(2),
+    serviceEpoch: hex64Schema,
+    revision: hex64Schema,
+    availability: z.enum(["ready", "limited", "unavailable"]),
     role: workbenchRoleSchema,
     managerId: z.union([spaceIdSchema, z.null()]),
     owner: z
       .object({
-        kind: z.enum(["web", "desktop"]),
+        kind: z.enum(["supervisor", "desktop"]),
         since: isoDateSchema,
       })
       .strict()
@@ -116,7 +139,6 @@ export const workbenchStateSchema = z
     mode: z.enum(["verified-full", "verified-limited", "unknown-readonly", "recovery-only"]),
     dshVersion: z.union([exactVersionSchema, z.null()]),
     maintenance: z.boolean(),
-    recoveryRequired: z.boolean(),
     reasons: reasonsSchema,
     spaces: z.array(workbenchSpaceSchema).max(256),
     jobs: z.array(workbenchJobSchema).max(256),
@@ -181,7 +203,7 @@ const createInputSchema = z
   })
   .strict();
 
-export const workbenchCommandSchema = z.discriminatedUnion("kind", [
+const coreWorkbenchCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("space.create"), input: createInputSchema }).strict(),
   z
     .object({
@@ -195,8 +217,6 @@ export const workbenchCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("space.start"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("space.verify"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("plan.execute"), planId: planIdSchema }).strict(),
-  z.object({ kind: z.literal("controller.acquire") }).strict(),
-  z.object({ kind: z.literal("recovery.resume") }).strict(),
   z
     .object({
       kind: z.literal("llm.apply"),
@@ -211,6 +231,7 @@ export const workbenchCommandSchema = z.discriminatedUnion("kind", [
               generation: z.number().int().nonnegative(),
               catalogRevision: z.number().int().nonnegative().nullable(),
               busy: z.boolean(),
+              serviceEpoch: hex64Schema,
             })
             .strict(),
         )
@@ -218,6 +239,8 @@ export const workbenchCommandSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+
+export const workbenchCommandSchema = z.union([coreWorkbenchCommandSchema, workbenchProductCommandSchema]);
 
 export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("space.stop"), spaceId: spaceIdSchema }).strict(),
@@ -242,14 +265,11 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("plugin.cleanup-manager"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("snapshot.create") }).strict(),
-  z.object({ kind: z.literal("snapshot.restore"), snapshotId: snapshotIdSchema }).strict(),
   z.object({ kind: z.literal("snapshot.delete"), snapshotId: snapshotIdSchema }).strict(),
-  z.object({ kind: z.literal("config.restore"), spaceId: spaceIdSchema, backupId: jobIdSchema }).strict(),
   z.object({ kind: z.literal("runtime.install"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("runtime.upgrade"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("workbench.upgrade"), catalogId: z.literal("bundled-workbench"), version: exactVersionSchema }).strict(),
-  z.object({ kind: z.literal("controller.release") }).strict(),
-  z.object({ kind: z.literal("controller.shutdown") }).strict(),
+  z.object({ kind: z.literal("service.shutdown") }).strict(),
 ]);
 
 export const workbenchPlanSchema = z
@@ -264,14 +284,11 @@ export const workbenchPlanSchema = z
       "plugin.toggle",
       "plugin.cleanup-manager",
       "snapshot.create",
-      "snapshot.restore",
       "snapshot.delete",
-      "config.restore",
       "runtime.install",
       "runtime.upgrade",
       "workbench.upgrade",
-      "controller.release",
-      "controller.shutdown",
+      "service.shutdown",
     ]),
     title: z.string().max(200),
     scope: z.enum(["space", "home", "controller"]),
@@ -280,6 +297,8 @@ export const workbenchPlanSchema = z
     changes: z.array(z.string().max(500)).max(64),
     destructive: z.boolean(),
     expiresAt: isoDateSchema,
+    serviceEpoch: hex64Schema,
+    stateRevision: hex64Schema,
   })
   .strict();
 
@@ -432,6 +451,7 @@ const llmObservationSchema = z
     generation: z.number().int().nonnegative(),
     catalogRevision: z.number().int().nonnegative().nullable(),
     busy: z.boolean(),
+    serviceEpoch: hex64Schema,
   })
   .strict();
 
