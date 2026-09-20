@@ -305,6 +305,10 @@ test("plugin download rejects URLs, credentials, local paths, and commands", asy
     /URL|credential|local path|not allowed/i,
   );
   await assert.rejects(
+    service.execute({ kind: "plugin.download", spec: "npm:@dsh-spaces/plugin" }, ctx),
+    /URL|credential|local path|not allowed/i,
+  );
+  await assert.rejects(
     service.execute({ kind: "plugin.download", spec: "dsh-outline; rm -rf /" }, ctx),
     /command|not allowed/i,
   );

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isGitSpec } from "../shared/plugin";
 import { isExactRuntimeVersion } from "../shared/runtime";
-import { FULL_SPACES_PACKAGE } from "../shared/desktop-controller";
+import { FULL_SPACES_PACKAGE } from "../shared/plugin-spec";
 import {
   SPACE_SHARE_FORMAT_VERSION,
   SPACE_SHARE_KIND,

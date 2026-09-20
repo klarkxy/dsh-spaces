@@ -14,6 +14,11 @@ import {
 } from "../src/core/application/space-recipe.ts";
 import { LLM_SHARE_NOTE } from "../src/core/domain/llm-share.ts";
 import { SPACE_TEMPLATES_FILE, createSpaceFromTemplate, listSpaceTemplates } from "../src/main/space-templates.ts";
+import {
+  FULL_SPACES_PACKAGE,
+  isFullSpacesManagerSpec,
+  isUnresolvedPluginAlias,
+} from "../src/shared/plugin-spec.ts";
 import type { SpaceRecipe, SpaceSharePlugin, SpaceTemplate } from "../src/shared/space-share.ts";
 
 const temps: string[] = [];
@@ -215,6 +220,26 @@ test("share parts from formatVersion 1 round-trip as a recipe", () => {
   });
   assert.equal(parsed.schemaVersion, 1);
   assert.equal(canonicalNpmInstallSpec(parsed.plugins[0]!), "dsh-outline@1.2.3");
+});
+
+test("full Spaces manager specs and unresolved aliases are not installable recipe plugins", () => {
+  assert.equal(isFullSpacesManagerSpec("@dsh-spaces/plugin"), true);
+  assert.equal(isFullSpacesManagerSpec("@dsh-spaces/plugin@0.2.0"), true);
+  assert.equal(isFullSpacesManagerSpec("npm:@dsh-spaces/plugin"), true);
+  assert.equal(isFullSpacesManagerSpec("dsh-outline"), false);
+  assert.equal(
+    canonicalNpmInstallSpec({
+      packageName: FULL_SPACES_PACKAGE,
+      resolvedVersion: "0.2.0",
+      source: "npm",
+      installSpec: `${FULL_SPACES_PACKAGE}@0.2.0`,
+    }),
+    null,
+  );
+  assert.equal(isUnresolvedPluginAlias("npm:@dsh-spaces/plugin"), true);
+  assert.equal(isUnresolvedPluginAlias("node:foo"), true);
+  assert.equal(isUnresolvedPluginAlias("file:../hub/plugins/foo.tgz"), true);
+  assert.equal(isUnresolvedPluginAlias("dsh-outline@1.2.3"), false);
 });
 
 test("web and reserved names cannot be recipe targets", async () => {

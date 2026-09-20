@@ -35,7 +35,7 @@ import {
   recipeFromTemplate,
 } from "../../core/application/space-recipe";
 import { parseLlmShareManifest, type LlmShareManifest } from "../../core/domain/llm-share";
-import { isUnresolvedPluginAlias } from "../../shared/desktop-controller";
+import { isUnresolvedPluginAlias } from "../../shared/plugin-spec";
 import { t } from "../../shared/i18n";
 import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
 import { isBareNpmPackageName, isGitSpec, isSafeSpec, matchesPluginQuery } from "../../shared/plugin";
