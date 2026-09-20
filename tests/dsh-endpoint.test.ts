@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { test } from "node:test";
-import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "../src/main/dsh-endpoint.ts";
+import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "../src/adapters/node/dsh-endpoint.ts";
 
 function childFixture(): ChildProcess {
   const child = new EventEmitter() as ChildProcess;

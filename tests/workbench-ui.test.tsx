@@ -1178,7 +1178,8 @@ test("runtime tab shows a workbench update region and previews bundled-workbench
   assert.ok(html.includes(t("zh", "workbenchPackage.consequences")));
   assert.ok(html.includes('data-installed-version="0.1.0"'));
   assert.ok(html.includes('data-candidate-version="0.2.0"'));
-  assert.ok(!html.includes(digest));
+  assert.ok(html.includes(`data-candidate-digest="${digest}"`));
+  assert.ok(html.includes('data-workbench-prepare="true"'));
   assert.ok(!upgradeButton(html).includes("disabled"));
   ctrl.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
   await flush();
@@ -1283,7 +1284,7 @@ test("same-version content update stays enabled; identical candidate is disabled
   const contentHtml = ready(content);
   assert.ok(contentHtml.includes('data-content-update="true"'));
   assert.ok(contentHtml.includes(t("zh", "workbenchPackage.contentUpdate")));
-  assert.ok(!contentHtml.includes(digest));
+  assert.ok(contentHtml.includes(`data-candidate-digest="${digest}"`));
   assert.ok(!upgradeButton(contentHtml).includes("disabled"));
   content.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
   await flush();
@@ -1336,6 +1337,190 @@ test("workbench package reloads after a confirmed upgrade reaches a terminal job
   assert.ok(upgradeButton(html).includes("disabled"));
   assert.ok(html.includes(t("zh", "workbenchPackage.current")));
 });
+
+test("handoff-pending upgrade success is not shown as a completed update; failed jobs still show the real error", async () => {
+  let packageCalls = 0;
+  const failedJob = job({
+    id: "job-fail-1",
+    requestId: "req-fail",
+    kind: "plan.execute",
+    status: "failed",
+    phase: "verify",
+    message: "candidate digest mismatch",
+    canCancel: false,
+    error: {
+      code: "workbench/failed",
+      message: "candidate digest mismatch",
+    },
+  });
+  const pendingJob = job({
+    id: "job-uuid-1",
+    requestId: "uuid-1",
+    kind: "plan.execute",
+    status: "succeeded",
+    phase: "handoff-pending",
+    message: "prepared",
+    canCancel: false,
+  });
+  let jobs: WorkbenchJob[] = [failedJob];
+  const api = fakeApi({
+    workbenchPackage: async () => {
+      packageCalls += 1;
+      return packageRelease({ updateAvailable: true });
+    },
+    state: async () => state({ jobs }),
+    submit: async (command, requestId) => {
+      const next = {
+        ...pendingJob,
+        id: `job-${requestId}`,
+        requestId,
+        kind: command.kind,
+      };
+      jobs = [next, failedJob];
+      return next;
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  assert.equal(packageCalls, 1);
+  ctrl.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  ctrl.confirmPlan();
+  await flush();
+  await ctrl.poll();
+  assert.equal(packageCalls, 1);
+  const runtimeHtml = ready(ctrl);
+  assert.ok(!runtimeHtml.includes(t("zh", "workbenchPackage.current")));
+  assert.ok(!runtimeHtml.includes(t("en", "workbenchPackage.current")));
+
+  ctrl.setHomeTab("overview");
+  const zhHtml = ready(ctrl);
+  assert.ok(zhHtml.includes('data-job-id="job-uuid-1"'));
+  assert.ok(zhHtml.includes('data-status="succeeded"'));
+  assert.ok(zhHtml.includes('data-phase="handoff-pending"'));
+  assert.ok(zhHtml.includes('data-handoff-pending="true"'));
+  assert.ok(zhHtml.includes("plan.execute"));
+  assert.ok(zhHtml.includes("succeeded"));
+  assert.ok(zhHtml.includes("handoff-pending"));
+  assert.ok(zhHtml.includes("prepared"));
+  assert.ok(zhHtml.includes(t("zh", "jobs.handoffPending")));
+  assert.equal(t("zh", "jobs.handoffPending"), "已准备更新，正在交接服务；新服务启动尚未确认");
+  assert.ok(!zhHtml.includes(t("zh", "workbenchPackage.current")));
+  assert.ok(!zhHtml.includes("升级完成"));
+  assert.ok(!zhHtml.includes("成功启动"));
+  assert.ok(zhHtml.includes('data-job-id="job-fail-1"'));
+  assert.ok(zhHtml.includes('data-status="failed"'));
+  assert.ok(zhHtml.includes(`${t("zh", "jobs.failed")}: candidate digest mismatch`));
+
+  ctrl.setLocale("en");
+  const enHtml = ready(ctrl);
+  assert.ok(enHtml.includes(t("en", "jobs.handoffPending")));
+  assert.equal(
+    t("en", "jobs.handoffPending"),
+    "Update is prepared; handing off the service. The new service has not been confirmed started.",
+  );
+  assert.ok(!enHtml.includes(t("en", "workbenchPackage.current")));
+  assert.ok(!enHtml.includes("upgrade complete"));
+  assert.ok(!enHtml.includes("successfully started"));
+  assert.ok(enHtml.includes(`${t("en", "jobs.failed")}: candidate digest mismatch`));
+
+  ctrl.setHomeTab("runtime");
+  await flush();
+  assert.equal(packageCalls, 1);
+});
+
+test("prepare update submits workbench.prepare through CAS and reloads the candidate", async () => {
+  let packageCalls = 0;
+  const first = packageRelease({ version: "0.1.0", installedVersion: "0.1.0", updateAvailable: false, digest: "aa".repeat(32) });
+  const prepared = packageRelease({ version: "0.2.0", installedVersion: "0.1.0", updateAvailable: true, digest: "bb".repeat(32) });
+  const api = fakeApi({
+    workbenchPackage: async () => {
+      packageCalls += 1;
+      return packageCalls === 1 ? first : prepared;
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  assert.equal(packageCalls, 1);
+  const before = ready(ctrl);
+  assert.ok(before.includes('data-candidate-version="0.1.0"'));
+  assert.ok(before.includes(t("zh", "workbenchPackage.current")));
+  assert.ok(!before.includes(t("zh", "plan.title")));
+  ctrl.prepareWorkbenchPackage();
+  await flush();
+  const submitted = api.calls.find((item) => item.method === "submit");
+  const submittedArg = submitted?.arg as { command: WorkbenchCommand; context: WorkbenchMutationContext };
+  assert.deepEqual(submittedArg.command, { kind: "workbench.prepare" });
+  assert.deepEqual(submittedArg.context, { serviceEpoch: EPOCH, expectedRevision: REVISION });
+  assert.equal(api.calls.filter((item) => item.method === "product").length, 0);
+  assert.equal(packageCalls, 2);
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-candidate-version="0.2.0"'));
+  assert.ok(html.includes(`data-candidate-digest="${prepared.digest}"`));
+  assert.ok(html.includes(t("zh", "workbenchPackage.consequences")));
+  assert.ok(!html.includes(t("zh", "plan.title")));
+  assert.equal(api.calls.filter((item) => item.method === "preview").length, 0);
+  assert.ok(!upgradeButton(html).includes("disabled"));
+  ctrl.preview({ kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" });
+  await flush();
+  assert.ok(ready(ctrl).includes(t("zh", "plan.title")));
+});
+
+test("failed prepare keeps the previous candidate and does not claim a ready update", async () => {
+  const previous = packageRelease({ version: "0.1.0", installedVersion: "0.1.0", updateAvailable: false, digest: "aa".repeat(32) });
+  const api = fakeApi({
+    workbenchPackage: async () => previous,
+    submit: async (command, requestId, context) => {
+      api.calls.push({ method: "submit", arg: { command, requestId, context } });
+      return job({
+        id: `job-${requestId}`,
+        requestId,
+        kind: command.kind,
+        status: "failed",
+        canCancel: false,
+        error: { code: "workbench/failed", message: "catalog unreachable" },
+      });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  ctrl.prepareWorkbenchPackage();
+  await flush();
+  assert.equal(api.calls.filter((item) => item.method === "workbenchPackage").length, 1);
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-candidate-version="0.1.0"'));
+  assert.ok(html.includes(t("zh", "workbenchPackage.current")));
+  assert.ok(html.includes("catalog unreachable"));
+  assert.ok(!html.includes("0.2.0"));
+  assert.ok(upgradeButton(html).includes("disabled"));
+  assert.equal(ctrl.getSnapshot().pendingPlan, null);
+});
+
+test("prepare stays disabled while a job is busy and does not auto-retry", async () => {
+  const api = fakeApi({
+    state: async () => state({ jobs: [job({ status: "running", kind: "workbench.prepare" })] }),
+    workbenchPackage: async () => packageRelease({ updateAvailable: false, version: "0.1.0", installedVersion: "0.1.0" }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  const html = ready(ctrl);
+  const prepare = html.match(/<button[^>]*data-workbench-prepare="true"[^>]*>/);
+  assert.ok(prepare);
+  assert.ok(prepare[0].includes("disabled"));
+  ctrl.prepareWorkbenchPackage();
+  await flush();
+  assert.equal(api.calls.filter((item) => item.method === "submit").length, 0);
+  assert.equal(ctrl.getSnapshot().commandError, t("zh", "app.locked"));
+});
+
 
 test("failed interrupted jobs render the persisted unconfirmed not-replayed message", () => {
   const html = renderToStaticMarkup(

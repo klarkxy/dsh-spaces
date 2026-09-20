@@ -45,9 +45,9 @@ import {
   onCliStatus,
   setManagedCliPrefix,
   setSelectedDshResolver,
-} from "./dsh-cli";
+} from "../adapters/node/dsh-cli";
 import { resolveDshHome } from "./dsh-home";
-import { authorizeProductHome } from "./home-guard";
+import { authorizeProductHome } from "../adapters/node/home-guard";
 import { applyNativeTheme, currentColorScheme } from "./native-theme";
 import {
   shutdownWorkbenchService,
@@ -58,6 +58,8 @@ import {
 import {
   applyPreferencePatch,
   coalesceInflight,
+  DESKTOP_SNAPSHOTS_DIRNAME,
+  ensureDesktopSnapshotRoot,
   loadShellPrefs,
   openWorkbenchSession,
   realDirectory,
@@ -69,7 +71,7 @@ import {
   writeShellPrefs,
   type InflightHolder,
 } from "./desktop-shell-runtime";
-import { nodeExecutable, setPackageSource, setToolchainRoot } from "./toolchain";
+import { nodeExecutable, setPackageSource, setToolchainRoot } from "../adapters/node/toolchain";
 import {
   appIconPng,
   concealWindowToTray,
@@ -132,10 +134,11 @@ function startMain(): void {
     moduleDir: __dirname,
   });
   const toolsRoot = join(userData, "supervisor-tools");
-  const snapshotRoot =
-    toolchain.kind === "verified" && toolchain.snapshotRoot && realDirectory(toolchain.snapshotRoot)
+  const recordedSnapshotRoot =
+    toolchain.kind === "verified" && typeof toolchain.snapshotRoot === "string" && toolchain.snapshotRoot.trim()
       ? toolchain.snapshotRoot
-      : join(userData, "snapshots");
+      : "";
+  const snapshotRoot = recordedSnapshotRoot || join(userData, DESKTOP_SNAPSHOTS_DIRNAME);
 
   const clientOptions = {
     home: dshHome,
@@ -365,6 +368,7 @@ function startMain(): void {
       workbenchError = null;
       broadcastState();
       try {
+        ensureDesktopSnapshotRoot(dshHome, snapshotRoot, { createIfMissing: !recordedSnapshotRoot });
         lastService = await client.start(runtime);
         if (lastService.status === "connected") await presentWorkbench();
       } catch (error) {

@@ -244,6 +244,7 @@ export class WorkbenchController {
   private notedCreates = new Set<string>();
   private awaitingPackagePlanId: string | null = null;
   private awaitingPackageJobId: string | null = null;
+  private prepareEpoch: string | null = null;
   private persistEmpty: boolean;
   private appliedClientDefaults = false;
   private ui: WorkbenchUiState;
@@ -684,6 +685,19 @@ export class WorkbenchController {
 
   removeLibraryItem = (libraryId: string): void => {
     void this.submit({ kind: "plugin.library.remove", libraryId });
+  };
+
+  prepareWorkbenchPackage = (): void => {
+    if (!this.canMutate()) {
+      this.rejectReadonly();
+      return;
+    }
+    if (this.isBusy()) {
+      this.patch({ commandError: localizeError(this.ui.locale, "workbench/locked") });
+      return;
+    }
+    this.prepareEpoch = this.ui.state?.serviceEpoch ?? null;
+    void this.submit({ kind: "workbench.prepare" });
   };
 
   previewInstallSelected = (): void => {
@@ -1367,7 +1381,22 @@ export class WorkbenchController {
         this.patch({ templatesStatus: "idle" });
         if (this.ui.homeTab === "templates") void this.loadTemplates();
       }
+      if (job.kind === "workbench.prepare" || product?.kind === "workbench.prepare") {
+        this.applyPreparedWorkbenchPackage();
+      }
+    } else if (job.status === "failed" && (job.kind === "workbench.prepare" || product?.kind === "workbench.prepare")) {
+      this.prepareEpoch = null;
+      this.patch({
+        commandError: job.error?.message || localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }),
+      });
     }
+  }
+
+  private applyPreparedWorkbenchPackage(): void {
+    if (this.prepareEpoch && this.ui.state?.serviceEpoch !== this.prepareEpoch) return;
+    this.prepareEpoch = null;
+    this.patch({ workbenchPackageStatus: "idle" });
+    if (this.ui.homeTab === "runtime") void this.loadWorkbenchPackage();
   }
 
   private noteCreated(job: WorkbenchJob, fromSnapshot = false): void {
@@ -1451,6 +1480,7 @@ export class WorkbenchController {
     if (!this.awaitingPackageJobId || job.id !== this.awaitingPackageJobId) return;
     if (ACTIVE_JOB.has(job.status)) return;
     if ((this.ui.state?.jobs ?? []).some((item) => ACTIVE_JOB.has(item.status))) return;
+    if (job.status === "succeeded" && job.phase === "handoff-pending") return;
     this.awaitingPackagePlanId = null;
     this.awaitingPackageJobId = null;
     this.patch({ workbenchPackageStatus: "idle" });

@@ -14,7 +14,7 @@ import {
   zh,
 } from "../src/shared/i18n/index.ts";
 import { resolveColorScheme } from "../src/shared/theme.ts";
-import { readSettings, writeSettings } from "../src/main/hub-settings.ts";
+import { readSettings, writeSettings } from "../src/adapters/node/hub-settings.ts";
 import { DEFAULT_HUB_SETTINGS } from "../src/shared/types.ts";
 
 const temps: string[] = [];

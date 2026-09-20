@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runProcess } from "../src/main/toolchain.ts";
+import { runProcess } from "../src/adapters/node/toolchain.ts";
 
 test("command timeout waits for the parent and grandchild to exit", async () => {
   const root = mkdtempSync(join(tmpdir(), "spaces-command-timeout-"));

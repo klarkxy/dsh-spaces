@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, rmdirSync, realpathSync, unlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
-import { runRuntimeInstallation } from "../adapters/node/runtime-installation";
+import { runRuntimeInstallation } from "./runtime-installation";
 import { renameDirectory } from "./atomic";
 import { authorizeProductHome, samePath } from "./home-guard";
 import {
@@ -11,9 +11,9 @@ import {
   SnapshotStore,
   type SnapshotRestoreOptions,
 } from "./snapshot-store";
-import type { SnapshotRuntime } from "../shared/snapshots";
-import type { RuntimeRef } from "../shared/runtime";
-import type { PackageSource } from "../shared/types";
+import type { SnapshotRuntime } from "../../shared/snapshots";
+import type { RuntimeRef } from "../../shared/runtime";
+import type { PackageSource } from "../../shared/types";
 import { ProcessTerminationError } from "./terminate-process";
 
 type SnapshotWorkerOperation =

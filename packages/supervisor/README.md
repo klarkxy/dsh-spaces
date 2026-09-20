@@ -8,7 +8,7 @@ This package is Node-only. Browser callers never receive filesystem paths, CLI c
 
 The supervisor manages **normal** operations: bind locally, authenticate, enforce single-writer, run user commands, query real state, start/stop spaces the user asked for. It does not resurrect a failed manager, reinstall dependencies, rebuild identity, auto-take-over, restore run rights, or enter rescue mode.
 
-Public restore APIs fail explicitly. `--snapshot-worker` is still required for the current runtime-install / long-IO path.
+Public restore APIs fail explicitly. `--snapshot-worker` is required for normal snapshot create/delete and remaining tree copy/rename/retarget IO. Runtime install lives in `runtime-installation.ts`; the worker only forwards. This is not restore.
 
 中文见 [中文](#中文)。
 
@@ -17,31 +17,34 @@ Public restore APIs fail explicitly. `--snapshot-worker` is still required for t
 - Dedicated manager profile `spaces-hub` (or `spaces-hub-N`). Existing ordinary profiles are attached in place; an ordinary profile already using the reserved name is **not** overwritten.
 - `@dsh-spaces/plugin` on the manager only; `@dsh-spaces/view-bridge` on ordinary spaces.
 - Stable entry at `origin`. Closing a browser tab does not stop instances. Stopping the manager does not stop this process — if the entry is still alive it can show the manager’s real failure (**查看错误详情**, **复制脱敏日志**). If this process itself dies, use stderr / launcher / existing logs. There is no watchdog.
-- One writer per Home. Desktop on the same Home stays read-only until it takes over. Live or unclear owners are refused.
+- One writer per Home. A second client attaches to a healthy existing service. Live or unclear owners are refused. There is no take-over.
 
 Default DSH channel is official **`latest`**, pinned to the resolved exact version. Any exact installed CLI can bind. SDK `0.1.5-rc.2` is this repo's plugin peer, not a CLI allowlist. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
 
 ## Launch (runnable local build)
 
-Compile from the repository root with `npm run build:spaces` (writes `packages/supervisor/lib/index.js`, `snapshot-worker.mjs`, `manifest.json`). Then pack plugin and view-bridge **outside** those packages. Use a **disposable** Home for development — do not pass `--allow-real-home` and do not point `--home` at `~/.dsh`.
+Compile from the repository root with `npm run build:spaces`. Current same-group entry is `packages/plugin/lib/supervisor/index.js` with `--component-payload packages/plugin/lib`. Pack **three** archives outside those packages. Use a **disposable** Home for development — do not pass `--allow-real-home` and do not point `--home` at `~/.dsh`. Runnable example: [docs/workbench.md](../../docs/workbench.md).
 
 ```powershell
 npm run build:spaces
 npm pack ./packages/plugin --ignore-scripts --pack-destination D:\dsh-packages
 npm pack ./packages/view-bridge --ignore-scripts --pack-destination D:\dsh-packages
+npm pack ./packages/llm-bridge --ignore-scripts --pack-destination D:\dsh-packages
 
-node packages/supervisor/lib/index.js `
+node packages/plugin/lib/supervisor/index.js `
   --home D:\dsh-workbench-dev\home `
-  --bin D:\path\to\@deepseek-ai\dsh\bin.js `
+  --bin D:\path\to\@deepseek-ai\dsh\lib\bin.js `
   --node D:\path\to\node.exe `
   --plugin-artifact D:\dsh-packages\dsh-spaces-plugin-0.3.0.tgz `
   --view-bridge-artifact D:\dsh-packages\dsh-spaces-view-bridge-0.3.0.tgz `
+  --llm-bridge-artifact D:\dsh-packages\dsh-spaces-llm-bridge-0.3.0.tgz `
   --control-tool-root D:\dsh-workbench-dev\tools `
-  --snapshot-worker <abs-repo>\packages\supervisor\lib\snapshot-worker.mjs `
+  --component-payload <abs-repo>\packages\plugin\lib `
+  --snapshot-worker <abs-repo>\packages\plugin\lib\supervisor\snapshot-worker.mjs `
   --snapshot-root D:\dsh-workbench-dev\snapshots
 ```
 
-Do not omit `--plugin-artifact`, `--view-bridge-artifact`, `--node`, `--snapshot-worker`, or `--control-tool-root`. Without the two tarballs the manager profile cannot finish installing and ordinary iframes have no handshake. `--bin` must be a supported CLI (`--cli` is an alias). Paths must be absolute. The browser must not be asked to supply them.
+Do not omit `--plugin-artifact`, `--view-bridge-artifact`, `--llm-bridge-artifact`, `--component-payload`, `--node`, `--snapshot-worker`, or `--control-tool-root`. Mix-and-match archives from different builds fail closed. `--bin` must be an exact CLI (`--cli` is an alias). Paths must be absolute. The browser must not be asked to supply them. There is no automatic repair or retry.
 
 Prefer `packages/supervisor/lib/index.js` after `build:spaces`. Running the TypeScript entry with plain `node` will not compile.
 
@@ -79,6 +82,8 @@ const handle = await createWorkbenchSupervisor({
   controlToolRoot,
   pluginArtifact,
   viewBridgeArtifact,
+  llmBridgeArtifact,
+  componentPayloadRoot,
   snapshotWorkerFile,
   snapshotRoot,
 });
@@ -89,7 +94,7 @@ await handle.close();
 
 `supervisorCliArgs(options)` rebuilds the argv for a child spawn (`--bin`, not `--cli`).
 
-A manager Host that already has this plugin attached will spawn the same argv (see `packages/plugin/src/host/supervisor-bootstrap.ts`): `--home --bin --node --plugin-artifact --view-bridge-artifact --control-tool-root --snapshot-worker` and optional `--snapshot-root` / `--allow-real-home`. Ordinary workspaces only attach; they do not cold-start a second controller. A failed initialization ends that request; the next page open does not silently complete it.
+A manager Host that already has this plugin attached will spawn the same argv (see `packages/plugin/src/host/supervisor-bootstrap.ts`): `--home --bin --node --plugin-artifact --view-bridge-artifact --llm-bridge-artifact --control-tool-root --snapshot-worker --component-payload` and optional `--snapshot-root` / `--allow-real-home`. Ordinary workspaces only attach; they do not cold-start a second controller. A failed initialization ends that request; the next page open does not silently complete it.
 
 ## Flags (all Node-only paths)
 
@@ -101,9 +106,11 @@ A manager Host that already has this plugin attached will spawn the same argv (s
 | `--port` | Listen port. Omit to reuse saved `entry-port.json`. `0` picks an ephemeral port. Always `127.0.0.1`. |
 | `--control-tool-root` | Toolchain / payload copies outside trees the current binary still treats as replaceable. Product cold start uses `{parent(home)}/.dsh-spaces-tools`. |
 | `--supervisor-asset-root` | Optional static assets for the stable entry. |
-| `--plugin-artifact` | File path of packed `@dsh-spaces/plugin` for the manager profile. Required for manager bootstrap. |
-| `--view-bridge-artifact` | File path of packed `@dsh-spaces/view-bridge` for ordinary spaces. Required for iframe handshake. |
-| `--snapshot-worker` | `snapshot-worker.mjs` used for current runtime install and long IO. Not a restore product. Required until R4. |
+| `--plugin-artifact` | File path of packed `@dsh-spaces/plugin` for the manager profile. Required. |
+| `--view-bridge-artifact` | File path of packed `@dsh-spaces/view-bridge` for ordinary spaces. Required. |
+| `--llm-bridge-artifact` | File path of packed `@dsh-spaces/llm-bridge`. Required. Same build group. |
+| `--component-payload` | Selected `lib` directory of the same group. Required for product cold start. |
+| `--snapshot-worker` | Same-group `snapshot-worker.mjs` for snapshot create/delete and remaining tree IO. Runtime install is extracted; the worker only forwards. Not restore. |
 | `--snapshot-root` | Directory the current binary may still use for snapshot files. Default: sibling `{parent}/{homeName}-snapshots` (not inside Home). Must stay outside `profiles` / `hub` / `sessions` / `storages` / `.dsh-spaces-restore`. Applying snapshots as disaster recovery is revoked. |
 | `--allow-real-home` | Flag with no value. Opt in for a Home you intend to manage. |
 
@@ -115,7 +122,7 @@ Root build/manifest wiring is owned by the integrating agent. This package does 
 - Manager host proxy: bearer in `{home}/.dsh-spaces-control/host.bearer`. Never copied into browser DTOs.
 - Origins: supervisor entry and the live manager origin. Ordinary workspace origins are rejected for management APIs. No arbitrary URL proxy.
 
-Private `{home}/.dsh-spaces-control/endpoint.json` is `{version:1,origin,bearer}` for Host attach. Release deletes this process's endpoint only.
+Private `{home}/.dsh-spaces-control/endpoint.json` is protocol v2 (`version`, `protocolVersion`, `homeId`, `serviceEpoch`, `origin`, `bearer`) for Host attach. Version 1 files are invalid. Release deletes this process's endpoint only.
 
 ## Build need
 
@@ -127,6 +134,6 @@ Private `{home}/.dsh-spaces-control/endpoint.json` is `{version:1,origin,bearer}
 
 独立工作台监督进程，只绑 `127.0.0.1`。完整可运行命令（含 plugin / view-bridge / node / worker / tools，缺一不可）见 [docs/workbench.md](../../docs/workbench.md)。故障政策见 [docs/let-it-crash.md](../../docs/let-it-crash.md)。
 
-开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。默认快照目录是 Home 的兄弟 `{上一级}/{Home名}-snapshots`，不是 Home 内部文件夹。当前启动仍需要 `--snapshot-worker`，因为它同时承担运行时安装；这不是恢复产品。
+开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。默认快照目录是 Home 的兄弟 `{上一级}/{Home名}-snapshots`，不是 Home 内部文件夹。启动需要 `--component-payload`、三份同组制品和同组 `--snapshot-worker`（正常快照与树 IO；运行时安装已抽出）。这不是恢复产品。没有自动修复或重试。
 
 关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。默认跟随官方 `latest` 并钉住精确版本。未登记的手工 DSH 不会被接管。

@@ -3,15 +3,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { FileLlmSpaceSettings } from "./llm-space-settings";
 import type { WorkbenchJobContext } from "./workbench-jobs";
-import { atomicWrite } from "../../main/atomic";
-import { assertNotRealHome } from "../../main/home-guard";
-import { settingsPath } from "../../main/hub-settings";
+import { atomicWrite } from "./atomic";
+import { assertNotRealHome } from "./home-guard";
+import { settingsPath } from "./hub-settings";
 import {
   loadPluginCatalog,
   readLocalPluginCatalog,
   type CatalogFetcher,
-} from "../../main/plugin-catalog";
-import { pluginLibraryPath, spacesUsingPlugin } from "../../main/plugin-library";
+} from "./plugin-catalog";
+import { pluginLibraryPath, spacesUsingPlugin } from "./plugin-library";
 import {
   downloadPlugin,
   listAllProfilePlugins,
@@ -19,14 +19,14 @@ import {
   removeDownloadedPlugin,
   type GitPacker,
   type PluginFetcher,
-} from "../../main/plugin-ops";
+} from "./plugin-ops";
 import {
   assertSafeShareArchive,
   exportSpaceArchive,
   parseSpaceShare,
   previewSpaceShare,
-} from "../../main/space-share";
-import { listSpaceTemplates, saveSpaceTemplate } from "../../main/space-templates";
+} from "./space-share";
+import { listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
 import {
   applySpaceRecipe,
   assertMutableRecipeSpaceId,
@@ -50,7 +50,7 @@ import {
   type PluginLibrarySource,
   type ThemePreference,
 } from "../../shared/types";
-import type { WorkbenchSpace } from "../../shared/workbench";
+import type { WorkbenchPackageRelease, WorkbenchSpace } from "../../shared/workbench";
 import {
   MAX_WORKBENCH_SHARE_BASE64,
   MAX_WORKBENCH_SHARE_BYTES,
@@ -91,6 +91,7 @@ export interface WorkbenchProductPorts {
   diagnostics(spaceId: string): WorkbenchDiagnostics;
   withWrite<T>(label: string, action: () => Promise<T>): Promise<T>;
   settingsChanged?(settings: WorkbenchHomeSettings): void;
+  prepareWorkbench?(input: { version?: string }, ctx: WorkbenchJobContext): Promise<WorkbenchPackageRelease>;
   now?(): Date;
   fetchImpl?: WorkbenchProductFetcher;
   packGit?: GitPacker;
@@ -112,8 +113,7 @@ interface StagedImport {
  * and job queue; this module must not create its own queue.
  *
  * Partial failures call `ctx.result({ product, spaceId })` then throw. JobStore
- * still drops `product` in `publicResult` and clears `result` on failed jobs;
- * protocol wiring must keep that safe subset.
+ * preserves that validated public subset on both successful and failed jobs.
  */
 export class WorkbenchProductService {
   private readonly ports: WorkbenchProductPorts;
@@ -165,6 +165,13 @@ export class WorkbenchProductService {
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchProductOutcome> {
     switch (command.kind) {
+      case "workbench.prepare": {
+        if (!this.ports.prepareWorkbench) throw new Error("Workbench update preparation is unavailable.");
+        const candidate = await this.ports.prepareWorkbench({ version: command.version }, ctx);
+        const outcome: WorkbenchProductOutcome = { kind: "workbench.prepare", candidate };
+        recordProductResult(ctx, outcome);
+        return outcome;
+      }
       case "settings.update":
         return this.updateSettings(command.settings, ctx);
       case "catalog.refresh":
@@ -221,7 +228,7 @@ export class WorkbenchProductService {
     const entries = readLibraryOrThrow(this.ports.home);
     const spaceIds = this.ports.listSpaces().map((space) => space.id);
     const installed = listAllProfilePlugins(this.ports.home, spaceIds);
-    return entries.map((entry) => publicLibraryItem(entry, spacesUsingPlugin(installed, entry)));
+    return entries.map((entry) => publicLibraryItem(entry, spacesUsingPlugin(this.ports.home, installed, entry)));
   }
 
   private async exportShare(spaceId: string, includeConfig: boolean): Promise<{
@@ -317,7 +324,7 @@ export class WorkbenchProductService {
     const entry = await downloadPlugin(
       this.ports.home,
       { catalogId: command.catalogId, spec: command.spec, version: command.version },
-      { fetchImpl: this.ports.fetchImpl, packGit: this.ports.packGit },
+      { fetchImpl: this.ports.fetchImpl, packGit: this.ports.packGit, signal: ctx.signal },
     );
     const item = this.publicItem(entry);
     const outcome: WorkbenchProductOutcome = { kind: "plugin.download", item };
@@ -444,7 +451,7 @@ export class WorkbenchProductService {
   private publicItem(entry: PluginLibraryEntry): WorkbenchLibraryItem {
     const spaceIds = this.ports.listSpaces().map((space) => space.id);
     const installed = listAllProfilePlugins(this.ports.home, spaceIds);
-    return publicLibraryItem(entry, spacesUsingPlugin(installed, entry));
+    return publicLibraryItem(entry, spacesUsingPlugin(this.ports.home, installed, entry));
   }
 
   private assertMutableSpace(spaceId: string, options: { mustExist?: boolean } = {}): void {
@@ -497,7 +504,7 @@ function publicLibraryItem(entry: PluginLibraryEntry, installedIn: string[]): Wo
   };
 }
 
-function readLibraryOrThrow(home: string): PluginLibraryEntry[] {
+export function readLibraryOrThrow(home: string): PluginLibraryEntry[] {
   const path = pluginLibraryPath(home);
   if (!existsSync(path)) return [];
   let text: string;

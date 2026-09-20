@@ -8,10 +8,10 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { bin, home } from './real-config-check.mjs';
-import { ProfileRegistry } from '../src/main/profile-registry.ts';
-import { writeSettings } from '../src/main/hub-settings.ts';
+import { ProfileRegistry } from '../src/adapters/node/profile-registry.ts';
+import { writeSettings } from '../src/adapters/node/hub-settings.ts';
 import { DEFAULT_HUB_SETTINGS } from '../src/shared/types.ts';
-import { findNodeDir, toolchainRoot, setToolchainRoot, ensurePnpm } from '../src/main/toolchain.ts';
+import { findNodeDir, toolchainRoot, setToolchainRoot, ensurePnpm } from '../src/adapters/node/toolchain.ts';
 
 const require = createRequire(import.meta.url);
 const { _electron: electron } = require('C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');

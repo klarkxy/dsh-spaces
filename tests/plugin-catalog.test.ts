@@ -17,8 +17,8 @@ import {
   searchPluginCatalog,
   seedCatalog,
   type CatalogFetcher,
-} from "../src/main/plugin-catalog.ts";
-import { parseCatalogUrl, readSettings, writeSettings as saveSettings } from "../src/main/hub-settings.ts";
+} from "../src/adapters/node/plugin-catalog.ts";
+import { parseCatalogUrl, readSettings, writeSettings as saveSettings } from "../src/adapters/node/hub-settings.ts";
 import {
   formatCount,
   isBareNpmPackageName,

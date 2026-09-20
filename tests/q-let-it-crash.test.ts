@@ -7,8 +7,8 @@ import { main as doctorMain } from "../packages/doctor/src/index.ts";
 import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { runBatch } from "../src/shared/batch.ts";
 import { formatWorkbenchFailure } from "../src/shared/workbench.ts";
-import { importSpaceArchive, parseSpaceShare } from "../src/main/space-share.ts";
-import { packZip } from "../src/main/space-share-zip.ts";
+import { importSpaceArchive, parseSpaceShare } from "../src/adapters/node/space-share.ts";
+import { packZip } from "../src/adapters/node/space-share-zip.ts";
 import { SPACE_SHARE_FORMAT_VERSION, SPACE_SHARE_KIND } from "../src/shared/space-share.ts";
 
 const temps: string[] = [];

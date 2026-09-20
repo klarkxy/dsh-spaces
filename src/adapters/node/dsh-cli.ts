@@ -3,9 +3,9 @@ import { execSync, type ChildProcess, type SpawnOptions } from "node:child_proce
 import { spawnObserved } from "./owned-process-record";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { t } from "../shared/i18n";
-import { DSH_DEFAULT_CHANNEL, DSH_RUNTIME_PACKAGE } from "../shared/runtime";
-import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../shared/types";
+import { t } from "../../shared/i18n";
+import { DSH_DEFAULT_CHANNEL, DSH_RUNTIME_PACKAGE } from "../../shared/runtime";
+import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../../shared/types";
 import { npmRegistry } from "./package-source";
 import { terminateProcessTree } from "./terminate-process";
 import {
@@ -32,6 +32,7 @@ export function setSelectedDshResolver(resolver: () => string | undefined): void
   selectedBin = resolver;
 }
 let managedPrefixOverride: string | undefined;
+let managedNodeOverride: string | undefined;
 let ensuring: Promise<string> | undefined;
 let cliStatus: CliEnsureStatus = {
   state: "idle",
@@ -45,6 +46,15 @@ function binUnder(nodeModulesRoot: string): string {
 
 export function setManagedCliPrefix(prefix: string): void {
   managedPrefixOverride = resolve(prefix);
+}
+
+/** Supervisor `--node` / a known Node binary. Not an Electron-as-Node fallback. */
+export function setManagedNodeExecutable(exe?: string): void {
+  managedNodeOverride = exe ? resolve(exe) : undefined;
+}
+
+function isElectronProcess(): boolean {
+  return typeof process.versions.electron === "string" && process.versions.electron.length > 0;
 }
 
 export function managedCliPrefix(): string {
@@ -278,16 +288,16 @@ async function doEnsureRuntime(source?: PackageSource): Promise<string> {
   }
 }
 
-/** Prefer the managed Node; fall back to Electron-as-Node only if Node is not installed yet. */
+/** Prefer the managed Node; fall back to Electron-as-Node only inside Electron. */
 export function spawnNode(args: string[], options: SpawnOptions = {}): ChildProcess {
-  const managed = nodeExecutable();
+  const managed = nodeExecutable() ?? managedNodeOverride;
   const exe = managed ?? process.execPath;
-  const usingElectron = !managed;
   const env = toolchainEnv({ ...(options.env as Record<string, string | undefined> | undefined) });
-  if (usingElectron) env.ELECTRON_RUN_AS_NODE = "1";
+  if (!managed && isElectronProcess()) env.ELECTRON_RUN_AS_NODE = "1";
   else delete env.ELECTRON_RUN_AS_NODE;
   return spawnObserved(exe, args, {
     ...options,
+    stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
     env,
   });
 }
@@ -307,6 +317,7 @@ export async function runDsh(
       },
       windowsHide: true,
       detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -330,7 +341,11 @@ export async function runDsh(
     child.on("close", (code) => {
       clearTimeout(timer);
       if (timedOut) return;
-      resolvePromise({ stdout, stderr, code: code ?? 1 });
+      const exitCode = code ?? 1;
+      const detail = exitCode !== 0 && stdout.trim()
+        ? [stderr, stdout].filter((part) => part.trim()).join("\n")
+        : stderr;
+      resolvePromise({ stdout, stderr: detail, code: exitCode });
     });
   });
 }

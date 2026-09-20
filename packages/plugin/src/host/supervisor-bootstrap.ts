@@ -1,20 +1,27 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
-  readFileSync,
   realpathSync,
   rmdirSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  readSelectedComponentPayload,
+  selectComponentPayload,
+  stageComponentPayload,
+} from "../../../../src/adapters/node/component-selection";
+import {
+  COMPONENT_PAYLOAD_ENTRIES,
+  validateComponentPayload,
+  type ValidatedComponentPayload,
+} from "../../../../src/adapters/node/component-payload";
 import { bindDshCli } from "../../../../src/adapters/node/spaces-control";
+import { authorizeProductHome } from "../../../../src/adapters/node/home-guard";
 import { HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home-controller";
-import { packLocalArtifacts, pluginPackageRootFromLib, validateSnapshotRoot, type PackOneRequest } from "./supervisor-pack";
+import { packLocalArtifacts, validateSnapshotRoot, type PackOneRequest } from "./supervisor-pack";
 import { attachExistingSupervisor } from "./supervisor-attach";
 import {
   diagnoseEndpointResidue,
@@ -29,6 +36,7 @@ export type { SupervisorEndpoint } from "./supervisor-endpoint";
 
 export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";
 export const VIEW_BRIDGE_PAYLOAD_DIRNAME = "view-bridge";
+export const LLM_BRIDGE_PAYLOAD_DIRNAME = "llm-bridge";
 export const SNAPSHOT_WORKER_FILE = "snapshot-worker.mjs";
 
 /** Matches parseSupervisorArgs in src/adapters/node/workbench-supervisor.ts. */
@@ -41,7 +49,11 @@ export const SUPERVISOR_CLI_FLAGS = {
   controlToolRoot: "--control-tool-root",
   snapshotWorker: "--snapshot-worker",
   snapshotRoot: "--snapshot-root",
+  llmBridgeArtifact: "--llm-bridge-artifact",
 } as const;
+
+/** Literal argv flag until primary SUPERVISOR_CLI_FLAGS / parseSupervisorArgs integration. */
+export const COMPONENT_PAYLOAD_ARGV_FLAG = "--component-payload";
 
 export const DEFAULT_SUPERVISOR_TIMEOUT_MS = 240_000;
 export const DEFAULT_SUPERVISOR_POLL_MS = 100;
@@ -91,9 +103,9 @@ export interface SupervisorBootstrapOptions {
 
 /**
  * Attach a live supervisor if the private endpoint authenticates and the
- * HomeController lease matches. Otherwise, for allowed roles, copy the
- * immutable program payload outside Home, pack plugin/view-bridge tarballs
- * outside Home, and cold-start the supervisor CLI with those paths.
+ * HomeController lease matches. Otherwise, for allowed roles, validate and
+ * stage the full v2 component group outside Home, pack plugin/view-bridge/
+ * llm-bridge tarballs from the selected package, and cold-start the supervisor CLI.
  */
 export async function bootstrapSupervisor(
   options: SupervisorBootstrapOptions,
@@ -121,6 +133,9 @@ export async function bootstrapSupervisor(
     return fail(["No running workbench was found. This profile does not start a second controller."]);
   }
 
+  const access = { allowRealHome: options.allowRealHome === true };
+  if (access.allowRealHome) authorizeProductHome(home);
+
   const argv = options.argv ?? process.argv;
   const env = options.env ?? process.env;
   const execPath = options.execPath ?? process.execPath;
@@ -136,106 +151,115 @@ export async function bootstrapSupervisor(
   if (!payloadRoot) {
     return fail(["Packaged supervisor payload is missing."]);
   }
-  const packed = join(payloadRoot, SUPERVISOR_PAYLOAD_DIRNAME);
-  const packedReal = realDirectory(packed);
-  if (!packedReal || !inside(payloadRoot, packedReal)) {
-    return fail(["Packaged supervisor payload directory is missing or not a real directory."]);
-  }
-  const manifest = readPayloadManifest(packedReal);
-  if (!manifest) return fail(["Supervisor payload manifest.json is missing or invalid."]);
-  const packedEntry = join(packedReal, manifest.entry);
-  if (!isRealFile(packedEntry) || !inside(packedReal, packedEntry)) {
-    return fail(["Supervisor payload entry is missing or not a real file."]);
-  }
-  const packedWorker = join(packedReal, SNAPSHOT_WORKER_FILE);
-  if (!isRealFile(packedWorker) || !inside(packedReal, packedWorker)) {
-    return fail(["Supervisor snapshot-worker.mjs is missing from the packaged payload."]);
-  }
 
-  const digest = contentId(packedReal);
   const toolsRoot = realOrCreateToolsRoot(options.toolsRoot ?? defaultToolsRoot(home), home);
   if (!toolsRoot) return fail(["Supervisor tools directory could not be created outside Home."]);
-  const dest = join(toolsRoot, `${manifest.version}-${digest}`);
-  try {
-    installPayload(packedReal, dest);
-  } catch {
-    return fail(["Supervisor payload could not be copied to the tools directory."]);
-  }
-  const destReal = realDirectory(dest);
-  if (!destReal || contentId(destReal) !== digest) {
-    return fail(["Copied supervisor payload failed verification."]);
-  }
-  const destEntry = join(destReal, manifest.entry);
-  const destWorker = join(destReal, SNAPSHOT_WORKER_FILE);
-  if (!isRealFile(destEntry) || !isRealFile(destWorker)) {
-    return fail(["Copied supervisor entry or snapshot-worker is not a real file."]);
-  }
-
-  const pluginRoot = pluginPackageRootFromLib(payloadRoot);
-  const viewRoot = realDirectory(join(payloadRoot, VIEW_BRIDGE_PAYLOAD_DIRNAME));
-  if (!pluginRoot || !viewRoot) {
-    return fail(["Installed plugin package or view-bridge payload is missing."]);
-  }
-  const packedArtifacts = await packLocalArtifacts({
-    pluginPackageRoot: pluginRoot,
-    viewBridgeRoot: viewRoot,
-    artifactDir: join(toolsRoot, "artifacts"),
-    home,
-    execPath,
-    env,
-    timeoutMs: options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS,
-    pack: options.pack,
-  });
-  if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
 
   const snapshotRoot = options.snapshotRoot ? validateSnapshotRoot(home, options.snapshotRoot) : undefined;
   if (options.snapshotRoot && !snapshotRoot) {
     return fail(["snapshotRoot must be a real directory outside snapshot-replaced Home entries."]);
   }
 
-  const childArgv = [
-    ...(options.allowRealHome ? ["--allow-real-home"] : []),
-    SUPERVISOR_CLI_FLAGS.home,
-    home,
-    SUPERVISOR_CLI_FLAGS.bin,
-    runtime.bin,
-    SUPERVISOR_CLI_FLAGS.node,
-    execPath,
-    SUPERVISOR_CLI_FLAGS.pluginArtifact,
-    packedArtifacts.pluginArtifact,
-    SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
-    packedArtifacts.viewBridgeArtifact,
-    SUPERVISOR_CLI_FLAGS.controlToolRoot,
-    toolsRoot,
-    SUPERVISOR_CLI_FLAGS.snapshotWorker,
-    destWorker,
-  ];
-  if (snapshotRoot) childArgv.push(SUPERVISOR_CLI_FLAGS.snapshotRoot, snapshotRoot);
+  let selected: ValidatedComponentPayload | undefined;
+  try {
+    selected = readSelectedComponentPayload(home, toolsRoot, access);
+  } catch (error) {
+    return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
+  }
 
   const reservation = join(toolsRoot, "coldstart.lock");
   if (!reserveColdStart(reservation)) {
-    return await pollEndpoint(home, destReal, toolsRoot, options, [
+    return await pollEndpoint(home, selected?.payloadRootLib ?? payloadRoot, toolsRoot, options, [
       "Another supervisor cold start is already in progress.",
     ]);
   }
+
   try {
+    if (!selected) {
+      try {
+        selected = readSelectedComponentPayload(home, toolsRoot, access);
+      } catch (error) {
+        return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
+      }
+    }
+    if (!selected) {
+      try {
+        validateComponentPayload(payloadRoot);
+        const staged = stageComponentPayload(home, toolsRoot, payloadRoot, access);
+        selected = selectComponentPayload(home, toolsRoot, staged.digest, access);
+      } catch (error) {
+        return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
+      }
+    }
+    if (!selected) return fail(["Selected component payload is missing."]);
+
+    const destEntry = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES.supervisor.split("/"));
+    const destWorker = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES["installation-worker"].split("/"));
+    if (!isRealFile(destEntry) || !inside(selected.packageRoot, destEntry)) {
+      return fail(["Selected supervisor entry is missing or not a real file."]);
+    }
+    if (!isRealFile(destWorker) || !inside(selected.packageRoot, destWorker)) {
+      return fail(["Selected snapshot-worker.mjs is missing or not a real file."]);
+    }
+
+    const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
+    const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
+    if (!viewRoot || !llmRoot) {
+      return fail(["Installed plugin package, view-bridge, or llm-bridge payload is missing."]);
+    }
+    const packedArtifacts = await packLocalArtifacts({
+      pluginPackageRoot: selected.packageRoot,
+      viewBridgeRoot: viewRoot,
+      llmBridgeRoot: llmRoot,
+      artifactDir: join(toolsRoot, "artifacts"),
+      home,
+      execPath,
+      env,
+      timeoutMs: options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS,
+      pack: options.pack,
+    });
+    if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
+    if (!packedArtifacts.llmBridgeArtifact) {
+      return fail(["llm-bridge artifact was not packed from the selected payload."]);
+    }
+
+    const childArgv = [
+      ...(options.allowRealHome ? ["--allow-real-home"] : []),
+      SUPERVISOR_CLI_FLAGS.home,
+      home,
+      SUPERVISOR_CLI_FLAGS.bin,
+      runtime.bin,
+      SUPERVISOR_CLI_FLAGS.node,
+      execPath,
+      SUPERVISOR_CLI_FLAGS.pluginArtifact,
+      packedArtifacts.pluginArtifact,
+      SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
+      packedArtifacts.viewBridgeArtifact,
+      SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
+      packedArtifacts.llmBridgeArtifact,
+      SUPERVISOR_CLI_FLAGS.controlToolRoot,
+      toolsRoot,
+      SUPERVISOR_CLI_FLAGS.snapshotWorker,
+      destWorker,
+      COMPONENT_PAYLOAD_ARGV_FLAG,
+      selected.payloadRootLib,
+    ];
+    if (snapshotRoot) childArgv.push(SUPERVISOR_CLI_FLAGS.snapshotRoot, snapshotRoot);
+
     const spawned = (options.spawn ?? defaultSpawn)({
       execPath,
       entry: destEntry,
       argv: childArgv,
-      cwd: destReal,
+      cwd: join(selected.payloadRootLib, SUPERVISOR_PAYLOAD_DIRNAME),
       env: { ...env, DSH_HOME: home },
     });
     if (spawned) spawned.unref();
-  } catch {
+    return await pollEndpoint(home, selected.payloadRootLib, toolsRoot, options, []);
+  } catch (error) {
+    return fail(["The supervisor process could not be started.", reasonOf(error)]);
+  } finally {
     releaseColdStart(reservation);
-    return fail(["The supervisor process could not be started."]);
   }
-
-  const polled = await pollEndpoint(home, destReal, toolsRoot, options, []);
-  if (!polled.connected) releaseColdStart(reservation);
-  else releaseColdStart(reservation);
-  return polled;
 }
 
 export function defaultPayloadRoot(from = import.meta.url): string {
@@ -287,71 +311,21 @@ async function pollEndpoint(
 }
 
 function defaultSpawn(request: SupervisorSpawnRequest): ChildProcess {
-  return spawn(request.execPath, [request.entry, ...request.argv], {
+  const child = spawn(request.execPath, [request.entry, ...request.argv], {
     cwd: request.cwd,
     env: request.env,
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     shell: false,
   });
+  child.stdout?.resume();
+  child.stderr?.resume();
+  return child;
 }
 
-function readPayloadManifest(dir: string): { version: string; entry: string } | null {
-  const file = join(dir, "manifest.json");
-  if (!isRealFile(file) || !inside(dir, file)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { version?: unknown; entry?: unknown };
-    if (typeof parsed.version !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(parsed.version)) return null;
-    if (typeof parsed.entry !== "string" || parsed.entry.includes("..") || parsed.entry.includes("\\")) return null;
-    if (parsed.entry.includes("\0") || isAbsolute(parsed.entry) || parsed.entry.startsWith("/")) return null;
-    return { version: parsed.version, entry: parsed.entry };
-  } catch {
-    return null;
-  }
-}
-
-function installPayload(src: string, dest: string): void {
-  if (existsSync(dest)) {
-    const current = realDirectory(dest);
-    if (current && contentId(current) === contentId(src)) return;
-    throw new Error("tools destination exists with different content");
-  }
-  mkdirSync(dirname(dest), { recursive: true });
-  cpSync(src, dest, { recursive: true, dereference: false });
-}
-
-function contentId(dir: string): string {
-  const hash = createHash("sha256");
-  for (const rel of listFiles(dir)) {
-    hash.update(rel);
-    hash.update(readFileSync(join(dir, rel)));
-  }
-  return hash.digest("hex").slice(0, 16);
-}
-
-function listFiles(dir: string, prefix = ""): string[] {
-  const rows: string[] = [];
-  let entries;
-  try {
-    entries = readdirSync(join(dir, prefix), { withFileTypes: true });
-  } catch {
-    return rows;
-  }
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const path = join(dir, prefix, entry.name);
-    let st;
-    try {
-      st = lstatSync(path);
-    } catch {
-      continue;
-    }
-    if (st.isSymbolicLink()) continue;
-    if (st.isDirectory()) rows.push(...listFiles(dir, rel));
-    else if (st.isFile()) rows.push(rel);
-  }
-  return rows;
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown error";
 }
 
 function reserveColdStart(path: string): boolean {

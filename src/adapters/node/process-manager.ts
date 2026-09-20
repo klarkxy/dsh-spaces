@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { createConnection, createServer } from "node:net";
 import { StringDecoder } from "node:string_decoder";
-import { t } from "../shared/i18n";
-import { formatWorkbenchFailure } from "../shared/workbench";
-import type { ProfileStatus } from "../shared/types";
+import { t } from "../../shared/i18n";
+import { formatWorkbenchFailure } from "../../shared/workbench";
+import type { ProfileStatus } from "../../shared/types";
 import { ensureDshCli, runDsh, spawnNode } from "./dsh-cli";
 import { PatchWriter, PatchVerifyError } from "./patch-writer";
 import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "./dsh-endpoint";

@@ -1,5 +1,5 @@
-import { t } from "../shared/i18n";
-import type { CreateProgress } from "../shared/types";
+import { t } from "../../shared/i18n";
+import type { CreateProgress } from "../../shared/types";
 import { addWebApp } from "./dsh-cli";
 import { PatchWriter } from "./patch-writer";
 import { ProfileRegistry } from "./profile-registry";

@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { atomicWrite } from "../../../../src/main/atomic";
+import { atomicWrite } from "../../../../src/adapters/node/atomic";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
 import { canonicalHome } from "../../../../src/adapters/node/home-operation-lock";
 import { deriveServiceEpoch, digestHomeIdentity } from "../../../../src/adapters/node/workbench-protocol";

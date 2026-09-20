@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 /**
+ * RETIRED historical source. Invocation fails closed and must not be treated
+ * as current B5/B6 evidence. Body kept for trace (old rollback inject /
+ * controller-era package upgrade). Current replacement:
+ *   scripts/verify-component-update.mjs
+ *
+ * Historical:
  * Workbench manager-package upgrade acceptance. Isolated Home only.
  * Packed supervisor for success. Source-seam driver for rollback inject
  * (not a packed-product failure). Real dsh plugin add. No model calls.
@@ -8,16 +14,7 @@
  * verify-workbench-product.mjs, or verify-workbench-interactions.mjs
  * (those parse argv / run at load). Safe to import this file; main is guarded.
  *
- *   node scripts/verify-workbench-package-upgrade.mjs [--phase success|rollback|all]
- *     [--self-check] [--http-only] [--with-browser] [--output DIR] [--home DIR]
- *     [--job-ms N]
- *
- * Reuses `.sandbox/workbench-maintenance-network-acceptance/results.json`
- * `phases.runtime.home` when present. New Homes are created only under
- * `.sandbox/workbench-package-acceptance`. Never ~/.dsh. Never prints tokens.
- *
- * Env: DSH_TEST_BIN, DSH_TEST_PLAYWRIGHT or DSH_TEST_PLAYWRIGHT_MODULE,
- * DSH_TEST_OUTPUT, DSH_TEST_HOME, DSH_TEST_PNPM_CJS, DSH_TEST_JOB_MS.
+ *   node scripts/verify-workbench-package-upgrade.mjs  → RETIRED (nonzero)
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -1460,8 +1457,9 @@ async function runAcceptance(flags) {
 
 const invoked = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invoked) {
-  main().catch(error => {
-    console.error(`FAIL ${redact(error instanceof Error ? error.message : error)}`);
-    process.exitCode = 1;
-  });
+  console.error(`RETIRED: scripts/verify-workbench-package-upgrade.mjs is historical source, not current evidence.
+Reason: it still drives old rollback inject / controller-era package-upgrade mutations that the product no longer supports. Invocation is fail-closed so those mutations never run.
+Replacement: scripts/verify-component-update.mjs
+That live script has not recorded a real PASS.`);
+  process.exitCode = 1;
 }

@@ -25,12 +25,12 @@ import {
   WorkbenchJobError,
   type WorkbenchJobContext,
 } from "../src/adapters/node/workbench-jobs.ts";
-import { isHubPluginArchive, readPluginLibrary } from "../src/main/plugin-library.ts";
-import { listProfilePlugins } from "../src/main/plugin-ops.ts";
-import { ProfileRegistry } from "../src/main/profile-registry.ts";
-import type { CoordinatedUpgrade } from "../src/main/coordinated-upgrade.ts";
-import type { DiagnosticsService } from "../src/main/diagnostics.ts";
-import type { SnapshotExecutor } from "../src/main/snapshot-executor.ts";
+import { isHubPluginArchive, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
+import { listProfilePlugins } from "../src/adapters/node/plugin-ops.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
+import type { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
+import type { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
+import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 import type { ProfileStatus } from "../src/shared/types.ts";
 
@@ -268,6 +268,10 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
     reinitializeManager: async () => undefined,
     setMaintenance: () => undefined,
     isCompatibleRuntime: (version: string) => version === runtime.version,
+    observation: () => ({
+      serviceEpoch: "c".repeat(64),
+      expectedRevision: "d".repeat(64),
+    }),
   };
   const maintenance = new WorkbenchMaintenance(ports, {
     packageSource: "official",

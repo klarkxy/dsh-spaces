@@ -13,7 +13,11 @@ import {
   HOME_CONTROL_MANAGER_FILE,
   HOME_CONTROL_OWNER_FILE,
   HOME_CONTROL_RUN_DIR_NAME,
+  HomeController,
+  type HomeControlHandle,
 } from "../src/adapters/node/home-controller.ts";
+import { canonicalHome } from "../src/adapters/node/home-operation-lock.ts";
+import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
 import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/spaces-control.ts";
 import { resolveHostIdentity } from "../packages/plugin/src/host/identity.ts";
 import { SpacesPlugin, injectHintScript } from "../packages/plugin/src/host/plugin.ts";
@@ -21,11 +25,18 @@ import { WorkbenchHostRuntime } from "../packages/plugin/src/host/runtime.ts";
 import { createWorkbenchHttpClient, mintSupervisorHandoff } from "../packages/plugin/src/host/workbench-http.ts";
 import { validateSnapshotRoot } from "../packages/plugin/src/host/supervisor-pack.ts";
 import {
+  COMPONENT_PAYLOAD_ARGV_FLAG,
   SUPERVISOR_CLI_FLAGS,
   SUPERVISOR_ENDPOINT_FILE,
   bootstrapSupervisor,
   writeEndpointFile,
 } from "../packages/plugin/src/host/supervisor-bootstrap.ts";
+import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
+import {
+  readSelectedComponentPayload,
+  selectComponentPayload,
+  stageComponentPayload,
+} from "../src/adapters/node/component-selection.ts";
 import { catalogIdSchema, workbenchCommandSchema, workbenchInitializeResultSchema, workbenchViewSchema, workbenchPackageResultSchema, workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import { GUIDE_METHODS, TYPERT } from "../packages/plugin/src/typert.host.ts";
 import {
@@ -36,7 +47,7 @@ import {
   readHostHint,
   WorkbenchRemoteError,
 } from "../packages/plugin/src/client/workbench-remote.ts";
-import { apply as applyClient, ReturnToWorkbenchPanel } from "../packages/plugin/src/client/index.tsx";
+import { apply as applyClient, GuidePanelView, ReturnToWorkbenchPanel } from "../packages/plugin/src/client/index.tsx";
 import { GUIDE_COPY } from "../packages/plugin/src/client/i18n.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -46,6 +57,10 @@ import { PARENT_PING_SOURCE, acceptParentMessage, postViewState } from "../packa
 
 const temps: string[] = [];
 const contexts: Context[] = [];
+const handles: HomeControlHandle[] = [];
+const HEX64_A = "ab".repeat(32);
+const HEX64_B = "cd".repeat(32);
+const STATE_SINCE = "2026-09-20T00:00:00.000Z";
 
 test("package update RPC preserves a missing candidate and rejects browser paths", async () => {
   const endpoints: string[] = [];
@@ -64,6 +79,13 @@ test("package update RPC preserves a missing candidate and rejects browser paths
 });
 
 afterEach(async () => {
+  for (const handle of handles.splice(0)) {
+    try {
+      handle.release();
+    } catch {
+      /* test isolation */
+    }
+  }
   for (const ctx of contexts.splice(0)) {
     try {
       await ctx.fiber.dispose();
@@ -119,18 +141,36 @@ function methodsOf(service: object): string[] {
   return remoteMethods(service).map((row) => row.exportName ?? row.method);
 }
 
-function writePayload(pluginRoot: string): string {
-  const lib = join(pluginRoot, "lib");
-  const supervisor = join(lib, "supervisor");
-  const viewBridge = join(lib, "view-bridge");
-  mkdirSync(supervisor, { recursive: true });
-  mkdirSync(viewBridge, { recursive: true });
-  writeFileSync(join(pluginRoot, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", version: "0.2.0" })}\n`);
-  writeFileSync(join(viewBridge, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/view-bridge", version: "0.2.0" })}\n`);
-  writeFileSync(join(supervisor, "manifest.json"), `${JSON.stringify({ version: "0.2.0", entry: "index.js" })}\n`);
-  writeFileSync(join(supervisor, "index.js"), "export {};\n");
-  writeFileSync(join(supervisor, "snapshot-worker.mjs"), "export {};\n");
-  return lib;
+function writeRel(root: string, rel: string, content: string): void {
+  const abs = join(root, ...rel.split("/"));
+  mkdirSync(join(abs, ".."), { recursive: true });
+  writeFileSync(abs, content);
+}
+
+function writePayload(pluginRoot: string, marker = "payload"): string {
+  const pkg = (name: string) => `${JSON.stringify({ name, version: "0.2.0" })}\n`;
+  const files: Array<[string, string]> = [
+    ["package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["manager-plugin"])],
+    ["cordis.patch.yml", "plugin: dummy\n"],
+    ["lib/index.js", `export const marker = ${JSON.stringify(marker)};\n`],
+    ["lib/typert.host.js", "export {};\n"],
+    ["lib/typert.remote-client.js", "export {};\n"],
+    ["lib/client.js", "export {};\n"],
+    ["lib/supervisor/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.supervisor)],
+    ["lib/supervisor/index.js", "export {};\n"],
+    ["lib/supervisor/launcher.mjs", "export {};\n"],
+    ["lib/supervisor/snapshot-worker.mjs", "export {};\n"],
+    ["lib/view-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["view-bridge"])],
+    ["lib/view-bridge/cordis.patch.yml", "view: dummy\n"],
+    ["lib/view-bridge/lib/index.js", "export {};\n"],
+    ["lib/view-bridge/lib/client.js", "export {};\n"],
+    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
+    ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
+    ["lib/llm-bridge/lib/index.js", "export {};\n"],
+  ];
+  for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
+  writeComponentPayloadManifest(join(pluginRoot, "lib"));
+  return join(pluginRoot, "lib");
 }
 
 async function stubPack(request: { packageRoot: string; destination: string }): Promise<string> {
@@ -141,10 +181,59 @@ async function stubPack(request: { packageRoot: string; destination: string }): 
   return path;
 }
 
+function v2State(epoch: string) {
+  return {
+    protocolVersion: 2 as const,
+    serviceEpoch: epoch,
+    revision: HEX64_B,
+    availability: "ready" as const,
+    role: "manager" as const,
+    managerId: "spaces-hub",
+    owner: { kind: "web" as const, since: STATE_SINCE },
+    writable: true,
+    mode: "verified-full" as const,
+    dshVersion: "0.1.5-rc.1",
+    maintenance: false,
+    reasons: [],
+    spaces: [
+      {
+        id: "spaces-hub",
+        displayName: "Manager",
+        isHost: true,
+        hasWebApp: true,
+        isolation: "verified",
+        icon: "",
+        status: "running",
+        generation: 1,
+        managed: true,
+        needsIsolation: false,
+      },
+    ],
+    jobs: [],
+  };
+}
+
+function v2Endpoint(home: string, origin: string, bearer: string, nonce: string) {
+  return {
+    origin,
+    bearer,
+    protocolVersion: 2 as const,
+    homeId: digestHomeIdentity(canonicalHome(home, { allowRealHome: false })),
+    serviceEpoch: deriveServiceEpoch(nonce),
+  };
+}
+
+function leaseWeb(home: string, origin: string): HomeControlHandle {
+  const handle = new HomeController(home, { allowRealHome: false }).acquire("web", `${origin}/`);
+  handles.push(handle);
+  return handle;
+}
+
 function startFixture(options: {
   bearer: string;
   originOut?: { value: string };
   handoff?: string;
+  epochRef?: { value: string };
 }): Promise<{ origin: string; close: () => Promise<void>; tokens: string[] }> {
   const tokens: string[] = [];
   const server = createServer((req, res) => {
@@ -160,19 +249,7 @@ function startFixture(options: {
       res.end(
         JSON.stringify({
           ok: true,
-          value: {
-            role: "manager",
-            managerId: "spaces-hub",
-            owner: null,
-            writable: true,
-            mode: "verified-full",
-            dshVersion: "0.1.5-rc.1",
-            maintenance: false,
-            recoveryRequired: false,
-            reasons: [],
-            spaces: [{ id: "spaces-hub", displayName: "Manager", isHost: true, hasWebApp: true, isolation: "verified", icon: "", status: "running", generation: 1, managed: true, needsIsolation: false }],
-            jobs: [],
-          },
+          value: v2State(options.epochRef?.value || HEX64_A),
         }),
       );
       return;
@@ -298,6 +375,7 @@ test("manager profile registers manager WorkbenchApi and compatibility reads, no
   assert.deepEqual(methodsOf(plugin.guide), ["role", "bootstrap", "returnTarget", "initialize"]);
   assert.ok(methodsOf(plugin.manager!).includes("state"));
   assert.ok(methodsOf(plugin.manager!).includes("submit"));
+  assert.ok(methodsOf(plugin.manager!).includes("product"));
   assert.equal(methodsOf(plugin.spaces!).includes("create"), false);
   assert.equal(methodsOf(plugin.spaces!).includes("verify"), false);
   assert.deepEqual(methodsOf(plugin.spaces!), ["overview", "detail"]);
@@ -311,7 +389,7 @@ test("guide bootstrap refuses damaged identity and does not clear locks", async 
   mkdirSync(join(home, ".dsh-spaces-lock"));
   const runtime = new WorkbenchHostRuntime(identityInput(home, "web"));
   const result = await runtime.bootstrap();
-  assert.equal(result.recoveryRequired, true);
+  assert.equal(result.unavailable, true);
   assert.equal(result.connected, false);
   assert.equal(result.origin, null);
   assert.ok(readFileSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE), "utf8").includes("{not-json"));
@@ -325,8 +403,11 @@ test("bootstrap copies payload, packs artifacts, passes CLI flags, and pings bef
   const payloadRoot = writePayload(pluginRoot);
   const toolsRoot = tempDir("dsh-wb-tools-");
   const bearer = "B".repeat(32);
-  const fixture = await startFixture({ bearer });
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
   const spawned: string[][] = [];
+  const packedRoots: string[] = [];
+  let spawnEntry = "";
   try {
     const result = await bootstrapSupervisor({
       home,
@@ -336,26 +417,39 @@ test("bootstrap copies payload, packs artifacts, passes CLI flags, and pings bef
       payloadRoot,
       toolsRoot,
       allowColdStart: true,
+      allowRealHome: false,
       timeoutMs: 3_000,
       pollMs: 20,
-      pack: stubPack,
+      pack: async (request) => {
+        packedRoots.push(request.packageRoot);
+        return stubPack(request);
+      },
       fetch: (input, init) => fetch(input, init),
       spawn: (request) => {
         spawned.push([...request.argv]);
-        writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), {
-          origin: fixture.origin,
-          bearer,
-        });
+        spawnEntry = request.entry;
+        const handle = leaseWeb(home, fixture.origin);
+        epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+        writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
       },
     });
-    assert.equal(result.connected, true);
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
     if (!result.connected) return;
     assert.equal(result.origin, fixture.origin);
     assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.pluginArtifact));
     assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.viewBridgeArtifact));
     assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.controlToolRoot));
     assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.snapshotWorker));
+    assert.ok(spawned[0]?.includes(COMPONENT_PAYLOAD_ARGV_FLAG));
     assert.ok(spawned[0]?.includes(toolsRoot));
+    assert.match(spawnEntry.replaceAll("\\", "/"), /lib\/supervisor\/index\.js$/);
+    assert.ok(spawned[0]?.some((row) => /snapshot-worker\.mjs$/.test(row.replaceAll("\\", "/"))));
+    assert.ok(spawned[0]?.some((row) => /[/\\]lib$/.test(row) || row.replaceAll("\\", "/").endsWith("/lib")));
+    assert.ok(packedRoots.some((root) => root.replaceAll("\\", "/").includes("/components/")));
+    assert.ok(packedRoots.some((root) => root.replaceAll("\\", "/").includes("view-bridge")));
+    const selected = readSelectedComponentPayload(home, toolsRoot);
+    assert.ok(selected);
+    assert.equal(result.payloadDir, selected?.payloadRootLib);
     assert.equal(JSON.stringify({ origin: result.origin }).includes(bearer), false);
   } finally {
     await fixture.close();
@@ -379,6 +473,108 @@ test("missing supervisor payload diagnoses instead of mocking a connection", asy
   assert.ok(result.reasons.some((row) => /payload/i.test(row)));
 });
 
+test("v1 supervisor manifest is not a successful payload", async () => {
+  const home = tempDir("dsh-wb-v1-payload-");
+  writeProfile(home, "web");
+  const pluginRoot = tempDir("dsh-wb-v1-pkg-");
+  mkdirSync(join(pluginRoot, "lib", "supervisor"), { recursive: true });
+  writeFileSync(join(pluginRoot, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", version: "0.2.0" })}\n`);
+  writeFileSync(join(pluginRoot, "lib", "supervisor", "manifest.json"), `${JSON.stringify({ version: "0.2.0", entry: "index.js" })}\n`);
+  writeFileSync(join(pluginRoot, "lib", "supervisor", "index.js"), "export {};\n");
+  writeFileSync(join(pluginRoot, "lib", "supervisor", "snapshot-worker.mjs"), "export {};\n");
+  let spawned = 0;
+  const result = await bootstrapSupervisor({
+    home,
+    argv: [process.execPath, writeCli(home), "--profile", "web"],
+    env: { ...process.env, DSH_HOME: home },
+    execPath: process.execPath,
+    payloadRoot: join(pluginRoot, "lib"),
+    toolsRoot: tempDir("dsh-wb-v1-tools-"),
+    allowColdStart: true,
+    timeoutMs: 200,
+    pack: stubPack,
+    spawn: () => {
+      spawned += 1;
+    },
+  });
+  assert.equal(result.connected, false);
+  assert.equal(spawned, 0);
+  assert.ok(result.reasons.some((row) => /schemaVersion|staged|payload/i.test(row)));
+});
+
+test("selected pointer is authoritative and is not overwritten by a new bundled payload", async () => {
+  const home = tempDir("dsh-wb-selected-");
+  writeProfile(home, "web");
+  const toolsRoot = tempDir("dsh-wb-selected-tools-");
+  const firstLib = writePayload(tempDir("dsh-wb-selected-first-"), "first");
+  const staged = stageComponentPayload(home, toolsRoot, firstLib);
+  mkdirSync(join(toolsRoot, "coldstart.lock"));
+  const selected = selectComponentPayload(home, toolsRoot, staged.digest);
+  rmSync(join(toolsRoot, "coldstart.lock"), { recursive: true, force: true });
+  const bundled = writePayload(tempDir("dsh-wb-selected-bundled-"), "bundled");
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const spawned: string[][] = [];
+  try {
+    const result = await bootstrapSupervisor({
+      home,
+      argv: [process.execPath, writeCli(home), "--profile", "web"],
+      env: { ...process.env, DSH_HOME: home },
+      execPath: process.execPath,
+      payloadRoot: bundled,
+      toolsRoot,
+      allowColdStart: true,
+      timeoutMs: 3_000,
+      pollMs: 20,
+      pack: stubPack,
+      fetch: (input, init) => fetch(input, init),
+      spawn: (request) => {
+        spawned.push([...request.argv]);
+        const handle = leaseWeb(home, fixture.origin);
+        epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+        writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+      },
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+    const again = readSelectedComponentPayload(home, toolsRoot);
+    assert.equal(again?.digest, selected.digest);
+    assert.ok(spawned[0]?.includes(selected.payloadRootLib));
+    assert.equal(result.connected && result.payloadDir, selected.payloadRootLib);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("invalid selected pointer fails closed without falling back to bundled payload", async () => {
+  const home = tempDir("dsh-wb-bad-pointer-");
+  writeProfile(home, "web");
+  const toolsRoot = tempDir("dsh-wb-bad-pointer-tools-");
+  const homeDigest = digestHomeIdentity(canonicalHome(home, { allowRealHome: false }));
+  const pointer = join(toolsRoot, `selected-${homeDigest}.json`);
+  writeFileSync(pointer, "{not-json");
+  const original = readFileSync(pointer, "utf8");
+  let spawned = 0;
+  const result = await bootstrapSupervisor({
+    home,
+    argv: [process.execPath, writeCli(home), "--profile", "web"],
+    env: { ...process.env, DSH_HOME: home },
+    execPath: process.execPath,
+    payloadRoot: writePayload(tempDir("dsh-wb-bad-pointer-pkg-")),
+    toolsRoot,
+    allowColdStart: true,
+    timeoutMs: 200,
+    pack: stubPack,
+    spawn: () => {
+      spawned += 1;
+    },
+  });
+  assert.equal(result.connected, false);
+  assert.equal(spawned, 0);
+  assert.ok(result.reasons.some((row) => /pointer is invalid/i.test(row)));
+  assert.equal(readFileSync(pointer, "utf8"), original);
+});
+
 test("manager HTTP client posts to /api/workbench/<method> and sanitizes errors", async () => {
   const bearer = "C".repeat(32);
   let seenAuth = "";
@@ -396,24 +592,7 @@ test("manager HTTP client posts to /api/workbench/<method> and sanitizes errors"
       }
       if (req.url === "/api/workbench/state") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(
-          JSON.stringify({
-            ok: true,
-            value: {
-              role: "manager",
-              managerId: "spaces-hub",
-              owner: null,
-              writable: true,
-              mode: "verified-full",
-              dshVersion: "0.1.5-rc.1",
-              maintenance: false,
-              recoveryRequired: false,
-              reasons: [],
-              spaces: [],
-              jobs: [],
-            },
-          }),
-        );
+        res.end(JSON.stringify({ ok: true, value: v2State(HEX64_A) }));
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
@@ -425,7 +604,15 @@ test("manager HTTP client posts to /api/workbench/<method> and sanitizes errors"
   assert.ok(address && typeof address === "object");
   const origin = `http://127.0.0.1:${address.port}`;
   try {
-    const api = createWorkbenchHttpClient({ endpoint: { origin, bearer } });
+    const api = createWorkbenchHttpClient({
+      endpoint: {
+        origin,
+        bearer,
+        protocolVersion: 2,
+        homeId: HEX64_A,
+        serviceEpoch: HEX64_A,
+      },
+    });
     const state = await api.state();
     assert.equal(state.role, "manager");
     assert.equal(seenAuth, `Bearer ${bearer}`);
@@ -447,6 +634,7 @@ test("typert schemas reject extra fields, tokens, and non-loopback views", () =>
   assert.equal(catalogIdSchema.safeParse("git+https://example.com/repo.git").success, false);
   assert.equal(
     workbenchViewSchema.safeParse({
+      serviceEpoch: HEX64_A,
       spaceId: "notes",
       generation: 1,
       origin: "http://example.com",
@@ -457,6 +645,7 @@ test("typert schemas reject extra fields, tokens, and non-loopback views", () =>
     false,
   );
   const ok = workbenchViewSchema.safeParse({
+    serviceEpoch: HEX64_A,
     spaceId: "notes",
     generation: 1,
     origin: "http://127.0.0.1:10",
@@ -465,6 +654,11 @@ test("typert schemas reject extra fields, tokens, and non-loopback views", () =>
     channel: "c1",
   });
   assert.equal(ok.success, true);
+  assert.equal(workbenchCommandSchema.safeParse({ kind: "recovery.resume" }).success, false);
+  assert.equal(workbenchCommandSchema.safeParse({ kind: "controller.acquire" }).success, false);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "snapshot.restore", snapshotId: "snap-1" }).success, false);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "controller.release" }).success, false);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "service.shutdown" }).success, true);
 });
 
 test("client remotes sanitize unknown errors and refuse non-loopback return URLs", async () => {
@@ -483,9 +677,9 @@ test("client remotes sanitize unknown errors and refuse non-loopback return URLs
   assert.equal(isTrustedLoopbackHref("http://127.0.0.1:9", "/"), "http://127.0.0.1:9/");
   assert.equal(isTrustedLoopbackHref("http://127.0.0.1:9", "//evil"), null);
   assert.equal(isTrustedLoopbackHref("http://example.com", "/"), null);
-  assert.equal(readHostHint({ __DSH_SPACES_HOST__: { role: "manager", recoveryRequired: false } })?.role, "manager");
-  assert.equal(readHostHint({ __DSH_SPACES_HOST__: { role: "root", recoveryRequired: false } }), null);
-  const html = injectHintScript("<head></head>", JSON.stringify({ role: "workspace", recoveryRequired: false }));
+  assert.equal(readHostHint({ __DSH_SPACES_HOST__: { role: "manager", unavailable: false } })?.role, "manager");
+  assert.equal(readHostHint({ __DSH_SPACES_HOST__: { role: "root", unavailable: false } }), null);
+  const html = injectHintScript("<head></head>", JSON.stringify({ role: "workspace", unavailable: false }));
   assert.match(html, /__DSH_SPACES_HOST__/);
 });
 
@@ -508,9 +702,10 @@ test("client apply registers root only for manager hints and a return entry othe
   assert.ok(registrations.some((row) => row.name === "sidebar.panellist" && row.id === "dsh-spaces"));
   assert.ok(registrations.some((row) => row.name === "main" && row.key === "dsh-spaces"));
   assert.equal(typeof ReturnToWorkbenchPanel, "function");
+  assert.equal(typeof GuidePanelView, "function");
 
   registrations.length = 0;
-  (globalThis as { __DSH_SPACES_HOST__?: unknown }).__DSH_SPACES_HOST__ = { role: "manager", recoveryRequired: false };
+  (globalThis as { __DSH_SPACES_HOST__?: unknown }).__DSH_SPACES_HOST__ = { role: "manager", unavailable: false };
   try {
     applyClient(ctx as never);
     assert.ok(registrations.some((row) => row.name === "root"));
@@ -518,6 +713,62 @@ test("client apply registers root only for manager hints and a return entry othe
   } finally {
     delete (globalThis as { __DSH_SPACES_HOST__?: unknown }).__DSH_SPACES_HOST__;
   }
+});
+
+test("guide error cards are details-only; initialize is only first healthy startup", () => {
+  const en = GUIDE_COPY.en;
+  const render = (mode: Parameters<typeof GuidePanelView>[0]["mode"], error: string | null = null) =>
+    renderToStaticMarkup(
+      createElement(GuidePanelView, {
+        locale: "en",
+        mode,
+        error,
+        status: null,
+        busy: null,
+      }),
+    );
+  const noRecoveryActions = (html: string) => {
+    assert.equal(html.includes(en.retry), false);
+    assert.equal(html.includes(en.startAction), false);
+    assert.equal(html.includes('data-dsh-spaces-action="initialize"'), false);
+    assert.equal(html.includes('data-dsh-spaces-action="enter"'), false);
+    assert.equal(html.includes('data-dsh-spaces-copy="details"'), true);
+    assert.match(html, /role="alert"/);
+  };
+
+  const blocked = render("blocked", "Manager identity is damaged or ambiguous and cannot be guessed.");
+  assert.match(blocked, /data-dsh-spaces-guide="blocked"/);
+  assert.equal(blocked.includes(en.blockedTitle), true);
+  noRecoveryActions(blocked);
+
+  const roleFailed = render("failed", "C:\\\\Users\\\\admin\\\\.dsh token");
+  assert.match(roleFailed, /data-dsh-spaces-guide="failed"/);
+  assert.equal(roleFailed.includes("[path]"), true);
+  assert.equal(roleFailed.includes("C:\\\\Users"), false);
+  noRecoveryActions(roleFailed);
+
+  const initFailed = render("init-failed", "The bound DSH CLI could not be validated from the current process.");
+  assert.match(initFailed, /data-dsh-spaces-guide="init-failed"/);
+  noRecoveryActions(initFailed);
+
+  const enterFailed = render("enter-failed", "The workbench entry is not available yet.");
+  assert.match(enterFailed, /data-dsh-spaces-guide="enter-failed"/);
+  noRecoveryActions(enterFailed);
+
+  const firstInit = render("init");
+  assert.match(firstInit, /data-dsh-spaces-guide="init"/);
+  assert.equal(firstInit.includes('data-dsh-spaces-action="initialize"'), true);
+  assert.equal(firstInit.includes(en.initAction), true);
+  assert.equal(firstInit.includes(en.retry), false);
+  assert.equal(firstInit.includes(en.startAction), false);
+  assert.equal(firstInit.includes('data-dsh-spaces-copy="details"'), false);
+
+  const enter = render("enter");
+  assert.match(enter, /data-dsh-spaces-guide="enter"/);
+  assert.equal(enter.includes('data-dsh-spaces-action="enter"'), true);
+  assert.equal(enter.includes('data-dsh-spaces-action="initialize"'), false);
+  assert.equal(enter.includes(en.startAction), false);
+  assert.equal(enter.includes(en.retry), false);
 });
 
 test("view-bridge ignores invalid env, has no management API, and can ready again after disconnect", () => {
@@ -533,11 +784,21 @@ test("view-bridge ignores invalid env, has no management API, and can ready agai
   contexts.push(ctx);
   assert.equal(applyViewHost(ctx, {}, {}), null);
 
+  assert.equal(
+    parseViewEnv({
+      DSH_SPACES_VIEW_PARENT_ORIGIN: "http://127.0.0.1:11",
+      DSH_SPACES_VIEW_ID: "notes",
+      DSH_SPACES_VIEW_GENERATION: "3",
+      DSH_SPACES_VIEW_CHANNEL: "chan-1",
+    }),
+    null,
+  );
   const view = parseViewEnv({
     DSH_SPACES_VIEW_PARENT_ORIGIN: "http://127.0.0.1:11",
     DSH_SPACES_VIEW_ID: "notes",
     DSH_SPACES_VIEW_GENERATION: "3",
     DSH_SPACES_VIEW_CHANNEL: "chan-1",
+    DSH_SPACES_VIEW_SERVICE_EPOCH: HEX64_A,
   });
   assert.ok(view);
   const posted: Array<{ data: { state: string }; origin: string }> = [];
@@ -598,7 +859,7 @@ test("view-bridge ignores invalid env, has no management API, and can ready agai
   const ping = {
     origin: "http://127.0.0.1:11",
     source: parent,
-    data: { source: PARENT_PING_SOURCE, type: "ping", spaceId: "notes", generation: 3, channel: "chan-1" },
+    data: { source: PARENT_PING_SOURCE, type: "ping", serviceEpoch: HEX64_A, spaceId: "notes", generation: 3, channel: "chan-1" },
   };
   const addMessage = startViewBridge(
     { slots: { inject: (_n, cb) => { cb(); return () => undefined; } } },
@@ -671,8 +932,8 @@ test("stale endpoint with a live foreign owner is not overwritten", async () => 
       endpoint: "http://127.0.0.1:1/",
     })}\n`,
   );
-  const original = { origin: "http://127.0.0.1:9", bearer: "D".repeat(32) };
-  writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), original);
+  const original = `${JSON.stringify({ version: 1, origin: "http://127.0.0.1:9", bearer: "D".repeat(32) })}\n`;
+  writeFileSync(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), original);
   let spawned = 0;
   const result = await bootstrapSupervisor({
     home,
@@ -699,11 +960,14 @@ test("returnTarget mints a one-time /bootstrap path and cookie exchange 303s to 
   const home = tempDir("dsh-wb-handoff-");
   writeProfile(home, "notes");
   const bearer = "E".repeat(32);
-  const fixture = await startFixture({ bearer });
-  writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), {
-    origin: fixture.origin,
-    bearer,
-  });
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const handle = leaseWeb(home, fixture.origin);
+  epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+  writeEndpointFile(
+    join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE),
+    v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce),
+  );
   try {
     const runtime = new WorkbenchHostRuntime({
       ...identityInput(home, "notes"),
@@ -720,10 +984,7 @@ test("returnTarget mints a one-time /bootstrap path and cookie exchange 303s to 
     assert.equal(response.status, 303);
     assert.equal(response.headers.get("location"), "/");
     assert.match(String(response.headers.get("set-cookie")), /HttpOnly/);
-    const minted = await mintSupervisorHandoff((input, init) => fetch(input, init), {
-      origin: fixture.origin,
-      bearer,
-    });
+    const minted = await mintSupervisorHandoff((input, init) => fetch(input, init), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
     assert.equal(minted.startsWith("/bootstrap/"), true);
   } finally {
     await fixture.close();
@@ -751,6 +1012,7 @@ test("initialize rejects a CLI that cannot be bound before manager allocation or
   });
   const result = await runtime.initialize();
   assert.equal(result.ok, false);
+  assert.equal(result.unavailable, false);
   assert.equal(attempts, 0);
   assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE)), false);
 });
@@ -786,7 +1048,7 @@ test("initialize rechecks identity damage that appears after the page loads", as
   mkdirSync(join(home, HOME_CONTROL_DIR_NAME), { recursive: true });
   writeFileSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE), "{broken");
   const result = await runtime.initialize();
-  assert.equal(result.recoveryRequired, true);
+  assert.equal(result.unavailable, true);
   assert.equal(attempts, 0);
   assert.equal(readFileSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE), "utf8"), "{broken");
 });
@@ -796,16 +1058,20 @@ for (const version of ["0.1.5-rc.1", "0.1.5-rc.2"]) {
     const home = tempDir("dsh-init-concurrent-");
     writeProfile(home, "web");
     const bin = writeCli(home, version);
-    const fixture = await startFixture({ bearer: "G".repeat(32) });
-    const endpoint = { origin: fixture.origin, bearer: "G".repeat(32) };
+    const epochRef = { value: HEX64_A };
+    const fixture = await startFixture({ bearer: "G".repeat(32), epochRef });
     let starts = 0;
     const options = {
       ...identityInput(home, "web", { argv: [process.execPath, bin, "--profile", "web"] }),
+      fetch: (input: string, init?: RequestInit) => fetch(input, init),
       bootstrap: async () => {
         starts++;
         await new Promise(resolve => setTimeout(resolve, 10));
         writeManager(home, "spaces-hub");
         writeProfile(home, "spaces-hub");
+        const handle = leaseWeb(home, fixture.origin);
+        epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+        const endpoint = v2Endpoint(home, fixture.origin, "G".repeat(32), handle.owner.nonce);
         writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), endpoint);
         return { connected: true as const, origin: fixture.origin, endpoint, payloadDir: home, toolsDir: home };
       },

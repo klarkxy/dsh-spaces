@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 /**
+ * RETIRED historical source. Invocation fails closed and must not be treated
+ * as current B5/B6 evidence. Body kept for trace (old restore-kill / rc.1
+ * allowlist). Current replacement:
+ *   scripts/verify-workbench-maintenance-product.mjs
+ *
+ * Historical:
  * Real maintenance-fault acceptance. Isolated Home, empty session, rc1 CLI,
  * packed plugin/view-bridge. No model calls. Does not import
  * scripts/verify-workbench-maintenance-product.mjs (unsafe: top-level parseFlags).
@@ -8,11 +14,7 @@
  * and a dedicated SnapshotStore worker). Packed supervisor/doctor are the formal
  * restore entry after a crash. Do not treat this as a full distribution proof.
  *
- *   node scripts/verify-workbench-maintenance-faults.mjs [--phase upgrade-throw|restore-kill|upgrade-kill|all]
- *     [--self-check] [--http-only] [--output DIR] [--home DIR]
- *
- * Env: DSH_TEST_BIN, DSH_TEST_OUTPUT, DSH_TEST_HOME, DSH_TEST_PNPM_CJS,
- * DSH_TEST_PLAYWRIGHT or DSH_TEST_PLAYWRIGHT_MODULE.
+ *   node scripts/verify-workbench-maintenance-faults.mjs  → RETIRED (nonzero)
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -1195,8 +1197,9 @@ function runDoctorRecover(ctx) {
 
 const invoked = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invoked) {
-  main().catch(error => {
-    console.error(`FAIL ${redact(error instanceof Error ? error.message : error)}`);
-    process.exitCode = 1;
-  });
+  console.error(`RETIRED: scripts/verify-workbench-maintenance-faults.mjs is historical source, not current evidence.
+Reason: it still drives old restore-kill / controller-era / rc.1 allowlist mutations that the product no longer supports. Invocation is fail-closed so those mutations never run.
+Replacement: scripts/verify-workbench-maintenance-product.mjs (snapshot create/list/delete; no restore).
+That live script has not recorded a real PASS.`);
+  process.exitCode = 1;
 }

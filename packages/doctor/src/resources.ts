@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { HOME_CONTROL_DIR_NAME } from "../../../src/adapters/node/home-controller.ts";
-import { atomicWrite } from "../../../src/main/atomic.ts";
+import { atomicWrite } from "../../../src/adapters/node/atomic.ts";
 import { isCompatibleDshCliVersion } from "../../../src/adapters/node/spaces-control.ts";
 import {
   CONTROL_TOOLCHAIN_FILE,

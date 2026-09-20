@@ -1,11 +1,10 @@
 /**
- * Test-only snapshot worker. Installs the original SnapshotStore.inject seam on
- * restore, then loads the production snapshot-worker dispatcher (runtimeInstall,
- * async errors, child-process journals). Do not pack this as a product worker.
+ * Test-only snapshot worker. Installs SnapshotStore.inject on create, then loads
+ * the production dispatcher. Restore is not patched. Do not pack as a product worker.
  */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SnapshotStore } from "../../../src/main/snapshot-store.ts";
+import { SnapshotStore } from "../../../src/adapters/node/snapshot-store.ts";
 
 type SnapshotInject = (op: string, detail?: string) => void;
 
@@ -14,12 +13,11 @@ const action = String(process.env.DSH_FAULT_SNAPSHOT_ACTION ?? "").trim();
 const markerDir = String(process.env.DSH_FAULT_MARKER_DIR ?? "").trim();
 
 if (hook) {
-  const originalRestore = SnapshotStore.prototype.restore;
-  SnapshotStore.prototype.restore = function restoreWithFaultInject(
+  const originalCreate = SnapshotStore.prototype.create;
+  SnapshotStore.prototype.create = function createWithFaultInject(
     this: SnapshotStore,
-    id: string,
-    runtime?: Parameters<typeof originalRestore>[1],
-    options?: Parameters<typeof originalRestore>[2],
+    runtime: Parameters<typeof originalCreate>[0],
+    reason?: Parameters<typeof originalCreate>[1],
   ) {
     const store = this as SnapshotStore & { inject?: SnapshotInject };
     const previous = store.inject;
@@ -28,14 +26,14 @@ if (hook) {
       if (op === hook) onSnapshotHook(op, detail);
     };
     try {
-      return originalRestore.call(this, id, runtime, options);
+      return originalCreate.call(this, runtime, reason);
     } finally {
       store.inject = previous;
     }
   };
 }
 
-await import("../../../src/main/snapshot-worker.ts");
+await import("../../../src/adapters/node/snapshot-worker.ts");
 
 function onSnapshotHook(op: string, detail?: string): void {
   writeMarker({

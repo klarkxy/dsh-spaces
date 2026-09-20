@@ -52,6 +52,14 @@ const catalogIdSchema = z
     "catalog id",
   );
 const exactVersionSchema = z.string().refine(isExactRuntimeVersion, "exact version required");
+// Library keys are persisted npm pins, catalog IDs or GitHub specs, not entity UUIDs.
+const libraryIdSchema = z.string().min(1).max(512).refine((value) => {
+  if (containsLocalPath(value) || containsCredentialUrl(value)) return false;
+  if (ENTITY_ID_RE.test(value)) return true;
+  const npm = /^((?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*)(?:@(.+))?$/.exec(value);
+  if (npm) return npm[2] === undefined || isExactRuntimeVersion(npm[2]);
+  return /^(?:github:)?[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*(?:#[A-Za-z0-9][A-Za-z0-9._/-]{0,127})?$/.test(value);
+}, "library id");
 const httpUrlSchema = z.string().max(2048).refine((value) => isHttpUrlWithoutCredentials(value), "http url");
 const optionalHttpUrlSchema = z
   .string()
@@ -70,7 +78,7 @@ const homeSettingsSchema = z
 
 const libraryItemSchema = z
   .object({
-    id: entityIdSchema,
+    id: libraryIdSchema,
     packageName: packageNameSchema,
     title: z.string().min(1).max(200),
     version: z.union([exactVersionSchema, z.null()]),
@@ -307,6 +315,7 @@ export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> =
 ]);
 
 export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("workbench.prepare"), version: z.union([z.literal("latest"), exactVersionSchema]).optional() }).strict(),
   z.object({ kind: z.literal("settings.update"), settings: homeSettingsSchema }).strict(),
   z.object({ kind: z.literal("catalog.refresh"), url: optionalHttpUrlSchema.optional() }).strict(),
   z
@@ -317,7 +326,7 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
       version: exactVersionSchema.optional(),
     })
     .strict(),
-  z.object({ kind: z.literal("plugin.library.remove"), libraryId: entityIdSchema }).strict(),
+  z.object({ kind: z.literal("plugin.library.remove"), libraryId: libraryIdSchema }).strict(),
   z
     .object({
       kind: z.literal("template.save"),
@@ -345,10 +354,15 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
 ]);
 
 export const workbenchProductOutcomeSchema: z.ZodType<WorkbenchProductOutcome> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("workbench.prepare"), candidate: z.object({
+    id: z.literal("bundled-workbench"), version: exactVersionSchema,
+    installedVersion: z.union([exactVersionSchema, z.null()]),
+    digest: z.string().regex(DIGEST_RE), updateAvailable: z.boolean(),
+  }).strict() }).strict(),
   z.object({ kind: z.literal("settings.update"), settings: homeSettingsSchema }).strict(),
   z.object({ kind: z.literal("catalog.refresh"), count: z.number().int().nonnegative().max(10_000) }).strict(),
   z.object({ kind: z.literal("plugin.download"), item: libraryItemSchema }).strict(),
-  z.object({ kind: z.literal("plugin.library.remove"), libraryId: entityIdSchema }).strict(),
+  z.object({ kind: z.literal("plugin.library.remove"), libraryId: libraryIdSchema }).strict(),
   z.object({ kind: z.literal("template.save"), templateId: entityIdSchema }).strict(),
   z.object({ kind: z.literal("template.create"), import: spaceImportResultSchema }).strict(),
   z.object({ kind: z.literal("space.import"), import: spaceImportResultSchema }).strict(),

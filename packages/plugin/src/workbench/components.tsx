@@ -643,6 +643,7 @@ function WorkbenchPackageSection({ ui, controller }: WorkbenchViewProps): ReactE
   const contentUpdate = Boolean(
     pkg && pkg.updateAvailable && pkg.installedVersion !== null && pkg.version === pkg.installedVersion,
   );
+  const canPrepare = Boolean(writable && !busy && ui.workbenchPackageStatus !== "loading");
   const canUpgrade = Boolean(writable && !busy && pkg?.updateAvailable);
   return (
     <section className="dsh-wb-package" data-workbench-package="true" aria-labelledby="dsh-wb-package-title">
@@ -653,9 +654,13 @@ function WorkbenchPackageSection({ ui, controller }: WorkbenchViewProps): ReactE
       {ui.workbenchPackageStatus === "loading" ? (
         <p role="status">{t(locale, "app.loading")}</p>
       ) : null}
-      {ui.workbenchPackageStatus === "error" ? (
+      {ui.commandError ? (
         <p className="dsh-wb-alert" role="alert">
-          {ui.commandError ?? t(locale, "app.genericError")}
+          {ui.commandError}
+        </p>
+      ) : ui.workbenchPackageStatus === "error" ? (
+        <p className="dsh-wb-alert" role="alert">
+          {t(locale, "app.genericError")}
         </p>
       ) : null}
       {ui.workbenchPackageStatus === "ready" && !pkg ? (
@@ -663,6 +668,17 @@ function WorkbenchPackageSection({ ui, controller }: WorkbenchViewProps): ReactE
           {t(locale, "workbenchPackage.none")}
         </p>
       ) : null}
+      <div className="dsh-wb-actions">
+        <button
+          type="button"
+          className="dsh-wb-btn"
+          data-workbench-prepare="true"
+          disabled={!canPrepare}
+          onClick={() => controller.prepareWorkbenchPackage()}
+        >
+          {t(locale, "workbenchPackage.prepare")}
+        </button>
+      </div>
       {pkg ? (
         <>
           <dl className="dsh-wb-dl">
@@ -672,6 +688,8 @@ function WorkbenchPackageSection({ ui, controller }: WorkbenchViewProps): ReactE
             </dd>
             <dt>{t(locale, "workbenchPackage.candidate")}</dt>
             <dd data-candidate-version={pkg.version}>{pkg.version}</dd>
+            <dt>{t(locale, "workbenchPackage.digest")}</dt>
+            <dd data-candidate-digest={pkg.digest}>{pkg.digest}</dd>
           </dl>
           {contentUpdate ? (
             <p className="dsh-wb-notice" data-content-update="true">
@@ -1373,11 +1391,22 @@ export function JobsList({
       <h2 className="dsh-wb-title">{t(locale, "home.jobs")}</h2>
       {jobs.length === 0 ? <p className="dsh-wb-muted">{t(locale, "home.noJobs")}</p> : null}
       {jobs.map((job) => (
-        <div key={job.id} className="dsh-wb-job" data-status={job.status} data-job-id={job.id}>
+        <div
+          key={job.id}
+          className="dsh-wb-job"
+          data-status={job.status}
+          data-job-id={job.id}
+          data-phase={job.phase}
+        >
           <strong>{job.kind}</strong> · {job.status}
           <div>
             {t(locale, "jobs.phase")}: {job.phase} — {job.message}
           </div>
+          {job.status === "succeeded" && job.phase === "handoff-pending" ? (
+            <p className="dsh-wb-notice" role="status" data-handoff-pending="true">
+              {t(locale, "jobs.handoffPending")}
+            </p>
+          ) : null}
           {job.status === "failed" && job.error && (
             <p className="dsh-wb-alert" role="alert">
               {t(locale, "jobs.failed")}: {job.message || job.error.message}

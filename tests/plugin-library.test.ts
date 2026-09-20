@@ -1,25 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, test } from "node:test";
 import { buildManageRows } from "../src/shared/plugin.ts";
 import {
   archiveAbsPath,
+  archiveRelPath,
   isHubPluginArchive,
   lookupLibraryEntry,
   readPluginLibrary,
   syncLibraryFromProfiles,
   upsertLibraryEntry,
-} from "../src/main/plugin-library.ts";
+} from "../src/adapters/node/plugin-library.ts";
 import {
   downloadPlugin,
   listPluginLibrary,
   listProfilePlugins,
   removeDownloadedPlugin,
   setSpacePlugin,
-} from "../src/main/plugin-ops.ts";
+} from "../src/adapters/node/plugin-ops.ts";
+import { enqueuePlugin } from "../src/adapters/node/dsh-cli.ts";
 import { applyAppLocale, t } from "../src/shared/i18n/index.ts";
+import { setTimeout as delay } from "node:timers/promises";
 
 const temps: string[] = [];
 
@@ -38,6 +42,7 @@ function writeProfile(
   name: string,
   bundles: string[],
   dependencies: Record<string, string> = {},
+  resolved: Record<string, string> = {},
 ): void {
   const dir = join(dshHome, "profiles", name);
   mkdirSync(dir, { recursive: true });
@@ -48,6 +53,18 @@ function writeProfile(
       dsh: { profile: { bundles } },
     }),
   );
+  for (const [pkg, version] of Object.entries(resolved)) {
+    const pkgDir = join(dir, "node_modules", ...pkg.split("/"));
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: pkg, version }));
+  }
+}
+
+function writeLibraryTarball(dshHome: string, id: string, bytes = "candidate"): string {
+  const rel = archiveRelPath(id);
+  mkdirSync(join(dshHome, "hub", "plugins"), { recursive: true });
+  writeFileSync(join(dshHome, rel), bytes);
+  return rel;
 }
 
 test("buildManageRows puts locked official plugins first then library checkboxes", () => {
@@ -369,6 +386,209 @@ test("downloadPlugin packs github specs with the injected packer", async () => {
   assert.equal(readFileSync(join(dir, entry.tarball!), "utf8"), "git-tarball");
 });
 
+test("downloadPlugin times out a stalled packument body and does not publish", async () => {
+  const dir = home();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(Buffer.from("{"));
+    },
+  }))) as typeof fetch;
+  try {
+    await assert.rejects(
+      downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { timeoutMs: 80 }),
+      /timed out|failed/i,
+    );
+    assert.equal(existsSync(archiveAbsPath(dir, "dsh-outline@1.2.3")), false);
+    assert.equal(lookupLibraryEntry(dir, "dsh-outline@1.2.3"), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("downloadPlugin times out a stalled tarball body and does not publish", async () => {
+  const dir = home();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url) => {
+    if (String(url).includes(".tgz")) {
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+        },
+      }));
+    }
+    return new Response(JSON.stringify({
+      name: "dsh-outline",
+      "dist-tags": { latest: "1.2.3" },
+      versions: { "1.2.3": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-1.2.3.tgz" } } },
+    }));
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { timeoutMs: 80 }),
+      /timed out|failed/i,
+    );
+    assert.equal(existsSync(archiveAbsPath(dir, "dsh-outline@1.2.3")), false);
+    assert.equal(lookupLibraryEntry(dir, "dsh-outline@1.2.3"), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("downloadPlugin cancel aborts the tarball reader and does not publish", async () => {
+  const dir = home();
+  const originalFetch = globalThis.fetch;
+  const abort = new AbortController();
+  let tarSignal: AbortSignal | undefined;
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).includes(".tgz")) {
+      tarSignal = init?.signal;
+      abort.abort();
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+        },
+      }));
+    }
+    return new Response(JSON.stringify({
+      name: "dsh-outline",
+      "dist-tags": { latest: "1.2.3" },
+      versions: { "1.2.3": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-1.2.3.tgz" } } },
+    }));
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { signal: abort.signal, timeoutMs: 1_000 }),
+      (error: unknown) => error instanceof Error && error.name === "AbortError",
+    );
+    assert.equal(tarSignal?.aborted, true);
+    assert.equal(existsSync(archiveAbsPath(dir, "dsh-outline@1.2.3")), false);
+    assert.equal(lookupLibraryEntry(dir, "dsh-outline@1.2.3"), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("downloadPlugin refuses an oversize packument and tarball without caching", async () => {
+  const dir = home();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(Buffer.alloc(64, 0x20));
+      controller.close();
+    },
+  }))) as typeof fetch;
+  try {
+    await assert.rejects(
+      downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { metadataMaxBytes: 16, timeoutMs: 1_000 }),
+      /exceeded/,
+    );
+    assert.equal(existsSync(archiveAbsPath(dir, "dsh-outline@1.2.3")), false);
+    assert.equal(lookupLibraryEntry(dir, "dsh-outline@1.2.3"), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = (async (url) => {
+    if (String(url).includes(".tgz")) {
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Buffer.alloc(64, 1));
+          controller.close();
+        },
+      }));
+    }
+    return new Response(JSON.stringify({
+      name: "dsh-outline",
+      versions: { "1.2.3": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-1.2.3.tgz" } } },
+    }));
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { archiveMaxBytes: 16, timeoutMs: 1_000 }),
+      /exceeded/,
+    );
+    assert.equal(existsSync(archiveAbsPath(dir, "dsh-outline@1.2.3")), false);
+    assert.equal(lookupLibraryEntry(dir, "dsh-outline@1.2.3"), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("downloadPlugin deadline starts after a prior plugin-queue hold, not when enqueued", async () => {
+  const dir = home();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const prior = enqueuePlugin("hold-queue", async () => {
+    await held;
+  });
+  let started = 0;
+  const download = downloadPlugin(
+    dir,
+    { spec: "dsh-outline@1.2.3" },
+    {
+      timeoutMs: 80,
+      fetchImpl: async (url) => {
+        started += 1;
+        if (url.includes("dsh-outline") && !url.endsWith(".tgz")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              name: "dsh-outline",
+              versions: { "1.2.3": { dist: { tarball: "https://registry.npmjs.org/dsh-outline/-/dsh-outline-1.2.3.tgz" } } },
+            }),
+            arrayBuffer: async () => new ArrayBuffer(0),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+          arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+        };
+      },
+    },
+  );
+  await delay(200);
+  assert.equal(started, 0);
+  release();
+  await prior;
+  const entry = await download;
+  assert.ok(started > 0);
+  assert.equal(entry.spec, "dsh-outline@1.2.3");
+  assert.deepEqual([...readFileSync(join(dir, entry.tarball!))], [1, 2, 3, 4]);
+});
+
+test("downloadPlugin aborts an unconsumed non-ok body without aborting the parent", async () => {
+  const dir = home();
+  const parent = new AbortController();
+  let fetchSignal: AbortSignal | undefined;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url, init) => {
+    fetchSignal = init?.signal;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]));
+      },
+    }), { status: 503 });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      downloadPlugin(dir, { spec: "dsh-outline@1.2.3" }, { signal: parent.signal, timeoutMs: 1_000 }),
+      /HTTP 503|failed/i,
+    );
+    assert.equal(parent.signal.aborted, false);
+    assert.equal(fetchSignal?.aborted, true);
+    assert.equal(existsSync(archiveAbsPath(dir, "dsh-outline@1.2.3")), false);
+    assert.equal(lookupLibraryEntry(dir, "dsh-outline@1.2.3"), undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("downloadPlugin refuses likely catalog entries", async () => {
   applyAppLocale("en");
   const dir = home();
@@ -392,6 +612,225 @@ test("removeDownloadedPlugin refuses plugins still installed on a space", async 
   });
   await assert.rejects(removeDownloadedPlugin(dir, "dsh-outline", ["coding"]), /installed|仍安装/);
   assert.equal(readPluginLibrary(dir).length, 1);
+});
+
+test("unused exact cache version can be removed while an older exact version stays installed", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  mkdirSync(join(dir, "hub", "plugins"), { recursive: true });
+  mkdirSync(join(dir, "pack"), { recursive: true });
+  const oldHubTar = join(dir, "hub", "plugins", "dsh-spaces-plugin.tgz");
+  const oldPackTar = join(dir, "pack", "dsh-spaces-plugin-0.3.0.tgz");
+  writeFileSync(oldHubTar, "old-hub");
+  writeFileSync(oldPackTar, "old-pack");
+  const candidateId = `${pkg}@0.3.1-test.1`;
+  const candidateTar = writeLibraryTarball(dir, candidateId, "candidate-0.3.1");
+  writeProfile(
+    dir,
+    "spaces-hub",
+    [pkg],
+    { [pkg]: "file:..\\..\\hub\\plugins\\dsh-spaces-plugin.tgz" },
+    { [pkg]: "0.3.0" },
+  );
+  writeProfile(
+    dir,
+    "web",
+    [pkg],
+    { [pkg]: `file:${oldPackTar.replaceAll("\\", "/")}` },
+    { [pkg]: "0.3.0" },
+  );
+  upsertLibraryEntry(dir, {
+    id: candidateId,
+    spec: candidateId,
+    packageName: pkg,
+    title: pkg,
+    tarball: candidateTar,
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  const next = await removeDownloadedPlugin(dir, candidateId, ["spaces-hub", "web"]);
+  assert.equal(next.length, 0);
+  assert.equal(existsSync(join(dir, candidateTar)), false);
+  assert.equal(existsSync(oldHubTar), true);
+  assert.equal(existsSync(oldPackTar), true);
+});
+
+test("same exact installed version keeps the matching cache entry in use", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const id = `${pkg}@0.3.0`;
+  const tarball = writeLibraryTarball(dir, id);
+  writeProfile(
+    dir,
+    "web",
+    [pkg],
+    { [pkg]: "file:../../hub/plugins/dsh-spaces-plugin.tgz" },
+    { [pkg]: "0.3.0" },
+  );
+  upsertLibraryEntry(dir, {
+    id,
+    spec: id,
+    packageName: pkg,
+    title: pkg,
+    tarball,
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  await assert.rejects(removeDownloadedPlugin(dir, id, ["web"]), /installed|仍安装/);
+  assert.equal(readPluginLibrary(dir).length, 1);
+  assert.equal(existsSync(join(dir, tarball)), true);
+});
+
+test("unknown actual version keeps an exact cache entry protected", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const id = `${pkg}@0.3.1-test.1`;
+  const tarball = writeLibraryTarball(dir, id);
+  writeProfile(dir, "web", [pkg], { [pkg]: `${pkg}@0.3.0` });
+  upsertLibraryEntry(dir, {
+    id,
+    spec: id,
+    packageName: pkg,
+    title: pkg,
+    tarball,
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  await assert.rejects(removeDownloadedPlugin(dir, id, ["web"]), /installed|仍安装/);
+  assert.equal(readPluginLibrary(dir).length, 1);
+  assert.equal(existsSync(join(dir, tarball)), true);
+});
+
+test("file: reference to this cache tarball stays in use even when resolved version differs", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const id = `${pkg}@0.3.1-test.1`;
+  const tarball = writeLibraryTarball(dir, id);
+  writeProfile(
+    dir,
+    "spaces-hub",
+    [pkg],
+    { [pkg]: `file:../../${tarball}` },
+    { [pkg]: "0.3.0" },
+  );
+  writeProfile(
+    dir,
+    "web",
+    [pkg],
+    { [pkg]: pathToFileURL(join(dir, tarball)).href },
+    { [pkg]: "0.3.0" },
+  );
+  upsertLibraryEntry(dir, {
+    id,
+    spec: id,
+    packageName: pkg,
+    title: pkg,
+    tarball,
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  await assert.rejects(removeDownloadedPlugin(dir, id, ["spaces-hub", "web"]), /installed|仍安装/);
+  assert.equal(readPluginLibrary(dir).length, 1);
+  assert.equal(existsSync(join(dir, tarball)), true);
+});
+
+test("file: reference through a directory junction to this cache tarball stays protected", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const id = `${pkg}@0.3.1-test.1`;
+  const tarball = writeLibraryTarball(dir, id);
+  const archive = join(dir, tarball);
+  const aliasDir = join(dir, "hub", "cache-alias");
+  symlinkSync(join(dir, "hub", "plugins"), aliasDir, process.platform === "win32" ? "junction" : "dir");
+  const referenced = join(aliasDir, basename(tarball));
+  assert.equal(realpathSync(referenced), realpathSync(archive));
+  writeProfile(
+    dir,
+    "coding",
+    [pkg],
+    { [pkg]: `file:../../hub/cache-alias/${basename(tarball)}` },
+    { [pkg]: "0.3.0" },
+  );
+  upsertLibraryEntry(dir, {
+    id,
+    spec: id,
+    packageName: pkg,
+    title: pkg,
+    tarball,
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  await assert.rejects(removeDownloadedPlugin(dir, id, ["coding"]), /installed|仍安装/);
+  assert.equal(readPluginLibrary(dir).length, 1);
+  assert.equal(existsSync(archive), true);
+});
+
+test("git spec with @semver stays unpinned and remains protected", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  writeProfile(
+    dir,
+    "coding",
+    ["dsh-outline"],
+    { "dsh-outline": "github:owner/dsh-outline@0.3.1" },
+    { "dsh-outline": "0.3.0" },
+  );
+  upsertLibraryEntry(dir, {
+    id: "github:owner/dsh-outline@0.3.1",
+    spec: "github:owner/dsh-outline@0.3.1",
+    packageName: "dsh-outline",
+    title: "dsh-outline",
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  await assert.rejects(
+    removeDownloadedPlugin(dir, "github:owner/dsh-outline@0.3.1", ["coding"]),
+    /installed|仍安装/,
+  );
+  assert.equal(readPluginLibrary(dir).length, 1);
+});
+
+test("bare spec with a pinned id stays unpinned and remains protected", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  writeProfile(dir, "coding", ["dsh-outline"], { "dsh-outline": "dsh-outline" }, { "dsh-outline": "0.3.0" });
+  upsertLibraryEntry(dir, {
+    id: "dsh-outline@0.3.1",
+    spec: "dsh-outline",
+    packageName: "dsh-outline",
+    title: "dsh-outline",
+    source: "installed",
+    downloadedAt: "t",
+  });
+  await assert.rejects(removeDownloadedPlugin(dir, "dsh-outline@0.3.1", ["coding"]), /installed|仍安装/);
+  assert.equal(readPluginLibrary(dir).length, 1);
+});
+
+test("malformed file: requestedSpec stays protected even when actual version differs", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  const pkg = "@dsh-spaces/plugin";
+  const id = `${pkg}@0.3.1-test.1`;
+  const tarball = writeLibraryTarball(dir, id);
+  writeProfile(dir, "web", [pkg], { [pkg]: "file://" }, { [pkg]: "0.3.0" });
+  writeProfile(dir, "notes", [pkg], { [pkg]: "file:bad\0archive.tgz" }, { [pkg]: "0.3.0" });
+  upsertLibraryEntry(dir, {
+    id,
+    spec: id,
+    packageName: pkg,
+    title: pkg,
+    tarball,
+    source: "catalog",
+    downloadedAt: "t",
+  });
+  await assert.rejects(removeDownloadedPlugin(dir, id, ["web", "notes"]), /installed|仍安装/);
+  assert.equal(readPluginLibrary(dir).length, 1);
+  assert.equal(existsSync(join(dir, tarball)), true);
 });
 
 test("setSpacePlugin rejects unknown and protected plugins", async () => {

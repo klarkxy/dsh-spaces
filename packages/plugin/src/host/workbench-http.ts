@@ -1,12 +1,14 @@
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../../src/shared/space-icon";
-import type { WorkbenchApi } from "../../../../src/shared/workbench";
+import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../../src/shared/workbench-product";
+import type { WorkbenchApi, WorkbenchMutationContext } from "../../../../src/shared/workbench";
 import type { LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
 import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
 import {
   backupsResultSchema,
   jobIdSchema,
+  mutationContextSchema,
   pluginsQuerySchema,
   snapshotIdSchema,
   spaceIdSchema,
@@ -15,6 +17,8 @@ import {
   workbenchPlanRequestSchema,
   workbenchPlanSchema,
   workbenchPluginListSchema,
+  workbenchProductRequestSchema,
+  workbenchProductResultSchema,
   workbenchRuntimeListSchema,
   workbenchPackageResultSchema,
   workbenchSnapshotSchema,
@@ -36,6 +40,7 @@ export const WORKBENCH_HTTP_METHODS = [
   "cancel",
   "view",
   "preview",
+  "product",
   "plugins",
   "snapshots",
   "snapshot",
@@ -47,8 +52,14 @@ export const WORKBENCH_HTTP_METHODS = [
 ] as const;
 
 export type WorkbenchHttpMethod = (typeof WORKBENCH_HTTP_METHODS)[number];
+export const WORKBENCH_API_METHODS = WORKBENCH_HTTP_METHODS;
 
+/** Ordinary JSON methods stay at the icon-file bound. */
 export const WORKBENCH_HTTP_BODY_LIMIT = MAX_SPACE_ICON_FILE_BYTES;
+
+/** share.previewImport request / share.export response: 8MiB binary as base64 plus a small JSON envelope. */
+export const WORKBENCH_PRODUCT_SHARE_JSON_OVERHEAD = 64 * 1024;
+export const WORKBENCH_PRODUCT_SHARE_BODY_LIMIT = MAX_WORKBENCH_SHARE_BASE64 + WORKBENCH_PRODUCT_SHARE_JSON_OVERHEAD;
 
 export interface WorkbenchHttpFetch {
   (input: string, init: RequestInit): Promise<Response>;
@@ -67,32 +78,48 @@ export interface WorkbenchHttpClientOptions {
 export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): WorkbenchApi {
   const origin = originOf(options.endpoint.origin);
   const doFetch = options.fetch ?? fetch;
-  const call = <T>(method: WorkbenchHttpMethod, body: unknown, resultSchema: { parse(value: unknown): T }): Promise<T> =>
-    workbenchPost(doFetch, origin, options.endpoint.bearer, method, body, resultSchema);
+  const call = <T>(
+    method: WorkbenchHttpMethod,
+    body: unknown,
+    resultSchema: { parse(value: unknown): T },
+  ): Promise<T> => workbenchPost(doFetch, origin, options.endpoint.bearer, method, body, resultSchema);
 
   return {
-    state: () => call("state", {}, workbenchStateSchema),
-    detail: (spaceId) => call("detail", { spaceId: spaceIdSchema.parse(spaceId) }, workbenchSpaceDetailSchema),
-    submit: (command, requestId) =>
+    state: async () => call("state", {}, workbenchStateSchema),
+    detail: async (spaceId) => call("detail", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, workbenchSpaceDetailSchema),
+    submit: async (command, requestId, context) =>
       call(
         "submit",
-        { command: workbenchCommandSchema.parse(command), requestId: requireRequestId(requestId) },
+        {
+          command: parseOrInvalid(workbenchCommandSchema, command),
+          requestId: requireRequestId(requestId),
+          context: parseContext(context),
+        },
         workbenchJobSchema,
       ),
-    job: (id) => call("job", { id: jobIdSchema.parse(id) }, workbenchJobSchema),
-    cancel: (id) => call("cancel", { id: jobIdSchema.parse(id) }, workbenchJobSchema),
-    view: (spaceId) => call("view", { spaceId: spaceIdSchema.parse(spaceId) }, workbenchViewSchema),
-    preview: (request) =>
-      call("preview", { request: workbenchPlanRequestSchema.parse(request) }, workbenchPlanSchema),
-    plugins: (query) => call("plugins", { query: pluginsQuerySchema.parse(query) }, workbenchPluginListSchema),
-    snapshots: () => call("snapshots", {}, workbenchSnapshotSchema.array()),
-    snapshot: (id) => call("snapshot", { id: snapshotIdSchema.parse(id) }, workbenchSnapshotSchema),
-    runtimes: () => call("runtimes", {}, workbenchRuntimeListSchema),
-    workbenchPackage: () => call("workbenchPackage", {}, workbenchPackageResultSchema),
-    backups: (spaceId) => call("backups", { spaceId: spaceIdSchema.parse(spaceId) }, backupsResultSchema),
-    llm: (request) => call("llm", llmApiRequestSchema.parse(request), llmApiResultSchema) as Promise<LlmApiResult>,
-    llmCredential: (request: LlmCredentialRequest) =>
-      call("llmCredential", llmCredentialRequestSchema.parse(request), llmApiResultSchema) as Promise<LlmApiResult>,
+    job: async (id) => call("job", { id: parseOrInvalid(jobIdSchema, id) }, workbenchJobSchema),
+    cancel: async (id) => call("cancel", { id: parseOrInvalid(jobIdSchema, id) }, workbenchJobSchema),
+    view: async (spaceId) => call("view", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, workbenchViewSchema),
+    preview: async (request, context) =>
+      call(
+        "preview",
+        {
+          request: parseOrInvalid(workbenchPlanRequestSchema, request),
+          context: parseContext(context),
+        },
+        workbenchPlanSchema,
+      ),
+    product: async (request) =>
+      call("product", { request: parseOrInvalid(workbenchProductRequestSchema, request) }, workbenchProductResultSchema),
+    plugins: async (query) => call("plugins", { query: parseOrInvalid(pluginsQuerySchema, query) }, workbenchPluginListSchema),
+    snapshots: async () => call("snapshots", {}, workbenchSnapshotSchema.array()),
+    snapshot: async (id) => call("snapshot", { id: parseOrInvalid(snapshotIdSchema, id) }, workbenchSnapshotSchema),
+    runtimes: async () => call("runtimes", {}, workbenchRuntimeListSchema),
+    workbenchPackage: async () => call("workbenchPackage", {}, workbenchPackageResultSchema),
+    backups: async (spaceId) => call("backups", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, backupsResultSchema),
+    llm: async (request) => call("llm", parseOrInvalid(llmApiRequestSchema, request), llmApiResultSchema) as Promise<LlmApiResult>,
+    llmCredential: async (request: LlmCredentialRequest) =>
+      call("llmCredential", parseOrInvalid(llmCredentialRequestSchema, request), llmApiResultSchema) as Promise<LlmApiResult>,
   };
 }
 
@@ -113,7 +140,8 @@ export async function workbenchPost<T>(
   } catch {
     throw publicError("workbench/invalid-input");
   }
-  if (payload.length > WORKBENCH_HTTP_BODY_LIMIT) {
+  const requestLimit = requestBodyLimit(method, body);
+  if (utf8Bytes(payload) > requestLimit) {
     throw publicError("workbench/invalid-input");
   }
   const url = `${origin}/api/workbench/${method}`;
@@ -133,7 +161,7 @@ export async function workbenchPost<T>(
   } catch {
     throw publicError("workbench/unavailable");
   }
-  const text = await readLimitedText(response);
+  const text = await readLimitedText(response, responseBodyLimit(method, body));
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -170,30 +198,95 @@ function requireRequestId(requestId: string): string {
   return requestId;
 }
 
+function parseContext(context: WorkbenchMutationContext | undefined): WorkbenchMutationContext {
+  return parseOrInvalid(mutationContextSchema, context);
+}
+
+function parseOrInvalid<T>(schema: { parse(value: unknown): T }, value: unknown): T {
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    if (error instanceof RemoteError) throw error;
+    throw publicError("workbench/invalid-input");
+  }
+}
+
+function productMethodOf(body: unknown): string | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const request = (body as { request?: unknown }).request;
+  if (!request || typeof request !== "object" || Array.isArray(request)) return null;
+  const method = (request as { method?: unknown }).method;
+  return typeof method === "string" ? method : null;
+}
+
+function requestBodyLimit(method: WorkbenchHttpMethod, body: unknown): number {
+  if (method === "product" && productMethodOf(body) === "share.previewImport") {
+    return WORKBENCH_PRODUCT_SHARE_BODY_LIMIT;
+  }
+  return WORKBENCH_HTTP_BODY_LIMIT;
+}
+
+function responseBodyLimit(method: WorkbenchHttpMethod, body: unknown): number {
+  if (method === "product" && productMethodOf(body) === "share.export") {
+    return WORKBENCH_PRODUCT_SHARE_BODY_LIMIT;
+  }
+  return WORKBENCH_HTTP_BODY_LIMIT;
+}
+
+function utf8Bytes(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
 function remoteFromSupervisorError(error: unknown): RemoteError {
-  if (
-    error &&
-    typeof error === "object" &&
-    typeof (error as { code?: unknown }).code === "string" &&
-    (error as { code: string }).code.startsWith("workbench/")
-  ) {
-    const code = (error as { code: string }).code;
-    if (code in WORKBENCH_PUBLIC_ERROR) {
-      return publicError(code as WorkbenchRemoteCode);
-    }
-    if (code in LLM_PUBLIC_ERROR) {
-      return new RemoteError(code as LlmRemoteCode, LLM_PUBLIC_ERROR[code as LlmRemoteCode], {});
-    }
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return publicError("workbench/unavailable");
+  }
+  const code = (error as { code?: unknown }).code;
+  if (typeof code !== "string") {
+    return publicError("workbench/unavailable");
+  }
+  if (Object.hasOwn(WORKBENCH_PUBLIC_ERROR, code)) {
+    return publicError(code as WorkbenchRemoteCode);
+  }
+  if (Object.hasOwn(LLM_PUBLIC_ERROR, code)) {
+    return new RemoteError(code as LlmRemoteCode, LLM_PUBLIC_ERROR[code as LlmRemoteCode], {});
   }
   return publicError("workbench/unavailable");
 }
 
-async function readLimitedText(response: Response): Promise<string> {
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > WORKBENCH_HTTP_BODY_LIMIT) {
+async function readLimitedText(response: Response, limit: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > limit) throw publicError("workbench/unavailable");
+    return new TextDecoder().decode(buffer);
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      const value = next.value;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined);
+        throw publicError("workbench/unavailable");
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    if (error instanceof RemoteError) throw error;
     throw publicError("workbench/unavailable");
   }
-  return new TextDecoder().decode(buffer);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 function publicError(code: WorkbenchRemoteCode): RemoteError {
@@ -221,7 +314,7 @@ export async function mintSupervisorHandoff(
   } catch {
     throw publicError("workbench/unavailable");
   }
-  const text = await readLimitedText(response);
+  const text = await readLimitedText(response, WORKBENCH_HTTP_BODY_LIMIT);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

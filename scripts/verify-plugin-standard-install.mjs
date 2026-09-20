@@ -8,14 +8,19 @@
  * No model calls. Disposable Home only (refuses ~/.dsh). No machine-path
  * defaults. Does not import verify-workbench-product.mjs (that file runs at load).
  *
+ *   node scripts/verify-plugin-standard-install.mjs --syntax
  *   node scripts/verify-plugin-standard-install.mjs --preflight
  *   node scripts/verify-plugin-standard-install.mjs
  *
  * Env: DSH_TEST_BIN, DSH_TEST_CLI_BIN, DSH_TEST_OUTPUT, DSH_TEST_PLAYWRIGHT,
  * DSH_TEST_PNPM_CJS, DSH_PACK_DEST.
  *
- * --preflight is syntax/static/safe mocks only: no DSH web, no supervisor,
- * no Playwright browser, no shared build.
+ * --syntax / --preflight are static only: no DSH web, no supervisor,
+ * no Playwright browser, no shared build, no real ~/.dsh.
+ * Protocol v2: preview/submit carry {serviceEpoch, expectedRevision};
+ * stop uses service.shutdown. Force-clean is cleanup, never PASS.
+ * Initialization-protection baseline is after ordinary web auth/onboarding,
+ * not after plugin add. After-add inventory stays in the report separately.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -48,7 +53,6 @@ import {
   refuseRealHome,
   run,
   runDsh,
-  runDshRetry,
   sha256File,
   stopOwned,
   waitPortClosed,
@@ -64,15 +68,23 @@ const PLUGIN_DIR = join(REPO, "packages", "plugin");
 const CANONICAL_NAME = "@dsh-spaces/plugin";
 const WEB_PROFILE = "web";
 const EXACT_CLI = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;
-const INIT_BUTTON = /^(初始化 Spaces|Initialize Spaces)$/;
-const ENTER_BUTTON = /^(进入工作台|Enter workbench)$/;
+const HEX64 = /^[a-f0-9]{64}$/;
+const GUIDE_ROOT = "[data-dsh-spaces-guide]";
+const GUIDE_INIT = '[data-dsh-spaces-action="initialize"]';
+const GUIDE_ENTER = '[data-dsh-spaces-action="enter"]';
+const GUIDE_ALERT = "[data-dsh-spaces-error] [role='alert']";
 const SIDEBAR_TAB = /^(工作台|Workbench)$/;
 const ONBOARDING = [/^(Continue|继续)$/, /稍后配置|set up later|configure later/i];
+const MANAGER_FRAME = "iframe#manager-frame";
+const WORKBENCH_ROOT = ".dsh-workbench";
 const CONTROL_DIR = ".dsh-spaces-control";
+const JOBS_DIR = "jobs";
+const PUBLIC_JOB_WAIT_MS = 240000;
 const MANAGER_FILE = "manager.json";
 const ENDPOINT_FILE = "endpoint.json";
 const ENTRY_PORT_FILE = "entry-port.json";
 const OWNER_FILE = join("run", "owner.json");
+const WEB_PROTECTED = ["sessions", "storages", ".credentials.yaml", ".anonymous-user-id"];
 
 const proved = [];
 const report = {
@@ -197,6 +209,61 @@ function hubProfiles(home) {
   return readdirSync(dir).filter((name) => /^spaces-hub(?:-\d+)?$/i.test(name));
 }
 
+function namesIfPresent(path) {
+  try {
+    return readdirSync(path).sort();
+  } catch {
+    return existsSync(path) ? ["<present>"] : null;
+  }
+}
+
+/** Presence/names only. Never read credential bytes. */
+function webProtectedFingerprint(home) {
+  const webRoot = join(home, "profiles", WEB_PROFILE);
+  const out = { webProfile: existsSync(join(webRoot, "package.json")) };
+  for (const name of WEB_PROTECTED) {
+    const path = name.startsWith(".") ? join(home, name) : join(webRoot, name);
+    out[name] = name.startsWith(".") ? existsSync(path) : namesIfPresent(path);
+  }
+  return out;
+}
+
+function fingerprintPresent(value) {
+  if (typeof value === "boolean") return value;
+  return value != null;
+}
+
+/** Safe booleans only: file existence and directory presence, never names or bytes. */
+function webProtectedPresence(fp) {
+  const out = { webProfile: fingerprintPresent(fp.webProfile) };
+  for (const name of WEB_PROTECTED) out[name] = fingerprintPresent(fp[name]);
+  return out;
+}
+
+function presenceDelta(before, after) {
+  const beforeP = webProtectedPresence(before);
+  const afterP = webProtectedPresence(after);
+  const fields = {};
+  const changed = [];
+  for (const key of ["webProfile", ...WEB_PROTECTED]) {
+    fields[key] = { before: beforeP[key], after: afterP[key] };
+    if (beforeP[key] !== afterP[key]) changed.push(key);
+  }
+  return { fields, changed };
+}
+
+function assertWebPathsProtected(home, before, label) {
+  const after = webProtectedFingerprint(home);
+  assert.equal(after.webProfile, true, `${label}: ordinary web profile is missing`);
+  for (const name of WEB_PROTECTED) {
+    assert.deepEqual(after[name], before[name], `${label}: protected ${name} changed`);
+  }
+  if (hubProfiles(home).includes(WEB_PROFILE)) {
+    throw new Error(`${label}: ordinary web was turned into a manager`);
+  }
+  return after;
+}
+
 function managerRecord(home) {
   const path = join(home, CONTROL_DIR, MANAGER_FILE);
   if (!existsSync(path)) return null;
@@ -204,6 +271,17 @@ function managerRecord(home) {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch {
     return { broken: true, path };
+  }
+}
+
+function assertManagerAbsent(home, label) {
+  const hubs = hubProfiles(home);
+  if (hubs.length !== 0) {
+    throw new Error(`${label}: expected no manager profile, found ${JSON.stringify(hubs)}`);
+  }
+  const record = managerRecord(home);
+  if (record) {
+    throw new Error(`${label}: manager.json present before initialize`);
   }
 }
 
@@ -270,14 +348,14 @@ async function dismissOnboarding(page) {
 }
 
 async function guideAlert(page) {
-  const alert = page.locator(".dsh-spaces-return [role='alert']").first();
+  const alert = page.locator(GUIDE_ALERT).first();
   if (!(await alert.count())) return "";
   if (!(await alert.isVisible().catch(() => false))) return "";
   return ((await alert.textContent()) || "").trim();
 }
 
 async function openGuidePanel(page) {
-  const panel = page.locator(".dsh-spaces-return");
+  const panel = page.locator(GUIDE_ROOT);
   if (await panel.isVisible().catch(() => false)) return panel;
   const tab = page.getByRole("button", { name: SIDEBAR_TAB });
   await tab.waitFor({ state: "visible", timeout: 30000 });
@@ -288,18 +366,23 @@ async function openGuidePanel(page) {
 
 async function clickInitialize(page) {
   const panel = await openGuidePanel(page);
-  const init = panel.getByRole("button", { name: INIT_BUTTON });
+  const init = panel.locator(GUIDE_INIT);
   await init.waitFor({ state: "visible", timeout: 30000 });
+  if (await init.isDisabled()) throw new Error("guide initialize action is disabled");
   await init.click();
 }
 
 async function enterOrInitialize(page) {
   const panel = await openGuidePanel(page);
-  const action = panel.getByRole("button", { name: /^(进入工作台|Enter workbench|初始化 Spaces|Initialize Spaces)$/ });
+  const action = panel.locator(`${GUIDE_ENTER}, ${GUIDE_INIT}`).first();
   await action.waitFor({ state: "visible", timeout: 30000 });
-  const name = await action.innerText();
+  const kind = await action.getAttribute("data-dsh-spaces-action");
+  if (kind !== "enter" && kind !== "initialize") {
+    throw new Error(`guide action is not v2 initialize/enter: ${kind || "missing"}`);
+  }
+  if (await action.isDisabled()) throw new Error(`guide ${kind} action is disabled`);
   await action.click();
-  return ENTER_BUTTON.test(name) ? "enter" : "initialize";
+  return kind;
 }
 
 function assertSingleManager(home, label) {
@@ -308,7 +391,13 @@ function assertSingleManager(home, label) {
   if (hubs.length !== 1) {
     throw new Error(`${label}: expected one manager profile, found ${JSON.stringify(hubs)}`);
   }
+  if (hubs[0] === WEB_PROFILE) {
+    throw new Error(`${label}: manager profile must not be ordinary web`);
+  }
   if (!record || record.broken) throw new Error(`${label}: manager.json missing or damaged`);
+  if (record.profileId === WEB_PROFILE) {
+    throw new Error(`${label}: manager.json bound ordinary web`);
+  }
   if (record.profileId !== hubs[0]) {
     assert.fail(`${label}: manager.json profileId=${record.profileId} hub=${hubs[0]}`);
   }
@@ -327,6 +416,46 @@ function loopbackOrigin(raw) {
   }
 }
 
+function readV2Endpoint(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (raw.version === 1) return null;
+  if (raw.version !== 2 || raw.protocolVersion !== 2) return null;
+  const parsed = typeof raw.origin === "string" ? loopbackOrigin(raw.origin) : null;
+  if (!parsed || typeof raw.bearer !== "string" || !raw.bearer) return null;
+  if (typeof raw.homeId !== "string" || !HEX64.test(raw.homeId)) return null;
+  if (typeof raw.serviceEpoch !== "string" || !HEX64.test(raw.serviceEpoch)) return null;
+  return {
+    origin: parsed.origin,
+    port: parsed.port,
+    bearer: raw.bearer,
+    homeId: raw.homeId,
+    serviceEpoch: raw.serviceEpoch,
+    protocolVersion: 2,
+  };
+}
+
+function ownerPid(owner) {
+  if (!owner || typeof owner !== "object") return null;
+  const pid = Number(owner.pid);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function ownerStartedAt(owner) {
+  return typeof owner?.startedAt === "string" ? owner.startedAt : "";
+}
+
+function pidLiveness(pid, startedAt) {
+  if (!pid) return "missing";
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error && error.code === "ESRCH") return "dead";
+    return "ambiguous";
+  }
+  if (startedAt && !Number.isFinite(Date.parse(startedAt))) return "ambiguous";
+  return "alive";
+}
+
 function readHomeIdentity(home) {
   const control = join(home, CONTROL_DIR);
   const endpointPath = join(control, ENDPOINT_FILE);
@@ -335,11 +464,7 @@ function readHomeIdentity(home) {
   let endpoint = null;
   if (existsSync(endpointPath)) {
     try {
-      const raw = JSON.parse(readFileSync(endpointPath, "utf8"));
-      const parsed = typeof raw.origin === "string" ? loopbackOrigin(raw.origin) : null;
-      if (raw.version === 1 && parsed && typeof raw.bearer === "string" && raw.bearer) {
-        endpoint = { origin: parsed.origin, port: parsed.port, bearer: raw.bearer };
-      }
+      endpoint = readV2Endpoint(JSON.parse(readFileSync(endpointPath, "utf8")));
     } catch {
       endpoint = null;
     }
@@ -365,6 +490,45 @@ function readHomeIdentity(home) {
     throw new Error(`this Home endpoint port ${endpoint.port} != entry-port.json ${entryPort}`);
   }
   return { endpoint, entryPort: entryPort ?? endpoint?.port ?? null, owner };
+}
+
+function contextOf(state) {
+  if (!HEX64.test(state?.serviceEpoch || "") || !HEX64.test(state?.revision || "")) {
+    throw new Error("workbench mutation context requires 64-hex serviceEpoch and revision");
+  }
+  return { serviceEpoch: state.serviceEpoch, expectedRevision: state.revision };
+}
+
+function assertV2State(state, label) {
+  if (!state || state.protocolVersion !== 2) {
+    throw new Error(`${label}: workbench state is not protocol v2`);
+  }
+  if (Object.prototype.hasOwnProperty.call(state, "recoveryRequired")) {
+    throw new Error(`${label}: stale recoveryRequired field on v2 state`);
+  }
+  contextOf(state);
+}
+
+function viewSrc(view) {
+  if (!view || typeof view.entryOrigin !== "string" || typeof view.origin !== "string") {
+    throw new Error("view DTO missing origin/entryOrigin");
+  }
+  const entry = loopbackOrigin(view.entryOrigin);
+  const child = loopbackOrigin(view.origin);
+  if (!entry || !child) throw new Error("view DTO origins are not clean loopback");
+  if (entry.origin === child.origin) throw new Error("view DTO entryOrigin must differ from origin");
+  if (typeof view.entryPath !== "string" || !view.entryPath.startsWith("/") || view.entryPath.includes("?")) {
+    throw new Error("view DTO entryPath is not a path-only supervisor route");
+  }
+  if (!HEX64.test(view.serviceEpoch || "")) throw new Error("view DTO missing serviceEpoch");
+  const path = new URL(view.entryPath, entry.origin).pathname;
+  return `${entry.origin}${path}?epoch=${encodeURIComponent(view.serviceEpoch)}`;
+}
+
+function assertV2View(view, spaceId, epoch, label) {
+  if (view.spaceId !== spaceId) throw new Error(`${label}: view.spaceId=${view.spaceId} expected ${spaceId}`);
+  if (view.serviceEpoch !== epoch) throw new Error(`${label}: view.serviceEpoch does not match state`);
+  viewSrc(view);
 }
 
 function createApi(post) {
@@ -407,13 +571,116 @@ function bearerApi(endpoint) {
   });
 }
 
-async function waitJob(api, command, label) {
-  const submitted = await api("submit", { command, requestId: randomUUID() });
+async function waitPublicJob(api, submitted, label) {
+  if (!submitted?.id) throw new Error(`${label}: submit returned no public job id`);
   let latest = submitted;
-  await until(async () => {
-    latest = await api("job", { id: submitted.id });
-    return !["queued", "running"].includes(latest.status);
-  }, label, 240000);
+  try {
+    await until(async () => {
+      latest = await api("job", { id: submitted.id });
+      return !["queued", "running"].includes(latest.status);
+    }, label, PUBLIC_JOB_WAIT_MS);
+  } catch (error) {
+    const extra = latest?.status ? ` lastStatus=${latest.status}` : "";
+    throw new Error(
+      `${label}: public job did not reach a terminal status${extra}: ${error instanceof Error ? error.message : error}`,
+    );
+  }
+  return latest;
+}
+
+function isTransportFailure(error) {
+  const parts = [
+    error instanceof Error ? error.message : String(error ?? ""),
+    error && typeof error === "object" && "code" in error ? String(error.code) : "",
+    error && typeof error === "object" && error.cause && typeof error.cause === "object" && "code" in error.cause
+      ? String(error.cause.code)
+      : "",
+  ];
+  const text = parts.filter(Boolean).join(" ");
+  if (/\bworkbench\/[a-z-]+\b/.test(text) && !/ECONN(?:RESET|REFUSED|ABORTED)|ENOTCONN|EPIPE|UND_ERR_|ERR_CONNECTION_/i.test(text)) {
+    return false;
+  }
+  return /ECONN(?:RESET|REFUSED|ABORTED)|ENOTCONN|EPIPE|EHOSTUNREACH|ERR_CONNECTION_(?:RESET|REFUSED|ABORTED|CLOSED)|ERR_SOCKET_NOT_CONNECTED|UND_ERR_(?:SOCKET|CONNECT_TIMEOUT|HEADERS_TIMEOUT)|socket hang up|network socket disconnected|fetch failed|read ECONNRESET|connect ECONNREFUSED/i.test(text);
+}
+
+function ownJobPath(home, requestId) {
+  return join(home, CONTROL_DIR, JOBS_DIR, `${requestId}.json`);
+}
+
+function readOwnShutdownJob(home, requestId, planId) {
+  const path = ownJobPath(home, requestId);
+  if (!existsSync(path)) return null;
+  let row;
+  try {
+    row = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  if (row.schemaVersion !== 1) return null;
+  if (row.id !== requestId || row.requestId !== requestId) return null;
+  if (row.kind !== "plan.execute") return null;
+  if (row.command?.kind !== "plan.execute" || row.command?.planId !== planId) return null;
+  return row;
+}
+
+async function waitServiceShutdownAccepted({ home, api, submitted, requestId, planId, timeout }) {
+  if (submitted?.id !== requestId) {
+    throw new Error(`service.shutdown: submitted.id ${submitted?.id ?? ""} != requestId ${requestId}`);
+  }
+  if (submitted.requestId !== requestId) {
+    throw new Error(`service.shutdown: submitted.requestId ${submitted.requestId ?? ""} != requestId ${requestId}`);
+  }
+  if (submitted.kind !== "plan.execute") {
+    throw new Error(`service.shutdown: submitted.kind ${submitted.kind ?? ""} is not plan.execute`);
+  }
+  const end = Date.now() + timeout;
+  let last = submitted;
+  let proof = "";
+  while (Date.now() < end) {
+    try {
+      last = await api("job", { id: requestId });
+      if (last.status === "succeeded" || last.status === "failed" || last.status === "cancelled") {
+        proof = "http";
+        break;
+      }
+    } catch (error) {
+      if (!isTransportFailure(error)) throw error;
+      const durable = readOwnShutdownJob(home, requestId, planId);
+      if (durable) last = durable;
+      if (durable?.status === "succeeded" || durable?.status === "failed" || durable?.status === "cancelled") {
+        proof = "durable";
+        info(
+          `service.shutdown: transport failed after public submit; durable job ${requestId} status=${durable.status} (durable proof, not HTTP success)`,
+        );
+        break;
+      }
+    }
+    await delay(250);
+  }
+  if (!proof) {
+    throw new Error(
+      `service.shutdown: public job ${requestId} did not reach a terminal status lastStatus=${last?.status ?? "unknown"}`,
+    );
+  }
+  if (last.status === "failed" || last.status === "cancelled") {
+    throw new Error(`service.shutdown job ${requestId} ${last.status}${proof === "durable" ? " (durable)" : ""}`);
+  }
+  if (last.status !== "succeeded") {
+    throw new Error(`service.shutdown job ${requestId} status=${last.status}`);
+  }
+  return { job: last, proof };
+}
+
+async function waitJob(api, command, label) {
+  const state = await api("state");
+  assertV2State(state, label);
+  const submitted = await api("submit", {
+    command,
+    requestId: randomUUID(),
+    context: contextOf(state),
+  });
+  const latest = await waitPublicJob(api, submitted, label);
   if (latest.status !== "succeeded") {
     const error = redact(`${label} ${latest.status}: ${JSON.stringify(latest.error)}`);
     report.rpcErrors.push(error);
@@ -424,16 +691,22 @@ async function waitJob(api, command, label) {
 
 async function managerFrameOf(page, api) {
   const state = await api("state");
+  assertV2State(state, "manager iframe");
   if (state.role !== "manager" || !state.managerId) {
     throw new Error(`workbench state is not manager: ${redact(JSON.stringify(state))}`);
   }
+  await page.locator(MANAGER_FRAME).waitFor({ state: "attached", timeout: 60000 });
+  const workbench = page.frameLocator(MANAGER_FRAME);
+  await workbench.locator(WORKBENCH_ROOT).waitFor({ state: "visible", timeout: 60000 });
+  await workbench.locator(".dsh-wb-rail").waitFor({ state: "visible", timeout: 60000 });
   const view = await api("view", { spaceId: state.managerId });
-  const prefix = `${view.origin}/`;
-  await until(() => page.frames().some((frame) => frame.url().startsWith(prefix)), "manager iframe", 60000);
-  const frame = page.frames().find((row) => row.url().startsWith(prefix));
-  if (!frame) throw new Error("manager iframe missing after wait");
-  await frame.locator(".dsh-wb-rail").waitFor({ state: "visible", timeout: 60000 });
-  return { state, view, frame };
+  assertV2View(view, state.managerId, state.serviceEpoch, "manager view");
+  const src = await page.locator(MANAGER_FRAME).getAttribute("src");
+  const epochQuery = `epoch=${encodeURIComponent(view.serviceEpoch)}`;
+  if (!src || !src.includes(epochQuery)) {
+    throw new Error(`manager-frame src missing v2 epoch query: ${redact(src || "")}`);
+  }
+  return { state, view, frame: workbench };
 }
 
 async function waitHandoff(page, webPort) {
@@ -477,82 +750,137 @@ function stopPid(pid) {
   });
 }
 
-async function shutdownThisHome({ home, api, origin, web }) {
-  const identity = existsSync(home) ? readHomeIdentity(home) : { endpoint: null, entryPort: null, owner: null };
+function collectSupervisorPorts(home, origin, identity) {
   const ports = new Set();
-  if (web?.port) ports.add(web.port);
   if (identity.entryPort) ports.add(identity.entryPort);
   if (identity.endpoint?.port) ports.add(identity.endpoint.port);
-  const instances = join(home, CONTROL_DIR, "instances");
-  if (existsSync(instances)) {
-    for (const file of readdirSync(instances).filter(file => file.endsWith(".json"))) {
-      const record = JSON.parse(readFileSync(join(instances, file), "utf8"));
-      if (record.version === 1 && Number.isInteger(record.port) && record.port > 0 && record.port <= 65535 &&
-          record.origin === `http://${HOST}:${record.port}`) ports.add(record.port);
-    }
-  }
   if (origin) {
     const parsed = loopbackOrigin(origin);
     if (parsed) ports.add(parsed.port);
   }
-
-  let call = api;
-  if (!call && identity.endpoint) call = bearerApi(identity.endpoint);
-  try { if (call) {
-    const plan = await call("preview", { request: { kind: "controller.shutdown" } });
-    const submitted = await call("submit", {
-      command: { kind: "plan.execute", planId: plan.id },
-      requestId: randomUUID(),
-    });
-    await until(async () => {
-      const job = await call("job", { id: submitted.id });
-      return !["queued", "running"].includes(job.status);
-    }, "controller.shutdown", 120000).catch((error) => {
-      report.rpcErrors.push(redact(error instanceof Error ? error.message : String(error)));
-    });
-  } } catch (error) {
-    report.rpcErrors.push(redact(error instanceof Error ? error.message : String(error)));
-  }
-
-  // The ordinary Web was started by this harness, not by the supervisor.
-  if (web?.child) await stopOwned(web.child);
-
-  for (const port of ports) {
-    await waitPortClosed(port, PORT_MS).catch(() => {});
-  }
-
-  const stillOpen = [];
-  for (const port of ports) {
-    try {
-      await waitPortClosed(port, 1000);
-    } catch {
-      stillOpen.push(port);
+  const instances = join(home, CONTROL_DIR, "instances");
+  if (existsSync(instances)) {
+    for (const file of readdirSync(instances).filter((name) => name.endsWith(".json"))) {
+      try {
+        const record = JSON.parse(readFileSync(join(instances, file), "utf8"));
+        if (
+          record.version === 1 &&
+          Number.isInteger(record.port) &&
+          record.port > 0 &&
+          record.port <= 65535 &&
+          record.origin === `http://${HOST}:${record.port}`
+        ) {
+          ports.add(record.port);
+        }
+      } catch {
+        /* skip damaged instance records */
+      }
     }
   }
-  if (stillOpen.length && identity.owner?.pid && identity.endpoint) {
-    const ownerOrigin = typeof identity.owner.endpoint === "string" ? loopbackOrigin(identity.owner.endpoint) : null;
-    if (ownerOrigin && ownerOrigin.origin === identity.endpoint.origin) {
-      await stopPid(identity.owner.pid);
-      for (const port of stillOpen) await waitPortClosed(port, PORT_MS).catch(() => {});
+  return [...ports];
+}
+
+function shutdownCaller(api, identity, origin) {
+  if (api) return api;
+  if (!identity.endpoint) return null;
+  const parsedOrigin = origin ? loopbackOrigin(origin) : null;
+  if (parsedOrigin && parsedOrigin.origin !== identity.endpoint.origin) {
+    throw new Error("service.shutdown: endpoint origin does not match this supervisor");
+  }
+  const ownerOrigin =
+    typeof identity.owner?.endpoint === "string" ? loopbackOrigin(identity.owner.endpoint) : null;
+  if (ownerOrigin && ownerOrigin.origin !== identity.endpoint.origin) {
+    throw new Error("service.shutdown: owner endpoint does not match this Home origin");
+  }
+  return bearerApi(identity.endpoint);
+}
+
+async function verifyServiceShutdown({ home, api, origin }) {
+  const identity = existsSync(home) ? readHomeIdentity(home) : { endpoint: null, entryPort: null, owner: null };
+  const beforePid = ownerPid(identity.owner);
+  const beforeStarted = ownerStartedAt(identity.owner);
+  if (!beforePid) throw new Error("service.shutdown: owner pid missing before shutdown");
+  const ports = collectSupervisorPorts(home, origin, identity);
+  if (!ports.length) throw new Error("service.shutdown: no supervisor ports to verify");
+
+  const call = shutdownCaller(api, identity, origin);
+  if (!call) throw new Error("service.shutdown: no cookie API and no v2 endpoint bearer");
+
+  const live = await call("state");
+  assertV2State(live, "service.shutdown");
+  const context = contextOf(live);
+  const plan = await call("preview", { request: { kind: "service.shutdown" }, context });
+  if (!plan?.id || plan.kind !== "service.shutdown") {
+    throw new Error(`service.shutdown preview rejected: ${redact(JSON.stringify(plan))}`);
+  }
+  const requestId = randomUUID();
+  const submitted = await call("submit", {
+    command: { kind: "plan.execute", planId: plan.id },
+    requestId,
+    context,
+  });
+  const waited = await waitServiceShutdownAccepted({
+    home,
+    api: call,
+    submitted,
+    requestId,
+    planId: plan.id,
+    timeout: PUBLIC_JOB_WAIT_MS,
+  });
+  const job = waited.job;
+
+  for (const port of ports) {
+    await waitPortClosed(port, PORT_MS);
+  }
+  await until(
+    () => pidLiveness(beforePid, beforeStarted) === "dead",
+    `owner pid ${beforePid} dead after service.shutdown`,
+    30000,
+  );
+  const after = readHomeIdentity(home);
+  if (after.endpoint) {
+    throw new Error("service.shutdown: endpoint.json still valid after succeeded job");
+  }
+  report.ownedPorts = ports;
+  report.shutdownJob = {
+    id: requestId,
+    requestId,
+    planId: plan.id,
+    status: job.status,
+    phase: job.phase,
+    proof: waited.proof,
+  };
+  if (waited.proof === "durable") {
+    info(`service.shutdown completed with durable proof (not HTTP success) job ${requestId}`);
+  }
+  return { job, ports, pid: beforePid, proof: waited.proof, requestId, planId: plan.id };
+}
+
+async function forceCleanOwned({ home, origin, web }) {
+  const identity = existsSync(home) ? readHomeIdentity(home) : { endpoint: null, entryPort: null, owner: null };
+  const ports = new Set(collectSupervisorPorts(home, origin, identity));
+  if (web?.port) ports.add(web.port);
+  let forced = false;
+  if (web?.child) await stopOwned(web.child);
+  const pid = ownerPid(identity.owner);
+  const started = ownerStartedAt(identity.owner);
+  if (pid && pidLiveness(pid, started) === "alive") {
+    const ownerOrigin = typeof identity.owner?.endpoint === "string" ? loopbackOrigin(identity.owner.endpoint) : null;
+    const expected = identity.endpoint?.origin || (origin ? loopbackOrigin(origin)?.origin : null);
+    if (!expected || (ownerOrigin && ownerOrigin.origin === expected) || !ownerOrigin) {
+      forced = true;
+      await stopPid(pid);
     }
   }
-
-  if (web?.child) await stopOwned(web.child);
-  if (web?.port) await waitPortClosed(web.port, PORT_MS).catch(() => {});
-
   const leftover = [];
   for (const port of ports) {
     try {
-      await waitPortClosed(port, 1000);
+      await waitPortClosed(port, PORT_MS);
     } catch {
       leftover.push(port);
     }
   }
-  report.ownedPorts = [...ports];
-  report.leftoverPorts = leftover;
-  if (leftover.length) {
-    throw new Error(`owned test ports still open after shutdown: ${leftover.join(", ")}`);
-  }
+  return { forced, leftoverPorts: leftover, ownedPorts: [...ports] };
 }
 
 function bannedPathNeedles() {
@@ -572,9 +900,126 @@ function assertNoHardcodedMachinePaths() {
   }
 }
 
-async function preflight() {
+function assertVerifierV2Contract() {
+  const staleKind = ["controller", "shutdown"].join(".");
+  const liveKind = ["service", "shutdown"].join(".");
+  const text = readFileSync(THIS_FILE, "utf8").replace(/function assertVerifierV2Contract[\s\S]*?\n\}\n/, "");
+  if (text.includes(`kind: "${staleKind}"`) || text.includes(`kind: '${staleKind}'`)) {
+    throw new Error("verifier still previews controller.shutdown");
+  }
+  if (!text.includes(`kind: "${liveKind}"`)) {
+    throw new Error("verifier does not preview service.shutdown");
+  }
+  if (!text.includes("serviceEpoch") || !text.includes("expectedRevision")) {
+    throw new Error("verifier does not send v2 mutation context");
+  }
+  if (!text.includes("data-dsh-spaces-action") || !text.includes("data-dsh-spaces-guide")) {
+    throw new Error("verifier does not use v2 guide selectors");
+  }
+  if (!text.includes("iframe#manager-frame") || !text.includes(".dsh-workbench")) {
+    throw new Error("verifier does not use v2 workbench iframe selectors");
+  }
+  if (!text.includes("protocolVersion")) {
+    throw new Error("verifier does not assert protocolVersion");
+  }
+  const staleFlag = ["recoveryRequired", "false"].join(", ");
+  if (text.includes(staleFlag)) {
+    throw new Error("verifier still requires stale recoveryRequired");
+  }
+  if (!text.includes("beforeOrdinaryBoot") || !text.includes("beforeInitialize")) {
+    throw new Error("verifier does not report boolean web-protection presence before ordinary boot vs before initialize");
+  }
+  if (!text.includes('protectionBaseline: "beforeInitialize"')) {
+    throw new Error("verifier does not pin initialization-protection baseline after ordinary web auth");
+  }
+}
+
+async function preflight({ syntaxOnly = false } = {}) {
+  const syntax = spawnSync(process.execPath, ["--check", THIS_FILE], { encoding: "utf8", windowsHide: true });
+  if (syntax.status !== 0) {
+    throw new Error(`node --check failed: ${syntax.stderr || syntax.stdout || syntax.status}`);
+  }
+  pass("node --check passed");
+
   assertNoHardcodedMachinePaths();
   pass("pack and verify scripts do not embed operator machine paths");
+  assertVerifierV2Contract();
+  pass("verifier source uses service.shutdown, v2 mutation context, and current guide/workbench selectors");
+
+  const epoch = "aa".repeat(32);
+  const revision = "bb".repeat(32);
+  assert.deepEqual(contextOf({ serviceEpoch: epoch, revision }), {
+    serviceEpoch: epoch,
+    expectedRevision: revision,
+  });
+  assert.throws(() => contextOf({ serviceEpoch: "nope", revision }));
+  assert.equal(readV2Endpoint({ version: 1, origin: `http://${HOST}:9`, bearer: "tok" }), null);
+  const parsed = readV2Endpoint({
+    version: 2,
+    protocolVersion: 2,
+    origin: `http://${HOST}:9`,
+    bearer: "tok",
+    homeId: epoch,
+    serviceEpoch: revision,
+  });
+  assert.equal(parsed?.port, 9);
+  assert.equal(parsed?.protocolVersion, 2);
+  const src = viewSrc({
+    serviceEpoch: epoch,
+    spaceId: "coding",
+    generation: 1,
+    origin: `http://${HOST}:10`,
+    entryOrigin: `http://${HOST}:9`,
+    entryPath: "/view/coding/1",
+    channel: "ch",
+  });
+  assert.equal(src, `http://${HOST}:9/view/coding/1?epoch=${epoch}`);
+  assert.throws(() =>
+    viewSrc({
+      serviceEpoch: epoch,
+      origin: `http://${HOST}:9`,
+      entryOrigin: `http://${HOST}:9`,
+      entryPath: "/view/coding/1",
+    }),
+  );
+  pass("v2 endpoint/context/view parsers reject v1 endpoint and missing epoch");
+
+  assert.deepEqual(
+    webProtectedPresence({
+      webProfile: true,
+      sessions: null,
+      storages: [],
+      ".credentials.yaml": false,
+      ".anonymous-user-id": false,
+    }),
+    {
+      webProfile: true,
+      sessions: false,
+      storages: true,
+      ".credentials.yaml": false,
+      ".anonymous-user-id": false,
+    },
+  );
+  const bootPresence = presenceDelta(
+    {
+      webProfile: true,
+      sessions: null,
+      storages: null,
+      ".credentials.yaml": false,
+      ".anonymous-user-id": false,
+    },
+    {
+      webProfile: true,
+      sessions: null,
+      storages: null,
+      ".credentials.yaml": true,
+      ".anonymous-user-id": false,
+    },
+  );
+  assert.deepEqual(bootPresence.changed, [".credentials.yaml"]);
+  assert.equal(bootPresence.fields[".credentials.yaml"].before, false);
+  assert.equal(bootPresence.fields[".credentials.yaml"].after, true);
+  pass("web protection presence helpers keep credential checks as booleans (no byte reads)");
 
   const plugin = JSON.parse(readFileSync(join(PLUGIN_DIR, "package.json"), "utf8"));
   assert.equal(plugin.name, CANONICAL_NAME);
@@ -618,6 +1063,44 @@ async function preflight() {
   }
   pass(`default pack dest is outside the package: ${dest}`);
 
+  if (syntaxOnly) {
+    const fixtureHome = mkdtempSync(join(tmpdir(), "dsh-spaces-shutdown-job-"));
+    try {
+      const planId = randomUUID();
+      const requestId = randomUUID();
+      const jobsDir = join(fixtureHome, CONTROL_DIR, JOBS_DIR);
+      mkdirSync(jobsDir, { recursive: true });
+      const succeeded = {
+        schemaVersion: 1,
+        id: requestId,
+        requestId,
+        kind: "plan.execute",
+        command: { kind: "plan.execute", planId },
+        status: "succeeded",
+      };
+      writeFileSync(join(jobsDir, `${requestId}.json`), `${JSON.stringify(succeeded)}\n`);
+      const row = readOwnShutdownJob(fixtureHome, requestId, planId);
+      assert.equal(row?.status, "succeeded");
+      assert.equal(readOwnShutdownJob(fixtureHome, requestId, randomUUID()), null);
+      assert.equal(isTransportFailure(new Error("apiRequestContext.post: read ECONNRESET")), true);
+      assert.equal(isTransportFailure(new Error("fetch failed: connect ECONNREFUSED")), true);
+      assert.equal(isTransportFailure(new Error("job: workbench/forbidden not allowed")), false);
+      writeFileSync(
+        join(jobsDir, `${requestId}.json`),
+        `${JSON.stringify({ ...succeeded, status: "failed" })}\n`,
+      );
+      assert.equal(readOwnShutdownJob(fixtureHome, requestId, planId)?.status, "failed");
+    } finally {
+      rmSync(fixtureHome, { recursive: true, force: true });
+    }
+    report.status = "syntax";
+    report.scope =
+      "syntax/static only: v2 shutdown/context/guide selectors, Home/path guards. Did not pack, boot DSH web, supervisor, or Playwright.";
+    pass("syntax contract: service.shutdown + mutation context; force-clean is not PASS");
+    pass("syntax fixture: own jobs/<id>.json binds plan.execute planId; ECONNRESET is transport, workbench/forbidden is not");
+    return report;
+  }
+
   const nodeExe = process.execPath;
   run(nodeExe, [PACK_SCRIPT, "--preflight"], {
     cwd: REPO,
@@ -639,8 +1122,8 @@ async function preflight() {
   report.status = "preflight";
   report.cli.resolved = cli;
   report.scope =
-    "static/mocks only: manifests, nested-tgz detector, pack dry-run contents, Home/path guards. Did not boot DSH web, supervisor, or Playwright.";
-  pass("serial run contract: Playwright clicks Initialize Spaces with no path args; rail is asserted on the manager iframe; shutdown uses this Home only");
+    "static/mocks only: manifests, nested-tgz detector, pack dry-run contents, Home/path guards, v2 API/selectors. Did not boot DSH web, supervisor, or Playwright.";
+  pass("serial run contract: Playwright clicks data-dsh-spaces-action=initialize with no path args; workbench is iframe#manager-frame .dsh-workbench; service.shutdown must succeed as a public job");
   return report;
 }
 
@@ -650,10 +1133,11 @@ async function main() {
   report.output = out;
   report.startedAt = new Date().toISOString();
 
-  if (process.argv.includes("--preflight")) {
-    await preflight();
-    writeJson(join(out, "preflight.json"), report);
-    console.log("\nSTANDARD INSTALL PREFLIGHT: PASS");
+  if (process.argv.includes("--syntax") || process.argv.includes("--preflight")) {
+    const syntaxOnly = process.argv.includes("--syntax") && !process.argv.includes("--preflight");
+    await preflight({ syntaxOnly });
+    writeJson(join(out, syntaxOnly ? "syntax.json" : "preflight.json"), report);
+    console.log(syntaxOnly ? "\nSTANDARD INSTALL SYNTAX: PASS" : "\nSTANDARD INSTALL PREFLIGHT: PASS");
     return;
   }
 
@@ -691,7 +1175,7 @@ async function main() {
   runDsh(nodeExe, bin, home, tooling, ["--profile", WEB_PROFILE, "--dump-config"], DUMP_MS, "seed web", join(out, "seed.log"));
   pass("fresh official web profile seeded; no user Home copied");
 
-  runDshRetry(
+  runDsh(
     nodeExe,
     bin,
     home,
@@ -715,7 +1199,12 @@ async function main() {
     "dump after add",
   );
   if (!dumpHasPlugin(dumpAfterAdd)) throw new Error("web dump-config missing id: dsh-spaces after add");
-  assert.equal(hubProfiles(home).length, 0);
+  const afterAddProtected = webProtectedFingerprint(home);
+  assert.equal(afterAddProtected.webProfile, true, "ordinary web profile missing after plugin add");
+  assertManagerAbsent(home, "after plugin add");
+  report.webProtection = {
+    beforeOrdinaryBoot: webProtectedPresence(afterAddProtected),
+  };
   pass("ordinary web standard add registered @dsh-spaces/plugin; no manager created before initialize");
 
   const playwright = await loadPlaywright();
@@ -734,24 +1223,42 @@ async function main() {
   let web = null;
   let api;
   let supervisorOrigin = null;
+  let shutdownVerified = false;
+  let webBefore;
   try {
     web = await startWeb(nodeExe, bin, home, tooling, join(out, "web.log"));
     await openAuthorizedWeb(page, web.launchUrl);
     await dismissOnboarding(page);
+    assertManagerAbsent(home, "after ordinary web boot");
+    webBefore = webProtectedFingerprint(home);
+    assert.equal(webBefore.webProfile, true, "ordinary web profile missing after ordinary boot");
+    const ordinaryBootChange = presenceDelta(afterAddProtected, webBefore);
+    report.webProtection.beforeInitialize = webProtectedPresence(webBefore);
+    report.webProtection.ordinaryBootChange = ordinaryBootChange;
+    report.webProtection.protectionBaseline = "beforeInitialize";
+    if (ordinaryBootChange.changed.length) {
+      info(
+        `ordinary web boot changed protected presence ${JSON.stringify(ordinaryBootChange.changed)} (not initialize)`,
+      );
+    } else {
+      info("ordinary web boot did not change protected presence");
+    }
+    pass("initialization-protection baseline captured after ordinary web auth/onboarding; manager still absent");
     await clickInitialize(page);
     await waitHandoff(page, web.port);
     supervisorOrigin = new URL(page.url()).origin;
     api = workbenchApi(context, supervisorOrigin);
     await managerFrameOf(page, api);
     await screenshot(page, out, "initialized.png");
-    pass("Playwright clicked initialize; supervisor stable page shows the manager iframe rail");
+    pass("Playwright clicked data-dsh-spaces-action=initialize; iframe#manager-frame shows .dsh-workbench");
 
     const first = assertSingleManager(home, "after initialize");
-    pass(`one manager ${first.hubs[0]} after initialize`);
+    assertWebPathsProtected(home, webBefore, "after initialize");
+    pass(`one manager ${first.hubs[0]} after initialize; ordinary web paths unchanged`);
 
     const state = await api("state");
+    assertV2State(state, "after initialize");
     assert.equal(state.role, "manager");
-    assert.equal(state.recoveryRequired, false);
     assert.ok(!state.reasons.includes("Unfinished Home maintenance must be recovered before new changes."));
     assert.ok(!state.reasons.includes("The manager profile cannot be used until recovery."));
     await waitJob(api, { kind: "space.create", input: { name: "coding", displayName: "编程" } }, "space.create");
@@ -762,21 +1269,30 @@ async function main() {
     pass("created and started an ordinary space with view-bridge only");
     const managerView = await managerFrameOf(page, api);
     await managerView.frame.getByRole("button", { name: "编程", exact: true }).click();
+    const live = await api("state");
+    assertV2State(live, "coding view");
     const codingView = await api("view", { spaceId: "coding" });
-    await until(() => page.frames().some(frame => frame.url().startsWith(codingView.origin + "/")), "ordinary space iframe", 60000);
+    assertV2View(codingView, "coding", live.serviceEpoch, "coding view");
+    const expectedSrc = viewSrc(codingView);
     await managerView.frame.locator('iframe[data-space-id="coding"][data-visible="true"]').waitFor({ state: "visible", timeout: 60000 });
-    await dismissOnboarding(page.frames().find(frame => frame.url().startsWith(codingView.origin + "/")));
+    const codingSrc = await managerView.frame.locator('iframe[data-space-id="coding"]').getAttribute("src");
+    if (codingSrc !== expectedSrc) {
+      throw new Error(`coding iframe src is not authorized v2 view: ${redact(codingSrc || "")}`);
+    }
     pass("selected space completed the view-bridge handshake and is visible");
     await screenshot(page, out, "coding.png");
+    assertWebPathsProtected(home, webBefore, "after create/start");
 
     await page.goto(`http://${HOST}:${web.port}/`, { waitUntil: "domcontentloaded", timeout: 30000 });
     await dismissOnboarding(page);
-    await enterOrInitialize(page);
+    const again = await enterOrInitialize(page);
+    assert.equal(again, "enter");
     await waitHandoff(page, web.port);
     await managerFrameOf(page, workbenchApi(context, new URL(page.url()).origin));
     const second = assertSingleManager(home, "repeat initialize");
     assert.deepEqual(second.hubs, first.hubs);
-    pass("repeat initialize / enter did not add a second manager");
+    assertWebPathsProtected(home, webBefore, "repeat enter");
+    pass("repeat enter did not add a second manager");
 
     // Stop only this ordinary Web host. A process-tree kill would also kill
     // the detached supervisor whose independence this restart is testing.
@@ -785,34 +1301,52 @@ async function main() {
     web = await startWeb(nodeExe, bin, home, tooling, join(out, "web-restart.log"));
     await openAuthorizedWeb(page, web.launchUrl);
     await dismissOnboarding(page);
-    await enterOrInitialize(page);
+    assert.equal(await enterOrInitialize(page), "enter");
     await waitHandoff(page, web.port);
     supervisorOrigin = new URL(page.url()).origin;
     api = workbenchApi(context, supervisorOrigin);
     await managerFrameOf(page, api);
     const third = assertSingleManager(home, "after web restart");
     assert.deepEqual(third.hubs, first.hubs);
+    assertWebPathsProtected(home, webBefore, "after web restart");
     pass("close and restart ordinary web re-enters the same manager");
     assert.deepEqual(report.pageErrors, [], "Unexpected browser runtime errors");
+
+    const shutdown = await verifyServiceShutdown({ home, api, origin: supervisorOrigin });
+    shutdownVerified = true;
+    pass(
+      shutdown.proof === "durable"
+        ? "explicit service.shutdown confirmed by durable job file (not HTTP success), dead pid, invalid endpoint, closed ports"
+        : "explicit service.shutdown confirmed by succeeded public job, dead pid, invalid endpoint, closed ports",
+    );
   } catch (error) {
     report.initAlert = redact(await guideAlert(page).catch(() => ""));
     await screenshot(page, out, "failure.png");
     throw error;
   } finally {
-    try {
-      await shutdownThisHome({ home, api, origin: supervisorOrigin, web });
-    } catch (error) {
-      report.shutdownError = redact(error instanceof Error ? error.message : String(error));
-      if (!report.error) report.error = report.shutdownError;
-    }
+    const cleaned = await forceCleanOwned({ home, origin: supervisorOrigin, web }).catch((error) => ({
+      forced: true,
+      leftoverPorts: [],
+      ownedPorts: [],
+      error: redact(error instanceof Error ? error.message : String(error)),
+    }));
+    report.forceCleaned = Boolean(cleaned.forced);
+    report.leftoverPorts = cleaned.leftoverPorts;
+    if (!report.ownedPorts) report.ownedPorts = cleaned.ownedPorts;
+    if (cleaned.error) report.cleanupError = cleaned.error;
     await browser.close().catch(() => {});
   }
-  if (report.shutdownError) throw new Error(report.shutdownError);
+  if (!shutdownVerified) {
+    throw new Error("service.shutdown was not verified; force-clean is not PASS");
+  }
+  if (report.forceCleaned) {
+    throw new Error("force-clean killed a still-alive supervisor; service.shutdown is not PASS");
+  }
   if (report.leftoverPorts?.length) {
     throw new Error(`owned test ports still open after shutdown: ${report.leftoverPorts.join(", ")}`);
   }
 
-  runDshRetry(
+  runDsh(
     nodeExe,
     bin,
     home,
@@ -838,6 +1372,7 @@ async function main() {
   if (dumpHasPlugin(dumpAfterRemove) || dumpAfterRemove.includes(CANONICAL_NAME)) {
     throw new Error("web dump-config still contains the plugin after remove");
   }
+  assertWebPathsProtected(home, webBefore, "after web remove");
   pass("ordinary web remove dropped package, bundle, and dump row");
 
   report.status = "pass";

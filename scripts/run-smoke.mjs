@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const electron = require("electron");
 const cwd = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const child = spawn(electron, ["."], {
+const child = spawn(process.execPath, ["--import", "tsx", join(cwd, "scripts", "verify-spaces-desktop.mjs")], {
   cwd,
-  env: { ...process.env, DSH_SPACES_SMOKE: "1" },
+  env: { ...process.env },
+  windowsHide: true,
   stdio: "inherit",
 });
 child.on("exit", (code) => process.exit(code ?? 1));

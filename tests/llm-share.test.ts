@@ -26,8 +26,8 @@ import {
   importSpaceArchive,
   packSpaceShare,
   parseSpaceShare,
-} from "../src/main/space-share.ts";
-import { packZip } from "../src/main/space-share-zip.ts";
+} from "../src/adapters/node/space-share.ts";
+import { packZip } from "../src/adapters/node/space-share-zip.ts";
 import type { InstalledPlugin } from "../src/shared/types.ts";
 
 const temps: string[] = [];

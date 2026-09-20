@@ -4,6 +4,7 @@ import type {
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchMutationContext,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -13,6 +14,7 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../../../src/shared/workbench";
+import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../../src/shared/workbench-product";
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
 import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
 import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
@@ -41,8 +43,8 @@ export class WorkbenchManagerHost extends TypertRemoteService {
   }
 
   @Remote("submit")
-  async submit(command: WorkbenchCommand, requestId: string): Promise<WorkbenchJob> {
-    return this.guard((api) => api.submit(command, requestId));
+  async submit(command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext): Promise<WorkbenchJob> {
+    return this.guard((api) => api.submit(command, requestId, context));
   }
 
   @Remote("job")
@@ -61,8 +63,13 @@ export class WorkbenchManagerHost extends TypertRemoteService {
   }
 
   @Remote("preview")
-  async preview(request: WorkbenchPlanRequest): Promise<WorkbenchPlan> {
-    return this.guard((api) => api.preview(request));
+  async preview(request: WorkbenchPlanRequest, context: WorkbenchMutationContext): Promise<WorkbenchPlan> {
+    return this.guard((api) => api.preview(request, context));
+  }
+
+  @Remote("product")
+  async product(request: WorkbenchProductRequest): Promise<WorkbenchProductResult> {
+    return this.guard((api) => api.product(request));
   }
 
   @Remote("plugins")

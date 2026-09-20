@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -27,6 +27,8 @@ import {
 } from "../src/main/desktop-shell-protocol.ts";
 import {
   coalesceInflight,
+  DESKTOP_SNAPSHOTS_DIRNAME,
+  ensureDesktopSnapshotRoot,
   openWorkbenchSession,
   resolveSpacesPayloadRoot,
   SHELL_PRELOAD_FILE,
@@ -693,4 +695,98 @@ test("prepare and start stay in the title bar; error cards copy logs and do not 
   assert.match(readFileSync(INDEX_SOURCE, "utf8"), /openWorkbenchSession/);
   assert.match(readFileSync(INDEX_SOURCE, "utf8"), /viewGeneration/);
   assert.match(readFileSync(INDEX_SOURCE, "utf8"), /snapshotAndEmit/);
+  const start = readFileSync(INDEX_SOURCE, "utf8");
+  assert.equal(/snapshotRoot && realDirectory\(toolchain\.snapshotRoot\)/.test(start), false);
+  assert.match(start, /createIfMissing:\s*!recordedSnapshotRoot/);
+  assert.ok(start.indexOf("ensureDesktopSnapshotRoot(dshHome, snapshotRoot") < start.indexOf("client.start(runtime)"));
+});
+
+test("explicit start creates the default app-owned snapshots directory when it is missing", () => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-shell-snap-"));
+  temps.push(root);
+  const home = join(root, "home");
+  const userData = join(root, "app");
+  mkdirSync(home);
+  mkdirSync(userData);
+  const snapshotRoot = join(userData, DESKTOP_SNAPSHOTS_DIRNAME);
+  assert.equal(existsSync(snapshotRoot), false);
+  const created = ensureDesktopSnapshotRoot(home, snapshotRoot, { createIfMissing: true });
+  assert.equal(created, realpathSync(snapshotRoot));
+  assert.equal(lstatSync(snapshotRoot).isDirectory(), true);
+  assert.equal(lstatSync(snapshotRoot).isSymbolicLink(), false);
+  writeFileSync(join(snapshotRoot, "keep.txt"), "keep");
+  assert.equal(ensureDesktopSnapshotRoot(home, snapshotRoot, { createIfMissing: true }), created);
+  assert.equal(readFileSync(join(snapshotRoot, "keep.txt"), "utf8"), "keep");
+});
+
+test("missing recorded snapshotRoot is not replaced by the default snapshots directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-shell-snap-recorded-"));
+  temps.push(root);
+  const home = join(root, "home");
+  const userData = join(root, "app");
+  mkdirSync(home);
+  mkdirSync(userData);
+  const recordedParent = join(root, "store");
+  mkdirSync(recordedParent);
+  const recorded = join(recordedParent, DESKTOP_SNAPSHOTS_DIRNAME);
+  const reason = /snapshotRoot must be a real directory outside snapshot-replaced Home entries/;
+  assert.equal(existsSync(recorded), false);
+  assert.throws(() => ensureDesktopSnapshotRoot(home, recorded, { createIfMissing: false }), reason);
+  assert.equal(existsSync(recorded), false);
+  assert.equal(existsSync(join(userData, DESKTOP_SNAPSHOTS_DIRNAME)), false);
+});
+
+test("existing recorded snapshotRoot with another directory name is reused", () => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-shell-snap-named-"));
+  temps.push(root);
+  const home = join(root, "home");
+  const userData = join(root, "app");
+  mkdirSync(home);
+  mkdirSync(userData);
+  const recorded = join(root, "archive-root");
+  mkdirSync(recorded);
+  writeFileSync(join(recorded, "keep.txt"), "keep");
+  const got = ensureDesktopSnapshotRoot(home, recorded, { createIfMissing: false });
+  assert.equal(got, realpathSync(recorded));
+  assert.equal(ensureDesktopSnapshotRoot(home, recorded, { createIfMissing: false }), got);
+  assert.equal(readFileSync(join(recorded, "keep.txt"), "utf8"), "keep");
+  assert.equal(existsSync(join(userData, DESKTOP_SNAPSHOTS_DIRNAME)), false);
+});
+
+test("explicit start refuses a file, junction, or Home profile snapshotRoot without mutation", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-shell-snap-bad-"));
+  temps.push(root);
+  const home = join(root, "home");
+  const userData = join(root, "app");
+  mkdirSync(home);
+  mkdirSync(userData);
+  const reason = /snapshotRoot must be a real directory outside snapshot-replaced Home entries/;
+
+  const asFile = join(userData, DESKTOP_SNAPSHOTS_DIRNAME);
+  writeFileSync(asFile, "not-a-directory");
+  assert.throws(() => ensureDesktopSnapshotRoot(home, asFile), reason);
+  assert.equal(readFileSync(asFile, "utf8"), "not-a-directory");
+
+  const profiles = join(home, "profiles", "notes");
+  mkdirSync(profiles, { recursive: true });
+  assert.throws(() => ensureDesktopSnapshotRoot(home, profiles), reason);
+  assert.equal(lstatSync(profiles).isDirectory(), true);
+  const forbiddenLeaf = join(home, "profiles", "web", DESKTOP_SNAPSHOTS_DIRNAME);
+  mkdirSync(join(home, "profiles", "web"), { recursive: true });
+  assert.throws(() => ensureDesktopSnapshotRoot(home, forbiddenLeaf, { createIfMissing: true }), reason);
+  assert.equal(existsSync(forbiddenLeaf), false);
+  assert.equal(existsSync(join(userData, "other-snapshots")), false);
+
+  const linked = join(userData, "linked-snapshots");
+  try {
+    symlinkSync(profiles, linked, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    t.diagnostic(`directory junction is not testable: ${String(error)}`);
+  }
+  if (existsSync(linked)) {
+    assert.throws(() => ensureDesktopSnapshotRoot(home, linked), reason);
+    const after = lstatSync(linked);
+    assert.equal(after.isSymbolicLink() || after.isDirectory(), true);
+    assert.equal(readFileSync(asFile, "utf8"), "not-a-directory");
+  }
 });

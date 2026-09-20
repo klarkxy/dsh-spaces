@@ -1,5 +1,5 @@
 import { type ChildProcess } from "node:child_process";
-import { spawnObserved } from "../../main/owned-process-record";
+import { spawnObserved } from "./owned-process-record";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   existsSync,
@@ -18,7 +18,7 @@ import {
   normalizeSpacesFile,
   packageHasWebApp,
 } from "../../core/domain/registry";
-import { atomicWrite } from "../../main/atomic";
+import { atomicWrite } from "./atomic";
 import {
   PatchForbiddenError,
   PatchVerifyError,
@@ -29,9 +29,9 @@ import {
   extractRoot,
   isExpectedIsolationRoot,
   patchTextLooksIsolated,
-} from "../../main/patch-writer";
-import { ProfileRegistry } from "../../main/profile-registry";
-import { terminateProcessTree } from "../../main/terminate-process";
+} from "./patch-writer";
+import { ProfileRegistry } from "./profile-registry";
+import { terminateProcessTree } from "./terminate-process";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { SNAPSHOT_ID_RE } from "../../shared/snapshots";
 import type {

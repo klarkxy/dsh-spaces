@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { t } from "../shared/i18n";
+import { t } from "../../shared/i18n";
 import {
   PatchForbiddenError,
   PatchVerifyError,
   applyIsolationPatch,
   assertDumpPatched,
-} from "../core/domain/isolation";
+} from "../../core/domain/isolation";
 import { atomicWrite } from "./atomic";
 import { runDsh } from "./dsh-cli";
 
@@ -29,7 +29,7 @@ export {
   isolationExpr,
   patchTextLooksConfigIsolated,
   patchTextLooksIsolated,
-} from "../core/domain/isolation";
+} from "../../core/domain/isolation";
 
 export class PatchWriter {
   constructor(private readonly dshHome: string) {}

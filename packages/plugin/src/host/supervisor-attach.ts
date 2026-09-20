@@ -89,11 +89,11 @@ export async function attachExistingSupervisor(options: {
   const recorded = readEndpointFile(path);
   const before = controller.inspect();
 
-  if ("missing" in recorded && recorded.missing) {
+  if ("missing" in recorded) {
     if (!before.held) return { missing: true };
     return blocked([heldReason(before)]);
   }
-  if ("invalid" in recorded && recorded.invalid) {
+  if ("invalid" in recorded) {
     return blocked(recorded.reasons);
   }
 

@@ -193,8 +193,8 @@ export const MESSAGES: Record<SpacesLocale, Record<SpacesMessageKey, string>> = 
 
 const guideEn = {
   loading: "Checking this Home…",
-  recoveryTitle: "Recovery required",
-  recoveryBody: "Workbench identity is damaged. Recovery is required. Locks were not cleared.",
+  blockedTitle: "Workbench unavailable",
+  blockedBody: "This Home cannot open the workbench. Locks were not cleared.",
   initTitle: "Initialize Spaces",
   initBody:
     "This creates a dedicated manager and supervisor for this Home, then opens the authenticated workbench. It does not turn this space into the manager.",
@@ -209,15 +209,16 @@ const guideEn = {
   enterProgress: "Connecting to the workbench…",
   startAction: "Start workbench",
   retry: "Retry",
+  copyDetails: "Copy details",
   unavailable: "The workbench entry is not available yet.",
   untrusted: "The workbench entry is not an authorized local address.",
-  roleFailed: "This Home could not be checked. Try again.",
+  roleFailed: "This Home could not be checked.",
 } as const;
 
 const guideZh: Record<keyof typeof guideEn, string> = {
   loading: "正在检查此 Home…",
-  recoveryTitle: "需要恢复",
-  recoveryBody: "管理工作台身份已损坏，需要恢复。未清除锁。",
+  blockedTitle: "工作台不可用",
+  blockedBody: "此 Home 无法打开工作台。未清除锁。",
   initTitle: "初始化 Spaces",
   initBody: "这将为本 Home 创建专用管理空间和监督进程，然后打开已认证的工作台。不会把当前空间变成管理空间。",
   initAction: "初始化 Spaces",
@@ -230,9 +231,10 @@ const guideZh: Record<keyof typeof guideEn, string> = {
   enterProgress: "正在连接工作台…",
   startAction: "启动工作台",
   retry: "重试",
+  copyDetails: "复制详情",
   unavailable: "工作台入口暂不可用。",
   untrusted: "工作台入口不是已授权的本机地址。",
-  roleFailed: "无法检查此 Home，请重试。",
+  roleFailed: "无法检查此 Home。",
 };
 
 export const GUIDE_COPY: Record<SpacesLocale, Record<keyof typeof guideEn, string>> = {

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { isGitSpec } from "../shared/plugin";
-import { isExactRuntimeVersion } from "../shared/runtime";
-import { FULL_SPACES_PACKAGE } from "../shared/plugin-spec";
+import { isGitSpec } from "../../shared/plugin";
+import { isExactRuntimeVersion } from "../../shared/runtime";
+import { FULL_SPACES_PACKAGE } from "../../shared/plugin-spec";
 import {
   SPACE_SHARE_FORMAT_VERSION,
   SPACE_SHARE_KIND,
@@ -12,26 +12,26 @@ import {
   type SpaceSharePlugin,
   type SpaceSharePluginSource,
   type SpaceSharePreview,
-} from "../shared/space-share";
-import { MAX_WORKBENCH_SHARE_BYTES } from "../shared/workbench-product";
+} from "../../shared/space-share";
+import { MAX_WORKBENCH_SHARE_BYTES } from "../../shared/workbench-product";
 import {
   LLM_SHARE_FILENAME,
   assertShareSecretFree,
   parseLlmShareManifest,
   type LlmShareManifest,
-} from "../core/domain/llm-share";
+} from "../../core/domain/llm-share";
 import {
   applySpaceRecipe,
   isNpmRangeOrExact,
   isSafeNpmPackageName,
   recipeFromShareParts,
-} from "../core/application/space-recipe";
+} from "../../core/application/space-recipe";
 import {
   PROFILE_NAME_RE,
   PROTECTED_PLUGIN_PACKAGES,
   type InstalledPlugin,
   type PluginLibraryEntry,
-} from "../shared/types";
+} from "../../shared/types";
 import { listProfilePlugins, parseNpmNameAndVersion } from "./plugin-ops";
 import { isHubPluginArchive, readPluginLibrary } from "./plugin-library";
 import { packZip, unpackZip } from "./space-share-zip";
@@ -39,7 +39,7 @@ import { packZip, unpackZip } from "./space-share-zip";
 const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, FULL_SPACES_PACKAGE]);
 const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "unknown"]);
 
-export { canonicalNpmInstallSpec, isNpmRangeOrExact, isSafeNpmPackageName, validateImportedPatch } from "../core/application/space-recipe";
+export { canonicalNpmInstallSpec, isNpmRangeOrExact, isSafeNpmPackageName, validateImportedPatch } from "../../core/application/space-recipe";
 
 export interface SpaceSharePorts {
   createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;

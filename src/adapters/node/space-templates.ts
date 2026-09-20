@@ -12,14 +12,14 @@ import {
   type SpaceRecipe,
   type SpaceSharePlugin,
   type SpaceTemplate,
-} from "../shared/space-share";
+} from "../../shared/space-share";
 import {
   applySpaceRecipe,
   assertSharePluginsSecretFree,
   parseSpaceRecipe,
   recipeFromTemplate,
-} from "../core/application/space-recipe";
-import type { LlmShareManifest } from "../core/domain/llm-share";
+} from "../../core/application/space-recipe";
+import type { LlmShareManifest } from "../../core/domain/llm-share";
 
 export const SPACE_TEMPLATES_FILE = "space-templates.json";
 

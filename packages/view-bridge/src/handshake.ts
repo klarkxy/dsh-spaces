@@ -4,6 +4,7 @@ export type ViewHandshakeState = "ready" | "failed" | "disconnected";
 
 export interface ViewHandshakeMessage {
   source: "dsh-spaces-view";
+  serviceEpoch: string;
   spaceId: string;
   generation: number;
   channel: string;
@@ -18,6 +19,7 @@ export interface ViewPostTarget {
 export function viewMessage(config: ViewHandshakeConfig, state: ViewHandshakeState, message?: string): ViewHandshakeMessage {
   const payload: ViewHandshakeMessage = {
     source: "dsh-spaces-view",
+    serviceEpoch: config.serviceEpoch,
     spaceId: config.spaceId,
     generation: config.generation,
     channel: config.channel,
@@ -60,6 +62,7 @@ export function parseParentPing(
   const row = data as Record<string, unknown>;
   if (row.source !== PARENT_PING_SOURCE) return false;
   if (row.type !== "ping") return false;
+  if (row.serviceEpoch !== config.serviceEpoch) return false;
   if (row.spaceId !== config.spaceId) return false;
   if (row.generation !== config.generation) return false;
   if (row.channel !== config.channel) return false;
@@ -77,12 +80,14 @@ export function acceptParentMessage(
   if (!data || typeof data !== "object") return null;
   const row = data as Record<string, unknown>;
   if (row.source !== "dsh-spaces-view") return null;
+  if (row.serviceEpoch !== config.serviceEpoch) return null;
   if (row.spaceId !== config.spaceId) return null;
   if (row.generation !== config.generation) return null;
   if (row.channel !== config.channel) return null;
   if (row.state !== "ready" && row.state !== "failed" && row.state !== "disconnected") return null;
   const parsed: ViewHandshakeMessage = {
     source: "dsh-spaces-view",
+    serviceEpoch: config.serviceEpoch,
     spaceId: config.spaceId,
     generation: config.generation,
     channel: config.channel,

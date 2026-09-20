@@ -1,1 +1,1 @@
-export { inspectControlResidue, inspectHomeToolchain } from "./control-residue";
+export { inspectControlResidue, inspectHomeToolchain } from "../node/control-residue";

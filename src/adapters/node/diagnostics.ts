@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { t } from "../shared/i18n";
+import { t } from "../../shared/i18n";
 import {
   BACKUP_FILE_PREFIX,
   MAX_BACKUP_BYTES,
@@ -26,9 +26,9 @@ import {
   type DiagnosticChannel,
   type DiagnosticLogEntry,
   type DiagnosticsSnapshot,
-} from "../shared/diagnostics";
-import type { ProfileRecord, ProfileStatus } from "../shared/types";
-import { PROFILE_NAME_RE } from "../shared/types";
+} from "../../shared/diagnostics";
+import type { ProfileRecord, ProfileStatus } from "../../shared/types";
+import { PROFILE_NAME_RE } from "../../shared/types";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 import { PatchWriter } from "./patch-writer";

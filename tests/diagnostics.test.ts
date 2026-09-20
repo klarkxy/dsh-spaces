@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { DiagnosticsService } from "../src/main/diagnostics.ts";
+import { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
 import { MAX_BACKUP_BYTES, MAX_LOG_BYTES, MAX_LOG_ENTRIES } from "../src/shared/diagnostics.ts";
 import { t } from "../src/shared/i18n/index.ts";
 import type { ProfileKind, ProfileRecord, ProfileStatus } from "../src/shared/types.ts";

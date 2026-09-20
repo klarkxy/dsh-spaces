@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { OperationLock } from "../../core/ports/operation-lock";
-import { assertNotRealHome } from "../../main/home-guard";
+import { assertNotRealHome } from "./home-guard";
 
 export type { OperationLock } from "../../core/ports/operation-lock";
 

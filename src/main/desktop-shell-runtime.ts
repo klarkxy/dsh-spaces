@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   parseLocalePreferenceValue,
@@ -9,13 +9,16 @@ import {
 } from "../shared/desktop-shell";
 import type { LocalePreference, PackageSource, ThemePreference } from "../shared/types";
 import { DEFAULT_HUB_SETTINGS } from "../shared/types";
-import { atomicWrite } from "./atomic";
-import { readSettings } from "./hub-settings";
+import { atomicWrite } from "../adapters/node/atomic";
+import { readSettings } from "../adapters/node/hub-settings";
+import { validateSnapshotRoot } from "../../packages/plugin/src/host/supervisor-pack";
 
 export const PACKAGED_PAYLOAD_DIRNAME = "spaces-payload";
 export const DEV_PAYLOAD_SEGMENTS = ["packages", "plugin", "lib"] as const;
 export const SHELL_PREFS_FILE = "desktop-shell.json";
 export const SHELL_PRELOAD_FILE = "index.cjs";
+export const DESKTOP_SNAPSHOTS_DIRNAME = "snapshots";
+const SNAPSHOT_ROOT_REASON = "snapshotRoot must be a real directory outside snapshot-replaced Home entries.";
 
 export interface DesktopShellPrefs {
   locale: LocalePreference;
@@ -97,6 +100,41 @@ export function realDirectory(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Recorded roots are validated in place. Missing default `snapshots` may be created only when asked. */
+export function ensureDesktopSnapshotRoot(
+  home: string,
+  snapshotRoot: string,
+  options: { createIfMissing?: boolean } = {},
+): string {
+  if (typeof snapshotRoot !== "string" || !snapshotRoot.trim() || !isAbsolute(snapshotRoot)) {
+    throw new Error(SNAPSHOT_ROOT_REASON);
+  }
+  const resolved = resolve(snapshotRoot);
+  let st: ReturnType<typeof lstatSync> | undefined;
+  try {
+    st = lstatSync(resolved);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(SNAPSHOT_ROOT_REASON);
+  }
+  if (st) {
+    if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(SNAPSHOT_ROOT_REASON);
+    const existing = validateSnapshotRoot(home, resolved);
+    if (!existing) throw new Error(SNAPSHOT_ROOT_REASON);
+    return existing;
+  }
+  if (options.createIfMissing !== true) throw new Error(SNAPSHOT_ROOT_REASON);
+  if (basename(resolved) !== DESKTOP_SNAPSHOTS_DIRNAME) throw new Error(SNAPSHOT_ROOT_REASON);
+  if (!validateSnapshotRoot(home, dirname(resolved))) throw new Error(SNAPSHOT_ROOT_REASON);
+  try {
+    mkdirSync(resolved);
+  } catch {
+    throw new Error(SNAPSHOT_ROOT_REASON);
+  }
+  const created = validateSnapshotRoot(home, resolved);
+  if (!created) throw new Error(SNAPSHOT_ROOT_REASON);
+  return created;
 }
 
 export function loadShellPrefs(userData: string, home: string): DesktopShellPrefs {

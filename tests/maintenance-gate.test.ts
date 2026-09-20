@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { MaintenanceGate } from "../src/main/maintenance-gate.ts";
+import { MaintenanceGate } from "../src/core/application/maintenance-gate.ts";
 
 test("run acquires synchronously and rejects a parallel holder", async () => {
   const gate = new MaintenanceGate();

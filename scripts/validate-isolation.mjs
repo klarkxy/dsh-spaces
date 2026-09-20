@@ -131,6 +131,12 @@ function cleanData(home) {
 }
 
 function dshBin() {
+  const explicit = process.env.DSH_TEST_BIN || process.env.DSH_TEST_CLI_BIN;
+  if (explicit) {
+    const bin = resolve(explicit);
+    if (!existsSync(bin)) throw new Error("Explicit DSH test CLI is missing");
+    return bin;
+  }
   const win = process.env.APPDATA
     ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
     : "";
@@ -276,7 +282,7 @@ function rpcAttempts(method, payload) {
   if (method.includes(".") && !method.includes("/")) {
     attempts.push({
       method: method.replaceAll(".", "/"),
-      payload: { args: { _request: payload && Object.keys(payload).length ? payload : {} } },
+      payload: { args: { [method === "session.create" ? "request" : "_request"]: payload && Object.keys(payload).length ? payload : {} } },
     });
   }
   return attempts;

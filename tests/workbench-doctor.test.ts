@@ -23,8 +23,8 @@ import {
   HOME_LOCK_OWNER_FILE,
 } from "../src/adapters/node/home-operation-lock.ts";
 import { WORKBENCH_JOBS_DIR_NAME } from "../src/adapters/node/workbench-jobs.ts";
-import { SnapshotStore } from "../src/main/snapshot-store.ts";
-import { RESTORE_STAGE_DIR, type SnapshotRuntime } from "../src/shared/snapshots.ts";
+import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
+import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 const root = dirname(fileURLToPath(new URL(".", import.meta.url)));
 const cliEntry = join(root, "packages", "doctor", "src", "index.ts");
@@ -83,6 +83,19 @@ process.stdout.write("simulated-cli");
     root: prefix,
     runtime: { version, root: prefix, binRelative: "node_modules/@deepseek-ai/dsh/lib/bin.js" },
   };
+}
+
+function writePendingRestore(root: string, snapshotId: string): void {
+  writeFileSync(
+    join(root, "pending-restore.json"),
+    `${JSON.stringify({
+      snapshotId,
+      beforeRestoreId: snapshotId,
+      runtimeVersion: "0.1.5-rc.1",
+      binRelative: "node_modules/@deepseek-ai/dsh/lib/bin.js",
+      startedAt: new Date().toISOString(),
+    }, null, 2)}\n`,
+  );
 }
 
 function seedHome(home: string, settings: string): void {
@@ -287,7 +300,7 @@ test("truncated job bytes stay in place and are not settled", async () => {
   const store = new SnapshotStore({ home, root: snapshotRoot });
   const snap = store.create(runtime.runtime);
   writeFileSync(join(home, "settings.yaml"), "dirty\n");
-  store.restore(snap.id, runtime.runtime);
+  writePendingRestore(snapshotRoot, snap.id);
   const jobPath = join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "broken.json");
   mkdirSync(dirname(jobPath), { recursive: true });
   writeFileSync(jobPath, "{\"schemaVersion\":1,\"status\":\"running\"");
@@ -348,9 +361,9 @@ test("recover does not complete a pending SnapshotStore restore", async () => {
     snapshotRoot,
     toolchainRoot: join(runtimeRoot, "toolchain"),
   });
-  store.restore(snap.id, runtime.runtime);
+  writePendingRestore(snapshotRoot, snap.id);
   assert.ok(store.pendingRestore());
-  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "original-settings\n");
+  assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "dirty-settings\n");
 
   const beforeSettings = readFileSync(join(home, "settings.yaml"));
   const beforeCreds = readFileSync(join(home, ".credentials.yaml"));
@@ -510,7 +523,7 @@ test("runtime readback failure does not settle jobs or claim success", async () 
   const store = new SnapshotStore({ home, root: snapshotRoot });
   const snap = store.create(runtime.runtime);
   writeFileSync(join(home, "settings.yaml"), "dirty\n");
-  store.restore(snap.id, runtime.runtime);
+  writePendingRestore(snapshotRoot, snap.id);
   writeQueuedJob(home, "queued-keep");
   writeFileSync(
     join(snapshotRoot, snap.id, "runtime", "node_modules", "@deepseek-ai", "dsh", "package.json"),

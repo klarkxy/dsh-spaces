@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { npmPackumentUrl, npmRegistry } from "../src/main/package-source.ts";
-import { RuntimeStore, type RegistryFetcher, type RunProcessFn } from "../src/main/runtime-store.ts";
+import { npmPackumentUrl, npmRegistry } from "../src/adapters/node/package-source.ts";
+import { RuntimeStore, type RegistryFetcher, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
 import { isExactRuntimeVersion, preferredTaggedVersion } from "../src/shared/runtime.ts";
 import type { PackageSource } from "../src/shared/types.ts";
 

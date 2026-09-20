@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { t } from "../shared/i18n";
-import type { OnboardingProfile, OnboardingScan, ProfileKind, ProfileRecord, SpaceMeta, SpacesFile } from "../shared/types";
+import { t } from "../../shared/i18n";
+import type { OnboardingProfile, OnboardingScan, ProfileKind, ProfileRecord, SpaceMeta, SpacesFile } from "../../shared/types";
 import {
   applyMetaPatch,
   applyWorkbenchReorder,
@@ -15,8 +15,8 @@ import {
   onboardingAction,
   packageHasWebApp,
   removeSpaceMeta,
-} from "../core/domain/registry";
-import { patchTextLooksIsolated } from "../core/domain/isolation";
+} from "../../core/domain/registry";
+import { patchTextLooksIsolated } from "../../core/domain/isolation";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 

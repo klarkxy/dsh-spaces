@@ -7,15 +7,15 @@
 import { appendFileSync, lstatSync, mkdirSync, readdirSync, rmdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
-import { renameDirectory } from "../src/main/atomic.ts";
-import { authorizeProductHome, samePath } from "../src/main/home-guard.ts";
+import { renameDirectory } from "../src/adapters/node/atomic.ts";
+import { authorizeProductHome, samePath } from "../src/adapters/node/home-guard.ts";
 import {
   clearRuntimeFallback,
   copyLinkedTree,
   retargetTree,
   SnapshotStore,
   type SnapshotRestoreOptions,
-} from "../src/main/snapshot-store.ts";
+} from "../src/adapters/node/snapshot-store.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 type SnapshotWorkerOperation =
@@ -28,7 +28,8 @@ type SnapshotWorkerOperation =
   | "removeTree"
   | "renameTree"
   | "retargetTree"
-  | "clearRuntimeFallback";
+  | "clearRuntimeFallback"
+  | "runtimeInstall";
 
 const input = workerData as {
   home: string;
@@ -85,20 +86,20 @@ function dispatch(data: typeof input): unknown {
     clearRuntimeFallback(data.profiles!, data.runtimeRoot!);
     return undefined;
   }
+  if (data.operation === "restore" || data.operation === "recover" || data.operation === "completeRestore") {
+    throw new Error("Snapshot restore is not supported.");
+  }
   const store = new SnapshotStore({
     home: data.home,
     root: data.root!,
     inject: hook ? onSnapshotHook : undefined,
   });
   if (data.operation === "create") return store.create(data.runtime!, data.reason);
-  if (data.operation === "restore") return store.restore(data.id!, data.runtime, data.options);
-  if (data.operation === "recover") return store.recover();
-  if (data.operation === "completeRestore") {
-    store.completeRestore();
+  if (data.operation === "delete") {
+    store.delete(data.id!);
     return undefined;
   }
-  store.delete(data.id!);
-  return undefined;
+  throw new Error(`Unsupported snapshot worker operation: ${data.operation}`);
 }
 
 function onSnapshotHook(op: string, detail?: string): void {

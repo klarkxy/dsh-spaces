@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import {existsSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve,dirname} from 'node:path';
-import {ProcessManager} from '../src/main/process-manager.ts';
-import {PatchWriter} from '../src/main/patch-writer.ts';
-import {SnapshotStore,clearRuntimeFallback} from '../src/main/snapshot-store.ts';
-import {describeRuntime} from '../src/main/runtime-descriptor.ts';
-import {dshSessionCookie,dshSessionList} from '../src/main/dsh-endpoint.ts';
-import {setSelectedDshResolver} from '../src/main/dsh-cli.ts';
+import {ProcessManager} from '../src/adapters/node/process-manager.ts';
+import {PatchWriter} from '../src/adapters/node/patch-writer.ts';
+import {SnapshotStore,clearRuntimeFallback} from '../src/adapters/node/snapshot-store.ts';
+import {describeRuntime} from '../src/adapters/node/runtime-descriptor.ts';
+import {dshSessionCookie,dshSessionList} from '../src/adapters/node/dsh-endpoint.ts';
+import {setSelectedDshResolver} from '../src/adapters/node/dsh-cli.ts';
 
 // Resume only an acceptance-owned restored Home; do not repeat the large copy
 // merely to verify first startup after the already completed data restoration.

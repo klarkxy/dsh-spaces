@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import type { RuntimeRef } from "../shared/runtime";
-import type { SnapshotRuntime } from "../shared/snapshots";
+import type { RuntimeRef } from "../../shared/runtime";
+import type { SnapshotRuntime } from "../../shared/snapshots";
 
 export function readRuntimeRef(bin: string | undefined): RuntimeRef | undefined {
   if (!bin || !existsSync(bin)) return undefined;

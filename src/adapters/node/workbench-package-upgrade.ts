@@ -4,21 +4,46 @@ import {
   copyFileSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { atomicWrite } from "../../main/atomic";
-import { assertNotRealHome, samePath } from "../../main/home-guard";
-import { archiveAbsPath } from "../../main/plugin-library";
-import { pluginAdd as defaultPluginAdd } from "../../main/plugin-ops";
-import { ProcessTerminationError } from "../../main/terminate-process";
-import type { CoordinatedUpgrade } from "../../main/coordinated-upgrade";
-import type { SnapshotExecutor } from "../../main/snapshot-executor";
+import { atomicWrite } from "./atomic";
+import { assertNotRealHome, samePath } from "./home-guard";
+import { archiveAbsPath, isHubPluginArchive } from "./plugin-library";
+import {
+  downloadPlugin as defaultDownloadPlugin,
+  parseNpmNameAndVersion,
+  pluginAdd as defaultPluginAdd,
+  type PluginFetcher,
+} from "./plugin-ops";
+import { readLibraryOrThrow } from "./workbench-products";
+import { ProcessTerminationError } from "./terminate-process";
+import type { CoordinatedUpgrade } from "./coordinated-upgrade";
+import type { SnapshotExecutor } from "./snapshot-executor";
 import { SNAPSHOT_ID_RE, type SnapshotRuntime } from "../../shared/snapshots";
 import { PROFILE_NAME_RE } from "../../shared/types";
+import { isExactRuntimeVersion } from "../../shared/runtime";
 import type { WorkbenchPackageRelease } from "../../shared/workbench";
+import {
+  COMPONENT_PAYLOAD_ENTRIES,
+  COMPONENT_PAYLOAD_MANIFEST_REL,
+  COMPONENT_PAYLOAD_NAMES,
+  COMPONENT_PAYLOAD_REQUIRED_FILES,
+  parseComponentPayloadManifest,
+  validateComponentPayload,
+  type ComponentPayloadName,
+  type ValidatedComponentPayload,
+} from "./component-payload";
+import { stageComponentPayload } from "./component-selection";
+import {
+  packLocalArtifacts,
+  type PackOneRequest,
+} from "../../../packages/plugin/src/host/supervisor-pack.ts";
 import {
   WORKBENCH_CONTROL_DIR_NAME,
   WorkbenchJobAbortError,
@@ -31,6 +56,7 @@ export const WORKBENCH_UPGRADE_RECEIPTS_DIR = "workbench-upgrade-receipts";
 export const WORKBENCH_UPGRADE_SNAPSHOT_REASON = "workbench-upgrade";
 export const SPACES_PLUGIN_PACKAGE = "@dsh-spaces/plugin";
 export const VIEW_BRIDGE_PACKAGE = "@dsh-spaces/view-bridge";
+export const LLM_BRIDGE_PACKAGE = "@dsh-spaces/llm-bridge";
 
 const SCHEMA_VERSION = 1;
 const MARKER_KIND = "workbench.upgrade";
@@ -40,21 +66,17 @@ const MAX_TAR_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_TAR_LIST_BYTES = 256 * 1024;
 const PLUGIN_ARCHIVE_PREFIX = "dsh-spaces-plugin";
 const VIEW_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-view-bridge";
-/** Packed layout from `packages/plugin/lib/supervisor` (`SUPERVISOR_PAYLOAD_DIRNAME`). */
-const SUPERVISOR_PAYLOAD_FILES = [
-  "lib/supervisor/manifest.json",
-  "lib/supervisor/index.js",
-  "lib/supervisor/snapshot-worker.mjs",
-] as const;
-const PLUGIN_FILES = [
-  "package.json",
-  "lib/index.js",
-  "lib/client.js",
-  "lib/typert.host.js",
-  "lib/typert.remote-client.js",
-  ...SUPERVISOR_PAYLOAD_FILES,
-] as const;
 const VIEW_BRIDGE_FILES = ["package.json", "lib/index.js", "lib/client.js"] as const;
+const LLM_BRIDGE_FILES = ["package.json", "lib/index.js"] as const;
+const LLM_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-llm-bridge";
+const PREPARE_SCRATCH_DIR = "workbench-prepare";
+const IDENTITY_JSON: Record<ComponentPayloadName, string> = {
+  supervisor: "lib/supervisor/package.json",
+  "manager-plugin": "package.json",
+  "view-bridge": "lib/view-bridge/package.json",
+  "llm-bridge": "lib/llm-bridge/package.json",
+  "installation-worker": "lib/supervisor/package.json",
+};
 
 export type WorkbenchPackageUpgradeErrorCode =
   | "invalid-input"
@@ -88,17 +110,41 @@ export interface WorkbenchPackageUpgradeInput {
   expectedDigest: string;
 }
 
+export type WorkbenchPackagePrepareInput = {
+  version?: string;
+  libraryId?: string;
+};
+
+export type WorkbenchPackageHandoffInput = {
+  planId: string;
+  snapshotId: string;
+  payload: ValidatedComponentPayload;
+};
+
+export type WorkbenchPackageHandoff = (
+  input: WorkbenchPackageHandoffInput,
+  ctx: WorkbenchJobContext,
+) => Promise<void>;
+
 export interface WorkbenchPackageUpgradeOptions {
   home: string;
   managerId: () => string | null;
   pluginArtifact?: string;
   viewBridgeArtifact?: string;
+  toolsRoot?: string;
+  handoff?: WorkbenchPackageHandoff;
   snapshots: Pick<SnapshotExecutor, "create">;
   upgrades: Pick<CoordinatedUpgrade, "restore" | "recover">;
   currentRuntime: () => SnapshotRuntime;
   stopAll: () => Promise<void>;
+  /** Kept for Supervisor construction; execute does not restart the old manager. */
   reinitializeManager: () => Promise<void>;
   pluginAdd?: typeof defaultPluginAdd;
+  fetchImpl?: PluginFetcher;
+  downloadPlugin?: typeof defaultDownloadPlugin;
+  pack?: (request: PackOneRequest) => Promise<string>;
+  execPath?: string;
+  downloadTimeoutMs?: number;
 }
 
 interface UpgradeSettlement {
@@ -142,9 +188,19 @@ interface CandidateInspection {
   viewBridge: ArtifactInspection;
 }
 
+interface PreparedCandidate extends CandidateInspection {
+  llmBridge: ArtifactInspection;
+  payload: ValidatedComponentPayload;
+}
+
+interface ExecuteCandidate extends CandidateInspection {
+  payload: ValidatedComponentPayload;
+}
+
 export class WorkbenchPackageUpgrade {
   private readonly home: string;
   private readonly pluginAdd: typeof defaultPluginAdd;
+  private prepared: PreparedCandidate | undefined;
 
   constructor(private readonly options: WorkbenchPackageUpgradeOptions) {
     assertNotRealHome(options.home);
@@ -155,16 +211,53 @@ export class WorkbenchPackageUpgrade {
   async describe(): Promise<WorkbenchPackageRelease | undefined> {
     const candidate = await this.readCandidateSilent();
     if (!candidate) return undefined;
-    const installed = this.readInstalledPlugin();
-    const installedVersion = installed?.version ?? null;
-    const updateAvailable = !this.installedMatches(candidate);
-    return {
-      id: WORKBENCH_PACKAGE_CATALOG_ID,
-      version: candidate.version,
-      installedVersion,
-      digest: candidate.digest,
-      updateAvailable,
-    };
+    return this.toRelease(candidate);
+  }
+
+  /**
+   * Download or reuse a cached @dsh-spaces/plugin, stage the immutable group, and
+   * pack plugin/view/llm. Does not stop, install, or change the selected pointer.
+   * Startup pluginArtifact/viewBridgeArtifact stay bound and are never selected here.
+   */
+  async prepare(
+    input: WorkbenchPackagePrepareInput,
+    ctx: WorkbenchJobContext,
+  ): Promise<WorkbenchPackageRelease> {
+    const requested = optionalText(input?.version);
+    const libraryId = optionalText(input?.libraryId);
+    if (requested && libraryId) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "Prepare accepts an exact version or a cached library id, not both.",
+      );
+    }
+    const version = requested === "latest" ? "" : requested;
+    if (version && !isExactRuntimeVersion(version)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "A precise package version is required.");
+    }
+    if (this.readMarker()) {
+      throw new WorkbenchPackageUpgradeError(
+        "conflict",
+        "Another workbench package plan is unfinished.",
+      );
+    }
+    const toolsRoot = this.requireToolsRoot();
+    assertExistingAncestorsOutsideHome(
+      this.home,
+      join(toolsRoot, PREPARE_SCRATCH_DIR, "extract-"),
+      "The prepare scratch",
+    );
+    this.readOfficialLibrary();
+    ctx.cancellable(true);
+    ctx.phase("prepare");
+    this.throwIfAborted(ctx);
+    const source = libraryId
+      ? this.requireCachedPluginArchive(libraryId)
+      : await this.downloadOfficialPlugin(version, ctx);
+    this.throwIfAborted(ctx);
+    const built = await this.buildPreparedCandidate(source.archive, source.expectedVersion, toolsRoot, ctx);
+    this.prepared = built;
+    return this.toRelease(built);
   }
 
   async execute(
@@ -197,13 +290,14 @@ export class WorkbenchPackageUpgrade {
       throw new WorkbenchPackageUpgradeError(
         "conflict",
         existing.planId === planId
-          ? "This workbench package plan is unfinished and must be recovered first."
-          : "Another workbench package plan is unfinished.",
+          ? "This workbench package plan is unfinished. Unfinished update evidence remains."
+          : "Another workbench package plan is unfinished. Unfinished update evidence remains.",
       );
     }
 
+    const ports = this.requireHandoffPort();
     const managerId = this.requireManagerId();
-    const candidate = await this.requireCandidate();
+    const candidate = await this.resolveExecuteCandidate(ports.toolsRoot, ctx);
     if (candidate.version !== input.version.trim()) {
       throw new WorkbenchPackageUpgradeError(
         "invalid-input",
@@ -258,9 +352,31 @@ export class WorkbenchPackageUpgrade {
 
       ctx.phase("verify");
       this.verifyInstalled(managerId, candidate);
+      const installedLib = this.installedPluginLib(managerId);
+      if (!installedLib) {
+        throw new WorkbenchPackageUpgradeError(
+          "failed",
+          "Installed workbench plugin payload could not be read back after plugin add.",
+        );
+      }
+      const installed = validateComponentPayload(installedLib);
+      this.assertPayloadMatchesCandidate(installed, candidate);
+      if (installed.digest !== candidate.payload.digest) {
+        throw new WorkbenchPackageUpgradeError(
+          "failed",
+          "Installed workbench payload does not match the prepared payload.",
+        );
+      }
+      const livePayload = this.revalidateStagedPayload(candidate.payload);
+      if (livePayload.digest !== candidate.payload.digest) {
+        throw new WorkbenchPackageUpgradeError(
+          "failed",
+          "Staged workbench payload does not match the prepared payload.",
+        );
+      }
 
-      ctx.phase("reinitialize");
-      await this.options.reinitializeManager();
+      ctx.phase("handoff");
+      await ports.handoff({ planId, snapshotId, payload: livePayload }, ctx);
       this.settle(marker, "succeeded", false);
       return { snapshotId };
     } catch (error) {
@@ -313,16 +429,6 @@ export class WorkbenchPackageUpgrade {
     this.clearMarker();
   }
 
-  private finishSettledMarker(marker: UpgradeMarker): WorkbenchPackageRecovery {
-    const settlement = marker.settlement;
-    if (!settlement) {
-      throw new WorkbenchPackageUpgradeError("unavailable", "The workbench package upgrade record is incomplete.");
-    }
-    this.writeReceipt(settlement);
-    this.clearMarker();
-    return publicRecovery(settlement);
-  }
-
   private async installCandidate(managerId: string, artifact: ArtifactInspection): Promise<void> {
     const dest = archiveAbsPath(this.home, artifact.archiveId);
     mkdirSync(dirname(dest), { recursive: true });
@@ -330,9 +436,33 @@ export class WorkbenchPackageUpgrade {
     await this.pluginAdd(this.home, managerId, dest);
   }
 
+  private requireHandoffPort(): { toolsRoot: string; handoff: WorkbenchPackageHandoff } {
+    const toolsRoot = this.requireToolsRoot();
+    const handoff = this.options.handoff;
+    if (typeof handoff !== "function") {
+      throw new WorkbenchPackageUpgradeError(
+        "unavailable",
+        "Workbench package upgrades require a tools root and a handoff port.",
+      );
+    }
+    return { toolsRoot, handoff };
+  }
+
+  private requireToolsRoot(): string {
+    const toolsRoot = this.options.toolsRoot;
+    if (typeof toolsRoot !== "string" || !toolsRoot.trim()) {
+      throw new WorkbenchPackageUpgradeError(
+        "unavailable",
+        "Workbench package upgrades require a tools root and a handoff port.",
+      );
+    }
+    return mkdirOutsideHome(this.home, resolve(toolsRoot.trim()), "The tools root");
+  }
+
   private verifyInstalled(managerId: string, candidate: CandidateInspection): void {
-    const plugin = this.readInstalledFiles(managerId, candidate.plugin.packageName, PLUGIN_FILES);
-    const bridge = this.readInstalledFiles(managerId, candidate.viewBridge.packageName, VIEW_BRIDGE_FILES);
+    const pluginFiles = Object.keys(candidate.plugin.files);
+    const plugin = this.readInstalledFiles(managerId, candidate.plugin.packageName, pluginFiles);
+    const bridge = this.readInstalledFiles(managerId, candidate.viewBridge.packageName, Object.keys(candidate.viewBridge.files));
     if (!plugin || !bridge) {
       throw new WorkbenchPackageUpgradeError(
         "failed",
@@ -341,6 +471,32 @@ export class WorkbenchPackageUpgrade {
     }
     assertSamePackage(plugin, candidate.plugin);
     assertSamePackage(bridge, candidate.viewBridge);
+  }
+
+  private installedPluginLib(managerId: string): string | undefined {
+    const path = this.installedFile(managerId, SPACES_PLUGIN_PACKAGE, "lib/index.js");
+    if (!path) return undefined;
+    return dirname(path);
+  }
+
+  private assertPayloadMatchesCandidate(payload: ValidatedComponentPayload, candidate: CandidateInspection): void {
+    for (const [rel, hash] of Object.entries(candidate.plugin.files)) {
+      const listed = payload.files.find((file) => file.path === rel);
+      if (!listed || listed.sha256 !== hash) {
+        throw new WorkbenchPackageUpgradeError(
+          "failed",
+          "Staged workbench payload does not match the candidate archive.",
+        );
+      }
+    }
+    for (const file of payload.files) {
+      if (candidate.plugin.files[file.path] !== file.sha256) {
+        throw new WorkbenchPackageUpgradeError(
+          "failed",
+          "Staged workbench payload does not match the candidate archive.",
+        );
+      }
+    }
   }
 
   private installedMatches(candidate: CandidateInspection): boolean {
@@ -363,7 +519,7 @@ export class WorkbenchPackageUpgrade {
   }
 
   private async requireCandidate(): Promise<CandidateInspection> {
-    const candidate = await this.readCandidateSilent();
+    const candidate = await this.readBoundCandidateSilent();
     if (!candidate) {
       throw new WorkbenchPackageUpgradeError(
         "invalid-input",
@@ -374,25 +530,370 @@ export class WorkbenchPackageUpgrade {
   }
 
   private async readCandidateSilent(): Promise<CandidateInspection | undefined> {
+    if (this.prepared) {
+      try {
+        return await this.revalidatePrepared(this.prepared);
+      } catch {
+        return undefined;
+      }
+    }
+    return this.readBoundCandidateSilent();
+  }
+
+  private async readBoundCandidateSilent(): Promise<CandidateInspection | undefined> {
     const pluginPath = this.options.pluginArtifact;
     const bridgePath = this.options.viewBridgeArtifact;
     if (!pluginPath || !bridgePath) return undefined;
     try {
       if (!isRealFile(pluginPath) || !isRealFile(bridgePath)) return undefined;
       const [plugin, viewBridge] = await Promise.all([
-        inspectArtifact(pluginPath, SPACES_PLUGIN_PACKAGE, PLUGIN_FILES, PLUGIN_ARCHIVE_PREFIX),
+        inspectPluginArchive(pluginPath),
         inspectArtifact(bridgePath, VIEW_BRIDGE_PACKAGE, VIEW_BRIDGE_FILES, VIEW_BRIDGE_ARCHIVE_PREFIX),
       ]);
-      if (plugin.version !== viewBridge.version) return undefined;
       return {
         version: plugin.version,
-        digest: sha256Text(`${plugin.packageName}:${plugin.fileDigest}\n${viewBridge.packageName}:${viewBridge.fileDigest}\n`),
+        digest: boundArtifactDigest(plugin, viewBridge),
         plugin,
         viewBridge,
       };
     } catch {
       return undefined;
     }
+  }
+
+  private async resolveExecuteCandidate(toolsRoot: string, ctx: WorkbenchJobContext): Promise<ExecuteCandidate> {
+    if (this.prepared) {
+      const live = await this.revalidatePrepared(this.prepared);
+      return live;
+    }
+    const bound = await this.requireCandidate();
+    this.throwIfAborted(ctx);
+    const payload = await this.stageFromPluginArchive(bound.plugin.artifact, toolsRoot, bound.plugin);
+    this.assertPayloadMatchesCandidate(payload, bound);
+    const viewBridge = await inspectArtifact(bound.viewBridge.artifact, VIEW_BRIDGE_PACKAGE, bridgeFiles(payload, "view-bridge"), VIEW_BRIDGE_ARCHIVE_PREFIX);
+    assertBridgeMatchesPayload(payload, "view-bridge", viewBridge);
+    return { ...bound, viewBridge, payload };
+  }
+
+  private readOfficialLibrary(): ReturnType<typeof readLibraryOrThrow> {
+    try {
+      return readLibraryOrThrow(this.home);
+    } catch (error) {
+      throw new WorkbenchPackageUpgradeError(
+        "unavailable",
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Plugin library could not be read. Original bytes were left unchanged.",
+      );
+    }
+  }
+
+  private requireCachedPluginArchive(libraryId: string): { archive: string; expectedVersion: string } {
+    const key = libraryId.toLowerCase();
+    const entry = this.readOfficialLibrary().find((row) => row.id === key);
+    if (!entry) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The cached workbench plugin was not found.");
+    }
+    if (entry.packageName !== SPACES_PLUGIN_PACKAGE) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "Workbench prepare accepts only the official Spaces plugin package.",
+      );
+    }
+    const pinned = parseNpmNameAndVersion(entry.spec);
+    if (!pinned || pinned.name !== SPACES_PLUGIN_PACKAGE || !isExactRuntimeVersion(pinned.version)) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "The cached workbench plugin does not have a pinned exact version.",
+      );
+    }
+    if (!entry.tarball) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The cached workbench plugin archive is missing.");
+    }
+    const archive = resolve(this.home, entry.tarball);
+    if (!isHubPluginArchive(this.home, archive) || !isRealFile(archive)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The cached workbench plugin archive is missing.");
+    }
+    return { archive, expectedVersion: pinned.version };
+  }
+
+  private async downloadOfficialPlugin(
+    version: string,
+    ctx: WorkbenchJobContext,
+  ): Promise<{ archive: string; expectedVersion: string }> {
+    ctx.message(
+      version
+        ? `Downloading the official workbench plugin ${version}.`
+        : "Downloading the latest official workbench plugin.",
+    );
+    const spec = version ? `${SPACES_PLUGIN_PACKAGE}@${version}` : SPACES_PLUGIN_PACKAGE;
+    const download = this.options.downloadPlugin ?? defaultDownloadPlugin;
+    let entry;
+    try {
+      entry = await download(
+        this.home,
+        { spec },
+        {
+          fetchImpl: this.options.fetchImpl,
+          signal: ctx.signal,
+          timeoutMs: this.options.downloadTimeoutMs,
+        },
+      );
+    } catch (error) {
+      if (ctx.signal.aborted) throw new WorkbenchJobAbortError();
+      throwUpgradeFailure(error, "The official workbench plugin could not be downloaded.");
+    }
+    if (entry.packageName !== SPACES_PLUGIN_PACKAGE) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "Workbench prepare accepts only the official Spaces plugin package.",
+      );
+    }
+    const pinned = parseNpmNameAndVersion(entry.spec);
+    if (!pinned || pinned.name !== SPACES_PLUGIN_PACKAGE || !isExactRuntimeVersion(pinned.version)) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "The official workbench plugin download did not pin an exact version.",
+      );
+    }
+    if (version && pinned.version !== version) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "The downloaded workbench plugin version does not match the requested version.",
+      );
+    }
+    if (!entry.tarball) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The official workbench plugin archive is missing.");
+    }
+    const archive = resolve(this.home, entry.tarball);
+    if (!isHubPluginArchive(this.home, archive) || !isRealFile(archive)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The official workbench plugin archive is missing.");
+    }
+    return { archive, expectedVersion: pinned.version };
+  }
+
+  private async buildPreparedCandidate(
+    archive: string,
+    expectedVersion: string,
+    toolsRoot: string,
+    ctx: WorkbenchJobContext,
+  ): Promise<PreparedCandidate> {
+    ctx.phase("validate");
+    ctx.message("Validating the official workbench plugin archive.");
+    let plugin;
+    try {
+      plugin = await inspectPluginArchive(archive);
+    } catch (error) {
+      if (error instanceof WorkbenchPackageUpgradeError) throw error;
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "The official workbench plugin archive is not a valid payload.",
+      );
+    }
+    if (plugin.packageName !== SPACES_PLUGIN_PACKAGE) {
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "Workbench prepare accepts only the official Spaces plugin package.",
+      );
+    }
+    assertPluginMatchesExpectedVersion(plugin, expectedVersion);
+    this.throwIfAborted(ctx);
+    ctx.phase("stage");
+    ctx.message("Staging the immutable workbench component group.");
+    const payload = await this.stageFromPluginArchive(archive, toolsRoot, plugin);
+    assertPayloadMatchesExpectedVersion(payload, expectedVersion);
+    this.throwIfAborted(ctx);
+    ctx.phase("pack");
+    ctx.message("Packing the staged workbench plugin, view-bridge, and llm-bridge.");
+    const packed = await this.packStagedGroup(payload, toolsRoot);
+    const inspected = await this.inspectPackedGroup(packed, payload);
+    assertPackedMatchesPayload(inspected, payload);
+    assertPluginMatchesExpectedVersion(inspected.plugin, expectedVersion);
+    const digest = preparedCandidateDigest(
+      inspected.plugin,
+      inspected.viewBridge,
+      inspected.llmBridge,
+      payload.digest,
+    );
+    const candidate: PreparedCandidate = {
+      version: inspected.plugin.version,
+      digest,
+      plugin: inspected.plugin,
+      viewBridge: inspected.viewBridge,
+      llmBridge: inspected.llmBridge,
+      payload,
+    };
+    return this.revalidatePrepared(candidate);
+  }
+
+  private async stageFromPluginArchive(
+    archive: string,
+    toolsRoot: string,
+    inspected?: ArtifactInspection,
+  ): Promise<ValidatedComponentPayload> {
+    const plugin = inspected ?? await inspectPluginArchive(archive);
+    const scratchParent = mkdirOutsideHome(
+      this.home,
+      join(toolsRoot, PREPARE_SCRATCH_DIR),
+      "The prepare scratch",
+    );
+    const extractRoot = mkdtempSync(join(scratchParent, "extract-"));
+    assertRealDirOutsideHome(this.home, extractRoot, "The prepare scratch");
+    const packageRoot = mkdirOutsideHome(this.home, join(extractRoot, "package"), "The prepare scratch");
+    try {
+      await materializeDeclaredFiles(archive, plugin.files, packageRoot, this.home);
+      const materialized = validateComponentPayload(join(packageRoot, "lib"));
+      this.assertPayloadMatchesCandidate(materialized, {
+        version: plugin.version,
+        digest: plugin.fileDigest,
+        plugin,
+        viewBridge: plugin,
+      });
+      const staged = stageComponentPayload(this.home, toolsRoot, materialized.payloadRootLib);
+      this.assertPayloadMatchesCandidate(staged, {
+        version: plugin.version,
+        digest: plugin.fileDigest,
+        plugin,
+        viewBridge: plugin,
+      });
+      return staged;
+    } catch (error) {
+      return throwUpgradeFailure(error, "The workbench payload could not be staged.");
+    } finally {
+      try {
+        rmSync(extractRoot, { recursive: true, force: true });
+      } catch {
+        // Scratch leftover is not selected. Do not roll back the staged group.
+      }
+    }
+  }
+
+  private async packStagedGroup(
+    payload: ValidatedComponentPayload,
+    toolsRoot: string,
+  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string }> {
+    const artifactDir = mkdirOutsideHome(
+      this.home,
+      join(toolsRoot, PREPARE_SCRATCH_DIR, payload.digest, "artifacts"),
+      "The packed artifact directory",
+    );
+    const packed = await packLocalArtifacts({
+      home: this.home,
+      pluginPackageRoot: payload.packageRoot,
+      viewBridgeRoot: join(payload.packageRoot, "lib", "view-bridge"),
+      llmBridgeRoot: join(payload.packageRoot, "lib", "llm-bridge"),
+      artifactDir,
+      execPath: this.options.execPath ?? process.execPath,
+      pack: this.options.pack,
+    });
+    if ("reasons" in packed || !packed.llmBridgeArtifact) {
+      const detail = "reasons" in packed ? packed.reasons[0] : "llm-bridge pack is missing.";
+      throw new WorkbenchPackageUpgradeError(
+        "failed",
+        detail || "The staged workbench group could not be packed.",
+      );
+    }
+    return {
+      pluginArtifact: packed.pluginArtifact,
+      viewBridgeArtifact: packed.viewBridgeArtifact,
+      llmBridgeArtifact: packed.llmBridgeArtifact,
+    };
+  }
+
+  private async inspectPackedGroup(
+    packed: { pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string },
+    payload: ValidatedComponentPayload,
+  ): Promise<{ plugin: ArtifactInspection; viewBridge: ArtifactInspection; llmBridge: ArtifactInspection }> {
+    if (!isRealFile(packed.pluginArtifact) || !isRealFile(packed.viewBridgeArtifact) || !isRealFile(packed.llmBridgeArtifact)) {
+      throw new WorkbenchPackageUpgradeError("failed", "Packed workbench artifacts are missing.");
+    }
+    try {
+      return await inspectComponentPayloadArtifacts(payload, packed);
+    } catch (error) {
+      throwUpgradeFailure(error, "Packed workbench artifacts are not official packages.");
+    }
+  }
+
+  private async revalidatePrepared(candidate: PreparedCandidate): Promise<PreparedCandidate> {
+    if (
+      !isRealFile(candidate.plugin.artifact) ||
+      !isRealFile(candidate.viewBridge.artifact) ||
+      !isRealFile(candidate.llmBridge.artifact)
+    ) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench artifacts are missing.");
+    }
+    if (
+      sha256File(candidate.plugin.artifact) !== candidate.plugin.fileDigest ||
+      sha256File(candidate.viewBridge.artifact) !== candidate.viewBridge.fileDigest ||
+      sha256File(candidate.llmBridge.artifact) !== candidate.llmBridge.fileDigest
+    ) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench artifacts changed after prepare.");
+    }
+    const inspected = await this.inspectPackedGroup({
+      pluginArtifact: candidate.plugin.artifact,
+      viewBridgeArtifact: candidate.viewBridge.artifact,
+      llmBridgeArtifact: candidate.llmBridge.artifact,
+    }, candidate.payload);
+    assertPackedMatchesPayload(inspected, candidate.payload);
+    if (
+      inspected.plugin.fileDigest !== candidate.plugin.fileDigest ||
+      inspected.viewBridge.fileDigest !== candidate.viewBridge.fileDigest ||
+      inspected.llmBridge.fileDigest !== candidate.llmBridge.fileDigest
+    ) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench artifacts changed after prepare.");
+    }
+    const payload = this.revalidateStagedPayload(candidate.payload);
+    const digest = preparedCandidateDigest(
+      inspected.plugin,
+      inspected.viewBridge,
+      inspected.llmBridge,
+      payload.digest,
+    );
+    if (digest !== candidate.digest || payload.digest !== candidate.payload.digest) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench digest changed after prepare.");
+    }
+    return {
+      version: inspected.plugin.version,
+      digest,
+      plugin: inspected.plugin,
+      viewBridge: inspected.viewBridge,
+      llmBridge: inspected.llmBridge,
+      payload,
+    };
+  }
+
+  private revalidateStagedPayload(payload: ValidatedComponentPayload): ValidatedComponentPayload {
+    try {
+      const live = validateComponentPayload(payload.payloadRootLib);
+      if (live.digest !== payload.digest) {
+        throw new WorkbenchPackageUpgradeError(
+          "invalid-input",
+          "The prepared workbench payload changed after prepare.",
+        );
+      }
+      return live;
+    } catch (error) {
+      if (error instanceof WorkbenchPackageUpgradeError) throw error;
+      throw new WorkbenchPackageUpgradeError(
+        "invalid-input",
+        "The prepared workbench payload changed after prepare.",
+      );
+    }
+  }
+
+  private toRelease(candidate: CandidateInspection): WorkbenchPackageRelease {
+    const installed = this.readInstalledPlugin();
+    const installedVersion = installed?.version ?? null;
+    const updateAvailable = !this.installedMatches(candidate);
+    return {
+      id: WORKBENCH_PACKAGE_CATALOG_ID,
+      version: candidate.version,
+      installedVersion,
+      digest: candidate.digest,
+      updateAvailable,
+    };
   }
 
   private requireManagerId(): string {
@@ -558,17 +1059,6 @@ export class WorkbenchPackageUpgrade {
     }
   }
 
-  private requireReceipt(planId: string): WorkbenchPackageRecovery {
-    const receipt = this.readReceipt(planId);
-    if (!receipt) {
-      throw new WorkbenchPackageUpgradeError(
-        "unavailable",
-        "The workbench package receipt could not be read after settlement.",
-      );
-    }
-    return publicRecovery(receipt);
-  }
-
   private readReceipt(planId: string): UpgradeSettlement | undefined {
     const path = this.receiptPath(planId);
     const kind = inspectLeaf(this.home, path);
@@ -595,15 +1085,6 @@ export class WorkbenchPackageUpgrade {
       );
     }
     return parsed;
-  }
-
-  private assertReceiptMatchesMarker(receipt: UpgradeSettlement, marker: UpgradeMarker): void {
-    if (receipt.planId !== marker.planId || receipt.snapshotId !== marker.snapshotId) {
-      throw new WorkbenchPackageUpgradeError(
-        "unavailable",
-        "The workbench package receipt does not match this plan settlement.",
-      );
-    }
   }
 
   private ensureReceiptsDir(): void {
@@ -636,14 +1117,326 @@ export class WorkbenchPackageUpgrade {
   }
 }
 
-function publicRecovery(settlement: UpgradeSettlement): WorkbenchPackageRecovery {
-  const result: WorkbenchPackageRecovery = {
-    planId: settlement.planId,
-    rolledBack: settlement.rolledBack,
-    outcome: settlement.outcome,
-  };
-  if (settlement.snapshotId) result.snapshotId = settlement.snapshotId;
-  return result;
+function boundArtifactDigest(plugin: ArtifactInspection, viewBridge: ArtifactInspection): string {
+  return sha256Text(`${plugin.packageName}:${plugin.fileDigest}\n${viewBridge.packageName}:${viewBridge.fileDigest}\n`);
+}
+
+function preparedCandidateDigest(
+  plugin: ArtifactInspection,
+  viewBridge: ArtifactInspection,
+  llmBridge: ArtifactInspection,
+  payloadDigest: string,
+): string {
+  return sha256Text(
+    `${plugin.packageName}:${plugin.fileDigest}\n${viewBridge.packageName}:${viewBridge.fileDigest}\n${llmBridge.packageName}:${llmBridge.fileDigest}\n${payloadDigest}\n`,
+  );
+}
+
+function assertPluginMatchesExpectedVersion(plugin: ArtifactInspection, expectedVersion: string): void {
+  if (plugin.version !== expectedVersion) {
+    throw new WorkbenchPackageUpgradeError(
+      "invalid-input",
+      "The workbench plugin archive version does not match the pinned version.",
+    );
+  }
+}
+
+function assertPayloadMatchesExpectedVersion(payload: ValidatedComponentPayload, expectedVersion: string): void {
+  if (payload.manifest.components["manager-plugin"].version !== expectedVersion) {
+    throw new WorkbenchPackageUpgradeError(
+      "invalid-input",
+      "The workbench plugin archive version does not match the pinned version.",
+    );
+  }
+}
+
+type ComponentArtifactPaths = { pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string };
+
+/** Verify CLI install archives against the selected component group's actual bytes. */
+export async function validateComponentPayloadArtifacts(
+  payload: ValidatedComponentPayload,
+  artifacts: ComponentArtifactPaths,
+): Promise<void> {
+  const current = validateComponentPayload(payload.payloadRootLib);
+  if (current.digest !== payload.digest) {
+    throw new WorkbenchPackageUpgradeError("invalid-input", "Selected component payload changed before startup.");
+  }
+  assertPackedMatchesPayload(await inspectComponentPayloadArtifacts(current, artifacts), current);
+}
+
+function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "llm-bridge"): string[] {
+  const prefix = `lib/${name}/`;
+  return payload.manifest.components[name].files.map((file) => {
+    if (!file.path.startsWith(prefix)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", `Component ${name} declares a file outside its package.`);
+    }
+    return file.path.slice(prefix.length);
+  });
+}
+
+function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "view-bridge" | "llm-bridge", artifact: ArtifactInspection): void {
+  const component = payload.manifest.components[name];
+  const prefix = `lib/${name}/`;
+  if (artifact.version !== component.version || artifact.packageName !== component.packageName) {
+    throw new WorkbenchPackageUpgradeError("failed", `Packed ${name} identity does not match the staged payload.`);
+  }
+  for (const file of component.files) {
+    if (!file.path.startsWith(prefix) || artifact.files[file.path.slice(prefix.length)] !== file.sha256) {
+      throw new WorkbenchPackageUpgradeError("failed", `Packed ${name} bytes do not match the staged payload.`);
+    }
+  }
+}
+
+async function inspectComponentPayloadArtifacts(payload: ValidatedComponentPayload, artifacts: ComponentArtifactPaths) {
+  const [plugin, viewBridge, llmBridge] = await Promise.all([
+    inspectPluginArchive(artifacts.pluginArtifact),
+    inspectArtifact(artifacts.viewBridgeArtifact, VIEW_BRIDGE_PACKAGE, bridgeFiles(payload, "view-bridge"), VIEW_BRIDGE_ARCHIVE_PREFIX),
+    inspectArtifact(artifacts.llmBridgeArtifact, LLM_BRIDGE_PACKAGE, bridgeFiles(payload, "llm-bridge"), LLM_BRIDGE_ARCHIVE_PREFIX),
+  ]);
+  return { plugin, viewBridge, llmBridge };
+}
+
+function assertPackedMatchesPayload(
+  packed: { plugin: ArtifactInspection; viewBridge: ArtifactInspection; llmBridge: ArtifactInspection },
+  payload: ValidatedComponentPayload,
+): void {
+  if (packed.plugin.packageName !== SPACES_PLUGIN_PACKAGE) {
+    throw new WorkbenchPackageUpgradeError("failed", "Packed plugin is not the official Spaces plugin.");
+  }
+  if (packed.viewBridge.packageName !== VIEW_BRIDGE_PACKAGE || packed.llmBridge.packageName !== LLM_BRIDGE_PACKAGE) {
+    throw new WorkbenchPackageUpgradeError("failed", "Packed workbench artifacts are not official packages.");
+  }
+  if (packed.plugin.version !== payload.manifest.components["manager-plugin"].version) {
+    throw new WorkbenchPackageUpgradeError("failed", "Packed plugin version does not match the staged manager plugin.");
+  }
+  if (packed.viewBridge.version !== payload.manifest.components["view-bridge"].version) {
+    throw new WorkbenchPackageUpgradeError("failed", "Packed view-bridge version does not match the staged view-bridge.");
+  }
+  if (packed.llmBridge.version !== payload.manifest.components["llm-bridge"].version) {
+    throw new WorkbenchPackageUpgradeError("failed", "Packed llm-bridge version does not match the staged llm-bridge.");
+  }
+  for (const [name, artifact] of [["view-bridge", packed.viewBridge], ["llm-bridge", packed.llmBridge]] as const) {
+    assertBridgeMatchesPayload(payload, name, artifact);
+  }
+  for (const file of payload.files) {
+    if (packed.plugin.files[file.path] !== file.sha256) {
+      throw new WorkbenchPackageUpgradeError("failed", "Packed workbench plugin does not match the staged payload.");
+    }
+  }
+  for (const [rel, hash] of Object.entries(packed.plugin.files)) {
+    const listed = payload.files.find((file) => file.path === rel);
+    if (!listed || listed.sha256 !== hash) {
+      throw new WorkbenchPackageUpgradeError("failed", "Packed workbench plugin does not match the staged payload.");
+    }
+  }
+}
+
+async function materializeDeclaredFiles(
+  archive: string,
+  files: Record<string, string>,
+  destRoot: string,
+  home: string,
+): Promise<void> {
+  assertRealDirOutsideHome(home, destRoot, "The prepare scratch");
+  const entries = await listTarEntries(archive);
+  const root = packageRoot(entries);
+  const rels = [...Object.keys(files), COMPONENT_PAYLOAD_MANIFEST_REL];
+  const unique = [...new Set(rels)];
+  for (const rel of unique) {
+    if (!isSafeTarEntry(rel)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", `Unsafe payload path ${rel}.`);
+    }
+    const dest = join(destRoot, ...rel.split("/"));
+    if (!isInsideRoot(destRoot, dest) || samePath(destRoot, dest)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", `Payload path escapes the scratch: ${rel}`);
+    }
+    const parentRel = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+    mkdirSafeOutsideHome(destRoot, parentRel, home);
+    if (inspectOutsideLeaf(home, dest) !== "missing") {
+      throw new WorkbenchPackageUpgradeError("invalid-input", `Payload path is not a fresh file: ${rel}`);
+    }
+    const bytes = await readTarEntry(archive, `${root}${rel}`);
+    if (files[rel] && sha256Bytes(bytes) !== files[rel]) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", `Payload file digest does not match archive: ${rel}`);
+    }
+    writeFileSync(dest, bytes);
+    const written = inspectOutsideLeaf(home, dest);
+    if (written !== "file") {
+      throw new WorkbenchPackageUpgradeError("failed", `Payload file could not be written: ${rel}`);
+    }
+    if (sha256File(dest) !== sha256Bytes(bytes)) {
+      throw new WorkbenchPackageUpgradeError("failed", `Payload file changed while writing: ${rel}`);
+    }
+  }
+}
+
+function mkdirSafeOutsideHome(root: string, relDir: string, home: string): void {
+  assertRealDirOutsideHome(home, root, "The prepare scratch");
+  if (!relDir) return;
+  if (!isSafeTarEntry(relDir)) {
+    throw new WorkbenchPackageUpgradeError("invalid-input", `Unsafe payload directory ${relDir}.`);
+  }
+  let cursor = root;
+  for (const part of relDir.split("/")) {
+    cursor = join(cursor, part);
+    if (!isInsideRoot(root, cursor) || samePath(root, cursor)) {
+      throw new WorkbenchPackageUpgradeError("invalid-input", `Payload directory escapes the scratch: ${relDir}`);
+    }
+    mkdirOutsideHome(home, cursor, "The prepare scratch");
+  }
+}
+
+function mkdirOutsideHome(home: string, path: string, label: string): string {
+  const abs = resolve(path);
+  if (!abs || abs.includes("\0")) {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} is missing.`);
+  }
+  assertExistingAncestorsOutsideHome(home, abs, label);
+  const missing: string[] = [];
+  let cursor = abs;
+  for (;;) {
+    let st;
+    try {
+      st = lstatSync(cursor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new WorkbenchPackageUpgradeError("unavailable", `${label} could not be read.`);
+      }
+      missing.push(cursor);
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      cursor = parent;
+      continue;
+    }
+    if (st.isSymbolicLink()) {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} is a symlink or junction.`);
+    }
+    if (!st.isDirectory()) {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} is not a directory.`);
+    }
+    break;
+  }
+  for (const dir of missing.reverse()) {
+    assertExistingAncestorsOutsideHome(home, dir, label);
+    mkdirSync(dir);
+    assertRealDirOutsideHome(home, dir, label);
+  }
+  assertRealDirOutsideHome(home, abs, label);
+  return realpathSync(abs);
+}
+
+function assertExistingAncestorsOutsideHome(home: string, path: string, label: string): void {
+  const abs = resolve(path);
+  if (isInsideHome(home, abs)) {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} must be outside Home.`);
+  }
+  let cursor = abs;
+  for (;;) {
+    let st;
+    try {
+      st = lstatSync(cursor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        const parent = dirname(cursor);
+        if (parent === cursor) return;
+        cursor = parent;
+        continue;
+      }
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} could not be read.`);
+    }
+    if (st.isSymbolicLink()) {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} is a symlink or junction.`);
+    }
+    let real: string;
+    try {
+      real = realpathSync(cursor);
+    } catch {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} could not be resolved.`);
+    }
+    if (!samePath(cursor, real)) {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} is a path alias.`);
+    }
+    if (isInsideHome(home, real)) {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} must be outside Home.`);
+    }
+    if (!st.isDirectory()) {
+      throw new WorkbenchPackageUpgradeError("unavailable", `${label} is not a directory.`);
+    }
+    const parent = dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent;
+  }
+}
+
+function assertRealDirOutsideHome(home: string, path: string, label: string): void {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} is missing.`);
+  }
+  if (st.isSymbolicLink()) {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} is a symlink or junction.`);
+  }
+  if (!st.isDirectory()) {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} is not a directory.`);
+  }
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} could not be resolved.`);
+  }
+  if (!samePath(path, real)) {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} is a path alias.`);
+  }
+  if (isInsideHome(home, real)) {
+    throw new WorkbenchPackageUpgradeError("unavailable", `${label} must be outside Home.`);
+  }
+}
+
+function inspectOutsideLeaf(home: string, path: string): "missing" | "file" | "dir" | "invalid" {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+    return "invalid";
+  }
+  if (st.isSymbolicLink()) return "invalid";
+  if (!st.isFile() && !st.isDirectory()) return "invalid";
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    return "invalid";
+  }
+  if (isInsideHome(home, real)) return "invalid";
+  if (!samePath(path, real)) return "invalid";
+  return st.isFile() ? "file" : "dir";
+}
+
+function isInsideRoot(root: string, path: string): boolean {
+  const rel = relative(resolve(root), resolve(path));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function throwUpgradeFailure(error: unknown, fallback: string): never {
+  if (error instanceof WorkbenchPackageUpgradeError) throw error;
+  if (error instanceof WorkbenchJobAbortError || error instanceof ProcessTerminationError) throw error;
+  if (error && typeof error === "object" && "name" in error && (error as { name: unknown }).name === "AbortError") {
+    throw error;
+  }
+  const message = error instanceof Error && error.message.trim() ? error.message : fallback;
+  throw new WorkbenchPackageUpgradeError("failed", message);
+}
+
+function optionalText(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    throw new WorkbenchPackageUpgradeError("invalid-input", "Prepare version and library id must be strings.");
+  }
+  return value.trim();
 }
 
 function receiptAgrees(current: UpgradeSettlement, intended: UpgradeSettlement): boolean {
@@ -733,6 +1526,53 @@ function parseSettlement(value: unknown): UpgradeSettlement {
   if (value.snapshotId !== undefined) settlement.snapshotId = requireUuid(text(value.snapshotId), "snapshotId");
   if ((outcome === "succeeded" || outcome === "rolled-back") && !settlement.snapshotId) throw new Error("missing snapshot evidence");
   return settlement;
+}
+
+async function inspectPluginArchive(artifact: string): Promise<ArtifactInspection> {
+  const resolved = resolve(artifact);
+  const entries = await listTarEntries(resolved);
+  const root = packageRoot(entries);
+  const manifestBytes = await readTarEntry(resolved, `${root}${COMPONENT_PAYLOAD_MANIFEST_REL}`);
+  const parsed = parseComponentPayloadManifest(JSON.parse(manifestBytes.toString("utf8")));
+  const hashes: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const name of COMPONENT_PAYLOAD_NAMES) {
+    const row = parsed.components[name];
+    const listed = new Set(row.files.map((file) => file.path));
+    for (const required of COMPONENT_PAYLOAD_REQUIRED_FILES[name]) {
+      if (!listed.has(required)) throw new Error(`component is missing ${required}`);
+    }
+    if (!listed.has(row.entry) || row.entry !== COMPONENT_PAYLOAD_ENTRIES[name]) {
+      throw new Error(`component does not list its entry: ${name}`);
+    }
+    for (const file of row.files) {
+      if (seen.has(file.path)) throw new Error(`duplicate component path ${file.path}`);
+      seen.add(file.path);
+      const bytes = await readTarEntry(resolved, `${root}${file.path}`);
+      if (bytes.length !== file.size) {
+        throw new Error(`component file size does not match archive: ${file.path}`);
+      }
+      const digest = sha256Bytes(bytes);
+      if (digest !== file.sha256) {
+        throw new Error(`component file digest does not match archive: ${file.path}`);
+      }
+      hashes[file.path] = digest;
+    }
+    const identity = readPackageIdentity((await readTarEntry(resolved, `${root}${IDENTITY_JSON[name]}`)).toString("utf8"));
+    if (!identity || identity.name !== row.packageName || identity.version !== row.version) {
+      throw new Error(`component identity does not match archive: ${name}`);
+    }
+  }
+  const pkg = parsed.components["manager-plugin"];
+  const fileDigest = sha256File(resolved);
+  return {
+    packageName: pkg.packageName,
+    version: pkg.version,
+    artifact: resolved,
+    fileDigest,
+    archiveId: `${PLUGIN_ARCHIVE_PREFIX}-${fileDigest.slice(0, DIGEST_ID_LENGTH)}`,
+    files: hashes,
+  };
 }
 
 async function inspectArtifact(

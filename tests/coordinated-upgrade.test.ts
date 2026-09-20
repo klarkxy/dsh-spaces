@@ -18,10 +18,10 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { test } from "node:test";
-import { CoordinatedUpgrade, resolveOfficialVersions } from "../src/main/coordinated-upgrade.ts";
-import { RuntimeStore, type RunProcessFn } from "../src/main/runtime-store.ts";
-import { SnapshotStore } from "../src/main/snapshot-store.ts";
-import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
+import { CoordinatedUpgrade, resolveOfficialVersions } from "../src/adapters/node/coordinated-upgrade.ts";
+import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
+import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
+import { RESTORE_STAGE_DIR, type SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 const BASE = "@deepseek-ai/dsh-base";
 const WEB = "@deepseek-ai/dsh-web-app";
@@ -389,16 +389,62 @@ test("upgrade does not recover after a successful commit", async (t) => {
 test("interrupted snapshot restore is not recovered by CoordinatedUpgrade", async t => {
   const ctx = await harness(t);
   const snapshotRoot = fakeDir(t, "dsh-receipt-");
-  ctx.snapshots = new SnapshotStore({ home: ctx.home, root: snapshotRoot,
-    inject: op => { if (op === "restore:swap") throw new Error("interrupted before swap"); } });
-  const snapshot = ctx.snapshots.create(descriptor(ctx.runtimes));
+  ctx.snapshots = new SnapshotStore({ home: ctx.home, root: snapshotRoot });
+  const runtime = descriptor(ctx.runtimes);
+  const snapshot = ctx.snapshots.create(runtime);
+  const planId = "12345678-1234-1234-1234-123456789abc";
+  const pendingPath = join(snapshotRoot, "pending-restore.json");
+  const pendingBytes = `${JSON.stringify({
+    snapshotId: snapshot.id,
+    beforeRestoreId: snapshot.id,
+    runtimeVersion: runtime.version,
+    binRelative: runtime.binRelative,
+    startedAt: "2026-09-12T00:00:00.000Z",
+    planId,
+  }, null, 2)}\n`;
+  writeFileSync(pendingPath, pendingBytes);
+  const journalPath = join(ctx.home, RESTORE_STAGE_DIR, "journal.json");
+  mkdirSync(dirname(journalPath), { recursive: true });
+  const journalBytes = `${JSON.stringify({
+    phase: "swapping",
+    snapshotId: snapshot.id,
+    beforeRestoreId: snapshot.id,
+    originalPresence: {
+      profiles: true,
+      sessions: false,
+      storages: false,
+      hub: false,
+      "settings.yaml": true,
+      "cordis.patch.yml": false,
+    },
+    runtimeVersion: runtime.version,
+    binRelative: runtime.binRelative,
+    startedAt: "2026-09-12T00:00:00.000Z",
+    planId,
+  }, null, 2)}\n`;
+  writeFileSync(journalPath, journalBytes);
+  assert.equal(ctx.snapshots.pendingRestore()?.planId, planId);
+  assert.equal(ctx.snapshots.restoreJournal()?.phase, "swapping");
+
   const marker = join(ctx.home, "settings.yaml");
   writeFileSync(marker, "before-restore data\n");
-  const planId = "12345678-1234-1234-1234-123456789abc";
-  await assert.rejects(async () => ctx.snapshots.restore(snapshot.id, descriptor(ctx.runtimes), { planId }), /interrupted/);
+  const liveVersion = ctx.runtimes.current()?.version;
+  const liveCoding = readFileSync(join(ctx.home, "profiles", "coding", "package.json"));
   ctx.upgrade = makeUpgrade(ctx);
   await assert.rejects(() => ctx.upgrade.recover({ receiptPlanId: planId }), /not supported/);
+  assert.equal(readFileSync(pendingPath, "utf8"), pendingBytes);
+  assert.equal(readFileSync(journalPath, "utf8"), journalBytes);
+  assert.equal(ctx.snapshots.pendingRestore()?.snapshotId, snapshot.id);
+  assert.equal(ctx.snapshots.restoreJournal()?.phase, "swapping");
+  assert.equal(ctx.runtimes.current()?.version, liveVersion);
+  assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8"), liveCoding.toString("utf8"));
   assert.equal(readFileSync(marker, "utf8"), "before-restore data\n");
+  assert.equal(ctx.restores, 0);
+  await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /Unfinished restore evidence/);
+  assert.equal(readFileSync(pendingPath, "utf8"), pendingBytes);
+  assert.equal(readFileSync(journalPath, "utf8"), journalBytes);
+  assert.equal(ctx.runtimes.current()?.version, liveVersion);
+  assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8"), liveCoding.toString("utf8"));
 });
 
 test("CoordinatedUpgrade restore is unsupported and does not persist a restore plan", async t => {

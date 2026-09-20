@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, lstatS
 import { tmpdir } from 'node:os';
 import { join, relative, isAbsolute } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { SnapshotStore } from '../src/main/snapshot-store.ts';
-import { describeRuntime, readRuntimeRef } from '../src/main/runtime-descriptor.ts';
+import { SnapshotStore } from '../src/adapters/node/snapshot-store.ts';
+import { describeRuntime, readRuntimeRef } from '../src/adapters/node/runtime-descriptor.ts';
 const resume = process.env.DSH_SNAPSHOT_RESUME_ROOT;
 const { bin, home } = resume ? {
   home: process.env.DSH_SNAPSHOT_RESUME_HOME,
