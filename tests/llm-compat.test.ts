@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PINNED_LLM_PI_AI_PROTOCOLS } from "../src/core/domain/llm-connections.ts";
@@ -52,16 +53,20 @@ test("0.1.5-rc.2 FileSettingsProvider and LocalCredentialProvider expose custom 
   assert.equal(typeof settings.SettingsProvider.prototype.mutate, "function");
   assert.equal(typeof credentials.credentialRef, "function");
   assert.equal(typeof credentials.credentialKey, "function");
+  const isolatedRoot = resolve(tmpdir(), "dsh-spaces-compat-isolate");
+  const settingsPath = resolve(isolatedRoot, "settings.yaml");
+  const credentialsPath = resolve(isolatedRoot, ".credentials.yaml");
+  const unusedHome = resolve(isolatedRoot, "unused-home");
   const resolvedSettings = settingsFile.resolveSpec({
-    path: "/tmp/spaces-a/settings.yaml",
-    dshHome: "/tmp/spaces-home",
+    path: settingsPath,
+    dshHome: unusedHome,
   });
-  assert.equal(resolvedSettings.filename, "/tmp/spaces-a/settings.yaml");
+  assert.equal(resolvedSettings.filename, settingsPath);
   const resolvedCreds = credentialsLocal.resolveSpec({
-    path: "/tmp/spaces-a/.credentials.yaml",
-    dshHome: "/tmp/spaces-home",
+    path: credentialsPath,
+    dshHome: unusedHome,
   });
-  assert.equal(resolvedCreds.filename, "/tmp/spaces-a/.credentials.yaml");
+  assert.equal(resolvedCreds.filename, credentialsPath);
 });
 
 test("0.1.5-rc.2 llm-pi-ai supportedProtocols matches the pinned shared-connection matrix", async () => {
