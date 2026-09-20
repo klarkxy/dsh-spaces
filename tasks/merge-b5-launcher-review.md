@@ -1,0 +1,12 @@
+# Launcher review: REVISE
+
+Independent read-only review of the frozen launcher, 2026-09-20. Node module relocation afterwards changed import paths only. No live Home used.
+
+1. P1: `waitForOldGone` trusts commit.oldPid/oldStartedAt, never comparing them with HomeController.inspect().handoff.original. Live repro with a valid transferred token and known-dead PID 2147483647 selected the pointer while the real original owner remained alive. Validate reservation first; derive original liveness identity from it or exact-compare before waiting/selecting.
+2. P1: spawnTarget discards validated payloadRootLib and spawns arbitrary commit.runtime.entry. Resolve staged manifest supervisor entry and reject mismatch BEFORE pointer selection. Spawn that resolved entry. Test targets belong inside the staged manifest, not separate fixture programs.
+3. P1: tools/components junction can redirect staging into target Home. Live repro returned stagedRoot under temporary Home. Check every staging ancestor for links/aliases and resolved containment before creating/copying. A post-copy check is too late.
+4. P2: environment check validates names only. Live repro env.REVIEW_CARRIER=token.secret reached target unchanged and receipt succeeded. Check complete effective env VALUES and full argv/execArgv for secret and nonce before pointer selection, including inherited env. Do not persist transport secrets.
+5. P2: acceptHandoffFromIpc reports accepted immediately on lock acceptance; launcher interprets as successful startup. Remove this automatic final report (or require explicit startup callback); startup success must be explicit after HTTP/manager ready. Replace fixture expecting accept-then-crash success with failed startup outcome preserving selected pointer/run owner.
+6. P2: generated old-owner fixture awaits launcher.waitForExit before exiting, while launcher waits for original owner death. Old parent must flush commit, disconnect, and exit; outer harness tracks launcher/target/receipt with bounded cleanup. This caused repeated success-path test hangs, not an unexplained production pipe issue.
+
+Reviewer independently passed selection 8/8 and missing-confirmation/missing-token 2/2, then demonstrated the three live violations above. Full handoff suite was not accepted. No persistent repro artifact was saved; create regression tests for these exact scenarios. Pipe errors and sustained operation were unproven, not additional verified findings.

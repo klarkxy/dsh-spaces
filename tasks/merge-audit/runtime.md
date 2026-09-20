@@ -92,15 +92,15 @@ Doctor 的 `doctor`/`verify`、备份查看、正常升级提交前失败丢弃 
 
 本叶 **没有** 需要从旧分支打补丁的 missing。下列是计划 B 段要改的主线现状，不要写成“旧分支没合进来”：
 
-1. **LLM job/generation 分叉（B2/B4）**  
+1. **LLM job/generation 分叉（B2/B4）**
    桌面 `generationOf: () => 0`，`desktop-llm.submitApply` 合成 `succeeded` job。Supervisor 使用 `generations` 并 `jobs.submit(llm.apply)`。
-2. **桌面仍是第二写者（B4）**  
+2. **桌面仍是第二写者（B4）**
    `src/main/index.ts` 继续装配 registry/process/runtime/upgrade。
-3. **合同仍混着恢复符号（B1）**  
+3. **合同仍混着恢复符号（B1）**
    `WorkbenchCommand` 仍有 `recovery.resume`；计划类型仍有 `snapshot.restore`/`config.restore`；IPC 名仍有 `restoreSnapshot`。执行层已 forbidden/unsupported。
-4. **未接线历史模块（B5）**  
+4. **未接线历史模块（B5）**
    `packages/doctor/src/recover.ts`、maintenance 私有 restore 函数、upgrade 私有 `rollbackSnapshot`。
-5. **c22c47f 不能被导入点覆盖**  
+5. **c22c47f 不能被导入点覆盖**
    若有人用 `1f339ac` 的 `control-residue` 做 ours/theirs，会死实例记录再次误拦。
 
 `HomeController.reclaimDead` 仍在 `src/adapters/node/home-controller.ts`（本叶路径外）。桌面 controller 已不调用。不得经旧分支重新接到 `acquireOnStart` / `acquireExplicit`。
