@@ -11,7 +11,7 @@ export interface TraySpace {
 
 export type TrayMenuItem =
   | { type: "separator"; id?: undefined; label?: undefined; enabled?: undefined }
-  | { type?: undefined; id: "show" | "stop-all" | "quit"; label: string; enabled?: boolean }
+  | { type?: undefined; id: "show" | "stop-all" | "stop-service" | "quit"; label: string; enabled?: boolean }
   | { type?: undefined; id: `space:${string}`; label: string; enabled: false };
 
 export interface TrayHandle {
@@ -81,6 +81,7 @@ export interface TrayCallbacks {
   getSpaces: () => TraySpace[];
   onShow: () => void;
   onStopAll: () => void;
+  onStopService?: () => void;
   onQuit: () => void;
 }
 
@@ -117,6 +118,7 @@ export function buildTrayMenuItems(spaces: TraySpace[]): TrayMenuItem[] {
   }
   items.push({ type: "separator" });
   items.push({ id: "stop-all", label: t("tray.stopAll") });
+  items.push({ id: "stop-service", label: t("tray.stopService") });
   items.push({ id: "quit", label: t("tray.quit") });
   return items;
 }
@@ -141,9 +143,11 @@ export function createAppTray(electron: TrayElectron, callbacks: TrayCallbacks):
             ? () => callbacks.onShow()
             : item.id === "stop-all"
               ? () => callbacks.onStopAll()
-              : item.id === "quit"
-                ? () => callbacks.onQuit()
-                : undefined;
+              : item.id === "stop-service"
+                ? () => callbacks.onStopService?.()
+                : item.id === "quit"
+                  ? () => callbacks.onQuit()
+                  : undefined;
         return {
           type: "normal" as const,
           id: item.id,
