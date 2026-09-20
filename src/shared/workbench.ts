@@ -1,10 +1,24 @@
 /** Browser-safe workbench contracts. Never carry file paths, cookies or child launch tokens. */
 import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest, LlmSpaceObservation } from './llm-api';
 import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './spaces-control';
+import type {
+  WorkbenchProductCommand,
+  WorkbenchProductOutcome,
+  WorkbenchProductRequest,
+  WorkbenchProductResult,
+} from './workbench-product';
 
 export type WorkbenchRole = 'manager' | 'workspace' | 'uninitialized';
 export type ControllerKind = 'web' | 'desktop';
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type WorkbenchAvailability = 'ready' | 'limited' | 'unavailable';
+export type WorkbenchProtocolVersion = 2;
+
+/** Read/write CAS token. Missing or malformed context is rejected by callers. */
+export interface WorkbenchMutationContext {
+  serviceEpoch: string;
+  expectedRevision: string;
+}
 
 /** Browser-safe failure fields. Do not put paths, tokens, or suggested fixes here. */
 export interface WorkbenchFailureContext {
@@ -66,20 +80,25 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
 }
 
 export interface WorkbenchState {
+  protocolVersion: WorkbenchProtocolVersion;
+  serviceEpoch: string;
+  revision: string;
+  availability: WorkbenchAvailability;
   role: WorkbenchRole;
   managerId: string | null;
+  /** Read-only controller status. Never includes the lock nonce. */
   owner: { kind: ControllerKind; since: string } | null;
   writable: boolean;
   mode: SpacesMode;
   dshVersion: string | null;
   maintenance: boolean;
-  recoveryRequired: boolean;
   reasons: string[];
   spaces: WorkbenchSpace[];
   jobs: WorkbenchJob[];
 }
 
 export interface WorkbenchView {
+  serviceEpoch: string;
   spaceId: string;
   generation: number;
   /** Clean child origin for exact postMessage source checking. */
@@ -94,12 +113,21 @@ export interface WorkbenchView {
 
 export interface WorkbenchViewMessage {
   source: 'dsh-spaces-view';
+  serviceEpoch: string;
   spaceId: string;
   generation: number;
   channel: string;
   state: 'ready' | 'failed' | 'disconnected';
   message?: string;
 }
+
+export type WorkbenchJobResult = {
+  spaceId?: string;
+  snapshotId?: string;
+  runtimeVersion?: string;
+  view?: WorkbenchView;
+  product?: WorkbenchProductOutcome;
+};
 
 export interface WorkbenchJob {
   id: string;
@@ -112,7 +140,7 @@ export interface WorkbenchJob {
   createdAt: string;
   updatedAt: string;
   canCancel: boolean;
-  result?: { spaceId?: string; snapshotId?: string; runtimeVersion?: string; view?: WorkbenchView };
+  result?: WorkbenchJobResult;
   error?: WorkbenchJobErrorInfo;
 }
 
@@ -123,9 +151,8 @@ export type WorkbenchCommand =
   | { kind: 'space.start'; spaceId: string }
   | { kind: 'space.verify'; spaceId: string }
   | { kind: 'plan.execute'; planId: string }
-  | { kind: 'controller.acquire' }
-  | { kind: 'recovery.resume' }
-  | { kind: 'llm.apply'; spaceIds: string[]; catalogRevision: number; observations: LlmSpaceObservation[] };
+  | { kind: 'llm.apply'; spaceIds: string[]; catalogRevision: number; observations: LlmSpaceObservation[] }
+  | WorkbenchProductCommand;
 
 export type WorkbenchPlanRequest =
   | { kind: 'space.stop' | 'space.restart'; spaceId: string }
@@ -135,11 +162,10 @@ export type WorkbenchPlanRequest =
   | { kind: 'plugin.toggle'; spaceId: string; pluginId: string; enabled: boolean }
   | { kind: 'plugin.cleanup-manager'; spaceId: string }
   | { kind: 'snapshot.create' }
-  | { kind: 'snapshot.restore' | 'snapshot.delete'; snapshotId: string }
-  | { kind: 'config.restore'; spaceId: string; backupId: string }
+  | { kind: 'snapshot.delete'; snapshotId: string }
   | { kind: 'runtime.install' | 'runtime.upgrade'; version: string }
   | { kind: 'workbench.upgrade'; catalogId: 'bundled-workbench'; version: string }
-  | { kind: 'controller.release' | 'controller.shutdown' };
+  | { kind: 'service.shutdown' };
 
 export interface WorkbenchPlan {
   id: string;
@@ -151,6 +177,8 @@ export interface WorkbenchPlan {
   changes: string[];
   destructive: boolean;
   expiresAt: string;
+  serviceEpoch: string;
+  stateRevision: string;
 }
 
 export interface WorkbenchPlugin {
@@ -185,11 +213,12 @@ export interface WorkbenchBackup { id: string; createdAt: string; reason: string
 export interface WorkbenchApi {
   state(): Promise<WorkbenchState>;
   detail(spaceId: string): Promise<SpaceDetail>;
-  submit(command: WorkbenchCommand, requestId: string): Promise<WorkbenchJob>;
+  submit(command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext): Promise<WorkbenchJob>;
   job(id: string): Promise<WorkbenchJob>;
   cancel(id: string): Promise<WorkbenchJob>;
   view(spaceId: string): Promise<WorkbenchView>;
-  preview(request: WorkbenchPlanRequest): Promise<WorkbenchPlan>;
+  preview(request: WorkbenchPlanRequest, context: WorkbenchMutationContext): Promise<WorkbenchPlan>;
+  product(request: WorkbenchProductRequest): Promise<WorkbenchProductResult>;
   plugins(query: string): Promise<WorkbenchPlugin[]>;
   snapshots(): Promise<WorkbenchSnapshot[]>;
   snapshot(id: string): Promise<WorkbenchSnapshot>;
