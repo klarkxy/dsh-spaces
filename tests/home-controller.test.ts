@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -21,14 +22,18 @@ import {
   HOME_CONTROL_RECLAIM_DIR_NAME,
   HOME_CONTROL_RUN_DIR_NAME,
   HomeControlBusyError,
+  HomeControlHandoffError,
   HomeControlPathError,
   HomeControlReleaseError,
   HomeController,
+  homeControlDigest,
   parseControlEndpoint,
+  type HomeControlHandoffBinding,
   type HomeControlOwner,
   type ReclaimDeadResult,
 } from "../src/adapters/node/home-controller.ts";
 import { HomeLockBusyError, HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
 import { MANAGED_HOME_ENTRIES } from "../src/shared/snapshots.ts";
 
 const temps: string[] = [];
@@ -58,6 +63,92 @@ function controlModuleHref(): string {
   return pathToFileURL(
     fileURLToPath(new URL("../src/adapters/node/home-controller.ts", import.meta.url)),
   ).href;
+}
+
+function sampleBinding(controller: HomeController, nonce: string): HomeControlHandoffBinding {
+  return {
+    homeDigest: homeControlDigest(controller.home),
+    handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
+    serviceEpoch: deriveServiceEpoch(nonce),
+    artifactDigest: "ab".repeat(32),
+  };
+}
+
+function ownerBytes(controller: HomeController): Buffer {
+  return readFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE));
+}
+
+function assertBusy(controller: HomeController): void {
+  assert.throws(() => controller.acquire("web"), HomeControlBusyError);
+  assert.throws(() => new HomeController(controller.home).acquire("desktop"), HomeControlBusyError);
+}
+
+function spawnScript(
+  home: string,
+  source: string,
+): { child: ChildProcess; waitFor: (text: string) => Promise<void>; write: (text: string) => void } {
+  const script = join(home, `handoff-${Date.now()}-${Math.random().toString(16).slice(2)}.mts`);
+  writeFileSync(script, source);
+  const child = spawn(process.execPath, ["--import", "tsx", script, home], {
+    cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: { ...process.env },
+  });
+  children.push(child);
+  let stdout = "";
+  let stderr = "";
+  const waiters: Array<{
+    text: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+  const notify = () => {
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      if (stdout.includes(waiters[i].text)) {
+        clearTimeout(waiters[i].timer);
+        waiters[i].resolve();
+        waiters.splice(i, 1);
+      }
+    }
+  };
+  child.stdout?.on("data", (chunk) => {
+    stdout += String(chunk);
+    notify();
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  child.once("exit", (code, signal) => {
+    for (const waiter of waiters.splice(0)) {
+      clearTimeout(waiter.timer);
+      if (!stdout.includes(waiter.text)) {
+        waiter.reject(
+          new Error(`child exited ${code}/${signal} before ${JSON.stringify(waiter.text)}; stderr=${stderr}`),
+        );
+      }
+    }
+  });
+  return {
+    child,
+    waitFor(text: string) {
+      if (stdout.includes(text)) return Promise.resolve();
+      return new Promise((resolveWait, rejectWait) => {
+        const timer = setTimeout(() => {
+          rejectWait(
+            new Error(
+              `timed out waiting for ${JSON.stringify(text)}; stdout=${JSON.stringify(stdout)} stderr=${stderr}`,
+            ),
+          );
+        }, 20_000);
+        waiters.push({ text, resolve: resolveWait, reject: rejectWait, timer });
+      });
+    },
+    write(text: string) {
+      child.stdin?.write(text);
+    },
+  };
 }
 
 test("ROOT existing manager identity remains readable while a maintenance lock is held", async () => {
@@ -632,4 +723,519 @@ test("clean 127.0.0.1 endpoints are accepted and dirty URLs are rejected", () =>
   const controller = new HomeController(tempHome());
   assert.throws(() => controller.acquire("desktop", "http://localhost:3100/"), /127\.0\.0\.1/);
   assert.equal(controller.inspect().held, false);
+});
+
+test("controlled handoff transfers occupancy old -> launcher -> new without an empty lock", async () => {
+  const home = tempHome();
+  const old = new HomeController(home);
+  const competitor = new HomeController(home);
+  const lock = new HomeOperationLock(home);
+  const handle = old.acquire("desktop", "http://127.0.0.1:3100");
+  const binding = sampleBinding(old, handle.owner.nonce);
+  const originalPid = handle.owner.pid;
+  const originalStarted = handle.owner.startedAt;
+
+  const token = await old.transferToLauncher({ nonce: handle.owner.nonce, binding });
+  assert.equal(token.v, 1);
+  assert.equal(token.homeDigest, binding.homeDigest);
+  assert.equal(token.homeDigest, digestHomeIdentity(old.home));
+  assert.equal(token.handoffId, binding.handoffId);
+  assert.equal(token.serviceEpoch, deriveServiceEpoch(handle.owner.nonce));
+  assert.match(token.secret, /^[0-9a-f]{64}$/);
+  assert.equal(lock.inspect().held, false);
+  const afterTransfer = old.inspect();
+  assert.equal(afterTransfer.held, true);
+  assert.ok("handoff" in afterTransfer && afterTransfer.handoff);
+  assert.equal(afterTransfer.handoff.phase, "launcher");
+  assert.equal(afterTransfer.handoff.original.pid, originalPid);
+  assert.equal(afterTransfer.handoff.original.kind, "desktop");
+  assert.equal(afterTransfer.handoff.original.startedAt, originalStarted);
+  assert.equal("nonce" in afterTransfer.handoff.original, false);
+  assert.equal(JSON.stringify(afterTransfer).includes(token.secret), false);
+  assert.equal("secret" in afterTransfer.handoff, false);
+  assertBusy(competitor);
+  assert.throws(() => handle.release(), HomeControlReleaseError);
+  assert.equal(old.inspect().held, true);
+  assert.deepEqual(old.reclaimDead(), { reclaimed: false, reason: "handoff" });
+
+  const authorized = await old.authorizeHandoff({
+    token,
+    target: { pid: process.pid, startedAt: new Date().toISOString() },
+  });
+  assert.equal(authorized.secret, token.secret);
+  const afterAuth = old.inspect();
+  assert.ok("handoff" in afterAuth && afterAuth.handoff);
+  assert.equal(afterAuth.handoff.phase, "authorized");
+  assert.equal(afterAuth.handoff.target?.pid, process.pid);
+  assertBusy(competitor);
+  assert.equal(lock.inspect().held, false);
+
+  const next = await old.acceptHandoff({ token: authorized, kind: "web", endpoint: "http://127.0.0.1:3200" });
+  const accepted = old.inspect();
+  assert.equal(accepted.held, true);
+  assert.ok("owner" in accepted);
+  assert.equal("handoff" in accepted && accepted.handoff ? true : false, false);
+  assert.equal(accepted.owner.kind, "web");
+  assert.equal(accepted.owner.pid, process.pid);
+  assert.equal(accepted.owner.endpoint, "http://127.0.0.1:3200/");
+  assert.notEqual(accepted.owner.nonce, handle.owner.nonce);
+  assert.notEqual(accepted.owner.nonce, token.nonce);
+  assertBusy(competitor);
+  assert.throws(() => handle.release(), HomeControlReleaseError);
+  assert.equal(old.inspect().held, true);
+  next.release();
+  assert.equal(old.inspect().held, false);
+  const after = competitor.acquire("web");
+  after.release();
+});
+
+test("handoff rejects wrong nonce, home, pid, phase, binding and duplicate calls", async () => {
+  const home = tempHome();
+  const controller = new HomeController(home);
+  const handle = controller.acquire("web");
+  const binding = sampleBinding(controller, handle.owner.nonce);
+  const before = ownerBytes(controller);
+
+  await assert.rejects(
+    () => controller.transferToLauncher({ nonce: "aa".repeat(16), binding }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "nonce-mismatch");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      controller.transferToLauncher({
+        nonce: handle.owner.nonce,
+        binding: { ...binding, homeDigest: "00".repeat(32) },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "home-mismatch");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      controller.transferToLauncher({
+        nonce: handle.owner.nonce,
+        binding: { ...binding, artifactDigest: "AB".repeat(32) },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "invalid-token");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      controller.transferToLauncher({
+        nonce: handle.owner.nonce,
+        binding: { ...binding, serviceEpoch: "epoch-test-1" },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "invalid-token");
+      return true;
+    },
+  );
+  assert.deepEqual(ownerBytes(controller), before);
+
+  const token = await controller.transferToLauncher({ nonce: handle.owner.nonce, binding });
+  const launcherBytes = ownerBytes(controller);
+  await assert.rejects(
+    () => controller.transferToLauncher({ nonce: token.nonce, binding }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "duplicate");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => controller.acceptHandoff({ token, kind: "web" }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "phase-mismatch");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      controller.authorizeHandoff({
+        token: { ...token, secret: "00".repeat(32) },
+        target: { pid: process.pid, startedAt: new Date().toISOString() },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "invalid-token");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      controller.authorizeHandoff({
+        token,
+        target: { pid: 0, startedAt: new Date().toISOString() },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "invalid-target");
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      controller.authorizeHandoff({
+        token,
+        target: { pid: 2_147_483_647, startedAt: new Date().toISOString() },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "invalid-target");
+      return true;
+    },
+  );
+  assert.deepEqual(ownerBytes(controller), launcherBytes);
+
+  await controller.authorizeHandoff({
+    token,
+    target: { pid: process.pid, startedAt: new Date().toISOString() },
+  });
+  await assert.rejects(
+    () =>
+      controller.authorizeHandoff({
+        token,
+        target: { pid: process.pid, startedAt: new Date().toISOString() },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "duplicate");
+      return true;
+    },
+  );
+  const next = await controller.acceptHandoff({ token, kind: "desktop" });
+  await assert.rejects(
+    () => controller.acceptHandoff({ token, kind: "desktop" }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "phase-mismatch");
+      return true;
+    },
+  );
+  next.release();
+});
+
+test("homeControlDigest matches protocol digestHomeIdentity for the same Home", () => {
+  const home = tempHome();
+  mkdirSync(join(home, "profiles"), { recursive: true });
+  const controller = new HomeController(home);
+  const aliased = new HomeController(join(home, ".", "profiles", ".."));
+  assert.equal(homeControlDigest(home), digestHomeIdentity(controller.home));
+  assert.equal(homeControlDigest(join(home, ".", "profiles", "..")), digestHomeIdentity(controller.home));
+  assert.equal(homeControlDigest(aliased.home), digestHomeIdentity(controller.home));
+  assert.notEqual(createHash("sha256").update(controller.home, "utf8").digest("hex"), homeControlDigest(home));
+});
+
+test("forged serviceEpoch is binding-mismatch and leaves the owner bytes", async () => {
+  const home = tempHome();
+  const controller = new HomeController(home);
+  const handle = controller.acquire("desktop");
+  const before = ownerBytes(controller);
+  const forged = "00".repeat(32);
+  const binding = {
+    ...sampleBinding(controller, handle.owner.nonce),
+    serviceEpoch: forged,
+  };
+  assert.match(forged, /^[0-9a-f]{64}$/);
+  assert.notEqual(forged, deriveServiceEpoch(handle.owner.nonce));
+  await assert.rejects(
+    () => controller.transferToLauncher({ nonce: handle.owner.nonce, binding }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "binding-mismatch");
+      return true;
+    },
+  );
+  assert.deepEqual(ownerBytes(controller), before);
+  const info = controller.inspect();
+  assert.equal(info.held, true);
+  assert.ok("owner" in info);
+  assert.equal(info.owner.nonce, handle.owner.nonce);
+  assert.equal(info.handoff, undefined);
+  handle.release();
+});
+
+test("child cannot start a handoff with the parent nonce", async () => {
+  const home = tempHome();
+  const parent = new HomeController(home);
+  const handle = parent.acquire("desktop");
+  const binding = sampleBinding(parent, handle.owner.nonce);
+  const child = spawnScript(
+    home,
+    `import { HomeController, HomeControlHandoffError } from ${JSON.stringify(controlModuleHref())};
+const controller = new HomeController(process.argv[2]);
+try {
+  await controller.transferToLauncher({
+    nonce: ${JSON.stringify(handle.owner.nonce)},
+    binding: ${JSON.stringify(binding)},
+  });
+  process.stdout.write("TRANSFERRED\\n");
+} catch (error) {
+  const code = error instanceof HomeControlHandoffError ? error.code : "other";
+  process.stdout.write("REJECTED " + code + "\\n");
+}
+`,
+  );
+  await child.waitFor("REJECTED pid-mismatch");
+  const stillHeld = parent.inspect();
+  assert.equal(stillHeld.held, true);
+  assert.ok("owner" in stillHeld);
+  assert.equal(stillHeld.owner.nonce, handle.owner.nonce);
+  handle.release();
+});
+
+test("unknown or corrupt new owner records stay held/ambiguous with original bytes", () => {
+  const home = tempHome();
+  const controller = new HomeController(home);
+  mkdirSync(controller.controlDir);
+  mkdirSync(controller.runDir);
+  const payloads = [
+    `${JSON.stringify({
+      version: 9,
+      pid: process.pid,
+      nonce: "aa".repeat(16),
+      startedAt: new Date().toISOString(),
+      kind: "web",
+    })}\n`,
+    `${JSON.stringify({ version: 2, phase: "launcher" })}\n`,
+    `${JSON.stringify({
+      version: 2,
+      phase: "authorized",
+      pid: process.pid,
+      nonce: "aa".repeat(16),
+      startedAt: new Date().toISOString(),
+      handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
+      homeDigest: "ab".repeat(32),
+      serviceEpoch: "epoch",
+      artifactDigest: "cd".repeat(32),
+      secretHash: "ef".repeat(32),
+      original: {
+        pid: process.pid,
+        nonce: "bb".repeat(16),
+        startedAt: new Date().toISOString(),
+        kind: "desktop",
+      },
+    })}\n`,
+    `${JSON.stringify({
+      version: 2,
+      phase: "launcher",
+      pid: process.pid,
+      nonce: "aa".repeat(16),
+      startedAt: new Date().toISOString(),
+      handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
+      homeDigest: "ab".repeat(32),
+      serviceEpoch: "epoch-test-1",
+      artifactDigest: "cd".repeat(32),
+      secretHash: "ef".repeat(32),
+      original: {
+        pid: process.pid,
+        nonce: "bb".repeat(16),
+        startedAt: new Date().toISOString(),
+        kind: "desktop",
+      },
+    })}\n`,
+  ];
+  for (const payload of payloads) {
+    writeFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE), payload);
+    const before = readFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE));
+    const info = controller.inspect();
+    assert.equal(info.held, true);
+    assert.ok("ambiguous" in info && info.ambiguous);
+    assert.throws(() => controller.acquire("web"), HomeControlBusyError);
+    assert.equal(controller.reclaimDead().reclaimed, false);
+    assert.deepEqual(readFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE)), before);
+  }
+});
+
+test("held transaction lock rejects handoff and leaves the owner record", async () => {
+  const home = tempHome();
+  const controller = new HomeController(home);
+  const lock = new HomeOperationLock(home);
+  const handle = controller.acquire("desktop");
+  const before = ownerBytes(controller);
+  await lock.run("hold-transaction", async () => {
+    await assert.rejects(
+      () =>
+        controller.transferToLauncher({
+          nonce: handle.owner.nonce,
+          binding: sampleBinding(controller, handle.owner.nonce),
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof HomeControlHandoffError);
+        assert.equal(error.code, "busy");
+        return true;
+      },
+    );
+  });
+  assert.deepEqual(ownerBytes(controller), before);
+  const stillOwner = controller.inspect();
+  assert.equal(stillOwner.held, true);
+  assert.ok("owner" in stillOwner);
+  assert.equal(stillOwner.handoff, undefined);
+  handle.release();
+});
+
+test("real children cannot acquire during handoff; only the authorized target can accept", async () => {
+  const home = tempHome();
+  const parent = new HomeController(home);
+  const handle = parent.acquire("desktop");
+  const binding = sampleBinding(parent, handle.owner.nonce);
+
+  const launcher = spawnScript(
+    home,
+    `import { HomeController } from ${JSON.stringify(controlModuleHref())};
+const controller = new HomeController(process.argv[2]);
+const startedAt = new Date().toISOString();
+process.stdout.write("LAUNCHER_READY " + process.pid + " " + startedAt + "\\n");
+const tokenLine = await new Promise((resolve) => {
+  let buf = "";
+  process.stdin.on("data", (chunk) => {
+    buf += String(chunk);
+    const idx = buf.indexOf("\\n");
+    if (idx >= 0) resolve(buf.slice(0, idx));
+  });
+});
+const { token, target } = JSON.parse(tokenLine);
+await controller.authorizeHandoff({ token, target });
+process.stdout.write("LAUNCHER_AUTHORIZED\\n");
+await new Promise((resolve) => process.stdin.once("data", resolve));
+`,
+  );
+  await launcher.waitFor("LAUNCHER_READY ");
+
+  const target = spawnScript(
+    home,
+    `import { HomeController } from ${JSON.stringify(controlModuleHref())};
+const controller = new HomeController(process.argv[2]);
+const startedAt = new Date().toISOString();
+process.stdout.write("TARGET_READY " + process.pid + " " + startedAt + "\\n");
+const tokenLine = await new Promise((resolve) => {
+  let buf = "";
+  process.stdin.on("data", (chunk) => {
+    buf += String(chunk);
+    const idx = buf.indexOf("\\n");
+    if (idx >= 0) resolve(buf.slice(0, idx));
+  });
+});
+const handle = await controller.acceptHandoff({ token: JSON.parse(tokenLine), kind: "web" });
+process.stdout.write("TARGET_ACCEPTED\\n");
+await new Promise((resolve) => process.stdin.once("data", resolve));
+handle.release();
+process.stdout.write("TARGET_RELEASED\\n");
+`,
+  );
+  await target.waitFor("TARGET_READY ");
+
+  const racer = spawnScript(
+    home,
+    `import { HomeController, HomeControlBusyError } from ${JSON.stringify(controlModuleHref())};
+const controller = new HomeController(process.argv[2]);
+process.stdout.write("RACER_READY\\n");
+let attempts = 0;
+const timer = setInterval(() => {
+  attempts += 1;
+  try {
+    controller.acquire("web");
+    process.stdout.write("RACER_WON\\n");
+    process.exit(2);
+  } catch (error) {
+    if (!(error instanceof HomeControlBusyError)) {
+      process.stdout.write("RACER_ERROR\\n");
+      process.exit(3);
+    }
+  }
+}, 25);
+await new Promise((resolve) => process.stdin.once("data", resolve));
+clearInterval(timer);
+process.stdout.write("RACER_BUSY " + attempts + "\\n");
+process.exit(0);
+`,
+  );
+  await racer.waitFor("RACER_READY");
+
+  const launcherPid = launcher.child.pid;
+  const targetPid = target.child.pid;
+  assert.ok(launcherPid && targetPid);
+
+  const token = await parent.transferToLauncher({
+    nonce: handle.owner.nonce,
+    binding,
+    launcher: { pid: launcherPid, startedAt: new Date().toISOString() },
+  });
+  assertBusy(parent);
+  assert.throws(() => handle.release(), HomeControlReleaseError);
+  await assert.rejects(
+    () =>
+      parent.authorizeHandoff({
+        token,
+        target: { pid: targetPid, startedAt: new Date().toISOString() },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "pid-mismatch");
+      return true;
+    },
+  );
+
+  launcher.write(
+    `${JSON.stringify({
+      token,
+      target: { pid: targetPid, startedAt: new Date().toISOString() },
+    })}\n`,
+  );
+  await launcher.waitFor("LAUNCHER_AUTHORIZED");
+  assertBusy(parent);
+  const authorized = parent.inspect();
+  assert.ok("handoff" in authorized && authorized.handoff);
+  assert.equal(authorized.handoff.phase, "authorized");
+
+  await assert.rejects(
+    () => parent.acceptHandoff({ token, kind: "web" }),
+    (error: unknown) => {
+      assert.ok(error instanceof HomeControlHandoffError);
+      assert.equal(error.code, "pid-mismatch");
+      return true;
+    },
+  );
+
+  target.write(`${JSON.stringify(token)}\n`);
+  await target.waitFor("TARGET_ACCEPTED");
+  assertBusy(parent);
+  assert.throws(() => handle.release(), HomeControlReleaseError);
+  const held = parent.inspect();
+  assert.equal(held.held, true);
+  assert.ok("owner" in held);
+  assert.equal(held.owner.pid, targetPid);
+  assert.equal(held.owner.kind, "web");
+  assert.equal("handoff" in held && held.handoff ? true : false, false);
+
+  racer.write("stop\n");
+  await racer.waitFor("RACER_BUSY ");
+  if (racer.child.exitCode === null) {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("racer did not exit")), 10_000);
+      racer.child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+  assert.equal(racer.child.exitCode, 0);
+
+  launcher.write("done\n");
+  target.write("release\n");
+  await target.waitFor("TARGET_RELEASED");
+  const reacquired = parent.acquire("desktop");
+  reacquired.release();
 });
