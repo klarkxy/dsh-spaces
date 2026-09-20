@@ -5,10 +5,12 @@
  * verify-workbench-product.mjs (that file runs at load). Safe to import this
  * module; main is guarded.
  *
- * Confirms live `dsh --version` is exactly 0.1.5-rc.2 against an official
- * published CLI, not a candidate esbuild inject. Product write-gate includes
- * 0.1.5-rc.1 and 0.1.5-rc.2. If the packed supervisor refuses the manager,
- * that is recorded as a blocker and the script continues with CLI /
+ * Historical evidence target: live `dsh --version` must be exactly 0.1.5-rc.2
+ * against an official published CLI, not a candidate esbuild inject. The old
+ * product write-gate allowlist of 0.1.5-rc.1 and 0.1.5-rc.2 is no longer
+ * current policy (latest channel, exact resolved version at execution). This
+ * file does not restore that allowlist. If the packed supervisor refuses the
+ * manager, that is recorded as a blocker and the script continues with CLI /
  * view-bridge / guide-only plugin wiring.
  *
  * Official web seed is `--profile web --dump-config`. Custom profiles still
@@ -24,9 +26,11 @@
  *
  *   node scripts/verify-workbench-rc2.mjs [--output DIR] [--home DIR]
  *
- * Env: DSH_TEST_BIN or DSH_TEST_RC2_BIN (must be real 0.1.5-rc.2),
- * DSH_TEST_PLAYWRIGHT or DSH_TEST_PLAYWRIGHT_MODULE, DSH_TEST_OUTPUT,
- * DSH_TEST_HOME, DSH_TEST_PNPM_CJS.
+ * Env: DSH_TEST_BIN or DSH_TEST_RC2_BIN override an official 0.1.5-rc.2
+ * lib/bin.js. If unset, the default is the repo isolation tree
+ * `.sandbox/spaces-unknown-cli/.../lib/bin.js` (must exist; this script does
+ * not guess a machine-local Temp path). DSH_TEST_PLAYWRIGHT or
+ * DSH_TEST_PLAYWRIGHT_MODULE, DSH_TEST_OUTPUT, DSH_TEST_HOME, DSH_TEST_PNPM_CJS.
  *
  * Exit: 0 product admitted official rc.2; 2 low-level wiring proved but
  * manager not admitted / full product unvalidated; 1 failed. Cleanup kills
@@ -77,8 +81,16 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const node = process.execPath;
 const PRODUCT_GATE = '0.1.5-rc.2';
 const RC2 = '0.1.5-rc.2';
-const DEFAULT_RC2_BIN =
-  'C:/Users/admin/AppData/Local/Temp/dsh-spaces-standard-rc2/node_modules/@deepseek-ai/dsh/lib/bin.js';
+const DEFAULT_RC2_BIN = join(
+  root,
+  '.sandbox',
+  'spaces-unknown-cli',
+  'node_modules',
+  '@deepseek-ai',
+  'dsh',
+  'lib',
+  'bin.js',
+);
 const PLUGIN_NAME = '@dsh-spaces/plugin';
 const BRIDGE_NAME = '@dsh-spaces/view-bridge';
 const PLUGIN_ROW = 'dsh-spaces';
@@ -261,7 +273,11 @@ function resolveRc2Bin() {
   const override = (process.env.DSH_TEST_RC2_BIN || process.env.DSH_TEST_BIN || '').trim();
   const candidate = override || DEFAULT_RC2_BIN;
   if (!existsSync(candidate)) {
-    throw new Error(`rc.2 CLI missing at ${candidate}; set DSH_TEST_RC2_BIN or DSH_TEST_BIN`);
+    throw new Error(
+      override
+        ? `rc.2 CLI missing at override ${candidate}`
+        : `rc.2 CLI missing at repo isolation default ${candidate}; set DSH_TEST_RC2_BIN or DSH_TEST_BIN to an official 0.1.5-rc.2 lib/bin.js. This script does not use a machine-local Temp path.`,
+    );
   }
   return resolve(candidate);
 }

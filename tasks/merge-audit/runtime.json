@@ -1,0 +1,1087 @@
+{
+  "group": "runtime",
+  "refs": {
+    "main": "c22c47fd37629e3bb852f7702d68624d3a73453d",
+    "old": "51911e481961408ad77758b0123653c0fc1e2bdd",
+    "imported": "1f339acc4c616ed634760f2735823f5ce83b9cd3"
+  },
+  "rows": [
+    {
+      "path": "packages/core/src/index.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "旧树把 isolation/registry/maintenance-gate 和历史 restore 端口从 core 包再导出。旧与导入 blob 相同。",
+      "currentEvidence": [
+        "packages/core/src/index.ts:1-11",
+        "git c22c47f packages/core/src/index.ts blob d96799b (adds llm-connections/resolution/global-llm-service/llm-store re-exports; still re-exports restore-session/restore ports)"
+      ],
+      "reason": "旧导出已在导入点，主线只追加全局 LLM 域/服务/存储再导出。没有旧独占实现。restore-session 再导出是 B 阶段遗留合同，不是 A 阶段旧遗漏。",
+      "verification": [
+        "src/core/domain/llm-connections.ts",
+        "src/core/application/global-llm-service.ts",
+        "packages/core/package.json consumers of @dsh-spaces/core"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/common.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "旧树硬编码 WRITE_CLI_VERSION=0.1.5-rc.1 与 VERIFY_CLI_VERSIONS={rc.1,rc.2}。导入点改为引用 COMPATIBLE_DSH_CLI_VERSIONS。",
+      "currentEvidence": [
+        "packages/doctor/src/common.ts:1-27 (no WRITE_CLI_VERSION / VERIFY_CLI_VERSIONS; EXIT.unsupported=7)",
+        "git ee26d4c Follow official DSH latest and drop the CLI version allowlist",
+        "src/adapters/node/spaces-control.ts:54-60 isCompatibleDshCliVersion=isExactRuntimeVersion"
+      ],
+      "reason": "旧白名单不得返场。现行规则是 latest 渠道、执行前钉死精确版本。common 只保留路径/退出码；校验改走 isCompatibleDshCliVersion。",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts:51-61",
+        "packages/doctor/src/resources.ts:49-54",
+        "docs/let-it-crash.md 与 tasks/todo.md 取消永久精确版本白名单"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/index.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "旧/导入把 unlock、recover、rollback 接到 runUnlock/runRecover/runRollback；verify 在 recoveryBlocksVerify 时拒绝并要求 Desktop recovery。",
+      "currentEvidence": [
+        "packages/doctor/src/index.ts:23-47",
+        "git 0c83fab Make doctor and restore product paths unsupported."
+      ],
+      "reason": "公开恢复命令必须失败且不转发旧实现。当前 doctor/verify 仍诊断；unlock/recover/rollback 以 EXIT.unsupported 拒绝。不要把旧路由移植回来。",
+      "verification": [
+        "tests/workbench-doctor.test.ts",
+        "docs/let-it-crash.md:15-16 公开恢复命令失败且不转发",
+        "tasks/todo.md R5"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/inspect.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "只读扫描 lock/jobs/instances/toolchain/plugin-mutation，产出 findings。旧与导入相同。",
+      "currentEvidence": [
+        "packages/doctor/src/inspect.ts:407-423",
+        "packages/doctor/src/index.ts:30-36 inspectHome for command doctor"
+      ],
+      "reason": "主线只改文案：不再建议 whole-home rollback/recovery mode，改为原字节保留、不交换目录、不杀 PID。诊断能力仍在，没有旧遗漏。",
+      "verification": [
+        "packages/doctor/src/index.ts doctor command",
+        "tests/workbench-doctor.test.ts",
+        "docs/let-it-crash.md Doctor 只诊断"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/recover.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "离线 recover/unlock/rollback：settle recovery-required jobs、重放维护、整 Home 快照回滚。旧与导入实现仍接线。",
+      "currentEvidence": [
+        "packages/doctor/src/index.ts:38-44 does not import or call recover.ts",
+        "packages/doctor/src/recover.ts:379-383 leftover settleJobs now only lists failed jobs",
+        "docs/let-it-crash.md:15 源码里仍可能留着未接线的历史恢复模块 packages/doctor/src/recover.ts"
+      ],
+      "reason": "产品入口已不调用。旧恢复链不得返场。文件本身是未接线历史模块，属 B5 遗留清理而非 A 阶段移植候选。",
+      "verification": [
+        "packages/doctor/src/index.ts:1-47 no runRecover import",
+        "docs/let-it-crash.md:15-16",
+        "tasks/todo.md R5"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/resources.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "绑定绝对 --cli、校验 allowedVerify/allowedWrite、解析 snapshot/runtime 根。旧与导入相同，写路径文案指向 recover/roll back 白名单。",
+      "currentEvidence": [
+        "packages/doctor/src/resources.ts:49-54 allowedVerify/allowedWrite=isCompatibleDshCliVersion",
+        "packages/doctor/src/resources.ts:178-183 RUNTIME_REFUSED is exact version, not recover allowlist"
+      ],
+      "reason": "绑定/校验 CLI 的意图仍在。白名单文案被精确版本规则替代，不是遗漏。",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts",
+        "packages/doctor/src/index.ts verify requires --cli"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/credentials-provider.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/credentials-provider.ts (SpacesCredentialsProvider)",
+        "packages/llm-bridge/src/index.ts:10-14",
+        "git 61af286 feat: bridge shared llm settings and credentials"
+      ],
+      "reason": "主线全局 LLM 凭据通道。旧无对应实现，无需从旧分支移植。",
+      "verification": [
+        "tests/helpers/llm-space-worker.ts",
+        "tests/llm-stream.test.ts",
+        "scripts/pack-spaces-plugin.mjs llm-bridge pack"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/errors.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/index.ts:23 LLM_ERROR/LlmConfigError re-export",
+        "packages/llm-bridge/src/errors.ts"
+      ],
+      "reason": "主线桥接错误映射，承接无秘密失败报告。旧无此层。",
+      "verification": [
+        "packages/plugin/src/host/remote-errors.ts LLM_PUBLIC_ERROR",
+        "tests/llm-gates.test.ts"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/index.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/index.ts:1-25 barrel for settings/credentials/guard/space-bridge/official-host/plugin"
+      ],
+      "reason": "llm-bridge 包入口，打包与测试从这里取符号。旧无此包。",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs",
+        "scripts/validate-llm-distribution.mjs"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/official-host.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/official-host.ts:15-24 attachOfficialLlm pins 0.1.5-rc.2 adapter and does not swap implementations"
+      ],
+      "reason": "官方适配器流式接入。缺适配器显式失败，不换实现。旧无全局 LLM。",
+      "verification": [
+        "tests/llm-gates.test.ts requireOfficialLlmAdapter",
+        "tests/llm-stream.test.ts attachOfficialLlm"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/plugin.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/plugin.ts:1-24 Cordis plugin reads launch snapshot via LLM_SNAPSHOT_ENV"
+      ],
+      "reason": "空间内 llm-bridge 插件，消费启动快照而非恢复快照。旧无此插件。",
+      "verification": [
+        "src/adapters/node/llm-snapshot.ts:50-62 writeSpaceLlmLaunchSnapshot",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/request-guard.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/index.ts:15 installManagedRequestGuard",
+        "packages/llm-bridge/src/official-host.ts:22"
+      ],
+      "reason": "拒绝托管路由越权调用。旧无此守卫。",
+      "verification": [
+        "tests/llm-gates.test.ts",
+        "docs/plans/global-llm-connections.md capabilities"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/settings-provider.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/settings-provider.ts SpacesFileSettingsProvider",
+        "git ead1022 fix: inject the frozen snapshot after official settings plugin init"
+      ],
+      "reason": "冻结共享设置为官方 settings 插件输入。旧无此提供者。",
+      "verification": [
+        "tests/helpers/llm-official.ts",
+        "tests/llm-integration.test.ts"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/space-bridge.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/src/space-bridge.ts:16-22 freezeSpaceSnapshot",
+        "packages/llm-bridge/src/index.ts:16-20"
+      ],
+      "reason": "按空间打开冻结快照上的官方 settings/credentials 缝。不是整 Home 恢复。",
+      "verification": [
+        "tests/llm-integration.test.ts freezeSpaceSnapshot",
+        "tests/llm-stream.test.ts openSpaceLlmBridge"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/plugin.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "默认插件始终注册只读 guide Remote；仅 manager 角色注册写 Remote。旧注释未写明 ordinary 永不自动冷启动 supervisor。",
+      "currentEvidence": [
+        "packages/plugin/src/host/plugin.ts:13-35",
+        "blob 9fcde5f identical at imported and main"
+      ],
+      "reason": "导入点补了 ordinary profiles never auto-bootstrap，主线保持该注释与实现。旧无额外行为，且弱于现行初始化边界。",
+      "verification": [
+        "packages/plugin/src/host/runtime.ts:61-68 canColdStart only manager",
+        "tests/workbench-plugin.test.ts initialize"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/remote-errors.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "工作台 RemoteError 公共码与文案，含 recovery-required。旧与导入相同。",
+      "currentEvidence": [
+        "packages/plugin/src/host/remote-errors.ts:12-89 workbench/unsupported plus LLM_REMOTE_CODES",
+        "packages/plugin/src/host/remote-errors.ts:92-93 recovery-required text no longer says Recovery is required"
+      ],
+      "reason": "主线追加 LLM 码和 unsupported，收紧恢复文案。旧码表没有独有错误语义要移植。",
+      "verification": [
+        "packages/plugin/src/host/workbench-http.ts:181-187",
+        "packages/plugin/src/host/workbench-manager.ts:114-129"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/runtime.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Host 身份、bootstrap/handoff、managerApi。旧 canColdStart 含 uninitialized，且 bootstrap 即冷启动。",
+      "currentEvidence": [
+        "packages/plugin/src/host/runtime.ts:65-68 canColdStart manager only",
+        "packages/plugin/src/host/runtime.ts initialize()/runInitialize()/deniedInitialize()",
+        "packages/plugin/src/host/runtime.ts:253-260 exact installed version, not allowlist"
+      ],
+      "reason": "导入点已把显式 initialize 与普通 bootstrap 分开，禁止 ordinary 冷启动。主线只把版本检查改成精确安装版本。旧 uninitialized 冷启动不应返场。",
+      "verification": [
+        "tests/workbench-plugin.test.ts initialize cases",
+        "packages/plugin/src/host/workbench-guide.ts:44-51",
+        "tasks/todo.md 普通 Web 标准安装后显式初始化"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-guide.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "只读 guide Remote：role/bootstrap/returnTarget。旧无 initialize。",
+      "currentEvidence": [
+        "packages/plugin/src/host/workbench-guide.ts:44-51 @Remote initialize",
+        "blob 082a64c identical at imported and main"
+      ],
+      "reason": "导入点已加 initialize Remote，主线未丢。旧没有要补的 guide 行为。",
+      "verification": [
+        "tests/workbench-plugin.test.ts",
+        "packages/plugin/src/host/plugin.ts:13-17"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-http.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Host 侧 HTTP 客户端封装 Supervisor WorkbenchApi。旧与导入相同。",
+      "currentEvidence": [
+        "packages/plugin/src/host/workbench-http.ts:42-47 llm/llmCredential methods",
+        "packages/plugin/src/host/workbench-http.ts:90-95"
+      ],
+      "reason": "主线给同一客户端加脱敏 LLM 与 Host-only 凭据方法。旧客户端没有独有方法。",
+      "verification": [
+        "src/shared/workbench.ts:197-207 WorkbenchApi.llm/llmCredential",
+        "src/adapters/node/workbench-http.ts:17-21"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-manager.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Manager Remote 转调 WorkbenchApi。旧与导入相同。",
+      "currentEvidence": [
+        "packages/plugin/src/host/workbench-manager.ts:98-129 llm/llmCredential remotes and LLM_ error mapping"
+      ],
+      "reason": "主线把 LLM 写路径接到同一 manager Remote。旧无独有 Remote。",
+      "verification": [
+        "packages/plugin/src/host/plugin.ts:31-34 manager registration",
+        "src/shared/llm-api.ts:20-40"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-schemas.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "zod 校验 bootstrap/returnTarget/state/job。旧无 initialize 结果 schema。",
+      "currentEvidence": [
+        "packages/plugin/src/host/workbench-schemas.ts:371 workbenchInitializeResultSchema",
+        "packages/plugin/src/host/workbench-schemas.ts llmApiRequestSchema/llmApiResultSchema/llmCredentialRequestSchema (imp→main)"
+      ],
+      "reason": "导入点已覆盖 initialize 结果；主线再加 LLM schema。旧 schema 没有独有字段要搬。",
+      "verification": [
+        "packages/plugin/src/host/workbench-http.ts schema imports",
+        "packages/plugin/src/host/workbench-guide.ts initialize return type"
+      ]
+    },
+    {
+      "path": "src/adapters/desktop/control-residue.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "只读扫描 jobs/instances/upgrade journal/mutation journal。用 pidAlive 忽略已证死的实例记录，不写不杀。旧仍把 recovery-required job 当未完成。",
+      "currentEvidence": [
+        "src/adapters/desktop/control-residue.ts:13-14 UNFINISHED_JOB_STATUS queued/running only",
+        "src/adapters/desktop/control-residue.ts:32-46 inspectControlResidue(home, ownsRecord, pidAlive)",
+        "src/adapters/desktop/control-residue.ts:188-212 inspectInstanceFile returns false for owned or pidAlive===dead",
+        "git c22c47f fix: ignore stale dead instance records and drop takeover copy."
+      ],
+      "reason": "导入点曾去掉 pidAlive，导致死实例记录误拦。HEAD c22c47f 已恢复旧的死记录忽略，且不 reclaim/不杀进程。recovery-required 状态已随 job 合同消失。旧意图已在主线，不要把导入点的过拦或旧 reclaim 一并搬回。",
+      "verification": [
+        "tests/desktop-controller.test.ts:368 stale dead instance records do not block writes; live leftovers still do",
+        "tests/cooperative-children.test.ts:101-102",
+        "docs/plans/spaces-merge-convergence.md:30-31,69-70"
+      ]
+    },
+    {
+      "path": "src/adapters/desktop/controller.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "桌面租约：acquireOnStart 对已证死 owner 调 reclaimDead；acquireExplicit 也可 reclaimDead；residue 用 pidAlive。",
+      "currentEvidence": [
+        "src/adapters/desktop/controller.ts:114-128 acquireOnStart never reclaimDead",
+        "src/adapters/desktop/controller.ts:130-138 acquireExplicit refuses dead/live/ambiguous and leaves the record",
+        "src/adapters/desktop/controller.ts:392-411 inspectControlResidue(..., pidAlive)",
+        "git c22c47f",
+        "git d267a20 Remove the desktop Home controller badge and hand-off overlay."
+      ],
+      "reason": "死/活/未知实例区分已在主线：死实例记录不拦 residue，但死 owner 也不接管。旧 reclaimDead 与“Take over to make changes”文案被 let it crash 替代，不得返场。",
+      "verification": [
+        "tests/desktop-controller.test.ts",
+        "docs/let-it-crash.md 不抢锁",
+        "docs/plans/spaces-merge-convergence.md:123 不可把旧 reclaimDead 带回"
+      ]
+    },
+    {
+      "path": "src/adapters/desktop/home-control.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "桌面 mutate/maintenance 门禁。旧/导入在 snapshot-restore 时跳过未完成 mutation 断言，并在 restore 后 unlink journal。",
+      "currentEvidence": [
+        "src/adapters/desktop/home-control.ts:24-40 assertNoUnfinishedEvidence; quit is the only label that may run while evidence exists; no unlink"
+      ],
+      "reason": "快照恢复例外和 journal 清除是恢复链。现行只阻断未完成证据上的写入，quit 仍可走。不要移植旧 restore 例外。",
+      "verification": [
+        "docs/let-it-crash.md 不恢复快照/不回滚",
+        "src/adapters/node/workbench-maintenance.ts:704-709 snapshot.restore/config.restore forbidden"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-catalog-store.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:19 FileLlmCatalogStore",
+        "src/adapters/node/llm-catalog-store.ts"
+      ],
+      "reason": "主线共享目录 CAS。旧无目录存储。",
+      "verification": [
+        "src/core/ports/llm-store.ts:3-6",
+        "tests under tests/llm-*.ts"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-credential-store.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:21-31 FileLlmCredentialStore and readSecret",
+        "src/adapters/node/llm-paths.ts:17-18 llmCredentialsPath"
+      ],
+      "reason": "凭据专用文件，不进通用 job。旧无此存储。",
+      "verification": [
+        "src/shared/workbench.ts:200-207 llmCredential Host-only",
+        "docs/plans/global-llm-connections.md"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-file-lock.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-file-lock.ts:7-19 withExclusiveDir waits only to acquire the write lock, not to retry a failed op"
+      ],
+      "reason": "目录锁是单写者约束，不是故障重试。旧无此锁。",
+      "verification": [
+        "docs/let-it-crash.md 单写者约束及原子写入",
+        "src/adapters/node/llm-catalog-store.ts / llm-policy-store.ts lock users"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-host.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:11-33 createHomeLlmHost wires stores + submitApply",
+        "src/adapters/node/workbench-supervisor.ts:302-313 supervisor submitLlmApply",
+        "src/main/desktop-llm.ts:37-50 desktop synthesizes succeeded job"
+      ],
+      "reason": "主线装配全局 LLM Host。旧无此装配。桌面 submitApply 走合成 job 是 B2 欠账，不是旧分支遗漏。",
+      "verification": [
+        "src/adapters/node/workbench-supervisor.ts:1614-1630",
+        "src/main/index.ts:224-238"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-operation-store.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:25 operations: FileLlmOperationStore"
+      ],
+      "reason": "LLM 操作状态持久化，中断不重放。旧无此存储。",
+      "verification": [
+        "src/core/ports/llm-runtime.ts",
+        "src/core/application/global-llm-host.ts operationStatus"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-paths.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-paths.ts:3-18 catalog/credentials/policy under .dsh-spaces-control/llm"
+      ],
+      "reason": "LLM 控制目录路径。旧无此布局。",
+      "verification": [
+        "src/adapters/node/llm-snapshot.ts:30-32",
+        "AGENTS.md 只用 .sandbox Home"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-policy-store.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:20 FileLlmPolicyStore"
+      ],
+      "reason": "空间 all/selected/none 策略存储。旧无策略文件。",
+      "verification": [
+        "src/core/domain/llm-resolution.ts",
+        "src/core/ports/llm-store.ts:8-11"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-probe.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:27 OfficialLlmProbe"
+      ],
+      "reason": "显式发现/测试探测。失败如实报告，不改用别的适配器。",
+      "verification": [
+        "src/core/ports/llm-runtime.ts",
+        "tests/llm-*.ts probe/discover"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-snapshot.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-snapshot.ts:18-62 LLM launch snapshot + writeSpaceLlmLaunchSnapshot",
+        "src/main/index.ts:127 extraEnv: writeSpaceLlmLaunchSnapshot",
+        "src/main/process-manager.ts:436 extraEnv"
+      ],
+      "reason": "这是 LLM 启动配置冻结，不是整 Home 恢复。不得因 snapshot 文件名当作已废弃。旧无此能力。",
+      "verification": [
+        "packages/llm-bridge/src/plugin.ts reads LLM_SNAPSHOT_ENV",
+        "docs/plans/spaces-merge-convergence.md:69-70 保留 LLM 启动配置"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-space-settings.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-host.ts:28 FileLlmSpaceSettings"
+      ],
+      "reason": "空间本地模型设置。none 仍允许本地模型。旧无此端口实现。",
+      "verification": [
+        "src/core/ports/llm-runtime.ts",
+        "docs/plans/spaces-merge-convergence.md V09"
+      ]
+    },
+    {
+      "path": "src/adapters/node/spaces-control.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "空间 CRUD 与 CLI 绑定。旧 COMPATIBLE_DSH_CLI_VERSIONS 仅 rc.1；导入点加 rc.2。创建空间仍用 --from-default-profile web。",
+      "currentEvidence": [
+        "src/adapters/node/spaces-control.ts:54-60 fixture version + isExactRuntimeVersion",
+        "src/adapters/node/spaces-control.ts:280-286 create still clones web for new profiles",
+        "git ee26d4c"
+      ],
+      "reason": "旧白名单被 latest+精确版本替代。从 web 克隆新空间仍在，与 supervisor 里“不要把 web 克隆到自身”不冲突。无旧遗漏。",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts",
+        "src/adapters/node/workbench-supervisor.ts:859-873"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-http.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Supervisor HTTP：state/submit/job 与 stabilization 页。旧页是救援入口，按钮会 submit recovery.resume。",
+      "currentEvidence": [
+        "src/adapters/node/workbench-http.ts:17-21 llm methods",
+        "src/adapters/node/workbench-http.ts idle chrome, copy-logs instead of resume",
+        "src/adapters/node/workbench-supervisor.ts:591-593 recovery.resume → workbench/unsupported"
+      ],
+      "reason": "稳定入口仍在，恢复按钮已换成复制脱敏日志。LLM HTTP 为后增。旧救援链不得返场。仍留 acquire 是 B1 合同清理，不是旧遗漏。",
+      "verification": [
+        "docs/let-it-crash.md 错误页只留详情/日志/脱敏复制",
+        "src/adapters/node/workbench-jobs.ts:834 recovery.resume unsupported"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-jobs.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "持久化 jobs；未完成记录标 recovery-required 并挡住新工作，等 settleRecovery/recovery.resume。不重放命令。旧与导入相同。",
+      "currentEvidence": [
+        "src/adapters/node/workbench-jobs.ts:34-35 INTERRUPTED_JOB_MESSAGE not replayed",
+        "src/adapters/node/workbench-jobs.ts:125-128 leftover queued/running become failed",
+        "src/adapters/node/workbench-jobs.ts:228-230 settleRecovery rejects unsupported",
+        "src/adapters/node/workbench-jobs.ts llm.apply parse + secret key rejection"
+      ],
+      "reason": "旧“不重放、保留证据”已在主线，且按 let it crash 改成 failed/unreadable。settleRecovery 产品链已撤销。另接 llm.apply。不要把 recovery-required FSM 搬回。",
+      "verification": [
+        "tests/workbench-jobs.test.ts:674 settleRecovery is unsupported and leftover jobs stay failed",
+        "tasks/todo.md R2",
+        "git 39f8224 Drop job recovery FSM and report failure context."
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-maintenance.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "计划预览/执行：插件、snapshot.create/restore/delete、config.restore、runtime、workbench.upgrade。旧与导入相同，恢复计划可执行。",
+      "currentEvidence": [
+        "src/adapters/node/workbench-maintenance.ts:491-502 snapshot.create runs; restore/config.restore throw forbidden; snapshot.delete runs",
+        "src/adapters/node/workbench-maintenance.ts:702-709 preview same split",
+        "src/adapters/node/workbench-maintenance.ts:421-427 backups() still lists backups",
+        "src/shared/batch.ts used for plugin batches"
+      ],
+      "reason": "正常快照创建/删除、运行时安装、精确版本、批量首败即停都在。restore 预览/执行被禁止。planSnapshotRestore 等私有方法是 B5 死代码，不是要把旧 restore 执行链移植回来。",
+      "verification": [
+        "tests/workbench-maintenance.test.ts:337 snapshot create",
+        "tests/workbench-maintenance.test.ts:796 snapshot restore preview and execute are forbidden",
+        "docs/plans/spaces-merge-convergence.md:69-70,181"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-package-upgrade.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "工作台包升级：预检、整 Home 快照、替换、失败则 restore/recover。旧与导入 blob 相同（bbd23e5）。",
+      "currentEvidence": [
+        "src/adapters/node/workbench-package-upgrade.ts execute path still present",
+        "src/adapters/node/workbench-package-upgrade.ts recover() throws Workbench package recovery is not supported",
+        "catch path settles abandoned evidence and does not rollback"
+      ],
+      "reason": "包升级执行仍在。旧 rollback/recover 被现行策略替代。提交前失败保留原指针不是回滚。测试未进默认 npm test 是 B5 入口问题，不是源码遗漏。",
+      "verification": [
+        "tests/workbench-package-upgrade.test.ts",
+        "docs/plans/spaces-merge-convergence.md:38 package-upgrade test wiring",
+        "tasks/todo.md R4"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-supervisor.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Supervisor 任务/进程/租约。旧不兼容文案只提 rc.1；web 种子用 --from-default-profile web。无 derivedRecoveryReasons，无 LLM Host。",
+      "currentEvidence": [
+        "src/adapters/node/workbench-supervisor.ts:265 derivedRecoveryReasons kept from imported",
+        "src/adapters/node/workbench-supervisor.ts:302-313 createHomeLlmHost + submitLlmApply",
+        "src/adapters/node/workbench-supervisor.ts:591-593 recovery.resume unsupported",
+        "src/adapters/node/workbench-supervisor.ts:859-873 web seed without --from-default-profile; manager create still clones web",
+        "src/adapters/node/workbench-supervisor.ts:1614-1643 runLlmApply uses real generations"
+      ],
+      "reason": "导入点的 rc.2 web 种子与 derivedRecoveryReasons 主线仍在。LLM apply 走真实 job/generation。旧 reclaim/恢复/白名单不应返场。桌面仍另有一套 LLM 写路径，属 B2/B4 欠账。",
+      "verification": [
+        "tests/workbench-supervisor.test.ts",
+        "src/main/desktop-llm.ts:37-50 contrast",
+        "docs/plans/spaces-merge-convergence.md:31-33"
+      ]
+    },
+    {
+      "path": "src/core/application/global-llm-host.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/core/application/global-llm-host.ts:45-50 LLM_CAPABILITIES adapterVersion 0.1.5-rc.2",
+        "src/core/application/global-llm-host.ts:64 submitApply",
+        "src/core/application/global-llm-host.ts:1 runBatch"
+      ],
+      "reason": "全局 LLM 管理用例与 apply 计划。旧无此应用层。",
+      "verification": [
+        "src/adapters/node/llm-host.ts",
+        "src/shared/llm-api.ts applyPlan"
+      ]
+    },
+    {
+      "path": "src/core/application/global-llm-service.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/core/application/global-llm-service.ts catalog/policy/credential CAS",
+        "packages/core/src/index.ts:7 re-export"
+      ],
+      "reason": "无秘密 catalog/policy 与凭据记录。旧无此服务。",
+      "verification": [
+        "src/core/ports/llm-store.ts",
+        "tests/llm-*.ts"
+      ]
+    },
+    {
+      "path": "src/core/domain/isolation.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "web 神圣；普通空间 sessions/storages 隔离补丁。旧与导入相同。",
+      "currentEvidence": [
+        "src/core/domain/isolation.ts:15-16 SETTINGS_ROW_ID/CREDENTIALS_ROW_ID",
+        "src/core/domain/isolation.ts:49-51 configPathExpr",
+        "src/core/domain/isolation.ts:144-169 assertDumpConfigIsolated"
+      ],
+      "reason": "主线把 settings.yaml 与 .credentials.yaml 纳入同一隔离补丁。旧 sessions/storages 规则仍在，没有被丢掉。",
+      "verification": [
+        "src/main/patch-writer.ts re-exports",
+        "isolation tests / dump-config assertions"
+      ]
+    },
+    {
+      "path": "src/core/domain/llm-connections.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/core/domain/llm-connections.ts:1-20 catalog schema, pinned protocols, LLM_ERROR"
+      ],
+      "reason": "共享连接身份与托管路由语法。旧无此域。",
+      "verification": [
+        "packages/core/src/index.ts:3",
+        "src/shared/llm-api.ts imports"
+      ]
+    },
+    {
+      "path": "src/core/domain/llm-resolution.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/adapters/node/llm-snapshot.ts:14 snapshotForSpace",
+        "packages/llm-bridge/src/space-bridge.ts:4 snapshotForSpace"
+      ],
+      "reason": "按空间解析冻结快照。旧无此解析。",
+      "verification": [
+        "src/core/domain/llm-share.ts",
+        "tests/llm-integration.test.ts"
+      ]
+    },
+    {
+      "path": "src/core/domain/llm-share.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/core/application/global-llm-host.ts:35 applyLlmShareMapping/buildLlmShareManifest",
+        "git 23eee7d fix: map imported requirements using a created catalog id"
+      ],
+      "reason": "无秘密分享映射，接收方显式绑定。旧无此域。",
+      "verification": [
+        "src/shared/llm-api.ts previewShare/mapImported",
+        "src/main/space-share.ts import path"
+      ]
+    },
+    {
+      "path": "src/core/ports/llm-runtime.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/core/ports/llm-runtime.ts instance/operation/probe/spaceSettings ports",
+        "src/adapters/node/llm-host.ts:3"
+      ],
+      "reason": "LLM 运行时端口。旧无此端口。",
+      "verification": [
+        "src/core/application/global-llm-host.ts:57-66"
+      ]
+    },
+    {
+      "path": "src/core/ports/llm-store.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/core/ports/llm-store.ts:3-11 catalog/policy stores",
+        "packages/core/src/index.ts:10"
+      ],
+      "reason": "LLM 持久化端口。旧无此端口。",
+      "verification": [
+        "src/adapters/node/llm-catalog-store.ts",
+        "src/adapters/node/llm-policy-store.ts"
+      ]
+    },
+    {
+      "path": "src/main/coordinated-upgrade.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "协调运行时升级：预检、停空间、提交前失败丢弃 stage；提交中失败则 rollbackSnapshot。另有 restore/recover 产品方法。旧与导入相同。",
+      "currentEvidence": [
+        "src/main/coordinated-upgrade.ts:238-249 commit-before-failure keeps original pointer; restore() throws Snapshot restore is not supported",
+        "src/main/coordinated-upgrade.ts:252-255 recover() throws",
+        "src/main/coordinated-upgrade.ts:404-407 restoreProfilesBackup only for uncommitted swap failure"
+      ],
+      "reason": "正常升级仍在。公开 restore/recover 已拒绝。提交前未切换不是回滚。私有 rollbackSnapshot 若仍留在文件里是 B5 死代码，不是要把旧恢复搬回。",
+      "verification": [
+        "tests/coordinated-upgrade.test.ts",
+        "git 603cb07 Keep original upgrade errors and treat leftover restore paths as unsupported.",
+        "docs/let-it-crash.md 提交前失败未切换新结果不是回滚"
+      ]
+    },
+    {
+      "path": "src/main/desktop-llm.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/main/desktop-llm.ts:37-50 submitApply executes then returns a synthetic succeeded WorkbenchJob",
+        "src/main/index.ts:233 generationOf: () => 0",
+        "src/adapters/node/workbench-supervisor.ts:1614-1643 real job + generation"
+      ],
+      "reason": "主线桌面 LLM 入口。旧无此分叉。generation 固定 0、自行生成成功 job 是 B2/B4 必须改掉的欠账，不是 A 阶段旧遗漏，因此不记 missing。",
+      "verification": [
+        "docs/plans/spaces-merge-convergence.md:31-32,161",
+        "src/main/index.ts:224-238"
+      ]
+    },
+    {
+      "path": "src/main/diagnostics.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "诊断、日志、配置备份列表与 restoreBackup（失败则写回旧 patch）。旧与导入相同。",
+      "currentEvidence": [
+        "src/main/diagnostics.ts canRestore: false",
+        "src/main/diagnostics.ts restoreBackup throws Configuration restore is not supported.",
+        "src/adapters/node/workbench-maintenance.ts:421-427 backups() still lists"
+      ],
+      "reason": "查看备份仍可通过 diagnostics.get/backups。配置恢复执行链已撤销。不要移植旧 restoreBackup。",
+      "verification": [
+        "tests/workbench-maintenance.test.ts config restore preview is forbidden",
+        "docs/let-it-crash.md 用户备份保留、恢复能力删除",
+        "git a026f05 Remove restore UI and fail leftover restore APIs."
+      ]
+    },
+    {
+      "path": "src/main/dsh-cli.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "安装/调用绑定 CLI。旧 DSH_CLI_SPEC 钉死 DSH_DEFAULT_VERSION（导入点为 rc.2）。",
+      "currentEvidence": [
+        "src/main/dsh-cli.ts DSH_CLI_SPEC = package@DSH_DEFAULT_CHANNEL",
+        "src/shared/runtime.ts:5 DSH_DEFAULT_CHANNEL latest"
+      ],
+      "reason": "渠道改为 latest，安装后仍由精确版本探针钉住。旧 rc.1/rc.2 默认值不应返场。",
+      "verification": [
+        "src/shared/runtime.ts:49-61 isExactRuntimeVersion/preferredTaggedVersion",
+        "tests/compatible-dsh-cli.test.ts"
+      ]
+    },
+    {
+      "path": "src/main/index.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "桌面装配 registry/process/runtime/upgrade/tray。旧关闭隐藏用 concealWindowToTray+通知；导入点改成 hide()/show()，丢掉跳过任务栏。",
+      "currentEvidence": [
+        "src/main/index.ts:115-222 still assembles registry, ProcessManager, RuntimeStore, CoordinatedUpgrade, snapshot-worker install IO",
+        "src/main/index.ts:335-355 concealWindowToTray + revealWindowFromTray + notifyHiddenToTray",
+        "git fd3bd9c fix: hide the desktop window to the tray on close.",
+        "src/main/index.ts:233 generationOf: () => 0"
+      ],
+      "reason": "旧托盘隐藏已由 fd3bd9c 接回（含 setSkipTaskbar）。导入点回退不是遗漏。桌面继续装配业务写者与 LLM generation=0 是 B4 计划改造，不是旧分支独有意图。snapshot-worker 仍服务安装 IO，不能当恢复残留删掉。",
+      "verification": [
+        "tests/process-manager.test.ts concealWindowToTray",
+        "src/main/tray.ts:35-47",
+        "docs/plans/spaces-merge-convergence.md:30,189"
+      ]
+    },
+    {
+      "path": "src/main/patch-writer.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "写出工作台隔离补丁并再导出 isolation 符号。旧与导入相同。",
+      "currentEvidence": [
+        "src/main/patch-writer.ts re-exports SETTINGS_ROW_ID, CREDENTIALS_ROW_ID, assertDumpConfigIsolated, configPathExpr"
+      ],
+      "reason": "主线追加配置隔离再导出。旧 patch 写入路径仍在。",
+      "verification": [
+        "src/core/domain/isolation.ts",
+        "src/adapters/node/workbench-supervisor.ts ensureWorkbenchPatch"
+      ]
+    },
+    {
+      "path": "src/main/plugin-ops.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "插件列表/下载/安装。旧下载按 packument latest 取包，不区分请求版本与已装版本。旧与导入相同。",
+      "currentEvidence": [
+        "src/main/plugin-ops.ts readResolvedVersion + requestedSpec/resolvedVersion",
+        "src/main/plugin-ops.ts parseNpmNameAndVersion / pinDownloadMeta / resolveNpmLatest",
+        "formatWorkbenchFailure on install errors"
+      ],
+      "reason": "主线：目录 latest 解析后钉死精确版本；缺版本不改用别的；未知已装版本显示未知。这是必须保护的后续规则，覆盖并替代旧“永远下 latest tarball”行为。",
+      "verification": [
+        "src/shared/types.ts:139 version omit resolves latest then pins",
+        "src/shared/plugin.ts:16 isBareNpmPackageName",
+        "tasks/todo.md M1-02"
+      ]
+    },
+    {
+      "path": "src/main/plugin-restore-point.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/main/plugin-restore-point.ts PLUGIN_RESTORE_* types only",
+        "tests/plugin-restore-point.test.ts is the only importer; no product caller"
+      ],
+      "reason": "主线后增类型模块，旧无对应实现，故无旧遗漏。它不承接现行恢复能力：无产品入口，B5 可删无消费者实现，不得当成要移植或要新接的恢复链。",
+      "verification": [
+        "tests/plugin-restore-point.test.ts",
+        "docs/let-it-crash.md 历史恢复模块不是产品入口",
+        "tasks/todo.md R4"
+      ]
+    },
+    {
+      "path": "src/main/process-manager.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "空间进程启停与崩溃 lastError。旧与导入相同。",
+      "currentEvidence": [
+        "src/main/process-manager.ts:26 extraEnv",
+        "src/main/process-manager.ts:436 extraEnv into spawn",
+        "src/main/process-manager.ts formatWorkbenchFailure on unexpected exit"
+      ],
+      "reason": "主线注入 LLM 启动快照环境，并用同一失败格式报告崩溃。旧启停语义仍在，没有恢复/重拉。",
+      "verification": [
+        "src/main/index.ts:125-131 ProcessManager extraEnv/kill",
+        "src/shared/workbench.ts formatWorkbenchFailure",
+        "tasks/todo.md R1"
+      ]
+    },
+    {
+      "path": "src/main/space-share-zip.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/main/space-share.ts:31 packZip/unpackZip"
+      ],
+      "reason": "分享 zip 编解码。旧无分享实现。",
+      "verification": [
+        "src/main/space-share.ts parseSpaceShare/packSpaceShare",
+        "src/main/index.ts space-share imports"
+      ]
+    },
+    {
+      "path": "src/main/space-share.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/main/space-share.ts:373-390 importSpaceArchive splits definition/plugins/start; parse failure leaves plugins/start not-run",
+        "src/main/space-share.ts:32 runBatch"
+      ],
+      "reason": "主线模板/分享必须保护的能力。三个结果分开，失败不回滚已发布空间。旧无此文件。",
+      "verification": [
+        "src/shared/space-share.ts",
+        "tasks/todo.md M2 07-08",
+        "docs/plans/spaces-merge-convergence.md:172-177"
+      ]
+    },
+    {
+      "path": "src/main/space-templates.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/main/space-templates.ts:125-145 createSpaceFromTemplate uses runBatch; first plugin failure returns plugins=failed"
+      ],
+      "reason": "模板复用创建流程，批量首败即停。旧无模板模块。",
+      "verification": [
+        "src/main/index.ts:88 createSpaceFromTemplate",
+        "src/shared/batch.ts:7-26",
+        "tasks/todo.md M3-11"
+      ]
+    },
+    {
+      "path": "src/shared/batch.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/shared/batch.ts:7-26 runBatch A keep / B fail / C skip"
+      ],
+      "reason": "主线批量合同。被 maintenance、share、templates、global-llm-host 使用。旧无此共享函数。",
+      "verification": [
+        "src/adapters/node/workbench-maintenance.ts import runBatch",
+        "src/main/space-share.ts",
+        "src/core/application/global-llm-host.ts",
+        "tasks/todo.md M3-10"
+      ]
+    },
+    {
+      "path": "src/shared/desktop-controller.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "桌面 IPC 写通道表与 controller 状态类型。旧与导入相同，无 share/template/llm 通道。",
+      "currentEvidence": [
+        "src/shared/desktop-controller.ts:47-50 exportSpaceShare/importSpaceShare/createSpaceFromTemplate/llmCredential",
+        "src/shared/desktop-controller.ts:51-56 still lists restoreConfigBackup/restoreSnapshot/createSnapshot/deleteSnapshot"
+      ],
+      "reason": "主线已接分享/模板/凭据通道。createSnapshot/deleteSnapshot 名称对应正常备份，不能当恢复残留删。restore* 通道名是 B1/B6 合同清理，产品执行已拒绝，不是旧遗漏。",
+      "verification": [
+        "src/main/index.ts IPC wiring",
+        "src/adapters/desktop/controller.ts assertWritable"
+      ]
+    },
+    {
+      "path": "src/shared/llm-api.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/shared/llm-api.ts:1-40 browser-safe methods, no secrets"
+      ],
+      "reason": "全局 LLM 管理 API 合同。旧无此合同。",
+      "verification": [
+        "src/shared/workbench.ts llm?/llmCredential?",
+        "packages/plugin/src/host/workbench-schemas.ts llm schemas"
+      ]
+    },
+    {
+      "path": "src/shared/plugin.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "isSafeSpec 等插件 spec 校验。旧与导入相同。",
+      "currentEvidence": [
+        "src/shared/plugin.ts:9-17 isSafeSpec allows @exact; isBareNpmPackageName"
+      ],
+      "reason": "主线区分裸包名与精确 spec，服务 latest→钉死。旧校验没有独有安全规则被丢掉。",
+      "verification": [
+        "src/main/plugin-ops.ts pinDownloadMeta",
+        "src/shared/types.ts PluginDownloadRequest.version"
+      ]
+    },
+    {
+      "path": "src/shared/runtime.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "DSH_DEFAULT_VERSION 旧为 rc.1，导入点改为 rc.2；preferredTaggedVersion 在 latest/next 里挑更新者。",
+      "currentEvidence": [
+        "src/shared/runtime.ts:5 DSH_DEFAULT_CHANNEL=latest",
+        "src/shared/runtime.ts:49-61 isExactRuntimeVersion rejects latest/next; preferredTaggedVersion reads only latest"
+      ],
+      "reason": "必须保护的后续规则：latest 渠道、执行精确版本。旧/导入的钉死 rc.1/rc.2 或 next 抢 latest 都不应返场。",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts:51-61",
+        "src/main/dsh-cli.ts DSH_CLI_SPEC",
+        "git ee26d4c"
+      ]
+    },
+    {
+      "path": "src/shared/space-share.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支与导入点均无此文件。",
+      "currentEvidence": [
+        "src/shared/space-share.ts share/template DTOs used by src/main/space-share.ts and space-templates.ts"
+      ],
+      "reason": "分享/模板浏览器安全合同。旧无此合同。",
+      "verification": [
+        "src/main/space-share.ts",
+        "src/renderer/src/components/SettingsDialog.tsx SpaceTemplate type"
+      ]
+    },
+    {
+      "path": "src/shared/types.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "InstalledPlugin.version 为请求 spec。旧与导入相同。",
+      "currentEvidence": [
+        "src/shared/types.ts requestedSpec/resolvedVersion/version null when unknown",
+        "src/shared/types.ts:139 PluginDownloadRequest.version omit→latest then pin"
+      ],
+      "reason": "主线把显示版本改成已装精确版本。旧字段语义被更严的读回替代，不是遗漏。",
+      "verification": [
+        "src/main/plugin-ops.ts listProfilePlugins",
+        "tasks/todo.md M1-02 读不到实际版本显示未知"
+      ]
+    },
+    {
+      "path": "src/shared/workbench.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "工作台浏览器合同，含 recovery-required job 状态与 recovery.resume 命令。旧与导入相同。",
+      "currentEvidence": [
+        "src/shared/workbench.ts JobStatus queued/running/succeeded/failed/cancelled",
+        "src/shared/workbench.ts:4-51 formatWorkbenchFailure",
+        "src/shared/workbench.ts:119-128 recovery.resume still in union plus llm.apply",
+        "src/shared/workbench.ts:137-139 snapshot.create/restore/delete and config.restore still in plan union"
+      ],
+      "reason": "失败上下文字段与 llm.apply 已覆盖后增能力。recovery.resume/snapshot.restore 仍出现在类型里，但执行层拒绝；这是 B1 合同收敛欠账，不是旧实现被主线漏掉。不要把旧 FSM 当缺失补丁移植。",
+      "verification": [
+        "src/adapters/node/workbench-jobs.ts parseCommand recovery.resume unsupported",
+        "src/adapters/node/workbench-maintenance.ts restore forbidden",
+        "docs/plans/spaces-merge-convergence.md:144-146"
+      ]
+    }
+  ],
+  "summary": {
+    "counts": {
+      "total": 68,
+      "already-covered": 63,
+      "superseded": 5,
+      "missing": 0
+    },
+    "missingItems": [],
+    "baselineRisks": [
+      "B2/B4 LLM 分叉：src/main/desktop-llm.ts:37-50 在桌面进程内 executeApply 后合成 status=succeeded 的 job；src/main/index.ts:233 generationOf 恒为 0。Supervisor 路径 src/adapters/node/workbench-supervisor.ts:1614-1643 才提交真实 job 并用 generations。旧分支没有全局 LLM，故不是 A 阶段移植项。",
+      "B4 桌面第二写者：src/main/index.ts 仍装配 ProfileRegistry、ProcessManager、RuntimeStore、CoordinatedUpgrade。计划要求删除该业务装配，但不能用旧分支覆盖。",
+      "B1 混合合同：WorkbenchCommand 仍含 recovery.resume，WorkbenchPlanRequest 仍含 snapshot.restore/config.restore；执行已拒绝。desktop-controller 通道名仍含 restoreConfigBackup/restoreSnapshot。",
+      "B5 未接线恢复模块：packages/doctor/src/recover.ts、coordinated-upgrade 私有 rollbackSnapshot、maintenance 私有 runSnapshotRestore/runConfigRestore、plugin-restore-point.ts 仅测试引用。产品入口已拒绝。不要当 missing 接回。",
+      "正常快照/安装 worker：src/main/index.ts:195-217 仍用 snapshot-worker.mjs 做 runtime 安装与 snapshot.create/delete。llm-snapshot.ts 是启动配置冻结。不能因 snapshot 名字整组删除。",
+      "c22c47f 已修正导入点过拦：死实例记录忽略且不 takeover。若有人按 imported=1f339ac 的 control-residue 合并，会回退该修正。",
+      "HomeController.reclaimDead 仍存在于 src/adapters/node/home-controller.ts；桌面 controller 已不调用。审计范围外的该符号不得经旧分支重新接入 acquireOnStart/acquireExplicit。",
+      "workbench-package-upgrade.test.ts 未进入默认 test/test:workbench（计划已记）。本叶未跑测试、未 npm ci。"
+    ]
+  }
+}
