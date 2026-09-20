@@ -1,0 +1,2601 @@
+{
+  "schemaVersion": 1,
+  "reviewedOn": "2026-09-20",
+  "refs": {
+    "main": "c22c47fd37629e3bb852f7702d68624d3a73453d",
+    "pluginization": "51911e481961408ad77758b0123653c0fc1e2bdd",
+    "mergeBase": "dfe9ae0ed760ee1e6fe9e9d9e5d057e9451981b7",
+    "localHeadAndImported": "1f339ac",
+    "preservedStash": "7ecafc6a8f5563130e4465b8b3f69c208235f1a5"
+  },
+  "currentDiffRows": [
+    {
+      "path": "packages/core/src/index.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/core/src/index.ts:1-11",
+        "git c22c47f packages/core/src/index.ts blob d96799b (adds llm-connections/resolution/global-llm-service/llm-store re-exports; still re-exports restore-session/restore ports)"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/common.ts",
+      "decision": "superseded",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/doctor/src/common.ts:1-27 (no WRITE_CLI_VERSION / VERIFY_CLI_VERSIONS; EXIT.unsupported=7)",
+        "git ee26d4c Follow official DSH latest and drop the CLI version allowlist",
+        "src/adapters/node/spaces-control.ts:54-60 isCompatibleDshCliVersion=isExactRuntimeVersion"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/index.ts",
+      "decision": "superseded",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/doctor/src/index.ts:23-47",
+        "git 0c83fab Make doctor and restore product paths unsupported."
+      ]
+    },
+    {
+      "path": "packages/doctor/src/inspect.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/doctor/src/inspect.ts:407-423",
+        "packages/doctor/src/index.ts:30-36 inspectHome for command doctor"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/recover.ts",
+      "decision": "superseded",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/doctor/src/index.ts:38-44 does not import or call recover.ts",
+        "packages/doctor/src/recover.ts:379-383 leftover settleJobs now only lists failed jobs",
+        "docs/let-it-crash.md:15 源码里仍可能留着未接线的历史恢复模块 packages/doctor/src/recover.ts"
+      ]
+    },
+    {
+      "path": "packages/doctor/src/resources.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/doctor/src/resources.ts:49-54 allowedVerify/allowedWrite=isCompatibleDshCliVersion",
+        "packages/doctor/src/resources.ts:178-183 RUNTIME_REFUSED is exact version, not recover allowlist"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/credentials-provider.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/credentials-provider.ts (SpacesCredentialsProvider)",
+        "packages/llm-bridge/src/index.ts:10-14",
+        "git 61af286 feat: bridge shared llm settings and credentials"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/errors.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/index.ts:23 LLM_ERROR/LlmConfigError re-export",
+        "packages/llm-bridge/src/errors.ts"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/index.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/index.ts:1-25 barrel for settings/credentials/guard/space-bridge/official-host/plugin"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/official-host.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/official-host.ts:15-24 attachOfficialLlm pins 0.1.5-rc.2 adapter and does not swap implementations"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/plugin.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/plugin.ts:1-24 Cordis plugin reads launch snapshot via LLM_SNAPSHOT_ENV"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/request-guard.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/index.ts:15 installManagedRequestGuard",
+        "packages/llm-bridge/src/official-host.ts:22"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/settings-provider.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/settings-provider.ts SpacesFileSettingsProvider",
+        "git ead1022 fix: inject the frozen snapshot after official settings plugin init"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/src/space-bridge.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/llm-bridge/src/space-bridge.ts:16-22 freezeSpaceSnapshot",
+        "packages/llm-bridge/src/index.ts:16-20"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/plugin.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/plugin.ts:13-35",
+        "blob 9fcde5f identical at imported and main"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/remote-errors.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/remote-errors.ts:12-89 workbench/unsupported plus LLM_REMOTE_CODES",
+        "packages/plugin/src/host/remote-errors.ts:92-93 recovery-required text no longer says Recovery is required"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/runtime.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/runtime.ts:65-68 canColdStart manager only",
+        "packages/plugin/src/host/runtime.ts initialize()/runInitialize()/deniedInitialize()",
+        "packages/plugin/src/host/runtime.ts:253-260 exact installed version, not allowlist"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-guide.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/workbench-guide.ts:44-51 @Remote initialize",
+        "blob 082a64c identical at imported and main"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-http.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/workbench-http.ts:42-47 llm/llmCredential methods",
+        "packages/plugin/src/host/workbench-http.ts:90-95"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-manager.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/workbench-manager.ts:98-129 llm/llmCredential remotes and LLM_ error mapping"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/host/workbench-schemas.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "packages/plugin/src/host/workbench-schemas.ts:371 workbenchInitializeResultSchema",
+        "packages/plugin/src/host/workbench-schemas.ts llmApiRequestSchema/llmApiResultSchema/llmCredentialRequestSchema (imp→main)"
+      ]
+    },
+    {
+      "path": "src/adapters/desktop/control-residue.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/desktop/control-residue.ts:13-14 UNFINISHED_JOB_STATUS queued/running only",
+        "src/adapters/desktop/control-residue.ts:32-46 inspectControlResidue(home, ownsRecord, pidAlive)",
+        "src/adapters/desktop/control-residue.ts:188-212 inspectInstanceFile returns false for owned or pidAlive===dead",
+        "git c22c47f fix: ignore stale dead instance records and drop takeover copy."
+      ]
+    },
+    {
+      "path": "src/adapters/desktop/controller.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/desktop/controller.ts:114-128 acquireOnStart never reclaimDead",
+        "src/adapters/desktop/controller.ts:130-138 acquireExplicit refuses dead/live/ambiguous and leaves the record",
+        "src/adapters/desktop/controller.ts:392-411 inspectControlResidue(..., pidAlive)",
+        "git c22c47f",
+        "git d267a20 Remove the desktop Home controller badge and hand-off overlay."
+      ]
+    },
+    {
+      "path": "src/adapters/desktop/home-control.ts",
+      "decision": "superseded",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/desktop/home-control.ts:24-40 assertNoUnfinishedEvidence; quit is the only label that may run while evidence exists; no unlink"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-catalog-store.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:19 FileLlmCatalogStore",
+        "src/adapters/node/llm-catalog-store.ts"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-credential-store.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:21-31 FileLlmCredentialStore and readSecret",
+        "src/adapters/node/llm-paths.ts:17-18 llmCredentialsPath"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-file-lock.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-file-lock.ts:7-19 withExclusiveDir waits only to acquire the write lock, not to retry a failed op"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-host.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:11-33 createHomeLlmHost wires stores + submitApply",
+        "src/adapters/node/workbench-supervisor.ts:302-313 supervisor submitLlmApply",
+        "src/main/desktop-llm.ts:37-50 desktop synthesizes succeeded job"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-operation-store.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:25 operations: FileLlmOperationStore"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-paths.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-paths.ts:3-18 catalog/credentials/policy under .dsh-spaces-control/llm"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-policy-store.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:20 FileLlmPolicyStore"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-probe.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:27 OfficialLlmProbe"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-snapshot.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-snapshot.ts:18-62 LLM launch snapshot + writeSpaceLlmLaunchSnapshot",
+        "src/main/index.ts:127 extraEnv: writeSpaceLlmLaunchSnapshot",
+        "src/main/process-manager.ts:436 extraEnv"
+      ]
+    },
+    {
+      "path": "src/adapters/node/llm-space-settings.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-host.ts:28 FileLlmSpaceSettings"
+      ]
+    },
+    {
+      "path": "src/adapters/node/spaces-control.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/spaces-control.ts:54-60 fixture version + isExactRuntimeVersion",
+        "src/adapters/node/spaces-control.ts:280-286 create still clones web for new profiles",
+        "git ee26d4c"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-http.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/workbench-http.ts:17-21 llm methods",
+        "src/adapters/node/workbench-http.ts idle chrome, copy-logs instead of resume",
+        "src/adapters/node/workbench-supervisor.ts:591-593 recovery.resume → workbench/unsupported"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-jobs.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/workbench-jobs.ts:34-35 INTERRUPTED_JOB_MESSAGE not replayed",
+        "src/adapters/node/workbench-jobs.ts:125-128 leftover queued/running become failed",
+        "src/adapters/node/workbench-jobs.ts:228-230 settleRecovery rejects unsupported",
+        "src/adapters/node/workbench-jobs.ts llm.apply parse + secret key rejection"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-maintenance.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/workbench-maintenance.ts:491-502 snapshot.create runs; restore/config.restore throw forbidden; snapshot.delete runs",
+        "src/adapters/node/workbench-maintenance.ts:702-709 preview same split",
+        "src/adapters/node/workbench-maintenance.ts:421-427 backups() still lists backups",
+        "src/shared/batch.ts used for plugin batches"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-package-upgrade.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/workbench-package-upgrade.ts execute path still present",
+        "src/adapters/node/workbench-package-upgrade.ts recover() throws Workbench package recovery is not supported",
+        "catch path settles abandoned evidence and does not rollback"
+      ]
+    },
+    {
+      "path": "src/adapters/node/workbench-supervisor.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/workbench-supervisor.ts:265 derivedRecoveryReasons kept from imported",
+        "src/adapters/node/workbench-supervisor.ts:302-313 createHomeLlmHost + submitLlmApply",
+        "src/adapters/node/workbench-supervisor.ts:591-593 recovery.resume unsupported",
+        "src/adapters/node/workbench-supervisor.ts:859-873 web seed without --from-default-profile; manager create still clones web",
+        "src/adapters/node/workbench-supervisor.ts:1614-1643 runLlmApply uses real generations"
+      ]
+    },
+    {
+      "path": "src/core/application/global-llm-host.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/application/global-llm-host.ts:45-50 LLM_CAPABILITIES adapterVersion 0.1.5-rc.2",
+        "src/core/application/global-llm-host.ts:64 submitApply",
+        "src/core/application/global-llm-host.ts:1 runBatch"
+      ]
+    },
+    {
+      "path": "src/core/application/global-llm-service.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/application/global-llm-service.ts catalog/policy/credential CAS",
+        "packages/core/src/index.ts:7 re-export"
+      ]
+    },
+    {
+      "path": "src/core/domain/isolation.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/domain/isolation.ts:15-16 SETTINGS_ROW_ID/CREDENTIALS_ROW_ID",
+        "src/core/domain/isolation.ts:49-51 configPathExpr",
+        "src/core/domain/isolation.ts:144-169 assertDumpConfigIsolated"
+      ]
+    },
+    {
+      "path": "src/core/domain/llm-connections.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/domain/llm-connections.ts:1-20 catalog schema, pinned protocols, LLM_ERROR"
+      ]
+    },
+    {
+      "path": "src/core/domain/llm-resolution.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/adapters/node/llm-snapshot.ts:14 snapshotForSpace",
+        "packages/llm-bridge/src/space-bridge.ts:4 snapshotForSpace"
+      ]
+    },
+    {
+      "path": "src/core/domain/llm-share.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/application/global-llm-host.ts:35 applyLlmShareMapping/buildLlmShareManifest",
+        "git 23eee7d fix: map imported requirements using a created catalog id"
+      ]
+    },
+    {
+      "path": "src/core/ports/llm-runtime.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/ports/llm-runtime.ts instance/operation/probe/spaceSettings ports",
+        "src/adapters/node/llm-host.ts:3"
+      ]
+    },
+    {
+      "path": "src/core/ports/llm-store.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/core/ports/llm-store.ts:3-11 catalog/policy stores",
+        "packages/core/src/index.ts:10"
+      ]
+    },
+    {
+      "path": "src/main/coordinated-upgrade.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/coordinated-upgrade.ts:238-249 commit-before-failure keeps original pointer; restore() throws Snapshot restore is not supported",
+        "src/main/coordinated-upgrade.ts:252-255 recover() throws",
+        "src/main/coordinated-upgrade.ts:404-407 restoreProfilesBackup only for uncommitted swap failure"
+      ]
+    },
+    {
+      "path": "src/main/desktop-llm.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/desktop-llm.ts:37-50 submitApply executes then returns a synthetic succeeded WorkbenchJob",
+        "src/main/index.ts:233 generationOf: () => 0",
+        "src/adapters/node/workbench-supervisor.ts:1614-1643 real job + generation"
+      ]
+    },
+    {
+      "path": "src/main/diagnostics.ts",
+      "decision": "superseded",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/diagnostics.ts canRestore: false",
+        "src/main/diagnostics.ts restoreBackup throws Configuration restore is not supported.",
+        "src/adapters/node/workbench-maintenance.ts:421-427 backups() still lists"
+      ]
+    },
+    {
+      "path": "src/main/dsh-cli.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/dsh-cli.ts DSH_CLI_SPEC = package@DSH_DEFAULT_CHANNEL",
+        "src/shared/runtime.ts:5 DSH_DEFAULT_CHANNEL latest"
+      ]
+    },
+    {
+      "path": "src/main/index.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/index.ts:115-222 still assembles registry, ProcessManager, RuntimeStore, CoordinatedUpgrade, snapshot-worker install IO",
+        "src/main/index.ts:335-355 concealWindowToTray + revealWindowFromTray + notifyHiddenToTray",
+        "git fd3bd9c fix: hide the desktop window to the tray on close.",
+        "src/main/index.ts:233 generationOf: () => 0"
+      ]
+    },
+    {
+      "path": "src/main/patch-writer.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/patch-writer.ts re-exports SETTINGS_ROW_ID, CREDENTIALS_ROW_ID, assertDumpConfigIsolated, configPathExpr"
+      ]
+    },
+    {
+      "path": "src/main/plugin-ops.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/plugin-ops.ts readResolvedVersion + requestedSpec/resolvedVersion",
+        "src/main/plugin-ops.ts parseNpmNameAndVersion / pinDownloadMeta / resolveNpmLatest",
+        "formatWorkbenchFailure on install errors"
+      ]
+    },
+    {
+      "path": "src/main/plugin-restore-point.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/plugin-restore-point.ts PLUGIN_RESTORE_* types only",
+        "tests/plugin-restore-point.test.ts is the only importer; no product caller"
+      ]
+    },
+    {
+      "path": "src/main/process-manager.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/process-manager.ts:26 extraEnv",
+        "src/main/process-manager.ts:436 extraEnv into spawn",
+        "src/main/process-manager.ts formatWorkbenchFailure on unexpected exit"
+      ]
+    },
+    {
+      "path": "src/main/space-share-zip.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/space-share.ts:31 packZip/unpackZip"
+      ]
+    },
+    {
+      "path": "src/main/space-share.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/space-share.ts:373-390 importSpaceArchive splits definition/plugins/start; parse failure leaves plugins/start not-run",
+        "src/main/space-share.ts:32 runBatch"
+      ]
+    },
+    {
+      "path": "src/main/space-templates.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/main/space-templates.ts:125-145 createSpaceFromTemplate uses runBatch; first plugin failure returns plugins=failed"
+      ]
+    },
+    {
+      "path": "src/shared/batch.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/batch.ts:7-26 runBatch A keep / B fail / C skip"
+      ]
+    },
+    {
+      "path": "src/shared/desktop-controller.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/desktop-controller.ts:47-50 exportSpaceShare/importSpaceShare/createSpaceFromTemplate/llmCredential",
+        "src/shared/desktop-controller.ts:51-56 still lists restoreConfigBackup/restoreSnapshot/createSnapshot/deleteSnapshot"
+      ]
+    },
+    {
+      "path": "src/shared/llm-api.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/llm-api.ts:1-40 browser-safe methods, no secrets"
+      ]
+    },
+    {
+      "path": "src/shared/plugin.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/plugin.ts:9-17 isSafeSpec allows @exact; isBareNpmPackageName"
+      ]
+    },
+    {
+      "path": "src/shared/runtime.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/runtime.ts:5 DSH_DEFAULT_CHANNEL=latest",
+        "src/shared/runtime.ts:49-61 isExactRuntimeVersion rejects latest/next; preferredTaggedVersion reads only latest"
+      ]
+    },
+    {
+      "path": "src/shared/space-share.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/space-share.ts share/template DTOs used by src/main/space-share.ts and space-templates.ts"
+      ]
+    },
+    {
+      "path": "src/shared/types.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/types.ts requestedSpec/resolvedVersion/version null when unknown",
+        "src/shared/types.ts:139 PluginDownloadRequest.version omit→latest then pin"
+      ]
+    },
+    {
+      "path": "src/shared/workbench.ts",
+      "decision": "already-covered",
+      "sourceReport": "runtime.json",
+      "evidence": [
+        "src/shared/workbench.ts JobStatus queued/running/succeeded/failed/cancelled",
+        "src/shared/workbench.ts:4-51 formatWorkbenchFailure",
+        "src/shared/workbench.ts:119-128 recovery.resume still in union plus llm.apply",
+        "src/shared/workbench.ts:137-139 snapshot.create/restore/delete and config.restore still in plan union"
+      ]
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        ".github/workflows/ci.yml:10-60 windows-gate (test:llm, test:workbench, pack preflight, standard-install --preflight, @deepseek-ai/dsh@latest)",
+        ".github/workflows/ci.yml:62-91 plugin-install + test:llm:browser + validate:plugin-install",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": ".github/workflows/plugin-distribution.yml",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        ".github/workflows/plugin-distribution.yml:1-47",
+        "scripts/pack-spaces-plugin.mjs:57-60 and :72-78 LLM_REQUIRED"
+      ]
+    },
+    {
+      "path": "electron.vite.config.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "electron.vite.config.ts:11-14 snapshot-worker",
+        "electron.vite.config.ts:24-27 @workbench",
+        "package.json:122-125 asarUnpack"
+      ]
+    },
+    {
+      "path": "package-lock.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "package.json:18-42 scripts",
+        "package.json version 0.3.0"
+      ]
+    },
+    {
+      "path": "package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "package.json:24-42 test:llm*, pack:plugin, validate:plugin-install, test:workbench includes q-let-it-crash",
+        "package.json:32 test:workbench:recovery",
+        "package.json:122-125 asarUnpack snapshot-worker"
+      ]
+    },
+    {
+      "path": "packages/core/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/core/package.json:3 version 0.3.0",
+        "git:c39b3ef Release 0.3.0 with let-it-crash semantics"
+      ]
+    },
+    {
+      "path": "packages/doctor/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/doctor/package.json:3",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/LICENSE",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/llm-bridge/LICENSE",
+        "scripts/pack-spaces-plugin.mjs:58"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/cordis.patch.yml",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/llm-bridge/cordis.patch.yml dsh-spaces-llm-bridge",
+        "packages/llm-bridge/package.json dsh.bundle.patch"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/llm-bridge/package.json:1-48",
+        "scripts/pack-spaces-plugin.mjs assertManifest llm-bridge"
+      ]
+    },
+    {
+      "path": "packages/plugin/.npmignore",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/.npmignore",
+        "scripts/pack-spaces-plugin.mjs FORBIDDEN_PACKED"
+      ]
+    },
+    {
+      "path": "packages/plugin/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/package.json version 0.3.0 keywords dsh-plugin",
+        "git:1f339ac Restore Spaces workbench and standard DSH plugin installation"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/client/i18n.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/client/i18n.ts GUIDE_COPY init/enter",
+        "packages/plugin/src/client/i18n.ts diag.runtimeIncompatible",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/client/index.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/client/index.tsx:26-30 initialize/enter guide, no management write UI",
+        "packages/plugin/src/typert.host.ts:211 GUIDE_METHODS includes initialize"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/client/workbench-remote.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/client/workbench-remote.ts initialize()",
+        "packages/plugin/src/client/workbench-remote.ts llm/llmCredential"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/index.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/index.ts LLM_REMOTE_CODES",
+        "git:7675ae4 feat: add global model center and space selection"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/typert.host.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/typert.host.ts:110 initialize",
+        "packages/plugin/src/typert.host.ts:211 GUIDE_METHODS",
+        "MANAGER_METHODS llm/llmCredential"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/typert.remote-client.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/typert.remote-client.ts initialize / llm / llmCredential"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/types.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/types.ts WorkbenchInitializeResult",
+        "packages/plugin/src/types.ts LlmApiRequest"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/components.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/components.tsx:514-526 snapshot.create",
+        "packages/plugin/src/workbench/components.tsx:559-566 snapshot.delete only",
+        "packages/plugin/src/workbench/components.tsx:611-674 WorkbenchPackageSection"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/i18n.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/i18n.ts snapshots.create/delete and snapshots.restore 'Restore is not supported'",
+        "packages/plugin/src/workbench/i18n.ts workbenchPackage.title"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/index.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/index.ts",
+        "tsconfig.web.json @workbench/*"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/llm/center.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/llm/center.tsx",
+        "git:7675ae4 feat: add global model center and space selection"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/llm/client.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/llm/client.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/llm/space-binding.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/llm/space-binding.tsx",
+        "git:7675ae4 feat: add global model center and space selection"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/recovery.tsx",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/recovery.tsx onAcquire kept, onResume removed",
+        "git:a026f05 Remove restore UI and fail leftover restore APIs",
+        "git:39f8224 Drop job recovery FSM and report failure context"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/store.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/store.ts loadWorkbenchPackage",
+        "packages/plugin/src/workbench/store.ts backups load"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/styles.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/plugin/src/workbench/styles.ts"
+      ]
+    },
+    {
+      "path": "packages/supervisor/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/supervisor/package.json private true version 0.3.0",
+        "scripts/pack-spaces-plugin.mjs supervisor must stay private"
+      ]
+    },
+    {
+      "path": "packages/view-bridge/.npmignore",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/view-bridge/.npmignore"
+      ]
+    },
+    {
+      "path": "packages/view-bridge/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "packages/view-bridge/package.json version 0.3.0 files README.md",
+        "git:1f339ac Restore Spaces workbench and standard DSH plugin installation"
+      ]
+    },
+    {
+      "path": "scripts/build-spaces.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/build-spaces.mjs:54-61 llm-bridge",
+        "scripts/build-spaces.mjs:65 snapshot-worker.mjs into supervisor"
+      ]
+    },
+    {
+      "path": "scripts/build-workbench-candidate.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/build-workbench-candidate.mjs assertOfficialGate",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "scripts/pack-spaces-plugin.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/pack-spaces-plugin.mjs:57-60 lib/llm-bridge/*",
+        "scripts/pack-spaces-plugin.mjs:72-78 LLM_REQUIRED",
+        "scripts/pack-spaces-plugin.mjs:402-418 pack llm"
+      ]
+    },
+    {
+      "path": "scripts/setup-sandbox.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/setup-sandbox.mjs settings.yaml and .credentials.yaml hub paths"
+      ]
+    },
+    {
+      "path": "scripts/validate-isolation.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/validate-isolation.mjs",
+        "git:861cf4e Authenticate the isolation release gate"
+      ]
+    },
+    {
+      "path": "scripts/validate-llm-distribution.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/validate-llm-distribution.mjs",
+        "package.json:29"
+      ]
+    },
+    {
+      "path": "scripts/validate-llm-secrets.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/validate-llm-secrets.mjs",
+        "package.json:28"
+      ]
+    },
+    {
+      "path": "scripts/verify-plugin-install-write-scope.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/verify-plugin-install-write-scope.mjs",
+        "package.json:38"
+      ]
+    },
+    {
+      "path": "scripts/verify-plugin-standard-install.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/verify-plugin-standard-install.mjs EXACT_CLI / inspectCli",
+        "scripts/verify-plugin-standard-install.mjs INIT_BUTTON ENTER_BUTTON",
+        "package.json:37"
+      ]
+    },
+    {
+      "path": "scripts/verify-spaces-distribution.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/verify-spaces-distribution.mjs dsh-spaces-plugin-0.3.0.tgz",
+        "git:c39b3ef Release 0.3.0 with let-it-crash semantics"
+      ]
+    },
+    {
+      "path": "scripts/verify-spaces-themes.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/verify-spaces-themes.mjs DEFAULT_SPACES_TGZ 0.3.0"
+      ]
+    },
+    {
+      "path": "scripts/verify-workbench-dual-control.mjs",
+      "decision": "covered-by-reviewed-patch",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "node --check exit0",
+        "Primary diff: obsolete badge wait replaced by no-takeover-button assertion; IPC assertions retained; real UI NOT_RUN"
+      ]
+    },
+    {
+      "path": "scripts/verify-workbench-maintenance-faults.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/verify-workbench-maintenance-faults.mjs",
+        "scripts/workbench-fault-snapshot-worker.ts header Do not pack as product worker"
+      ]
+    },
+    {
+      "path": "scripts/verify-workbench-rc2.mjs",
+      "decision": "covered-by-reviewed-patch",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "node --check exit0",
+        "Primary diff: personal Temp path replaced by repo sandbox; explicit env overrides and missing-file error retained; real CLI NOT_RUN"
+      ]
+    },
+    {
+      "path": "scripts/workbench-fault-snapshot-worker.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/workbench-fault-snapshot-worker.ts:1-5",
+        "operation union includes create/delete"
+      ]
+    },
+    {
+      "path": "scripts/workbench-fault-supervisor.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "scripts/workbench-fault-supervisor.mjs"
+      ]
+    },
+    {
+      "path": "src/preload/index.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/preload/index.ts:95-109"
+      ]
+    },
+    {
+      "path": "src/renderer/src/App.tsx",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/App.tsx:14-18 no ControllerStatus",
+        "src/renderer/src/App.tsx crash 查看错误详情 / 复制脱敏日志",
+        "git:d267a20 Remove the desktop Home controller badge and hand-off overlay"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/CreateWizard.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/CreateWizard.tsx useSharedLlm",
+        "src/shared/i18n/en.ts create.useSharedLlmHint"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/DiagnosticsDialog.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/DiagnosticsDialog.tsx",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/DiagnosticsPanel.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/DiagnosticsPanel.tsx"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/MaintenanceDialog.tsx",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/MaintenanceDialog.tsx confirmSnapshot delete-only",
+        "Snapshots cannot be restored",
+        "git:a026f05 Remove restore UI and fail leftover restore APIs"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/PluginPanel.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/PluginPanel.tsx exact version",
+        "git:28d4f9e Require exact plugin versions and surface install errors"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/SettingsDialog.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/SettingsDialog.tsx LlmModelCenter + SpaceSharePanel",
+        "src/shared/i18n/en.ts settings.tabRuntime Versions"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/SpaceSharePanel.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/components/SpaceSharePanel.tsx",
+        "git:6f13271 Add space share export and split-state import"
+      ]
+    },
+    {
+      "path": "src/renderer/src/recovery.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/renderer/src/recovery.ts:12-16",
+        "tests/frontend-recovery.test.ts restore options are not offered"
+      ]
+    },
+    {
+      "path": "src/shared/i18n/en.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/shared/i18n/en.ts tray.stillRunning",
+        "src/shared/i18n/en.ts settings.tabRuntime Versions",
+        "git:fd3bd9c hide the desktop window to the tray on close"
+      ]
+    },
+    {
+      "path": "src/shared/i18n/zh.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "src/shared/i18n/zh.ts tray.stillRunning",
+        "git:fd3bd9c hide the desktop window to the tray on close"
+      ]
+    },
+    {
+      "path": "tests/batch.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/batch.test.ts",
+        "package.json:42",
+        "git:c31547d Stop plugin batches at the first failure and add space templates"
+      ]
+    },
+    {
+      "path": "tests/compatible-dsh-cli.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/compatible-dsh-cli.test.ts exact CLI versions can bind",
+        "tests/compatible-dsh-cli.test.ts dump-config seed",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "tests/coordinated-upgrade.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/coordinated-upgrade.test.ts recover and restore are not supported",
+        "git:603cb07 leftover restore paths unsupported"
+      ]
+    },
+    {
+      "path": "tests/desktop-controller.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/desktop-controller.test.ts dead owners are not taken",
+        "tests/desktop-controller.test.ts stale dead instance records do not block writes",
+        "git:c22c47f ignore stale dead instance records and drop takeover copy",
+        "git:d267a20 Remove the desktop Home controller badge and hand-off overlay"
+      ]
+    },
+    {
+      "path": "tests/diagnostics.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/diagnostics.test.ts",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ]
+    },
+    {
+      "path": "tests/dsh-cli.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/dsh-cli.test.ts follows the official latest dist-tag",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "tests/fixtures/llm-ui/host.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/llm-ui/host.tsx"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-broken/index.js",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-broken/index.js",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-broken/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-broken/package.json",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-crash/index.js",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-crash/index.js",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-crash/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-crash/package.json",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-notes/cordis.patch.yml",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/cordis.patch.yml",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-notes/index.js",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/index.js",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-notes/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/package.json",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-relay/index.js",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-relay/index.js",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-relay/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-relay/package.json",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/client.js",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/client.js",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/cordis.patch.yml",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/cordis.patch.yml",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/index.js",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/index.js",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/package.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/package.json",
+        "tests/sample-plugins.test.ts"
+      ]
+    },
+    {
+      "path": "tests/frontend-recovery.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/frontend-recovery.test.ts restore options are not offered",
+        "src/renderer/src/recovery.ts:16"
+      ]
+    },
+    {
+      "path": "tests/helpers/llm-official.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/helpers/llm-official.ts"
+      ]
+    },
+    {
+      "path": "tests/helpers/llm-space-worker.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/helpers/llm-space-worker.ts",
+        "git:9d83c2f"
+      ]
+    },
+    {
+      "path": "tests/i18n.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/i18n.test.ts catalogs do not offer recovery actions",
+        "tests/i18n.test.ts tray.stillRunning",
+        "git:fd3bd9c hide the desktop window to the tray on close"
+      ]
+    },
+    {
+      "path": "tests/llm-api-auth.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-api-auth.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-compat.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-compat.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-concurrency.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-concurrency.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-credentials.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-credentials.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-default-resolution.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-default-resolution.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-domain.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-domain.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-gates.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-gates.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-integration.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-integration.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-multi-space.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-multi-space.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-packaging.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-packaging.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-secret-leaks.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-secret-leaks.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-settings-bridge.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-settings-bridge.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-share.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-share.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-space-settings.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-space-settings.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-store.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-store.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-stream.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-stream.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-ui-dom.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-ui-dom.test.ts",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/llm-ui.test.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/llm-ui.test.tsx",
+        "package.json:25-27 test:llm*"
+      ]
+    },
+    {
+      "path": "tests/maintenance-responsiveness.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/maintenance-responsiveness.test.ts coordinated restore is unsupported",
+        "package.json:32 test:workbench:recovery"
+      ]
+    },
+    {
+      "path": "tests/plugin-catalog.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/plugin-catalog.test.ts",
+        "git:28d4f9e Require exact plugin versions and surface install errors"
+      ]
+    },
+    {
+      "path": "tests/plugin-library.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/plugin-library.test.ts"
+      ]
+    },
+    {
+      "path": "tests/plugin-ops.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/plugin-ops.test.ts",
+        "git:28d4f9e Require exact plugin versions and surface install errors"
+      ]
+    },
+    {
+      "path": "tests/plugin-restore-point.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/plugin-restore-point.test.ts:72 round-trip",
+        "tests/plugin-restore-point.test.ts:113 rejects sessions"
+      ]
+    },
+    {
+      "path": "tests/q-let-it-crash.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/q-let-it-crash.test.ts:27 E01",
+        "package.json:30 test:workbench"
+      ]
+    },
+    {
+      "path": "tests/runtime-store.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/runtime-store.test.ts"
+      ]
+    },
+    {
+      "path": "tests/sample-plugins.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30 and :42"
+      ]
+    },
+    {
+      "path": "tests/space-share.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/space-share.test.ts",
+        "git:6f13271 Add space share export and split-state import"
+      ]
+    },
+    {
+      "path": "tests/space-templates.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/space-templates.test.ts",
+        "git:c31547d Stop plugin batches at the first failure and add space templates"
+      ]
+    },
+    {
+      "path": "tests/spaces-core.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/spaces-core.test.ts",
+        "package.json:24 test:spaces"
+      ]
+    },
+    {
+      "path": "tests/spaces-doctor.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/spaces-doctor.test.ts",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ]
+    },
+    {
+      "path": "tests/spaces-host.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/spaces-host.test.ts initialize, workbenchPackage, llm",
+        "tests/spaces-host.test.ts unbound CLI uses latest tag"
+      ]
+    },
+    {
+      "path": "tests/spaces-lock.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/spaces-lock.test.ts"
+      ]
+    },
+    {
+      "path": "tests/spaces-panel.test.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/spaces-panel.test.tsx"
+      ]
+    },
+    {
+      "path": "tests/validate-isolation.test.mjs",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/validate-isolation.test.mjs",
+        "package.json:42",
+        "git:861cf4e"
+      ]
+    },
+    {
+      "path": "tests/workbench-doctor.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-doctor.test.ts recover unlock and rollback are unsupported",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ]
+    },
+    {
+      "path": "tests/workbench-jobs.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-jobs.test.ts settleRecovery is unsupported",
+        "tests/workbench-jobs.test.ts:642-671 epsilon/zeta",
+        "git:39f8224 Drop job recovery FSM and report failure context"
+      ]
+    },
+    {
+      "path": "tests/workbench-maintenance.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-maintenance.test.ts:783-838 restore forbidden",
+        "tests/workbench-maintenance.test.ts:841 stale title"
+      ]
+    },
+    {
+      "path": "tests/workbench-package-upgrade.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-package-upgrade.test.ts:163 successful execute",
+        "package.json scripts omit this file (old 51911e4 also omitted it)",
+        "docs/plans/spaces-merge-convergence.md"
+      ]
+    },
+    {
+      "path": "tests/workbench-plugin.test.ts",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-plugin.test.ts:743 initialize rejects unbound CLI (latest)",
+        "initialize refuses a desktop lease without an endpoint"
+      ]
+    },
+    {
+      "path": "tests/workbench-supervisor.test.ts",
+      "decision": "superseded",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-supervisor.test.ts:1183 official web seed",
+        "tests/workbench-supervisor.test.ts recovery.resume is unsupported",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist",
+        "git:39f8224 Drop job recovery FSM and report failure context"
+      ]
+    },
+    {
+      "path": "tests/workbench-ui.test.tsx",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tests/workbench-ui.test.tsx snapshots.create and !snapshot.restore",
+        "tests/workbench-ui.test.tsx workbench package reloads after upgrade",
+        "settings share panel"
+      ]
+    },
+    {
+      "path": "tsconfig.web.json",
+      "decision": "already-covered",
+      "sourceReport": "interfaces.json",
+      "evidence": [
+        "tsconfig.web.json @workbench/*",
+        "include packages/plugin/src/workbench and llm-connections"
+      ]
+    },
+    {
+      "path": "AGENTS.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "AGENTS.md:1-14",
+        "git e5e4079 Adopt let it crash as the project contract"
+      ]
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "CONTRIBUTING.md:3-32",
+        "blob old=imported=9bb7dd1889ec → main=c11b39020903"
+      ]
+    },
+    {
+      "path": "IMPLEMENTATION_PLAN.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "IMPLEMENTATION_PLAN.md:3-8,91-104",
+        "docs/let-it-crash.md:17-20"
+      ]
+    },
+    {
+      "path": "README.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "README.md:5-11,21,43-57,78-80",
+        "old→imported 仅改施工声明/标准安装/rc.2；imported→main 再改 latest 与 let it crash"
+      ]
+    },
+    {
+      "path": "REQUIREMENTS.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "REQUIREMENTS.md:3-24,71-78,105-110,208-224",
+        "blob old=imported=15fc7a0ad808"
+      ]
+    },
+    {
+      "path": "TODO.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "TODO.md:3-11,142-145,171",
+        "tasks/todo.md:1-5"
+      ]
+    },
+    {
+      "path": "docs/compat/global-llm-acceptance.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "docs/compat/global-llm-acceptance.md:1-16,47-60",
+        "git 9382ae2 test: pin global llm compatibility and config scopes"
+      ]
+    },
+    {
+      "path": "docs/compat/global-llm-config-sources.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "docs/compat/global-llm-config-sources.md（主线新增）",
+        "REQUIREMENTS.md:55-58"
+      ]
+    },
+    {
+      "path": "docs/compat/global-llm-matrix.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "docs/compat/global-llm-matrix.md",
+        "docs/workbench.md:51"
+      ]
+    },
+    {
+      "path": "docs/let-it-crash.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "docs/let-it-crash.md:1-16,59-78",
+        "git e5e4079"
+      ]
+    },
+    {
+      "path": "docs/plans/global-llm-connections.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "docs/plans/global-llm-connections.md:1-80",
+        "git 2b3defd feat: add shared llm catalog and space policies"
+      ]
+    },
+    {
+      "path": "docs/plugin-standard-install.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "docs/plugin-standard-install.md:1-31",
+        "imported blob 9338faefa7d2 → main e3920c84b3bc"
+      ]
+    },
+    {
+      "path": "docs/workbench.md",
+      "decision": "covered-by-reviewed-patch",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "Primary readback against runSnapshotCreate/withMaintenance; normal backup management retained; restore unsupported",
+        "Bilingual latest/exact-version text inspected"
+      ]
+    },
+    {
+      "path": "dsh-spaces-let-it-crash-plan.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "dsh-spaces-let-it-crash-plan.md:1-16,20-30",
+        "tasks/let-it-crash-d-delivery.md:7-15"
+      ]
+    },
+    {
+      "path": "packages/core/README.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "packages/core/README.md:1-6",
+        "blob old=imported=b9458462b675"
+      ]
+    },
+    {
+      "path": "packages/doctor/README.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "packages/doctor/README.md:5-28",
+        "old c3306270d3d8 → imported 6c6b5068599e（rc.2 写路径）→ main f4ccc5e6f62c"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/README.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "packages/llm-bridge/README.md:1-16",
+        "packages/plugin/README.md:25"
+      ]
+    },
+    {
+      "path": "packages/plugin/README.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "packages/plugin/README.md:1-35",
+        "docs/workbench.md:7,201-213",
+        "docs/plugin-standard-install.md:15-31",
+        "old 10bc5ec8bbcf → imported a611d9793772（标准安装重写）→ main 70132094d51e"
+      ]
+    },
+    {
+      "path": "packages/supervisor/README.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "packages/supervisor/README.md:9-11,28-44,94-108,130",
+        "old→imported 仅 bin.js 路径与 snapshot-worker 写法"
+      ]
+    },
+    {
+      "path": "packages/view-bridge/README.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "packages/view-bridge/README.md:1-11",
+        "imported a0d735a9b4d5 → main c5a5801b3cb3"
+      ]
+    },
+    {
+      "path": "tasks/acceptance.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/acceptance.md:1-4（历史盖章）",
+        "blob old=imported=23c779dea7f2"
+      ]
+    },
+    {
+      "path": "tasks/fix-acceptance-2026-09-11.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/fix-acceptance-2026-09-11.md:1（盖章）",
+        "blob old=imported=1d8810b66173"
+      ]
+    },
+    {
+      "path": "tasks/global-llm.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/global-llm.md:1-39",
+        "tasks/todo.md:61-63"
+      ]
+    },
+    {
+      "path": "tasks/handoff-2026-09-14.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/handoff-2026-09-14.md:1-20,53-55",
+        "tasks/todo.md:67"
+      ]
+    },
+    {
+      "path": "tasks/history-recovery.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/history-recovery.md:1-31,110-116"
+      ]
+    },
+    {
+      "path": "tasks/let-it-crash-d-delivery.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/let-it-crash-d-delivery.md:7-15",
+        "tasks/todo.md:9-16 D0–D4"
+      ]
+    },
+    {
+      "path": "tasks/plan.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plan.md:1-9,19-33,51-76",
+        "old 4d963ce2df44 → imported 07e3b04a307f（加 09-13 标准安装头）→ main 84915637eb7f"
+      ]
+    },
+    {
+      "path": "tasks/plugin-cli-rc2-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plugin-cli-rc2-worker.md:1-16,106-111",
+        "README.md:56-57"
+      ]
+    },
+    {
+      "path": "tasks/plugin-community-submission.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plugin-community-submission.md:1-24"
+      ]
+    },
+    {
+      "path": "tasks/plugin-distribution-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plugin-distribution-worker.md:1-8"
+      ]
+    },
+    {
+      "path": "tasks/plugin-management/plan.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plugin-management/plan.md:1-27",
+        "tasks/todo.md:18-47"
+      ]
+    },
+    {
+      "path": "tasks/plugin-management/task-01-write-scope.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plugin-management/task-01-write-scope.md",
+        "tasks/todo.md:21,7"
+      ]
+    },
+    {
+      "path": "tasks/plugin-standard-install.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/plugin-standard-install.md:7-12,19-24"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-acceptance.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-acceptance.md:1-12,40-45",
+        "blob old=imported=4c3c88764dac"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-bundle.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-bundle.md:1-12 及原 bundle 示例",
+        "packages/plugin/README.md:21-23"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-core.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-core.md:3-9",
+        "packages/core/README.md:3-5"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-desktop.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-desktop.md:1-8",
+        "old→imported 仅换行"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-distribution.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-distribution.md 现行合同头 + 原脚本范围",
+        "docs/plugin-standard-install.md:45-52"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-doctor.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-doctor.md:3-32,46-50",
+        "packages/doctor/README.md:7-28"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-frontend.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-frontend.md 盖章 + 原 client 范围"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-host.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-host.md:3-26"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-localization.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-localization.md 原 SDK 调查段落"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-lock.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-lock.md 原锁目录说明",
+        "docs/let-it-crash.md:59 单写者",
+        "git c22c47f ignore stale dead instance records and drop takeover copy"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-plan.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-plan.md:3-16"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-runtime.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-runtime.md:3-8,75-80"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-theme-compatibility.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-theme-compatibility.md:1-4",
+        "docs/workbench.md:36-37,217",
+        "tasks/todo.md:70"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-themes-acceptance.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-themes-acceptance.md 结果表",
+        "docs/workbench.md:27-28"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-themes-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-themes-worker.md:1 盖章 + 原交接结论"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-trial-acceptance.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-trial-acceptance.md:1,48-52"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-windows-distribution.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/pluginization-windows-distribution.md 已做/未做",
+        "old→imported 仅换行"
+      ]
+    },
+    {
+      "path": "tasks/q-coverage.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/q-coverage.md:1-9",
+        "docs/let-it-crash.md:15"
+      ]
+    },
+    {
+      "path": "tasks/releases/v0.2.0.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/releases/v0.2.0.md:1-28"
+      ]
+    },
+    {
+      "path": "tasks/releases/v0.3.0.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/releases/v0.3.0.md:1-21",
+        "git c39b3ef Release 0.3.0 with let-it-crash semantics"
+      ]
+    },
+    {
+      "path": "tasks/review-2026-09-11.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/review-2026-09-11.md:1 盖章 + 原不通过结论"
+      ]
+    },
+    {
+      "path": "tasks/review-config.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/review-config.md:1 盖章",
+        "REQUIREMENTS.md:105-110 NFR1"
+      ]
+    },
+    {
+      "path": "tasks/spaces-demo-video-acceptance.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/spaces-demo-video-acceptance.md 成片清单",
+        "tasks/todo.md:71"
+      ]
+    },
+    {
+      "path": "tasks/spaces-demo-video-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/spaces-demo-video-worker.md:1 盖章 + 原结论"
+      ]
+    },
+    {
+      "path": "tasks/todo.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/todo.md:1-71",
+        "old d4b93f7248ec → imported 2e123574403e → main 9fffeea973b8"
+      ]
+    },
+    {
+      "path": "tasks/workbench-audit.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-audit.md:1-8"
+      ]
+    },
+    {
+      "path": "tasks/workbench-browser-failures-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-browser-failures-worker.md 结论：脚本不是真实验收"
+      ]
+    },
+    {
+      "path": "tasks/workbench-contract.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-contract.md:2-56",
+        "src/shared/workbench.ts:76 recoveryRequired"
+      ]
+    },
+    {
+      "path": "tasks/workbench-controller-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-controller-worker.md 产物 home-controller.ts"
+      ]
+    },
+    {
+      "path": "tasks/workbench-crash-worker.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-crash-worker.md:1-4"
+      ]
+    },
+    {
+      "path": "tasks/workbench-demo-narration.json",
+      "decision": "covered-by-reviewed-patch",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "JSON parsed; entries 01-03 byte-equivalent at object level; only04 changed; no new video claimed"
+      ]
+    },
+    {
+      "path": "tasks/workbench-demo-video-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-demo-video-worker.md 结论未录制"
+      ]
+    },
+    {
+      "path": "tasks/workbench-desktop-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-desktop-worker.md 结论",
+        "git fd3bd9c"
+      ]
+    },
+    {
+      "path": "tasks/workbench-doctor-worker.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-doctor-worker.md 现行合同改写段",
+        "packages/doctor/README.md:7-10"
+      ]
+    },
+    {
+      "path": "tasks/workbench-documentation-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-documentation-worker.md:52-60",
+        "docs/workbench.md:1-11"
+      ]
+    },
+    {
+      "path": "tasks/workbench-dual-control-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-dual-control-worker.md 结论未执行",
+        "docs/workbench.md:187-197"
+      ]
+    },
+    {
+      "path": "tasks/workbench-external-discovery.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-external-discovery.md:12-26",
+        "tasks/todo.md:69",
+        "README.md:42"
+      ]
+    },
+    {
+      "path": "tasks/workbench-foundation-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-foundation-worker.md:7-10,56-60",
+        "docs/workbench.md:133-140"
+      ]
+    },
+    {
+      "path": "tasks/workbench-implementation.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-implementation.md:3-16,129-176"
+      ]
+    },
+    {
+      "path": "tasks/workbench-jobs-worker.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-jobs-worker.md:3-16",
+        "tasks/workbench-contract.md:26-32"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-faults-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-maintenance-faults-worker.md:1-3"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-product-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-maintenance-product-worker.md:14-16,70-74"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-responsiveness-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-maintenance-responsiveness-worker.md 原 4018ms 记录"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-maintenance-worker.md 结论",
+        "src/adapters/node/workbench-maintenance.ts"
+      ]
+    },
+    {
+      "path": "tasks/workbench-package-acceptance-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-package-acceptance-worker.md:49-52",
+        "docs/plans/spaces-merge-convergence.md:38 package-upgrade 测试未进默认入口"
+      ]
+    },
+    {
+      "path": "tasks/workbench-package-upgrade-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-package-upgrade-worker.md:1-8 及原结论"
+      ]
+    },
+    {
+      "path": "tasks/workbench-plugin-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-plugin-worker.md 结论",
+        "docs/workbench.md:20-21"
+      ]
+    },
+    {
+      "path": "tasks/workbench-rc2-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-rc2-worker.md 状态句",
+        "docs/plugin-standard-install.md:9"
+      ]
+    },
+    {
+      "path": "tasks/workbench-restore-receipt.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-restore-receipt.md:1-4",
+        "docs/let-it-crash.md:17-20"
+      ]
+    },
+    {
+      "path": "tasks/workbench-self-update-audit.md",
+      "decision": "superseded",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-self-update-audit.md:1-12,110-124"
+      ]
+    },
+    {
+      "path": "tasks/workbench-supervisor-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-supervisor-worker.md 结论",
+        "packages/supervisor/README.md:5-22,71-92"
+      ]
+    },
+    {
+      "path": "tasks/workbench-ui-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-ui-worker.md 结论",
+        "docs/workbench.md:19,183",
+        "tasks/workbench-contract.md:20"
+      ]
+    },
+    {
+      "path": "tasks/workbench-xp-compatibility-worker.md",
+      "decision": "already-covered",
+      "sourceReport": "evidence.json",
+      "evidence": [
+        "tasks/workbench-xp-compatibility-worker.md 状态",
+        "docs/workbench.md:27,217",
+        "tasks/workbench-demo-narration.json:3"
+      ]
+    }
+  ],
+  "additionalImportDeltaRows": [
+    {
+      "path": "src/main/tray.ts",
+      "oldObject": "8d94243374edc247a4434607b5a8b03ce15cfaa2",
+      "mainObject": "8d94243374edc247a4434607b5a8b03ce15cfaa2",
+      "importedObject": "0b0a39d57f075960bf082f87745bce30acea6759",
+      "decision": "already-covered",
+      "reason": "Current main is byte-identical to the original branch; the intermediate regression was already reversed."
+    },
+    {
+      "path": "src/renderer/src/components/ControllerStatus.tsx",
+      "oldObject": null,
+      "mainObject": null,
+      "importedObject": "f6da4875a259b691270a45b409df343b6a0f21d3",
+      "decision": "superseded",
+      "reason": "Only the import commit introduced this controller badge; neither original branch nor current main contains it. Current main intentionally removed the badge."
+    },
+    {
+      "path": "tests/process-manager.test.ts",
+      "oldObject": "679dec94cb0b19f852b3b4db844404647095a6ae",
+      "mainObject": "679dec94cb0b19f852b3b4db844404647095a6ae",
+      "importedObject": "d5055511fa973b0c5d821b8bf2ea962e3d308be1",
+      "decision": "already-covered",
+      "reason": "Current main is byte-identical to the original branch; the intermediate regression was already reversed."
+    }
+  ],
+  "coverage": {
+    "currentEndpointPaths": 279,
+    "oldToImportedPaths": 68,
+    "unionPaths": 282,
+    "pending": 0,
+    "candidateCounts": {
+      "already-covered": 242,
+      "superseded": 33,
+      "missing": 4
+    },
+    "patchesResolved": 4
+  },
+  "baseline": {
+    "typechecks": [
+      "node",
+      "web",
+      "spaces"
+    ],
+    "builds": [
+      "spaces",
+      "desktop"
+    ],
+    "unitRun": {
+      "tests": 641,
+      "pass": 638,
+      "fail": 2,
+      "skip": 1,
+      "log": ".sandbox/merge-baseline-process-permissions/unit-and-integration.log"
+    },
+    "focusedFixReadback": {
+      "files": [
+        "tests/llm-compat.test.ts",
+        "tests/llm-gates.test.ts"
+      ],
+      "tests": 8,
+      "pass": 8,
+      "fail": 0,
+      "skip": 0,
+      "meaning": "Six previously passing tests and the two portability failures rechecked after fixes; full suite not repeated"
+    },
+    "optionalOfficialCli": "NOT_RUN",
+    "realUI": "NOT_RUN",
+    "packagedStartup": "NOT_RUN"
+  },
+  "decision": "A1 semantic audit closed; tree-preserving history merge permitted; B architecture work remains unimplemented",
+  "additionalFindings": [
+    "withMaintenance currently invokes reinitializeManager on consistent failure; B2/B5 must remove failure-triggered restart/reinstall path and test it. Existing passing tests are not complete let-it-crash proof.",
+    "Normal backup creation stops owned processes and may reinitialize manager; ordinary workspaces stay stopped."
+  ]
+}

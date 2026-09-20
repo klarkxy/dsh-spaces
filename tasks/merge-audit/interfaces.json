@@ -1,0 +1,1904 @@
+{
+  "group": "interfaces",
+  "refs": {
+    "main": "c22c47fd37629e3bb852f7702d68624d3a73453d",
+    "old": "51911e481961408ad77758b0123653c0fc1e2bdd",
+    "imported": "1f339acc4c616ed634760f2735823f5ce83b9cd3"
+  },
+  "rows": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old Windows gate ran typecheck, npm test, test:spaces, build:spaces, isolation/lifecycle/A8 with a pinned CLI. No workbench/LLM/standard-install jobs.",
+      "currentEvidence": [
+        ".github/workflows/ci.yml:10-60 windows-gate (test:llm, test:workbench, pack preflight, standard-install --preflight, @deepseek-ai/dsh@latest)",
+        ".github/workflows/ci.yml:62-91 plugin-install + test:llm:browser + validate:plugin-install",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ],
+      "reason": "Imported added workbench + rc.1/rc.2 matrix; main replaced the matrix with latest-channel and DSH_TEST_CLI_BIN. Old had no unique CI step that main dropped. Package-upgrade unit test still absent here — B5, also absent from old 51911e4 scripts.",
+      "verification": [
+        "package.json:24-42",
+        "tests/compatible-dsh-cli.test.ts",
+        "scripts/verify-plugin-standard-install.mjs"
+      ]
+    },
+    {
+      "path": ".github/workflows/plugin-distribution.yml",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no manual pack workflow. Imported/main add workflow_dispatch pack without npm publish.",
+      "currentEvidence": [
+        ".github/workflows/plugin-distribution.yml:1-47",
+        "scripts/pack-spaces-plugin.mjs:57-60 and :72-78 LLM_REQUIRED"
+      ],
+      "reason": "Main-added. Version check :30-33 still only plugin+view-bridge while pack script now packs llm-bridge — B5 distribution debt, not old-branch content (old lacked the file).",
+      "verification": [
+        "package.json:35-36 pack:plugin",
+        "tests/llm-packaging.test.ts:9-23",
+        "docs/plans/spaces-merge-convergence.md"
+      ]
+    },
+    {
+      "path": "electron.vite.config.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported emitted main index plus snapshot-worker.mjs. Main only added renderer @workbench alias.",
+      "currentEvidence": [
+        "electron.vite.config.ts:11-14 snapshot-worker",
+        "electron.vite.config.ts:24-27 @workbench",
+        "package.json:122-125 asarUnpack"
+      ],
+      "reason": "Worker filename is runtime install IO, not restore product. Alias exists so SettingsDialog can import workbench LLM UI. No old unique vite intent dropped.",
+      "verification": [
+        "scripts/build-spaces.mjs:65",
+        "src/renderer/src/components/SettingsDialog.tsx"
+      ]
+    },
+    {
+      "path": "package-lock.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Lockfile for root scripts/devDeps. Old lacked playwright and later LLM scripts; imported added playwright; main follows 0.3.0.",
+      "currentEvidence": [
+        "package.json:18-42 scripts",
+        "package.json version 0.3.0"
+      ],
+      "reason": "Mechanical lock. Do not copy old lock over 0.3.0. No unique old dependency omitted.",
+      "verification": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "package.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old 51911e4 added test:workbench:recovery only. It did not add pack:plugin, validate:plugin-install, or workbench-package-upgrade.test.ts to scripts. Imported added pack/check/validate:plugin-install, playwright, compatible-dsh-cli in test:spaces.",
+      "currentEvidence": [
+        "package.json:24-42 test:llm*, pack:plugin, validate:plugin-install, test:workbench includes q-let-it-crash",
+        "package.json:32 test:workbench:recovery",
+        "package.json:122-125 asarUnpack snapshot-worker"
+      ],
+      "reason": "Recovery script name kept as the non-restore bucket (plan §5). workbench-package-upgrade.test.ts missing from scripts on old, imported, and main — B5 wiring, not an A-stage transplant. Keep latest/LLM/share/batch scripts.",
+      "verification": [
+        "docs/plans/spaces-merge-convergence.md :38 and :243",
+        "tests/workbench-package-upgrade.test.ts:163"
+      ]
+    },
+    {
+      "path": "packages/core/package.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported 0.2.0; main 0.3.0.",
+      "currentEvidence": [
+        "packages/core/package.json:3 version 0.3.0",
+        "git:c39b3ef Release 0.3.0 with let-it-crash semantics"
+      ],
+      "reason": "Version bump only.",
+      "verification": [
+        "scripts/build-spaces.mjs:32-37"
+      ]
+    },
+    {
+      "path": "packages/doctor/package.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported 0.2.0 doctor CLI; main 0.3.0 diagnose-only product.",
+      "currentEvidence": [
+        "packages/doctor/package.json:3",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ],
+      "reason": "Manifest only. Recover unsupported is in doctor tests.",
+      "verification": [
+        "tests/workbench-doctor.test.ts",
+        "tests/spaces-doctor.test.ts"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/LICENSE",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no llm-bridge. Main-added MIT copied into payload.",
+      "currentEvidence": [
+        "packages/llm-bridge/LICENSE",
+        "scripts/pack-spaces-plugin.mjs:58"
+      ],
+      "reason": "Required by LLM_REQUIRED.",
+      "verification": [
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/cordis.patch.yml",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no space LLM plugin patch.",
+      "currentEvidence": [
+        "packages/llm-bridge/cordis.patch.yml dsh-spaces-llm-bridge",
+        "packages/llm-bridge/package.json dsh.bundle.patch"
+      ],
+      "reason": "Install unit for shared connections inside a space.",
+      "verification": [
+        "tests/llm-packaging.test.ts:18-19",
+        "scripts/validate-llm-distribution.mjs"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/package.json",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no @dsh-spaces/llm-bridge. Main 0.3.0 public DSH plugin.",
+      "currentEvidence": [
+        "packages/llm-bridge/package.json:1-48",
+        "scripts/pack-spaces-plugin.mjs assertManifest llm-bridge"
+      ],
+      "reason": "Main-added packable bridge. Distribution workflow version check does not include it (B5).",
+      "verification": [
+        "tests/llm-packaging.test.ts",
+        "package.json:29 validate:llm:distribution"
+      ]
+    },
+    {
+      "path": "packages/plugin/.npmignore",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no npmignore. Imported/main exclude nested tgz/src/.sandbox/env.",
+      "currentEvidence": [
+        "packages/plugin/.npmignore",
+        "scripts/pack-spaces-plugin.mjs FORBIDDEN_PACKED"
+      ],
+      "reason": "Standard-install packing guard.",
+      "verification": [
+        "scripts/verify-plugin-standard-install.mjs"
+      ]
+    },
+    {
+      "path": "packages/plugin/package.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old 0.2.0 lacked repository/keywords/publishConfig. Imported added them; main 0.3.0.",
+      "currentEvidence": [
+        "packages/plugin/package.json version 0.3.0 keywords dsh-plugin",
+        "git:1f339ac Restore Spaces workbench and standard DSH plugin installation"
+      ],
+      "reason": "Imported listing metadata is the standard-install contract.",
+      "verification": [
+        "scripts/pack-spaces-plugin.mjs",
+        ".github/workflows/plugin-distribution.yml:30-33"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/client/i18n.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old copy was return-to-workbench only. Imported added GUIDE_COPY initialize/enter (and leftover recoveryTitle). Main kept guide copy; diag.runtimeIncompatible now 'exact installed version'.",
+      "currentEvidence": [
+        "packages/plugin/src/client/i18n.ts GUIDE_COPY init/enter",
+        "packages/plugin/src/client/i18n.ts diag.runtimeIncompatible",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ],
+      "reason": "Initialize/enter strings are the ordinary-web standard-install entry. recoveryTitle/recoveryBody are B1/B4 leftovers, not old unique value.",
+      "verification": [
+        "packages/plugin/src/client/index.tsx",
+        "tests/workbench-plugin.test.ts",
+        "scripts/verify-plugin-standard-install.mjs INIT_BUTTON"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/client/index.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old ReturnToWorkbenchPanel only returned to an existing workbench. Imported==main add role/initialize/enter/trusted loopback.",
+      "currentEvidence": [
+        "packages/plugin/src/client/index.tsx:26-30 initialize/enter guide, no management write UI",
+        "packages/plugin/src/typert.host.ts:211 GUIDE_METHODS includes initialize"
+      ],
+      "reason": "Ordinary-web standard-install UI. Old single-button return is a subset. Do not restore the old panel.",
+      "verification": [
+        "tests/workbench-plugin.test.ts:743",
+        "scripts/verify-plugin-standard-install.mjs"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/client/workbench-remote.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old guide remote lacked initialize(). Imported added it. Main added llm/llmCredential and workbench/unsupported plus LLM_* codes.",
+      "currentEvidence": [
+        "packages/plugin/src/client/workbench-remote.ts initialize()",
+        "packages/plugin/src/client/workbench-remote.ts llm/llmCredential"
+      ],
+      "reason": "Imported initialize is required. Main LLM remotes are required. Old had neither extra to port.",
+      "verification": [
+        "packages/plugin/src/typert.remote-client.ts",
+        "tests/llm-ui.test.tsx"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/index.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported exports. Main adds LLM_REMOTE_CODES.",
+      "currentEvidence": [
+        "packages/plugin/src/index.ts LLM_REMOTE_CODES",
+        "git:7675ae4 feat: add global model center and space selection"
+      ],
+      "reason": "Additive export.",
+      "verification": [
+        "tests/spaces-host.test.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/typert.host.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old guide methods role/bootstrap/returnTarget. Imported added initialize. Main added workbench/llm and llmCredential.",
+      "currentEvidence": [
+        "packages/plugin/src/typert.host.ts:110 initialize",
+        "packages/plugin/src/typert.host.ts:211 GUIDE_METHODS",
+        "MANAGER_METHODS llm/llmCredential"
+      ],
+      "reason": "Host Typert matches client. Old unique was the missing initialize, now present.",
+      "verification": [
+        "tests/spaces-host.test.ts Typert list",
+        "tests/workbench-plugin.test.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/typert.remote-client.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old remote map lacked initialize and LLM. Imported added initialize; main added llm types.",
+      "currentEvidence": [
+        "packages/plugin/src/typert.remote-client.ts initialize / llm / llmCredential"
+      ],
+      "reason": "Keeps ordinary guide + manager LLM channels.",
+      "verification": [
+        "packages/plugin/src/client/workbench-remote.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/types.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old WorkbenchGuideApi had no initialize. Imported added WorkbenchInitializeResult; main re-exports LlmApi*.",
+      "currentEvidence": [
+        "packages/plugin/src/types.ts WorkbenchInitializeResult",
+        "packages/plugin/src/types.ts LlmApiRequest"
+      ],
+      "reason": "Initialize result is the standard-install contract. recoveryRequired on the struct is B1 leftover signaling, not a restore product.",
+      "verification": [
+        "packages/plugin/src/client/index.tsx",
+        "tests/workbench-plugin.test.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/components.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported UI including snapshot create/delete and workbench package upgrade preview. Main removed snapshot.restore/config.restore buttons; added LlmModelCenter and create.useSharedLlm.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/components.tsx:514-526 snapshot.create",
+        "packages/plugin/src/workbench/components.tsx:559-566 snapshot.delete only",
+        "packages/plugin/src/workbench/components.tsx:611-674 WorkbenchPackageSection"
+      ],
+      "reason": "Package-upgrade UI from 51911e4/import remains. Restore clicks superseded. Do not treat snapshot.* names as dead — create/delete remain.",
+      "verification": [
+        "tests/workbench-ui.test.tsx snapshots.create present and snapshot.restore absent",
+        "packages/plugin/src/workbench/store.ts loadWorkbenchPackage"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/i18n.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported included workbenchPackage.* and snapshots.create/delete plus restore/acquire/resume. Main sets snapshots.restore to refusal text and adds LLM/share copy.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/i18n.ts snapshots.create/delete and snapshots.restore 'Restore is not supported'",
+        "packages/plugin/src/workbench/i18n.ts workbenchPackage.title"
+      ],
+      "reason": "Upgrade and backup-management copy kept. recovery.acquire leftover is B4, not old unique missing.",
+      "verification": [
+        "tests/workbench-ui.test.tsx"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/index.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported barrel. Main re-exports LLM surfaces for @workbench.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/index.ts",
+        "tsconfig.web.json @workbench/*"
+      ],
+      "reason": "Barrel growth for shared UI.",
+      "verification": [
+        "electron.vite.config.ts:27"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/llm/center.tsx",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no global model center.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/llm/center.tsx",
+        "git:7675ae4 feat: add global model center and space selection"
+      ],
+      "reason": "Protect global LLM UI.",
+      "verification": [
+        "tests/llm-ui.test.tsx",
+        "src/renderer/src/components/SettingsDialog.tsx"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/llm/client.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no workbench LLM client.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/llm/client.ts"
+      ],
+      "reason": "Wraps workbench/llm without secrets in generic jobs.",
+      "verification": [
+        "tests/llm-api-auth.test.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/llm/space-binding.tsx",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no space all/selected/none UI.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/llm/space-binding.tsx",
+        "git:7675ae4 feat: add global model center and space selection"
+      ],
+      "reason": "Space policy UI for shared connections.",
+      "verification": [
+        "tests/llm-space-settings.test.ts"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/recovery.tsx",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported RecoverySurface called acquire and resume. Main drops onResume.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/recovery.tsx onAcquire kept, onResume removed",
+        "git:a026f05 Remove restore UI and fail leftover restore APIs",
+        "git:39f8224 Drop job recovery FSM and report failure context"
+      ],
+      "reason": "Resume is a recovery product path and must stay gone. Remaining acquire chip is B4, not old unique to re-import.",
+      "verification": [
+        "tests/workbench-ui.test.tsx RecoverySurface without resume",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/store.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported loaded workbenchPackage/backups and could submit snapshot.restore. Main keeps package load and snapshot.create/delete.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/store.ts loadWorkbenchPackage",
+        "packages/plugin/src/workbench/store.ts backups load"
+      ],
+      "reason": "Package upgrade + backup listing kept. Restore submit superseded. Do not delete snapshot/backup state because of names.",
+      "verification": [
+        "tests/workbench-ui.test.tsx workbench package reload",
+        "packages/plugin/src/workbench/components.tsx:611-674"
+      ]
+    },
+    {
+      "path": "packages/plugin/src/workbench/styles.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported styles. Main adds LLM/package rules.",
+      "currentEvidence": [
+        "packages/plugin/src/workbench/styles.ts"
+      ],
+      "reason": "Additive styling.",
+      "verification": [
+        "tests/workbench-ui.test.tsx"
+      ]
+    },
+    {
+      "path": "packages/supervisor/package.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Private supervisor. Old==imported 0.2.0 private:true; main 0.3.0 still private.",
+      "currentEvidence": [
+        "packages/supervisor/package.json private true version 0.3.0",
+        "scripts/pack-spaces-plugin.mjs supervisor must stay private"
+      ],
+      "reason": "Privacy constraint intact.",
+      "verification": [
+        "scripts/build-spaces.mjs:63-72"
+      ]
+    },
+    {
+      "path": "packages/view-bridge/.npmignore",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no view-bridge npmignore.",
+      "currentEvidence": [
+        "packages/view-bridge/.npmignore"
+      ],
+      "reason": "Same packing hygiene as plugin.",
+      "verification": [
+        "scripts/pack-spaces-plugin.mjs VIEW_REQUIRED"
+      ]
+    },
+    {
+      "path": "packages/view-bridge/package.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old 0.2.0 files omitted README. Imported added README+keywords; main 0.3.0.",
+      "currentEvidence": [
+        "packages/view-bridge/package.json version 0.3.0 files README.md",
+        "git:1f339ac Restore Spaces workbench and standard DSH plugin installation"
+      ],
+      "reason": "Imported listing metadata is current.",
+      "verification": [
+        ".github/workflows/plugin-distribution.yml:30-33"
+      ]
+    },
+    {
+      "path": "scripts/build-spaces.mjs",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported built plugin, view-bridge, supervisor, doctor, snapshot-worker. Main adds llm-bridge compile/copy into plugin payload.",
+      "currentEvidence": [
+        "scripts/build-spaces.mjs:54-61 llm-bridge",
+        "scripts/build-spaces.mjs:65 snapshot-worker.mjs into supervisor"
+      ],
+      "reason": "LLM payload and worker copy required. Worker is install IO. Do not drop because of snapshot in the name.",
+      "verification": [
+        "package.json:22 build:spaces",
+        "scripts/pack-spaces-plugin.mjs PLUGIN_REQUIRED"
+      ]
+    },
+    {
+      "path": "scripts/build-workbench-candidate.mjs",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported injected COMPATIBLE_DSH_CLI_VERSIONS to admit rc.2 experimentally. Main deletes allowlist injection and requires isExactRuntimeVersion.",
+      "currentEvidence": [
+        "scripts/build-workbench-candidate.mjs assertOfficialGate",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ],
+      "reason": "Allowlist injection superseded. Do not restore the injector.",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts"
+      ]
+    },
+    {
+      "path": "scripts/pack-spaces-plugin.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no pack script. Imported packed plugin+view-bridge+private supervisor. Main extends payload to llm-bridge.",
+      "currentEvidence": [
+        "scripts/pack-spaces-plugin.mjs:57-60 lib/llm-bridge/*",
+        "scripts/pack-spaces-plugin.mjs:72-78 LLM_REQUIRED",
+        "scripts/pack-spaces-plugin.mjs:402-418 pack llm"
+      ],
+      "reason": "LLM-bridge packaging path is present on main. Old had nothing to port.",
+      "verification": [
+        "tests/llm-packaging.test.ts",
+        "package.json:35-36",
+        ".github/workflows/ci.yml:45-46"
+      ]
+    },
+    {
+      "path": "scripts/setup-sandbox.mjs",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported session/storage patches. Main also writes settings and credentials under hub/<name>/.",
+      "currentEvidence": [
+        "scripts/setup-sandbox.mjs settings.yaml and .credentials.yaml hub paths"
+      ],
+      "reason": "Isolation overlay extended. Old session/storage lines remain.",
+      "verification": [
+        "scripts/validate-isolation.mjs",
+        "AGENTS.md web is sacred"
+      ]
+    },
+    {
+      "path": "scripts/validate-isolation.mjs",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported isolation gate. Main adds authentication/path coverage (861cf4e).",
+      "currentEvidence": [
+        "scripts/validate-isolation.mjs",
+        "git:861cf4e Authenticate the isolation release gate"
+      ],
+      "reason": "Gate strengthened. No old unique check dropped.",
+      "verification": [
+        "tests/validate-isolation.test.mjs",
+        ".github/workflows/ci.yml Isolation gate"
+      ]
+    },
+    {
+      "path": "scripts/validate-llm-distribution.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM distribution gate.",
+      "currentEvidence": [
+        "scripts/validate-llm-distribution.mjs",
+        "package.json:29"
+      ],
+      "reason": "Release gate for llm-bridge packaging; wired in CI.",
+      "verification": [
+        "tests/llm-packaging.test.ts",
+        ".github/workflows/ci.yml:30"
+      ]
+    },
+    {
+      "path": "scripts/validate-llm-secrets.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM secret scan.",
+      "currentEvidence": [
+        "scripts/validate-llm-secrets.mjs",
+        "package.json:28"
+      ],
+      "reason": "P6 LLM gate.",
+      "verification": [
+        "tests/llm-secret-leaks.test.ts",
+        ".github/workflows/ci.yml:29"
+      ]
+    },
+    {
+      "path": "scripts/verify-plugin-install-write-scope.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no write-scope probe. Main records independent-per-space install writes (M1-01), not a restore module.",
+      "currentEvidence": [
+        "scripts/verify-plugin-install-write-scope.mjs",
+        "package.json:38"
+      ],
+      "reason": "Measurement of install writes. Name must not be read as recovery.",
+      "verification": [
+        "tests/plugin-restore-point.test.ts"
+      ]
+    },
+    {
+      "path": "scripts/verify-plugin-standard-install.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no standard-install script. Imported allowed only 0.1.5-rc.1/rc.2. Main follows latest channel and requires an exact resolved CLI version (rejects the tag 'latest').",
+      "currentEvidence": [
+        "scripts/verify-plugin-standard-install.mjs EXACT_CLI / inspectCli",
+        "scripts/verify-plugin-standard-install.mjs INIT_BUTTON ENTER_BUTTON",
+        "package.json:37"
+      ],
+      "reason": "Standard prebuilt plugin install path. Allowlist superseded; exact-version execution kept.",
+      "verification": [
+        ".github/workflows/ci.yml:47-50 and :77-83",
+        "packages/plugin/src/client/index.tsx",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "scripts/verify-spaces-distribution.mjs",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported. Main retargets staged tarball 0.2.0→0.3.0.",
+      "currentEvidence": [
+        "scripts/verify-spaces-distribution.mjs dsh-spaces-plugin-0.3.0.tgz",
+        "git:c39b3ef Release 0.3.0 with let-it-crash semantics"
+      ],
+      "reason": "Version follow-through. Shared C:/Users/admin defaults are not unique old intent.",
+      "verification": [
+        "package.json:34"
+      ]
+    },
+    {
+      "path": "scripts/verify-spaces-themes.mjs",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported theme evidence. Main retargets default tarball 0.3.0.",
+      "currentEvidence": [
+        "scripts/verify-spaces-themes.mjs DEFAULT_SPACES_TGZ 0.3.0"
+      ],
+      "reason": "Version bump only.",
+      "verification": [
+        "tasks/todo.md Catppuccin"
+      ]
+    },
+    {
+      "path": "scripts/verify-workbench-dual-control.mjs",
+      "status": "M",
+      "decision": "missing",
+      "oldIntent": "51911e4 required that while Web owns Home, desktop UI must not show 接管/Take over/移交/Hand off. Imported replaced that with waitFor '只读 — Web 工作台正在控制此 Home'.",
+      "currentEvidence": [
+        "scripts/verify-workbench-dual-control.mjs:709-713 waitFor removed badge copy (imported==main)",
+        "src/renderer/src/App.tsx no ControllerStatus",
+        "git:d267a20 Remove the desktop Home controller badge and hand-off overlay",
+        "git:c22c47f ignore stale dead instance records and drop takeover copy"
+      ],
+      "reason": "Current App.tsx matches the old no-takeover-chip rule, but this script still waits for badge copy that exists only here. IPC read-only checks at :703-707 remain valid. Do not re-import ControllerStatus tests.",
+      "verification": [
+        "src/renderer/src/App.tsx:14-18",
+        "tests/desktop-controller.test.ts dead owners are not taken",
+        "git show 51911e4 -- scripts/verify-workbench-dual-control.mjs"
+      ],
+      "missingPatch": "Restore the old assertion that 接管|Take over|移交|Hand off count is 0 while ownerKind=web. Delete the waitFor of the removed badge string. Keep IPC writable===false / ownerKind===web and no-manager-rail checks."
+    },
+    {
+      "path": "scripts/verify-workbench-maintenance-faults.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old lacked this fault-injection evidence file. Imported==main observe failure without rescue.",
+      "currentEvidence": [
+        "scripts/verify-workbench-maintenance-faults.mjs",
+        "scripts/workbench-fault-snapshot-worker.ts header Do not pack as product worker"
+      ],
+      "reason": "Fault evidence for let-it-crash, not a restore product. Do not delete because of snapshot in the sibling filename.",
+      "verification": [
+        "tests/maintenance-responsiveness.test.ts",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "scripts/verify-workbench-rc2.mjs",
+      "status": "M",
+      "decision": "missing",
+      "oldIntent": "Old DEFAULT_RC2_BIN was repo-relative .sandbox/spaces-unknown-cli. Imported/main hardcode C:/Users/admin/AppData/Local/Temp/dsh-spaces-standard-rc2 and PRODUCT_GATE=0.1.5-rc.2. Imported also documented official web --dump-config seed (keep).",
+      "currentEvidence": [
+        "scripts/verify-workbench-rc2.mjs:78-81 PRODUCT_GATE and DEFAULT_RC2_BIN",
+        "tests/workbench-supervisor.test.ts:1183 dump-config seed",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ],
+      "reason": "Do not port old rc.1 write-gate or any CLI allowlist. Do port the sandbox-relative default bin. Env DSH_TEST_BIN/DSH_TEST_CLI_BIN remains the override.",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts DSH_TEST_CLI_BIN",
+        "scripts/verify-plugin-standard-install.mjs inspectCli"
+      ],
+      "missingPatch": "Replace DEFAULT_RC2_BIN with the old repo-relative .sandbox/spaces-unknown-cli default (or require env and fail closed). Leave PRODUCT_GATE/allowlist unrestored."
+    },
+    {
+      "path": "scripts/workbench-fault-snapshot-worker.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no test-only snapshot worker. Imported==main dispatch create/restore/recover for fault injection. Header forbids packing as product worker.",
+      "currentEvidence": [
+        "scripts/workbench-fault-snapshot-worker.ts:1-5",
+        "operation union includes create/delete"
+      ],
+      "reason": "Not a product restore entry. Needed so fault tests can prove restore is not invoked. Do not delete because of snapshot in the filename.",
+      "verification": [
+        "scripts/verify-workbench-maintenance-faults.mjs",
+        "electron.vite.config.ts product snapshot-worker is src/main/snapshot-worker.ts"
+      ]
+    },
+    {
+      "path": "scripts/workbench-fault-supervisor.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no fault supervisor harness. Imported==main.",
+      "currentEvidence": [
+        "scripts/workbench-fault-supervisor.mjs"
+      ],
+      "reason": "Test harness, not a recovery service.",
+      "verification": [
+        "scripts/verify-workbench-maintenance-faults.mjs"
+      ]
+    },
+    {
+      "path": "src/preload/index.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported createProfile(name, displayName, icon). Main adds useSharedLlm, llm/llmCredential, share/templates.",
+      "currentEvidence": [
+        "src/preload/index.ts:95-109"
+      ],
+      "reason": "Desktop bridge for LLM/share/templates. Old unique preload had no extra APIs to port.",
+      "verification": [
+        "src/renderer/src/components/CreateWizard.tsx",
+        "src/renderer/src/components/SpaceSharePanel.tsx"
+      ]
+    },
+    {
+      "path": "src/renderer/src/App.tsx",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old App had no ControllerStatus. Imported added takeover badge/hand-off overlay and restore-oriented crash copy. Main removed the badge, crash restart CTA, Version & recovery label; added createProfile(..., useSharedLlm).",
+      "currentEvidence": [
+        "src/renderer/src/App.tsx:14-18 no ControllerStatus",
+        "src/renderer/src/App.tsx crash 查看错误详情 / 复制脱敏日志",
+        "git:d267a20 Remove the desktop Home controller badge and hand-off overlay"
+      ],
+      "reason": "Old already lacked the badge; main independently removed imported takeover UI. Dual-control script (separate missing row) still expects the imported badge.",
+      "verification": [
+        "tests/desktop-controller.test.ts",
+        "docs/let-it-crash.md",
+        "src/shared/i18n/zh.ts crash.hint"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/CreateWizard.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported wizard. Main adds useSharedLlm checkbox default on.",
+      "currentEvidence": [
+        "src/renderer/src/components/CreateWizard.tsx useSharedLlm",
+        "src/shared/i18n/en.ts create.useSharedLlmHint"
+      ],
+      "reason": "Main-line global LLM create flag.",
+      "verification": [
+        "src/preload/index.ts:95-96"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/DiagnosticsDialog.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported diagnostics. Main shrinks to report-only.",
+      "currentEvidence": [
+        "src/renderer/src/components/DiagnosticsDialog.tsx",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ],
+      "reason": "Diagnose-only.",
+      "verification": [
+        "tests/diagnostics.test.ts",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/DiagnosticsPanel.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported panel. Main small copy/status tweaks.",
+      "currentEvidence": [
+        "src/renderer/src/components/DiagnosticsPanel.tsx"
+      ],
+      "reason": "Still a report surface.",
+      "verification": [
+        "tests/diagnostics.test.ts"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/MaintenanceDialog.tsx",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported offered snapshot restore + data-only ack + upgrade failure restores backup. Main keeps create snapshot + delete + upgrade apply; restore UI gone; upgrade failure keeps failed state.",
+      "currentEvidence": [
+        "src/renderer/src/components/MaintenanceDialog.tsx confirmSnapshot delete-only",
+        "Snapshots cannot be restored",
+        "git:a026f05 Remove restore UI and fail leftover restore APIs"
+      ],
+      "reason": "Normal backup create/delete kept. Restore confirmation superseded.",
+      "verification": [
+        "src/renderer/src/recovery.ts:12-16",
+        "tests/frontend-recovery.test.ts"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/PluginPanel.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported panel. Main adds optional exact version and latest-resolve-then-pin copy.",
+      "currentEvidence": [
+        "src/renderer/src/components/PluginPanel.tsx exact version",
+        "git:28d4f9e Require exact plugin versions and surface install errors"
+      ],
+      "reason": "Latest channel with pinned exact download.",
+      "verification": [
+        "tests/plugin-catalog.test.ts",
+        "tests/plugin-ops.test.ts"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/SettingsDialog.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported Versions and recovery tab. Main adds LLM tab, share/import, writable gating; runtime tab renamed Versions.",
+      "currentEvidence": [
+        "src/renderer/src/components/SettingsDialog.tsx LlmModelCenter + SpaceSharePanel",
+        "src/shared/i18n/en.ts settings.tabRuntime Versions"
+      ],
+      "reason": "Main-line LLM + share. Recovery tab name superseded.",
+      "verification": [
+        "packages/plugin/src/workbench/llm/center.tsx",
+        "tests/workbench-ui.test.tsx"
+      ]
+    },
+    {
+      "path": "src/renderer/src/components/SpaceSharePanel.tsx",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no share panel.",
+      "currentEvidence": [
+        "src/renderer/src/components/SpaceSharePanel.tsx",
+        "git:6f13271 Add space share export and split-state import"
+      ],
+      "reason": "Protect templates/share. Split definition/install/start. No secrets in archive.",
+      "verification": [
+        "tests/space-share.test.ts",
+        "tests/llm-share.test.ts"
+      ]
+    },
+    {
+      "path": "src/renderer/src/recovery.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported restoreOptionsFor offered data-only restore. Main always returns undefined. settingsFormKey remains.",
+      "currentEvidence": [
+        "src/renderer/src/recovery.ts:12-16",
+        "tests/frontend-recovery.test.ts restore options are not offered"
+      ],
+      "reason": "Restore option helper superseded. Keep settingsFormKey.",
+      "verification": [
+        "src/renderer/src/components/MaintenanceDialog.tsx",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "src/shared/i18n/en.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old uniquely had tray.stillRunning (51911e4). Imported deleted it. Main re-added it, dropped Versions and recovery, added LLM/share/exact-version strings.",
+      "currentEvidence": [
+        "src/shared/i18n/en.ts tray.stillRunning",
+        "src/shared/i18n/en.ts settings.tabRuntime Versions",
+        "git:fd3bd9c hide the desktop window to the tray on close"
+      ],
+      "reason": "Old tray copy is on main again.",
+      "verification": [
+        "tests/i18n.test.ts"
+      ]
+    },
+    {
+      "path": "src/shared/i18n/zh.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Same as en: old tray.stillRunning restored on main; recovery tab renamed; LLM/share added.",
+      "currentEvidence": [
+        "src/shared/i18n/zh.ts tray.stillRunning",
+        "git:fd3bd9c hide the desktop window to the tray on close"
+      ],
+      "reason": "Bilingual pair of en.ts.",
+      "verification": [
+        "tests/i18n.test.ts /托盘/"
+      ]
+    },
+    {
+      "path": "tests/batch.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no batch tests.",
+      "currentEvidence": [
+        "tests/batch.test.ts",
+        "package.json:42",
+        "git:c31547d Stop plugin batches at the first failure and add space templates"
+      ],
+      "reason": "First-failure stops the batch. Protect.",
+      "verification": [
+        "tasks/todo.md M3-10"
+      ]
+    },
+    {
+      "path": "tests/compatible-dsh-cli.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old file weaker. Imported rc.1/rc.2 allowlist + official dump-config seed. Main admits any exact version, rejects tags, uses DSH_TEST_CLI_BIN, keeps web seed.",
+      "currentEvidence": [
+        "tests/compatible-dsh-cli.test.ts exact CLI versions can bind",
+        "tests/compatible-dsh-cli.test.ts dump-config seed",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ],
+      "reason": "Allowlist superseded. Official web seed kept.",
+      "verification": [
+        ".github/workflows/ci.yml:39-44"
+      ]
+    },
+    {
+      "path": "tests/coordinated-upgrade.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported recover rebuilds snapshot and successful restore. Main recover/restore throw not supported and leave bytes.",
+      "currentEvidence": [
+        "tests/coordinated-upgrade.test.ts recover and restore are not supported",
+        "git:603cb07 leftover restore paths unsupported"
+      ],
+      "reason": "Old recovery assertions intentionally invalid. Success-path upgrade coverage remains.",
+      "verification": [
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "tests/desktop-controller.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old 51911e4 stale-dead instances do not block writes. Imported replaced with ControllerStatus takeover tests and dead-owner reclaim. Main deleted ControllerStatus tests, refuses acquireExplicit on dead owners, restored stale-dead vs live leftover (c22c47f).",
+      "currentEvidence": [
+        "tests/desktop-controller.test.ts dead owners are not taken",
+        "tests/desktop-controller.test.ts stale dead instance records do not block writes",
+        "git:c22c47f ignore stale dead instance records and drop takeover copy",
+        "git:d267a20 Remove the desktop Home controller badge and hand-off overlay"
+      ],
+      "reason": "Old unique stale-dead test is on main again. Do not port reclaim-on-start.",
+      "verification": [
+        "docs/plans/spaces-merge-convergence.md"
+      ]
+    },
+    {
+      "path": "tests/diagnostics.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported. Main retargets to report-only.",
+      "currentEvidence": [
+        "tests/diagnostics.test.ts",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ],
+      "reason": "Aligned with diagnose-only Doctor.",
+      "verification": [
+        "src/renderer/src/components/DiagnosticsDialog.tsx"
+      ]
+    },
+    {
+      "path": "tests/dsh-cli.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old pinned 0.1.5-rc.1; imported rc.2; main DSH_DEFAULT_CHANNEL latest.",
+      "currentEvidence": [
+        "tests/dsh-cli.test.ts follows the official latest dist-tag",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ],
+      "reason": "Channel follow, not an allowlist.",
+      "verification": [
+        "src/main/dsh-cli.ts"
+      ]
+    },
+    {
+      "path": "tests/fixtures/llm-ui/host.tsx",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM UI host fixture.",
+      "currentEvidence": [
+        "tests/fixtures/llm-ui/host.tsx"
+      ],
+      "reason": "Harness for llm-ui tests.",
+      "verification": [
+        "tests/llm-ui.test.tsx"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-broken/index.js",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no broken sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-broken/index.js",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-broken/package.json",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no broken sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-broken/package.json",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-crash/index.js",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no crash sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-crash/index.js",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-crash/package.json",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no crash sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-crash/package.json",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-notes/cordis.patch.yml",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no notes sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/cordis.patch.yml",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-notes/index.js",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no notes sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/index.js",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-notes/package.json",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no notes sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/package.json",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-relay/index.js",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no relay sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-relay/index.js",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-relay/package.json",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no relay sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-relay/package.json",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/client.js",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no sketch sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/client.js",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/cordis.patch.yml",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no sketch sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/cordis.patch.yml",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/index.js",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no sketch sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/index.js",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/package.json",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no sketch sample plugin fixture.",
+      "currentEvidence": [
+        "tests/fixtures/sample-plugins/dsh-sample-sketch/package.json",
+        "tests/sample-plugins.test.ts"
+      ],
+      "reason": "Main-line fixture for install/crash visibility. No old unique fixture.",
+      "verification": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30"
+      ]
+    },
+    {
+      "path": "tests/frontend-recovery.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported required ack to offer data-only restore. Main restoreOptionsFor always undefined.",
+      "currentEvidence": [
+        "tests/frontend-recovery.test.ts restore options are not offered",
+        "src/renderer/src/recovery.ts:16"
+      ],
+      "reason": "Filename historical. Assertions now refuse restore. Keep the file.",
+      "verification": [
+        "package.json:42",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "tests/helpers/llm-official.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no official LLM helper.",
+      "currentEvidence": [
+        "tests/helpers/llm-official.ts"
+      ],
+      "reason": "Wires llm-bridge providers.",
+      "verification": [
+        "tests/llm-stream.test.ts"
+      ]
+    },
+    {
+      "path": "tests/helpers/llm-space-worker.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no isolated space worker helper.",
+      "currentEvidence": [
+        "tests/helpers/llm-space-worker.ts",
+        "git:9d83c2f"
+      ],
+      "reason": "Required for isolated adapter tests.",
+      "verification": [
+        "tests/llm-concurrency.test.ts"
+      ]
+    },
+    {
+      "path": "tests/i18n.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old asserted tray.stillRunning; imported deleted; main restored plus catalogs do not offer recovery actions.",
+      "currentEvidence": [
+        "tests/i18n.test.ts catalogs do not offer recovery actions",
+        "tests/i18n.test.ts tray.stillRunning",
+        "git:fd3bd9c hide the desktop window to the tray on close"
+      ],
+      "reason": "Old tray asserts covered.",
+      "verification": [
+        "src/shared/i18n/en.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-api-auth.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM API auth tests.",
+      "currentEvidence": [
+        "tests/llm-api-auth.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-compat.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM compat tests.",
+      "currentEvidence": [
+        "tests/llm-compat.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-concurrency.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM concurrency tests.",
+      "currentEvidence": [
+        "tests/llm-concurrency.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-credentials.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM credential-channel tests.",
+      "currentEvidence": [
+        "tests/llm-credentials.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-default-resolution.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM default resolution tests.",
+      "currentEvidence": [
+        "tests/llm-default-resolution.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-domain.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM domain tests.",
+      "currentEvidence": [
+        "tests/llm-domain.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-gates.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM release-gate tests.",
+      "currentEvidence": [
+        "tests/llm-gates.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-integration.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM integration tests.",
+      "currentEvidence": [
+        "tests/llm-integration.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-multi-space.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM multi-space tests.",
+      "currentEvidence": [
+        "tests/llm-multi-space.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-packaging.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no llm-bridge packaging tests.",
+      "currentEvidence": [
+        "tests/llm-packaging.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-secret-leaks.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM secret-leak tests.",
+      "currentEvidence": [
+        "tests/llm-secret-leaks.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-settings-bridge.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM settings-bridge tests.",
+      "currentEvidence": [
+        "tests/llm-settings-bridge.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-share.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM share mapping tests.",
+      "currentEvidence": [
+        "tests/llm-share.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-space-settings.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM space binding tests.",
+      "currentEvidence": [
+        "tests/llm-space-settings.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-store.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM store tests.",
+      "currentEvidence": [
+        "tests/llm-store.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-stream.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM stream tests.",
+      "currentEvidence": [
+        "tests/llm-stream.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-ui-dom.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM browser DOM tests.",
+      "currentEvidence": [
+        "tests/llm-ui-dom.test.ts",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/llm-ui.test.tsx",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no LLM workbench UI tests.",
+      "currentEvidence": [
+        "tests/llm-ui.test.tsx",
+        "package.json:25-27 test:llm*"
+      ],
+      "reason": "Main-added LLM test. Packaging tests prove llm-bridge is in PLUGIN_REQUIRED. No old unique LLM test.",
+      "verification": [
+        "packages/llm-bridge/package.json",
+        "scripts/pack-spaces-plugin.mjs LLM_REQUIRED",
+        "tests/llm-packaging.test.ts"
+      ]
+    },
+    {
+      "path": "tests/maintenance-responsiveness.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported coordinated restore completeRestore. Main: unsupported and never invokes snapshot mutation. Imported esbuild require banner kept.",
+      "currentEvidence": [
+        "tests/maintenance-responsiveness.test.ts coordinated restore is unsupported",
+        "package.json:32 test:workbench:recovery"
+      ],
+      "reason": "Worker/responsiveness coverage is the keep. Restore success superseded.",
+      "verification": [
+        "scripts/workbench-fault-snapshot-worker.ts",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "tests/plugin-catalog.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported. Main exact version / latest resolve tweaks.",
+      "currentEvidence": [
+        "tests/plugin-catalog.test.ts",
+        "git:28d4f9e Require exact plugin versions and surface install errors"
+      ],
+      "reason": "Catalog still resolves latest then pins.",
+      "verification": [
+        "be9b7a5 Download catalog plugins without asking for a version"
+      ]
+    },
+    {
+      "path": "tests/plugin-library.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported. Main expands multi-version cache / unknown version display.",
+      "currentEvidence": [
+        "tests/plugin-library.test.ts"
+      ],
+      "reason": "Library coverage grew on main.",
+      "verification": [
+        "tasks/todo.md M1-02"
+      ]
+    },
+    {
+      "path": "tests/plugin-ops.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported. Main exact-version / error surfacing.",
+      "currentEvidence": [
+        "tests/plugin-ops.test.ts",
+        "git:28d4f9e Require exact plugin versions and surface install errors"
+      ],
+      "reason": "Install errors must surface; no latest fallback on missing version.",
+      "verification": [
+        "src/shared/i18n/en.ts errors.pluginNeedExactVersion"
+      ]
+    },
+    {
+      "path": "tests/plugin-restore-point.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no file. Main parses write-scope records and rejects session restores. Not a snapshot restore product test.",
+      "currentEvidence": [
+        "tests/plugin-restore-point.test.ts:72 round-trip",
+        "tests/plugin-restore-point.test.ts:113 rejects sessions"
+      ],
+      "reason": "Name is historical measurement. Included in npm test. Do not treat as deprecated recovery.",
+      "verification": [
+        "scripts/verify-plugin-install-write-scope.mjs",
+        "package.json:42"
+      ]
+    },
+    {
+      "path": "tests/q-let-it-crash.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no Q matrix unit file.",
+      "currentEvidence": [
+        "tests/q-let-it-crash.test.ts:27 E01",
+        "package.json:30 test:workbench"
+      ],
+      "reason": "Protect let-it-crash unit coverage.",
+      "verification": [
+        "docs/let-it-crash.md",
+        "tasks/q-coverage.md"
+      ]
+    },
+    {
+      "path": "tests/runtime-store.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported runtime pointer tests. Main tiny tweak.",
+      "currentEvidence": [
+        "tests/runtime-store.test.ts"
+      ],
+      "reason": "Runtime selection is not snapshot restore.",
+      "verification": [
+        "package.json:42"
+      ]
+    },
+    {
+      "path": "tests/sample-plugins.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no sample plugin pack tests.",
+      "currentEvidence": [
+        "tests/sample-plugins.test.ts",
+        "package.json:30 and :42"
+      ],
+      "reason": "Broken/crash/notes fixtures for install/crash visibility.",
+      "verification": [
+        "tests/fixtures/sample-plugins/dsh-sample-notes/package.json"
+      ]
+    },
+    {
+      "path": "tests/space-share.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no share tests.",
+      "currentEvidence": [
+        "tests/space-share.test.ts",
+        "git:6f13271 Add space share export and split-state import"
+      ],
+      "reason": "Protect share split-state.",
+      "verification": [
+        "src/renderer/src/components/SpaceSharePanel.tsx"
+      ]
+    },
+    {
+      "path": "tests/space-templates.test.ts",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no template tests.",
+      "currentEvidence": [
+        "tests/space-templates.test.ts",
+        "git:c31547d Stop plugin batches at the first failure and add space templates"
+      ],
+      "reason": "Create-from-template without mutating existing spaces.",
+      "verification": [
+        "src/preload/index.ts:106-109"
+      ]
+    },
+    {
+      "path": "tests/spaces-core.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported. Main additive 25 lines.",
+      "currentEvidence": [
+        "tests/spaces-core.test.ts",
+        "package.json:24 test:spaces"
+      ],
+      "reason": "Core assertions grew; no evidence old unique cases were deleted.",
+      "verification": [
+        "tests/spaces-host.test.ts"
+      ]
+    },
+    {
+      "path": "tests/spaces-doctor.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported recover/rollback write tests. Main unsupported + diagnose-only.",
+      "currentEvidence": [
+        "tests/spaces-doctor.test.ts",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ],
+      "reason": "Old recover-success assertions invalid.",
+      "verification": [
+        "tests/workbench-doctor.test.ts",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "tests/spaces-host.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old Typert list lacked initialize and workbenchPackage. Imported added both. Main adds llm/llmCredential; unknown CLI fixture is tag latest.",
+      "currentEvidence": [
+        "tests/spaces-host.test.ts initialize, workbenchPackage, llm",
+        "tests/spaces-host.test.ts unbound CLI uses latest tag"
+      ],
+      "reason": "Imported initialize + package query kept. Allowlist unknown-version case superseded.",
+      "verification": [
+        "packages/plugin/src/typert.host.ts",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "tests/spaces-lock.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported lock tests. Main small diff; still no reclaimDead.",
+      "currentEvidence": [
+        "tests/spaces-lock.test.ts"
+      ],
+      "reason": "Refuse-on-busy remains. Old reclaim must not return.",
+      "verification": [
+        "docs/plans/spaces-merge-convergence.md",
+        "tasks/todo.md R3"
+      ]
+    },
+    {
+      "path": "tests/spaces-panel.test.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported panel tests. Main 8-line tweak.",
+      "currentEvidence": [
+        "tests/spaces-panel.test.tsx"
+      ],
+      "reason": "Ordinary plugin still observes only.",
+      "verification": [
+        "packages/plugin/src/client/index.tsx"
+      ]
+    },
+    {
+      "path": "tests/validate-isolation.test.mjs",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "Old had no unit wrapper for isolation script.",
+      "currentEvidence": [
+        "tests/validate-isolation.test.mjs",
+        "package.json:42",
+        "git:861cf4e"
+      ],
+      "reason": "Unit coverage of isolation gate.",
+      "verification": [
+        "scripts/validate-isolation.mjs"
+      ]
+    },
+    {
+      "path": "tests/workbench-doctor.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old refused rc.2 recover writes. Imported allowed rc.2 recover. Main recover/unlock/rollback exit 7 UNSUPPORTED and leave bytes.",
+      "currentEvidence": [
+        "tests/workbench-doctor.test.ts recover unlock and rollback are unsupported",
+        "git:0c83fab Make doctor and restore product paths unsupported"
+      ],
+      "reason": "All three refs' recover-write assertions are invalid now. Diagnose + unsupported is current.",
+      "verification": [
+        "package.json:32 test:workbench:recovery",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "tests/workbench-jobs.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old used recovery-required/settleRecovery. Imported added epsilon/zeta view sanitization. Main leftover jobs fail interrupted; recovery.resume unsupported; epsilon/zeta kept.",
+      "currentEvidence": [
+        "tests/workbench-jobs.test.ts settleRecovery is unsupported",
+        "tests/workbench-jobs.test.ts:642-671 epsilon/zeta",
+        "git:39f8224 Drop job recovery FSM and report failure context"
+      ],
+      "reason": "Imported sanitization is on main. Recovery FSM superseded.",
+      "verification": [
+        "package.json:30 test:workbench"
+      ]
+    },
+    {
+      "path": "tests/workbench-maintenance.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old==imported recover reconciled snapshots; config restore reinitialized manager. Main recover/snapshot.restore/config.restore forbidden. One title still says reinitializes while body asserts forbidden.",
+      "currentEvidence": [
+        "tests/workbench-maintenance.test.ts:783-838 restore forbidden",
+        "tests/workbench-maintenance.test.ts:841 stale title"
+      ],
+      "reason": "Restore success superseded. Create/delete/upgrade-preview coverage is the keep. Stale title is B-stage rename.",
+      "verification": [
+        "packages/plugin/src/workbench/components.tsx snapshot.create",
+        "docs/let-it-crash.md"
+      ]
+    },
+    {
+      "path": "tests/workbench-package-upgrade.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported recover-after-success and install-failure restore. Main: recover unavailable; no restore on failure; leftover marker kept; successful execute still installs digest-named archives.",
+      "currentEvidence": [
+        "tests/workbench-package-upgrade.test.ts:163 successful execute",
+        "package.json scripts omit this file (old 51911e4 also omitted it)",
+        "docs/plans/spaces-merge-convergence.md"
+      ],
+      "reason": "Non-restore upgrade assertions remain. Not wiring into npm test is B5, not an old script main dropped.",
+      "verification": [
+        "packages/plugin/src/workbench/components.tsx:611-674",
+        "docs/plans/spaces-merge-convergence.md npx tsx --test tests/workbench-package-upgrade.test.ts"
+      ]
+    },
+    {
+      "path": "tests/workbench-plugin.test.ts",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old omitted initialize. Imported added initialize/desktop-lease/handoff/no-cold-start tests. Main changes unbound CLI fixture from 0.1.5-rc.3 to tag latest.",
+      "currentEvidence": [
+        "tests/workbench-plugin.test.ts:743 initialize rejects unbound CLI (latest)",
+        "initialize refuses a desktop lease without an endpoint"
+      ],
+      "reason": "Standard-install initialize coverage from import is on main and updated for latest-channel.",
+      "verification": [
+        "packages/plugin/src/client/index.tsx",
+        "scripts/verify-plugin-standard-install.mjs"
+      ]
+    },
+    {
+      "path": "tests/workbench-supervisor.test.ts",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Old treated rc.2 as incompatible. Imported admitted rc.2, added dump-config seed, recovery.resume tests. Main: exact 0.1.5-rc.3 admitted; tag latest unbound; recovery.resume unsupported; dump-config seed kept.",
+      "currentEvidence": [
+        "tests/workbench-supervisor.test.ts:1183 official web seed",
+        "tests/workbench-supervisor.test.ts recovery.resume is unsupported",
+        "git:ee26d4c Follow official DSH latest and drop the CLI version allowlist",
+        "git:39f8224 Drop job recovery FSM and report failure context"
+      ],
+      "reason": "Imported web-seed assertion is on main. Recovery resume superseded. Old rc.2-incompatible gate must not return.",
+      "verification": [
+        "tests/compatible-dsh-cli.test.ts"
+      ]
+    },
+    {
+      "path": "tests/workbench-ui.test.tsx",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported included restore/resume. Main: snapshots.create present, snapshot.restore absent, RecoverySurface without resume, share panel, package upgrade button remains.",
+      "currentEvidence": [
+        "tests/workbench-ui.test.tsx snapshots.create and !snapshot.restore",
+        "tests/workbench-ui.test.tsx workbench package reloads after upgrade",
+        "settings share panel"
+      ],
+      "reason": "Package upgrade + snapshot create + share covered. Restore/resume UI assertions superseded.",
+      "verification": [
+        "packages/plugin/src/workbench/components.tsx",
+        "src/renderer/src/components/SpaceSharePanel.tsx"
+      ]
+    },
+    {
+      "path": "tsconfig.web.json",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Old==imported @/* @shared/*. Main adds @workbench/* and includes workbench + llm domain files.",
+      "currentEvidence": [
+        "tsconfig.web.json @workbench/*",
+        "include packages/plugin/src/workbench and llm-connections"
+      ],
+      "reason": "Needed for SettingsDialog LLM UI.",
+      "verification": [
+        "electron.vite.config.ts:27"
+      ]
+    }
+  ],
+  "summary": {
+    "counts": {
+      "alreadyCovered": 111,
+      "superseded": 12,
+      "missing": 2,
+      "total": 125
+    },
+    "missingItems": [
+      {
+        "path": "scripts/verify-workbench-dual-control.mjs",
+        "missingPatch": "Restore the old assertion that 接管|Take over|移交|Hand off count is 0 while ownerKind=web. Delete the waitFor of the removed badge string. Keep IPC writable===false / ownerKind===web and no-manager-rail checks."
+      },
+      {
+        "path": "scripts/verify-workbench-rc2.mjs",
+        "missingPatch": "Replace DEFAULT_RC2_BIN with the old repo-relative .sandbox/spaces-unknown-cli default (or require env and fail closed). Leave PRODUCT_GATE/allowlist unrestored."
+      }
+    ],
+    "baselineRisks": [
+      "B5 (not old unique): tests/workbench-package-upgrade.test.ts is on main with let-it-crash assertions but is not in package.json test/test:workbench or CI. Old 51911e4 also omitted it from scripts. Plan already requires npx tsx --test tests/workbench-package-upgrade.test.ts.",
+      "B5 (main-added file): .github/workflows/plugin-distribution.yml:30-33 version-checks plugin and view-bridge only; scripts/pack-spaces-plugin.mjs already packs llm-bridge.",
+      "B1/B4 leftover copy, not old unique: packages/plugin/src/workbench/recovery.tsx still exposes acquire; GUIDE_COPY recoveryTitle/recoveryBody. Dual-control stale badge is the A-stage missing item.",
+      "Stale test title only: tests/workbench-maintenance.test.ts:841 still named 'manager config restore reinitializes the manager' while body asserts workbench/forbidden.",
+      "Historical evidence scripts on both trees hardcode C:/Users/admin Playwright/CLI paths. Only verify-workbench-rc2.mjs DEFAULT_RC2_BIN uniquely regressed from a repo-relative sandbox default.",
+      "Protect: snapshot-worker remains packed (electron.vite.config.ts:11-14, package.json:122-125, scripts/build-spaces.mjs:65) as install IO. plugin-restore-point tests measure write-scope records.",
+      "This audit did not merge, run tests, npm install, or perform runtime acceptance."
+    ]
+  }
+}

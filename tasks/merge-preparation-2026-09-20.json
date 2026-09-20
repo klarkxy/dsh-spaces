@@ -1,0 +1,1652 @@
+{
+  "schemaVersion": 1,
+  "checkedOn": "2026-09-20",
+  "repository": "https://github.com/klarkxy/dsh-spaces",
+  "purpose": "Merge planning only; no merge or runtime acceptance performed",
+  "refs": {
+    "main": "c22c47fd37629e3bb852f7702d68624d3a73453d",
+    "pluginization": "51911e481961408ad77758b0123653c0fc1e2bdd",
+    "mergeBase": "dfe9ae0ed760ee1e6fe9e9d9e5d057e9451981b7",
+    "localHeadAndImported": "1f339ac",
+    "preservedStash": "7ecafc6a8f5563130e4465b8b3f69c208235f1a5"
+  },
+  "counts": {
+    "mainOnlyCommits": 33,
+    "pluginizationOnlyCommits": 16,
+    "localBehindMain": 32,
+    "oldToImportedChangedPaths": 68,
+    "oldToMainChangedPaths": 279,
+    "conflictingPaths": 124,
+    "addAddConflicts": 115,
+    "contentConflicts": 9
+  },
+  "equalObjects": [
+    {
+      "paths": [
+        "src/core"
+      ],
+      "pluginizationAndImportedObject": "3850022e5aa67a827c3cb186aeca27d6007804df",
+      "meaning": "same tree at old branch and imported commit; not same as current main"
+    },
+    {
+      "paths": [
+        "src/preload"
+      ],
+      "pluginizationAndImportedObject": "60f385f0a1943ffd0cb664d65e26a242621f334c",
+      "meaning": "same tree at old branch and imported commit"
+    },
+    {
+      "paths": [
+        "src/adapters/node/workbench-package-upgrade.ts"
+      ],
+      "pluginizationAndImportedObject": "bbd23e5a36c3b0bc513f877a9cf5d516866dc6d5",
+      "meaning": "same blob at old branch and imported commit"
+    }
+  ],
+  "mergeSimulation": {
+    "command": "git merge-tree --write-tree --name-only origin/main origin/codex/spaces-pluginization",
+    "exitCode": 1,
+    "meaning": "conflicts found; branch, index and worktree unchanged",
+    "conflictingPaths": [
+      ".github/workflows/ci.yml",
+      "README.md",
+      "docs/workbench.md",
+      "package-lock.json",
+      "package.json",
+      "packages/core/README.md",
+      "packages/core/package.json",
+      "packages/core/src/index.ts",
+      "packages/doctor/README.md",
+      "packages/doctor/package.json",
+      "packages/doctor/src/common.ts",
+      "packages/doctor/src/index.ts",
+      "packages/doctor/src/inspect.ts",
+      "packages/doctor/src/recover.ts",
+      "packages/doctor/src/resources.ts",
+      "packages/plugin/README.md",
+      "packages/plugin/package.json",
+      "packages/plugin/src/client/i18n.ts",
+      "packages/plugin/src/client/index.tsx",
+      "packages/plugin/src/client/workbench-remote.ts",
+      "packages/plugin/src/host/plugin.ts",
+      "packages/plugin/src/host/remote-errors.ts",
+      "packages/plugin/src/host/runtime.ts",
+      "packages/plugin/src/host/workbench-guide.ts",
+      "packages/plugin/src/host/workbench-http.ts",
+      "packages/plugin/src/host/workbench-manager.ts",
+      "packages/plugin/src/host/workbench-schemas.ts",
+      "packages/plugin/src/index.ts",
+      "packages/plugin/src/typert.host.ts",
+      "packages/plugin/src/typert.remote-client.ts",
+      "packages/plugin/src/types.ts",
+      "packages/plugin/src/workbench/components.tsx",
+      "packages/plugin/src/workbench/i18n.ts",
+      "packages/plugin/src/workbench/index.ts",
+      "packages/plugin/src/workbench/recovery.tsx",
+      "packages/plugin/src/workbench/store.ts",
+      "packages/plugin/src/workbench/styles.ts",
+      "packages/supervisor/README.md",
+      "packages/supervisor/package.json",
+      "packages/view-bridge/package.json",
+      "scripts/build-spaces.mjs",
+      "scripts/build-workbench-candidate.mjs",
+      "scripts/verify-spaces-distribution.mjs",
+      "scripts/verify-spaces-themes.mjs",
+      "scripts/verify-workbench-dual-control.mjs",
+      "scripts/verify-workbench-rc2.mjs",
+      "src/adapters/desktop/control-residue.ts",
+      "src/adapters/desktop/controller.ts",
+      "src/adapters/desktop/home-control.ts",
+      "src/adapters/node/spaces-control.ts",
+      "src/adapters/node/workbench-http.ts",
+      "src/adapters/node/workbench-jobs.ts",
+      "src/adapters/node/workbench-maintenance.ts",
+      "src/adapters/node/workbench-package-upgrade.ts",
+      "src/adapters/node/workbench-supervisor.ts",
+      "src/core/domain/isolation.ts",
+      "src/main/coordinated-upgrade.ts",
+      "src/main/index.ts",
+      "src/main/patch-writer.ts",
+      "src/renderer/src/App.tsx",
+      "src/shared/desktop-controller.ts",
+      "src/shared/workbench.ts",
+      "tasks/pluginization-acceptance.md",
+      "tasks/pluginization-bundle.md",
+      "tasks/pluginization-core.md",
+      "tasks/pluginization-desktop.md",
+      "tasks/pluginization-distribution.md",
+      "tasks/pluginization-doctor.md",
+      "tasks/pluginization-frontend.md",
+      "tasks/pluginization-host.md",
+      "tasks/pluginization-localization.md",
+      "tasks/pluginization-lock.md",
+      "tasks/pluginization-plan.md",
+      "tasks/pluginization-runtime.md",
+      "tasks/pluginization-theme-compatibility.md",
+      "tasks/pluginization-themes-acceptance.md",
+      "tasks/pluginization-themes-worker.md",
+      "tasks/pluginization-trial-acceptance.md",
+      "tasks/pluginization-windows-distribution.md",
+      "tasks/spaces-demo-video-acceptance.md",
+      "tasks/spaces-demo-video-worker.md",
+      "tasks/workbench-audit.md",
+      "tasks/workbench-browser-failures-worker.md",
+      "tasks/workbench-contract.md",
+      "tasks/workbench-controller-worker.md",
+      "tasks/workbench-crash-worker.md",
+      "tasks/workbench-demo-narration.json",
+      "tasks/workbench-demo-video-worker.md",
+      "tasks/workbench-desktop-worker.md",
+      "tasks/workbench-doctor-worker.md",
+      "tasks/workbench-documentation-worker.md",
+      "tasks/workbench-dual-control-worker.md",
+      "tasks/workbench-external-discovery.md",
+      "tasks/workbench-foundation-worker.md",
+      "tasks/workbench-implementation.md",
+      "tasks/workbench-jobs-worker.md",
+      "tasks/workbench-maintenance-product-worker.md",
+      "tasks/workbench-maintenance-responsiveness-worker.md",
+      "tasks/workbench-maintenance-worker.md",
+      "tasks/workbench-package-acceptance-worker.md",
+      "tasks/workbench-package-upgrade-worker.md",
+      "tasks/workbench-plugin-worker.md",
+      "tasks/workbench-rc2-worker.md",
+      "tasks/workbench-restore-receipt.md",
+      "tasks/workbench-self-update-audit.md",
+      "tasks/workbench-supervisor-worker.md",
+      "tasks/workbench-ui-worker.md",
+      "tasks/workbench-xp-compatibility-worker.md",
+      "tests/compatible-dsh-cli.test.ts",
+      "tests/coordinated-upgrade.test.ts",
+      "tests/desktop-controller.test.ts",
+      "tests/maintenance-responsiveness.test.ts",
+      "tests/spaces-core.test.ts",
+      "tests/spaces-doctor.test.ts",
+      "tests/spaces-host.test.ts",
+      "tests/spaces-lock.test.ts",
+      "tests/spaces-panel.test.tsx",
+      "tests/workbench-doctor.test.ts",
+      "tests/workbench-jobs.test.ts",
+      "tests/workbench-maintenance.test.ts",
+      "tests/workbench-package-upgrade.test.ts",
+      "tests/workbench-plugin.test.ts",
+      "tests/workbench-supervisor.test.ts",
+      "tests/workbench-ui.test.tsx"
+    ]
+  },
+  "oldToImported": {
+    "direction": "pluginization -> imported",
+    "paths": [
+      {
+        "status": "M",
+        "path": ".github/workflows/ci.yml",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": ".github/workflows/plugin-distribution.yml",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "README.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "docs/plugin-standard-install.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "docs/workbench.md",
+        "decision": "covered-by-reviewed-patch"
+      },
+      {
+        "status": "M",
+        "path": "package-lock.json",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "package.json",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/README.md",
+        "decision": "superseded"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/src/common.ts",
+        "decision": "superseded"
+      },
+      {
+        "status": "A",
+        "path": "packages/plugin/.npmignore",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/README.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/package.json",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/client/i18n.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/client/index.tsx",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/client/workbench-remote.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/plugin.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/runtime.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/workbench-guide.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/workbench-schemas.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/typert.host.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/typert.remote-client.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/types.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/supervisor/README.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "packages/view-bridge/.npmignore",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "packages/view-bridge/README.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "packages/view-bridge/package.json",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "scripts/pack-spaces-plugin.mjs",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "scripts/verify-plugin-standard-install.mjs",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-workbench-dual-control.mjs",
+        "decision": "covered-by-reviewed-patch"
+      },
+      {
+        "status": "A",
+        "path": "scripts/verify-workbench-maintenance-faults.mjs",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-workbench-rc2.mjs",
+        "decision": "covered-by-reviewed-patch"
+      },
+      {
+        "status": "A",
+        "path": "scripts/workbench-fault-snapshot-worker.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "scripts/workbench-fault-supervisor.mjs",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/desktop/control-residue.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/desktop/controller.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/spaces-control.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/workbench-supervisor.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/main/index.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/main/tray.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/App.tsx",
+        "decision": "superseded"
+      },
+      {
+        "status": "A",
+        "path": "src/renderer/src/components/ControllerStatus.tsx",
+        "decision": "superseded"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/i18n/en.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/i18n/zh.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/runtime.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "tasks/handoff-2026-09-14.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "tasks/history-recovery.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tasks/plan.md",
+        "decision": "superseded"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-cli-rc2-worker.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-community-submission.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-distribution-worker.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-standard-install.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-bundle.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-desktop.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-windows-distribution.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tasks/todo.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-foundation-worker.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "A",
+        "path": "tasks/workbench-maintenance-faults-worker.md",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/compatible-dsh-cli.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/desktop-controller.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/dsh-cli.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/i18n.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/maintenance-responsiveness.test.ts",
+        "decision": "superseded"
+      },
+      {
+        "status": "M",
+        "path": "tests/process-manager.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/spaces-host.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-doctor.test.ts",
+        "decision": "superseded"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-jobs.test.ts",
+        "decision": "superseded"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-plugin.test.ts",
+        "decision": "already-covered"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-supervisor.test.ts",
+        "decision": "superseded"
+      }
+    ]
+  },
+  "oldToMain": {
+    "direction": "pluginization -> main",
+    "paths": [
+      {
+        "status": "M",
+        "path": ".github/workflows/ci.yml"
+      },
+      {
+        "status": "A",
+        "path": ".github/workflows/plugin-distribution.yml"
+      },
+      {
+        "status": "A",
+        "path": "AGENTS.md"
+      },
+      {
+        "status": "M",
+        "path": "CONTRIBUTING.md"
+      },
+      {
+        "status": "M",
+        "path": "IMPLEMENTATION_PLAN.md"
+      },
+      {
+        "status": "M",
+        "path": "README.md"
+      },
+      {
+        "status": "M",
+        "path": "REQUIREMENTS.md"
+      },
+      {
+        "status": "M",
+        "path": "TODO.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/compat/global-llm-acceptance.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/compat/global-llm-config-sources.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/compat/global-llm-matrix.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/let-it-crash.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/plans/global-llm-connections.md"
+      },
+      {
+        "status": "A",
+        "path": "docs/plugin-standard-install.md"
+      },
+      {
+        "status": "M",
+        "path": "docs/workbench.md"
+      },
+      {
+        "status": "A",
+        "path": "dsh-spaces-let-it-crash-plan.md"
+      },
+      {
+        "status": "M",
+        "path": "electron.vite.config.ts"
+      },
+      {
+        "status": "M",
+        "path": "package-lock.json"
+      },
+      {
+        "status": "M",
+        "path": "package.json"
+      },
+      {
+        "status": "M",
+        "path": "packages/core/README.md"
+      },
+      {
+        "status": "M",
+        "path": "packages/core/package.json"
+      },
+      {
+        "status": "M",
+        "path": "packages/core/src/index.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/README.md"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/package.json"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/src/common.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/src/index.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/src/inspect.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/src/recover.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/doctor/src/resources.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/LICENSE"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/README.md"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/cordis.patch.yml"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/package.json"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/credentials-provider.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/errors.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/index.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/official-host.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/plugin.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/request-guard.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/settings-provider.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/llm-bridge/src/space-bridge.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/plugin/.npmignore"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/README.md"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/package.json"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/client/i18n.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/client/index.tsx"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/client/workbench-remote.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/plugin.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/remote-errors.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/runtime.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/workbench-guide.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/workbench-http.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/workbench-manager.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/host/workbench-schemas.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/index.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/typert.host.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/typert.remote-client.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/types.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/workbench/components.tsx"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/workbench/i18n.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/workbench/index.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/plugin/src/workbench/llm/center.tsx"
+      },
+      {
+        "status": "A",
+        "path": "packages/plugin/src/workbench/llm/client.ts"
+      },
+      {
+        "status": "A",
+        "path": "packages/plugin/src/workbench/llm/space-binding.tsx"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/workbench/recovery.tsx"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/workbench/store.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/plugin/src/workbench/styles.ts"
+      },
+      {
+        "status": "M",
+        "path": "packages/supervisor/README.md"
+      },
+      {
+        "status": "M",
+        "path": "packages/supervisor/package.json"
+      },
+      {
+        "status": "A",
+        "path": "packages/view-bridge/.npmignore"
+      },
+      {
+        "status": "A",
+        "path": "packages/view-bridge/README.md"
+      },
+      {
+        "status": "M",
+        "path": "packages/view-bridge/package.json"
+      },
+      {
+        "status": "M",
+        "path": "scripts/build-spaces.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/build-workbench-candidate.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/pack-spaces-plugin.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/setup-sandbox.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/validate-isolation.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/validate-llm-distribution.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/validate-llm-secrets.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/verify-plugin-install-write-scope.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/verify-plugin-standard-install.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-spaces-distribution.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-spaces-themes.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-workbench-dual-control.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/verify-workbench-maintenance-faults.mjs"
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-workbench-rc2.mjs"
+      },
+      {
+        "status": "A",
+        "path": "scripts/workbench-fault-snapshot-worker.ts"
+      },
+      {
+        "status": "A",
+        "path": "scripts/workbench-fault-supervisor.mjs"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/desktop/control-residue.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/desktop/controller.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/desktop/home-control.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-catalog-store.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-credential-store.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-file-lock.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-host.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-operation-store.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-paths.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-policy-store.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-probe.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-snapshot.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/adapters/node/llm-space-settings.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/spaces-control.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/workbench-http.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/workbench-jobs.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/workbench-maintenance.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/workbench-package-upgrade.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/adapters/node/workbench-supervisor.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/application/global-llm-host.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/application/global-llm-service.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/core/domain/isolation.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/domain/llm-connections.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/domain/llm-resolution.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/domain/llm-share.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/ports/llm-runtime.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/core/ports/llm-store.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/coordinated-upgrade.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/main/desktop-llm.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/diagnostics.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/dsh-cli.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/index.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/patch-writer.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/plugin-ops.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/main/plugin-restore-point.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/main/process-manager.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/main/space-share-zip.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/main/space-share.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/main/space-templates.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/preload/index.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/App.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/components/CreateWizard.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/components/DiagnosticsDialog.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/components/DiagnosticsPanel.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/components/MaintenanceDialog.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/components/PluginPanel.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/components/SettingsDialog.tsx"
+      },
+      {
+        "status": "A",
+        "path": "src/renderer/src/components/SpaceSharePanel.tsx"
+      },
+      {
+        "status": "M",
+        "path": "src/renderer/src/recovery.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/shared/batch.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/desktop-controller.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/i18n/en.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/i18n/zh.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/shared/llm-api.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/plugin.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/runtime.ts"
+      },
+      {
+        "status": "A",
+        "path": "src/shared/space-share.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/types.ts"
+      },
+      {
+        "status": "M",
+        "path": "src/shared/workbench.ts"
+      },
+      {
+        "status": "M",
+        "path": "tasks/acceptance.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/fix-acceptance-2026-09-11.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/global-llm.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/handoff-2026-09-14.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/history-recovery.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/let-it-crash-d-delivery.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/plan.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-cli-rc2-worker.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-community-submission.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-distribution-worker.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-management/plan.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-management/task-01-write-scope.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/plugin-standard-install.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-acceptance.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-bundle.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-core.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-desktop.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-distribution.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-doctor.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-frontend.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-host.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-localization.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-lock.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-plan.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-runtime.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-theme-compatibility.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-themes-acceptance.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-themes-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-trial-acceptance.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/pluginization-windows-distribution.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/q-coverage.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/releases/v0.2.0.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/releases/v0.3.0.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/review-2026-09-11.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/review-config.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/spaces-demo-video-acceptance.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/spaces-demo-video-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/todo.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-audit.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-browser-failures-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-contract.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-controller-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-crash-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-demo-narration.json"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-demo-video-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-desktop-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-doctor-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-documentation-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-dual-control-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-external-discovery.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-foundation-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-implementation.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-jobs-worker.md"
+      },
+      {
+        "status": "A",
+        "path": "tasks/workbench-maintenance-faults-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-maintenance-product-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-maintenance-responsiveness-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-maintenance-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-package-acceptance-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-package-upgrade-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-plugin-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-rc2-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-restore-receipt.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-self-update-audit.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-supervisor-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-ui-worker.md"
+      },
+      {
+        "status": "M",
+        "path": "tasks/workbench-xp-compatibility-worker.md"
+      },
+      {
+        "status": "A",
+        "path": "tests/batch.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/compatible-dsh-cli.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/coordinated-upgrade.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/desktop-controller.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/diagnostics.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/dsh-cli.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/llm-ui/host.tsx"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-broken/index.js"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-broken/package.json"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-crash/index.js"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-crash/package.json"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-notes/cordis.patch.yml"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-notes/index.js"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-notes/package.json"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-relay/index.js"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-relay/package.json"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/client.js"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/cordis.patch.yml"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/index.js"
+      },
+      {
+        "status": "A",
+        "path": "tests/fixtures/sample-plugins/dsh-sample-sketch/package.json"
+      },
+      {
+        "status": "M",
+        "path": "tests/frontend-recovery.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/helpers/llm-official.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/helpers/llm-space-worker.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/i18n.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-api-auth.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-compat.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-concurrency.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-credentials.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-default-resolution.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-domain.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-gates.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-integration.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-multi-space.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-packaging.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-secret-leaks.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-settings-bridge.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-share.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-space-settings.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-store.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-stream.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-ui-dom.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/llm-ui.test.tsx"
+      },
+      {
+        "status": "M",
+        "path": "tests/maintenance-responsiveness.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/plugin-catalog.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/plugin-library.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/plugin-ops.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/plugin-restore-point.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/q-let-it-crash.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/runtime-store.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/sample-plugins.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/space-share.test.ts"
+      },
+      {
+        "status": "A",
+        "path": "tests/space-templates.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/spaces-core.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/spaces-doctor.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/spaces-host.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/spaces-lock.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/spaces-panel.test.tsx"
+      },
+      {
+        "status": "A",
+        "path": "tests/validate-isolation.test.mjs"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-doctor.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-jobs.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-maintenance.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-package-upgrade.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-plugin.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-supervisor.test.ts"
+      },
+      {
+        "status": "M",
+        "path": "tests/workbench-ui.test.tsx"
+      },
+      {
+        "status": "M",
+        "path": "tsconfig.web.json"
+      }
+    ]
+  },
+  "auditGate": {
+    "complete": true,
+    "explanation": "Primary accepted three semantic audit reports and four bounded fixes. See tasks/merge-audit/acceptance.json. Completion is A1 only, not architecture or runtime acceptance."
+  },
+  "runtimeValidation": {
+    "performed": false,
+    "reason": "Planning-only turn; working checkout remains at older local main; no tests on stale checkout claimed as current evidence."
+  },
+  "auditAcceptance": "tasks/merge-audit/acceptance.json"
+}
