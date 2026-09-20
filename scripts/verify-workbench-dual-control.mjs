@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 /**
+ * RETIRED historical source. Invocation fails closed and must not be treated
+ * as current B5/B6 evidence. Body kept for trace (old take-over / rc.1
+ * allowlist dual-end). Current replacement:
+ *   scripts/verify-spaces-desktop.mjs
+ *
+ * Historical:
  * Desktop/Web dual-end run-rights handoff against one isolated Home.
  * Packed supervisor first; Electron second. Real IPC. No model calls.
  * Does not import scripts/verify-spaces-desktop.mjs or verify-workbench-product.mjs
  * (both execute at load). Safe to import this file; main is guarded.
  *
- *   node scripts/verify-workbench-dual-control.mjs [--output DIR] [--home DIR]
- *
- * Env: DSH_TEST_PACKAGED_EXE (preferred distribution exe), DSH_TEST_BIN,
- * DSH_TEST_PLAYWRIGHT or DSH_TEST_PLAYWRIGHT_MODULE, DSH_TEST_OUTPUT,
- * DSH_TEST_HOME, DSH_TEST_PNPM_CJS.
- *
- * Without DSH_TEST_PACKAGED_EXE the current out/main unpackaged Electron is
- * used and the report marks it as not a distribution build.
+ *   node scripts/verify-workbench-dual-control.mjs  → RETIRED (nonzero)
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -922,12 +921,9 @@ async function main() {
 
 const invoked = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invoked) {
-  main().catch(error => {
-    report.status = 'fail';
-    report.error ||= redact(errorText(error));
-    mkdirSync(output, { recursive: true });
-    save();
-    console.error(`FAIL ${redact(error instanceof Error ? error.message : error)}`);
-    process.exitCode = 1;
-  });
+  console.error(`RETIRED: scripts/verify-workbench-dual-control.mjs is historical source, not current evidence.
+Reason: it still drives old take-over / rc.1 allowlist dual-end mutations that the product no longer supports. Invocation is fail-closed so those mutations never run.
+Replacement: scripts/verify-spaces-desktop.mjs
+That live script has not recorded a real PASS.`);
+  process.exitCode = 1;
 }

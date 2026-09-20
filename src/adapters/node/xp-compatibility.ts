@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
-import { atomicWrite } from "../../main/atomic";
+import { atomicWrite } from "./atomic";
 import { PROFILE_NAME_RE } from "../../shared/types";
 
 export const XP_PACKAGE_NAME = "dsh-client-ui-theme-xp";

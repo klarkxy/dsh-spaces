@@ -25,9 +25,16 @@ import {
   type WorkbenchMaintenance,
   type WorkbenchSupervisorHandle,
 } from "../src/adapters/node/workbench-supervisor.ts";
-import { cookieValue, expectedAuthCookieName, renderEntryPage } from "../src/adapters/node/workbench-http.ts";
-import type { PatchWriter } from "../src/main/patch-writer.ts";
-import type { ProcessRuntime } from "../src/main/process-manager.ts";
+import {
+  cookieValue,
+  expectedAuthCookieName,
+  renderEntryPage,
+  startWorkbenchHttp,
+  WORKBENCH_HTTP_BODY_LIMIT,
+  type WorkbenchHttpRuntime,
+} from "../src/adapters/node/workbench-http.ts";
+import type { PatchWriter } from "../src/adapters/node/patch-writer.ts";
+import type { ProcessRuntime } from "../src/adapters/node/process-manager.ts";
 import type { WorkbenchPlan, WorkbenchPlanRequest } from "../src/shared/workbench.ts";
 
 const temps: string[] = [];
@@ -36,10 +43,67 @@ const handles: WorkbenchSupervisorHandle[] = [];
 
 test("stable entry scripts parse before any DSH instance is available", () => {
   const html = renderEntryPage({ managerRunning: false, managerViewPath: null,
-    maintenance: false, recoveryRequired: false, writable: true, reasons: [] });
+    maintenance: false, writable: true, reasons: [], serviceEpoch: "a".repeat(64) });
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length);
   for (const [, source] of scripts) assert.doesNotThrow(() => new Script(source));
+});
+
+function fakeHttpRuntime(originOf: () => string): WorkbenchHttpRuntime {
+  return {
+    cookieName: () => "dsh-auth-test",
+    sessionCookie: () => "",
+    sessionEquals: () => false,
+    consumeBootstrapToken: () => false,
+    hostBearerEquals: (value) => value === "test-bearer",
+    supervisorOrigin: () => originOf(),
+    managerOrigin: () => null,
+    isWorkspaceOrigin: () => false,
+    dispatch: async () => ({ ok: true }),
+    entryPage: () => "<html></html>",
+    viewEntry: async () => ({ status: 404, message: "missing" }),
+    mintHandoff: () => "",
+  };
+}
+
+test("ordinary workbench methods keep the small body limit; product share.previewImport may exceed it", async () => {
+  let origin = "http://127.0.0.1:9";
+  const http = await startWorkbenchHttp(fakeHttpRuntime(() => origin), 0);
+  origin = http.origin;
+  const headers = { "content-type": "application/json", authorization: "Bearer test-bearer" };
+  try {
+    const overOrdinary = `{${"\"pad\":\""}${"A".repeat(WORKBENCH_HTTP_BODY_LIMIT)}"}\n`;
+    const state = await fetch(`${http.origin}/api/workbench/state`, {
+      method: "POST",
+      headers,
+      body: overOrdinary,
+    });
+    assert.equal(state.status, 413);
+
+    const productOther = JSON.stringify({
+      request: { method: "settings.read", pad: "A".repeat(WORKBENCH_HTTP_BODY_LIMIT) },
+    });
+    const other = await fetch(`${http.origin}/api/workbench/product`, {
+      method: "POST",
+      headers,
+      body: productOther,
+    });
+    assert.equal(other.status, 413);
+
+    const share = JSON.stringify({
+      request: { method: "share.previewImport", archive: "A".repeat(WORKBENCH_HTTP_BODY_LIMIT) },
+    });
+    const preview = await fetch(`${http.origin}/api/workbench/product`, {
+      method: "POST",
+      headers,
+      body: share,
+    });
+    assert.notEqual(preview.status, 413);
+    const previewBody = (await preview.json()) as { ok?: boolean };
+    assert.equal(previewBody.ok, true);
+  } finally {
+    await http.close();
+  }
 });
 
 test("default entry origin survives clean cold restart while explicit port zero stays ephemeral", async () => {
@@ -80,13 +144,141 @@ test("ROOT: interrupted owned manager install resumes without claiming an existi
     },
   };
   const first = await startSupervisor(home, extra);
-  assert.equal((await first.runtime.state()).recoveryRequired, true);
+  assert.equal((await first.runtime.state()).availability, "limited");
+  assert.equal((await first.runtime.state()).availability, "limited");
   await first.close();
   fail = false;
   const second = await startSupervisor(home, extra);
   assert.equal((await second.runtime.state()).role, "manager");
-  assert.equal((await second.runtime.state()).recoveryRequired, false);
+  assert.notEqual((await second.runtime.state()).availability, "unavailable");
   assert.equal(existsSync(join(home, ".dsh-spaces-control", "manager-bootstrap.json")), false);
+});
+
+test("HTTP state during owned manager bootstrap stays limited without latching blocked", async () => {
+  const home = tempHome();
+  const artifact = join(home, "plugin.tgz");
+  writeFileSync(artifact, "test archive");
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let enteredAdd = false;
+  const creating = createWorkbenchSupervisor({
+    home,
+    bin: writeFakeCli(home),
+    port: 0,
+    portStart: 34000,
+    portEnd: 34999,
+    patchWriter: fakePatchWriter(home),
+    pluginArtifact: artifact,
+    processRuntime: {
+      spawn: spawnFixture("ok"),
+      prepareHome: async () => undefined,
+      gracefulWaitMs: 40,
+      forceWaitMs: 20,
+      readyTimeoutMs: 8_000,
+      fetchTimeoutMs: 2_000,
+      pollMs: 40,
+      kill: async (pid, kind) => {
+        if (kind === "kill") return;
+        await new Promise<void>((resolveKill) => {
+          const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          killer.once("exit", () => resolveKill());
+          killer.once("error", () => resolveKill());
+        });
+      },
+    },
+    runCli: async (args) => {
+      const profile = args[args.indexOf("--profile") + 1] ?? "web";
+      if (profile === "web" && args.includes("--from-default-profile")) {
+        return {
+          code: 1,
+          stdout: "",
+          stderr: "error: profile web is shipped and cannot be a custom profile target; omit --from-default-profile",
+        };
+      }
+      if (args.includes("--from-default-profile")) {
+        writeProfile(home, profile);
+      } else if (profile === "web" && args.includes("--dump-config")) {
+        writeProfile(home, "web");
+      }
+      return { code: 0, stdout: dumpText(profile), stderr: "" };
+    },
+    dumpConfig: async (profile) => dumpText(profile),
+    createMaintenance: () => fakeMaintenance(),
+    pluginAdd: async (_home, profile) => {
+      enteredAdd = true;
+      await held;
+      writeProfile(home, profile, {
+        dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+        dsh: { profile: { bundles: ["@dsh-spaces/plugin"] } },
+      });
+    },
+  });
+  creating.then(
+    (handle) => {
+      if (!handles.includes(handle)) handles.push(handle);
+    },
+    () => undefined,
+  );
+  try {
+    await waitUntil(
+      () => enteredAdd && existsSync(join(home, ".dsh-spaces-control", "endpoint.json")),
+      "endpoint during owned bootstrap",
+    );
+    const endpoint = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "endpoint.json"), "utf8")) as {
+      origin?: string;
+      bearer?: string;
+    };
+    assert.equal(typeof endpoint.origin, "string");
+    assert.equal(typeof endpoint.bearer, "string");
+    const origin = new URL(endpoint.origin!).origin;
+    const transient = await fetch(`${origin}/api/workbench/state`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin,
+        authorization: `Bearer ${endpoint.bearer}`,
+      },
+      body: "{}",
+    });
+    assert.equal(transient.status, 200);
+    const body = (await transient.json()) as {
+      ok?: boolean;
+      value?: { availability?: string; reasons?: string[] };
+    };
+    assert.equal(body.ok, true);
+    assert.equal(body.value?.availability, "limited");
+    assert.ok((body.value?.reasons ?? []).length > 0);
+  } finally {
+    release();
+  }
+  const handle = await creating;
+  if (!handles.includes(handle)) handles.push(handle);
+  const ready = await handle.runtime.state();
+  assert.equal(ready.availability, "ready");
+  assert.equal(ready.role, "manager");
+  assert.equal(ready.spaces.find((space) => space.id === ready.managerId)?.status, "running");
+  const again = await handle.runtime.state();
+  assert.equal(again.availability, "ready");
+  assert.equal(again.spaces.find((space) => space.id === again.managerId)?.status, "running");
+});
+
+test("leftover upgrade journal stays limited after repeated state", async () => {
+  const home = tempHome();
+  mkdirSync(join(home, ".dsh-spaces-upgrade"), { recursive: true });
+  writeFileSync(join(home, ".dsh-spaces-upgrade", "journal.json"), `${JSON.stringify({ version: 1 })}\n`);
+  const handle = await startSupervisor(home);
+  const first = await handle.runtime.state();
+  assert.equal(first.availability, "limited");
+  assert.match(first.reasons.join(" "), /journal|maintenance/i);
+  const second = await handle.runtime.state();
+  assert.equal(second.availability, "limited");
+  assert.match(second.reasons.join(" "), /journal|maintenance/i);
+  assert.notEqual(second.spaces.find((space) => space.id === second.managerId)?.status, "running");
 });
 
 afterEach(async () => {
@@ -278,6 +470,8 @@ function fakeMaintenance(): WorkbenchMaintenance {
       changes: ["delegated"],
       destructive: false,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      serviceEpoch: "a".repeat(64),
+      stateRevision: "b".repeat(64),
     }),
     execute: async () => ({ snapshotId: "snap-1" }),
     plugins: async () => [{ id: "p", title: "p", packageName: "p", description: "", version: "1.0.0", installedIn: [], protected: false }],
@@ -362,6 +556,24 @@ async function bootstrap(origin: string, bootstrapUrl: string): Promise<string> 
   const cookie = setCookie.split(";", 1)[0];
   assert.ok(cookie);
   return cookie;
+}
+
+async function mutationContext(
+  origin: string,
+  cookie: string,
+): Promise<{ serviceEpoch: string; expectedRevision: string }> {
+  const state = await api(origin, cookie, "state");
+  const value = state.body.value as { serviceEpoch: string; revision: string };
+  return { serviceEpoch: value.serviceEpoch, expectedRevision: value.revision };
+}
+
+async function mutate(
+  origin: string,
+  cookie: string,
+  method: "submit" | "preview",
+  payload: Record<string, unknown>,
+): Promise<{ status: number; body: { ok?: boolean; value?: unknown; error?: { code: string; message: string } } }> {
+  return api(origin, cookie, method, { ...payload, context: await mutationContext(origin, cookie) });
 }
 
 async function api(
@@ -475,7 +687,7 @@ test("workspace origin cannot call management APIs; host bearer can", async () =
   writeProfile(home, "alpha", { dependencies: { "@deepseek-ai/dsh-web-app": "0.1.5-rc.1" } });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const started = await api(handle.origin, cookie, "submit", {
+  const started = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.start", spaceId: "alpha" },
     requestId: "start-alpha",
   });
@@ -523,9 +735,9 @@ test("role/identity guard does not overwrite an ordinary profile reserved as man
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const state = await api(handle.origin, cookie, "state");
   assert.equal(state.body.ok, true);
-  const value = state.body.value as { recoveryRequired: boolean; reasons: string[]; managerId: string };
+  const value = state.body.value as { availability: string; reasons: string[]; managerId: string };
   assert.equal(value.managerId, "spaces-hub");
-  assert.equal(value.recoveryRequired, true);
+  assert.equal(value.availability, "limited");
   assert.match(value.reasons.join(" "), /ordinary profile/i);
   assert.equal(readFileSync(join(home, "profiles", "spaces-hub", "package.json"), "utf8"), before);
 });
@@ -555,15 +767,17 @@ test("maintenance polling preserves inventory during a Home swap and reads live 
     }),
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  await handle.runtime.preview({ kind: "snapshot.create" });
-  await handle.runtime.submit({ kind: "plan.execute", planId: "maint-plan" }, "inventory-swap");
+  const observed = await handle.runtime.state();
+  const context = { serviceEpoch: observed.serviceEpoch, expectedRevision: observed.revision };
+  await handle.runtime.preview({ kind: "snapshot.create" }, context);
+  await handle.runtime.submit({ kind: "plan.execute", planId: "maint-plan" }, "inventory-swap", context);
   try {
     await waitUntil(async () => (await handle.runtime.job("inventory-swap")).phase === "stage", "maintenance stage");
     const response = await api(handle.origin, cookie, "state");
     assert.equal(response.body.ok, true);
     const state = response.body.value as Awaited<ReturnType<typeof handle.runtime.state>>;
     assert.equal(state.maintenance, true);
-    assert.equal(state.recoveryRequired, false);
+    assert.notEqual(state.availability, "unavailable");
     assert.ok(state.spaces.some(row => row.id === "alpha"));
     assert.equal(state.spaces.some(row => row.id === "beta"), false);
     assert.equal(state.jobs.find(job => job.id === "inventory-swap")?.phase, "stage");
@@ -591,11 +805,11 @@ test("jobs.submit is idempotent and maintenance preview is delegated", async () 
     }),
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const first = await api(handle.origin, cookie, "submit", {
+  const first = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.update", spaceId: "alpha", displayName: "Alpha" },
     requestId: "upd-1",
   });
-  const second = await api(handle.origin, cookie, "submit", {
+  const second = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.update", spaceId: "alpha", displayName: "Alpha" },
     requestId: "upd-1",
   });
@@ -604,7 +818,7 @@ test("jobs.submit is idempotent and maintenance preview is delegated", async () 
   assert.equal((first.body.value as { id: string }).id, (second.body.value as { id: string }).id);
   await waitJob(handle.origin, cookie, "upd-1");
 
-  const preview = await api(handle.origin, cookie, "preview", {
+  const preview = await mutate(handle.origin, cookie, "preview", {
     request: { kind: "snapshot.create" },
   });
   assert.equal(preview.body.ok, true);
@@ -630,19 +844,19 @@ test("web stop does not force-kill and keeps the instance record", async () => {
     },
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const started = await api(handle.origin, cookie, "submit", {
+  const started = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.start", spaceId: "alpha" },
     requestId: "start-live-stop",
   });
   assert.equal(started.body.ok, true, JSON.stringify(started.body));
   await waitJob(handle.origin, cookie, "start-live-stop");
 
-  const preview = await api(handle.origin, cookie, "preview", {
+  const preview = await mutate(handle.origin, cookie, "preview", {
     request: { kind: "space.stop", spaceId: "alpha" },
   });
   assert.equal(preview.body.ok, true);
   const plan = preview.body.value as WorkbenchPlan;
-  const stop = await api(handle.origin, cookie, "submit", {
+  const stop = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "plan.execute", planId: plan.id },
     requestId: "stop-noforce",
   });
@@ -663,7 +877,7 @@ test("stable entry still responds after the manager process is gone", async () =
   writeProfile(home, "alpha", { name: "alpha" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const started = await api(handle.origin, cookie, "submit", {
+  const started = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.start", spaceId: "alpha" },
     requestId: "start-live",
   });
@@ -690,89 +904,46 @@ test("busy home keeps a read-only entry and does not write the job store", async
   await page.text();
   const state = await api(handle.origin, cookie, "state");
   assert.equal((state.body.value as { writable: boolean }).writable, false);
-  const submit = await api(handle.origin, cookie, "submit", {
+  const submit = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.update", spaceId: "alpha", displayName: "nope" },
     requestId: "busy-1",
   });
   assert.equal(submit.body.ok, false);
   assert.equal(submit.body.error?.code, "workbench/read-only");
   assert.equal(existsSync(join(home, ".dsh-spaces-control", "jobs")), false);
-  const acquire = await api(handle.origin, cookie, "submit", {
+  const acquire = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "controller.acquire" },
     requestId: "acq-1",
   });
   assert.equal(acquire.body.ok, false);
-  assert.equal(acquire.body.error?.code, "workbench/busy");
+  assert.equal(acquire.body.error?.code, "workbench/unsupported");
   holder.release();
 });
 
-test("web release then desktop acquire refuses web writes as read-only or busy, not as releasing", async () => {
+test("controller.release and controller.acquire are unsupported; desktop holder keeps web read-only", async () => {
   const home = tempHome();
   writeProfile(home, "alpha", { name: "alpha" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const preview = await api(handle.origin, cookie, "preview", { request: { kind: "controller.release" } });
-  assert.equal(preview.body.ok, true, JSON.stringify(preview.body));
-  const planId = (preview.body.value as { id: string }).id;
-  const submitted = await api(handle.origin, cookie, "submit", {
-    command: { kind: "plan.execute", planId },
-    requestId: "rel-1",
-  });
-  assert.equal(submitted.body.ok, true, JSON.stringify(submitted.body));
-  await waitUntil(() => {
-    if (!existsSync(join(home, ".dsh-spaces-control", "jobs", "rel-1.json"))) return false;
-    const record = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "jobs", "rel-1.json"), "utf8")) as {
-      status: string;
-    };
-    return record.status === "succeeded";
-  }, "release job persisted");
-  await waitUntil(() => !existsSync(join(home, ".dsh-spaces-control", "run", "owner.json")), "web owner released");
-
-  const afterRelease = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "web-should-not-write" },
-    requestId: "web-after-release",
-  });
-  assert.equal(afterRelease.body.ok, false);
-  assert.equal(afterRelease.body.error?.code, "workbench/read-only");
-  assert.doesNotMatch(afterRelease.body.error?.message ?? "", /releasing run rights/i);
-
-  const desktop = new HomeController(home).acquire("desktop");
-  const whileDesktop = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "web-should-not-write" },
-    requestId: "web-while-desktop",
-  });
-  assert.equal(whileDesktop.body.ok, false);
-  assert.match(whileDesktop.body.error?.code ?? "", /read-only|busy/);
-  assert.doesNotMatch(whileDesktop.body.error?.message ?? "", /releasing run rights/i);
-  const steal = await api(handle.origin, cookie, "submit", {
+  const preview = await mutate(handle.origin, cookie, "preview", { request: { kind: "controller.release" } });
+  assert.equal(preview.body.ok, false);
+  assert.equal(preview.body.error?.code, "workbench/unsupported");
+  const steal = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "controller.acquire" },
     requestId: "web-steal",
   });
   assert.equal(steal.body.ok, false);
-  assert.equal(steal.body.error?.code, "workbench/busy");
-
-  desktop.release();
-  const reacquire = await api(handle.origin, cookie, "submit", {
-    command: { kind: "controller.acquire" },
-    requestId: "web-reacquire",
-  });
-  assert.equal(reacquire.body.ok, true, JSON.stringify(reacquire.body));
-  const write = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "web-after-reacquire" },
-    requestId: "web-write",
-  });
-  assert.equal(write.body.ok, true, JSON.stringify(write.body));
-  await waitJob(handle.origin, cookie, "web-write");
+  assert.equal(steal.body.error?.code, "workbench/unsupported");
 });
 
 test("shutdown persists the job then releases rights without deadlocking on whenIdle", async () => {
   const home = tempHome();
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  const preview = await api(handle.origin, cookie, "preview", { request: { kind: "controller.shutdown" } });
+  const preview = await mutate(handle.origin, cookie, "preview", { request: { kind: "service.shutdown" } });
   assert.equal(preview.body.ok, true);
   const planId = (preview.body.value as { id: string }).id;
-  const submitted = await api(handle.origin, cookie, "submit", {
+  const submitted = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "plan.execute", planId },
     requestId: "bye-1",
   });
@@ -789,8 +960,8 @@ test("shutdown persists the job then releases rights without deadlocking on when
   assert.equal(record.kind, "plan.execute");
   let shutdownWrite: { ok?: boolean; error?: { code?: string; message?: string } } | undefined;
   try {
-    shutdownWrite = (await api(handle.origin, cookie, "submit", {
-      command: { kind: "controller.acquire" },
+    shutdownWrite = (await mutate(handle.origin, cookie, "submit", {
+      command: { kind: "space.update", spaceId: "alpha", displayName: "after" },
       requestId: "after-shutdown",
     })).body;
   } catch {
@@ -853,8 +1024,11 @@ test("CLI accepts --cli as an alias of --bin and writes a private endpoint file"
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const endpoint = JSON.parse(
     readFileSync(join(home, ".dsh-spaces-control", "endpoint.json"), "utf8"),
-  ) as { version: number; origin: string; bearer: string };
-  assert.equal(endpoint.version, 1);
+  ) as { version: number; protocolVersion: number; homeId: string; serviceEpoch: string; origin: string; bearer: string };
+  assert.equal(endpoint.version, 2);
+  assert.equal(endpoint.protocolVersion, 2);
+  assert.match(endpoint.homeId, /^[a-f0-9]{64}$/);
+  assert.match(endpoint.serviceEpoch, /^[a-f0-9]{64}$/);
   assert.equal(endpoint.origin.startsWith(handle.origin), true);
   const bearer = readFileSync(join(home, ".dsh-spaces-control", "host.bearer"), "utf8").trim();
   assert.equal(endpoint.bearer, bearer);
@@ -869,7 +1043,8 @@ test("CLI accepts --cli as an alias of --bin and writes a private endpoint file"
   const page = await fetch(`${handle.origin}/`, { headers: { cookie } });
   const html = await page.text();
   assert.doesNotMatch(html, /检查并恢复|救援入口|需要恢复|recovery\.resume/);
-  assert.match(html, /查看错误详情|复制脱敏日志|接管运行权/);
+  assert.match(html, /查看错误详情|复制脱敏日志/);
+  assert.doesNotMatch(html, /接管运行权/);
   assert.doesNotMatch(html, /标记恢复完成/);
 });
 
@@ -898,7 +1073,7 @@ test("recovery.resume is unsupported and leftover jobs stay failed", async () =>
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const leftoverBefore = readFileSync(join(home, ".dsh-spaces-control", "jobs", "old-space.json"));
-  const resume = await api(handle.origin, cookie, "submit", {
+  const resume = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "recovery.resume" },
     requestId: "resume-1",
   });
@@ -915,7 +1090,7 @@ async function assertRecoveryResumeUnsupported(
   requestId: string,
 ): Promise<void> {
   const before = files.map((path) => (existsSync(path) ? readFileSync(path) : Buffer.from("")));
-  const resume = await api(origin, cookie, "submit", {
+  const resume = await mutate(origin, cookie, "submit", {
     command: { kind: "recovery.resume" },
     requestId,
   });
@@ -1215,7 +1390,7 @@ test("official web seed omits --from-default-profile; shipped web clone args are
     },
   });
   const state = await handle.runtime.state();
-  assert.equal(state.recoveryRequired, false);
+  assert.notEqual(state.availability, "unavailable");
   assert.deepEqual(
     calls.find((args) => args[args.indexOf("--profile") + 1] === "web" && args.includes("--dump-config")),
     ["--profile", "web", "--dump-config"],
@@ -1249,8 +1424,89 @@ test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
     gracefulWaitMs: 30, forceWaitMs: 10,
     readyTimeoutMs: 8000, pollMs: 20,
   } });
-  await handle.runtime.submit({ kind: "space.start", spaceId: "alpha" }, "root-start");
+  const startedState = await handle.runtime.state();
+  await handle.runtime.submit(
+    { kind: "space.start", spaceId: "alpha" },
+    "root-start",
+    { serviceEpoch: startedState.serviceEpoch, expectedRevision: startedState.revision },
+  );
   await waitUntil(async () => (await handle.runtime.job("root-start")).status === "succeeded", "root start");
   await assert.rejects(() => handle.close());
   assert.equal(new HomeController(home).inspect().held, true);
+});
+
+test("submit without context is rejected and old epoch cannot mutate", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha", { name: "alpha" });
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const missing = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "no-context" },
+    requestId: "no-ctx",
+  });
+  assert.equal(missing.body.ok, false);
+  assert.equal(missing.body.error?.code, "workbench/invalid-input");
+  const stale = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "stale" },
+    requestId: "stale-epoch",
+    context: { serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) },
+  });
+  assert.equal(stale.body.ok, true, JSON.stringify(stale.body));
+  await waitUntil(async () => {
+    const job = await handle.runtime.job("stale-epoch");
+    return job.status === "failed";
+  }, "stale epoch job failed");
+  const failed = await handle.runtime.job("stale-epoch");
+  assert.equal(failed.error?.code, "workbench/conflict");
+});
+
+test("two clients with the same revision: only one mutating job succeeds", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha", { name: "alpha" });
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const context = await mutationContext(handle.origin, cookie);
+  const first = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "One" },
+    requestId: "cas-a",
+    context,
+  });
+  const second = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "Two" },
+    requestId: "cas-b",
+    context,
+  });
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  assert.equal(second.body.ok, true, JSON.stringify(second.body));
+  await waitJob(handle.origin, cookie, "cas-a");
+  await waitUntil(async () => {
+    const job = await handle.runtime.job("cas-b");
+    return job.status === "failed" || job.status === "succeeded";
+  }, "second cas job settled");
+  const a = await handle.runtime.job("cas-a");
+  const b = await handle.runtime.job("cas-b");
+  const winners = [a, b].filter((job) => job.status === "succeeded");
+  const losers = [a, b].filter((job) => job.status === "failed");
+  assert.equal(winners.length, 1);
+  assert.equal(losers.length, 1);
+  assert.equal(losers[0]?.error?.code, "workbench/conflict");
+});
+
+test("same request id with a different command is rejected even after revision moves", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha", { name: "alpha" });
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const first = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "Alpha" },
+    requestId: "same-id",
+  });
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  await waitJob(handle.origin, cookie, "same-id");
+  const conflict = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.verify", spaceId: "alpha" },
+    requestId: "same-id",
+  });
+  assert.equal(conflict.body.ok, false);
+  assert.equal(conflict.body.error?.code, "workbench/conflict");
 });

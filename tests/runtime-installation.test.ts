@@ -6,10 +6,10 @@ import { fileURLToPath } from "node:url";
 import { after, afterEach, before, test } from "node:test";
 import { build } from "esbuild";
 import { runRuntimeInstallation } from "../src/adapters/node/runtime-installation.ts";
-import { runSnapshotWorker, SnapshotExecutor } from "../src/main/snapshot-executor.ts";
-import { ProcessTerminationError } from "../src/main/terminate-process.ts";
-import type { RunProcessFn } from "../src/main/runtime-store.ts";
-import { npmRegistry } from "../src/main/package-source.ts";
+import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
+import { ProcessTerminationError } from "../src/adapters/node/terminate-process.ts";
+import type { RunProcessFn } from "../src/adapters/node/runtime-store.ts";
+import { npmRegistry } from "../src/adapters/node/package-source.ts";
 
 const temps: string[] = [];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -253,7 +253,7 @@ async function compileWorker(): Promise<string> {
   const outfile = join(dir, "snapshot-worker.mjs");
   await build({
     absWorkingDir: repoRoot,
-    entryPoints: [join(repoRoot, "src", "main", "snapshot-worker.ts")],
+    entryPoints: [join(repoRoot, "src", "adapters/node", "snapshot-worker.ts")],
     outfile,
     bundle: true,
     platform: "node",

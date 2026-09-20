@@ -8,10 +8,12 @@ import {
   listAllProfilePlugins,
   listProfilePlugins,
   parseNpmNameAndVersion,
+  pluginAdd,
   pluginRemove,
   resolveInstallSpec,
-} from "../src/main/plugin-ops.ts";
-import { seedCatalog } from "../src/main/plugin-catalog.ts";
+} from "../src/adapters/node/plugin-ops.ts";
+import { seedCatalog } from "../src/adapters/node/plugin-catalog.ts";
+import { resetDshBinCache, setSelectedDshResolver } from "../src/adapters/node/dsh-cli.ts";
 import { applyAppLocale, t } from "../src/shared/i18n/index.ts";
 
 const temps: string[] = [];
@@ -131,6 +133,40 @@ test("resolveInstallSpec uses catalog id not a renderer spec", async () => {
   await assert.rejects(resolveInstallSpec(dir, { spec: "-foo" }), /not allowed|不合法/);
   const typed = await resolveInstallSpec(dir, { spec: "github:owner/repo" });
   assert.equal(typed, "github:owner/repo");
+});
+
+test("pluginAdd error keeps generic dsh stderr and the pnpm stdout tail", async () => {
+  applyAppLocale("en");
+  const dir = home();
+  writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
+  const bin = join(dir, "fake-dsh.js");
+  const stdoutTail = `EPERM cannot unlink node_modules ${"x".repeat(80)}`;
+  writeFileSync(
+    bin,
+    [
+      "process.stderr.write('dsh: pnpm failed in profile directory\\n');",
+      `process.stdout.write(${JSON.stringify(`${"y".repeat(2000)}${stdoutTail}`)});`,
+      "process.exit(1);",
+    ].join("\n"),
+  );
+  setSelectedDshResolver(() => bin);
+  resetDshBinCache();
+  try {
+    await assert.rejects(
+      pluginAdd(dir, "coding", "dsh-outline@1.2.3"),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /dsh: pnpm failed in profile directory/);
+        assert.match(error.message, /EPERM cannot unlink node_modules/);
+        assert.equal(error.message.includes("y".repeat(1900)), false);
+        assert.ok(error.message.length <= 2800);
+        return true;
+      },
+    );
+  } finally {
+    setSelectedDshResolver(() => undefined);
+    resetDshBinCache();
+  }
 });
 
 test("parseNpmNameAndVersion requires an exact version and never reads latest", () => {

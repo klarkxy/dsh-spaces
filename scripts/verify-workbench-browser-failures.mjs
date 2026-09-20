@@ -54,7 +54,7 @@ const HANG_CLI = join(root, 'tests', 'fixtures', 'workbench-failures', 'hang-cli
 const PRODUCT_SCRIPT = join(root, 'scripts', 'verify-workbench-product.mjs');
 const INTERACTIONS_SCRIPT = join(root, 'scripts', 'verify-workbench-interactions.mjs');
 const STORE_TS = join(root, 'packages', 'plugin', 'src', 'workbench', 'store.ts');
-const PROCESS_TS = join(root, 'src', 'main', 'process-manager.ts');
+const PROCESS_TS = join(root, 'src', 'adapters/node', 'process-manager.ts');
 const DEFAULT_PLAYWRIGHT =
   'C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
 

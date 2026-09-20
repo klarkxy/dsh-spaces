@@ -1,12 +1,24 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { DSH_CLI_SPEC, dshBinCandidates, findDshBin, resetDshBinCache, setManagedCliPrefix } from "../src/main/dsh-cli.ts";
+import {
+  DSH_CLI_SPEC,
+  dshBinCandidates,
+  findDshBin,
+  resetDshBinCache,
+  setManagedCliPrefix,
+  setManagedNodeExecutable,
+  spawnNode,
+} from "../src/adapters/node/dsh-cli.ts";
+import { setToolchainRoot } from "../src/adapters/node/toolchain.ts";
 import { DSH_DEFAULT_CHANNEL } from "../src/shared/runtime.ts";
 
 const temps: string[] = [];
+const children: ChildProcess[] = [];
+const originalElectron = process.env.ELECTRON_RUN_AS_NODE;
 
 function fakeDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "dsh-spaces-cli-"));
@@ -21,8 +33,28 @@ function writeFakeBin(prefix: string): string {
   return bin;
 }
 
+function restoreElectronEnv(): void {
+  if (originalElectron === undefined) delete process.env.ELECTRON_RUN_AS_NODE;
+  else process.env.ELECTRON_RUN_AS_NODE = originalElectron;
+}
+
+async function waitClosed(child: ChildProcess): Promise<void> {
+  children.push(child);
+  child.stdout?.resume();
+  child.stderr?.resume();
+  await new Promise<void>((resolve, reject) => {
+    child.once("close", () => resolve());
+    child.once("error", reject);
+  });
+}
+
 afterEach(() => {
+  for (const child of children.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+  }
   resetDshBinCache();
+  setManagedNodeExecutable(undefined);
+  restoreElectronEnv();
   delete process.env.DSH_SPACES_CLI;
   for (const dir of temps.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -52,4 +84,50 @@ test("findDshBin returns the managed CLI when present", () => {
   setManagedCliPrefix(prefix);
   resetDshBinCache();
   assert.equal(findDshBin(), bin);
+});
+
+test("spawnNode fallback strips inherited ELECTRON_RUN_AS_NODE when toolchain has no Node", async () => {
+  process.env.ELECTRON_RUN_AS_NODE = "1";
+  try {
+    setManagedNodeExecutable(undefined);
+    setToolchainRoot(fakeDir());
+    const stamp = join(fakeDir(), "env.json");
+    const child = spawnNode(
+      [
+        "-e",
+        "require('node:fs').writeFileSync(process.env.DSH_ENV_STAMP, JSON.stringify({ electron: process.env.ELECTRON_RUN_AS_NODE ?? null }))",
+      ],
+      {
+        windowsHide: true,
+        env: { DSH_ENV_STAMP: stamp },
+      },
+    );
+    await waitClosed(child);
+    const parsed = JSON.parse(readFileSync(stamp, "utf8")) as { electron: string | null };
+    assert.equal(parsed.electron, null);
+  } finally {
+    restoreElectronEnv();
+  }
+});
+
+test("spawnNode default stdio ignores stdin and pipes stdout/stderr", async () => {
+  setManagedNodeExecutable(undefined);
+  setToolchainRoot(fakeDir());
+  const dir = fakeDir();
+  const script = join(dir, "stamp.mjs");
+  const stamp = join(dir, "out.json");
+  writeFileSync(
+    script,
+    `import { writeFileSync } from "node:fs";
+writeFileSync(process.argv[2], JSON.stringify({ ok: true, argv2: process.argv[2] }));
+`,
+  );
+  const child = spawnNode([script, stamp], { windowsHide: true });
+  assert.equal(child.stdin, null);
+  assert.ok(child.stdout);
+  assert.ok(child.stderr);
+  await waitClosed(child);
+  const parsed = JSON.parse(readFileSync(stamp, "utf8")) as { ok: boolean; argv2: string };
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.argv2, stamp);
 });

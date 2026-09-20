@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 /**
+ * RETIRED historical source. Invocation fails closed and must not be treated
+ * as current B5/B6 evidence. Body kept for trace (old restore/controller/rc.1
+ * allowlist mutations). Current replacement:
+ *   scripts/verify-workbench-maintenance-product.mjs
+ *
+ * Historical:
  * Real maintenance-crash acceptance. Isolated Home, empty session, rc1 CLI,
  * packed plugin/view-bridge. No model calls. Does not import
  * scripts/verify-workbench-maintenance-product.mjs (unsafe: top-level parseFlags).
@@ -9,11 +15,7 @@
  * snapshot-worker). Packed supervisor/doctor are the formal restore entry after a
  * crash. Do not treat this as a full distribution proof.
  *
- *   node scripts/verify-workbench-crash.mjs [--phase upgrade-throw|restore-kill|upgrade-kill|all]
- *     [--self-check] [--http-only] [--output DIR] [--home DIR]
- *
- * Env: DSH_TEST_BIN, DSH_TEST_OUTPUT, DSH_TEST_HOME, DSH_TEST_PNPM_CJS,
- * DSH_TEST_PLAYWRIGHT or DSH_TEST_PLAYWRIGHT_MODULE.
+ *   node scripts/verify-workbench-crash.mjs  → RETIRED (nonzero)
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -52,7 +54,7 @@ const SPACE_NAME = '编程';
 const PHASES = ['upgrade-throw', 'restore-kill', 'upgrade-kill'];
 const DRIVER = join(root, 'tests/fixtures/workbench-crash/driver.ts');
 const WORKER_TS = join(root, 'tests/fixtures/workbench-crash/snapshot-worker.ts');
-const PRODUCTION_WORKER_TS = join(root, 'src/main/snapshot-worker.ts');
+const PRODUCTION_WORKER_TS = join(root, 'src/adapters/node/snapshot-worker.ts');
 const PACKED_SUPERVISOR = join(root, 'packages/supervisor/lib/index.js');
 const PACKED_WORKER = join(root, 'packages/supervisor/lib/snapshot-worker.mjs');
 const DOCTOR = join(root, 'packages/doctor/lib/index.js');
@@ -184,7 +186,7 @@ export async function runSelfCheck(outputDir = join(root, '.sandbox', 'workbench
   try {
     const production = inspectProductionWorker();
     if (!production.operations.includes('runtimeInstall')) {
-      fail('production-worker-operations', 'src/main/snapshot-worker.ts is missing runtimeInstall');
+      fail('production-worker-operations', 'src/adapters/node/snapshot-worker.ts is missing runtimeInstall');
     } else if (!production.hasErrorName || !production.hasProcessTermination || !production.hasChildObservation) {
       fail('production-worker-operations', 'production worker missing async errorName / ProcessTerminationError / child observation');
     } else pass('production-worker-operations', production);
@@ -1334,8 +1336,9 @@ function runDoctorRecover(ctx) {
 
 const invoked = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invoked) {
-  main().catch(error => {
-    console.error(`FAIL ${redact(error instanceof Error ? error.message : error)}`);
-    process.exitCode = 1;
-  });
+  console.error(`RETIRED: scripts/verify-workbench-crash.mjs is historical source, not current evidence.
+Reason: it still drives old restore-kill / SnapshotStore.restore inject / rc.1 allowlist / controller-era mutations that the product no longer supports. Invocation is fail-closed so those mutations never run.
+Replacement: scripts/verify-workbench-maintenance-product.mjs (snapshot create/list/delete; no restore). Official install: scripts/verify-plugin-standard-install.mjs.
+Those live scripts are not a recorded real PASS (standard install currently FAIL under diagnosis; maintenance real not yet PASS).`);
+  process.exitCode = 1;
 }

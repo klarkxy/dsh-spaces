@@ -6,13 +6,13 @@ import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, test } from "node:test";
 import { applyAppLocale } from "../src/shared/i18n/index.ts";
-import type { PatchWriter } from "../src/main/patch-writer.ts";
+import type { PatchWriter } from "../src/adapters/node/patch-writer.ts";
 import {
   isStartCancelled,
   LOG_LINE_OMITTED,
   ProcessManager,
   type ProcessRuntime,
-} from "../src/main/process-manager.ts";
+} from "../src/adapters/node/process-manager.ts";
 import {
   appIconPng,
   buildTrayMenuItems,

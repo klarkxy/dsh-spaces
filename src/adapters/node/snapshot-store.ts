@@ -16,7 +16,6 @@ import { parseDocument } from "yaml";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { atomicWrite, renameDirectory as renameSync } from "./atomic";
 import { assertNotRealHome, samePath } from "./home-guard";
-import { isExactRuntimeVersion } from "../shared/runtime";
 import {
   MANAGED_HOME_ENTRIES,
   RESTORE_STAGE_DIR,
@@ -29,7 +28,7 @@ import {
   type SnapshotMeta,
   type SnapshotPresence,
   type SnapshotRuntime,
-} from "../shared/snapshots";
+} from "../../shared/snapshots";
 
 const MANIFEST = "manifest.json";
 const PENDING_FILE = "pending-restore.json";
@@ -37,8 +36,6 @@ const JOURNAL_FILE = "journal.json";
 const RECEIPT_FILE = "restore-receipt.json";
 const DATA_DIR = "data";
 const RUNTIME_DIR = "runtime";
-const INCOMING_DIR = "incoming";
-const BACKUP_DIR = "backup";
 
 export type SnapshotInject = (op: string, detail?: string) => void;
 
@@ -185,45 +182,8 @@ export class SnapshotStore {
     return bin;
   }
 
-  restore(id: string, currentRuntime?: SnapshotRuntime, options?: SnapshotRestoreOptions): RestoreResult {
-    this.assertWritable();
-    const planId = parseOptionalPlanId(options?.planId, "restore options");
-    const restored = this.preview(id);
-    if (restored.runtimeMissing) {
-      throw new Error(`Snapshot ${restored.id} saved data only and cannot be used as a restore target`);
-    }
-    this.assertHomeMatch(restored);
-    const beforeRestore = this.backupCurrent(currentRuntime, options);
-    const stage = this.stageDir();
-    const startedAt = new Date().toISOString();
-    rmContained(this.home, stage);
-    mkdirSync(join(stage, INCOMING_DIR), { recursive: true });
-    mkdirSync(join(stage, BACKUP_DIR), { recursive: true });
-    const journal: RestoreJournal = {
-      phase: "copying",
-      snapshotId: restored.id,
-      beforeRestoreId: beforeRestore.id,
-      originalPresence: currentPresence(this.home),
-      runtimeVersion: restored.runtimeVersion,
-      binRelative: restored.binRelative,
-      startedAt,
-      ...(planId ? { planId } : {}),
-    };
-    this.writeJournal(journal);
-    try {
-      this.stageIncoming(restored.id);
-      this.hook("restore:staged");
-      journal.phase = "swapping";
-      this.writeJournal(journal);
-      this.swapManaged(stage);
-      this.finishSwapped(journal, restored, beforeRestore);
-      return { restored: this.preview(restored.id), beforeRestore: this.preview(beforeRestore.id) };
-    } catch (err) {
-      if (!this.pendingRestore() && !this.isDataSwapped(journal)) {
-        this.rollbackSwap(journal);
-      }
-      throw err;
-    }
+  restore(_id: string, _currentRuntime?: SnapshotRuntime, _options?: SnapshotRestoreOptions): RestoreResult {
+    throw new Error("Snapshot restore is not supported.");
   }
 
   delete(id: string): void {
@@ -257,67 +217,11 @@ export class SnapshotStore {
   }
 
   completeRestore(): void {
-    const pending = this.pendingRestore();
-    if (!pending) {
-      throw new Error("No pending restore to complete");
-    }
-    this.hook("restore:complete");
-    this.writeRecoveryReceipt("completed", pending);
-    rmContained(this.home, this.stageDir());
-    this.hook("restore:complete-pending");
-    const pendingPath = join(this.root, PENDING_FILE);
-    if (lexists(pendingPath)) {
-      this.assertInsideStore(pendingPath);
-      unlinkSync(pendingPath);
-    }
+    throw new Error("Snapshot restore is not supported.");
   }
 
   recover(): PendingRestore | undefined {
-    const stage = this.stageDir();
-    const journalPath = join(stage, JOURNAL_FILE);
-    if (!lexists(journalPath)) {
-      return this.pendingRestore();
-    }
-    this.assertInsideHome(journalPath);
-    const journal = parseJournal(readFileSync(journalPath, "utf8"), journalPath);
-    if (journal.phase === "swapped" || this.isDataSwapped(journal)) {
-      // A crash may occur after the final rename but before its junctions are retargeted.
-      for (const name of MANAGED_HOME_ENTRIES) {
-        const live = join(this.home, name);
-        this.assertInsideHome(live);
-        if (lexists(live) && lstatSync(live).isDirectory()) {
-          retargetTree(live, join(stage, INCOMING_DIR, name), live);
-        }
-      }
-      if (!this.pendingRestore()) {
-        this.writePending(pendingFromJournal(journal));
-      }
-      return this.pendingRestore();
-    }
-    this.rollbackSwap(journal);
-    return undefined;
-  }
-
-  private backupCurrent(currentRuntime: SnapshotRuntime | undefined, options?: SnapshotRestoreOptions): SnapshotMeta {
-    if (currentRuntime) {
-      return this.create(currentRuntime, "before-restore");
-    }
-    if (options?.allowDataOnlyBackup !== true) {
-      throw new Error(
-        "Current runtime is missing or damaged; restoring requires allowDataOnlyBackup to save data without the runtime",
-      );
-    }
-    const recorded = options.recordedRuntime;
-    const binRelative = recorded?.binRelative
-      ? normalizeRel(recorded.binRelative)
-      : "missing-runtime";
-    return this.writeSnapshot({
-      reason: "before-restore",
-      runtimeMissing: true,
-      runtimeVersion: recorded?.version && isExactRuntimeVersion(recorded.version) ? recorded.version : "unknown",
-      binRelative,
-      omitRuntimeRoot: recorded?.root,
-    });
+    throw new Error("Snapshot recover is not supported.");
   }
 
   private writeSnapshot(input: {
@@ -325,8 +229,6 @@ export class SnapshotStore {
     runtimeVersion: string;
     binRelative: string;
     copyRuntimeFrom?: string;
-    omitRuntimeRoot?: string;
-    runtimeMissing?: boolean;
   }): SnapshotMeta {
     const id = randomUUID();
     const temp = join(this.root, `.tmp-${id}`);
@@ -339,7 +241,7 @@ export class SnapshotStore {
     }
     mkdirSync(temp, { recursive: true });
     let publishedReady = false;
-    const fallbackRuntimeRoot = input.copyRuntimeFrom ?? input.omitRuntimeRoot;
+    const fallbackRuntimeRoot = input.copyRuntimeFrom;
     try {
       const dataDir = join(temp, DATA_DIR);
       mkdirSync(dataDir);
@@ -361,7 +263,6 @@ export class SnapshotStore {
         { version: input.runtimeVersion, binRelative: input.binRelative },
         presence,
         input.reason,
-        input.runtimeMissing,
       );
       atomicWrite(join(temp, MANIFEST), `${JSON.stringify(toManifest(meta), null, 2)}\n`);
       this.hook("create:retarget");
@@ -428,7 +329,6 @@ export class SnapshotStore {
     runtime: { version: string; binRelative: string },
     presence: SnapshotPresence,
     reason?: string,
-    runtimeMissing?: boolean,
   ): SnapshotMeta {
     const profilesDir = join(snapDir, DATA_DIR, "profiles");
     const profiles = presence.profiles && lexists(profilesDir) ? listProfiles(profilesDir) : [];
@@ -442,7 +342,6 @@ export class SnapshotStore {
       profiles,
       size: treeSize(snapDir),
       presence,
-      ...(runtimeMissing ? { runtimeMissing: true } : {}),
     };
   }
 
@@ -480,114 +379,9 @@ export class SnapshotStore {
     return dir;
   }
 
-  private stageIncoming(id: string): void {
-    const srcData = join(this.root, id, DATA_DIR);
-    this.assertInsideStore(srcData);
-    const incoming = join(this.stageDir(), INCOMING_DIR);
-    this.assertInsideHome(incoming);
-    const manifest = this.readPublished(id);
-    for (const name of MANAGED_HOME_ENTRIES) {
-      const src = join(srcData, name);
-      const dest = join(incoming, name);
-      this.assertInsideStore(src);
-      this.assertInsideHome(dest);
-      const present = lexists(src);
-      if (present !== manifest.presence[name]) {
-        throw new Error(`Snapshot ${id} presence for ${name} does not match stored data`);
-      }
-      if (!present) continue;
-      copyManagedEntry(src, dest);
-    }
-  }
-
-  private swapManaged(stage: string): void {
-    for (const name of MANAGED_HOME_ENTRIES) {
-      this.hook("restore:swap", name);
-      const live = join(this.home, name);
-      const backup = join(stage, BACKUP_DIR, name);
-      const incoming = join(stage, INCOMING_DIR, name);
-      this.assertInsideHome(live);
-      this.assertInsideHome(backup);
-      this.assertInsideHome(incoming);
-      if (lexists(live)) {
-        if (lexists(backup)) {
-          throw new Error(`Restore backup already exists for ${name}`);
-        }
-        renameSync(live, backup);
-        this.hook("restore:backed-up", name);
-      }
-      if (lexists(incoming)) {
-        renameSync(incoming, live);
-        this.hook("restore:replaced", name);
-        if (lstatSync(live).isDirectory()) {
-          retargetTree(live, incoming, live);
-        }
-      }
-    }
-  }
-
-  private isDataSwapped(journal: RestoreJournal): boolean {
-    if (journal.phase === "copying") return false;
-    const stage = this.stageDir();
-    if (!lexists(join(stage, JOURNAL_FILE))) return false;
-    for (const name of MANAGED_HOME_ENTRIES) {
-      if (lexists(join(stage, INCOMING_DIR, name))) return false;
-      if (journal.originalPresence[name] && !lexists(join(stage, BACKUP_DIR, name))) return false;
-    }
-    return true;
-  }
-
-  private finishSwapped(journal: RestoreJournal, restored: SnapshotMeta, beforeRestore: SnapshotMeta): void {
-    const stage = this.stageDir();
-    journal.phase = "swapped";
-    this.writeJournal(journal);
-    this.writePending({
-      snapshotId: restored.id,
-      beforeRestoreId: beforeRestore.id,
-      runtimeVersion: restored.runtimeVersion,
-      binRelative: restored.binRelative,
-      startedAt: journal.startedAt,
-      ...(journal.planId ? { planId: journal.planId } : {}),
-    });
-    this.hook("restore:pending");
-    rmContained(stage, join(stage, INCOMING_DIR));
-    rmContained(stage, join(stage, BACKUP_DIR));
-  }
-
-  private rollbackSwap(journal: RestoreJournal): void {
-    const stage = this.stageDir();
-    for (const name of MANAGED_HOME_ENTRIES) {
-      const live = join(this.home, name);
-      const backup = join(stage, BACKUP_DIR, name);
-      this.assertInsideHome(live);
-      this.assertInsideHome(backup);
-      if (lexists(backup)) {
-        if (lexists(live)) rmContained(this.home, live);
-        renameSync(backup, live);
-        continue;
-      }
-      if (!journal.originalPresence[name] && lexists(live)) {
-        rmContained(this.home, live);
-      }
-    }
-    this.writeRecoveryReceipt("rolled-back", pendingFromJournal(journal));
-    const pendingPath = join(this.root, PENDING_FILE);
-    if (lexists(pendingPath)) {
-      this.assertInsideStore(pendingPath);
-      unlinkSync(pendingPath);
-    }
-    rmContained(this.home, stage);
-  }
-
   private assertWritable(): void {
-    if (this.pendingRestore()) {
-      throw new Error("A restore is pending; complete it before creating, restoring, or deleting snapshots");
-    }
-  }
-
-  private assertHomeMatch(meta: SnapshotMeta): void {
-    if (!samePath(meta.home, this.home)) {
-      throw new Error(`Snapshot ${meta.id} belongs to a different DSH home`);
+    if (this.pendingRestore() || this.restoreJournal()) {
+      throw new Error("Unfinished restore evidence was reported. Writes are blocked.");
     }
   }
 
@@ -634,35 +428,6 @@ export class SnapshotStore {
     return dir;
   }
 
-  private writeJournal(journal: RestoreJournal): void {
-    const path = join(this.stageDir(), JOURNAL_FILE);
-    this.assertInsideHome(path);
-    atomicWrite(path, `${JSON.stringify(journal, null, 2)}\n`);
-  }
-
-  private writePending(pending: PendingRestore): void {
-    const path = join(this.root, PENDING_FILE);
-    this.assertInsideStore(path);
-    atomicWrite(path, `${JSON.stringify(pending, null, 2)}\n`);
-  }
-
-  private writeRecoveryReceipt(outcome: RestoreRecoveryReceipt["outcome"], source: PendingRestore): void {
-    const receipt: RestoreRecoveryReceipt = {
-      schemaVersion: 1,
-      outcome,
-      snapshotId: source.snapshotId,
-      beforeRestoreId: source.beforeRestoreId,
-      runtimeVersion: source.runtimeVersion,
-      binRelative: source.binRelative,
-      startedAt: source.startedAt,
-      ...(source.planId ? { planId: source.planId } : {}),
-    };
-    this.hook("restore:receipt", outcome);
-    const path = join(this.root, RECEIPT_FILE);
-    this.assertInsideStore(path);
-    atomicWrite(path, `${JSON.stringify(receipt, null, 2)}\n`);
-  }
-
   private hook(op: string, detail?: string): void {
     this.inject?.(op, detail);
   }
@@ -681,14 +446,6 @@ function emptyPresence(): SnapshotPresence {
     "settings.yaml": false,
     "cordis.patch.yml": false,
   };
-}
-
-function currentPresence(home: string): SnapshotPresence {
-  const presence = emptyPresence();
-  for (const name of MANAGED_HOME_ENTRIES) {
-    presence[name] = lexists(join(home, name));
-  }
-  return presence;
 }
 
 function copyManagedEntry(src: string, dest: string, fallbackRuntimeRoot?: string): void {
@@ -989,17 +746,6 @@ function parseReceipt(raw: string, path: string): RestoreRecoveryReceipt {
     binRelative: normalizeRel(parsed.binRelative),
     startedAt: parsed.startedAt,
     ...optionalPlanIdField(parsed.planId, path),
-  };
-}
-
-function pendingFromJournal(journal: RestoreJournal): PendingRestore {
-  return {
-    snapshotId: journal.snapshotId,
-    beforeRestoreId: journal.beforeRestoreId,
-    runtimeVersion: journal.runtimeVersion,
-    binRelative: journal.binRelative,
-    startedAt: journal.startedAt,
-    ...(journal.planId ? { planId: journal.planId } : {}),
   };
 }
 

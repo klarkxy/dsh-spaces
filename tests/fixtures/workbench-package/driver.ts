@@ -20,8 +20,8 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assertNotRealHome } from "../../../src/main/home-guard.ts";
-import { pluginAdd as defaultPluginAdd } from "../../../src/main/plugin-ops.ts";
+import { assertNotRealHome } from "../../../src/adapters/node/home-guard.ts";
+import { pluginAdd as defaultPluginAdd } from "../../../src/adapters/node/plugin-ops.ts";
 import { createWorkbenchSupervisor } from "../../../src/adapters/node/workbench-supervisor.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));

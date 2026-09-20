@@ -20,10 +20,10 @@ import { fileURLToPath } from "node:url";
 import { after, afterEach, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { build } from "esbuild";
-import { CoordinatedUpgrade } from "../src/main/coordinated-upgrade.ts";
-import { RuntimeStore, type RunProcessFn } from "../src/main/runtime-store.ts";
-import { runSnapshotWorker, SnapshotExecutor } from "../src/main/snapshot-executor.ts";
-import { retargetTree, SnapshotStore } from "../src/main/snapshot-store.ts";
+import { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
+import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
+import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
+import { retargetTree, SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
 import { RESTORE_STAGE_DIR, type SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 const FILE_COUNT = 900;
@@ -48,41 +48,59 @@ before(async () => {
   workerFile = await compileWorker();
 });
 
-test("sync completeRestore stalls the HTTP heartbeat; worker completeRestore does not", async () => {
+test("sync snapshot create stalls the HTTP heartbeat; worker create does not", async () => {
   const worker = requireWorker();
-  const sync = pendingStageFixture("dsh-sync-restore-");
-  const asyncFix = pendingStageFixture("dsh-async-restore-");
+  const sync = snapshotCreateFixture("dsh-sync-create-");
+  fillTree(join(sync.home, "profiles", "coding", "payload"), FILE_COUNT);
   const syncPulse = await withHeartbeat(() => {
-    sync.store.completeRestore();
+    sync.store.create(sync.runtime);
   });
+  const asyncFix = snapshotCreateFixture("dsh-async-create-");
+  fillTree(join(asyncFix.home, "profiles", "coding", "payload"), FILE_COUNT);
   const executor = new SnapshotExecutor({ home: asyncFix.home, root: asyncFix.root, workerFile: worker });
-  const asyncPulse = await withHeartbeat(() => executor.completeRestore());
+  const asyncPulse = await withHeartbeat(() => executor.create(asyncFix.runtime, "upgrade"));
 
-  assert.equal(asyncFix.store.pendingRestore(), undefined);
-  assert.equal(existsSync(join(asyncFix.home, RESTORE_STAGE_DIR)), false);
+  assert.equal(executor.list().length, 1);
   assert.ok(asyncPulse.elapsed >= 0);
   if (syncPulse.elapsed >= STALL_MS) {
-    assert.equal(syncPulse.during, 0, `sync completeRestore must block the loop (${syncPulse.elapsed}ms, hits=${syncPulse.during})`);
+    assert.equal(syncPulse.during, 0, `sync snapshot create must block the loop (${syncPulse.elapsed}ms, hits=${syncPulse.during})`);
   }
   if (asyncPulse.elapsed >= STALL_MS) {
     assert.ok(
       asyncPulse.during > 0,
-      `worker completeRestore must keep HTTP responding (${asyncPulse.elapsed}ms, hits=${asyncPulse.during})`,
+      `worker snapshot create must keep HTTP responding (${asyncPulse.elapsed}ms, hits=${asyncPulse.during})`,
     );
   }
-  const missing = executor.completeRestore();
-  assert.equal(typeof missing.then, "function");
-  await assert.rejects(() => missing, /No pending restore/);
 });
 
-test("worker completeRestore keeps transaction errors and does not drop pending on failure", async () => {
+test("worker restore/completeRestore refuse and keep pending evidence", async () => {
   const worker = requireWorker();
   const { home, root, store } = pendingStageFixture("dsh-fail-restore-");
-  const missingWorker = join(dirname(worker), "missing-snapshot-worker.mjs");
-  const executor = new SnapshotExecutor({ home, root, workerFile: missingWorker });
-  await assert.rejects(() => executor.completeRestore(), /Snapshot worker exited|Cannot find|ENOENT|not found/i);
+  const pendingPath = join(root, "pending-restore.json");
+  const pendingBytes = readFileSync(pendingPath);
+  const executor = new SnapshotExecutor({ home, root, workerFile: worker });
+  const pulse = await withHeartbeat(async () => {
+    await assert.rejects(() => executor.completeRestore(), /not supported/);
+    await assert.rejects(() => executor.restore("59ca7cee-0c06-4610-bc95-e86849247cef"), /not supported/);
+    await assert.rejects(
+      () => runSnapshotWorker(worker, {
+        home,
+        root,
+        operation: "restore",
+        id: "59ca7cee-0c06-4610-bc95-e86849247cef",
+      }),
+      /not supported/,
+    );
+  });
+  assert.ok(pulse.elapsed >= 0);
+  assert.deepEqual(readFileSync(pendingPath), pendingBytes);
   assert.ok(store.pendingRestore());
   assert.equal(existsSync(join(home, RESTORE_STAGE_DIR)), true);
+
+  const missingWorker = join(dirname(worker), "missing-snapshot-worker.mjs");
+  const missing = new SnapshotExecutor({ home, root, workerFile: missingWorker });
+  await assert.rejects(() => missing.delete("59ca7cee-0c06-4610-bc95-e86849247cef"), /Snapshot worker exited|Cannot find|ENOENT|not found/i);
+  assert.deepEqual(readFileSync(pendingPath), pendingBytes);
 });
 
 test("coordinated restore is unsupported and never invokes snapshot mutation", async (t) => {
@@ -313,7 +331,7 @@ async function compileWorker(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "dsh-snap-worker-"));
   assertTempPath(dir);
   const outfile = join(dir, "snapshot-worker.mjs");
-  const src = join(repoRoot, "src", "main", "snapshot-worker.ts");
+  const src = join(repoRoot, "src", "adapters/node", "snapshot-worker.ts");
   await build({
     absWorkingDir: repoRoot,
     entryPoints: [src],
@@ -328,6 +346,21 @@ async function compileWorker(): Promise<string> {
     },
   });
   return outfile;
+}
+
+function snapshotCreateFixture(prefix: string): {
+  home: string;
+  root: string;
+  store: SnapshotStore;
+  runtime: SnapshotRuntime;
+} {
+  const home = fakeDirPath(prefix);
+  const root = fakeDirPath(`${prefix}snaps-`);
+  const runtimeDir = fakeDirPath(`${prefix}rt-`);
+  mkdirSync(join(home, "profiles", "coding"), { recursive: true });
+  writeFileSync(join(runtimeDir, "bin.js"), "cli\n");
+  const runtime: SnapshotRuntime = { version: "1.0.0", root: runtimeDir, binRelative: "bin.js" };
+  return { home, root, store: new SnapshotStore({ home, root }), runtime };
 }
 
 function pendingStageFixture(prefix: string): { home: string; root: string; store: SnapshotStore } {

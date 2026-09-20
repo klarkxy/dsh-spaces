@@ -1,12 +1,13 @@
-import type { ProfileRegistry } from '../../main/profile-registry';
-import type { SnapshotExecutor } from '../../main/snapshot-executor';
-import type { RuntimeStore } from '../../main/runtime-store';
-import type { CoordinatedUpgrade } from '../../main/coordinated-upgrade';
-import type { DiagnosticsService } from '../../main/diagnostics';
+import type { ProfileRegistry } from './profile-registry';
+import type { SnapshotExecutor } from './snapshot-executor';
+import type { RuntimeStore } from './runtime-store';
+import type { CoordinatedUpgrade } from './coordinated-upgrade';
+import type { DiagnosticsService } from './diagnostics';
 import type { HomeOperationLock } from './home-operation-lock';
 import type { ProfileStatus } from '../../shared/types';
 import type { SnapshotRuntime } from '../../shared/snapshots';
 import type { WorkbenchPackageUpgrade } from './workbench-package-upgrade';
+import type { WorkbenchProductObservation } from '../../shared/workbench-product';
 
 /** Node-only composition boundary; all paths and process authority stay here. */
 export interface WorkbenchMaintenancePorts {
@@ -34,4 +35,5 @@ export interface WorkbenchMaintenancePorts {
   reinitializeManager(): Promise<void>;
   setMaintenance(active: boolean): void;
   isCompatibleRuntime(version: string): boolean;
+  observation(): WorkbenchProductObservation;
 }

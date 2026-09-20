@@ -25,7 +25,7 @@ import {
   type UnlockDeadResult,
 } from "../src/adapters/node/home-operation-lock.ts";
 import { MaintenanceGate } from "../src/core/application/maintenance-gate.ts";
-import { realDshHome } from "../src/main/home-guard.ts";
+import { realDshHome } from "../src/adapters/node/home-guard.ts";
 
 const temps: string[] = [];
 const children: ChildProcess[] = [];

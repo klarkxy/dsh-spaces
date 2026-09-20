@@ -51,6 +51,7 @@ const PLUGIN_REQUIRED = [
   "lib/typert.host.js",
   "lib/typert.remote-client.js",
   "lib/supervisor/index.js",
+  "lib/supervisor/launcher.mjs",
   COMPONENT_PAYLOAD_MANIFEST,
   "lib/supervisor/snapshot-worker.mjs",
   "lib/view-bridge/package.json",
@@ -500,4 +501,6 @@ export {
   listTarEntries,
   normalizePacked,
   printAddCommand,
+  resolveNpmCli,
+  runNpmPack,
 };

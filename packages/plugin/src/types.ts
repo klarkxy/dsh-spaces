@@ -8,21 +8,22 @@ export type { WorkbenchPackageRelease } from "../../../src/shared/workbench";
 
 export interface WorkbenchHostHint {
   role: WorkbenchRole;
-  recoveryRequired: boolean;
+  /** Local identity/role is blocked. Distinct from WorkbenchState.availability. */
+  unavailable: boolean;
 }
 
 export interface WorkbenchGuideRole {
   role: WorkbenchRole;
   profileId: string | null;
   managerId: string | null;
-  recoveryRequired: boolean;
+  unavailable: boolean;
   reasons: string[];
 }
 
 export interface WorkbenchBootstrapResult {
   ok: boolean;
   connected: boolean;
-  recoveryRequired: boolean;
+  unavailable: boolean;
   origin: string | null;
   reasons: string[];
 }
@@ -31,7 +32,7 @@ export interface WorkbenchReturnTarget {
   available: boolean;
   origin: string | null;
   path: string | null;
-  recoveryRequired: boolean;
+  unavailable: boolean;
   reasons: string[];
 }
 
@@ -39,7 +40,7 @@ export interface WorkbenchReturnTarget {
 export interface WorkbenchInitializeResult {
   ok: boolean;
   connected: boolean;
-  recoveryRequired: boolean;
+  unavailable: boolean;
   origin: string | null;
   path: string | null;
   managerId: string | null;

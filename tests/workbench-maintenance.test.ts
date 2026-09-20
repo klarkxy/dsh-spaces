@@ -31,16 +31,16 @@ import {
   WorkbenchJobError,
   type WorkbenchJobContext,
 } from "../src/adapters/node/workbench-jobs.ts";
-import { CoordinatedUpgrade } from "../src/main/coordinated-upgrade.ts";
-import { ProcessTerminationError } from "../src/main/terminate-process.ts";
-import { DiagnosticsService } from "../src/main/diagnostics.ts";
-import { CATALOG_CACHE_FILE } from "../src/main/plugin-catalog.ts";
-import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../src/main/plugin-library.ts";
-import { listProfilePlugins } from "../src/main/plugin-ops.ts";
-import { ProfileRegistry } from "../src/main/profile-registry.ts";
-import { RuntimeStore, type RunProcessFn } from "../src/main/runtime-store.ts";
-import { SnapshotStore } from "../src/main/snapshot-store.ts";
-import type { SnapshotExecutor } from "../src/main/snapshot-executor.ts";
+import { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
+import { ProcessTerminationError } from "../src/adapters/node/terminate-process.ts";
+import { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
+import { CATALOG_CACHE_FILE } from "../src/adapters/node/plugin-catalog.ts";
+import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
+import { listProfilePlugins } from "../src/adapters/node/plugin-ops.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
+import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
+import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
+import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 import type { ProfileStatus } from "../src/shared/types.ts";
 
@@ -76,7 +76,7 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-test("ROOT abandoned package recovery cannot report successful update", async () => {
+test("ROOT abandoned package recover is unsupported and does not clear evidence", async () => {
   let active = true;
   const packageUpgrade = {
     hasEvidence: () => active,
@@ -94,8 +94,9 @@ test("ROOT abandoned package recovery cannot report successful update", async ()
 test("preview hands space and controller actions to supervisor runtime", async () => {
   const { maintenance } = harness();
   await assert.rejects(() => maintenance.preview({ kind: "space.stop", spaceId: "coding" }), matchCode("workbench/runtime-handoff"));
-  await assert.rejects(() => maintenance.preview({ kind: "controller.release" }), matchCode("workbench/runtime-handoff"));
-  await assert.rejects(() => maintenance.preview({ kind: "controller.shutdown" }), matchCode("workbench/runtime-handoff"));
+  await assert.rejects(() => maintenance.preview({ kind: "service.shutdown" }), matchCode("workbench/runtime-handoff"));
+  await assert.rejects(() => maintenance.preview({ kind: "controller.release" } as never), matchCode("workbench/unsupported"));
+  await assert.rejects(() => maintenance.preview({ kind: "controller.shutdown" } as never), matchCode("workbench/unsupported"));
 });
 
 test("preview rejects raw spec, filepath, git url, and extra command fields", async () => {
@@ -334,6 +335,19 @@ test("toggle plan uses install/remove semantics and says a restart is required",
   assert.ok(plan.changes.some((line) => /not a hot toggle/i.test(line)));
 });
 
+test("snapshot create failure does not reinitialize or restart the manager", async () => {
+  const { maintenance, state } = harness({
+    snapshotsCreate: async () => {
+      throw new Error("snapshot create failed");
+    },
+  });
+  const plan = await maintenance.preview({ kind: "snapshot.create" });
+  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
+  assert.equal(state.reinitialized, 0);
+  assert.equal(state.started.length, 0);
+  assert.equal(state.maintenance.at(-1), true);
+});
+
 test("snapshot create is whole-home, stops owned spaces, and public DTO strips home and bin", async () => {
   const { home, maintenance, state, snapRoot, runtime } = snapshotHarness();
   const plan = await maintenance.preview({ kind: "snapshot.create" });
@@ -374,7 +388,7 @@ test("runtime upgrade of an incompatible version is refused, but install remains
   assert.equal(result?.runtimeVersion, "0.1.5-rc.2");
 });
 
-test("lost progress persistence or uncertain child termination keeps the plan open for recovery", async () => {
+test("lost progress persistence or uncertain child termination keeps the plan open as unfinished evidence", async () => {
   for (const failure of [new WorkbenchJobError("workbench/persist-failed"), new ProcessTerminationError("unknown child")]) {
     const { maintenance, home, state } = harness();
     const plan = await maintenance.preview({ kind: "runtime.install", version: "0.1.5-rc.1" });
@@ -389,7 +403,7 @@ test("lost progress persistence or uncertain child termination keeps the plan op
   }
 });
 
-test("upgrade failure with proven live home may reinitialize the manager", async () => {
+test("upgrade failure with proven live home does not reinitialize the manager", async () => {
   const ctx = await upgradeHarness();
   const plan = await ctx.maintenance.preview({ kind: "runtime.upgrade", version: "0.9.9" });
   assert.equal(plan.scope, "home");
@@ -399,7 +413,6 @@ test("upgrade failure with proven live home may reinitialize the manager", async
   assert.equal(existsSync(join(ctx.home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE)), false);
   assert.deepEqual(ctx.order.filter((item) => item === "reinitialize" || item === "upgrade-fail"), [
     "upgrade-fail",
-    "reinitialize",
   ]);
 });
 
@@ -457,7 +470,7 @@ test("cancel is honored before mutation and ignored after the irreversible point
   assert.deepEqual(state2.started, ["coding"]);
 });
 
-test("recover reconciles a pending snapshot and refuses to wipe an unreadable upgrade journal", async () => {
+test("recover is unsupported and does not reconcile pending snapshot or wipe an unreadable journal", async () => {
   let pending: {
     snapshotId: string;
     beforeRestoreId: string;
@@ -504,7 +517,7 @@ test("recover reconciles a pending snapshot and refuses to wipe an unreadable up
   assert.equal(blocked.state.reinitialized, 0);
 });
 
-test("unreadable pending restore is a conservative recover failure and does not settle jobs", async () => {
+test("unreadable pending restore is left in place and recover is unsupported", async () => {
   const { maintenance, state } = harness({
     pendingRestore: () => {
       throw new Error("unreadable restore record");
@@ -516,7 +529,7 @@ test("unreadable pending restore is a conservative recover failure and does not 
   assert.equal(state.reinitialized, 0);
 });
 
-test("recover resets a previous true outcome and empty journals do not settle unrelated jobs", async () => {
+test("repeated recover stays unsupported and does not settle empty journals", async () => {
   let pending: {
     snapshotId: string;
     beforeRestoreId: string;
@@ -546,7 +559,7 @@ test("recover resets a previous true outcome and empty journals do not settle un
   assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
-test("recover does not change pointers when stopAll fails", async () => {
+test("recover is unsupported and does not stop instances or change pointers", async () => {
   let recovered = false;
   const { maintenance, state } = harness({
     pendingRestore: () => ({
@@ -572,7 +585,7 @@ test("recover does not change pointers when stopAll fails", async () => {
   assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
-test("upgrade stage rollback does not clear plugin-mutation evidence", async () => {
+test("recover is unsupported and does not clear plugin-mutation or upgrade journal", async () => {
   const { home, maintenance, state } = harness();
   mkdirSync(join(home, UPGRADE_STAGE_DIR), { recursive: true });
   const journal = join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
@@ -615,7 +628,7 @@ test("runtime upgrade execute passes the stored plan id", async () => {
   assert.equal(state.lastUpgradePlanId, plan.id);
 });
 
-test("recover does not treat a junctioned profiles directory as readable home config", async () => {
+test("recover is unsupported and does not rewrite a junctioned profiles tree", async () => {
   let pending: {
     snapshotId: string;
     beforeRestoreId: string;
@@ -703,7 +716,7 @@ test("plugin install failure names space, stage, and package", async () => {
   );
 });
 
-test("plugin lock mismatch fails verification and interrupted mutation stays open for recover", async () => {
+test("plugin lock mismatch fails verification and interrupted mutation stays open as evidence", async () => {
   const { home, maintenance, state } = harness({
     pluginAdd: async (dshHome, profile, spec) => {
       await addFromTarball(dshHome, profile, spec);
@@ -789,18 +802,18 @@ test("config restore preview is forbidden", async () => {
       spaceId: "spaces-hub",
       backupId: "cordis.patch.yml.bak-1",
     }),
-    matchCode("workbench/forbidden"),
+    matchCode("workbench/unsupported"),
   );
 });
 
-test("snapshot restore preview and execute are forbidden", async () => {
+test("snapshot restore preview and execute are unsupported", async () => {
   const { home, maintenance, state } = harness();
   const snapshotId = "11111111-1111-1111-1111-111111111111";
   const codingManifest = join(home, "profiles", "coding", "package.json");
   const before = readFileSync(codingManifest);
   await assert.rejects(
-    () => maintenance.preview({ kind: "snapshot.restore", snapshotId }),
-    matchCode("workbench/forbidden"),
+    () => maintenance.preview({ kind: "snapshot.restore", snapshotId } as never),
+    matchCode("workbench/unsupported"),
   );
   assert.equal(state.restoreCalls, 0);
   assert.equal(existsSync(join(home, WORKBENCH_CONTROL_DIR_NAME, "plans")), false);
@@ -833,12 +846,12 @@ test("snapshot restore preview and execute are forbidden", async () => {
       status: "previewed",
     })}\n`,
   );
-  await assert.rejects(() => maintenance.execute(planId, jobCtx()), matchCode("workbench/forbidden"));
+  await assert.rejects(() => maintenance.execute(planId, jobCtx()), matchCode("workbench/unsupported"));
   assert.equal(state.restoreCalls, 0);
   assert.deepEqual(readFileSync(codingManifest), before);
 });
 
-test("manager config restore reinitializes the manager; ordinary restore stays stopped", async () => {
+test("config restore preview is unsupported and does not restore or reinitialize", async () => {
   const { home, maintenance, state } = harness();
   state.backups = [{ id: "cordis.patch.yml.bak-1", createdAt: "2026-01-01T00:00:00.000Z", size: 10, tooLarge: false }];
   const codingManifest = join(home, "profiles", "coding", "package.json");
@@ -849,8 +862,8 @@ test("manager config restore reinitializes the manager; ordinary restore stays s
         kind: "config.restore",
         spaceId: "spaces-hub",
         backupId: "cordis.patch.yml.bak-1",
-      }),
-    matchCode("workbench/forbidden"),
+      } as never),
+    matchCode("workbench/unsupported"),
   );
   await assert.rejects(
     () =>
@@ -858,8 +871,8 @@ test("manager config restore reinitializes the manager; ordinary restore stays s
         kind: "config.restore",
         spaceId: "coding",
         backupId: "cordis.patch.yml.bak-1",
-      }),
-    matchCode("workbench/forbidden"),
+      } as never),
+    matchCode("workbench/unsupported"),
   );
   assert.deepEqual(state.restored, []);
   assert.equal(state.reinitialized, 0);
@@ -1068,6 +1081,7 @@ function createMaintenance(
     },
     isCompatibleRuntime: overrides.compatible ?? ((version: string) => version === "0.1.5-rc.1"),
     packageUpgrade: overrides.packageUpgrade,
+    observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) }),
   };
   return new WorkbenchMaintenance(ports, {
     now: overrides.now,
@@ -1161,6 +1175,7 @@ function snapshotHarness() {
       state.maintenance.push(active);
     },
     isCompatibleRuntime: (version: string) => version === runtime.version,
+    observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) }),
   };
   return {
     home,
@@ -1246,6 +1261,7 @@ async function upgradeHarness() {
       state.maintenance.push(active);
     },
     isCompatibleRuntime: (version: string) => version === "0.9.9" || version === "0.1.1-rc.2",
+    observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) }),
   };
   return {
     home,

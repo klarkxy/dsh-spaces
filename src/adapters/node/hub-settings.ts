@@ -7,8 +7,8 @@ import {
   type LocalePreference,
   type PackageSource,
   type ThemePreference,
-} from "../shared/types";
-import { t } from "../shared/i18n";
+} from "../../shared/types";
+import { t } from "../../shared/i18n";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 

@@ -1,10 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   lstatSync,
   readdirSync,
   readFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite } from "../../main/atomic";
+import { atomicWrite } from "./atomic";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import type {
   JobStatus,
@@ -14,8 +15,14 @@ import type {
   WorkbenchJobErrorInfo,
   WorkbenchView,
 } from "../../shared/workbench";
+import { isWorkbenchProductCommand } from "../../shared/workbench-product";
+import { parseWorkbenchProductCommand, parseWorkbenchProductOutcome } from "../../shared/workbench-product-schemas";
 import { LlmConfigError } from "../../core/domain/llm-connections";
 import { canonicalHome } from "./home-operation-lock";
+
+type ExclusiveAdmission = { store: WorkbenchJobStore; active: boolean };
+/** Per-execution token. ALS store identity alone is not admission: late timer descendants stay bound after the callback ends. */
+const exclusiveContext = new AsyncLocalStorage<ExclusiveAdmission>();
 
 export const WORKBENCH_CONTROL_DIR_NAME = ".dsh-spaces-control";
 export const WORKBENCH_JOBS_DIR_NAME = "jobs";
@@ -242,6 +249,30 @@ export class WorkbenchJobStore {
     return wait();
   }
 
+  /** Serialize a direct mutation on the same tail as jobs. Never persist the callback payload. */
+  runExclusive<T>(task: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.enqueue(async () => {
+        try {
+          resolve(await task());
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  /**
+   * Run inline only while this store's current exclusive/job callback is still
+   * active. Detached timer/promise descendants keep the ALS binding after
+   * that callback returns, so they must wait on the tail.
+   */
+  runAdmitted<T>(task: () => Promise<T>): Promise<T> {
+    const ctx = exclusiveContext.getStore();
+    if (ctx?.store === this && ctx.active) return Promise.resolve().then(task);
+    return this.runExclusive(task);
+  }
+
   private accept(
     command: WorkbenchCommand,
     requestId: string,
@@ -301,7 +332,15 @@ export class WorkbenchJobStore {
   }
 
   private enqueue(task: () => Promise<void>): void {
-    this.queue = this.queue.then(task, task);
+    const gated = async (): Promise<void> => {
+      const token: ExclusiveAdmission = { store: this, active: true };
+      try {
+        await exclusiveContext.run(token, task);
+      } finally {
+        token.active = false;
+      }
+    };
+    this.queue = this.queue.then(gated, gated);
   }
 
   private async run(id: string, handler: WorkbenchJobHandler): Promise<void> {
@@ -363,7 +402,8 @@ export class WorkbenchJobStore {
         current.phase = current.phase === "running" ? "failed" : current.phase;
         current.canCancel = false;
         current.updatedAt = this.isoNow();
-        current.result = undefined;
+        const partial = this.pendingResults.get(id);
+        current.result = partial && Object.keys(partial).length ? partial : undefined;
         current.error = publicErrorFromUnknown(error);
         if (!current.message) current.message = current.error.message;
         try {
@@ -628,12 +668,19 @@ function publicResult(value: unknown): WorkbenchJobResult | undefined {
     const view = publicView(value.view);
     if (view) result.view = view;
   }
+  if (value.product !== undefined) {
+    try {
+      result.product = parseWorkbenchProductOutcome(value.product);
+    } catch {
+      /* drop unsafe product payloads instead of persisting them */
+    }
+  }
   return result;
 }
 
 function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   if (!isPlainObject(value)) return undefined;
-  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "view"]);
+  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "view", "product"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
   if (value.spaceId !== undefined && (typeof value.spaceId !== "string" || !ENTITY_ID_RE.test(value.spaceId))) {
     return undefined;
@@ -645,6 +692,13 @@ function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
     if (typeof value.runtimeVersion !== "string" || !isExactRuntimeVersion(value.runtimeVersion)) return undefined;
   }
   if (value.view !== undefined && !publicView(value.view)) return undefined;
+  if (value.product !== undefined) {
+    try {
+      parseWorkbenchProductOutcome(value.product);
+    } catch {
+      return undefined;
+    }
+  }
   return publicResult(value) ?? {};
 }
 
@@ -658,7 +712,9 @@ function publicView(value: unknown): WorkbenchView | undefined {
   if (typeof value.entryOrigin !== "string" || !isLoopbackOrigin(value.entryOrigin)) return undefined;
   if (typeof value.entryPath !== "string" || !isSupervisorEntryPath(value.entryPath)) return undefined;
   if (typeof value.channel !== "string" || !ENTITY_ID_RE.test(value.channel)) return undefined;
+  if (typeof value.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(value.serviceEpoch)) return undefined;
   return {
+    serviceEpoch: value.serviceEpoch,
     spaceId: value.spaceId,
     generation: value.generation,
     origin: value.origin,
@@ -690,6 +746,12 @@ function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
       if (error.context.signal !== undefined) info.signal = error.context.signal;
     }
     return info;
+  }
+  if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string") {
+    const code = (error as { code: string }).code;
+    if (isJobErrorCode(code)) {
+      return { code, message: WORKBENCH_JOB_ERROR[code] };
+    }
   }
   return {
     code: "workbench/failed",
@@ -833,10 +895,7 @@ function parseCommand(input: unknown): WorkbenchCommand {
       expectKeys(input, ["kind", "planId"]);
       return { kind, planId: parseEntityId(input.planId) };
     }
-    case "controller.acquire": {
-      expectKeys(input, ["kind"]);
-      return { kind };
-    }
+    case "controller.acquire":
     case "recovery.resume":
       throw new WorkbenchJobError("workbench/unsupported");
     case "llm.apply": {
@@ -856,6 +915,13 @@ function parseCommand(input: unknown): WorkbenchCommand {
       };
     }
     default:
+      if (typeof kind === "string" && isWorkbenchProductCommand({ kind })) {
+        try {
+          return parseWorkbenchProductCommand(input);
+        } catch {
+          throw new WorkbenchJobError("workbench/invalid-input");
+        }
+      }
       throw new WorkbenchJobError("workbench/invalid-input");
   }
 }
@@ -864,7 +930,7 @@ function parseApplyObservations(value: unknown): Extract<WorkbenchCommand, { kin
   if (!Array.isArray(value)) throw new WorkbenchJobError("workbench/invalid-input");
   return value.map((item) => {
     if (!isPlainObject(item)) throw new WorkbenchJobError("workbench/invalid-input");
-    expectKeys(item, ["spaceId", "status", "generation", "catalogRevision", "busy"]);
+    expectKeys(item, ["spaceId", "status", "generation", "catalogRevision", "busy", "serviceEpoch"]);
     parseEntityId(item.spaceId);
     const status = item.status;
     if (
@@ -883,12 +949,16 @@ function parseApplyObservations(value: unknown): Extract<WorkbenchCommand, { kin
     if (item.catalogRevision !== null && (!Number.isInteger(item.catalogRevision) || Number(item.catalogRevision) < 0)) {
       throw new WorkbenchJobError("workbench/invalid-input");
     }
+    if (typeof item.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(item.serviceEpoch)) {
+      throw new WorkbenchJobError("workbench/invalid-input");
+    }
     return {
       spaceId: String(item.spaceId),
       status,
       generation: Number(item.generation),
       catalogRevision: item.catalogRevision === null ? null : Number(item.catalogRevision),
       busy: item.busy,
+      serviceEpoch: item.serviceEpoch,
     };
   });
 }
@@ -992,17 +1062,14 @@ function affectedSpaceIds(command: WorkbenchCommand): string[] {
     case "space.update":
     case "space.start":
     case "space.verify":
+    case "template.save":
       return [command.spaceId];
     case "space.reorder":
       return [...command.spaceIds];
-    case "space.create":
-    case "plan.execute":
-    case "controller.acquire":
-      return [];
-    case "recovery.resume":
-      return [];
     case "llm.apply":
       return [...command.spaceIds];
+    default:
+      return [];
   }
 }
 

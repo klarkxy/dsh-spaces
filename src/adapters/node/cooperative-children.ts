@@ -1,11 +1,11 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite } from "../../main/atomic";
-import { assertNotRealHome } from "../../main/home-guard";
+import { atomicWrite } from "./atomic";
+import { assertNotRealHome } from "./home-guard";
 import { PROFILE_NAME_RE } from "../../shared/types";
-import { spawnNode } from "../../main/dsh-cli";
-import { withoutChildObservation } from "../../main/owned-process-record";
+import { spawnNode } from "./dsh-cli";
+import { withoutChildObservation } from "./owned-process-record";
 
 // Node cannot deliver a catchable SIGTERM to a Windows console-less process.
 // The inherited IPC descriptor is private to its parent; it asks DSH's own

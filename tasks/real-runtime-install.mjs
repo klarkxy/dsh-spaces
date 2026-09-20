@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RuntimeStore } from '../src/main/runtime-store.ts';
+import { RuntimeStore } from '../src/adapters/node/runtime-store.ts';
 const root = mkdtempSync(join(tmpdir(), 'spaces-runtime-install-'));
 console.log(`RUNTIME_INSTALL_ROOT=${root}`);
 const source = process.env.DSH_TEST_PACKAGE_SOURCE === 'china' ? 'china' : 'official';

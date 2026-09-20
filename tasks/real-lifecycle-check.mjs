@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bin, home } from './real-config-check.mjs';
-import { ProcessManager } from '../src/main/process-manager.ts';
-import { PatchWriter } from '../src/main/patch-writer.ts';
-import { setSelectedDshResolver } from '../src/main/dsh-cli.ts';
+import { ProcessManager } from '../src/adapters/node/process-manager.ts';
+import { PatchWriter } from '../src/adapters/node/patch-writer.ts';
+import { setSelectedDshResolver } from '../src/adapters/node/dsh-cli.ts';
 
 setSelectedDshResolver(() => bin);
 const writer = new PatchWriter(home);

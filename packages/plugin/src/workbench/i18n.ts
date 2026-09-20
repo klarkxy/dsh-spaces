@@ -141,6 +141,7 @@ const en = {
   "jobs.phase": "Phase",
   "jobs.cancel": "Cancel",
   "jobs.failed": "Failed",
+  "jobs.handoffPending": "Update is prepared; handing off the service. The new service has not been confirmed started.",
   "jobs.progress": "Job progress",
   "plugins.search": "Search plugins",
   "plugins.query": "Search",
@@ -198,6 +199,8 @@ const en = {
   "workbenchPackage.current": "The installed package already matches this candidate.",
   "workbenchPackage.contentUpdate": "Same-version content update available.",
   "workbenchPackage.preview": "Preview workbench update",
+  "workbenchPackage.prepare": "Prepare update",
+  "workbenchPackage.digest": "Candidate digest",
   "workbenchPackage.consequences":
     "This stops every owned space and takes a whole-Home snapshot. The outer entry keeps showing progress during maintenance. Ordinary spaces stay stopped and do not restart automatically. The supervisor itself updates on the next cold start.",
   "settings.title": "Settings",
@@ -484,6 +487,7 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "jobs.phase": "阶段",
   "jobs.cancel": "取消",
   "jobs.failed": "失败",
+  "jobs.handoffPending": "已准备更新，正在交接服务；新服务启动尚未确认",
   "jobs.progress": "任务进度",
   "plugins.search": "搜索插件",
   "plugins.query": "搜索",
@@ -540,6 +544,8 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "workbenchPackage.current": "已安装包与当前候选相同。",
   "workbenchPackage.contentUpdate": "同版本内容更新可用。",
   "workbenchPackage.preview": "预览工作台更新",
+  "workbenchPackage.prepare": "准备更新",
+  "workbenchPackage.digest": "候选摘要",
   "workbenchPackage.consequences":
     "将停止所有自有空间并创建整 Home 快照。维护期间外层入口继续显示进度。普通空间保持停止，不会自动重启。监督程序本身在下一次冷启动时更新。",
   "settings.title": "设置",

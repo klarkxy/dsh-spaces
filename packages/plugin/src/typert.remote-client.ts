@@ -5,6 +5,7 @@ import type {
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchMutationContext,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -14,6 +15,7 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../../src/shared/workbench";
+import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../src/shared/workbench-product";
 import type {
   WorkbenchBootstrapResult,
   WorkbenchGuideRole,
@@ -37,11 +39,12 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
   interface TypertRemoteNamespace$workbench {
     state: () => Promise<RemoteResult<WorkbenchState>>;
     detail: (spaceId: string) => Promise<RemoteResult<SpaceDetail>>;
-    submit: (command: WorkbenchCommand, requestId: string) => Promise<RemoteResult<WorkbenchJob>>;
+    submit: (command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext) => Promise<RemoteResult<WorkbenchJob>>;
     job: (id: string) => Promise<RemoteResult<WorkbenchJob>>;
     cancel: (id: string) => Promise<RemoteResult<WorkbenchJob>>;
     view: (spaceId: string) => Promise<RemoteResult<WorkbenchView>>;
-    preview: (request: WorkbenchPlanRequest) => Promise<RemoteResult<WorkbenchPlan>>;
+    preview: (request: WorkbenchPlanRequest, context: WorkbenchMutationContext) => Promise<RemoteResult<WorkbenchPlan>>;
+    product: (request: WorkbenchProductRequest) => Promise<RemoteResult<WorkbenchProductResult>>;
     plugins: (query: string) => Promise<RemoteResult<WorkbenchPlugin[]>>;
     snapshots: () => Promise<RemoteResult<WorkbenchSnapshot[]>>;
     snapshot: (id: string) => Promise<RemoteResult<WorkbenchSnapshot>>;
@@ -60,11 +63,12 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "spaces/detail": (id: string) => Promise<RemoteResult<SpaceDetail>>;
     "workbench/state": () => Promise<RemoteResult<WorkbenchState>>;
     "workbench/detail": (spaceId: string) => Promise<RemoteResult<SpaceDetail>>;
-    "workbench/submit": (command: WorkbenchCommand, requestId: string) => Promise<RemoteResult<WorkbenchJob>>;
+    "workbench/submit": (command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext) => Promise<RemoteResult<WorkbenchJob>>;
     "workbench/job": (id: string) => Promise<RemoteResult<WorkbenchJob>>;
     "workbench/cancel": (id: string) => Promise<RemoteResult<WorkbenchJob>>;
     "workbench/view": (spaceId: string) => Promise<RemoteResult<WorkbenchView>>;
-    "workbench/preview": (request: WorkbenchPlanRequest) => Promise<RemoteResult<WorkbenchPlan>>;
+    "workbench/preview": (request: WorkbenchPlanRequest, context: WorkbenchMutationContext) => Promise<RemoteResult<WorkbenchPlan>>;
+    "workbench/product": (request: WorkbenchProductRequest) => Promise<RemoteResult<WorkbenchProductResult>>;
     "workbench/plugins": (query: string) => Promise<RemoteResult<WorkbenchPlugin[]>>;
     "workbench/snapshots": () => Promise<RemoteResult<WorkbenchSnapshot[]>>;
     "workbench/snapshot": (id: string) => Promise<RemoteResult<WorkbenchSnapshot>>;

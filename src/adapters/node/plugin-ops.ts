@@ -1,19 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { t } from "../shared/i18n";
-import { formatWorkbenchFailure } from "../shared/workbench";
-import { isExactRuntimeVersion } from "../shared/runtime";
+import { t } from "../../shared/i18n";
+import { formatWorkbenchFailure } from "../../shared/workbench";
+import { isExactRuntimeVersion } from "../../shared/runtime";
 import {
   PROTECTED_PLUGIN_PACKAGES,
   type InstalledPlugin,
   type PluginDownloadRequest,
   type PluginInstallResult,
   type PluginLibraryEntry,
-} from "../shared/types";
+} from "../../shared/types";
 import { enqueuePlugin, runDsh } from "./dsh-cli";
+import { sanitizeLogText } from "./diagnostics";
 import { assertNotRealHome } from "./home-guard";
 import { npmPackumentUrl } from "./package-source";
-import { isBareNpmPackageName, isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases } from "../shared/plugin";
+import { isBareNpmPackageName, isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases } from "../../shared/plugin";
 import { lookupCatalogEntry } from "./plugin-catalog";
 import {
   archiveAbsPath,
@@ -29,11 +30,16 @@ import { currentPackageSource, npmCliJs, nodeExecutable, runProcess, toolchainEn
 
 const PROTECTED = new Set<string>(PROTECTED_PLUGIN_PACKAGES);
 const PLUGIN_TIMEOUT_MS = 180_000;
-const DOWNLOAD_TIMEOUT_MS = 180_000;
+/** Headers plus body. Git pack reuses this bound; HTTP tests may inject a shorter value. */
+export const DOWNLOAD_TIMEOUT_MS = 180_000;
+/** npm packuments stay small; 32 MiB stops a never-ending JSON stream without blocking a real registry document. */
+export const DOWNLOAD_METADATA_MAX_BYTES = 32 * 1024 * 1024;
+/** Workbench plugin tarballs are tens of MiB; 256 MiB is a hard RAM cap, not an expected size. */
+export const DOWNLOAD_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
 
 export type PluginFetcher = (
   url: string,
-  init?: { headers?: Record<string, string> },
+  init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{
   ok: boolean;
   status: number;
@@ -42,6 +48,15 @@ export type PluginFetcher = (
 }>;
 
 export type GitPacker = (spec: string, destFile: string) => Promise<void>;
+
+export type PluginDownloadOptions = {
+  fetchImpl?: PluginFetcher;
+  packGit?: GitPacker;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  metadataMaxBytes?: number;
+  archiveMaxBytes?: number;
+};
 
 function profileDir(dshHome: string, name: string): string {
   return join(dshHome, "profiles", name);
@@ -126,7 +141,7 @@ export function listProfilePlugins(dshHome: string, name: string): InstalledPlug
 }
 
 function pluginError(spaceId: string, spec: string, code: number, stdout: string, stderr: string): Error {
-  const detail = (stderr || stdout).slice(0, 800);
+  const detail = boundedProcessDetail(stdout, stderr);
   return new Error(
     formatWorkbenchFailure({
       spaceId,
@@ -137,6 +152,17 @@ function pluginError(spaceId: string, spec: string, code: number, stdout: string
       exitCode: code,
     }),
   );
+}
+
+/** Official `dsh` stderr is often only "pnpm failed"; the useful pnpm text is on stdout. */
+function boundedProcessDetail(stdout: string, stderr: string): string {
+  const errHead = String(stderr ?? "").slice(0, 400);
+  const outTail = String(stdout ?? "").slice(-1600);
+  const parts = [errHead, outTail].filter((part) => part.trim());
+  let detail = parts.join("\n");
+  if (parts.length === 2 && errHead.includes(outTail)) detail = errHead;
+  if (detail.length > 2400) detail = detail.slice(0, 2400);
+  return sanitizeLogText(detail);
 }
 
 function addableSpec(dshHome: string, spec: string): string {
@@ -238,16 +264,158 @@ export function listPluginLibrary(
   return syncLibraryFromProfiles(dshHome, listAllProfilePlugins(dshHome, profileNames));
 }
 
-function defaultFetcher(): PluginFetcher {
+function defaultFetcher(limits?: { metadataMaxBytes?: number; archiveMaxBytes?: number }): PluginFetcher {
+  const metadataMaxBytes = limits?.metadataMaxBytes ?? DOWNLOAD_METADATA_MAX_BYTES;
+  const archiveMaxBytes = limits?.archiveMaxBytes ?? DOWNLOAD_ARCHIVE_MAX_BYTES;
   return async (url, init) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
-    try {
-      return await fetch(url, { headers: init?.headers, signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
-    }
+    const response = await fetch(url, { headers: init?.headers, signal: init?.signal });
+    return {
+      ok: response.ok,
+      status: response.status,
+      json: async () => {
+        const bytes = await readFetchBody(response, init?.signal, metadataMaxBytes);
+        try {
+          return JSON.parse(bytes.toString("utf8")) as unknown;
+        } catch {
+          throw new Error(t("errors.pluginDownloadFailed", { spec: url, detail: "invalid JSON" }));
+        }
+      },
+      arrayBuffer: async () => {
+        const bytes = await readFetchBody(response, init?.signal, archiveMaxBytes);
+        return Uint8Array.from(bytes).buffer;
+      },
+    };
   };
+}
+
+function createDownloadControl(options: PluginDownloadOptions): { signal: AbortSignal; close(): void } {
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const parent = options.signal;
+  const onParentAbort = () => controller.abort();
+  if (parent) {
+    if (parent.aborted) controller.abort();
+    else parent.addEventListener("abort", onParentAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    close() {
+      controller.abort();
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+function abortError(message = "The download was aborted."): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "name" in error && (error as { name: unknown }).name === "AbortError");
+}
+
+function throwIfDownloadAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw abortError();
+}
+
+function downloadFailed(spec: string, detail: string): Error {
+  return new Error(t("errors.pluginDownloadFailed", { spec, detail }));
+}
+
+function raceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function readFetchBody(response: Response, signal: AbortSignal | undefined, maxBytes: number): Promise<Buffer> {
+  if (signal?.aborted) {
+    await response.body?.cancel().catch(() => undefined);
+    throw abortError();
+  }
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw downloadFailed("plugin", `response exceeded ${maxBytes} bytes`);
+  }
+  if (!response.body) {
+    const bytes = Buffer.from(await raceAbort(response.arrayBuffer(), signal ?? new AbortController().signal));
+    if (bytes.length > maxBytes) throw downloadFailed("plugin", `response exceeded ${maxBytes} bytes`);
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const abortReader = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", abortReader, { once: true });
+  try {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      if (signal?.aborted) {
+        await reader.cancel().catch(() => undefined);
+        throw abortError();
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw downloadFailed("plugin", `response exceeded ${maxBytes} bytes`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, total);
+  } finally {
+    signal?.removeEventListener("abort", abortReader);
+  }
+}
+
+async function readFetcherJson(
+  response: { json(): Promise<unknown>; arrayBuffer(): Promise<ArrayBuffer> },
+  signal: AbortSignal,
+  maxBytes: number,
+  spec: string,
+): Promise<unknown> {
+  throwIfDownloadAborted(signal);
+  const value = await raceAbort(Promise.resolve().then(() => response.json()), signal);
+  try {
+    const encoded = Buffer.byteLength(JSON.stringify(value), "utf8");
+    if (encoded > maxBytes) throw downloadFailed(spec, `response exceeded ${maxBytes} bytes`);
+  } catch (error) {
+    if (error instanceof Error && /exceeded/.test(error.message)) throw error;
+  }
+  return value;
+}
+
+async function readFetcherArchive(
+  response: { arrayBuffer(): Promise<ArrayBuffer> },
+  signal: AbortSignal,
+  maxBytes: number,
+  spec: string,
+): Promise<Buffer> {
+  throwIfDownloadAborted(signal);
+  const body: ArrayBuffer = await raceAbort<ArrayBuffer>(Promise.resolve().then(() => response.arrayBuffer()), signal);
+  const bytes = Buffer.from(new Uint8Array(body));
+  if (bytes.length > maxBytes) throw downloadFailed(spec, `response exceeded ${maxBytes} bytes`);
+  if (bytes.length === 0) throw downloadFailed(spec, "empty tarball");
+  return bytes;
 }
 
 function rewriteTarballUrl(url: string): string {
@@ -306,17 +474,19 @@ async function downloadNpmTarball(
   spec: string,
   destFile: string,
   fetchImpl: PluginFetcher,
+  control: { signal: AbortSignal; metadataMaxBytes: number; archiveMaxBytes: number },
 ): Promise<{ packageName: string; version: string }> {
   const parsed = parseNpmNameAndVersion(spec);
   if (!parsed) {
     throw new Error(t("errors.pluginNeedExactVersion"));
   }
+  throwIfDownloadAborted(control.signal);
   const url = npmPackumentUrl(currentPackageSource(), parsed.name);
-  const response = await fetchImpl(url, { headers: { accept: "application/json" } });
+  const response = await fetchImpl(url, { headers: { accept: "application/json" }, signal: control.signal });
   if (!response.ok) {
-    throw new Error(t("errors.pluginDownloadFailed", { spec, detail: `HTTP ${response.status}` }));
+    throw downloadFailed(spec, `HTTP ${response.status}`);
   }
-  const packument = (await response.json()) as {
+  const packument = (await readFetcherJson(response, control.signal, control.metadataMaxBytes, spec)) as {
     name?: unknown;
     "dist-tags"?: { latest?: string };
     versions?: Record<string, { dist?: { tarball?: string } }>;
@@ -324,16 +494,15 @@ async function downloadNpmTarball(
   const tarball = packument.versions?.[parsed.version]?.dist?.tarball;
   const packageName = typeof packument.name === "string" && packument.name ? packument.name : parsed.name;
   if (!tarball) {
-    throw new Error(t("errors.pluginDownloadFailed", { spec, detail: "missing tarball" }));
+    throw downloadFailed(spec, "missing tarball");
   }
-  const packed = await fetchImpl(rewriteTarballUrl(tarball));
+  throwIfDownloadAborted(control.signal);
+  const packed = await fetchImpl(rewriteTarballUrl(tarball), { signal: control.signal });
   if (!packed.ok) {
-    throw new Error(t("errors.pluginDownloadFailed", { spec, detail: `HTTP ${packed.status}` }));
+    throw downloadFailed(spec, `HTTP ${packed.status}`);
   }
-  const bytes = Buffer.from(await packed.arrayBuffer());
-  if (bytes.length === 0) {
-    throw new Error(t("errors.pluginDownloadFailed", { spec, detail: "empty tarball" }));
-  }
+  const bytes = await readFetcherArchive(packed, control.signal, control.archiveMaxBytes, spec);
+  throwIfDownloadAborted(control.signal);
   await writeAtomicBin(destFile, bytes);
   return { packageName, version: parsed.version };
 }
@@ -458,13 +627,15 @@ function resolveDownloadDraft(dshHome: string, request: PluginDownloadRequest): 
 async function resolveNpmLatest(
   name: string,
   fetchImpl: PluginFetcher,
+  control: { signal: AbortSignal; metadataMaxBytes: number },
 ): Promise<{ packageName: string; version: string }> {
+  throwIfDownloadAborted(control.signal);
   const url = npmPackumentUrl(currentPackageSource(), name);
-  const response = await fetchImpl(url, { headers: { accept: "application/json" } });
+  const response = await fetchImpl(url, { headers: { accept: "application/json" }, signal: control.signal });
   if (!response.ok) {
-    throw new Error(t("errors.pluginDownloadFailed", { spec: name, detail: `HTTP ${response.status}` }));
+    throw downloadFailed(name, `HTTP ${response.status}`);
   }
-  const packument = (await response.json()) as {
+  const packument = (await readFetcherJson(response, control.signal, control.metadataMaxBytes, name)) as {
     name?: unknown;
     "dist-tags"?: { latest?: unknown };
     versions?: Record<string, { dist?: { tarball?: string } }>;
@@ -478,9 +649,13 @@ async function resolveNpmLatest(
   return { packageName, version: latest };
 }
 
-async function pinDownloadMeta(draft: DownloadMeta, fetchImpl: PluginFetcher): Promise<DownloadMeta> {
+async function pinDownloadMeta(
+  draft: DownloadMeta,
+  fetchImpl: PluginFetcher,
+  control: { signal: AbortSignal; metadataMaxBytes: number },
+): Promise<DownloadMeta> {
   if (isGitSpec(draft.spec) || parseNpmNameAndVersion(draft.spec)) return draft;
-  const pinned = await resolveNpmLatest(draft.packageName, fetchImpl);
+  const pinned = await resolveNpmLatest(draft.packageName, fetchImpl, control);
   const spec = `${pinned.packageName}@${pinned.version}`;
   return {
     ...draft,
@@ -493,40 +668,62 @@ async function pinDownloadMeta(draft: DownloadMeta, fetchImpl: PluginFetcher): P
 export async function downloadPlugin(
   dshHome: string,
   request: PluginDownloadRequest,
-  options: { fetchImpl?: PluginFetcher; packGit?: GitPacker } = {},
+  options: PluginDownloadOptions = {},
 ): Promise<PluginLibraryEntry> {
   assertNotRealHome(dshHome);
-  const fetchImpl = options.fetchImpl ?? defaultFetcher();
+  const fetchImpl = options.fetchImpl ?? defaultFetcher({
+    metadataMaxBytes: options.metadataMaxBytes,
+    archiveMaxBytes: options.archiveMaxBytes,
+  });
   const draft = resolveDownloadDraft(dshHome, request);
   return enqueuePlugin(t("queue.pluginDownload", { spec: draft.spec }), async () => {
-    const meta = await pinDownloadMeta(draft, fetchImpl);
-    const existing = lookupLibraryEntry(dshHome, meta.id);
-    const dest = archiveAbsPath(dshHome, meta.id);
-    if (existing?.tarball && existsSync(resolve(dshHome, existing.tarball))) {
-      return existing;
-    }
-    if (isGitSpec(meta.spec)) {
-      const pack = options.packGit ?? defaultGitPacker;
-      await pack(meta.spec, dest);
-    } else {
-      const fetched = await downloadNpmTarball(meta.spec, dest, fetchImpl);
-      if (fetched.packageName) meta.packageName = fetched.packageName;
-    }
-    if (!existsSync(dest)) {
-      throw new Error(t("errors.pluginDownloadFailed", { spec: meta.spec, detail: "no file" }));
-    }
-    const entry: PluginLibraryEntry = {
-      id: meta.id,
-      spec: meta.spec,
-      packageName: meta.packageName,
-      title: meta.title,
-      catalogId: meta.catalogId,
-      tarball: archiveRelPath(meta.id),
-      source: meta.source,
-      downloadedAt: new Date().toISOString(),
+    const control = createDownloadControl(options);
+    const limits = {
+      signal: control.signal,
+      metadataMaxBytes: options.metadataMaxBytes ?? DOWNLOAD_METADATA_MAX_BYTES,
+      archiveMaxBytes: options.archiveMaxBytes ?? DOWNLOAD_ARCHIVE_MAX_BYTES,
     };
-    upsertLibraryEntry(dshHome, entry);
-    return entry;
+    try {
+      throwIfDownloadAborted(control.signal);
+      const meta = await pinDownloadMeta(draft, fetchImpl, limits);
+      const existing = lookupLibraryEntry(dshHome, meta.id);
+      const dest = archiveAbsPath(dshHome, meta.id);
+      if (existing?.tarball && existsSync(resolve(dshHome, existing.tarball))) {
+        throwIfDownloadAborted(control.signal);
+        return existing;
+      }
+      if (isGitSpec(meta.spec)) {
+        throwIfDownloadAborted(control.signal);
+        const pack = options.packGit ?? defaultGitPacker;
+        await pack(meta.spec, dest);
+      } else {
+        const fetched = await downloadNpmTarball(meta.spec, dest, fetchImpl, limits);
+        if (fetched.packageName) meta.packageName = fetched.packageName;
+      }
+      throwIfDownloadAborted(control.signal);
+      if (!existsSync(dest)) {
+        throw downloadFailed(meta.spec, "no file");
+      }
+      const entry: PluginLibraryEntry = {
+        id: meta.id,
+        spec: meta.spec,
+        packageName: meta.packageName,
+        title: meta.title,
+        catalogId: meta.catalogId,
+        tarball: archiveRelPath(meta.id),
+        source: meta.source,
+        downloadedAt: new Date().toISOString(),
+      };
+      throwIfDownloadAborted(control.signal);
+      upsertLibraryEntry(dshHome, entry);
+      return entry;
+    } catch (error) {
+      if (options.signal?.aborted) throw abortError();
+      if (isAbortError(error)) throw downloadFailed(draft.spec, "timed out");
+      throw error;
+    } finally {
+      control.close();
+    }
   });
 }
 
@@ -538,7 +735,7 @@ export async function removeDownloadedPlugin(
   assertNotRealHome(dshHome);
   const entry = lookupLibraryEntry(dshHome, id);
   if (!entry) throw new Error(t("errors.pluginLibraryMissing", { id }));
-  const used = spacesUsingPlugin(listAllProfilePlugins(dshHome, profileNames), entry);
+  const used = spacesUsingPlugin(dshHome, listAllProfilePlugins(dshHome, profileNames), entry);
   if (used.length > 0) {
     throw new Error(t("errors.pluginInUse", { name: entry.title || entry.packageName, spaces: used.join(", ") }));
   }

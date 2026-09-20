@@ -28,9 +28,9 @@ import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "./dsh-endp
 import { toolchainEnv } from "./toolchain";
 import { renameDirectory as renameSync } from "./atomic";
 import { sanitizeLogText } from "./diagnostics";
-import { PROTECTED_PLUGIN_PACKAGES } from "../shared/types";
-import { isExactRuntimeVersion } from "../shared/runtime";
-import type { PendingRestore, RestoreResult, RestoreRecoveryReceipt, SnapshotMeta, SnapshotRuntime } from "../shared/snapshots";
+import { PROTECTED_PLUGIN_PACKAGES } from "../../shared/types";
+import { isExactRuntimeVersion } from "../../shared/runtime";
+import type { PendingRestore, RestoreResult, RestoreRecoveryReceipt, SnapshotMeta, SnapshotRuntime } from "../../shared/snapshots";
 import type { SnapshotRestoreOptions } from "./snapshot-store";
 import type {
   OfficialPluginChange,
@@ -39,7 +39,7 @@ import type {
   UpgradeProgress,
   UpgradeProfilePreview,
   UpgradeResult,
-} from "../shared/upgrade";
+} from "../../shared/upgrade";
 
 const OFFICIAL = new Set<string>(PROTECTED_PLUGIN_PACKAGES);
 const BASE_PKG = "@deepseek-ai/dsh-base";

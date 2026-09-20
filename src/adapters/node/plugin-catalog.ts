@@ -9,7 +9,7 @@ import {
   type PluginCatalogSnapshot,
   type PluginInstallMethod,
   type PluginTier,
-} from "../shared/types";
+} from "../../shared/types";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 import { parseCatalogUrl } from "./hub-settings";
@@ -40,7 +40,7 @@ export function isCompatibleCatalog(meta: PluginCatalogMeta): boolean {
   return Number.isFinite(meta.schemaVersion) && meta.schemaVersion <= PLUGIN_CATALOG_SCHEMA_VERSION;
 }
 
-export { isInstallableEntry, isSafeSpec } from "../shared/plugin";
+export { isInstallableEntry, isSafeSpec } from "../../shared/plugin";
 
 export function resolveCatalogUrl(override?: string): string {
   return parseCatalogUrl(override) || DEFAULT_PLUGIN_CATALOG_URL;

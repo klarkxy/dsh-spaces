@@ -9,7 +9,7 @@ import {
   HomeControlPathError,
 } from "../../../../src/adapters/node/home-controller";
 import { invocationProfile } from "../../../../src/adapters/node/spaces-control";
-import { samePath } from "../../../../src/main/home-guard";
+import { samePath } from "../../../../src/adapters/node/home-guard";
 import { PROFILE_NAME_RE } from "../../../../src/shared/types";
 import type { WorkbenchRole } from "../../../../src/shared/workbench";
 

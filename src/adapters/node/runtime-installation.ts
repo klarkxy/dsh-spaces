@@ -1,8 +1,8 @@
-import { observeMaintenanceChild, withChildObservation } from "../../main/owned-process-record";
-import { assertNotRealHome } from "../../main/home-guard";
-import { RuntimeStore, type RunProcessFn } from "../../main/runtime-store";
-import { ProcessTerminationError } from "../../main/terminate-process";
-import { setToolchainRoot } from "../../main/toolchain";
+import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
+import { assertNotRealHome } from "./home-guard";
+import { RuntimeStore, type RunProcessFn } from "./runtime-store";
+import { ProcessTerminationError } from "./terminate-process";
+import { setToolchainRoot } from "./toolchain";
 import type { InstalledRuntime, RuntimeRef } from "../../shared/runtime";
 import type { PackageSource } from "../../shared/types";
 

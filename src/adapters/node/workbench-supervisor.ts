@@ -2,37 +2,38 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
+  chmodSync,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Server } from "node:http";
-import { atomicWrite } from "../../main/atomic";
+import { atomicWrite } from "./atomic";
 import { CooperativeChildren } from "./cooperative-children";
-import { observeMaintenanceChild, withChildObservation } from "../../main/owned-process-record";
-import { inspectHomeToolchain } from "../desktop/control-residue";
-import { CoordinatedUpgrade } from "../../main/coordinated-upgrade";
-import { DiagnosticsService, sanitizeLogText } from "../../main/diagnostics";
-import { setManagedCliPrefix, setSelectedDshResolver, spawnNode } from "../../main/dsh-cli";
-import { assertNotRealHome, authorizeProductHome } from "../../main/home-guard";
-import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "../../main/patch-writer";
-import { archiveAbsPath } from "../../main/plugin-library";
-import { pluginAdd } from "../../main/plugin-ops";
-import { ProcessManager, type KillKind, type ProcessRuntime } from "../../main/process-manager";
+import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
+import { inspectHomeToolchain } from "./control-residue";
+import { CoordinatedUpgrade } from "./coordinated-upgrade";
+import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
+import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver, spawnNode } from "./dsh-cli";
+import { assertNotRealHome, authorizeProductHome, samePath } from "./home-guard";
+import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
+import { archiveAbsPath } from "./plugin-library";
+import { pluginAdd } from "./plugin-ops";
+import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
-import { ProfileRegistry } from "../../main/profile-registry";
-import { describeRuntime, readRuntimeRef } from "../../main/runtime-descriptor";
-import { RuntimeStore } from "../../main/runtime-store";
-import { SnapshotExecutor } from "../../main/snapshot-executor";
-import { setToolchainRoot } from "../../main/toolchain";
-import { inferPackageSource, type ProfileStatus } from "../../shared/types";
+import { ProfileRegistry } from "./profile-registry";
+import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
+import { RuntimeStore } from "./runtime-store";
+import { SnapshotExecutor } from "./snapshot-executor";
+import { setPackageSource, setToolchainRoot } from "./toolchain";
+import type { ProfileStatus } from "../../shared/types";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { sanitizeSpaceIcon } from "../../shared/space-icon";
 import type { SnapshotRuntime } from "../../shared/snapshots";
@@ -42,6 +43,7 @@ import type {
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchMutationContext,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -52,6 +54,26 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../shared/workbench";
+import { isWorkbenchProductCommand } from "../../shared/workbench-product";
+import type {
+  WorkbenchDiagnostics,
+  WorkbenchHomeSettings,
+  WorkbenchProductCommand,
+  WorkbenchProductRequest,
+} from "../../shared/workbench-product";
+import { parseWorkbenchProductCommand, parseWorkbenchProductRequest } from "../../shared/workbench-product-schemas";
+import { readSettings } from "./hub-settings";
+import {
+  WORKBENCH_PROTOCOL_VERSION,
+  WorkbenchProtocolConflictError,
+  WorkbenchProtocolInputError,
+  assertMutationContext,
+  computeWorkbenchRevision,
+  deriveServiceEpoch,
+  digestHomeIdentity,
+  parseMutationContext,
+} from "./workbench-protocol";
+import { WorkbenchProductService } from "./workbench-products";
 import {
   isCompatibleDshCliVersion,
   NodeSpacesControl,
@@ -70,20 +92,40 @@ import {
   type HomeControlHandle,
   type PidAliveFn,
 } from "./home-controller";
+import {
+  COMPONENT_PAYLOAD_ENTRIES,
+  ComponentPayloadError,
+  validateComponentPayload,
+  type ValidatedComponentPayload,
+} from "./component-payload";
+import {
+  COMPONENT_HANDOFF_FLAG,
+  createComponentHandoffBinding,
+  spawnComponentLauncher,
+  type ComponentHandoffCommit,
+  type SpawnComponentLauncherOptions,
+} from "./component-handoff";
 import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
 import {
   WorkbenchJobError,
   WorkbenchJobStore,
   WORKBENCH_JOBS_DIR_NAME,
   type WorkbenchJobContext,
+  type WorkbenchJobsInject,
 } from "./workbench-jobs";
+import { packLocalArtifacts } from "../../../packages/plugin/src/host/supervisor-pack.ts";
 import {
   WorkbenchMaintenance as WorkbenchMaintenanceService,
   WORKBENCH_PLANS_DIR_NAME,
   type WorkbenchRecoveryOutcome,
 } from "./workbench-maintenance";
 import type { WorkbenchMaintenancePorts } from "./workbench-maintenance-ports";
-import { WorkbenchPackageUpgrade } from "./workbench-package-upgrade";
+import {
+  WorkbenchPackageUpgrade,
+  validateComponentPayloadArtifacts,
+  type WorkbenchPackageHandoff,
+  type WorkbenchPackageHandoffInput,
+} from "./workbench-package-upgrade";
 import {
   expectedAuthCookieName,
   renderEntryPage,
@@ -97,7 +139,7 @@ import { createHomeLlmHost } from "./llm-host";
 import { GlobalLlmHost, type LlmApplyCommand } from "../../core/application/global-llm-host";
 import { LLM_ERROR, LlmConfigError } from "../../core/domain/llm-connections";
 import type { LlmInstanceRecord } from "../../core/ports/llm-runtime";
-import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
+import { isLlmWriteMethod, type LlmApiRequest, type LlmApiResult } from "../../shared/llm-api";
 
 export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./workbench-http";
 export { isCompatibleDshCliVersion };
@@ -108,6 +150,7 @@ const VIEW_ENV = {
   id: "DSH_SPACES_VIEW_ID",
   generation: "DSH_SPACES_VIEW_GENERATION",
   channel: "DSH_SPACES_VIEW_CHANNEL",
+  epoch: "DSH_SPACES_VIEW_SERVICE_EPOCH",
 } as const;
 const PLAN_TTL_MS = 5 * 60_000;
 const STOP_NOT_FORCED = "Timed stop did not force-kill the process. The instance is still recorded.";
@@ -123,9 +166,10 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.stop",
   "space.restart",
   "space.delete",
-  "controller.release",
-  "controller.shutdown",
+  "service.shutdown",
 ]);
+const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume"]);
+const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore"]);
 
 export const WORKBENCH_ERROR = {
   "workbench/invalid-input": "The request is not a valid workbench operation.",
@@ -135,6 +179,7 @@ export const WORKBENCH_ERROR = {
   "workbench/read-only": "The workbench is read-only until control is acquired.",
   "workbench/unavailable": "The workbench cannot accept this request.",
   "workbench/unsupported": "That command is not supported.",
+  "workbench/conflict": "The service epoch or state revision does not match.",
   "workbench/busy": "Another controller already holds run rights for this home.",
   "workbench/unmanaged": "This instance is not managed here. It can be viewed only.",
   "workbench/protected": "The web profile and manager space cannot be changed this way.",
@@ -180,6 +225,16 @@ export interface WorkbenchSupervisorOptions {
   llmBridgeArtifact?: string;
   snapshotWorkerFile?: string;
   snapshotRoot?: string;
+  /** Selected v2 payload `lib` root (`--component-payload`). Absent keeps library callers compatible. */
+  componentPayloadRoot?: string;
+  /** Internal-only accepted run owner. Never a public browser field. */
+  acceptedHandle?: HomeControlHandle;
+  /** CLI-only: process may exit normally after a flushed handoff commit. */
+  onNormalExit?: () => void | Promise<void>;
+  /** Test seam forwarded to WorkbenchJobStore. */
+  jobsInject?: WorkbenchJobsInject;
+  /** Test seam for the one-shot launcher spawn. Production uses spawnComponentLauncher. */
+  spawnLauncher?: (options: SpawnComponentLauncherOptions) => ReturnType<typeof spawnComponentLauncher>;
   runtimeRoot?: string;
   allowRealHome?: boolean;
   portStart?: number;
@@ -198,6 +253,7 @@ export interface WorkbenchSupervisorOptions {
 export interface SupervisorCliOptions extends WorkbenchSupervisorOptions {
   home: string;
   bin: string;
+  acceptHandoff?: boolean;
 }
 
 export interface WorkbenchSupervisorHandle {
@@ -213,6 +269,7 @@ interface ChildView {
   generation: number;
   origin: string;
   channel: string;
+  serviceEpoch: string;
   issued: boolean;
 }
 
@@ -222,6 +279,16 @@ interface StoredPlan {
   fingerprint: string;
   consumed?: boolean;
 }
+
+type PendingComponentHandoff = {
+  jobId: string;
+  planId: string;
+  snapshotId: string;
+  payload: ValidatedComponentPayload;
+  pluginArtifact?: string;
+  viewBridgeArtifact?: string;
+  llmBridgeArtifact?: string;
+};
 
 interface BoundCli {
   bin: string;
@@ -253,6 +320,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private processes: ProcessManager | undefined;
   private spaces: NodeSpacesControl | undefined;
   private maintenance: WorkbenchMaintenance | null = null;
+  private products: WorkbenchProductService | null = null;
+  private diagnostics: DiagnosticsService | undefined;
+  private homeSettings: WorkbenchHomeSettings | undefined;
   private cli: BoundCli | null = null;
   private managerId: string | null = null;
   private managerInstall: "missing" | "manager" | "ordinary" | "damaged" = "missing";
@@ -260,7 +330,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   // Inventory is a display snapshot while maintenance swaps its backing tree.
   // Admission still uses the live controller and transaction locks.
   private maintenanceInventory: { mode: WorkbenchState["mode"]; spaces: WorkbenchSpace[] } | null = null;
-  private recoveryRequired = false;
+  private blocked = false;
   private reasons: string[] = [];
   private derivedRecoveryReasons = new Set<string>();
   private readonly generations = new Map<string, number>();
@@ -268,7 +338,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly workspaceOrigins = new Set<string>();
   private readonly plans = new Map<string, StoredPlan>();
   private httpClose: (() => Promise<void>) | undefined;
-  private relinquishKind: "controller.release" | "controller.shutdown" | null = null;
+  private relinquishKind: "service.shutdown" | null = null;
   private closed = false;
   private sealing = false;
   private maintenanceBlocked = false;
@@ -280,6 +350,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly pidAlive: PidAliveFn;
   private readonly llmApplied = new Map<string, number>();
   private readonly llmBusy = new Set<string>();
+  private activeJobId: string | undefined;
+  private pendingHandoff: PendingComponentHandoff | undefined;
+  private transferredOwner = false;
+  private selectedPayload: ValidatedComponentPayload | undefined;
+  private packageUpgrade: WorkbenchPackageUpgrade | undefined;
   readonly llmHost: GlobalLlmHost;
 
   constructor(options: WorkbenchSupervisorOptions) {
@@ -299,6 +374,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.now = options.now ?? (() => new Date());
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.pidAlive = options.pidAlive ?? defaultPidAlive;
+    if (options.componentPayloadRoot) {
+      this.selectedPayload = validateComponentPayload(options.componentPayloadRoot);
+    }
     this.llmHost = createHomeLlmHost(this.home, {
       listSpaceIds: async () => this.homeProfileNames(),
       instances: {
@@ -377,7 +455,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.reasons = this.heldReasons(error.inspection);
         return;
       }
-      this.recoveryRequired = true;
+      this.blocked = true;
       this.reasons = ["Writable startup did not finish. The stable entry is still available."];
       return;
     }
@@ -386,7 +464,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       await this.initWritable();
     } catch {
-      this.recoveryRequired = true;
+      this.blocked = true;
       this.reasons = [
         ...this.reasons,
         "Writable startup did not finish. The stable entry is still available.",
@@ -394,15 +472,35 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
+  /**
+   * Use an already-accepted run owner instead of acquire. Fresh bearer; epoch
+   * follows the accepted nonce. Failure does not acquire a fallback owner.
+   */
+  async takeAcceptedOwner(handle: HomeControlHandle): Promise<void> {
+    this.assertAcceptedHandle(handle);
+    this.handle = handle;
+    this.writeHostBearer();
+    this.writeEndpointFile();
+    await this.initWritable();
+    this.assertAcceptedStartupReady();
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
+    if (this.transferredOwner) {
+      this.closed = true;
+      this.sealing = true;
+      this.handle = undefined;
+      await this.httpClose?.();
+      return;
+    }
     this.sealing = true;
     try {
       if (this.jobs) await this.jobs.whenIdle();
       await this.stopOwnedAll();
     } catch (error) {
       this.maintenanceBlocked = true;
-      this.recoveryRequired = true;
+      this.blocked = true;
       if (!this.reasons.includes("Owned processes could not be stopped. Run rights were kept.")) {
         this.reasons.push("Owned processes could not be stopped. Run rights were kept.");
       }
@@ -423,8 +521,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         expectKeys(body, ["spaceId"]);
         return this.detail(parseSpaceName(body.spaceId));
       case "submit":
-        expectKeys(body, ["command", "requestId"]);
-        return this.submit(body.command as WorkbenchCommand, parseRequestId(body.requestId));
+        expectKeys(body, ["command", "requestId", "context"]);
+        return this.submit(
+          body.command as WorkbenchCommand,
+          parseRequestId(body.requestId),
+          parseMutationContext(body.context),
+        );
       case "job":
         expectKeys(body, ["id"]);
         return this.job(parseRequestId(body.id));
@@ -435,8 +537,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         expectKeys(body, ["spaceId"]);
         return this.view(parseSpaceName(body.spaceId));
       case "preview":
-        expectKeys(body, ["request"]);
-        return this.preview(body.request as WorkbenchPlanRequest);
+        expectKeys(body, ["request", "context"]);
+        return this.preview(body.request as WorkbenchPlanRequest, parseMutationContext(body.context));
       case "plugins":
         expectKeys(body, [], ["query"]);
         return this.plugins(typeof body.query === "string" ? body.query : "");
@@ -458,7 +560,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "llm":
         return this.dispatchLlm(body);
       case "llmCredential":
-        return this.llmHost.dispatchCredential(body);
+        return this.dispatchLlmCredential(body);
+      case "product":
+        expectKeys(body, ["request"]);
+        return this.product(parseWorkbenchProductRequest(body.request));
     }
   }
 
@@ -467,7 +572,42 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async dispatchLlm(body: unknown): Promise<unknown> {
+    const method = body && typeof body === "object" ? (body as { method?: unknown }).method : undefined;
+    if (method === "applyPlan") {
+      if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+      return this.llmHost.dispatch(body);
+    }
+    if (typeof method === "string" && isLlmWriteMethod(method)) {
+      if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+      return this.jobs.runExclusive(async () => {
+        this.assertLlmMutationAllowed();
+        const result = await this.llmHost.dispatch(body);
+        await this.maybeInstallLlmBridge(body);
+        return result;
+      });
+    }
     const result = await this.llmHost.dispatch(body);
+    await this.maybeInstallLlmBridge(body);
+    return result;
+  }
+
+  private async dispatchLlmCredential(body: unknown): Promise<unknown> {
+    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+    return this.jobs.runExclusive(async () => {
+      this.assertLlmMutationAllowed();
+      return this.llmHost.dispatchCredential(body);
+    });
+  }
+
+  private assertLlmMutationAllowed(): void {
+    this.assertWritable();
+    if (this.sealing) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
+    }
+    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+  }
+
+  private async maybeInstallLlmBridge(body: unknown): Promise<void> {
     const request = body as { method?: string; spaceId?: string; shared?: { mode?: string } };
     if (
       typeof request.spaceId === "string" &&
@@ -476,32 +616,44 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     ) {
       await this.installLlmBridgeIfExplicit(request.spaceId);
     }
-    return result;
   }
 
   entryPage(): string {
     const managerId = this.managerId;
     const view = managerId ? this.views.get(managerId) : undefined;
     const running = managerId ? this.statusOf(managerId) === "running" : false;
+    const epoch = this.currentServiceEpoch();
+    const viewPath =
+      running && view
+        ? `/view/${encodeURIComponent(view.spaceId)}/${view.generation}${epoch ? `?epoch=${encodeURIComponent(epoch)}` : ""}`
+        : null;
     return renderEntryPage({
       managerRunning: running,
-      managerViewPath: running && view ? `/view/${encodeURIComponent(view.spaceId)}/${view.generation}` : null,
+      managerViewPath: viewPath,
       maintenance: this.maintenanceFlag,
-      recoveryRequired: this.recoveryRequired,
       writable: Boolean(this.handle),
       reasons: this.reasons,
+      serviceEpoch: epoch,
     });
   }
 
-  async viewEntry(spaceId: string, generation: string): Promise<ViewBootstrap | { status: number; message: string }> {
+  async viewEntry(
+    spaceId: string,
+    generation: string,
+    epoch?: string | null,
+  ): Promise<ViewBootstrap | { status: number; message: string }> {
     const id = parseSpaceName(spaceId);
     const gen = Number(generation);
     if (!Number.isInteger(gen) || gen < 0) {
       return { status: 404, message: "That view entry was not found." };
     }
+    const currentEpoch = this.currentServiceEpoch();
+    if (!epoch || epoch !== currentEpoch) {
+      return { status: 403, message: "View entry requires the current service epoch." };
+    }
     const view = this.views.get(id);
     const owned = this.processes?.statusOf(id) === "running";
-    if (!view || view.generation !== gen || !owned) {
+    if (!view || view.generation !== gen || !owned || view.serviceEpoch !== currentEpoch) {
       return { status: 403, message: "View entry is only issued for owned ready children." };
     }
     const launch = this.processes?.urlOf(id);
@@ -532,12 +684,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async state(): Promise<WorkbenchState> {
-    this.refreshRecovery();
+    this.refreshAvailability(false);
     const owner = this.maintenanceFlag && this.handle
       ? { kind: this.handle.owner.kind, since: this.handle.owner.startedAt }
       : this.readOwner();
     const inventory = this.maintenanceFlag ? this.maintenanceInventory : null;
+    const spaces = inventory ? inventory.spaces.map(row => ({
+      ...row,
+      status: this.unmanaged.has(row.id) ? "unknown" as const : this.publicStatus(row.id),
+      generation: this.views.get(row.id)?.generation ?? this.generations.get(row.id) ?? row.generation,
+      managed: Boolean(this.handle) && !this.unmanaged.has(row.id),
+    })) : this.listSpaces();
     return {
+      protocolVersion: WORKBENCH_PROTOCOL_VERSION,
+      serviceEpoch: this.currentServiceEpoch(),
+      revision: this.stateRevision(spaces),
+      availability: this.availability(),
       role: this.role(),
       managerId: this.managerId,
       owner,
@@ -545,14 +707,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       mode: inventory?.mode ?? this.spaces?.capabilities().mode ?? "unknown-readonly",
       dshVersion: this.cli?.version ?? null,
       maintenance: this.maintenanceFlag,
-      recoveryRequired: this.recoveryRequired,
       reasons: [...this.reasons],
-      spaces: inventory ? inventory.spaces.map(row => ({
-        ...row,
-        status: this.unmanaged.has(row.id) ? "unknown" : this.publicStatus(row.id),
-        generation: this.views.get(row.id)?.generation ?? this.generations.get(row.id) ?? row.generation,
-        managed: Boolean(this.handle) && !this.unmanaged.has(row.id),
-      })) : this.listSpaces(),
+      spaces,
       jobs: this.jobs?.list() ?? [],
     };
   }
@@ -580,26 +736,34 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     };
   }
 
-  async submit(command: WorkbenchCommand, requestId: string): Promise<WorkbenchJob> {
-    if (command.kind === "controller.acquire") {
-      return this.acquireCommand(requestId);
+  async submit(command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext): Promise<WorkbenchJob> {
+    const parsedContext = parseMutationContext(context);
+    if (REMOVED_COMMAND_KINDS.has((command as { kind?: string }).kind ?? "")) {
+      throw new WorkbenchPublicError("workbench/unsupported");
     }
     if (this.closed || this.sealing || this.relinquishKind) {
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     this.assertWritable();
-    if (command.kind === "recovery.resume") {
-      throw new WorkbenchPublicError("workbench/unsupported");
-    }
     if (this.maintenanceBlocked) {
       throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
     }
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    const job = await this.jobs.submit(command, requestId, (ctx) =>
-      this.observeChildWork(() => this.runCommand(command, ctx)),
-    );
-    if (command.kind === "plan.execute") {
-      void this.jobs.whenIdle().then(() => this.finishRelinquish());
+    const parsedCommand = isWorkbenchProductCommand(command) ? parseWorkbenchProductCommand(command) : command;
+    const job = await this.jobs.submit(parsedCommand, requestId, (ctx) => {
+      this.activeJobId = requestId;
+      return this.observeChildWork(async () => {
+        try {
+          this.assertLiveContext(parsedContext);
+          return await this.runCommand(parsedCommand, ctx);
+        } finally {
+          this.activeJobId = undefined;
+        }
+      });
+    });
+    if (parsedCommand.kind === "plan.execute") {
+      const jobId = job.id;
+      void this.jobs.whenIdle().then(() => this.afterPlanJobSettled(jobId));
     }
     return job;
   }
@@ -623,19 +787,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/not-found");
     const generation = this.generations.get(id) ?? 0;
+    const epoch = this.requireServiceEpoch();
     let current = this.views.get(id);
-    if (!current || current.generation !== generation) {
+    if (!current || current.generation !== generation || current.serviceEpoch !== epoch) {
       current = {
         spaceId: id,
         generation,
         origin: `http://127.0.0.1:${port}`,
         channel: randomBytes(8).toString("hex"),
+        serviceEpoch: epoch,
         issued: true,
       };
       this.views.set(id, current);
     }
     current.issued = true;
     return {
+      serviceEpoch: current.serviceEpoch,
       spaceId: current.spaceId,
       generation: current.generation,
       origin: current.origin,
@@ -645,12 +812,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     };
   }
 
-  async preview(request: WorkbenchPlanRequest): Promise<WorkbenchPlan> {
+  async preview(request: WorkbenchPlanRequest, context: WorkbenchMutationContext): Promise<WorkbenchPlan> {
+    const parsedContext = parseMutationContext(context);
     this.assertWritable();
+    this.assertLiveContext(parsedContext);
+    if (REMOVED_PLAN_KINDS.has((request as { kind?: string }).kind ?? "")) {
+      throw new WorkbenchPublicError("workbench/unsupported");
+    }
     const parsed = parsePlanRequest(request);
     if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) return this.previewLocal(parsed);
     if (!this.maintenance) throw new WorkbenchPublicError("workbench/maintenance");
     return this.maintenance.preview(parsed);
+  }
+
+  async product(request: WorkbenchProductRequest): Promise<Awaited<ReturnType<WorkbenchApi["product"]>>> {
+    if (!this.products) throw new WorkbenchPublicError("workbench/read-only");
+    return this.products.read(parseWorkbenchProductRequest(request));
   }
 
   async plugins(query: string): Promise<WorkbenchPlugin[]> {
@@ -674,70 +851,50 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return this.maintenance.backups(spaceId);
   }
 
-  private async acquireCommand(requestId: string): Promise<WorkbenchJob> {
-    if (this.closed) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
-    }
-    if (this.handle) {
-      return syntheticJob(requestId, "controller.acquire", "succeeded", "Run rights already held.");
-    }
-    const inspection = this.controller.inspect();
-    if (inspection.held) {
-      throw new WorkbenchPublicError("workbench/busy");
-    }
-    this.handle = this.controller.acquire("web", this.origin);
-    this.sealing = false;
-    this.relinquishKind = null;
-    this.writeHostBearer();
-    this.writeEndpointFile();
-    await this.initWritable();
-    return syntheticJob(requestId, "controller.acquire", "succeeded", "Run rights acquired.");
-  }
-
   private async initWritable(): Promise<void> {
     this.bindToolchain();
     mkdirSync(this.controlDir, { recursive: true });
-    this.writeHostBearer();
     const identity = await this.controller.ensureManager();
     this.managerId = identity.profileId;
     this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
-    this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now });
+    this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
     this.processes = this.createProcessManager();
+    this.bindProductService();
     this.reconcileInstanceRecords();
     if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size) {
       this.maintenance = this.createMaintenance();
-      this.refreshRecovery();
+      this.refreshAvailability();
       return;
     }
     const bootstrapPending = this.ownsBootstrap(identity.profileId);
     if (this.managerInstall === "ordinary" && !bootstrapPending) {
-      this.recoveryRequired = true;
+      this.blocked = true;
       this.reasons = [
         "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
       ];
-      this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now });
-      this.refreshRecovery();
+      this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
+      this.refreshAvailability();
       return;
     }
     if (this.managerInstall === "damaged") {
-      this.recoveryRequired = true;
+      this.blocked = true;
       this.reasons = ["The manager profile record is damaged and was not rebuilt."];
-      this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now });
-      this.refreshRecovery();
+      this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
+      this.refreshAvailability();
       return;
     }
     if (this.managerInstall === "missing" || bootstrapPending) {
       if (!this.cli) {
-        this.recoveryRequired = true;
+        this.blocked = true;
         this.reasons = ["A compatible DSH CLI is required before the manager profile can be created."];
-        this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now });
+        this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
         return;
       }
       try {
         await this.observeChildWork(() => this.bootstrapManager(identity.profileId));
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
-        this.recoveryRequired = true;
+        this.blocked = true;
         this.reasons = ["Manager initialization did not complete. Its local diagnostic record is available."];
         atomicWrite(join(this.controlDir, "manager-bootstrap-error.json"), `${JSON.stringify({
           version: 1, at: this.now().toISOString(),
@@ -752,13 +909,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } catch {
       this.reasons.push("Maintenance could not be composed.");
     }
-    this.refreshRecovery();
+    this.refreshAvailability();
 
-    if (this.managerInstall === "manager" && this.cli && !this.recoveryRequired && !this.unmanaged.has(identity.profileId)) {
+    if (this.managerInstall === "manager" && this.cli && !this.blocked && !this.unmanaged.has(identity.profileId)) {
       try {
         await this.startSpace(identity.profileId, silentJobContext());
       } catch (error) {
-        this.recoveryRequired = true;
+        this.blocked = true;
         const detail = error instanceof WorkbenchPublicError ? error.message : "The manager process could not be started.";
         this.reasons.push(`${detail} The stable entry is still available.`);
       }
@@ -777,7 +934,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       } else this.cli = bindSelectedCli(this.options.bin);
     } catch (error) {
       this.cli = null;
-      this.recoveryRequired = true;
+      this.blocked = true;
       this.reasons = [
         error instanceof WorkbenchPublicError ? error.message : WORKBENCH_ERROR["workbench/incompatible"],
       ];
@@ -787,6 +944,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const toolRoot = this.options.controlToolRoot ?? join(this.controlDir, "toolchain");
     setToolchainRoot(toolRoot);
     setManagedCliPrefix(this.options.controlToolRoot ?? join(this.controlDir, "cli"));
+    setManagedNodeExecutable(this.nodeExe);
     setSelectedDshResolver(() => this.cli?.bin);
     atomicWrite(
       join(this.controlDir, "toolchain.json"),
@@ -808,20 +966,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private writeHostBearer(): void {
-    const path = join(this.controlDir, HOST_BEARER_FILE);
-    if (existsSync(path)) {
-      try {
-        const existing = readFileSync(path, "utf8").trim();
-        if (existing) {
-          this.bearer = existing;
-          return;
-        }
-      } catch {
-        /* replace */
-      }
-    }
     this.bearer = randomBytes(32).toString("hex");
-    writeFileSync(path, `${this.bearer}\n`, { encoding: "utf8", mode: 0o600, flag: "w" });
+    const path = join(this.controlDir, HOST_BEARER_FILE);
+    atomicWrite(path, `${this.bearer}\n`);
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      /* Windows may ignore mode; the file is still local to this Home. */
+    }
   }
 
   private writeEndpointFile(): void {
@@ -831,11 +983,23 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       origin = parseControlEndpoint(this.origin);
     } catch {
-      origin = this.origin;
+      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor origin is not a valid loopback endpoint.");
     }
+    if (this.handle?.owner.endpoint && this.handle.owner.endpoint !== origin) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The owner endpoint origin does not match this supervisor.");
+    }
+    const epoch = this.currentServiceEpoch();
+    if (!epoch) return;
     atomicWrite(
       join(this.controlDir, ENDPOINT_FILE),
-      `${JSON.stringify({ version: 1, origin, bearer: this.bearer })}\n`,
+      `${JSON.stringify({
+        version: 2,
+        protocolVersion: WORKBENCH_PROTOCOL_VERSION,
+        homeId: digestHomeIdentity(this.home),
+        serviceEpoch: epoch,
+        origin,
+        bearer: this.bearer,
+      })}\n`,
     );
     if (this.options.port === undefined) {
       atomicWrite(join(this.controlDir, "entry-port.json"),
@@ -996,7 +1160,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       installWorker: { file: worker, home: this.home },
       root: this.runtimeRoot(),
       snapshotRoot,
-      source: () => inferPackageSource(),
+      source: () => this.readHomeSettings().packageSource,
       legacy: () => (this.cli ? { bin: this.cli.bin, version: this.cli.version } : undefined),
     });
     this.runtimeStore = runtimes;
@@ -1010,22 +1174,23 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       runtimes,
       runtimeDescriptor: () => this.currentRuntime(),
     });
-    const diagnostics = new DiagnosticsService({
-      home: this.home,
-      profiles: () => this.registry.scan(),
-      statusOf: (name) => this.statusOf(name),
-      stop: (name) => this.stopOwned(name),
-      isMaintenance: () => this.maintenanceFlag,
-    });
+    const diagnostics = this.ensureDiagnostics();
     const ports = this.maintenancePorts(snapshots, runtimes, upgrades, diagnostics);
-    ports.packageUpgrade = new WorkbenchPackageUpgrade({
+    const toolsRoot = this.toolsRootOutsideHome();
+    const handoff = this.componentHandoffCallback();
+    this.packageUpgrade = new WorkbenchPackageUpgrade({
       home: this.home, managerId: () => this.managerId,
       pluginArtifact: this.options.pluginArtifact, viewBridgeArtifact: this.options.viewBridgeArtifact,
       snapshots, upgrades, currentRuntime: () => this.currentRuntime(),
       stopAll: () => this.stopOwnedAll(), reinitializeManager: () => this.reinitializeManager(),
       pluginAdd: this.options.pluginAdd,
+      execPath: this.nodeExe,
+      ...(toolsRoot ? { toolsRoot } : {}),
+      ...(handoff ? { handoff } : {}),
     });
+    ports.packageUpgrade = this.packageUpgrade;
     const create = this.options.createMaintenance ?? ((next) => new WorkbenchMaintenanceService(next, {
+      packageSource: () => this.readHomeSettings().packageSource,
       log: (operation, error) => {
         const detail = sanitizeLogText(error instanceof Error ? error.message : String(error ?? "")).slice(0, 4000);
         try {
@@ -1080,6 +1245,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       hasUnfinishedPlan: planId => this.jobs?.hasUnfinishedPlan(planId) ?? false,
       unfinishedPlanIds: () => this.jobs?.unfinishedPlanIds() ?? [],
       isCompatibleRuntime: (version) => isCompatibleDshCliVersion(version),
+      observation: () => this.productObservation(),
     };
   }
 
@@ -1182,11 +1348,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       [VIEW_ENV.id]: profile,
       [VIEW_ENV.generation]: generation,
       [VIEW_ENV.channel]: view?.channel ?? "",
+      [VIEW_ENV.epoch]: view?.serviceEpoch ?? this.currentServiceEpoch(),
     };
   }
 
   private async runCommand(command: WorkbenchCommand, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
-    if (this.sealing && command.kind !== "controller.acquire") {
+    if (this.sealing) {
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     switch (command.kind) {
@@ -1202,12 +1369,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return this.verifySpace(command.spaceId, ctx);
       case "plan.execute":
         return this.executePlan(command.planId, ctx);
-      case "recovery.resume":
-        throw new WorkbenchPublicError("workbench/unsupported");
-      case "controller.acquire":
-        return undefined;
       case "llm.apply":
         return this.runLlmApply(command, ctx);
+      default:
+        if (isWorkbenchProductCommand(command)) return this.runProductCommand(command, ctx);
+        throw new WorkbenchPublicError("workbench/unsupported");
     }
   }
 
@@ -1282,11 +1448,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const gen = (this.generations.get(id) ?? 0) + 1;
     this.generations.set(id, gen);
     const channel = randomBytes(8).toString("hex");
+    const epoch = this.requireServiceEpoch();
     this.views.set(id, {
       spaceId: id,
       generation: gen,
       origin: this.origin,
       channel,
+      serviceEpoch: epoch,
       issued: false,
     });
     await this.startOwned(id);
@@ -1305,6 +1473,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return {
       spaceId: id,
       view: {
+        serviceEpoch: epoch,
         spaceId: id,
         generation: gen,
         origin: childOrigin,
@@ -1331,12 +1500,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.consumeLifecyclePlan(planId);
         throw new WorkbenchPublicError("workbench/invalid-input", "The preview expired. Request a new preview.");
       }
+      if (!stored.plan.serviceEpoch || stored.plan.serviceEpoch !== this.currentServiceEpoch()) {
+        throw new WorkbenchPublicError("workbench/conflict", "The preview belongs to another service epoch.");
+      }
+      if (!stored.plan.stateRevision || stored.plan.stateRevision !== this.stateRevision()) {
+        throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
+      }
       const fingerprint = this.fingerprint(stored.request);
       if (fingerprint !== stored.fingerprint) {
-        throw new WorkbenchPublicError("workbench/invalid-input", "The target changed. Request a new preview.");
+        throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
       }
       this.consumeLifecyclePlan(planId);
-      if (stored.request.kind === "controller.release" || stored.request.kind === "controller.shutdown") {
+      if (stored.request.kind === "service.shutdown") {
         this.relinquishKind = stored.request.kind;
       }
       return this.executeLocal(stored, ctx);
@@ -1384,8 +1559,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         });
         return;
       }
-      case "controller.release":
-      case "controller.shutdown": {
+      case "service.shutdown": {
         ctx.phase("stopping-children");
         this.sealing = true;
         try {
@@ -1397,7 +1571,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           throw error;
         }
         ctx.phase("finalizing");
-        this.relinquishKind = request.kind;
+        this.relinquishKind = "service.shutdown";
         return;
       }
       default:
@@ -1418,13 +1592,318 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!kind) return;
     this.relinquishKind = null;
     this.dropWritable();
-    if (kind === "controller.shutdown") {
+    if (kind === "service.shutdown") {
       this.sealing = true;
       this.closed = true;
       await this.httpClose?.();
+    }
+  }
+
+  private async afterPlanJobSettled(jobId: string): Promise<void> {
+    const pending = this.pendingHandoff;
+    if (pending && pending.jobId === jobId) {
+      if (this.jobPersistedSuccess(jobId)) {
+        try {
+          await this.finalizeComponentHandoff(pending);
+        } catch (error) {
+          this.recordHandoffDiagnostic(error);
+        }
+        return;
+      }
+      this.pendingHandoff = undefined;
+      this.recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
       return;
     }
-    this.sealing = false;
+    if (this.relinquishKind) await this.finishRelinquish();
+  }
+
+  /**
+   * Package-upgrade handoff port. Confirms owned children are stopped, seals
+   * further mutations, and records an in-memory pending transfer. Does not wait
+   * for this job's tail.
+   */
+  async handoffWorkbenchPackage(input: WorkbenchPackageHandoffInput, ctx: WorkbenchJobContext): Promise<void> {
+    if (this.ownedChildStillRunning()) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Owned processes are still running. The component handoff was not started.",
+      );
+    }
+    const jobId = this.activeJobId;
+    if (!jobId) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Component handoff requires the running upgrade job.");
+    }
+    const artifacts = await this.artifactsForPayload(input.payload);
+    this.sealing = true;
+    this.pendingHandoff = {
+      jobId,
+      planId: input.planId,
+      snapshotId: input.snapshotId,
+      payload: input.payload,
+      ...artifacts,
+    };
+    ctx.phase("handoff-pending");
+    ctx.message("Handoff preparation is complete. New service startup is unconfirmed.");
+    ctx.result({ snapshotId: input.snapshotId });
+  }
+
+  private toolsRootOutsideHome(): string | undefined {
+    const toolsRoot = this.options.controlToolRoot;
+    if (typeof toolsRoot !== "string" || !toolsRoot.trim()) return undefined;
+    const resolved = resolve(toolsRoot.trim());
+    if (pathInsideHome(this.home, resolved)) return undefined;
+    return resolved;
+  }
+
+  private componentHandoffCallback(): WorkbenchPackageHandoff | undefined {
+    if (typeof this.options.onNormalExit !== "function" || !this.selectedPayload) return undefined;
+    if (!this.toolsRootOutsideHome()) return undefined;
+    return (input, ctx) => this.handoffWorkbenchPackage(input, ctx);
+  }
+
+  private componentHandoffPort(): { toolsRoot: string; handoff: WorkbenchPackageHandoff } | undefined {
+    const toolsRoot = this.toolsRootOutsideHome();
+    const handoff = this.componentHandoffCallback();
+    if (!toolsRoot || !handoff) return undefined;
+    return { toolsRoot, handoff };
+  }
+
+  private jobPersistedSuccess(jobId: string): boolean {
+    if (!this.jobs) return false;
+    try {
+      if (this.jobs.job(jobId).status !== "succeeded") return false;
+    } catch {
+      return false;
+    }
+    try {
+      const raw = readFileSync(join(this.controlDir, WORKBENCH_JOBS_DIR_NAME, `${jobId}.json`), "utf8");
+      const parsed = JSON.parse(raw) as { status?: string };
+      return parsed.status === "succeeded";
+    } catch {
+      return false;
+    }
+  }
+
+  private ownedChildStillRunning(): boolean {
+    const ids = new Set([...this.ownedSpaceIds(), ...this.spawned.keys()]);
+    for (const id of ids) {
+      const spawned = this.spawned.get(id);
+      if (spawned) {
+        const liveness = this.pidAlive(spawned.pid, spawned.startedAt);
+        if (liveness === "alive" || liveness === "ambiguous") return true;
+      }
+      const status = this.statusOf(id);
+      if (status === "running" || status === "starting") return true;
+    }
+    return false;
+  }
+
+  private async finalizeComponentHandoff(pending: PendingComponentHandoff): Promise<void> {
+    this.pendingHandoff = undefined;
+    if (this.ownedChildStillRunning()) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Owned processes are still running. The component handoff was not transferred.",
+      );
+    }
+    const owner = this.handle;
+    if (!owner) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Run rights are not held for the component handoff.");
+    }
+    const toolsRoot = this.componentHandoffPort()?.toolsRoot ?? this.options.controlToolRoot;
+    if (!toolsRoot) {
+      throw new WorkbenchPublicError("workbench/unavailable", "A tools root outside Home is required for handoff.");
+    }
+    const port = Number(new URL(this.origin).port);
+    if (!Number.isInteger(port) || port < 1) {
+      throw new WorkbenchPublicError("workbench/invalid-input", "Handoff requires the preserved nonzero management port.");
+    }
+
+    await this.httpClose?.();
+    this.httpClose = undefined;
+    this.removeEndpointFile();
+
+    const oldPayload = this.selectedPayload;
+    if (!oldPayload) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The running component group is not validated.");
+    }
+    const launcherEntry = resolveLauncherEntry(oldPayload);
+    const spawnFn = this.options.spawnLauncher ?? spawnComponentLauncher;
+    let launcher;
+    try {
+      launcher = spawnFn({
+        home: this.home,
+        launcherEntry,
+        execPath: this.nodeExe,
+        allowRealHome: this.options.allowRealHome,
+      });
+    } catch (error) {
+      this.recordHandoffDiagnostic(error);
+      throw error;
+    }
+
+    let token;
+    try {
+      token = await this.controller.transferToLauncher({
+        nonce: owner.owner.nonce,
+        binding: createComponentHandoffBinding(
+          this.home,
+          owner.owner.nonce,
+          pending.payload.digest,
+          undefined,
+          { allowRealHome: this.options.allowRealHome },
+        ),
+        launcher: { pid: launcher.pid, startedAt: launcher.startedAt },
+      });
+    } catch (error) {
+      try {
+        launcher.disconnect();
+      } catch {
+        /* ignore */
+      }
+      this.recordHandoffDiagnostic(error);
+      throw error;
+    }
+    this.transferredOwner = true;
+
+    const newEntry = payloadRel(pending.payload.packageRoot, COMPONENT_PAYLOAD_ENTRIES.supervisor);
+    const newWorker = payloadRel(pending.payload.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
+    const argv = supervisorCliArgs({
+      home: this.home,
+      bin: this.options.bin,
+      nodeExe: this.nodeExe,
+      port,
+      allowRealHome: this.options.allowRealHome,
+      controlToolRoot: resolve(toolsRoot),
+      snapshotRoot: this.options.snapshotRoot,
+      pluginArtifact: pending.pluginArtifact,
+      viewBridgeArtifact: pending.viewBridgeArtifact,
+      llmBridgeArtifact: pending.llmBridgeArtifact,
+      snapshotWorkerFile: newWorker,
+      componentPayloadRoot: pending.payload.payloadRootLib,
+      acceptHandoff: true,
+    });
+    const commit: ComponentHandoffCommit = {
+      token,
+      home: this.home,
+      toolsRoot: resolve(toolsRoot),
+      artifactDigest: pending.payload.digest,
+      oldPid: process.pid,
+      oldStartedAt: owner.owner.startedAt,
+      cleanStopConfirmed: true,
+      runtime: {
+        execPath: this.nodeExe,
+        entry: newEntry,
+        argv,
+        cwd: dirname(newEntry),
+      },
+      ...(this.options.allowRealHome ? { allowRealHome: true } : {}),
+    };
+    try {
+      await launcher.sendCommit(commit);
+    } catch (error) {
+      this.recordHandoffDiagnostic(error);
+      throw error;
+    }
+    launcher.disconnect();
+    this.closed = true;
+    this.handle = undefined;
+    if (this.options.onNormalExit) await this.options.onNormalExit();
+  }
+
+  private async artifactsForPayload(
+    payload: ValidatedComponentPayload,
+  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact?: string }> {
+    const live = validateComponentPayload(payload.payloadRootLib);
+    const toolsRoot = this.options.controlToolRoot;
+    if (typeof toolsRoot !== "string" || !toolsRoot.trim() || pathInsideHome(this.home, resolve(toolsRoot))) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Selected component artifacts require a tools root outside Home.",
+      );
+    }
+    const packed = await packLocalArtifacts({
+      pluginPackageRoot: live.packageRoot,
+      viewBridgeRoot: join(live.payloadRootLib, "view-bridge"),
+      llmBridgeRoot: join(live.payloadRootLib, "llm-bridge"),
+      artifactDir: join(resolve(toolsRoot), "artifacts"),
+      home: this.home,
+      execPath: this.nodeExe,
+    });
+    if ("reasons" in packed) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        packed.reasons[0] ?? "Selected component artifacts could not be packed.",
+      );
+    }
+    if (!packed.pluginArtifact || !packed.viewBridgeArtifact) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Selected component artifacts could not be packed.");
+    }
+    return {
+      pluginArtifact: packed.pluginArtifact,
+      viewBridgeArtifact: packed.viewBridgeArtifact,
+      ...(packed.llmBridgeArtifact ? { llmBridgeArtifact: packed.llmBridgeArtifact } : {}),
+    };
+  }
+
+  private recordHandoffDiagnostic(error: unknown): void {
+    const message = sanitizeLogText(
+      error instanceof Error ? error.message : typeof error === "string" ? error : "Component handoff failed.",
+    ).slice(0, 400);
+    if (!this.reasons.includes(message)) this.reasons.push(message);
+    this.blocked = true;
+  }
+
+  private assertAcceptedStartupReady(): void {
+    if (this.maintenanceBlocked) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Accepted startup could not stop owned processes. Run rights were kept.",
+      );
+    }
+    const managerId = this.managerId;
+    if (!managerId || this.managerInstall !== "manager" || this.unmanaged.has(managerId)) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Accepted startup did not start the manager. Run rights were kept.",
+      );
+    }
+    if (this.statusOf(managerId) !== "running") {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Accepted startup did not start the manager. Run rights were kept.",
+      );
+    }
+    const epoch = this.currentServiceEpoch();
+    const view = this.views.get(managerId);
+    if (!epoch || !view || view.serviceEpoch !== epoch || !view.origin || view.origin === this.origin) {
+      throw new WorkbenchPublicError(
+        "workbench/unavailable",
+        "Accepted startup did not bind a ready manager view. Run rights were kept.",
+      );
+    }
+  }
+
+  private assertAcceptedHandle(handle: HomeControlHandle): void {
+    const inspection = this.controller.inspect();
+    if (!inspection.held || !("owner" in inspection)) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Accepted run rights are not held.");
+    }
+    if (inspection.owner.pid !== handle.owner.pid || inspection.owner.nonce !== handle.owner.nonce) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Accepted run rights do not match the current owner.");
+    }
+    let origin: string;
+    try {
+      origin = parseControlEndpoint(this.origin);
+    } catch {
+      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor origin is not a valid loopback endpoint.");
+    }
+    if (handle.owner.endpoint && parseControlEndpoint(handle.owner.endpoint) !== origin) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The owner endpoint origin does not match this supervisor.");
+    }
+    if (inspection.owner.endpoint && parseControlEndpoint(inspection.owner.endpoint) !== origin) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The owner endpoint origin does not match this supervisor.");
+    }
   }
 
   private observeChildWork<T>(action: () => T): T {
@@ -1437,10 +1916,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private dropWritable(): void {
-    try {
-      this.handle?.release();
-    } catch {
-      /* already released */
+    if (!this.transferredOwner) {
+      try {
+        this.handle?.release();
+      } catch {
+        /* already released */
+      }
     }
     this.handle = undefined;
     this.removeEndpointFile();
@@ -1448,6 +1929,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.processes = undefined;
     this.spaces = undefined;
     this.maintenance = null;
+    this.products = null;
+    this.packageUpgrade = undefined;
   }
 
   private previewLocal(request: WorkbenchPlanRequest): WorkbenchPlan {
@@ -1458,21 +1941,24 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (request.kind === "space.delete") this.protectSpecial(id, { allowManager: false });
     }
     const running = id && this.statusOf(id) === "running" ? [id] : [];
+    const observed = this.productObservation();
     const plan: WorkbenchPlan = {
       id: randomUUID(),
       kind: request.kind,
       title: request.kind,
-      scope: request.kind.startsWith("controller.") ? "controller" : "space",
+      scope: request.kind === "service.shutdown" ? "controller" : "space",
       affectedSpaceIds: id ? [id] : this.ownedSpaceIds(),
-      runningSpaceIds: request.kind.startsWith("controller.")
+      runningSpaceIds: request.kind === "service.shutdown"
         ? this.ownedSpaceIds().filter((name) => this.statusOf(name) === "running")
         : running,
       changes: request.kind === "space.delete" ? [
         "Remove this space's profile and installed plugins.",
         request.removeData ? "Delete this space's isolated sessions and storage." : "Keep this space's isolated sessions and storage on disk.",
       ] : [request.kind],
-      destructive: request.kind === "space.delete" || request.kind === "controller.shutdown",
+      destructive: request.kind === "space.delete" || request.kind === "service.shutdown",
       expiresAt: new Date(this.now().getTime() + PLAN_TTL_MS).toISOString(),
+      serviceEpoch: observed.serviceEpoch,
+      stateRevision: observed.expectedRevision,
     };
     const stored: StoredPlan = { plan, request, fingerprint: this.fingerprint(request) };
     this.plans.set(plan.id, stored);
@@ -1601,6 +2087,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private assertWritable(): void {
     if (!this.handle) throw new WorkbenchPublicError("workbench/read-only");
+    if (this.maintenanceBlocked) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
+    }
     if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
   }
 
@@ -1608,11 +2097,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.handle) {
       throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");
     }
+    if (this.maintenanceBlocked) {
+      throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
+    }
     if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
   }
 
   private async submitLlmApply(command: LlmApplyCommand, requestId: string): Promise<WorkbenchJob> {
-    this.assertWritable();
+    this.assertLlmMutationAllowed();
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
     return this.jobs.submit(command, requestId, (ctx) =>
       this.observeChildWork(() => this.runLlmApply(command, ctx)),
@@ -1620,6 +2112,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async runLlmApply(command: LlmApplyCommand, ctx: WorkbenchJobContext): Promise<void> {
+    this.assertLlmMutationAllowed();
     ctx.phase("apply");
     await this.llmHost.executeApply(command, async (spaceId) => {
       ctx.message(`restart ${spaceId}`);
@@ -1640,6 +2133,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         catalogRevision: this.llmApplied.get(id) ?? null,
         policyRevision: null,
         busy: this.llmBusy.has(id),
+        serviceEpoch: this.currentServiceEpoch(),
       };
     });
   }
@@ -1651,13 +2145,152 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return "uninitialized";
   }
 
+  private currentServiceEpoch(): string {
+    const nonce = this.handle?.owner.nonce ?? this.peekOwnerNonce();
+    if (!nonce) return "";
+    return deriveServiceEpoch(nonce);
+  }
+
+  private peekOwnerNonce(): string | undefined {
+    const inspection = this.controller.inspect();
+    if (inspection.held && "owner" in inspection) return inspection.owner.nonce;
+    return undefined;
+  }
+
+  private requireServiceEpoch(): string {
+    const epoch = this.currentServiceEpoch();
+    if (!epoch) throw new WorkbenchPublicError("workbench/unavailable");
+    return epoch;
+  }
+
+  private stateRevision(spaces: WorkbenchSpace[] = this.listSpaces()): string {
+    return computeWorkbenchRevision({ spaces, settings: this.readHomeSettings() });
+  }
+
+  private readHomeSettings(): WorkbenchHomeSettings {
+    if (this.homeSettings) return this.homeSettings;
+    const raw = readSettings(this.home);
+    this.homeSettings = {
+      portStart: raw.portStart,
+      portEnd: raw.portEnd,
+      packageSource: raw.packageSource,
+      catalogUrl: raw.catalogUrl,
+    };
+    return this.homeSettings;
+  }
+
+  private availability(): WorkbenchState["availability"] {
+    if (!this.handle || this.closed || this.sealing) return "unavailable";
+    if (this.blocked || this.maintenanceBlocked || this.unmanaged.size > 0 || !this.cli) return "limited";
+    if (this.managerId && this.managerInstall !== "manager") return "limited";
+    if (this.derivedRecoveryReasons.size > 0) return "limited";
+    return "ready";
+  }
+
+  private productObservation() {
+    return { serviceEpoch: this.requireServiceEpoch(), expectedRevision: this.stateRevision() };
+  }
+
+  private assertLiveContext(context: WorkbenchMutationContext): void {
+    try {
+      assertMutationContext(context, {
+        serviceEpoch: this.requireServiceEpoch(),
+        revision: this.stateRevision(),
+      });
+    } catch (error) {
+      if (error instanceof WorkbenchProtocolConflictError) {
+        throw new WorkbenchPublicError("workbench/conflict", error.message);
+      }
+      if (error instanceof WorkbenchProtocolInputError) {
+        throw new WorkbenchPublicError("workbench/invalid-input", error.message);
+      }
+      throw error;
+    }
+  }
+
+  private bindProductService(): void {
+    this.homeSettings = this.readHomeSettings();
+    this.products = new WorkbenchProductService({
+      home: this.home,
+      observation: () => this.productObservation(),
+      managerId: () => this.managerId,
+      listSpaces: () => this.listSpaces(),
+      createSpace: (input, ctx) => this.createSpace(input, ctx),
+      installPlugin: async (spaceId, spec) => {
+        const add = this.options.pluginAdd ?? pluginAdd;
+        await add(this.home, spaceId, spec);
+      },
+      llm: (request) => {
+        if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+        return this.jobs.runAdmitted(async () => this.llmHost.dispatch(request) as Promise<LlmApiResult>);
+      },
+      diagnostics: (spaceId) => this.productDiagnostics(spaceId),
+      withWrite: (label, action) => this.lock.run(label, action),
+      settingsChanged: (settings) => {
+        this.homeSettings = {
+          portStart: settings.portStart,
+          portEnd: settings.portEnd,
+          packageSource: settings.packageSource,
+          catalogUrl: settings.catalogUrl,
+        };
+        setPackageSource(settings.packageSource);
+        this.processes?.setPortRange(settings.portStart, settings.portEnd);
+      },
+      now: this.now,
+      prepareWorkbench: async (input, ctx) => {
+        if (!this.packageUpgrade) {
+          throw new WorkbenchPublicError("workbench/unavailable", "Workbench update preparation is unavailable.");
+        }
+        setPackageSource(this.readHomeSettings().packageSource);
+        return this.packageUpgrade.prepare({ version: input.version }, ctx);
+      },
+    });
+  }
+
+  private ensureDiagnostics(): DiagnosticsService {
+    this.diagnostics ??= new DiagnosticsService({
+      home: this.home,
+      profiles: () => this.registry.scan(),
+      statusOf: (name) => this.statusOf(name),
+      stop: (name) => this.stopOwned(name),
+      isMaintenance: () => this.maintenanceFlag,
+    });
+    return this.diagnostics;
+  }
+
+  private productDiagnostics(spaceId: string): WorkbenchDiagnostics {
+    const id = this.requireSpace(spaceId);
+    const snap = this.ensureDiagnostics().get(id);
+    return {
+      spaceId: id,
+      status: this.publicStatus(id),
+      lastError: snap.lastError,
+      logs: snap.logs.slice(0, 256),
+      logError: snap.logError,
+      backups: snap.backups,
+    };
+  }
+
+  private async runProductCommand(
+    command: WorkbenchProductCommand,
+    ctx: WorkbenchJobContext,
+  ): Promise<WorkbenchJob["result"]> {
+    if (!this.products) throw new WorkbenchPublicError("workbench/unavailable");
+    if (command.kind === "plugin.download") setPackageSource(this.readHomeSettings().packageSource);
+    const outcome = await this.products.execute(command, ctx);
+    const result = { product: outcome };
+    ctx.result(result);
+    return result;
+  }
+
   private readOwner(): WorkbenchState["owner"] {
     const inspection = this.controller.inspect();
     if (!inspection.held || !("owner" in inspection)) return null;
     return { kind: inspection.owner.kind, since: inspection.owner.startedAt };
   }
 
-  private refreshRecovery(): void {
+  /** Public `state()` passes false so a first-boot poll cannot latch a transient extra. */
+  private refreshAvailability(latchBlock = true): void {
     const extra: string[] = [];
     if (!this.jobs?.list().some(job => job.status === "running")) {
       if (this.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance journal is present.");
@@ -1674,7 +2307,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ...extra,
     ])];
     this.derivedRecoveryReasons = new Set(extra);
-    this.recoveryRequired = extra.length > 0;
+    if (latchBlock && extra.length > 0) this.blocked = true;
   }
 
   private hasMaintenanceEvidence(): boolean {
@@ -1829,6 +2462,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       const parsed = JSON.parse(readFileSync(join(this.controlDir, LIFECYCLE_PLANS_DIR_NAME, `${id}.json`), "utf8")) as StoredPlan;
       if (!parsed?.plan?.id || !parsed.request || !parsed.fingerprint) return undefined;
+      if (!parsed.plan.serviceEpoch || !parsed.plan.stateRevision) return undefined;
       this.plans.set(id, parsed);
       return parsed;
     } catch {
@@ -1870,13 +2504,140 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 }
 
+/**
+ * Cold-start binding for `--component-payload`. Library callers that omit the
+ * root stay unchanged. A present root is v2-validated and fail-closed: worker
+ * and supervisor assets come from that group, and packed view/llm artifacts
+ * must be real files already supplied by bootstrap.
+ */
+export function bindSupervisorComponentPayload(options: WorkbenchSupervisorOptions): WorkbenchSupervisorOptions {
+  const root = options.componentPayloadRoot;
+  if (root === undefined) return options;
+  if (typeof root !== "string" || !root.trim()) {
+    throw new WorkbenchPublicError("workbench/invalid-input", "--component-payload must be a filesystem path.");
+  }
+  let selected: ValidatedComponentPayload;
+  try {
+    selected = validateComponentPayload(root);
+  } catch (error) {
+    const detail = error instanceof ComponentPayloadError || error instanceof Error
+      ? error.message
+      : "Component payload is invalid.";
+    throw new WorkbenchPublicError("workbench/invalid-input", detail);
+  }
+  options.componentPayloadRoot = selected.payloadRootLib;
+  const worker = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
+  const supervisorDir = payloadRel(selected.packageRoot, "lib/supervisor");
+  const viewEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["view-bridge"]);
+  const llmEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["llm-bridge"]);
+  const launcher = payloadRel(selected.packageRoot, "lib/supervisor/launcher.mjs");
+  assertRealFile(worker, "Selected snapshot worker");
+  assertRealDirectory(supervisorDir, "Selected supervisor assets");
+  assertRealFile(launcher, "Selected launcher");
+  assertRealFile(viewEntry, "Selected view-bridge");
+  assertRealFile(llmEntry, "Selected llm-bridge");
+
+  if (options.snapshotWorkerFile !== undefined && !sameRealPath(options.snapshotWorkerFile, worker)) {
+    throw new WorkbenchPublicError(
+      "workbench/invalid-input",
+      "snapshot-worker is not from the selected component group.",
+    );
+  }
+  options.snapshotWorkerFile = worker;
+
+  if (options.supervisorAssetRoot !== undefined && !sameRealPath(options.supervisorAssetRoot, supervisorDir)) {
+    throw new WorkbenchPublicError(
+      "workbench/invalid-input",
+      "supervisor-asset-root is not from the selected component group.",
+    );
+  }
+  options.supervisorAssetRoot = supervisorDir;
+
+  if (options.viewBridgeArtifact !== undefined) {
+    assertRealFile(options.viewBridgeArtifact, "view-bridge-artifact");
+  }
+  if (options.llmBridgeArtifact !== undefined) {
+    assertRealFile(options.llmBridgeArtifact, "llm-bridge-artifact");
+  }
+  if (options.pluginArtifact !== undefined) {
+    assertRealFile(options.pluginArtifact, "plugin-artifact");
+  }
+  return options;
+}
+
+export function assertHandoffTokenMatchesSelectedPayload(
+  token: { artifactDigest: string },
+  payloadRoot: string,
+  runningEntry?: string,
+): ValidatedComponentPayload {
+  const selected = validateComponentPayload(payloadRoot);
+  if (token.artifactDigest !== selected.digest) {
+    throw new WorkbenchPublicError(
+      "workbench/invalid-input",
+      "Handoff token artifactDigest does not match the selected component group.",
+    );
+  }
+  if (runningEntry) {
+    const expected = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.supervisor);
+    if (!sameRealPath(runningEntry, expected)) {
+      throw new WorkbenchPublicError(
+        "workbench/invalid-input",
+        "Supervisor entry is not from the selected component group.",
+      );
+    }
+  }
+  return selected;
+}
+
+/**
+ * Async group preflight: bind the v2 payload, require the plugin/view/llm
+ * artifact tuple, and validate tar bytes against the selected manifest.
+ * Call before runtime construction, HTTP, or Home writers.
+ */
+export async function preflightSupervisorComponentPayload(
+  options: WorkbenchSupervisorOptions,
+): Promise<WorkbenchSupervisorOptions> {
+  const resolved: WorkbenchSupervisorOptions = { ...options };
+  bindSupervisorComponentPayload(resolved);
+  if (resolved.componentPayloadRoot === undefined) return resolved;
+  const pluginArtifact = resolved.pluginArtifact;
+  const viewBridgeArtifact = resolved.viewBridgeArtifact;
+  const llmBridgeArtifact = resolved.llmBridgeArtifact;
+  if (!pluginArtifact || !viewBridgeArtifact || !llmBridgeArtifact) {
+    throw new WorkbenchPublicError(
+      "workbench/invalid-input",
+      "A component payload requires plugin, view-bridge, and llm-bridge artifacts from the same group.",
+    );
+  }
+  const payload = validateComponentPayload(resolved.componentPayloadRoot);
+  try {
+    await validateComponentPayloadArtifacts(payload, {
+      pluginArtifact,
+      viewBridgeArtifact,
+      llmBridgeArtifact,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Component payload artifacts are invalid.";
+    throw new WorkbenchPublicError("workbench/invalid-input", detail);
+  }
+  return resolved;
+}
+
 export async function createWorkbenchSupervisor(
   options: WorkbenchSupervisorOptions,
 ): Promise<WorkbenchSupervisorHandle> {
-  const runtime = new WorkbenchSupervisorRuntime(options);
-  let port = options.port;
-  if (port === undefined) {
-    const path = join(resolve(options.home), HOME_CONTROL_DIR_NAME, "entry-port.json");
+  const resolved = await preflightSupervisorComponentPayload(options);
+  const runtime = new WorkbenchSupervisorRuntime(resolved);
+  let port = resolved.port;
+  if (resolved.acceptedHandle) {
+    if (!Number.isInteger(port) || port! < 1 || port! > 65535) {
+      throw new WorkbenchPublicError(
+        "workbench/invalid-input",
+        "Accepted handoff requires an explicit nonzero --port.",
+      );
+    }
+  } else if (port === undefined) {
+    const path = join(resolve(resolved.home), HOME_CONTROL_DIR_NAME, "entry-port.json");
     if (existsSync(path)) {
       const stat = lstatSync(path);
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Workbench entry port record needs recovery.");
@@ -1890,8 +2651,20 @@ export async function createWorkbenchSupervisor(
   const http = await startWorkbenchHttp(runtime, port ?? 0);
   runtime.attachHttp(http.origin, http.close);
   try {
-    await runtime.tryOwn();
-  } catch {
+    if (resolved.acceptedHandle) {
+      await runtime.takeAcceptedOwner(resolved.acceptedHandle);
+    } else {
+      await runtime.tryOwn();
+    }
+  } catch (error) {
+    if (resolved.acceptedHandle) {
+      try {
+        await http.close();
+      } catch {
+        /* owner and selected pointer stay; HTTP must not leak */
+      }
+      throw error;
+    }
     /* HTTP and any acquired lease stay; caller inspects state/reasons */
   }
   return {
@@ -1908,6 +2681,10 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--allow-real-home") { flags.allowRealHome = "1"; continue; }
+    if (token === COMPONENT_HANDOFF_FLAG || token === "--accept-handoff") {
+      flags.acceptHandoff = "1";
+      continue;
+    }
     const mapped = flagName(token);
     if (!mapped) throw new WorkbenchPublicError("workbench/invalid-input", `Unknown flag: ${token}`);
     const value = argv[i + 1];
@@ -1922,6 +2699,7 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   const bin = requirePath(flags.bin ?? flags.cli, binFlag);
   const options: SupervisorCliOptions = { home, bin };
   if (flags.allowRealHome === "1") options.allowRealHome = true;
+  if (flags.acceptHandoff === "1") options.acceptHandoff = true;
   if (flags.node) options.nodeExe = requirePath(flags.node, "--node");
   if (flags.port) {
     const port = Number(flags.port);
@@ -1929,6 +2707,14 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
       throw new WorkbenchPublicError("workbench/invalid-input", "Port must be an integer 0-65535.");
     }
     options.port = port;
+  }
+  if (options.acceptHandoff) {
+    if (!Number.isInteger(options.port) || options.port! < 1 || options.port! > 65535) {
+      throw new WorkbenchPublicError(
+        "workbench/invalid-input",
+        "--accept-handoff requires an explicit nonzero --port.",
+      );
+    }
   }
   if (flags["control-tool-root"]) options.controlToolRoot = requirePath(flags["control-tool-root"], "--control-tool-root");
   if (flags["supervisor-asset-root"]) {
@@ -1943,6 +2729,9 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   }
   if (flags["snapshot-worker"]) options.snapshotWorkerFile = requirePath(flags["snapshot-worker"], "--snapshot-worker");
   if (flags["snapshot-root"]) options.snapshotRoot = requirePath(flags["snapshot-root"], "--snapshot-root");
+  if (flags["component-payload"]) {
+    options.componentPayloadRoot = requirePath(flags["component-payload"], "--component-payload");
+  }
   return options;
 }
 
@@ -1958,6 +2747,8 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.llmBridgeArtifact) args.push("--llm-bridge-artifact", options.llmBridgeArtifact);
   if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
   if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
+  if (options.componentPayloadRoot) args.push("--component-payload", options.componentPayloadRoot);
+  if (options.acceptHandoff) args.push(COMPONENT_HANDOFF_FLAG);
   return args;
 }
 
@@ -1975,6 +2766,7 @@ function flagName(token: string): string | undefined {
     "--llm-bridge-artifact": "llm-bridge-artifact",
     "--snapshot-worker": "snapshot-worker",
     "--snapshot-root": "snapshot-root",
+    "--component-payload": "component-payload",
   };
   return names[token];
 }
@@ -1984,6 +2776,69 @@ function requirePath(value: string | undefined, flag: string): string {
   const resolved = resolve(value);
   if (!isAbsolute(resolved)) throw new WorkbenchPublicError("workbench/invalid-input", `${flag} must be a filesystem path.`);
   return resolved;
+}
+
+function payloadRel(packageRoot: string, rel: string): string {
+  return join(packageRoot, ...rel.split("/").filter(Boolean));
+}
+
+function assertRealFile(path: string, label: string): string {
+  const abs = resolve(path);
+  let st;
+  try {
+    st = lstatSync(abs);
+  } catch {
+    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is missing.`);
+  }
+  if (st.isSymbolicLink()) {
+    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is a symlink or junction.`);
+  }
+  if (!st.isFile()) {
+    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is not a regular file.`);
+  }
+  return abs;
+}
+
+function assertRealDirectory(path: string, label: string): string {
+  const abs = resolve(path);
+  let st;
+  try {
+    st = lstatSync(abs);
+  } catch {
+    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is missing.`);
+  }
+  if (st.isSymbolicLink()) {
+    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is a symlink or junction.`);
+  }
+  if (!st.isDirectory()) {
+    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is not a directory.`);
+  }
+  return abs;
+}
+
+function sameRealPath(left: string, right: string): boolean {
+  try {
+    return samePath(realpathSync(resolve(left)), realpathSync(resolve(right)));
+  } catch {
+    return false;
+  }
+}
+
+function pathInsideHome(home: string, path: string): boolean {
+  const rel = relative(resolve(home), resolve(path));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function resolveLauncherEntry(payload: ValidatedComponentPayload): string {
+  const live = validateComponentPayload(payload.payloadRootLib);
+  const declared = live.manifest.components.supervisor.files.some((file) => file.path === "lib/supervisor/launcher.mjs");
+  if (!declared) {
+    throw new WorkbenchPublicError(
+      "workbench/invalid-input",
+      "Selected component group does not declare lib/supervisor/launcher.mjs.",
+    );
+  }
+  return assertRealFile(payloadRel(live.packageRoot, "lib/supervisor/launcher.mjs"), "Selected launcher");
 }
 
 function bindSelectedCli(bin: string): BoundCli {
@@ -2216,6 +3071,10 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       };
     case "controller.release":
     case "controller.shutdown":
+    case "snapshot.restore":
+    case "config.restore":
+      throw new WorkbenchPublicError("workbench/unsupported");
+    case "service.shutdown":
       expectKeys(body, ["kind"]);
       return { kind };
     case "plugin.install":
@@ -2239,13 +3098,9 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
     case "snapshot.create":
       expectKeys(body, ["kind"]);
       return { kind };
-    case "snapshot.restore":
     case "snapshot.delete":
       expectKeys(body, ["kind", "snapshotId"]);
       return { kind, snapshotId: parseId(body.snapshotId) };
-    case "config.restore":
-      expectKeys(body, ["kind", "spaceId", "backupId"]);
-      return { kind, spaceId: parseSpaceName(body.spaceId), backupId: parseId(body.backupId) };
     case "runtime.install":
     case "runtime.upgrade":
       expectKeys(body, ["kind", "version"]);

@@ -9,7 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assertNotRealHome } from "../../../src/main/home-guard.ts";
+import { assertNotRealHome } from "../../../src/adapters/node/home-guard.ts";
 import { createWorkbenchSupervisor } from "../../../src/adapters/node/workbench-supervisor.ts";
 import { WorkbenchMaintenance } from "../../../src/adapters/node/workbench-maintenance.ts";
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Task 01: measure official `dsh plugin --profile <name> add|remove` write
- * scope on a disposable Home and prove offline restore from those copies.
+ * scope on a disposable Home. Records a no-secret hash manifest of the
+ * measured install tree and compares a copy replay to that baseline.
+ * Not a product restore entry.
  *
  *   node --import tsx scripts/verify-plugin-install-write-scope.mjs
  *   node --import tsx scripts/verify-plugin-install-write-scope.mjs --preflight
@@ -46,12 +48,7 @@ import {
   writeJson,
   writePnpmShim,
 } from "./verify-spaces-distribution.mjs";
-import { copyLinkedTree } from "../src/main/snapshot-store.ts";
-import {
-  buildPluginRestorePoint,
-  classifyRestorePath,
-  serializePluginRestorePoint,
-} from "../src/main/plugin-restore-point.ts";
+import { copyLinkedTree } from "../src/adapters/node/snapshot-store.ts";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const THIS_FILE = fileURLToPath(import.meta.url);
@@ -79,6 +76,90 @@ function outputDir() {
 
 function posixRel(from, to) {
   return relative(from, to).split(sep).join("/");
+}
+
+const PROTECTED_REL_RE =
+  /(^|\/)(sessions|storages)(\/|$)|(^|\/)\.credentials\.yaml$|(^|\/)\.anonymous-user-id$|(^|\/)profiles\/web(\/|$)/i;
+const LIVE_KEY = /\bsk-[A-Za-z0-9_-]{8,}\b/;
+
+function posixWriteRel(rel) {
+  const posix = String(rel).replaceAll("\\", "/").replace(/^\/+/, "");
+  if (!posix || posix.includes("\0") || posix.split("/").some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error(`write-scope path is invalid: ${rel}`);
+  }
+  return posix;
+}
+
+function classifyWritePath(rel, kind, root = "home") {
+  const posix = posixWriteRel(rel);
+  const excluded = root === "home" && PROTECTED_REL_RE.test(posix);
+  const base = posix.split("/").pop() ?? posix;
+  let role = "other";
+  if (kind === "link" || posix === "profiles/node_modules" || posix.startsWith("profiles/node_modules/")) {
+    role = "link";
+  } else if (
+    base === "pnpm-lock.yaml" ||
+    base === "pnpm-lock.yml" ||
+    base === "pnpm-workspace.yaml" ||
+    base === ".modules.yaml" ||
+    base === "package-lock.json"
+  ) {
+    role = "lock";
+  } else if (base === "package.json") {
+    role = "manifest";
+  } else if (base === "cordis.patch.yml" || base === "cordis.yml") {
+    role = "config";
+  } else if (
+    root === "store" ||
+    posix.includes("/node_modules/") ||
+    posix.endsWith("/node_modules") ||
+    posix.startsWith("node_modules/")
+  ) {
+    role = "dependency";
+  }
+  const shared =
+    root === "store" || posix === "profiles/node_modules" || posix.startsWith("profiles/node_modules/");
+  return { role, shared, excluded };
+}
+
+function assertProtectedPathsUntouched(scope, label) {
+  const bad = scope.filter((entry) => entry.root === "home" && PROTECTED_REL_RE.test(entry.rel.replaceAll("\\", "/")));
+  if (bad.length) {
+    throw new Error(`${label}: write scope touched web/session/storage/credential paths: ${bad.map((row) => row.rel).join(", ")}`);
+  }
+}
+
+function buildWriteScopeManifest({ packageName, spaceId, resolvedVersion, contentDigest, paths }) {
+  if (typeof contentDigest !== "string" || !/^[0-9a-f]{64}$/.test(contentDigest)) {
+    throw new Error("write-scope contentDigest must be 64 hex");
+  }
+  const included = paths
+    .filter((entry) => !entry.excluded)
+    .map((entry) => ({
+      root: entry.root,
+      rel: posixWriteRel(entry.rel),
+      kind: entry.kind,
+      role: entry.role,
+      shared: entry.shared === true,
+    }));
+  if (included.some((entry) => entry.root === "home" && PROTECTED_REL_RE.test(entry.rel))) {
+    throw new Error("write-scope manifest must not list web/session/storage/credential paths");
+  }
+  const manifest = {
+    kind: "plugin-install-write-scope",
+    packageName,
+    spaceId,
+    resolvedVersion,
+    contentDigest,
+    excluded: { web: true, sessions: true, storages: true, credentials: true },
+    paths: included,
+  };
+  const text = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (LIVE_KEY.test(text)) throw new Error("write-scope manifest contains a key-like token");
+  if (/probe-secret|apiKey|authorization/i.test(text)) {
+    throw new Error("write-scope manifest contains a secret-like field");
+  }
+  return { manifest, text };
 }
 
 function realHomeFingerprint() {
@@ -149,7 +230,7 @@ function diffInventory(before, after) {
 function scopeEntries(changes, root) {
   return changes.map((change) => {
     const kind = change.kind === "link" || change.kind === "dir" || change.kind === "file" ? change.kind : "file";
-    const classified = classifyRestorePath(change.rel, kind, root);
+    const classified = classifyWritePath(change.rel, kind, root);
     return {
       op: change.op,
       root,
@@ -445,27 +526,37 @@ function preflight() {
   }
   pass("disposable Home is required; real user Home is refused");
 
-  const sample = buildPluginRestorePoint({
-    id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-    createdAt: "2026-09-15T00:00:00.000Z",
-    spaceId: ALPHA,
+  const fixture = [
+    { root: "home", rel: "profiles/alpha/pnpm-lock.yaml", kind: "file" },
+    { root: "home", rel: "profiles/alpha/node_modules/@dsh-spaces/write-scope-probe", kind: "dir" },
+    { root: "home", rel: "profiles/node_modules/ms", kind: "link" },
+    { root: "home", rel: "hub/alpha/sessions/chat.jsonl", kind: "file" },
+    { root: "home", rel: "hub/web/storages/data.json", kind: "file" },
+    { root: "home", rel: ".credentials.yaml", kind: "file" },
+  ].map((row) => ({ ...row, ...classifyWritePath(row.rel, row.kind, row.root) }));
+  assert.equal(fixture.find((row) => row.rel.endsWith("pnpm-lock.yaml"))?.role, "lock");
+  assert.equal(fixture.find((row) => row.rel.includes("node_modules/@dsh-spaces"))?.role, "dependency");
+  assert.equal(fixture.find((row) => row.rel.includes("sessions"))?.excluded, true);
+  assert.equal(fixture.find((row) => row.rel.includes("storages"))?.excluded, true);
+  assert.equal(fixture.find((row) => row.rel.endsWith(".credentials.yaml"))?.excluded, true);
+  const digest = createHash("sha256")
+    .update(JSON.stringify(fixture.filter((row) => !row.excluded).map((row) => row.rel)))
+    .digest("hex");
+  const { manifest, text } = buildWriteScopeManifest({
     packageName: PACKAGE,
-    requestedSpec: `${PACKAGE}@${VERSION_A}`,
+    spaceId: ALPHA,
     resolvedVersion: VERSION_A,
-    action: "install",
-    boundary: "independent-per-space",
-    linkPreservingCopySufficient: true,
-    contentDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    paths: [
-      { root: "home", rel: "profiles/alpha/pnpm-lock.yaml", kind: "file", role: "lock", shared: false },
-      { root: "home", rel: "profiles/alpha/node_modules/@dsh-spaces/write-scope-probe", kind: "dir", role: "dependency", shared: false },
-      { root: "home", rel: "profiles/node_modules/ms", kind: "link", role: "link", shared: true },
-    ],
+    contentDigest: digest,
+    paths: fixture,
   });
-  const parsed = JSON.parse(serializePluginRestorePoint(sample));
-  assert.equal(parsed.schemaVersion, 1);
-  assert.equal(parsed.excluded.sessions, true);
-  pass("restore-point record format parse/serialize works");
+  assert.equal(manifest.excluded.sessions, true);
+  assert.equal(manifest.excluded.storages, true);
+  assert.equal(manifest.excluded.web, true);
+  assert.equal(manifest.excluded.credentials, true);
+  assert.equal(manifest.paths.some((row) => /sessions|storages|credentials|profiles\/web/.test(row.rel)), false);
+  assert.equal(LIVE_KEY.test(text), false);
+  JSON.parse(text);
+  pass("write-scope classifier excludes sessions/storages/web/credentials; hash manifest has no secret paths");
   return { status: "preflight", proved };
 }
 
@@ -540,10 +631,15 @@ async function experiment(out) {
   const markerToken = randomUUID();
   writeMarkers(home, ALPHA, `${markerToken}-alpha`);
   writeMarkers(home, BETA, `${markerToken}-beta`);
+  writeMarkers(home, "web", `${markerToken}-web`);
   const peerBefore = {
     config: spaceConfigFingerprint(home, BETA),
     markers: markerFingerprint(home, BETA),
     credentials: credentialFingerprint(home),
+  };
+  const webBefore = {
+    config: spaceConfigFingerprint(home, "web"),
+    markers: markerFingerprint(home, "web"),
   };
 
   const addAlphaLog = join(out, "plugin-add-alpha.log");
@@ -561,6 +657,7 @@ async function experiment(out) {
   );
   const afterAlpha = capturePair(home, tooling.store);
   const addAlphaScope = scopeFromPair(beforeAlpha, afterAlpha);
+  assertProtectedPathsUntouched(addAlphaScope, "alpha add");
   const addAlphaSummary = assertScopeNamesInstallFiles(addAlphaScope, home, "alpha add");
   const alphaInstalled = installedVersion(home, ALPHA);
   if (!alphaInstalled || alphaInstalled.version !== VERSION_A) {
@@ -583,6 +680,7 @@ async function experiment(out) {
   );
   const afterBeta = capturePair(home, tooling.store);
   const addBetaScope = scopeFromPair(beforeBeta, afterBeta);
+  assertProtectedPathsUntouched(addBetaScope, "beta add");
   const addBetaSummary = assertScopeNamesInstallFiles(addBetaScope, home, "beta add");
   const betaInstalled = installedVersion(home, BETA);
   if (!betaInstalled || betaInstalled.version !== VERSION_B) {
@@ -594,7 +692,7 @@ async function experiment(out) {
   pass(`beta installed ${PACKAGE}@${betaInstalled.version}; versions differ`);
 
   const fallbackRuntimeRoot = cliRuntimeRoot(cli.bin);
-  const backup = join(session, "restore-point");
+  const backup = join(session, "measured-baseline");
   const copyMethods = {};
   for (const rel of independentRoots(ALPHA)) {
     copyMethods[rel] = copyRoot(join(home, ...rel.split("/")), join(backup, ...rel.split("/")), fallbackRuntimeRoot);
@@ -612,7 +710,7 @@ async function experiment(out) {
     );
   }
   const digest = hashTree(join(backup, "profiles", ALPHA));
-  const restorePaths = addAlphaScope
+  const measuredPaths = addAlphaScope
     .filter((entry) => !entry.excluded)
     .map((entry) => ({
       root: entry.root,
@@ -620,6 +718,7 @@ async function experiment(out) {
       kind: entry.kind,
       role: entry.role,
       shared: entry.shared,
+      excluded: false,
     }));
   const peerTouched = addAlphaScope.some(
     (entry) =>
@@ -639,7 +738,9 @@ async function experiment(out) {
     markers: markerFingerprint(home, BETA),
     credentials: credentialFingerprint(home),
   };
-  const alphaMarkersBeforeRestore = markerFingerprint(home, ALPHA);
+  const alphaMarkersBeforeReplay = markerFingerprint(home, ALPHA);
+  assert.deepEqual(markerFingerprint(home, "web"), webBefore.markers, "web sessions/storages changed by plugin add");
+  assert.deepEqual(spaceConfigFingerprint(home, "web"), webBefore.config, "web profile changed by plugin add");
 
   const removeLog = join(out, "plugin-remove-alpha.log");
   writeFileSync(removeLog, "", "utf8");
@@ -656,6 +757,7 @@ async function experiment(out) {
   );
   const afterRemove = capturePair(home, tooling.store);
   const removeScope = scopeFromPair(beforeRemove, afterRemove);
+  assertProtectedPathsUntouched(removeScope, "alpha remove");
   const removeSummary = summarizeScope(removeScope.filter((entry) => !entry.excluded));
   if (installedVersion(home, ALPHA)) throw new Error("alpha still has the probe package after remove");
   if (installedVersion(home, BETA)?.version !== VERSION_B) throw new Error("beta version changed during alpha remove");
@@ -664,78 +766,74 @@ async function experiment(out) {
   for (const rel of independentRoots(ALPHA)) {
     copyRoot(join(backup, ...rel.split("/")), join(home, ...rel.split("/")), fallbackRuntimeRoot);
   }
-  let usedSharedRestore = false;
-  const dumpLog = join(out, "dump-after-restore.log");
+  let usedSharedCopy = false;
+  const dumpLog = join(out, "dump-after-baseline-replay.log");
   writeFileSync(dumpLog, "", "utf8");
-  let restoredDump;
+  let replayDump;
   try {
-    restoredDump = runDshOffline(
+    replayDump = runDshOffline(
       nodeExe,
       cli.bin,
       home,
       tooling,
       ["--profile", ALPHA, "--dump-config"],
       DUMP_MS,
-      "offline dump-config after independent restore",
+      "offline dump-config after measured copy replay",
       dumpLog,
     );
   } catch (error) {
     if (!storeChanged) throw error;
-    info(`independent restore did not start offline; restoring measured store: ${error instanceof Error ? error.message : error}`);
+    info(`independent copy replay did not start offline; replaying measured store: ${error instanceof Error ? error.message : error}`);
     copyRoot(join(backup, "store"), tooling.store, fallbackRuntimeRoot);
-    usedSharedRestore = true;
+    usedSharedCopy = true;
     boundary = "shared-deps-require-pause";
-    restoredDump = runDshOffline(
+    replayDump = runDshOffline(
       nodeExe,
       cli.bin,
       home,
       tooling,
       ["--profile", ALPHA, "--dump-config"],
       DUMP_MS,
-      "offline dump-config after shared-store restore",
+      "offline dump-config after shared-store copy replay",
       dumpLog,
     );
   }
-  const restored = installedVersion(home, ALPHA);
-  if (!restored || restored.version !== VERSION_A) {
-    throw new Error(`offline restore did not bring back ${VERSION_A}: ${JSON.stringify(restored)}`);
+  const replayed = installedVersion(home, ALPHA);
+  if (!replayed || replayed.version !== VERSION_A) {
+    throw new Error(`measured copy replay did not bring back ${VERSION_A}: ${JSON.stringify(replayed)}`);
   }
-  if (!restoredDump.includes("dsh-spaces-write-scope-probe") && !restoredDump.includes(PACKAGE)) {
+  assert.equal(hashTree(join(home, "profiles", ALPHA)), digest, "measured copy replay did not match baseline digest");
+  if (!replayDump.includes("dsh-spaces-write-scope-probe") && !replayDump.includes(PACKAGE)) {
     info("dump-config did not name the probe id; installed package version still matched");
   }
-  pass(`offline restore started alpha with saved version ${restored.version}`);
+  pass(`measured copy replay matched baseline digest and ${replayed.version}`);
 
   const peerAfter = {
     config: spaceConfigFingerprint(home, BETA),
     markers: markerFingerprint(home, BETA),
     credentials: credentialFingerprint(home),
   };
-  assert.deepEqual(peerAfter.config, peerAfterInstall.config, "beta config changed by alpha restore");
-  assert.deepEqual(peerAfter.markers, peerAfterInstall.markers, "beta sessions/storages changed by alpha restore");
+  assert.deepEqual(peerAfter.config, peerAfterInstall.config, "beta config changed by alpha copy replay");
+  assert.deepEqual(peerAfter.markers, peerAfterInstall.markers, "beta sessions/storages changed by alpha copy replay");
   assert.deepEqual(peerAfter.credentials, peerBefore.credentials, "Home credentials changed");
-  assert.deepEqual(markerFingerprint(home, ALPHA), alphaMarkersBeforeRestore, "alpha sessions/storages rolled back");
-  pass("peer config and sessions/storages unchanged; credentials/runtime identity files untouched");
+  assert.deepEqual(markerFingerprint(home, ALPHA), alphaMarkersBeforeReplay, "alpha sessions/storages overwritten by copy replay");
+  assert.deepEqual(markerFingerprint(home, "web"), webBefore.markers, "web sessions/storages changed by copy replay");
+  assert.deepEqual(spaceConfigFingerprint(home, "web"), webBefore.config, "web profile changed by copy replay");
+  pass("web/peer sessions/storages and credentials/runtime identity files untouched");
 
   const linkPreservingCopySufficient =
-    copyMethods[`profiles/${ALPHA}`]?.method === "copyLinkedTree" && !usedSharedRestore;
+    copyMethods[`profiles/${ALPHA}`]?.method === "copyLinkedTree" && !usedSharedCopy;
   if (!linkPreservingCopySufficient && boundary === "independent-per-space") {
     boundary = "shared-deps-require-pause";
   }
-  const restorePoint = buildPluginRestorePoint({
-    id: randomUUID(),
-    spaceId: ALPHA,
+  const { manifest, text: manifestText } = buildWriteScopeManifest({
     packageName: PACKAGE,
-    requestedSpec: `${PACKAGE}@${VERSION_A}`,
+    spaceId: ALPHA,
     resolvedVersion: VERSION_A,
-    action: "install",
-    boundary,
-    linkPreservingCopySufficient,
     contentDigest: digest,
-    sharedReferencers: usedSharedRestore || peerTouched ? [BETA] : [],
-    paths: restorePaths,
+    paths: measuredPaths,
   });
-  const restorePointText = serializePluginRestorePoint(restorePoint);
-  writeFileSync(join(out, "restore-point.json"), restorePointText);
+  writeFileSync(join(out, "write-scope-manifest.json"), manifestText);
 
   const afterReal = realHomeFingerprint();
   assertUnchangedRealHome(beforeReal, afterReal);
@@ -744,7 +842,7 @@ async function experiment(out) {
   report.status = "pass";
   report.cli = cli;
   report.package = PACKAGE;
-  report.versions = { alpha: restored.version, beta: betaInstalled.version };
+  report.versions = { alpha: replayed.version, beta: betaInstalled.version };
   report.writeScope = {
     addAlpha: addAlphaSummary,
     addBeta: addBetaSummary,
@@ -753,7 +851,7 @@ async function experiment(out) {
   report.copyMethods = copyMethods;
   report.boundary = boundary;
   report.linkPreservingCopySufficient = linkPreservingCopySufficient;
-  report.restorePoint = restorePoint;
+  report.writeScopeManifest = manifest;
   report.home = posixRel(session, home);
   report.realHome = { used: false, unchanged: true };
   writeJson(join(out, "results.json"), report);

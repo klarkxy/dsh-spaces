@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../shared/space-icon";
+import { MAX_WORKBENCH_SHARE_BASE64 } from "../../shared/workbench-product";
 
 export const WORKBENCH_API_PREFIX = "/api/workbench/";
 export const WORKBENCH_API_METHODS = [
@@ -19,11 +20,30 @@ export const WORKBENCH_API_METHODS = [
   "backups",
   "llm",
   "llmCredential",
+  "product",
 ] as const;
 export type WorkbenchApiMethod = (typeof WORKBENCH_API_METHODS)[number];
 
-const BODY_LIMIT = MAX_SPACE_ICON_FILE_BYTES;
+/** Ordinary JSON methods stay at the icon-file bound. */
+export const WORKBENCH_HTTP_BODY_LIMIT = MAX_SPACE_ICON_FILE_BYTES;
+/** share.previewImport request: 8MiB binary as base64 plus a small JSON envelope. */
+export const WORKBENCH_PRODUCT_SHARE_JSON_OVERHEAD = 64 * 1024;
+export const WORKBENCH_PRODUCT_SHARE_BODY_LIMIT = MAX_WORKBENCH_SHARE_BASE64 + WORKBENCH_PRODUCT_SHARE_JSON_OVERHEAD;
 const HOST = "127.0.0.1";
+/** https://fetch.spec.whatwg.org/#port-blocking */
+const WHATWG_FETCH_BLOCKED_PORTS = new Set<number>([
+  0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102,
+  103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512,
+  513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719,
+  1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697,
+  10080,
+]);
+/** Initial listen(0) only: close an unexposed forbidden assignment and try again. */
+const INITIAL_LOOPBACK_BIND_ATTEMPTS = 8;
+
+export function isForbiddenFetchPort(port: number): boolean {
+  return WHATWG_FETCH_BLOCKED_PORTS.has(port);
+}
 
 export interface ViewBootstrap {
   setCookies: string[];
@@ -41,7 +61,11 @@ export interface WorkbenchHttpRuntime {
   isWorkspaceOrigin(origin: string): boolean;
   dispatch(method: WorkbenchApiMethod, payload: unknown): Promise<unknown>;
   entryPage(): string;
-  viewEntry(spaceId: string, generation: string): Promise<ViewBootstrap | { status: number; message: string }>;
+  viewEntry(
+    spaceId: string,
+    generation: string,
+    epoch?: string | null,
+  ): Promise<ViewBootstrap | { status: number; message: string }>;
   mintHandoff(): string;
 }
 
@@ -61,33 +85,88 @@ export function supervisorCookieName(port: number): string {
   return expectedAuthCookieName(`${HOST}:${port}`);
 }
 
+function closeUnexposed(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!server.listening) {
+      server.close();
+      resolve();
+      return;
+    }
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+async function listenLoopback(server: Server, port: number): Promise<number> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      server.once("error", onError);
+      server.listen(port, HOST, () => {
+        server.off("error", onError);
+        resolve();
+      });
+    });
+  } catch (error) {
+    await closeUnexposed(server).catch(() => undefined);
+    throw error;
+  }
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    await closeUnexposed(server);
+    throw new Error("supervisor did not bind 127.0.0.1");
+  }
+  return address.port;
+}
+
+/**
+ * Initial Supervisor loopback bind only. Explicit ports keep their identity;
+ * listen(0) may filter an unexposed WHATWG-blocked OS assignment.
+ */
+export async function bindInitialLoopbackHttp(
+  open: () => Server,
+  requestedPort = 0,
+): Promise<{ server: Server; port: number }> {
+  if (requestedPort !== 0) {
+    if (isForbiddenFetchPort(requestedPort)) {
+      throw new Error(
+        `supervisor port ${requestedPort} is blocked by Fetch (https://fetch.spec.whatwg.org/#port-blocking)`,
+      );
+    }
+    const server = open();
+    const port = await listenLoopback(server, requestedPort);
+    return { server, port };
+  }
+
+  for (let attempt = 0; attempt < INITIAL_LOOPBACK_BIND_ATTEMPTS; attempt += 1) {
+    const server = open();
+    const port = await listenLoopback(server, 0);
+    if (!isForbiddenFetchPort(port)) return { server, port };
+    await closeUnexposed(server);
+  }
+  throw new Error("supervisor could not bind a browser-safe loopback port");
+}
+
 export async function startWorkbenchHttp(
   host: WorkbenchHttpRuntime,
   port = 0,
 ): Promise<WorkbenchHttpServer> {
-  const server = createServer((req, res) => {
-    void handleRequest(host, req, res);
-  });
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    server.once("error", onError);
-    server.listen(port, HOST, () => {
-      server.off("error", onError);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    server.close();
-    throw new Error("supervisor did not bind 127.0.0.1");
-  }
-  const origin = `http://${HOST}:${address.port}`;
+  const bound = await bindInitialLoopbackHttp(
+    () =>
+      createServer((req, res) => {
+        void handleRequest(host, req, res);
+      }),
+    port,
+  );
+  const origin = `http://${HOST}:${bound.port}`;
   return {
-    server,
+    server: bound.server,
     origin,
     close: () =>
       new Promise((resolveClose) => {
-        server.close(() => resolveClose());
+        bound.server.close(() => resolveClose());
         setTimeout(resolveClose, 2000).unref();
       }),
   };
@@ -212,15 +291,23 @@ async function handleApi(
     deny(res, 403, "workbench/forbidden", "Origin is not allowed.");
     return;
   }
+  const readLimit = method === "product" ? WORKBENCH_PRODUCT_SHARE_BODY_LIMIT : WORKBENCH_HTTP_BODY_LIMIT;
   let payload: unknown;
+  let bytes = 0;
   try {
-    payload = await readJsonBody(req, BODY_LIMIT);
+    const read = await readJsonBody(req, readLimit);
+    payload = read.payload;
+    bytes = read.bytes;
   } catch (error) {
     if (error instanceof BodyLimitError) {
       deny(res, 413, "workbench/invalid-input", "The request body is too large.");
       return;
     }
     deny(res, 400, "workbench/invalid-input", "The request is not valid JSON.");
+    return;
+  }
+  if (method === "product" && productMethodOf(payload) !== "share.previewImport" && bytes > WORKBENCH_HTTP_BODY_LIMIT) {
+    deny(res, 413, "workbench/invalid-input", "The request body is too large.");
     return;
   }
   try {
@@ -258,7 +345,8 @@ async function handleView(
   }
   const spaceId = decodeURIComponent(parts[1] ?? "");
   const generation = decodeURIComponent(parts[2] ?? "");
-  const result = await host.viewEntry(spaceId, generation);
+  const epoch = url.searchParams.get("epoch");
+  const result = await host.viewEntry(spaceId, generation, epoch);
   if ("status" in result) {
     deny(res, result.status, "workbench/forbidden", result.message);
     return;
@@ -382,6 +470,14 @@ function isApiMethod(value: string): value is WorkbenchApiMethod {
   return (WORKBENCH_API_METHODS as readonly string[]).includes(value);
 }
 
+function productMethodOf(body: unknown): string | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const request = (body as { request?: unknown }).request;
+  if (!request || typeof request !== "object" || Array.isArray(request)) return null;
+  const method = (request as { method?: unknown }).method;
+  return typeof method === "string" ? method : null;
+}
+
 function looksLikeProxy(url: URL): boolean {
   if (url.pathname.startsWith("/proxy")) return true;
   if (url.searchParams.has("url")) return true;
@@ -412,7 +508,7 @@ class BodyLimitError extends Error {
   readonly name = "BodyLimitError";
 }
 
-function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
+function readJsonBody(req: IncomingMessage, limit: number): Promise<{ payload: unknown; bytes: number }> {
   return new Promise((resolve, reject) => {
     const type = String(req.headers["content-type"] ?? "");
     if (type && !type.toLowerCase().startsWith("application/json")) {
@@ -421,27 +517,36 @@ function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
     }
     const chunks: Buffer[] = [];
     let size = 0;
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      req.resume();
+      reject(error);
+    };
     req.on("data", (chunk: Buffer) => {
+      if (settled) return;
       size += chunk.length;
       if (size > limit) {
-        req.destroy();
-        reject(new BodyLimitError());
+        fail(new BodyLimitError());
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       if (size === 0) {
-        resolve({});
+        resolve({ payload: {}, bytes: 0 });
         return;
       }
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        resolve({ payload: JSON.parse(Buffer.concat(chunks).toString("utf8")), bytes: size });
       } catch {
         reject(new Error("json"));
       }
     });
-    req.on("error", reject);
+    req.on("error", (error) => fail(error instanceof Error ? error : new Error("read")));
   });
 }
 
@@ -577,9 +682,9 @@ export function renderEntryPage(_input: {
   managerRunning: boolean;
   managerViewPath: string | null;
   maintenance: boolean;
-  recoveryRequired: boolean;
   writable: boolean;
   reasons: string[];
+  serviceEpoch: string;
 }): string {
   return `<!doctype html>
 <html lang="zh-CN">
@@ -619,7 +724,6 @@ ul{padding-left:1.2rem}
 <p>查看错误详情</p>
 <ul id="reasons"></ul>
 <p>
-<button id="acquire">接管运行权</button>
 <button id="copy-logs" class="secondary">复制脱敏日志</button>
 <button id="refresh" class="secondary">刷新</button>
 </p>
@@ -680,16 +784,16 @@ function applyState(state) {
   document.getElementById("banner-title").textContent = live ? "工作台入口在线" : "管理环境不可用，入口仍在线";
   document.getElementById("banner-sub").textContent = state.writable
     ? (state.maintenance ? "维护进行中" : "当前进程持有运行权")
-    : "只读。接管前不会安装或启动管理环境。";
+    : "只读。此入口不会获取运行权或启动管理环境。";
   document.getElementById("idle-title").textContent = state.maintenance ? "维护中" : "工作台入口";
   document.getElementById("reasons").innerHTML = (state.reasons || []).length
     ? state.reasons.map((row) => "<li>" + escapeHtml(row) + "</li>").join("")
-    : "<li>管理进程未在运行。可查看任务进度或接管运行权。</li>";
-  document.getElementById("acquire").disabled = Boolean(state.writable);
+    : "<li>管理进程未在运行。可查看错误详情或复制脱敏日志。</li>";
   renderJobs(jobs);
   const frame = document.getElementById("manager-frame");
   if (live) {
-    const src = "/view/" + encodeURIComponent(manager.id) + "/" + manager.generation;
+    const epoch = typeof state.serviceEpoch === "string" ? state.serviceEpoch : "";
+    const src = "/view/" + encodeURIComponent(manager.id) + "/" + manager.generation + (epoch ? ("?epoch=" + encodeURIComponent(epoch)) : "");
     frame.hidden = false;
     if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
   } else {
@@ -707,14 +811,6 @@ async function refresh() {
   }
 }
 document.getElementById("refresh").addEventListener("click", () => { void refresh(); });
-document.getElementById("acquire").addEventListener("click", async () => {
-  try {
-    await api("submit", { command: { kind: "controller.acquire" }, requestId: crypto.randomUUID() });
-    await refresh();
-  } catch (error) {
-    showError(error instanceof Error ? error.message : String(error));
-  }
-});
 document.getElementById("copy-logs").addEventListener("click", async () => {
   try {
     const state = await api("state");

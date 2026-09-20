@@ -10,8 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite } from "../../main/atomic";
-import { samePath } from "../../main/home-guard";
+import { atomicWrite } from "./atomic";
+import { samePath } from "./home-guard";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
 import { HomeLockBusyError, HomeOperationLock, canonicalHome } from "./home-operation-lock";
 import { deriveServiceEpoch, digestHomeIdentity } from "./workbench-protocol";

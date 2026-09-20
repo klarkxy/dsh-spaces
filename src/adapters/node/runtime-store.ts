@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { t } from "../shared/i18n";
+import { t } from "../../shared/i18n";
 import {
   DSH_RUNTIME_PACKAGE,
   isExactRuntimeVersion,
@@ -18,8 +18,8 @@ import {
   type RuntimeInventory,
   type RuntimeOrigin,
   type RuntimeRef,
-} from "../shared/runtime";
-import type { PackageSource } from "../shared/types";
+} from "../../shared/runtime";
+import type { PackageSource } from "../../shared/types";
 import { atomicWrite } from "./atomic";
 import { ProcessTerminationError } from "./terminate-process";
 import { assertNotRealHome } from "./home-guard";

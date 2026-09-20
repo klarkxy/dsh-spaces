@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-const {PatchWriter,assertDumpPatched,extractRoot}=await import(new URL('../src/main/patch-writer.ts', import.meta.url).href);
+const {PatchWriter,assertDumpPatched,extractRoot}=await import(new URL('../src/adapters/node/patch-writer.ts', import.meta.url).href);
 const mk=original=>{const home=mkdtempSync(join(tmpdir(),'spaces-patch-review-'));const dir=join(home,'profiles','notes');mkdirSync(dir,{recursive:true});const file=join(dir,'cordis.patch.yml');writeFileSync(file,original);return {home,file,writer:new PatchWriter(home)};};
 let passes=0;
 function check(name,fn){try{fn();console.log('PASS '+name);passes++;}catch(e){console.error('FAIL '+name+': '+e.message);process.exitCode=1;}}

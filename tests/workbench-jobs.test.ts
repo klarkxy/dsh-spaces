@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -416,16 +417,16 @@ test("unreadable history cannot be settled into a fabricated terminal job", asyn
   assert.equal(new WorkbenchJobStore({ home }).job("unknown").status, "failed");
 });
 
-test("unknown command kinds and controller.acquire parse as contract input", async () => {
+test("unknown command kinds and controller.acquire are rejected as contract input", async () => {
   const store = new WorkbenchJobStore({ home: tempHome() });
   await assert.rejects(
     () => store.submit({ kind: "space.delete", spaceId: "alpha" } as unknown as WorkbenchCommand, "nope", noop()),
     (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/invalid-input",
   );
-  const acquired = await store.submit({ kind: "controller.acquire" }, "acq-1", async () => undefined);
-  await store.whenIdle();
-  assert.equal(acquired.kind, "controller.acquire");
-  assert.equal(store.job("acq-1").status, "succeeded");
+  await assert.rejects(
+    () => store.submit({ kind: "controller.acquire" } as unknown as WorkbenchCommand, "acq-1", async () => undefined),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
 });
 
 function validStoredJob(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -615,10 +616,12 @@ test("result and view projection drop path, token, and non-loopback origins", as
   await store.whenIdle();
   assert.equal(store.job("proj-3").result?.view, undefined);
 
+  const epoch = "a".repeat(64);
   await store.submit(startCmd("delta"), "proj-4", async () => ({
     spaceId: "delta",
     runtimeVersion: "0.1.5-rc.1",
     view: {
+      serviceEpoch: epoch,
       spaceId: "delta",
       generation: 3,
       origin: "http://127.0.0.1:3210",
@@ -631,6 +634,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
   const clean = store.job("proj-4");
   assert.equal(clean.result?.runtimeVersion, "0.1.5-rc.1");
   assert.deepEqual(clean.result?.view, {
+    serviceEpoch: epoch,
     spaceId: "delta",
     generation: 3,
     origin: "http://127.0.0.1:3210",
@@ -737,4 +741,128 @@ test("failure context is stored on the public job error", async () => {
   assert.equal(job.error?.stage, "load-plugin");
   assert.equal(job.error?.packageName, "example-plugin@1.2.3");
   assert.equal(job.error?.exitCode, 1);
+});
+
+test("failed jobs keep a validated product partial result", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(
+    { kind: "plugin.library.remove", libraryId: "lib-1" },
+    "partial-1",
+    async (ctx) => {
+      ctx.result({ product: { kind: "plugin.library.remove", libraryId: "lib-1" } });
+      throw new WorkbenchJobError("workbench/failed");
+    },
+  );
+  await store.whenIdle();
+  const job = store.job("partial-1");
+  assert.equal(job.status, "failed");
+  assert.deepEqual(job.result?.product, { kind: "plugin.library.remove", libraryId: "lib-1" });
+});
+
+test("runExclusive shares the job tail and does not persist the callback payload", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  const gate = latch();
+  await store.submit(startCmd("one"), "serial-job", async () => {
+    order.push("job-start");
+    await gate.promise;
+    order.push("job-end");
+  });
+  const exclusive = store.runExclusive(async () => {
+    order.push("exclusive");
+    return { secret: "do-not-persist" };
+  });
+  await waitUntil(() => store.job("serial-job").status === "running", "running");
+  gate.release();
+  const value = await exclusive;
+  await store.whenIdle();
+  assert.deepEqual(order, ["job-start", "job-end", "exclusive"]);
+  assert.deepEqual(value, { secret: "do-not-persist" });
+  const files = readdirSync(jobsDir(store.home));
+  for (const name of files) {
+    const text = readFileSync(join(jobsDir(store.home), name), "utf8");
+    assert.equal(text.includes("do-not-persist"), false);
+  }
+});
+
+test("runAdmitted from an unrelated caller waits for the exclusive tail", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const events: string[] = [];
+  const gate = latch();
+  const exclusive = store.runExclusive(async () => {
+    events.push("exclusive started");
+    await gate.promise;
+    events.push("exclusive done");
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const admitted = store.runAdmitted(async () => {
+    events.push("unrelated external mutation");
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ["exclusive started"]);
+  gate.release();
+  await Promise.all([exclusive, admitted]);
+  assert.deepEqual(events, ["exclusive started", "exclusive done", "unrelated external mutation"]);
+});
+
+test("runAdmitted nested in the exclusive callback runs inline", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  await store.runExclusive(async () => {
+    order.push("outer");
+    await store.runAdmitted(async () => {
+      order.push("nested");
+    });
+    order.push("after");
+  });
+  assert.deepEqual(order, ["outer", "nested", "after"]);
+});
+
+test("runAdmitted nested in a job handler does not deadlock", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  await store.submit(startCmd("one"), "admit-job", async () => {
+    order.push("job");
+    await store.runAdmitted(async () => {
+      order.push("nested");
+    });
+  });
+  await store.whenIdle();
+  assert.deepEqual(order, ["job", "nested"]);
+});
+
+test("detached descendant from a finished exclusive waits for a later exclusive", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  const detached = latch();
+  const secondHold = latch();
+  await store.runExclusive(async () => {
+    order.push("first");
+    void detached.promise.then(async () => {
+      order.push("detached-enter");
+      await store.runAdmitted(async () => {
+        order.push("detached-admitted");
+      });
+    });
+  });
+  const second = store.runExclusive(async () => {
+    order.push("second-start");
+    await secondHold.promise;
+    order.push("second-end");
+  });
+  await waitUntil(() => order.includes("second-start"), "second exclusive started");
+  detached.release();
+  await waitUntil(() => order.includes("detached-enter"), "detached entered");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(order.includes("detached-admitted"), false);
+  secondHold.release();
+  await second;
+  await store.whenIdle();
+  assert.deepEqual(order, [
+    "first",
+    "second-start",
+    "detached-enter",
+    "second-end",
+    "detached-admitted",
+  ]);
 });
