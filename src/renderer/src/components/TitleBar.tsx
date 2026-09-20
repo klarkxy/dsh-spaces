@@ -83,11 +83,19 @@ export function TitleBar({
   queueText,
   error,
   onDismissError,
+  canPrepare,
+  canStart,
+  onPrepare,
+  onStart,
 }: {
   busy?: string;
   queueText?: string;
   error?: string;
   onDismissError?: () => void;
+  canPrepare?: boolean;
+  canStart?: boolean;
+  onPrepare?: () => void;
+  onStart?: () => void;
 }) {
   const { t } = useI18n();
   const isMac = window.dshSpaces.platform === "darwin";
@@ -117,6 +125,24 @@ export function TitleBar({
     >
       <div className={`flex min-w-0 flex-1 items-center gap-3 px-3 ${isMac ? "pl-[76px]" : ""}`}>
         <p className="ui-kicker shrink-0">{t("cli.brand")}</p>
+        {canPrepare && onPrepare ? (
+          <button
+            type="button"
+            className="app-no-drag btn-ghost shrink-0 rounded px-2 py-0.5 text-xs"
+            onClick={onPrepare}
+          >
+            {t("shell.prepare")}
+          </button>
+        ) : null}
+        {canStart && onStart ? (
+          <button
+            type="button"
+            className="app-no-drag btn-ghost shrink-0 rounded px-2 py-0.5 text-xs"
+            onClick={onStart}
+          >
+            {t("shell.startService")}
+          </button>
+        ) : null}
         {error ? (
           <div className="app-no-drag flex min-w-0 flex-1 items-center gap-2">
             <p className="min-w-0 truncate text-xs text-red-500" title={error}>

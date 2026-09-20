@@ -17,6 +17,8 @@
     "src/main/**/*",
     "src/core/**/*",
     "src/adapters/**/*",
+    "packages/plugin/src/host/**/*",
+    "packages/plugin/src/types.ts",
     "src/preload/**/*",
     "src/shared/**/*"
   ]
