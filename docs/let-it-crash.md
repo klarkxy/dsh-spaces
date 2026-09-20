@@ -12,7 +12,13 @@
 
 本文件是当前唯一有效的故障政策。其他文档引用它，不再各写一套恢复解释。
 
-**运行时已符合 let it crash（产品路径）。** 公开恢复命令失败且不转发到旧实现；中断任务失败留证、不重放；Doctor 只诊断。源码里仍可能留着未接线的历史恢复模块（例如 `packages/doctor/src/recover.ts`、`RestoreSession`、底层 `SnapshotStore.restore`），那不是产品入口。未在本机用官方 DSH CLI / 浏览器跑完的矩阵项见 [tasks/q-coverage.md](../tasks/q-coverage.md)。启动若仍走运行时安装 IO，继续需要 `--snapshot-worker`。
+当前实现已拒绝公开恢复命令：`snapshot.restore`、`config.restore`、`controller.shutdown` 以及 Doctor `unlock` / `recover` / `rollback` 均为 unsupported。中断任务失败留证、不重放。Doctor 只诊断。
+
+源码侧恢复编排已删：`RestoreSession` 不存在。`SnapshotStore.restore` / `recover` / `completeRestore` 与 snapshot-worker 的同名操作抛出不支持，不是可执行恢复链。`packages/doctor/src/recover.ts` 仅为编译桩，CLI `index.ts` 不引用。历史 `pending-restore.json` 与 restore journal 仍可读作未完成证据并挡住后续写入，不重放、不修补。
+
+运行时安装 IO 已抽到 `src/adapters/node/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及升级过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。
+
+维护成功路径可以 `reinitializeManager`（同一 Supervisor `serviceEpoch`）；失败路径保持 maintenance、不重启管理 profile。组件升级的一次性 launcher 交接已在源码接线（`--accept-handoff`、`packages/supervisor/src/launcher.ts`、`workbench.upgrade` 的 `handoff-pending`）。**这不是真实验收通过：** 现行 `scripts/verify-plugin-standard-install.mjs` 在诊断中失败；desktop / component-update / maintenance-product 真实运行尚未记录 PASS。不要把实现完成写成验收完成。进度由 Primary 维护 [合并执行记录](../tasks/merge-execution.md)。
 
 ## 两个必须明确的解释
 

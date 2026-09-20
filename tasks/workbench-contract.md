@@ -1,27 +1,29 @@
 # 工作台接口与所有权合同
 
-Codex owns src/shared/workbench.ts。本文件固定新接口，保留旧 SpacesControlApi 供兼容适配；不是授权浏览器提交路径、命令或原始 spec。
+现行固定合同是 [merge-contract-v2.md](merge-contract-v2.md)，细化 [合并计划](../docs/plans/spaces-merge-convergence.md)。`src/shared/workbench.ts` 仍由主 Agent 协调。本文件是现行公开行为摘要，不是第二套协议。
 
-现行故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。**目标政策 / 已知实现差距：** 源码在 R1–R6 完成前仍含 `recoveryRequired`、`recovery.resume`、`snapshot.restore`、`config.restore` 等。那些不是当前合同要求。实现迁移见 [todo.md](todo.md) R1–R6。
+故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。历史恢复要求见 [history-recovery.md](history-recovery.md) 与下方历史段，不是现行门槛。
 
 ## 通信
 
-- 浏览器 API 以 WorkbenchApi 为准。监督 HTTP transport 固定 /api/workbench/<method>，POST JSON，查询也 POST。方法白名单和逐方法输入校验，credentials include；精确校验管理页/监督入口 Origin，普通子空间不得调用管理 API。请求上限按图标许可大小设置，不接受任意代理URL。
-- API 成功 {ok:true,value}，失败 {ok:false,error:{code,message}}，敏感原始异常仅落经脱敏的本地日志。客户端不根据HTTP200猜成功。不得增加 `recoveryPlan`、`suggestedFix`、`autoRetry` 等指导恢复字段。
-- submit(command,requestId) 持久化且幂等；同requestId同命令返回原job，不同命令拒绝；job.result只允许合同中的字段，不直接透传内部对象。刷新只读取同一任务，不重新执行。
-- 危险或需停机动作先preview再plan.execute；plan在服务器保存解析后的输入、目标与fingerprint，有效期5分钟；执行时再次核对目标状态/运行权，变化则要求新preview。取消只允许queued或尚未进入不可逆阶段，不能把“取消请求”伪装为已回滚。
-- view(spaceId)只为已由监督进程启动、通过后端就绪检查的实例签发授权引导路径。entryPath不含DSH原始token；origin用于精确消息源检查。每次启动/重启递增generation，channel只做视图消息相关性校验，不授予管理权。
-- 安装只接受服务端目录条目catalogId和精确版本；目录可复用原本npm/GitHub条目解析，但不得让客户端传本地file:/git/shell spec。保护官方核心与完整Spaces管理包。下载失败报错；读不到实际版本显示未知，不改用 latest。
+- 浏览器以 `WorkbenchApi` 为准。监督 HTTP：`POST /api/workbench/<method>`，JSON，查询也 POST。方法白名单和逐方法校验；精确校验管理 Origin。普通子空间不得调用管理 API。
+- 成功 `{ok:true,value}`，失败 `{ok:false,error:{code,message}}`。不得增加 `recoveryPlan`、`suggestedFix`、`autoRetry`。
+- 协议版本 **2**。`WorkbenchState` 含 `protocolVersion`、`serviceEpoch`、`revision`、`availability`。`submit(command, requestId, context)` 与 `preview(request, context)` 的 `context` 为 `{ serviceEpoch, expectedRevision }`。缺失、多余字段或 epoch/revision 不符明确拒绝。比较在串行执行边界完成。
+- 同 `requestId` 同命令读同一 job；同 ID 不同命令拒绝。刷新只读该 job，不重放。
+- 危险或停机动作先 preview 再 `plan.execute`。公开 `WorkbenchPlan` 带 `serviceEpoch` 与 `stateRevision`。过期 epoch 的计划不能执行。
+- `product(request)` 是类型化读/预览；写入走同一队列。`llm(request)` 与 `llmCredential` 仍是独立通道，凭据不进通用 job。
+- `view(spaceId)` 只为监督已启动且通过就绪检查的实例签发引导路径。`entryOrigin` 是监督 origin；`origin` 是子 DSH origin，只做消息校验。实例身份为 `serviceEpoch + spaceId + generation`。
+- 安装只接受目录 `catalogId` 和精确版本。不得让客户端传本地 file:/git/shell spec。读不到实际版本显示未知，不改用 `latest`。
+
+公开命令没有 `controller.acquire`、`controller.release`、`recovery.resume`、`snapshot.restore`、`config.restore`。正常停服务使用 `service.shutdown` 预览。旧调用只在兼容拒绝边界返回 unsupported。
 
 ## 拓扑
 
-独立监督进程持有运行权、进程监督和任务执行，提供稳定HTTP入口。正常页面展示管理profile的原生DSH客户端，完整Spaces插件只在该profile提供工作台root布局。工作空间使用各自独立origin，视图桥不含管理能力。入口在管理profile停机时若自身仍在线，显示真实失败（错误详情、脱敏日志），监督进程不随管理profile停机。不得通过共origin反向代理所有工作空间来假装隔离。不提供救援页、检查并恢复、恢复中断任务。
+独立 Supervisor 是唯一管理执行器：运行权、进程监督、任务执行、稳定 HTTP。桌面壳不创建第二套 ProfileRegistry / ProcessManager / RuntimeStore / CoordinatedUpgrade / DesktopLlmHost。管理页是 spaces-hub 的原生工作台；Host 只作受信任转接。工作空间独立 origin；view-bridge 不含管理能力。
 
-管理profile内优先通过已认证的DSH Remote代理WorkbenchApi至监督进程，浏览器不接收进程间私密凭据；稳定入口直接使用监督进程受认证的同源API。保留独立稳定入口页面（正常时嵌入管理profile，停机时显示失败）。入口进程自己崩溃时用已有 stderr/启动器/日志，不另建看门狗。
+入口在管理 profile 停机后若 Supervisor 仍在线，显示真实失败。Supervisor 不随管理 profile 停机。桌面退出销毁客户端，不停止服务。浏览器和桌面打开现存健康服务是附着，不是恢复；失联后不自动重启或重发管理请求。
 
-整合澄清：WorkbenchView.entryOrigin 是监督进程的干净 origin，entryPath 相对此 origin；WorkbenchView.origin 是最终子 DSH origin，只用于消息校验。两者不应混用。新增必填 entryOrigin，所有生产 view DTO 与客户端必须携带并校验；不得把引导路径拼到子 DSH 端口。
-
-controller.acquire是唯一允许只读端请求的写运行权操作，仍必须已有本机浏览器认证；只在无人占有且无歧义时获取，不自动抢占，不清锁，不接管身份不明的所有者。另一端释放后必须由用户明确点击接管，不因轮询发现空闲而自动获得运行权。这是正常双端控制，不是恢复。
+客户端之间没有业务控制权交接。Home 锁由 Supervisor 持有。另一端只读查询。活着或身份不明的锁只诊断，不清锁、不接管。
 
 ## 任务状态
 
@@ -29,29 +31,31 @@ controller.acquire是唯一允许只读端请求的写运行权操作，仍必�
 queued → running → succeeded / failed / cancelled
 ```
 
-进程中断后重开：读取原任务，展示中断失败或结果无法确认，保留最后阶段和证据，不重放命令，不对账修补环境。没有记录完成不证明命令没有生效。损坏或未知格式的任务文件保留原字节，不清空成默认状态。
+进程中断后重开：读取原任务，展示中断失败或结果无法确认，保留最后阶段和证据。不重放，不对账修补。损坏或未知格式的任务文件保留原字节。
 
-不得要求 `recovery-required`、恢复冻结、`settleRecovery` 或 `recovery.resume`。不得要求先完成恢复结算再允许普通任务继续。
+没有 `recovery-required`、恢复冻结或 `recovery.resume` 产品入口。
 
 ## 已选行为
 
-- 保留所有已访问iframe，停止或重启其目标才销毁；不用新标签代替切换。失败的新启动保留上一视图，同时标明本次切换失败。
-- managed=false的外部实例只能查看，不能start/stop/restart/adopt。
-- 删除工作空间先预览。删除配置与保留/删除隔离数据分开；removeData默认false；web和manager保护。
-- 插件toggle沿用桌面现有“安装到空间/从空间移除”语义，UI应直说，不伪装为无需重启的热开关。
-- UI不提供修改管理环境的任意插件或主题；管理器自身包更新走受控、用户主动的维护，失败不自动回退。
-- 基础状态轮询1秒，任务活跃时500ms；页面隐藏降频，不停止任务。轮询不触发接管、重启或重放。
-- 默认使用已有home的源设置。当前二进制仍可能使用独立 snapshot 目录与旧读写格式；**目标政策**不把快照恢复列为 API 能力。API 映射去除home/bin路径。
+- 保留已访问 iframe；停止或重启其目标才销毁。失败的新启动保留上一视图，并标明本次切换失败。
+- `managed=false` 的外部实例只能查看。
+- 删除工作空间先预览。`removeData` 默认 false；web 和 manager 受保护。
+- 插件安装到空间 / 从空间移除需要时重启，不是热开关。
+- UI 不提供修改管理环境的任意插件或主题。管理器自身包更新是用户主动的维护。
+- 轮询不触发启动、停机或重放。
+- 快照 API 只有创建、查看、删除。`--snapshot-worker` 服务正常快照与剩余安装 IO；运行时安装已抽出。没有恢复链。
+- 通用 Node 模块在 `src/adapters/node`（从 `src/main` 迁出）。Electron 壳留在桌面进程。
 
-公开命令不得再把 `recovery.resume`、`snapshot.restore`、`config.restore` 作为有效产品入口。调用已移除的恢复 API 必须明确失败（R6）。
+构建清单覆盖 Supervisor、管理插件、view-bridge、llm-bridge、安装 worker。冷启动与 pack 使用同一组制品和 `--component-payload`。组件升级的一次性启动器交接是合同目标；实现与双端验收仍由 Supervisor/launcher 写者完成，本文不把它写成已通过。
 
-## 并行模块
+## 模块边界（现行）
 
-A1 owns home-controller.ts（管理身份/运行权）。后续监督runtime仅消费该模块，不能自行重写/清除owner。
-任务持久化模块与runtime分开，以类型合同交接。公共合同、依赖和最终构建整合由Codex单写。
+- Home 运行权：`src/adapters/node/home-controller.ts`。Supervisor 消费该锁，客户端不公开 acquire/release。
+- 任务：`src/adapters/node/workbench-jobs.ts`。调用者必须已在 Supervisor 串行边界内。
+- 维护端口：`src/adapters/node/workbench-maintenance-ports.ts`。维护层不另造 ProcessManager。停服务走 `service.shutdown`。
+- 产品读/写：`src/adapters/node/workbench-products.ts` 与配方 `src/core/application/space-recipe.ts`。
+- 桌面连接：只附着已有 Supervisor 或用户显式 start；`dispose` 不停止服务。
 
-A2 owns src/adapters/node/workbench-jobs.ts、tests/workbench-jobs.test.ts、tasks/workbench-jobs-worker.md（持久化任务/幂等/取消/中断失败记录）。调用者必须先持有A1运行权；A2不启动DSH或管理进程。中断标记是失败终态，不是恢复合同。
+公共合同、依赖和最终构建整合仍由主 Agent 单写。
 
-维护层组合接口固定为 src/adapters/node/workbench-maintenance-ports.ts，由监督runtime提供现有模块与安全生命周期回调。维护层不自行生成第二个ProcessManager或运行权；controller.release/shutdown由监督层处理。所有业务目标验证和停机通过ports，避免绕过运行权或误停外部实例。Web停止超时应失败并保留实例记录，不沿用桌面ProcessManager默认自动强杀而不提示。维护层不得在故障后回滚、恢复快照或续跑中断任务。
-
-> 历史记录：本文件早期把稳定入口写成恢复页，并把中断恢复标记写入 A2。那些要求已由 2026-09-15 let it crash 取代。当时的接口实现事实见源码与 [workbench-jobs-worker.md](workbench-jobs-worker.md)，待 R2/R6 删除。
+> 历史：早期合同曾把稳定入口写成恢复页，并把 `controller.acquire` / `controller.release` 写成双端交接。那些要求已由 2026-09-15 let it crash 与 2026-09-20 合同 v2 取代。当时实现痕迹见源码与 [workbench-jobs-worker.md](workbench-jobs-worker.md)，不要当成现行 API。

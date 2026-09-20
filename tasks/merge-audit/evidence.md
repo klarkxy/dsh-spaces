@@ -36,12 +36,12 @@
 
 ### 需要补的两处（不是 merge 旧文）
 
-1. **`docs/workbench.md`**  
-   监督 flag、view-bridge、误装卸载、双端、jobs 不重放、批量首失败、`--snapshot-worker` 作为运行时安装 IO，都在。  
-   缺口：用户主动 **创建/列出/删除备份** 从指南消失，只剩“写入快照文件不是恢复承诺”（约 L99）。运行时仍有 `runSnapshotCreate`（`src/adapters/node/workbench-maintenance.ts:1206-1219`）和 `snapshots.create` / `snapshots.delete`（`packages/plugin/src/workbench/i18n.ts:156-160`）。  
+1. **`docs/workbench.md`**
+   监督 flag、view-bridge、误装卸载、双端、jobs 不重放、批量首失败、`--snapshot-worker` 作为运行时安装 IO，都在。
+   缺口：用户主动 **创建/列出/删除备份** 从指南消失，只剩“写入快照文件不是恢复承诺”（约 L99）。运行时仍有 `runSnapshotCreate`（`src/adapters/node/workbench-maintenance.ts:1206-1219`）和 `snapshots.create` / `snapshots.delete`（`packages/plugin/src/workbench/i18n.ts:156-160`）。
    补丁：在现行 let it crash 下写备份管理，明确不是 `snapshot.restore`。不要从旧 `56ba211` 带回 config restore / doctor recover。顺带处理 L231 仍写 rc.1/rc.2 门禁、与 README latest 不一致。
 
-2. **`tasks/workbench-demo-narration.json`**  
+2. **`tasks/workbench-demo-narration.json`**
    04 段旧文有“插件、**备份**和运行时维护”，主线改成只报错、不救援，正确去掉“快照恢复影响整个 Home”。备份被一并删掉。只改 04 段加回创建/查看/删除备份，不恢复旧恢复句。
 
 ### 已覆盖的后续能力（主线新增，不要用旧树覆盖）

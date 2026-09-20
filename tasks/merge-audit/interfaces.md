@@ -10,10 +10,10 @@
 
 JSON 结论未改，仍记这两条为 missing。随后只对这两个脚本做了静态修补，没有重跑真实 UI/CLI 证据，也没有改 `interfaces.json`。
 
-1. **`scripts/verify-workbench-dual-control.mjs`**  
+1. **`scripts/verify-workbench-dual-control.mjs`**
    旧 `51911e4` 断言：Web 持有 Home 时桌面不得出现「接管/Take over/移交/Hand off」。导入点改成等待「只读 — Web 工作台正在控制此 Home」，主线 `d267a20` 删掉了 `ControllerStatus` 徽章。静态修补：删除该徽章 `waitFor`；按按钮 role 断言当前桌面没有接管/移交按钮；保留 IPC `ownerKind=web` / `writable===false`、manager 不进普通轨、写 IPC 拒绝等实际检查。截图只记录当前外观，不声称只读徽章或整段 UI 已通过。
 
-2. **`scripts/verify-workbench-rc2.mjs`**（只改默认 CLI 路径，不写回白名单）  
+2. **`scripts/verify-workbench-rc2.mjs`**（只改默认 CLI 路径，不写回白名单）
    默认 bin 改回仓库隔离树 `.sandbox/spaces-unknown-cli/.../lib/bin.js`；缺失则清楚失败，并要求 `DSH_TEST_RC2_BIN` 或 `DSH_TEST_BIN`。仍是官方 0.1.5-rc.2 历史证据脚本。顶部原「产品写门含 rc.1 和 rc.2」已标明失效，只作历史测试版本说明。未改产品 latest 渠道策略，也未迁移其他脚本里的个人路径。
 
 ## 计数
