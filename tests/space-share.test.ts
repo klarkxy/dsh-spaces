@@ -478,6 +478,21 @@ test("invalid config is rejected before creating a space or installing plugins",
   assert.equal(result.spaceId, undefined);
 });
 
+test("zip path traversal is rejected and original bytes are not imported", async () => {
+  let created = 0;
+  const archive = packZip([{ name: "../hub/settings.json", data: Buffer.from("stolen") }]);
+  const result = await importSpaceArchive(archive, {
+    listSpaceIds: () => [],
+    createSpace: async () => {
+      created += 1;
+    },
+    installPlugin: async () => undefined,
+  });
+  assert.equal(result.definition, "failed");
+  assert.equal(created, 0);
+  assert.match(result.errors.join("\n"), /unsafe path/i);
+});
+
 test("valid config is isolated in memory then written only after the space exists", async () => {
   const created: string[] = [];
   const patches: string[] = [];
