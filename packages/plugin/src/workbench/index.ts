@@ -17,6 +17,7 @@ export {
   isTrustedOrigin,
   isCleanLoopbackOrigin,
   isAuthorizedEntryPath,
+  isServiceEpoch,
   type ViewFrameState,
 } from "./view-session";
 export { validateWorkbenchIcon, KNOWN_GLYPHS } from "./icons";

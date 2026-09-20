@@ -18,6 +18,12 @@ export interface ViewMessageEvent {
   data: unknown;
 }
 
+const SERVICE_EPOCH_RE = /^[a-f0-9]{64}$/;
+
+export function isServiceEpoch(value: string): boolean {
+  return typeof value === "string" && SERVICE_EPOCH_RE.test(value);
+}
+
 /** Exact `http(s)://127.0.0.1[:port]` — no userinfo, path, query, or hash. */
 export function isCleanLoopbackOrigin(value: string): boolean {
   if (typeof value !== "string" || value.length === 0) return false;
@@ -52,8 +58,8 @@ export function isAuthorizedEntryPath(path: string): boolean {
 }
 
 /**
- * iframe src is supervisor entryOrigin + entryPath.
- * Child `origin` is only for postMessage source checking and must be a different clean origin.
+ * iframe src is supervisor entryOrigin + entryPath + exactly `?epoch=` of the view epoch.
+ * entryPath stays path-only; the epoch query is appended here, not taken from the path.
  */
 export function authorizedViewSrc(view: WorkbenchView): string {
   if (!view || typeof view.entryOrigin !== "string" || typeof view.origin !== "string") {
@@ -64,16 +70,18 @@ export function authorizedViewSrc(view: WorkbenchView): string {
   }
   if (view.entryOrigin === view.origin) throw new Error("unauthorized-view");
   if (!isAuthorizedEntryPath(view.entryPath)) throw new Error("unauthorized-view");
+  if (!isServiceEpoch(view.serviceEpoch)) throw new Error("unauthorized-view");
   const url = new URL(view.entryPath, view.entryOrigin);
   if (url.origin !== view.entryOrigin) throw new Error("unauthorized-view");
   if (url.search !== "" || url.hash !== "") throw new Error("unauthorized-view");
-  return `${view.entryOrigin}${url.pathname}`;
+  return `${view.entryOrigin}${url.pathname}?epoch=${encodeURIComponent(view.serviceEpoch)}`;
 }
 
 export function parseViewMessage(data: unknown): WorkbenchViewMessage | null {
   if (!data || typeof data !== "object") return null;
   const message = data as Record<string, unknown>;
   if (message.source !== "dsh-spaces-view") return null;
+  if (typeof message.serviceEpoch !== "string" || !message.serviceEpoch) return null;
   if (typeof message.spaceId !== "string" || !message.spaceId) return null;
   if (typeof message.generation !== "number" || !Number.isFinite(message.generation)) return null;
   if (typeof message.channel !== "string" || !message.channel) return null;
@@ -82,6 +90,7 @@ export function parseViewMessage(data: unknown): WorkbenchViewMessage | null {
   }
   const parsed: WorkbenchViewMessage = {
     source: "dsh-spaces-view",
+    serviceEpoch: message.serviceEpoch,
     spaceId: message.spaceId,
     generation: message.generation,
     channel: message.channel,
@@ -101,6 +110,7 @@ export function acceptViewMessage(
   if (event.origin !== frame.view.origin) return null;
   const message = parseViewMessage(event.data);
   if (!message) return null;
+  if (message.serviceEpoch !== frame.view.serviceEpoch) return null;
   if (message.spaceId !== frame.view.spaceId) return null;
   if (message.generation !== frame.view.generation) return null;
   if (message.channel !== frame.view.channel) return null;
@@ -196,7 +206,11 @@ export class ViewSession {
   applyView(spaceId: string, token: number, view: WorkbenchView): ViewFrameState | null {
     const frame = this.frames.get(spaceId);
     if (!frame || frame.selectToken !== token || frame.status === "failed") return null;
-    if (view.spaceId !== spaceId || view.generation !== frame.generation) {
+    if (
+      view.spaceId !== spaceId ||
+      view.generation !== frame.generation ||
+      !isServiceEpoch(view.serviceEpoch)
+    ) {
       frame.status = "failed";
       frame.error = "unauthorized-view";
       this.failPending(spaceId, token);
@@ -262,13 +276,26 @@ export class ViewSession {
     if (this.visibleSpaceId === spaceId) this.visibleSpaceId = null;
   }
 
-  /** Destroy frames whose generation no longer matches (stop/restart/restore). */
+  /** Destroy frames whose generation no longer matches (stop/restart). */
   syncGenerations(spaces: WorkbenchSpace[]): string[] {
     const live = new Map(spaces.map((item) => [item.id, item]));
     const destroyed: string[] = [];
     for (const [spaceId, frame] of [...this.frames.entries()]) {
       const space = live.get(spaceId);
       if (!space || space.generation !== frame.generation) {
+        this.frames.delete(spaceId);
+        if (this.visibleSpaceId === spaceId) this.visibleSpaceId = null;
+        destroyed.push(spaceId);
+      }
+    }
+    return destroyed;
+  }
+
+  /** Drop frames minted by a previous service epoch. Old-service messages cannot reuse them. */
+  syncServiceEpoch(serviceEpoch: string): string[] {
+    const destroyed: string[] = [];
+    for (const [spaceId, frame] of [...this.frames.entries()]) {
+      if (frame.view && frame.view.serviceEpoch !== serviceEpoch) {
         this.frames.delete(spaceId);
         if (this.visibleSpaceId === spaceId) this.visibleSpaceId = null;
         destroyed.push(spaceId);

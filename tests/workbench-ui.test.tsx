@@ -3,11 +3,13 @@ import { afterEach, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SpaceDetail } from "../src/shared/spaces-control.ts";
+import type { SpaceSharePreview } from "../src/shared/space-share.ts";
 import type {
   WorkbenchApi,
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchMutationContext,
   WorkbenchPackageRelease,
   WorkbenchPlan,
   WorkbenchPlanRequest,
@@ -18,10 +20,10 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../src/shared/workbench.ts";
+import type { WorkbenchProductRequest, WorkbenchProductResult } from "../src/shared/workbench-product.ts";
 import { WorkbenchApp } from "../packages/plugin/src/workbench/app.tsx";
 import { RecoverySurface } from "../packages/plugin/src/workbench/recovery.tsx";
 import { JobsList, WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
-import { SpaceSharePanel } from "../src/renderer/src/components/SpaceSharePanel.tsx";
 import { INTERRUPTED_JOB_MESSAGE } from "../src/adapters/node/workbench-jobs.ts";
 import {
   WorkbenchController,
@@ -105,16 +107,24 @@ function job(partial: Partial<WorkbenchJob> = {}): WorkbenchJob {
   };
 }
 
+const EPOCH = "aa".repeat(32);
+const REVISION = "bb".repeat(32);
+const REVISION_NEXT = "cc".repeat(32);
+const OBSERVATION = { serviceEpoch: EPOCH, expectedRevision: REVISION };
+
 function state(partial: Partial<WorkbenchState> = {}): WorkbenchState {
   return {
+    protocolVersion: 2,
+    serviceEpoch: EPOCH,
+    revision: REVISION,
+    availability: "ready",
     role: "manager",
     managerId: "hub",
-    owner: { kind: "web", since: "2026-09-12T00:00:00.000Z" },
+    owner: { kind: "supervisor", since: "2026-09-12T00:00:00.000Z" },
     writable: true,
     mode: "verified-full",
     dshVersion: "0.1.5-rc.1",
     maintenance: false,
-    recoveryRequired: false,
     reasons: [],
     spaces: [manager, alpha, beta],
     jobs: [],
@@ -127,6 +137,7 @@ const SUPERVISOR_ORIGIN = "http://127.0.0.1:3100";
 
 function viewOf(spaceId: string, generation = 1): WorkbenchView {
   return {
+    serviceEpoch: EPOCH,
     spaceId,
     generation,
     origin: CHILD_ORIGIN,
@@ -136,13 +147,139 @@ function viewOf(spaceId: string, generation = 1): WorkbenchView {
   };
 }
 
+function viewSrc(spaceId: string): string {
+  return `${SUPERVISOR_ORIGIN}/view/${spaceId}?epoch=${EPOCH}`;
+}
+
 function readyMessage(spaceId: string, generation = 1, state: "ready" | "failed" = "ready") {
   return {
     source: "dsh-spaces-view" as const,
+    serviceEpoch: EPOCH,
     spaceId,
     generation,
     channel: `ch-${spaceId}-${generation}`,
     state,
+  };
+}
+
+function sharePreview(): SpaceSharePreview {
+  return {
+    manifest: {
+      formatVersion: 1,
+      kind: "dsh-space",
+      exportedAt: "2026-09-12T00:00:00.000Z",
+      source: { dshVersion: "0.1.5-rc.1" },
+      space: { displayName: "Alpha" },
+    },
+    plugins: [{ packageName: "demo", resolvedVersion: "1.2.3", source: "npm" }],
+    hasConfig: false,
+    unknownSources: [],
+    llmMappingRequired: true,
+    llmRequirements: [],
+  };
+}
+
+function productResult(request: WorkbenchProductRequest): WorkbenchProductResult {
+  if (request.method === "settings") {
+    return {
+      method: "settings",
+      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+      clientDefaults: { locale: "zh", theme: "dark" },
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "catalog") {
+    return {
+      method: "catalog",
+      catalog: {
+        meta: {
+          schemaVersion: 1,
+          generatedAt: "2026-09-12T00:00:00.000Z",
+          count: 1,
+          contentHash: "ab".repeat(8),
+        },
+        entries: [
+          {
+            id: "catalog.demo",
+            repo: "demo",
+            owner: "demo",
+            url: "https://example.com/demo",
+            tier: "verified-npm",
+            packageName: "demo",
+            installMethod: "npm",
+            runsBuildScript: false,
+            description: "A plugin",
+            tags: [],
+            stars: 0,
+            hasClient: false,
+          },
+        ],
+        source: "cache",
+        url: "https://example.com/catalog.json",
+      },
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "library") {
+    return {
+      method: "library",
+      items: [
+        {
+          id: "lib-demo-1.2.3",
+          packageName: "demo",
+          title: "Demo",
+          version: "1.2.3",
+          source: "catalog",
+          downloadedAt: "2026-09-12T00:00:00.000Z",
+          installedIn: [],
+        },
+      ],
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "diagnostics") {
+    return {
+      method: "diagnostics",
+      diagnostics: {
+        spaceId: request.spaceId,
+        status: "running",
+        lastError: "plugin failed",
+        logs: [{ at: "2026-09-12T00:00:00.000Z", channel: "stderr", text: "redacted" }],
+        backups: [{ id: "bak-1", createdAt: "2026-09-12T00:00:00.000Z", size: 12, tooLarge: false }],
+      },
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "templates") {
+    return {
+      method: "templates",
+      templates: [
+        {
+          id: "dev",
+          name: "dev",
+          displayName: "Development",
+          plugins: [],
+          createdAt: "2026-09-12T00:00:00.000Z",
+        },
+      ],
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "share.export") {
+    return {
+      method: "share.export",
+      fileName: "alpha.dshspace",
+      archiveBase64: "YQ==",
+      preview: sharePreview(),
+      observation: OBSERVATION,
+    };
+  }
+  return {
+    method: "share.previewImport",
+    importId: "imp-1",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    preview: sharePreview(),
+    observation: OBSERVATION,
   };
 }
 
@@ -208,12 +345,14 @@ function planOf(request: WorkbenchPlanRequest, partial: Partial<WorkbenchPlan> =
     changes: ["change-1"],
     destructive: request.kind.includes("delete") || request.kind.includes("restore"),
     expiresAt: "2026-09-12T00:05:00.000Z",
+    serviceEpoch: EPOCH,
+    stateRevision: REVISION,
     ...partial,
   };
 }
 
 interface SpyApi extends WorkbenchApi {
-  calls: Array<{ method: string; arg: unknown }>;
+  calls: Array<{ method: string; arg: unknown; context?: unknown }>;
 }
 
 function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
@@ -233,8 +372,8 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
         diagnostics: [{ level: "warning", code: "NEED_CHECK", message: "check" }],
       } satisfies SpaceDetail;
     },
-    submit: async (command, requestId) => {
-      calls.push({ method: "submit", arg: { command, requestId } });
+    submit: async (command, requestId, context) => {
+      calls.push({ method: "submit", arg: { command, requestId, context } });
       return job({
         id: `job-${requestId}`,
         requestId,
@@ -256,9 +395,13 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
       calls.push({ method: "view", arg: spaceId });
       return viewOf(spaceId);
     },
-    preview: async (request) => {
-      calls.push({ method: "preview", arg: request });
+    preview: async (request, context) => {
+      calls.push({ method: "preview", arg: request, context });
       return planOf(request);
+    },
+    product: async (request) => {
+      calls.push({ method: "product", arg: request });
+      return productResult(request);
     },
     plugins: async (query) => {
       calls.push({ method: "plugins", arg: query });
@@ -326,6 +469,7 @@ function env(overrides: Partial<WorkbenchEnv> = {}): Partial<WorkbenchEnv> {
     onVisibilityChange: () => () => undefined,
     addMessageListener: () => () => undefined,
     openUrl: () => undefined,
+    downloadFile: () => undefined,
     ...overrides,
   };
 }
@@ -344,7 +488,7 @@ function ready(ctrl: WorkbenchController): string {
 
 test("authorized view src is origin+entryPath and rejects remote or token-like paths", () => {
   const view = viewOf("alpha");
-  assert.equal(authorizedViewSrc(view), `${SUPERVISOR_ORIGIN}/view/alpha`);
+  assert.equal(authorizedViewSrc(view), viewSrc("alpha"));
   assert.equal(isCleanLoopbackOrigin(SUPERVISOR_ORIGIN), true);
   assert.equal(isCleanLoopbackOrigin("http://127.0.0.1:3100/"), false);
   assert.equal(isCleanLoopbackOrigin("http://user@127.0.0.1:3100"), false);
@@ -358,11 +502,17 @@ test("authorized view src is origin+entryPath and rejects remote or token-like p
   assert.throws(() => authorizedViewSrc({ ...view, entryPath: "//evil.example/x" }));
   assert.throws(() => authorizedViewSrc({ ...view, entryPath: "view/alpha" }));
   assert.throws(() => authorizedViewSrc({ ...view, entryPath: "/view/alpha?token=secret" }));
+  assert.throws(() => authorizedViewSrc({ ...view, entryPath: "/view/alpha?epoch=" + EPOCH }));
   assert.throws(() => authorizedViewSrc({ ...view, entryPath: "/view\\alpha" }));
+  assert.throws(() => authorizedViewSrc({ ...view, serviceEpoch: "" }));
+  assert.throws(() => authorizedViewSrc({ ...view, serviceEpoch: "nope" }));
+  assert.throws(() => authorizedViewSrc({ ...view, serviceEpoch: "AA".repeat(32) }));
   assert.notEqual(authorizedViewSrc(view), `${CHILD_ORIGIN}/view/alpha`);
+  assert.equal(authorizedViewSrc(view).includes("?epoch="), true);
+  assert.equal(authorizedViewSrc(view).includes("&"), false);
 });
 
-test("view handshake requires origin, event.source, spaceId, generation and channel", () => {
+test("view handshake requires origin, event.source, epoch, spaceId, generation and channel", () => {
   const session = new ViewSession();
   const spaceRow = space({ id: "alpha" });
   const { token } = session.requestSpace(spaceRow);
@@ -374,6 +524,7 @@ test("view handshake requires origin, event.source, spaceId, generation and chan
     source: iframe,
     data: {
       source: "dsh-spaces-view",
+      serviceEpoch: EPOCH,
       spaceId: "alpha",
       generation: 1,
       channel: "ch-alpha-1",
@@ -399,6 +550,13 @@ test("view handshake requires origin, event.source, spaceId, generation and chan
     acceptViewMessage({ ...good, data: { ...good.data, source: "other" } }, frame, iframe),
     null,
   );
+  assert.equal(
+    acceptViewMessage({ ...good, data: { ...good.data, serviceEpoch: "nope" } }, frame, iframe),
+    null,
+  );
+  const withoutEpoch = { ...good.data } as { serviceEpoch?: string };
+  delete withoutEpoch.serviceEpoch;
+  assert.equal(acceptViewMessage({ ...good, data: withoutEpoch }, frame, iframe), null);
 });
 
 test("last selection wins; stale ready does not steal visibility", () => {
@@ -414,7 +572,7 @@ test("last selection wins; stale ready does not steal visibility", () => {
   session.onAcceptedMessage("beta", readyMessage("beta"));
   assert.equal(session.visibleSpaceId, "beta");
   assert.equal(session.committedSpaceId, "beta");
-  assert.equal(session.get("alpha")?.src, `${SUPERVISOR_ORIGIN}/view/alpha`);
+  assert.equal(session.get("alpha")?.src, viewSrc("alpha"));
 });
 
 test("failed pending view keeps the previous ready frame mounted", () => {
@@ -522,12 +680,11 @@ test("stale failed handshake does not hide the still-selected ready space", asyn
   assert.ok(html.includes('data-visible="true"'));
 });
 
-test("readonly rejects mutations but still allows queries and acquire", async () => {
+test("readonly rejects mutations but still allows queries", async () => {
   const api = fakeApi({
     state: async () =>
       state({
         writable: false,
-        recoveryRequired: true,
         reasons: ["owner held by desktop"],
         jobs: [job({ canCancel: false, status: "failed" })],
       }),
@@ -542,13 +699,9 @@ test("readonly rejects mutations but still allows queries and acquire", async ()
   assert.equal(api.calls.filter((item) => item.method === "submit").length, 0);
   await ctrl.searchPlugins("demo");
   assert.equal(api.calls.some((item) => item.method === "plugins"), true);
-  ctrl.acquire();
-  await flush();
-  const submits = api.calls.filter((item) => item.method === "submit").map((item) => (item.arg as { command: WorkbenchCommand }).command.kind);
-  assert.deepEqual(submits, ["controller.acquire"]);
   const html = ready(ctrl);
   assert.ok(html.includes("disabled"));
-  assert.ok(html.includes(t("zh", "app.readonly")) || html.includes(t("zh", "app.recovery")));
+  assert.ok(html.includes(t("zh", "app.readonly")));
   assert.ok(!html.includes('data-plan-id="plan-1"'));
 });
 
@@ -654,11 +807,12 @@ test("cancel is only offered when canCancel is true", async () => {
   assert.equal(api.calls.filter((item) => item.method === "cancel").length, 1);
 });
 
-test("localStorage only keeps selectedId and locale", async () => {
+test("localStorage only keeps selectedId, locale and theme", async () => {
   const storage = memoryStorage();
   const ctrl = controller(fakeApi(), { storage });
   await ctrl.poll();
   ctrl.setLocale("en");
+  ctrl.setTheme("light");
   ctrl.selectHome();
   const raw = storage.getItem(WORKBENCH_STORAGE_KEY);
   assert.equal(persistLooksSafe(raw), true);
@@ -666,13 +820,16 @@ test("localStorage only keeps selectedId and locale", async () => {
   assert.ok(raw && !raw.includes("token"));
   assert.ok(raw && !raw.includes("entryPath"));
   assert.ok(raw && !raw.includes("channel"));
+  assert.ok(raw && !raw.includes("YQ=="));
   const parsed = readPersist(storage);
   assert.equal(parsed.locale, "en");
+  assert.equal(parsed.theme, "light");
   assert.equal(parsed.selectedId, "__home__");
-  writePersist(storage, { selectedId: "alpha", locale: "zh" });
+  writePersist(storage, { selectedId: "alpha", locale: "zh", theme: "dark" });
   assert.deepEqual(JSON.parse(storage.getItem(WORKBENCH_STORAGE_KEY) ?? "{}"), {
     selectedId: "alpha",
     locale: "zh",
+    theme: "dark",
   });
 });
 
@@ -738,17 +895,16 @@ test("workspace iframe src is only the authorized view and pending stays hidden"
   ctrl.selectSpace("alpha");
   await flush();
   const html = ready(ctrl);
-  assert.ok(html.includes(`src="${SUPERVISOR_ORIGIN}/view/alpha"`));
+  assert.ok(html.includes(`src="${viewSrc("alpha")}"`));
   assert.ok(!html.includes("token="));
   assert.ok(html.includes('hidden=""') || html.includes("hidden"));
 });
 
-test("RecoverySurface shows reasons, jobs and acquire without a manager iframe", async () => {
+test("RecoverySurface shows reasons and jobs without acquire or a manager iframe", async () => {
   const api = fakeApi({
     state: async () =>
       state({
         writable: false,
-        recoveryRequired: true,
         reasons: ["desktop holds write access"],
         jobs: [job({ status: "failed", canCancel: false, message: "needs resume" })],
       }),
@@ -759,7 +915,8 @@ test("RecoverySurface shows reasons, jobs and acquire without a manager iframe",
     React.createElement(RecoverySurface, { api, env: env({ storage: memoryStorage() }) }),
   );
   assert.ok(html.includes(t("zh", "recovery.title")));
-  assert.ok(html.includes(t("zh", "recovery.acquire")));
+  assert.ok(!html.includes("Take write control"));
+  assert.ok(!html.includes("接管写控制权"));
   assert.ok(html.includes(t("zh", "app.copyLogs")));
   assert.ok(html.includes(t("zh", "app.errorDetails")));
   assert.ok(!html.includes("<iframe"));
@@ -769,7 +926,7 @@ test("RecoverySurface shows reasons, jobs and acquire without a manager iframe",
       controller: ctrl,
     }),
   );
-  assert.ok(readyHtml.includes("desktop holds write access") || readyHtml.includes(t("zh", "app.recovery")));
+  assert.ok(readyHtml.includes("desktop holds write access"));
 });
 
 test("create validates name and does not submit reserved ids", async () => {
@@ -816,7 +973,7 @@ test("pending click keeps committed home highlight and persist until ready", asy
   assert.equal(readPersist(storage).selectedId, "__home__");
   const html = ready(ctrl);
   assert.ok(html.includes('aria-current="true"'));
-  assert.ok(html.includes(`src="${SUPERVISOR_ORIGIN}/view/alpha"`));
+  assert.ok(html.includes(`src="${viewSrc("alpha")}"`));
   assert.ok(html.includes("dsh-wb-frames"));
 });
 
@@ -930,6 +1087,8 @@ test("openIndependent re-requests view and does not reuse a consumed src", async
   assert.equal(opened.length, 1);
   assert.notEqual(opened[0], firstSrc);
   assert.ok(opened[0]?.startsWith(`${SUPERVISOR_ORIGIN}/view/alpha/`));
+  assert.ok(opened[0]?.includes(`?epoch=${EPOCH}`));
+  assert.ok(!opened[0]?.includes("&"));
 });
 
 test("going home keeps visited iframes mounted in markup", async () => {
@@ -1075,7 +1234,6 @@ test("readonly and recovery block workbench upgrade writes", async () => {
     state: async () =>
       state({
         writable: false,
-        recoveryRequired: true,
         reasons: ["owner held by desktop"],
       }),
     workbenchPackage: async () => packageRelease(),
@@ -1203,32 +1361,367 @@ test("failed interrupted jobs render the persisted unconfirmed not-replayed mess
   assert.match(html, /install/);
 });
 
-test("settings share panel lists every template and offers config export", () => {
+test("templates tab lists templates and export without storing archives", async () => {
+  const downloads: Array<{ fileName: string; archiveBase64: string }> = [];
+  const api = fakeApi();
+  const ctrl = controller(api, {
+    downloadFile: (fileName, archiveBase64) => downloads.push({ fileName, archiveBase64 }),
+  });
+  await ctrl.poll();
+  ctrl.setHomeTab("templates");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes("Development"));
+  assert.ok(html.includes(t("zh", "share.includeConfig")));
+  assert.ok(html.includes(t("zh", "share.export")));
+  ctrl.exportShare();
+  await flush();
+  assert.deepEqual(downloads, [{ fileName: "alpha.dshspace", archiveBase64: "YQ==" }]);
+  const raw = api.calls.some((item) => JSON.stringify(item).includes("YQ==") && item.method === "submit");
+  assert.equal(raw, false);
+});
+
+test("dirty settings draft keeps its observation and does not take a later state revision", async () => {
+  let current = state();
+  const api = fakeApi({
+    state: async () => current,
+    submit: async (command, requestId, context) => {
+      api.calls.push({ method: "submit", arg: { command, requestId, context } });
+      throw Object.assign(new Error("revision conflict"), { code: "workbench/conflict" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  await flush();
+  assert.equal(ctrl.getSnapshot().settingsDraft?.observation.expectedRevision, REVISION);
+  ctrl.setHomeSettings({ portStart: 4100 });
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+  current = state({ revision: REVISION_NEXT });
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4100);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.observation.expectedRevision, REVISION);
+  ctrl.saveHomeSettings();
+  await flush();
+  const submitted = api.calls.filter((item) => item.method === "submit").at(-1);
+  const arg = submitted?.arg as { context: WorkbenchMutationContext; command: WorkbenchCommand };
+  assert.equal(arg.context.expectedRevision, REVISION);
+  assert.equal(arg.context.serviceEpoch, EPOCH);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4100);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+  assert.equal(ctrl.getSnapshot().commandError, t("zh", "app.conflict"));
+});
+
+test("old-service view frames are rejected without serviceEpoch", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  await becomeReady(ctrl, "alpha", { id: "a" });
+  const win = { id: "a" };
+  ctrl.handleMessage({
+    origin: CHILD_ORIGIN,
+    source: win,
+    data: {
+      source: "dsh-spaces-view",
+      spaceId: "alpha",
+      generation: 1,
+      channel: "ch-alpha-1",
+      state: "failed",
+      message: "stale",
+    },
+  });
+  assert.equal(ctrl.getSnapshot().visibleSpaceId, "alpha");
+  assert.equal(ctrl.getSnapshot().frames.find((frame) => frame.spaceId === "alpha")?.status, "ready");
+});
+
+test("import preview then confirm submits once and does not resend after epoch change", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.previewImportArchive("YQ==", "alpha.dshspace");
+  await flush();
+  assert.equal(ctrl.getSnapshot().overlay?.type, "import");
+  assert.equal(ctrl.getSnapshot().importPreview?.importId, "imp-1");
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "share.confirmImport")));
+  assert.ok(html.includes(t("zh", "share.llmMapping")));
+  ctrl.setImportName("notes");
+  ctrl.confirmImport();
+  await flush();
+  const imports = api.calls
+    .filter((item) => item.method === "submit")
+    .map((item) => (item.arg as { command: WorkbenchCommand }).command)
+    .filter((command) => command.kind === "space.import");
+  assert.equal(imports.length, 1);
+  assert.deepEqual(imports[0], { kind: "space.import", importId: "imp-1", name: "notes", displayName: undefined });
+  ctrl.confirmImport();
+  await flush();
+  assert.equal(
+    api.calls.filter((item) => item.method === "submit" && (item.arg as { command: WorkbenchCommand }).command.kind === "space.import").length,
+    1,
+  );
+
+  const stale = fakeApi({
+    state: async () => state({ serviceEpoch: "dd".repeat(32) }),
+  });
+  const staleCtrl = controller(stale);
+  await staleCtrl.poll();
+  staleCtrl.previewImportArchive("YQ==", "alpha.dshspace");
+  await flush();
+  staleCtrl.setImportName("notes");
+  staleCtrl.confirmImport();
+  await flush();
+  assert.equal(stale.calls.filter((item) => item.method === "submit").length, 0);
+  assert.equal(staleCtrl.getSnapshot().commandError, t("zh", "share.epochChanged"));
+});
+
+test("failed import jobs keep partial product results", () => {
   const html = renderToStaticMarkup(
-    React.createElement(SpaceSharePanel, {
-      locale: "en",
-      templates: [
-        { id: "dev", name: "Dev", displayName: "Development" },
-        { id: "writing", name: "Writing", displayName: "Writing" },
+    React.createElement(JobsList, {
+      locale: "zh",
+      jobs: [
+        job({
+          kind: "space.import",
+          status: "failed",
+          canCancel: false,
+          result: {
+            spaceId: "notes",
+            product: {
+              kind: "space.import",
+              import: {
+                definition: "imported",
+                plugins: "failed",
+                start: "not-run",
+                spaceId: "notes",
+                errors: ["plugin demo failed"],
+                pendingManual: [],
+                llm: { mappingRequired: true, requirements: [], mapped: false },
+              },
+            },
+          },
+        }),
       ],
-      templateId: "writing",
-      spaces: [{ id: "coding", name: "coding", displayName: "Coding" }],
-      spaceId: "coding",
-      includeConfig: true,
-      notice: "",
-      onTemplateId() {},
-      onSpaceId() {},
-      onIncludeConfig() {},
-      onImport() {},
-      onCreateFromTemplate() {},
-      onExport() {},
+      onCancel() {},
     }),
   );
-  assert.match(html, /Development/);
-  assert.match(html, /Writing/);
-  assert.match(html, /value="writing" selected/);
-  assert.match(html, /Select template/);
-  assert.match(html, /Include config \(preview before save\)/);
-  assert.match(html, /type="checkbox" checked/);
-  assert.match(html, /Export and preview/);
+  assert.ok(html.includes(t("zh", "templates.result.definition")));
+  assert.ok(html.includes("imported"));
+  assert.ok(html.includes("failed"));
+  assert.ok(html.includes("not-run"));
+  assert.ok(html.includes("plugin demo failed"));
+});
+
+test("saving Home settings does not reset client locale or theme", async () => {
+  const storage = memoryStorage();
+  const api = fakeApi();
+  const ctrl = controller(api, { storage });
+  await ctrl.poll();
+  ctrl.setLocale("en");
+  ctrl.setTheme("light");
+  ctrl.openSettings();
+  await flush();
+  assert.equal(ctrl.getSnapshot().locale, "en");
+  assert.equal(ctrl.getSnapshot().theme, "light");
+  ctrl.setHomeSettings({ portStart: 4100 });
+  ctrl.saveHomeSettings();
+  await flush();
+  assert.equal(ctrl.getSnapshot().locale, "en");
+  assert.equal(ctrl.getSnapshot().theme, "light");
+  assert.equal(readPersist(storage).locale, "en");
+  assert.equal(readPersist(storage).theme, "light");
+  const command = (api.calls.find((item) => item.method === "submit")?.arg as { command: WorkbenchCommand }).command;
+  assert.equal(command.kind, "settings.update");
+  if (command.kind === "settings.update") {
+    assert.equal("locale" in command.settings, false);
+    assert.equal("theme" in command.settings, false);
+    assert.equal(command.settings.portStart, 4100);
+  }
+});
+
+test("service shutdown is a preview, not acquire", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "settings.shutdown")));
+  assert.ok(html.includes(t("zh", "settings.exit")));
+  assert.ok(!html.includes("controller.acquire"));
+  assert.ok(!html.includes("controller.release"));
+  ctrl.preview({ kind: "service.shutdown" });
+  await flush();
+  assert.deepEqual(api.calls.find((item) => item.method === "preview")?.arg, { kind: "service.shutdown" });
+  assert.equal((api.calls.find((item) => item.method === "preview")?.context as WorkbenchMutationContext).serviceEpoch, EPOCH);
+  ctrl.confirmPlan();
+  await flush();
+  const executed = api.calls.find((item) => item.method === "submit");
+  assert.deepEqual((executed?.arg as { command: WorkbenchCommand }).command, {
+    kind: "plan.execute",
+    planId: "plan-1",
+  });
+});
+
+test("applyView rejects missing or non-hex serviceEpoch before minting src", () => {
+  const session = new ViewSession();
+  const first = session.requestSpace(space({ id: "alpha" }));
+  session.applyView("alpha", first.token, { ...viewOf("alpha"), serviceEpoch: "nope" });
+  assert.equal(session.get("alpha")?.status, "failed");
+  assert.equal(session.get("alpha")?.error, "unauthorized-view");
+  assert.equal(session.get("alpha")?.src, null);
+  const second = session.retry(space({ id: "alpha" }));
+  session.applyView("alpha", second.token, { ...viewOf("alpha"), serviceEpoch: "" });
+  assert.equal(session.get("alpha")?.status, "failed");
+  const third = session.retry(space({ id: "alpha" }));
+  session.applyView("alpha", third.token, viewOf("alpha"));
+  assert.equal(session.get("alpha")?.src, viewSrc("alpha"));
+});
+
+test("repeat submit of the same pending intent reuses requestId and does not resubmit on poll", async () => {
+  const pending = deferred<WorkbenchJob>();
+  let submits = 0;
+  const api = fakeApi({
+    submit: async (command, requestId, context) => {
+      submits += 1;
+      api.calls.push({ method: "submit", arg: { command, requestId, context } });
+      if (submits === 1) return pending.promise;
+      return job({ id: `job-${requestId}`, requestId, kind: command.kind, status: "succeeded", canCancel: false });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.createSpace({ name: "ok-space" });
+  ctrl.createSpace({ name: "ok-space" });
+  await flush();
+  assert.equal(submits, 1);
+  pending.resolve(job({ id: "job-uuid-1", requestId: "uuid-1", kind: "space.create", status: "running", canCancel: true }));
+  await flush();
+  const before = submits;
+  await ctrl.poll();
+  assert.equal(submits, before);
+});
+
+test("settings.update success then later dirty edit is not overwritten by polling the same terminal job", async () => {
+  const saved = { portStart: 3100, portEnd: 3199, packageSource: "official" as const, catalogUrl: "" };
+  let settingsReads = 0;
+  let jobs: WorkbenchJob[] = [];
+  const api = fakeApi({
+    product: async (request) => {
+      if (request.method === "settings") {
+        settingsReads += 1;
+        return {
+          method: "settings",
+          settings: { ...saved },
+          clientDefaults: { locale: "zh", theme: "dark" },
+          observation: OBSERVATION,
+        };
+      }
+      return productResult(request);
+    },
+    submit: async (command, requestId, context) => {
+      api.calls.push({ method: "submit", arg: { command, requestId, context } });
+      if (command.kind === "settings.update") {
+        saved.portStart = command.settings.portStart;
+        saved.portEnd = command.settings.portEnd;
+        saved.packageSource = command.settings.packageSource;
+        saved.catalogUrl = command.settings.catalogUrl;
+        const next = job({
+          id: "job-settings-1",
+          requestId,
+          kind: "settings.update",
+          status: "succeeded",
+          canCancel: false,
+          result: { product: { kind: "settings.update", settings: { ...command.settings } } },
+        });
+        jobs = [next];
+        return next;
+      }
+      return job({ id: `job-${requestId}`, requestId, kind: command.kind, status: "succeeded", canCancel: false });
+    },
+    state: async () => state({ jobs }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  await flush();
+  const readsAfterOpen = settingsReads;
+  ctrl.setHomeSettings({ portStart: 4100 });
+  ctrl.saveHomeSettings();
+  await flush();
+  assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4100);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false);
+  ctrl.setHomeSettings({ portStart: 4200 });
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4200);
+  const readsBeforePoll = settingsReads;
+  await ctrl.poll();
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4200);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+  assert.equal(settingsReads, readsBeforePoll);
+  assert.ok(settingsReads >= readsAfterOpen);
+});
+
+test("edits made while settings.update is pending are kept when the old save succeeds", async () => {
+  const pending = deferred<WorkbenchJob>();
+  const api = fakeApi({
+    submit: async (command, requestId, context) => {
+      api.calls.push({ method: "submit", arg: { command, requestId, context } });
+      if (command.kind === "settings.update") return pending.promise;
+      return job({ id: `job-${requestId}`, requestId, kind: command.kind, status: "succeeded", canCancel: false });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  await flush();
+  ctrl.setHomeSettings({ portStart: 4100 });
+  ctrl.saveHomeSettings();
+  ctrl.setHomeSettings({ portStart: 4300 });
+  pending.resolve(
+    job({
+      id: "job-settings-pending",
+      requestId: "uuid-1",
+      kind: "settings.update",
+      status: "succeeded",
+      canCancel: false,
+      result: {
+        product: {
+          kind: "settings.update",
+          settings: { portStart: 4100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+        },
+      },
+    }),
+  );
+  await flush();
+  assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4300);
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+});
+
+test("stop() drops in-flight state and product responses", async () => {
+  const stateGate = deferred<WorkbenchState>();
+  const settingsGate = deferred<WorkbenchProductResult>();
+  const api = fakeApi({
+    state: async () => stateGate.promise,
+    product: async (request) => {
+      if (request.method === "settings") return settingsGate.promise;
+      return productResult(request);
+    },
+  });
+  const ctrl = controller(api);
+  const pollDone = ctrl.poll();
+  ctrl.openSettings();
+  ctrl.stop();
+  stateGate.resolve(state({ reasons: ["late-state"] }));
+  settingsGate.resolve({
+    method: "settings",
+    settings: { portStart: 4100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+    clientDefaults: { locale: "zh", theme: "dark" },
+    observation: OBSERVATION,
+  });
+  await pollDone;
+  await flush();
+  assert.equal(ctrl.getSnapshot().state, null);
+  assert.equal(ctrl.getSnapshot().boot, "loading");
+  assert.equal(ctrl.getSnapshot().settingsDraft, null);
 });

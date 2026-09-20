@@ -180,7 +180,7 @@ function App(): React.ReactElement {
       locale="en"
       writable
       client={client}
-      spaces={[{ spaceId: "alpha", displayName: "Alpha", status: "running", generation: 1 }]}
+      spaces={[{ spaceId: "alpha", displayName: "Alpha", status: "running", generation: 1, serviceEpoch: "aa".repeat(32) }]}
       uuid={() => "op-browser"}
       initialDescribe={describeResult()}
     />
