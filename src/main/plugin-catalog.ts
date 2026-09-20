@@ -236,9 +236,25 @@ function readCachedCatalog(dshHome: string): { meta: PluginCatalogMeta; entries:
   if (!existsSync(path)) return undefined;
   try {
     return parseAnyCatalog(JSON.parse(readFileSync(path, "utf8")));
-  } catch {
-    return undefined;
+  } catch (error) {
+    throw new Error(
+      `Plugin catalog cache could not be read. Original bytes were left unchanged: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
+}
+
+/** Local catalog only. Missing cache is seed; a damaged cache file is a real error. */
+export function readLocalPluginCatalog(
+  dshHome: string,
+  options: { url?: string } = {},
+): PluginCatalogSnapshot {
+  assertNotRealHome(dshHome);
+  const url = resolveCatalogUrl(options.url);
+  const cached = readCachedCatalog(dshHome);
+  if (cached) return { ...cached, source: "cache", url };
+  return { ...seedCatalog(), source: "seed", url };
 }
 
 function rememberEntries(dshHome: string, extras: PluginCatalogEntry[]): void {
@@ -337,8 +353,10 @@ export async function loadPluginCatalog(
       const parsed = parseAnyCatalog(await response.json());
       writeCache(dshHome, parsed, response.headers.get("etag"));
       return { ...parsed, source: "remote", url };
-    } catch {
-      // fall through to cache / seed
+    } catch (error) {
+      if (options.refresh) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
     }
   }
 

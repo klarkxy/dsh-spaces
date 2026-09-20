@@ -4,6 +4,7 @@ import type { LlmShareManifest, LlmShareRequirement } from "../core/domain/llm-s
 
 export const SPACE_SHARE_KIND = "dsh-space" as const;
 export const SPACE_SHARE_FORMAT_VERSION = 1 as const;
+export const SPACE_RECIPE_SCHEMA_VERSION = 1 as const;
 
 export type SpaceSharePluginSource = "npm" | "git" | "manual" | "unknown";
 
@@ -55,12 +56,24 @@ export interface SpaceExportOptions {
   llm?: LlmShareManifest;
 }
 
+/** Versioned local recipe. Shares are the portable zip wrapping the same fields. */
+export interface SpaceRecipe {
+  schemaVersion: typeof SPACE_RECIPE_SCHEMA_VERSION;
+  displayName: string;
+  icon?: string;
+  plugins: SpaceSharePlugin[];
+  patch?: string;
+  llm?: LlmShareManifest;
+  source?: { dshVersion?: string | null };
+}
+
 export interface SpaceTemplate {
   id: string;
   name: string;
   displayName: string;
   plugins: SpaceSharePlugin[];
   createdAt: string;
+  recipe?: SpaceRecipe;
 }
 
 export interface CreateFromTemplateResult {

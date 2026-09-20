@@ -1,19 +1,33 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 import { listProfilePlugins } from "./plugin-ops";
 import { readPluginLibrary } from "./plugin-library";
-import { canonicalNpmInstallSpec, pluginToShare } from "./space-share";
-import type { CreateFromTemplateResult, SpaceSharePlugin, SpaceTemplate } from "../shared/space-share";
-import { runBatch } from "../shared/batch";
+import { pluginToShare } from "./space-share";
+import {
+  SPACE_RECIPE_SCHEMA_VERSION,
+  type CreateFromTemplateResult,
+  type SpaceRecipe,
+  type SpaceSharePlugin,
+  type SpaceTemplate,
+} from "../shared/space-share";
+import {
+  applySpaceRecipe,
+  assertSharePluginsSecretFree,
+  parseSpaceRecipe,
+  recipeFromTemplate,
+} from "../core/application/space-recipe";
+import type { LlmShareManifest } from "../core/domain/llm-share";
 
 export const SPACE_TEMPLATES_FILE = "space-templates.json";
 
 export interface SpaceTemplatePorts {
-  createSpace(input: { name: string; displayName: string }): Promise<void>;
+  createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
+  writePatch?(spaceId: string, patch: string): void;
+  writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
 }
 
 function templatesPath(dshHome: string): string {
@@ -52,29 +66,46 @@ export function listSpaceTemplates(dshHome: string): SpaceTemplate[] {
   } catch {
     throw new Error("Space templates JSON is invalid. Original bytes were left unchanged.");
   }
-  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { templates?: unknown }).templates)) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Space templates file is not a valid template list. Original bytes were left unchanged.");
   }
-  const templates = (parsed as { templates: unknown[] }).templates;
-  if (!templates.every(isTemplate)) {
-    throw new Error("Space templates file contains an invalid template. Original bytes were left unchanged.");
+  const row = parsed as { schemaVersion?: unknown; templates?: unknown };
+  if (row.schemaVersion !== undefined && row.schemaVersion !== SPACE_RECIPE_SCHEMA_VERSION) {
+    throw new Error(
+      `Unsupported space templates schema ${String(row.schemaVersion)}. Original bytes were left unchanged.`,
+    );
+  }
+  if (!Array.isArray(row.templates)) {
+    throw new Error("Space templates file is not a valid template list. Original bytes were left unchanged.");
+  }
+  const templates: SpaceTemplate[] = [];
+  for (const item of row.templates) {
+    const template = parseStoredTemplate(item);
+    if (!template) {
+      throw new Error("Space templates file contains an invalid template. Original bytes were left unchanged.");
+    }
+    templates.push(template);
   }
   return templates;
 }
 
-function isTemplate(value: unknown): value is SpaceTemplate {
-  if (!value || typeof value !== "object") return false;
+function parseStoredTemplate(value: unknown): SpaceTemplate | undefined {
+  if (!value || typeof value !== "object") return undefined;
   const row = value as SpaceTemplate;
-  return (
-    typeof row.id === "string" &&
-    Boolean(row.id) &&
-    typeof row.name === "string" &&
-    Boolean(row.name) &&
-    typeof row.displayName === "string" &&
-    Boolean(row.displayName) &&
-    typeof row.createdAt === "string" &&
-    Array.isArray(row.plugins) &&
-    row.plugins.every((plugin) => {
+  if (
+    typeof row.id !== "string" ||
+    !row.id ||
+    typeof row.name !== "string" ||
+    !row.name ||
+    typeof row.displayName !== "string" ||
+    !row.displayName ||
+    typeof row.createdAt !== "string" ||
+    !Array.isArray(row.plugins)
+  ) {
+    return undefined;
+  }
+  if (
+    !row.plugins.every((plugin) => {
       if (!plugin || typeof plugin !== "object") return false;
       return (
         typeof plugin.packageName === "string" &&
@@ -85,12 +116,27 @@ function isTemplate(value: unknown): value is SpaceTemplate {
         (plugin.installSpec === undefined || typeof plugin.installSpec === "string")
       );
     })
-  );
+  ) {
+    return undefined;
+  }
+  assertSharePluginsSecretFree(row.plugins);
+  if (row.recipe !== undefined) parseSpaceRecipe(row.recipe);
+  return {
+    id: row.id,
+    name: row.name,
+    displayName: row.displayName,
+    plugins: row.plugins,
+    createdAt: row.createdAt,
+    recipe: row.recipe,
+  };
 }
 
 export function writeSpaceTemplates(dshHome: string, templates: SpaceTemplate[]): SpaceTemplate[] {
   assertNotRealHome(dshHome);
-  atomicWrite(templatesPath(dshHome), `${JSON.stringify({ templates }, null, 2)}\n`);
+  atomicWrite(
+    templatesPath(dshHome),
+    `${JSON.stringify({ schemaVersion: SPACE_RECIPE_SCHEMA_VERSION, templates }, null, 2)}\n`,
+  );
   return templates;
 }
 
@@ -98,18 +144,35 @@ export function saveSpaceTemplate(
   dshHome: string,
   spaceId: string,
   name: string,
-  options: { displayName?: string; now?: Date } = {},
+  options: {
+    displayName?: string;
+    now?: Date;
+    includeConfig?: boolean;
+    llm?: LlmShareManifest;
+  } = {},
 ): SpaceTemplate {
+  if (spaceId === "web") throw new Error("The web space cannot be saved as a template.");
   const library = readPluginLibrary(dshHome);
   const plugins = listProfilePlugins(dshHome, spaceId)
     .map((plugin) => pluginToShare(plugin, { library, dshHome, spaceId }))
     .filter((row): row is SpaceSharePlugin => row !== null);
+  const patchPath = join(dshHome, "profiles", spaceId, "cordis.patch.yml");
+  const patch =
+    options.includeConfig && existsSync(patchPath) ? readFileSync(patchPath, "utf8") : undefined;
+  const recipe: SpaceRecipe = parseSpaceRecipe({
+    schemaVersion: SPACE_RECIPE_SCHEMA_VERSION,
+    displayName: options.displayName || name,
+    plugins,
+    patch,
+    llm: options.llm,
+  });
   const template: SpaceTemplate = {
     id: spaceTemplateId(name),
     name,
     displayName: options.displayName || name,
     plugins,
     createdAt: (options.now ?? new Date()).toISOString(),
+    recipe,
   };
   const current = listSpaceTemplates(dshHome);
   const clash = current.find((row) => row.id === template.id && row.name !== name);
@@ -127,20 +190,21 @@ export async function createSpaceFromTemplate(
   spaceId: string,
   ports: SpaceTemplatePorts,
 ): Promise<CreateFromTemplateResult> {
-  await ports.createSpace({ name: spaceId, displayName: template.displayName });
-  const errors: string[] = [];
-  const auto: { plugin: SpaceSharePlugin; spec: string }[] = [];
-  for (const plugin of template.plugins) {
-    const spec = canonicalNpmInstallSpec(plugin);
-    if (spec) auto.push({ plugin, spec });
-  }
-  const batch = await runBatch(auto, async (row) => {
-    await ports.installPlugin(spaceId, row.spec);
+  const imported = await applySpaceRecipe(recipeFromTemplate(template), ports, {
+    name: spaceId,
+    displayName: template.displayName,
   });
-  if (batch.failed) {
-    errors.push(batch.failed.error);
-    return { spaceId, plugins: "failed", errors };
+  if (imported.definition !== "imported" || !imported.spaceId) {
+    throw new Error(imported.errors[0] || "The template could not create a space.");
   }
-  const pending = template.plugins.some((row) => canonicalNpmInstallSpec(row) === null);
-  return { spaceId, plugins: pending ? "pending-manual" : "completed", errors };
+  if (imported.plugins === "failed") {
+    return { spaceId: imported.spaceId, plugins: "failed", errors: imported.errors };
+  }
+  if (imported.plugins === "pending-manual") {
+    return { spaceId: imported.spaceId, plugins: "pending-manual", errors: imported.errors };
+  }
+  if (imported.plugins === "not-run") {
+    return { spaceId: imported.spaceId, plugins: "failed", errors: imported.errors };
+  }
+  return { spaceId: imported.spaceId, plugins: "completed", errors: imported.errors };
 }

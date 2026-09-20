@@ -161,6 +161,50 @@ test("template creation does not execute a mismatched installSpec", async () => 
   assert.equal(result.plugins, "pending-manual");
 });
 
+test("unknown templates schema keeps original bytes", () => {
+  const dir = home();
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", SPACE_TEMPLATES_FILE);
+  const original = JSON.stringify({ schemaVersion: 2, templates: [] });
+  writeFileSync(path, original);
+  assert.throws(() => listSpaceTemplates(dir), /Unsupported space templates schema 2/);
+  assert.equal(readFileSync(path, "utf8"), original);
+});
+
+test("saving a template with secret config is rejected and original bytes stay", () => {
+  const dir = home();
+  writeProfile(dir, "coding");
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", SPACE_TEMPLATES_FILE);
+  const original = `${JSON.stringify({ templates: [] })}\n`;
+  writeFileSync(path, original);
+  writeFileSync(join(dir, "profiles", "coding", "cordis.patch.yml"), "apiKey: fake-test-secret-123\n");
+  assert.throws(() => saveSpaceTemplate(dir, "coding", "example", { includeConfig: true }), /secret|credential|apiKey/i);
+  assert.equal(readFileSync(path, "utf8"), original);
+  assert.equal(readFileSync(path, "utf8").includes("fake-test-secret-123"), false);
+});
+
+test("non-secret template config is kept and written back on create", async () => {
+  const dir = home();
+  writeProfile(dir, "coding");
+  writeFileSync(join(dir, "profiles", "coding", "cordis.patch.yml"), "- id: example\n  config:\n    foo: 1\n");
+  const template = saveSpaceTemplate(dir, "coding", "Dev", { displayName: "Dev box", includeConfig: true });
+  assert.match(template.recipe?.patch ?? "", /foo: 1/);
+  assert.equal((template.recipe?.patch ?? "").includes("apiKey"), false);
+  const patches: string[] = [];
+  const result = await createSpaceFromTemplate(template, "lab", {
+    createSpace: async () => undefined,
+    installPlugin: async () => undefined,
+    writePatch: (_spaceId, patch) => {
+      patches.push(patch);
+    },
+  });
+  assert.equal(result.plugins, "completed");
+  assert.equal(patches.length, 1);
+  assert.match(patches[0] ?? "", /hub\/lab\/sessions/);
+  assert.match(patches[0] ?? "", /foo: 1/);
+});
+
 test("template install failure is reported and does not rewrite other spaces", async () => {
   const result = await createSpaceFromTemplate(
     {

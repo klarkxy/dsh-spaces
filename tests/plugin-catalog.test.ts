@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
+  CATALOG_CACHE_FILE,
   isCompatibleCatalog,
   isInstallableEntry,
   isSafeSpec,
@@ -11,6 +12,7 @@ import {
   parseAnyCatalog,
   parseCatalog,
   parseGitHubRepo,
+  readLocalPluginCatalog,
   resolveCatalogUrl,
   searchPluginCatalog,
   seedCatalog,
@@ -249,4 +251,34 @@ test("settings persist catalogUrl", () => {
   const dir = home();
   saveSettings(dir, { ...DEFAULT_HUB_SETTINGS, catalogUrl: "https://example.com/c.json" });
   assert.equal(readSettings(dir).catalogUrl, "https://example.com/c.json");
+});
+
+test("explicit catalog refresh does not fall back to seed", async () => {
+  const dir = home();
+  await assert.rejects(
+    loadPluginCatalog(dir, {
+      refresh: true,
+      fetchImpl: async () => {
+        throw new Error("offline");
+      },
+    }),
+    /offline/,
+  );
+  assert.equal(existsSync(join(dir, "hub", CATALOG_CACHE_FILE)), false);
+});
+
+test("readLocalPluginCatalog returns seed when cache is missing and does not write", () => {
+  const dir = home();
+  const snap = readLocalPluginCatalog(dir);
+  assert.equal(snap.source, "seed");
+  assert.equal(existsSync(join(dir, "hub", CATALOG_CACHE_FILE)), false);
+});
+
+test("a damaged catalog cache fails instead of becoming seed", () => {
+  const dir = home();
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", CATALOG_CACHE_FILE);
+  writeFileSync(path, "{not-json");
+  assert.throws(() => readLocalPluginCatalog(dir), /could not be read|Original bytes/i);
+  assert.equal(readFileSync(path, "utf8"), "{not-json");
 });
