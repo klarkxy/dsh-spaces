@@ -1,3 +1,7 @@
+# 2026-09-20 现行计划
+
+当前实施：[分支合并与架构收敛](../docs/plans/spaces-merge-convergence.md)。状态只在 [todo.md](todo.md) 登记，证据见 [merge-execution.md](merge-execution.md)。本次前后端 Grok 施工、主 Agent 编排和验收，使用 CLI 默认配置。下面保留历史计划；历史授权和已撤销恢复要求不适用于本次。
+
 # 2026-09-15 现行计划
 
 故障政策：[docs/let-it-crash.md](../docs/let-it-crash.md)。唯一活动账本：[todo.md](todo.md)。

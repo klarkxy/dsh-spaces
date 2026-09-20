@@ -1,0 +1,1303 @@
+{
+  "group": "evidence",
+  "refs": {
+    "main": "c22c47fd37629e3bb852f7702d68624d3a73453d",
+    "old": "51911e481961408ad77758b0123653c0fc1e2bdd",
+    "imported": "1f339acc4c616ed634760f2735823f5ce83b9cd3"
+  },
+  "rows": [
+    {
+      "path": "AGENTS.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "AGENTS.md:1-14",
+        "git e5e4079 Adopt let it crash as the project contract"
+      ],
+      "reason": "主线在导入点之后新增的开发入口：先读 let-it-crash 与 tasks/todo.md，禁止恢复/回滚/重放，禁止读写真实 ~/.dsh，web 路径神圣。旧分支没有对等规则文件可移植。后续能力由本文件承接，不是旧遗漏。",
+      "verification": [
+        "docs/let-it-crash.md:1-16",
+        "tasks/todo.md:1-5",
+        "CONTRIBUTING.md:1-24"
+      ]
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "沙箱 Home、禁止真实 ~/.dsh、web 零写入、阶段门禁看 TODO.md/IMPLEMENTATION_PLAN.md。",
+      "currentEvidence": [
+        "CONTRIBUTING.md:3-32",
+        "blob old=imported=9bb7dd1889ec → main=c11b39020903"
+      ],
+      "reason": "旧与导入相同。主线补 let it crash 专节，并把活动账本改到 tasks/todo.md，保留原 Safety 三条。没有丢掉沙箱/web 保护。旧恢复验收不当作现行通过条件。",
+      "verification": [
+        "AGENTS.md:12-14",
+        "TODO.md:3-5"
+      ]
+    },
+    {
+      "path": "IMPLEMENTATION_PLAN.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "阶段 3 把崩溃恢复、一键重启写成完成判据；后续范围含协调升级和快照恢复。",
+      "currentEvidence": [
+        "IMPLEMENTATION_PLAN.md:3-8,91-104",
+        "docs/let-it-crash.md:17-20"
+      ],
+      "reason": "旧与导入相同。主线把阶段 3 改成错误传播与失败展示，并声明 2026-09-08 的快照恢复不再是施工门槛。隔离阶段 0、web 禁写、官方基础插件升级仍在。不应把旧“崩溃恢复/一键重启”段落移植回现行计划。",
+      "verification": [
+        "REQUIREMENTS.md:71-78,208-212",
+        "tasks/todo.md:9-16"
+      ]
+    },
+    {
+      "path": "README.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "插件化施工声明、工作台文档、隔离与恢复核心、写门禁仅 CLI 0.1.5-rc.1、监督启动缺 flag 不完整。",
+      "currentEvidence": [
+        "README.md:5-11,21,43-57,78-80",
+        "old→imported 仅改施工声明/标准安装/rc.2；imported→main 再改 latest 与 let it crash"
+      ],
+      "reason": "导入点已写入标准预构建安装与 rc.2。当前默认 latest 并钉住精确版本，故障政策改为不恢复，但仍要求 --snapshot-worker 因为运行时安装 IO，并指向 docs/workbench.md 完整命令。spaces-hub / view-bridge / 误装只显示返回工作台仍在。旧“共享隔离和恢复核心”与 rc.1 永久门禁已被现行政策替代，不是遗漏。",
+      "verification": [
+        "docs/plugin-standard-install.md:1-13",
+        "docs/workbench.md:7-11,84-94",
+        "git ee26d4c Follow official DSH latest and drop the CLI version allowlist"
+      ]
+    },
+    {
+      "path": "REQUIREMENTS.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "2026-08-28 隔离/生命周期需求；2026-09-08 把升级前快照恢复写入后续决策；FR2 进程崩溃提供一键重启。",
+      "currentEvidence": [
+        "REQUIREMENTS.md:3-24,71-78,105-110,208-224",
+        "blob old=imported=15fc7a0ad808"
+      ],
+      "reason": "主线把 let it crash 提升为最高原则，FR2 改为崩溃可见且不自动重启，NFR1 备份明确为提交前安全副本。全局 LLM 共享连接写入 2.2。旧快照恢复/一键重启作为现行功能需求已被取代；A1–A10 隔离目标仍有效。",
+      "verification": [
+        "docs/let-it-crash.md:5-12,59-70",
+        "docs/plans/global-llm-connections.md:1-40"
+      ]
+    },
+    {
+      "path": "TODO.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "根执行清单，阶段勾选，决策规则。",
+      "currentEvidence": [
+        "TODO.md:3-11,142-145,171",
+        "tasks/todo.md:1-5"
+      ],
+      "reason": "旧与导入相同。当前根 TODO 声明唯一活动账本是 tasks/todo.md，历史阶段勾选保留，3.4 一键重启改为常规菜单主动重启。没有旧独占未完成项需要从旧分支抄回。导航冲突见 summary：根文件与 tasks/plan.md 仍交叉引用。",
+      "verification": [
+        "tasks/todo.md:1-16",
+        "IMPLEMENTATION_PLAN.md:3-8"
+      ]
+    },
+    {
+      "path": "docs/compat/global-llm-acceptance.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "docs/compat/global-llm-acceptance.md:1-16,47-60",
+        "git 9382ae2 test: pin global llm compatibility and config scopes"
+      ],
+      "reason": "主线后续全局 LLM 验收合同。A25 keyless 明确未交付，不得把矩阵“pass”写成全部完成。旧分支无 LLM 连接库意图可移植。",
+      "verification": [
+        "tasks/global-llm.md:1-16",
+        "package.json scripts test:llm / validate:llm:secrets（本叶未跑）"
+      ]
+    },
+    {
+      "path": "docs/compat/global-llm-config-sources.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "docs/compat/global-llm-config-sources.md（主线新增）",
+        "REQUIREMENTS.md:55-58"
+      ],
+      "reason": "记录官方 settings/credentials 实际配置来源，服务 P0 接入面。无旧分支对等遗漏。",
+      "verification": [
+        "docs/plans/global-llm-connections.md",
+        "packages/llm-bridge/README.md:5-16"
+      ]
+    },
+    {
+      "path": "docs/compat/global-llm-matrix.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "docs/compat/global-llm-matrix.md",
+        "docs/workbench.md:51"
+      ],
+      "reason": "主线兼容矩阵。承接共享连接 catalog/policy，不是旧插件化分支遗漏。",
+      "verification": [
+        "docs/compat/global-llm-acceptance.md:5",
+        "tasks/todo.md:61-63"
+      ]
+    },
+    {
+      "path": "docs/let-it-crash.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件；旧恢复合同分散在 README/doctor/plan。",
+      "currentEvidence": [
+        "docs/let-it-crash.md:1-16,59-78",
+        "git e5e4079"
+      ],
+      "reason": "现行唯一故障政策。明确不恢复/不回滚/不抢锁/不重放；用户备份不得为证明已移除而删除；启动若仍走运行时安装 IO 继续需要 --snapshot-worker。旧恢复文档不应覆盖本文件。文内 L15 已声明产品路径符合，L77 仍写“在那之前不得声明”，属主线导航冲突，不是旧分支补丁。",
+      "verification": [
+        "AGENTS.md:4-10",
+        "tasks/todo.md:5,49-59",
+        "packages/supervisor/README.md:9-11"
+      ]
+    },
+    {
+      "path": "docs/plans/global-llm-connections.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "docs/plans/global-llm-connections.md:1-80",
+        "git 2b3defd feat: add shared llm catalog and space policies"
+      ],
+      "reason": "必须保护的后续全局 LLM 完整契约。旧分支无连接库、凭据通道或分享映射。",
+      "verification": [
+        "packages/llm-bridge/README.md",
+        "tasks/global-llm.md"
+      ]
+    },
+    {
+      "path": "docs/plugin-standard-install.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。导入点新增普通 web add + 初始化 Spaces，CLI 写 rc.1/rc.2。",
+      "currentEvidence": [
+        "docs/plugin-standard-install.md:1-31",
+        "imported blob 9338faefa7d2 → main e3920c84b3bc"
+      ],
+      "reason": "导入点已有标准预构建安装；主线改为 latest 渠道、精确钉住、初始化失败不续接。这是必须保护的后续安装合同，不是旧遗漏。未发布 npm 仍写明。",
+      "verification": [
+        "packages/plugin/README.md:9-19",
+        "tasks/plugin-standard-install.md:7-12",
+        "git ee26d4c"
+      ]
+    },
+    {
+      "path": "docs/workbench.md",
+      "status": "M",
+      "decision": "missing",
+      "oldIntent": "独立监督、spaces-hub、72px iframe、单写者、完整启动 flag（含 --snapshot-worker）、误装只返回工作台、双端接管、主题限制；并把 Whole-Home snapshots / config restore / doctor recovery 写成当时可用能力。",
+      "currentEvidence": [
+        "docs/workbench.md:7-25,84-99,150,203-231",
+        "packages/plugin/src/workbench/i18n.ts:156-160,428-429",
+        "src/adapters/node/workbench-maintenance.ts:1206-1219",
+        "old→imported 已改标准安装与 rc.1/rc.2 门禁；imported→main 再改 let it crash / latest / LLM / 模板批量"
+      ],
+      "reason": "监督启动参数、view-bridge、误装卸载、双端运行权、jobs 不重放、批量首失败、导入三结果、--snapshot-worker 作为运行时安装 IO，均已在当前指南。恢复/救援/config.restore 作为现行能力已被 let it crash 取代，不能从旧文整段搬回。缺口：旧用户面把快照管理（创建/查看/删除）与恢复写在一起；D 阶段删恢复时把“用户主动备份”也从指南抹掉，只剩“写入快照文件不是恢复承诺”（:99）。运行时仍有 snapshots.create / snapshots.delete 文案与 workbench-maintenance.runSnapshotCreate。这不是 B 阶段架构债，是主线用户文档相对旧仍有效意图的遗漏。另：:231 仍写 runtime 预览走 rc.1/rc.2 门禁，与 README latest 政策不一致，属主线文档冲突，待核查时不要用旧白名单覆盖 latest。",
+      "verification": [
+        "tests/workbench-maintenance.test.ts:337 snapshot create is whole-home",
+        "src/renderer/src/components/MaintenanceDialog.tsx:121 停止空间并创建快照",
+        "docs/let-it-crash.md:70 用户备份行",
+        "docs/plans/spaces-merge-convergence.md B3 有效快照管理"
+      ],
+      "missingPatch": "在 docs/workbench.md 英文/中文“Using the workbench”补一小节：用户可主动创建/列出/删除备份（先停自有空间，完成后保持停止）；明确不是 snapshot.restore、不是灾难恢复、不得删用户已有快照。保留 --snapshot-worker 必填原因（运行时安装 IO）。不要从旧 56ba211 段落带回 config restore、doctor recover 或救援入口。顺手把 :231 rc.1/rc.2 门禁改成与 latest+精确版本一致，或标明那是历史验收组合。"
+    },
+    {
+      "path": "dsh-spaces-let-it-crash-plan.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "dsh-spaces-let-it-crash-plan.md:1-16,20-30",
+        "tasks/let-it-crash-d-delivery.md:7-15"
+      ],
+      "reason": "主线 D/R 迁移方案。起草时声明本文不代表测试已通过。后续 R 勾选在 tasks/todo.md，不从旧恢复计划补洞。",
+      "verification": [
+        "docs/let-it-crash.md",
+        "tasks/todo.md:49-59"
+      ]
+    },
+    {
+      "path": "packages/core/README.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "共享隔离/注册表/维护锁，以及 recovery state machine 作为 core 域。",
+      "currentEvidence": [
+        "packages/core/README.md:1-6",
+        "blob old=imported=b9458462b675"
+      ],
+      "reason": "当前明确本包不定义 recovery core；历史状态机是 R 差距而非域需求。隔离与锁合同仍在。旧 README 把恢复状态机当产品域，不能移植。文内仍写 R1–R2 gap，与 tasks/todo.md 已勾 R 冲突，属导航问题。",
+      "verification": [
+        "docs/let-it-crash.md:15",
+        "tasks/pluginization-core.md:3-7"
+      ]
+    },
+    {
+      "path": "packages/doctor/README.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "doctor/verify/unlock/recover/rollback 产品命令；导入点把 recover/rollback 也放到 rc.1/rc.2。",
+      "currentEvidence": [
+        "packages/doctor/README.md:5-28",
+        "old c3306270d3d8 → imported 6c6b5068599e（rc.2 写路径）→ main f4ccc5e6f62c"
+      ],
+      "reason": "现行目标只诊断；unlock/recover/rollback 返回 UNSUPPORTED 退出 7，不转发旧实现。旧/导入把 recover 当产品入口，已被 let it crash 取代。只读 inspect、生产 Home 需 --allow-real-home、坏 schema 保留原字节仍覆盖。",
+      "verification": [
+        "docs/let-it-crash.md:15",
+        "tasks/todo.md:57 R5",
+        "tests/spaces-doctor.test.ts（本叶未跑）"
+      ]
+    },
+    {
+      "path": "packages/llm-bridge/README.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "packages/llm-bridge/README.md:1-16",
+        "packages/plugin/README.md:25"
+      ],
+      "reason": "主线 llm-bridge：注入共享连接、拒绝劫持、不装第二个监督。打包进标准插件 tarball。无旧遗漏。",
+      "verification": [
+        "docs/compat/global-llm-acceptance.md:28",
+        "git 61af286 feat: bridge shared llm settings and credentials"
+      ]
+    },
+    {
+      "path": "packages/plugin/README.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "管理 profile Host 插件、guide-only 误装、pack 到包外、bundle.patch、Windows 空格路径、snapshotRoot 仅 Node、架构与 doctor 恢复。",
+      "currentEvidence": [
+        "packages/plugin/README.md:1-35",
+        "docs/workbench.md:7,201-213",
+        "docs/plugin-standard-install.md:15-31",
+        "old 10bc5ec8bbcf → imported a611d9793772（标准安装重写）→ main 70132094d51e"
+      ],
+      "reason": "导入点已把本 README 改成普通 web 标准安装，丢掉旧 Architecture/Recovery 专节。当前继续该安装合同，并加入 llm-bridge payload、初始化失败不续接、latest。角色分流、空格路径、view-bridge、误装卸载改由 docs/workbench.md 与 standard-install 承接。旧 Whole-Home snapshot create/restore/delete 清单未回到本 README；create/delete 的现行用户说明记在 docs/workbench.md 的 missingPatch，不把旧 Recovery 节移植回来。",
+      "verification": [
+        "tasks/pluginization-trial-acceptance.md:48-52 file: 版本显示未知",
+        "packages/plugin/src/host/supervisor-bootstrap.ts 启动参数（runtime 组）"
+      ]
+    },
+    {
+      "path": "packages/supervisor/README.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "127.0.0.1 监督、必填 artifact/node/snapshot-worker/control-tool-root、一次性 bootstrap cookie。",
+      "currentEvidence": [
+        "packages/supervisor/README.md:9-11,28-44,94-108,130",
+        "old→imported 仅 bin.js 路径与 snapshot-worker 写法"
+      ],
+      "reason": "当前仍把 --snapshot-worker 列为运行时安装/长 IO 必填，不是恢复产品。latest 渠道、公开恢复 API 失败、关标签不停实例均在。旧命令行意图已覆盖，未因 snapshot 文件名整段删除 worker。",
+      "verification": [
+        "docs/workbench.md:84-94",
+        "docs/let-it-crash.md:15"
+      ]
+    },
+    {
+      "path": "packages/view-bridge/README.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。导入点新增：普通空间只握手，不是用户安装单位。",
+      "currentEvidence": [
+        "packages/view-bridge/README.md:1-11",
+        "imported a0d735a9b4d5 → main c5a5801b3cb3"
+      ],
+      "reason": "主线补握手失败只报错、不重连监督。标准安装仍由完整 plugin tarball 把 payload 拷到普通空间。无旧遗漏。",
+      "verification": [
+        "docs/plugin-standard-install.md:11,29",
+        "docs/workbench.md:20"
+      ]
+    },
+    {
+      "path": "tasks/acceptance.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "2026-09-11 独立验收矩阵：179 项、升级/分段回退、损坏运行时恢复当时通过；并写明 9/9 未新增通过、安装器未跑。",
+      "currentEvidence": [
+        "tasks/acceptance.md:1-4（历史盖章）",
+        "blob old=imported=23c779dea7f2"
+      ],
+      "reason": "主线只加历史盖章，未改写当时数字。那些恢复通过是历史事实，不是本次或现行门槛。文中“未跑/超时/未批准”仍在，没有把未运行证据改成通过。",
+      "verification": [
+        "tasks/fix-acceptance-2026-09-11.md",
+        "tasks/q-coverage.md"
+      ]
+    },
+    {
+      "path": "tasks/fix-acceptance-2026-09-11.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "0.2.0 修复与独立验收，含恢复流程当时实现。",
+      "currentEvidence": [
+        "tasks/fix-acceptance-2026-09-11.md:1（盖章）",
+        "blob old=imported=1d8810b66173"
+      ],
+      "reason": "历史验收原文保留。恢复作为当时实现事实，现行能力已撤销。不移植为发布门槛。",
+      "verification": [
+        "docs/let-it-crash.md:17-20",
+        "tasks/todo.md:73-77"
+      ]
+    },
+    {
+      "path": "tasks/global-llm.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无此文件。",
+      "currentEvidence": [
+        "tasks/global-llm.md:1-39",
+        "tasks/todo.md:61-63"
+      ],
+      "reason": "全局 LLM 施工账本，P0–P6 勾选。未跑平台与 A25 指向验收文档。无旧遗漏。",
+      "verification": [
+        "docs/compat/global-llm-acceptance.md:5,47,58"
+      ]
+    },
+    {
+      "path": "tasks/handoff-2026-09-14.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。导入点记录换机续接、latest 策略、标准安装已验 rc.1/rc.2。",
+      "currentEvidence": [
+        "tasks/handoff-2026-09-14.md:1-20,53-55",
+        "tasks/todo.md:67"
+      ],
+      "reason": "标题“恢复”指换机取回代码。现行 latest+精确版本策略的接线入口仍有用。文首仍写“白名单尚未实施/当前代码仍有精确版本门禁”，与 tasks/todo.md:67 已勾及 git ee26d4c 冲突——这是主线导航欠账，不是旧分支独有补丁。整 Home 回滚最终验收已标明撤销。",
+      "verification": [
+        "README.md:56-57",
+        "git ee26d4c"
+      ]
+    },
+    {
+      "path": "tasks/history-recovery.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。导入点记录从旧电脑找回源码，不是产品故障恢复。",
+      "currentEvidence": [
+        "tasks/history-recovery.md:1-31,110-116"
+      ],
+      "reason": "主线已把标题与“当前有效需求”改成历史代码找回，并撤销回滚/冷恢复待办。旧插件化意图通过已导入源码体现，不需要再搬这份取回日志里的恢复产品需求。",
+      "verification": [
+        "docs/let-it-crash.md:9",
+        "tasks/todo.md:26-34"
+      ]
+    },
+    {
+      "path": "tasks/let-it-crash-d-delivery.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。",
+      "currentEvidence": [
+        "tasks/let-it-crash-d-delivery.md:7-15",
+        "tasks/todo.md:9-16 D0–D4"
+      ],
+      "reason": "D 阶段交付记录。当时明确未跑测试、R1–R6 pending。这是 2026-09-15 文档完成证据，不能当成运行时已通过。与后来 todo 勾选 R 的差异是主线时间线，不是旧遗漏。",
+      "verification": [
+        "tasks/q-coverage.md",
+        "docs/let-it-crash.md:75-78"
+      ]
+    },
+    {
+      "path": "tasks/plan.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "2026-09-08 已确定产品决策含关闭托盘、统一 DSH 版本、升级前快照恢复、配置恢复、提交失败恢复旧环境。",
+      "currentEvidence": [
+        "tasks/plan.md:1-9,19-33,51-76",
+        "old 4d963ce2df44 → imported 07e3b04a307f（加 09-13 标准安装头）→ main 84915637eb7f"
+      ],
+      "reason": "当前头指向 plugin-management 与 let it crash，并声明 09-08 恢复条款已取代。09-08 正文作为历史保留，其中“支持恢复升级前快照/提交失败恢复旧环境”不得再当现行计划。导入点增加的标准安装段落仍有效，由 plugin-standard-install 承接。L7 仍写 R1–R6 待实施、L9 仍写白名单尚未实施，与 tasks/todo.md 已勾冲突，见 summary，不从旧分支回填恢复矩阵。",
+      "verification": [
+        "tasks/todo.md:5,49-67",
+        "tasks/plugin-management/plan.md:1-27"
+      ]
+    },
+    {
+      "path": "tasks/plugin-cli-rc2-worker.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧无。导入点记录 COMPATIBLE_DSH_CLI_VERSIONS 含 rc.1/rc.2，unknown 只读。",
+      "currentEvidence": [
+        "tasks/plugin-cli-rc2-worker.md:1-16,106-111",
+        "README.md:56-57"
+      ],
+      "reason": "历史 rc.2 写门禁叶子。主线注明 recover/rollback 已撤销，并保留当时数组是历史接线。后续 latest 策略在 ee26d4c / todo.md:67，不把旧永久白名单当现行合同。",
+      "verification": [
+        "git ee26d4c",
+        "tasks/handoff-2026-09-14.md:13-18"
+      ]
+    },
+    {
+      "path": "tasks/plugin-community-submission.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧无。导入点准备社区简介，曾写“独立恢复入口”。",
+      "currentEvidence": [
+        "tasks/plugin-community-submission.md:1-24"
+      ],
+      "reason": "主线把简介改成错误报告、不提供恢复入口，并保留预构建包/未发布事实。社区提交仍未做（todo 未勾 npm 发布）。无旧独有安装意图丢失。",
+      "verification": [
+        "docs/plugin-standard-install.md:35-40",
+        "tasks/todo.md:68"
+      ]
+    },
+    {
+      "path": "tasks/plugin-distribution-worker.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧无。导入点分发叶子记录。",
+      "currentEvidence": [
+        "tasks/plugin-distribution-worker.md:1-8"
+      ],
+      "reason": "仅加现行合同/历史盖章。预构建分发由 pack:plugin 与 check:plugin-package 承接。",
+      "verification": [
+        "docs/plugin-standard-install.md:45-52"
+      ]
+    },
+    {
+      "path": "tasks/plugin-management/plan.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。",
+      "currentEvidence": [
+        "tasks/plugin-management/plan.md:1-27",
+        "tasks/todo.md:18-47"
+      ],
+      "reason": "主线模板/分享/批量合同：导出不是灾难恢复；任务 08 三结果分开；任务 10 首失败终止；整 Home 快照恢复已撤销。必须保护的后续主线能力。",
+      "verification": [
+        "docs/workbench.md:225-227",
+        "git c31547d Stop plugin batches at the first failure and add space templates",
+        "git 6f13271 Add space share export and split-state import"
+      ]
+    },
+    {
+      "path": "tasks/plugin-management/task-01-write-scope.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。",
+      "currentEvidence": [
+        "tasks/plugin-management/task-01-write-scope.md",
+        "tasks/todo.md:21,7"
+      ],
+      "reason": "Home 实测安装写入范围。账本写明不是恢复模块前置。无旧遗漏。",
+      "verification": [
+        "tasks/plugin-management/plan.md:5"
+      ]
+    },
+    {
+      "path": "tasks/plugin-standard-install.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧无。导入点：web add + 初始化，不要求用户传内部路径；当时目标含稳定救援入口。",
+      "currentEvidence": [
+        "tasks/plugin-standard-install.md:7-12,19-24"
+      ],
+      "reason": "主线去掉救援入口与失败可重试产品入口，保留标准安装与 payload 内置 supervisor/view-bridge/worker。这是导入后主线能力，旧分支没有对等任务文。",
+      "verification": [
+        "docs/plugin-standard-install.md:1-8",
+        "packages/plugin/README.md:9-19"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-acceptance.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "2026-09-11 插件化交付：core/adapters/plugin/doctor；当时含恢复流程、recovery-only、doctor 回收死锁。",
+      "currentEvidence": [
+        "tasks/pluginization-acceptance.md:1-12,40-45",
+        "blob old=imported=4c3c88764dac"
+      ],
+      "reason": "主线改写交付列表的现行口径，保留 Windows-only、未知版本未现场、macOS/Linux 未验收等限制。隔离、Host 插件、tarball 加载仍覆盖。恢复端口标为已撤销，不是遗漏。",
+      "verification": [
+        "packages/plugin/README.md",
+        "tasks/pluginization-trial-acceptance.md:1-8"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-bundle.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "dsh.bundle.patch 使 plugin add 写入 bundles、id: dsh-spaces；remove 去掉层。",
+      "currentEvidence": [
+        "tasks/pluginization-bundle.md:1-12 及原 bundle 示例",
+        "packages/plugin/README.md:21-23"
+      ],
+      "reason": "导入点相对旧只改了 markdown 换行。主线加现行合同，保留官方 bundle 安装/卸载。snapshotRoot 未配置如实不可用仍有效。",
+      "verification": [
+        "docs/plugin-standard-install.md:41",
+        "tasks/pluginization-trial-acceptance.md:52"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-core.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "抽出 restore-session / ports/restore 作为 core 范围。",
+      "currentEvidence": [
+        "tasks/pluginization-core.md:3-9",
+        "packages/core/README.md:3-5"
+      ],
+      "reason": "现行合同写明 restore-core 不是当前需求；下文抽取记录是 09-11 事实。不能把旧 restore-session 建设任务接回 A 阶段。文内 “R1–R6 pending” 与 todo 已勾冲突。",
+      "verification": [
+        "tasks/todo.md:53-56",
+        "docs/let-it-crash.md:15"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-desktop.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "verify-spaces-desktop.mjs 非打包 Electron smoke，fixture CLI rc.1，约 68s exit 0。",
+      "currentEvidence": [
+        "tasks/pluginization-desktop.md:1-8",
+        "old→imported 仅换行"
+      ],
+      "reason": "历史 smoke 结论保留。未把当时 pass 写成本次运行。关闭隐藏等到主线 fd3bd9c，属后续修正而非旧文遗漏。",
+      "verification": [
+        "git fd3bd9c fix: hide the desktop window to the tray on close",
+        "scripts/verify-spaces-desktop.mjs（本叶未跑）"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-distribution.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "verify-spaces-distribution.mjs：真实 CLI 安装 tarball，不手解包。",
+      "currentEvidence": [
+        "tasks/pluginization-distribution.md 现行合同头 + 原脚本范围",
+        "docs/plugin-standard-install.md:45-52"
+      ],
+      "reason": "官方 CLI 安装读回仍是有效分发意图。主线盖章撤销恢复，未删安装验收口径。",
+      "verification": [
+        "scripts/verify-spaces-distribution.mjs"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-doctor.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "unlock 调 unlockDead；recover/rollback Exit 10 + 桌面恢复指引；verify 可持锁跑 dump-config。",
+      "currentEvidence": [
+        "tasks/pluginization-doctor.md:3-32,46-50",
+        "packages/doctor/README.md:7-28"
+      ],
+      "reason": "现行命令表撤销 unlock/recover/rollback。15 pass 是当时机器证据，文内改为 fail-closed 描述，未宣称本叶重跑。旧 Exit 10 recovery needed 不能作为产品状态移植。",
+      "verification": [
+        "tasks/todo.md:57",
+        "docs/let-it-crash.md:15"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-frontend.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "packages/plugin/src/client 面板，Kimi 范围当时记录。",
+      "currentEvidence": [
+        "tasks/pluginization-frontend.md 盖章 + 原 client 范围"
+      ],
+      "reason": "历史前端范围保留。当前施工指定前端也用 Grok，不改变这份历史作者记录。无独有未迁 UI 合同在本文件。",
+      "verification": [
+        "packages/plugin/src/client/**",
+        "docs/plans/spaces-merge-convergence.md B4"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-host.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "损坏/重定向 journal 进入 recovery-only；中断 CLI 保持 recovery-needed。",
+      "currentEvidence": [
+        "tasks/pluginization-host.md:3-26"
+      ],
+      "reason": "现行改为 fail closed、保留原字节、无 recovery-only 产品模式。未知 CLI 只读仍在。旧 recovery-only 不能搬回。文内 R1–R6 pending 为导航冲突。",
+      "verification": [
+        "docs/let-it-crash.md:59-66",
+        "tasks/workbench-contract.md:24-32"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-localization.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "不注入 ctx.locale，因 SDK 无 locale 插件包；自管 zh/en。",
+      "currentEvidence": [
+        "tasks/pluginization-localization.md 原 SDK 调查段落"
+      ],
+      "reason": "locale 约束是有效历史技术决定，主线只加盖章。无恢复内容可替代，也无遗漏。",
+      "verification": [
+        "packages/plugin/src/client/i18n.ts"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-lock.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "跨进程 Home 锁放在 home 旁，不放进会被快照替换的 hub/profiles。",
+      "currentEvidence": [
+        "tasks/pluginization-lock.md 原锁目录说明",
+        "docs/let-it-crash.md:59 单写者",
+        "git c22c47f ignore stale dead instance records and drop takeover copy"
+      ],
+      "reason": "单写者锁仍有效。旧 reclaimDead 产品路径已被主线后续提交去掉接管文案；这是必须保留的现行方向，不能从旧锁任务把 reclaim 接回。",
+      "verification": [
+        "tasks/todo.md:55 R3",
+        "docs/plans/spaces-merge-convergence.md:32-33"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-plan.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "Phase 1 保留独立桌面恢复并加 doctor；Phase 2 含 snapshot restore。",
+      "currentEvidence": [
+        "tasks/pluginization-plan.md:3-16"
+      ],
+      "reason": "现行声明 snapshot restore 已撤销不是延期 Phase 2。共享隔离、Host 插件、薄桌面仍覆盖。旧“preserve independent desktop recovery”不能当 A 阶段补丁。",
+      "verification": [
+        "tasks/plugin-management/plan.md:22-26",
+        "docs/let-it-crash.md:17-20"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-runtime.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "verify-spaces-plugin.mjs 范围外含 snapshot restore、desktop recovery。",
+      "currentEvidence": [
+        "tasks/pluginization-runtime.md:3-8,75-80"
+      ],
+      "reason": "脚本所有权与 unknown-readonly 记录仍在。把 restore 从“未做的 Phase 2”改成已撤销，避免后续按旧清单建设恢复。",
+      "verification": [
+        "scripts/verify-spaces-plugin.mjs"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-theme-compatibility.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Catppuccin peer 冲突审计；Spaces-first 后 Host 正常、原主题客户端仍失败。",
+      "currentEvidence": [
+        "tasks/pluginization-theme-compatibility.md:1-4",
+        "docs/workbench.md:36-37,217",
+        "tasks/todo.md:70"
+      ],
+      "reason": "Catppuccin 缺依赖失败如实记录、不包装成 Spaces 已修复——旧结论仍是现行缺口。主线只盖章。",
+      "verification": [
+        "tasks/pluginization-themes-acceptance.md"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-themes-acceptance.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "真实 DSH Web 多主题：4 主题独立 profile，3 个可见，并非全部兼容。",
+      "currentEvidence": [
+        "tasks/pluginization-themes-acceptance.md 结果表",
+        "docs/workbench.md:27-28"
+      ],
+      "reason": "竹青/EternalNight/XP 适配是已行使证据。未把未兼容主题写成已修。本叶未重跑浏览器。",
+      "verification": [
+        "scripts/verify-spaces-themes.mjs（未跑）"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-themes-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "主题验收叶子交接；最终结果指向 themes-acceptance。",
+      "currentEvidence": [
+        "tasks/pluginization-themes-worker.md:1 盖章 + 原交接结论"
+      ],
+      "reason": "历史叶子状态保留。无独有主题合同需移植。",
+      "verification": [
+        "tasks/pluginization-themes-acceptance.md"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-trial-acceptance.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "可分发试用：正式安装/替换/卸载、未知版本、Windows 安装包载荷；file: 版本显示未知；空格路径限制。",
+      "currentEvidence": [
+        "tasks/pluginization-trial-acceptance.md:1,48-52"
+      ],
+      "reason": "Windows 空格路径、file: 未知版本、未发布 npm 仍在。把 recover/rollback/快照恢复从“后续阶段”改为已撤销，避免按旧清单施工。Web 启停/插件变更/运行时升级仍标为可后续且不含恢复。",
+      "verification": [
+        "docs/plugin-standard-install.md:31",
+        "packages/plugin/README.md:17"
+      ]
+    },
+    {
+      "path": "tasks/pluginization-windows-distribution.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "本叶未跑 electron-builder / NSIS /S /D；只做脚本与静态阅读。",
+      "currentEvidence": [
+        "tasks/pluginization-windows-distribution.md 已做/未做",
+        "old→imported 仅换行"
+      ],
+      "reason": "明确未跑项仍在，没有写成通过。安装器验收仍是缺口，不是旧代码丢失。",
+      "verification": [
+        "tasks/todo.md:71 最终回归",
+        "package.json pack/build 脚本（未跑）"
+      ]
+    },
+    {
+      "path": "tasks/q-coverage.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。",
+      "currentEvidence": [
+        "tasks/q-coverage.md:1-9",
+        "docs/let-it-crash.md:15"
+      ],
+      "reason": "诚实列出未在本机用官方 CLI/浏览器跑完的 E 项。承接“未运行不能写成通过”。无旧遗漏。",
+      "verification": [
+        "tasks/todo.md:5,59",
+        "dsh-spaces-let-it-crash-plan.md §8 引用链"
+      ]
+    },
+    {
+      "path": "tasks/releases/v0.2.0.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "0.2.0 发布文案主打可恢复升级、完整快照、配置恢复、救援页。",
+      "currentEvidence": [
+        "tasks/releases/v0.2.0.md:1-28"
+      ],
+      "reason": "主线改写成历史说明，禁止以后发布复制恢复卖点；隔离/插件库/普通启停仍可描述。旧恢复营销不能移植。",
+      "verification": [
+        "docs/let-it-crash.md:50",
+        "tasks/todo.md:71 新媒体不得宣传恢复"
+      ]
+    },
+    {
+      "path": "tasks/releases/v0.3.0.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧分支无。",
+      "currentEvidence": [
+        "tasks/releases/v0.3.0.md:1-21",
+        "git c39b3ef Release 0.3.0 with let-it-crash semantics"
+      ],
+      "reason": "0.3.0 采纳 let it crash，并加入分享/模板/批量。Known limits 仍写白名单待移除，那是发版当时口径；其后 ee26d4c 已改 latest。历史发布说明不应改写成 0.3.0 当时已无白名单。",
+      "verification": [
+        "git ee26d4c",
+        "tasks/todo.md:67"
+      ]
+    },
+    {
+      "path": "tasks/review-2026-09-11.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "发布前只读评审不通过，含 P1 恢复问题；未改产品源码。",
+      "currentEvidence": [
+        "tasks/review-2026-09-11.md:1 盖章 + 原不通过结论"
+      ],
+      "reason": "保留当时不通过事实。后续修复在 fix-acceptance。不把评审当时的恢复缺陷清单当现行要做的恢复产品。",
+      "verification": [
+        "tasks/fix-acceptance-2026-09-11.md"
+      ]
+    },
+    {
+      "path": "tasks/review-config.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "配置解析验收；当时含配置备份预览与恢复验证。",
+      "currentEvidence": [
+        "tasks/review-config.md:1 盖章",
+        "REQUIREMENTS.md:105-110 NFR1"
+      ],
+      "reason": "!!js 配置读写与隔离校验仍有效。当时“恢复后解析”是历史验证，配置恢复产品能力已撤销。提交前备份不是恢复流程。",
+      "verification": [
+        "docs/let-it-crash.md:62-68",
+        "README.md:37-38"
+      ]
+    },
+    {
+      "path": "tasks/spaces-demo-video-acceptance.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "首版介绍视频 138s 成片路径在 .sandbox。",
+      "currentEvidence": [
+        "tasks/spaces-demo-video-acceptance.md 成片清单",
+        "tasks/todo.md:71"
+      ],
+      "reason": "历史成片记录保留。新介绍视频仍未做；不得宣传恢复。不能把旧录像当本次验收。",
+      "verification": [
+        "tasks/workbench-demo-narration.json",
+        "docs/plans/spaces-merge-convergence.md:203"
+      ]
+    },
+    {
+      "path": "tasks/spaces-demo-video-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "录像叶子：脚本与 sandbox 素材，未改产品。",
+      "currentEvidence": [
+        "tasks/spaces-demo-video-worker.md:1 盖章 + 原结论"
+      ],
+      "reason": "历史交接。无独有产品合同。",
+      "verification": [
+        "tasks/spaces-demo-video-acceptance.md"
+      ]
+    },
+    {
+      "path": "tasks/todo.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "旧为 09-08 首批清单（含诊断恢复、快照恢复、失败恢复）。导入点前置 09-13 标准安装清单，仍把整 Home 回滚矩阵列为未完成。",
+      "currentEvidence": [
+        "tasks/todo.md:1-71",
+        "old d4b93f7248ec → imported 2e123574403e → main 9fffeea973b8"
+      ],
+      "reason": "当前是唯一活动账本：let it crash 产品路径、插件 02–11、R1–R6 已勾、latest 白名单已勾、外部发现/Catppuccin/视频未勾。09-13/09-08 历史段落保留并盖章。旧恢复待办已撤销而不是遗漏。内部冲突：L5 称产品路径已符合，L51 R 节仍写“完成前不得声明”——不得用旧清单覆盖，只提示协调者统一导航。",
+      "verification": [
+        "TODO.md:3-7",
+        "docs/let-it-crash.md:15",
+        "tasks/plan.md:1-9"
+      ]
+    },
+    {
+      "path": "tasks/workbench-audit.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "工作台独立审计进行中的控制记录问题。",
+      "currentEvidence": [
+        "tasks/workbench-audit.md:1-8"
+      ],
+      "reason": "现行合同头撤销救援/恢复；下文审计反例保留为历史。R1–R6 pending 字样与 todo 冲突。无旧独有有效审计项被删。",
+      "verification": [
+        "tasks/workbench-contract.md",
+        "git c22c47f"
+      ]
+    },
+    {
+      "path": "tasks/workbench-browser-failures-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "异常切换/滚动会话脚本已写，本叶未跑 Playwright。",
+      "currentEvidence": [
+        "tasks/workbench-browser-failures-worker.md 结论：脚本不是真实验收"
+      ],
+      "reason": "未跑事实仍在。没有把 self-check 当通过。",
+      "verification": [
+        "tasks/q-coverage.md Playwright E07"
+      ]
+    },
+    {
+      "path": "tasks/workbench-contract.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "WorkbenchApi、preview/execute、requestId 幂等、精确版本安装、controller.acquire 双端、稳定入口；当时入口写成恢复页、A2 含中断恢复标记。",
+      "currentEvidence": [
+        "tasks/workbench-contract.md:2-56",
+        "src/shared/workbench.ts:76 recoveryRequired"
+      ],
+      "reason": "非恢复合同（白名单方法、job 字段、view origin、catalogId+精确版本、managed=false 只读、删除预览）仍在并加强了不重放/不恢复字段。恢复页与 recovery.resume 改为禁止。controller.acquire 仍写为正常双端控制；B1 计划移除旧 acquire 是架构改造欠账，不是旧分支遗漏。文首“R1–R6 完成前仍含 recoveryRequired”与 todo 已勾、源码仍有 recoveryRequired 同时存在，见 baselineRisks。",
+      "verification": [
+        "docs/workbench.md:187-197",
+        "docs/plans/spaces-merge-convergence.md B1",
+        "git 28d4f9e Require exact plugin versions"
+      ]
+    },
+    {
+      "path": "tasks/workbench-controller-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "HomeController 管理身份与长期运行权模块落地，不是桌面/Web 接入完成。",
+      "currentEvidence": [
+        "tasks/workbench-controller-worker.md 产物 home-controller.ts"
+      ],
+      "reason": "运行权模块仍被监督使用。旧 reclaimDead 不能从本历史交接接回。",
+      "verification": [
+        "tasks/todo.md:55",
+        "git c22c47f"
+      ]
+    },
+    {
+      "path": "tasks/workbench-crash-worker.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "真实维护崩溃验收，当时通过条件含恢复成功 / recovery.resume / doctor 回滚。",
+      "currentEvidence": [
+        "tasks/workbench-crash-worker.md:1-4"
+      ],
+      "reason": "现行通过条件改为 kill 后失败可见、无自动恢复。本叶未跑真实 DSH 的声明保留。不能移植旧恢复成功断言。",
+      "verification": [
+        "docs/let-it-crash.md:59-66",
+        "tasks/todo.md:59 Q 改验失败被报告"
+      ]
+    },
+    {
+      "path": "tasks/workbench-demo-narration.json",
+      "status": "M",
+      "decision": "missing",
+      "oldIntent": "第四章“维护时，入口仍然在”：管理首页提供插件、备份和运行时维护；快照恢复影响整个 Home；管理环境停止时独立维护入口仍可用。",
+      "currentEvidence": [
+        "tasks/workbench-demo-narration.json:1-5 id 04-maintenance",
+        "blob old=imported=367876fdffa6 → main 144f09686933",
+        "packages/plugin/src/workbench/i18n.ts:156-160"
+      ],
+      "reason": "01–03 空间栏/主题/误装返回工作台仍在，XP 适配仍在。04 按 let it crash 改成报错、不救援，正确取代了“快照恢复影响整个 Home”和救援式维护入口。但旧文“备份”是用户主动快照管理，与 restore 不是同一意图；当前台词只剩插件安装/运行时安装/启停，把备份一并删掉。运行时仍有创建/删除快照文案。属 D 阶段过删，需要从旧台词收回备份（非恢复）表述。",
+      "verification": [
+        "src/adapters/node/workbench-maintenance.ts:1206-1219",
+        "docs/let-it-crash.md:70",
+        "tasks/todo.md:71 新视频不得宣传恢复"
+      ],
+      "missingPatch": "只改 04 段：在报错/不救援的现行政策下，加回“可以创建、查看、删除备份；这不是把整个 Home 恢复到旧环境”。不要恢复旧句“快照恢复影响整个 Home”或“独立的维护入口”。"
+    },
+    {
+      "path": "tasks/workbench-demo-video-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "录像脚本已按审查修正；真实录制未执行，成片不存在。",
+      "currentEvidence": [
+        "tasks/workbench-demo-video-worker.md 结论未录制"
+      ],
+      "reason": "未把未录制写成完成。配音复用约束仍有效。",
+      "verification": [
+        "tasks/workbench-demo-narration.json",
+        "tasks/todo.md:71"
+      ]
+    },
+    {
+      "path": "tasks/workbench-desktop-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "desktop-controller 审计重试 PASS，不是正式 Electron/DSH 双端验收。",
+      "currentEvidence": [
+        "tasks/workbench-desktop-worker.md 结论",
+        "git fd3bd9c"
+      ],
+      "reason": "桌面运行权/关闭隐藏的后续修正在主线提交。本文件保持“未做正式双端验收”。旧交接没有未迁的独有桌面合同。",
+      "verification": [
+        "docs/workbench.md:199",
+        "src/adapters/desktop/controller.ts（runtime 组）"
+      ]
+    },
+    {
+      "path": "tasks/workbench-doctor-worker.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "doctor 叶子：proven-dead 经 recover/unlock reclaim；rollback 成功后 settle jobs；插件 mutation 要求整 Home 回滚。",
+      "currentEvidence": [
+        "tasks/workbench-doctor-worker.md 现行合同改写段",
+        "packages/doctor/README.md:7-10"
+      ],
+      "reason": "主线把 reclaim/rollback settle 标为历史接线。资源旗标作输入、坏 schema 保留原字节仍覆盖。不得移植旧 reclaimDead 合同。",
+      "verification": [
+        "tasks/todo.md:55-57",
+        "git c22c47f"
+      ]
+    },
+    {
+      "path": "tasks/workbench-documentation-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "用户文档叶子：把当时已验证的 restore 写进 docs；CLI 门禁仅 rc.1。",
+      "currentEvidence": [
+        "tasks/workbench-documentation-worker.md:52-60",
+        "docs/workbench.md:1-11"
+      ],
+      "reason": "交接记录改为：restore 不得再写进现行用户文档；未完成项去掉 kill 恢复。文档实体已在 README/workbench/plugin README。备份用户说明的缺口记在 docs/workbench.md missing，不把本历史交接当补丁源。",
+      "verification": [
+        "docs/workbench.md:27-37"
+      ]
+    },
+    {
+      "path": "tasks/workbench-dual-control-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "Desktop/Web 双端运行权脚本已准备，本叶未执行真实 DSH/Electron。",
+      "currentEvidence": [
+        "tasks/workbench-dual-control-worker.md 结论未执行",
+        "docs/workbench.md:187-197"
+      ],
+      "reason": "双端单写者仍是有效产品意图。脚本未跑事实保留。B1 将改 acquire 协议，属后续改造不是旧遗漏。",
+      "verification": [
+        "tasks/workbench-contract.md:22-24"
+      ]
+    },
+    {
+      "path": "tasks/workbench-external-discovery.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "未登记手工 DSH 无法映射 Home；不能猜 PID；整 Home 快照/恢复仍会替换 sessions/hub。",
+      "currentEvidence": [
+        "tasks/workbench-external-discovery.md:12-26",
+        "tasks/todo.md:69",
+        "README.md:42"
+      ],
+      "reason": "缺口仍登记为未完成。主线删除“用恢复补发现”的暗示，禁止为列表完整而接管/误杀。这是有效旧意图（不接管外部进程）加上现行政策，不是遗漏。",
+      "verification": [
+        "docs/workbench.md:39,249"
+      ]
+    },
+    {
+      "path": "tasks/workbench-foundation-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "A0 实验闸门：服务端换票、iframe 不卸载、管理停后入口仍在；实验入口不是产品。",
+      "currentEvidence": [
+        "tasks/workbench-foundation-worker.md:7-10,56-60",
+        "docs/workbench.md:133-140"
+      ],
+      "reason": "Cookie/Origin/iframe 保活仍被产品沿用。文中“救援视图”是 09-12 实验截图事实，盖章后不当现行救援产品。导入点只改换行。产品稳定入口失败展示在 workbench.md，不必移植实验脚手架。",
+      "verification": [
+        "docs/let-it-crash.md:21",
+        "scripts/verify-workbench-foundation.mjs"
+      ]
+    },
+    {
+      "path": "tasks/workbench-implementation.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "完整 A—D 工作台实施记录；大量未提交成果、HEAD 6247b22；总目标含 restore/upgrade kill 恢复。",
+      "currentEvidence": [
+        "tasks/workbench-implementation.md:3-16,129-176"
+      ],
+      "reason": "固定需求（spaces-hub、72px、单写者、DTO 无路径）抽到现行合同头。历史批次完成不能当总目标完成的警告仍在。kill 恢复从“仍待”改为已撤销。未验证项没有改写成通过。",
+      "verification": [
+        "tasks/workbench-contract.md:8-20",
+        "docs/workbench.md:15-22"
+      ]
+    },
+    {
+      "path": "tasks/workbench-jobs-worker.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "A2 持久化任务含中断恢复标记、settleRecovery。",
+      "currentEvidence": [
+        "tasks/workbench-jobs-worker.md:3-16",
+        "tasks/workbench-contract.md:26-32"
+      ],
+      "reason": "现行 queued→running→succeeded/failed/cancelled，中断是失败终态。requestId 幂等保留。旧恢复 hold 不能扩建。文内 R2 pending 与 todo 已勾冲突。",
+      "verification": [
+        "tasks/todo.md:54 R2",
+        "git 39f8224 Drop job recovery FSM and report failure context"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-faults-worker.md",
+      "status": "A",
+      "decision": "already-covered",
+      "oldIntent": "旧无。导入点：真实维护故障验收叶子。",
+      "currentEvidence": [
+        "tasks/workbench-maintenance-faults-worker.md:1-3"
+      ],
+      "reason": "仅历史盖章。故障注入改验失败可见是现行 Q 口径，不从本文件移植恢复成功。",
+      "verification": [
+        "tasks/todo.md:59",
+        "tasks/workbench-crash-worker.md:1-4"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-product-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "产品维护脚本：plugins 过；snapshot.create 成功；snapshot.restore/runtime.install 被截断。保持严格 FAIL。",
+      "currentEvidence": [
+        "tasks/workbench-maintenance-product-worker.md:14-16,70-74"
+      ],
+      "reason": "当时 FAIL/未修好 RuntimeStore 的诚实记录仍在。现行覆盖改为 plugins/runtime install、restore 成功不再通过条件。snapshot.create 成功作为当时观察保留，与“不要因 snapshot 名字废弃创建”一致。",
+      "verification": [
+        "src/adapters/node/workbench-maintenance.ts:1206-1219",
+        "scripts/verify-workbench-maintenance-product.mjs"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-responsiveness-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "维护期间入口响应：snapshot 相已过；runtime.install 成功但入口断 4018ms>3000ms。",
+      "currentEvidence": [
+        "tasks/workbench-maintenance-responsiveness-worker.md 原 4018ms 记录"
+      ],
+      "reason": "响应性缺口是有效非恢复问题，正文未删。盖章不改变未达标事实。",
+      "verification": [
+        "tests/maintenance-responsiveness.test.ts"
+      ]
+    },
+    {
+      "path": "tasks/workbench-maintenance-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "C 维护层：15 项 fixture 过；真实 pnpm/Chromium/升级待整合。",
+      "currentEvidence": [
+        "tasks/workbench-maintenance-worker.md 结论",
+        "src/adapters/node/workbench-maintenance.ts"
+      ],
+      "reason": "维护层组合仍存在。正常快照创建与安装 worker 在源码中。恢复链删除是 R4 后续/已做方向，不能从本交接把 restore 接回。",
+      "verification": [
+        "tasks/todo.md:56 R4 不要整份删除 snapshot-worker"
+      ]
+    },
+    {
+      "path": "tasks/workbench-package-acceptance-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "管理包更新真实验收脚本；success 含整 Home 快照与 manager 恢复；rollback 读回。",
+      "currentEvidence": [
+        "tasks/workbench-package-acceptance-worker.md:49-52",
+        "docs/plans/spaces-merge-convergence.md:38 package-upgrade 测试未进默认入口"
+      ],
+      "reason": "现行 success 仍要求 snapshot-worker.mjs 哈希变化（安装 worker 未当废弃）。整 Home 快照与 rollback 读回改为已撤销。管理包自升级真实闭环仍是缺口（todo/handoff），不是旧恢复合同。",
+      "verification": [
+        "tests/workbench-package-upgrade.test.ts（计划写明需显式跑，本叶未跑）"
+      ]
+    },
+    {
+      "path": "tasks/workbench-package-upgrade-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "管理包升级模块审计六条落地，fixture 17 PASS，不是产品闭环。",
+      "currentEvidence": [
+        "tasks/workbench-package-upgrade-worker.md:1-8 及原结论"
+      ],
+      "reason": "模块存在且旧/导入相同。主线只盖章。包升级漏接默认 test 是 B5 欠账，不是旧文件未导入。",
+      "verification": [
+        "src/adapters/node/workbench-package-upgrade.ts",
+        "docs/plans/spaces-merge-convergence.md:38"
+      ]
+    },
+    {
+      "path": "tasks/workbench-plugin-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "按 HomeController.roleOf 分流；guide vs manager 接线。",
+      "currentEvidence": [
+        "tasks/workbench-plugin-worker.md 结论",
+        "docs/workbench.md:20-21"
+      ],
+      "reason": "普通空间不承载完整管理器仍是现行架构。无旧独有角色逻辑写在本历史文件里需要抄回。",
+      "verification": [
+        "packages/plugin/README.md:19,26"
+      ]
+    },
+    {
+      "path": "tasks/workbench-rc2-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "rc.2 脚本已按失败修正，证据未重跑，不宣称 rc.2 产品支持。",
+      "currentEvidence": [
+        "tasks/workbench-rc2-worker.md 状态句",
+        "docs/plugin-standard-install.md:9"
+      ],
+      "reason": "未重跑/不宣称支持的诚实性保留。后来标准安装在隔离 Home 做了 rc.1/rc.2 浏览器验收，由 plugin-standard-install 记录，不是把本未跑脚本改成通过。",
+      "verification": [
+        "tasks/plugin-standard-install.md",
+        "tasks/handoff-2026-09-14.md:25"
+      ]
+    },
+    {
+      "path": "tasks/workbench-restore-receipt.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "restore receipt 叶子交接，产品恢复回执。",
+      "currentEvidence": [
+        "tasks/workbench-restore-receipt.md:1-4",
+        "docs/let-it-crash.md:17-20"
+      ],
+      "reason": "文件本身是恢复回执历史。盖章后不当现行能力。没有仍有效的非恢复意图需要从该交接移植。",
+      "verification": [
+        "tasks/todo.md:56 公开 snapshot.restore 失败"
+      ]
+    },
+    {
+      "path": "tasks/workbench-self-update-audit.md",
+      "status": "M",
+      "decision": "superseded",
+      "oldIntent": "无用户可用工作台自升级闭环；当时设计用 snapshots.create 作唯一回滚源，失败走 CoordinatedUpgrade.restore。",
+      "currentEvidence": [
+        "tasks/workbench-self-update-audit.md:1-12,110-124"
+      ],
+      "reason": "“没有自升级闭环”仍有效，且不得把 runtime.upgrade 冒充。回滚源设计已撤销。正常更新缺口保留。不能移植步骤 8–10 的 restore 结算。",
+      "verification": [
+        "tasks/todo.md:34-35 原 manager 自升级矩阵已撤销",
+        "docs/plans/spaces-merge-convergence.md §3 升级交接"
+      ]
+    },
+    {
+      "path": "tasks/workbench-supervisor-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "createWorkbenchSupervisor：127.0.0.1 入口、HomeController、WorkbenchApi；未注入维护则返回 workbench/maintenance。",
+      "currentEvidence": [
+        "tasks/workbench-supervisor-worker.md 结论",
+        "packages/supervisor/README.md:5-22,71-92"
+      ],
+      "reason": "监督装配意图已在当前包 README 与 bootstrap 文档。旧交接没有额外未迁的启动 flag。",
+      "verification": [
+        "packages/plugin/src/host/supervisor-bootstrap.ts"
+      ]
+    },
+    {
+      "path": "tasks/workbench-ui-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "iframe 树常驻、创建不自动切换、entryOrigin≠child origin。",
+      "currentEvidence": [
+        "tasks/workbench-ui-worker.md 结论",
+        "docs/workbench.md:19,183",
+        "tasks/workbench-contract.md:20"
+      ],
+      "reason": "这些 UI 约束仍在现行指南/合同。无旧独有未迁交互。",
+      "verification": [
+        "packages/plugin/src/workbench/**"
+      ]
+    },
+    {
+      "path": "tasks/workbench-xp-compatibility-worker.md",
+      "status": "M",
+      "decision": "already-covered",
+      "oldIntent": "XP 嵌入适配模块审计已修，产品未通过，需真实 Chromium。",
+      "currentEvidence": [
+        "tasks/workbench-xp-compatibility-worker.md 状态",
+        "docs/workbench.md:27,217",
+        "tasks/workbench-demo-narration.json:3"
+      ],
+      "reason": "显式 XP 适配仍是已行使能力。本文件保持产品未通过/需真实验收，没有伪造成功。",
+      "verification": [
+        "git c6f71b7 feat: add verified XP embedded desktop compatibility adapter（旧提交内容已在主线使用，非 git 祖先）"
+      ]
+    }
+  ],
+  "summary": {
+    "counts": {
+      "total": 86,
+      "already-covered": 68,
+      "superseded": 16,
+      "missing": 2
+    },
+    "missingItems": [
+      {
+        "path": "docs/workbench.md",
+        "need": "用户主动创建/查看/删除备份（非 snapshot.restore）的现行说明；勿删 --snapshot-worker。"
+      },
+      {
+        "path": "tasks/workbench-demo-narration.json",
+        "need": "04 段加回备份管理，不带回整 Home 恢复/救援入口。"
+      }
+    ],
+    "baselineRisks": [
+      "未执行 merge、未 checkout 旧分支、未跑 npm ci/测试/浏览器/打包；本报告不是运行验收。",
+      "旧 16 个提交不是 main 祖先；core/preload 等曾按内容导入。文档组多数 old==imported，差异来自导入后 32 个主线提交（let it crash、全局 LLM、模板/分享/批量、latest）。",
+      "任务导航冲突（只指出不改）：tasks/todo.md:5 与 :51；docs/let-it-crash.md:15 与 :77；tasks/plan.md:7-9 与 todo 已勾 R/白名单；tasks/handoff-2026-09-14.md:5,11 仍写白名单未实施；tasks/workbench-contract.md:5、pluginization-core.md:7、workbench-audit.md:5、let-it-crash-d-delivery.md:12 仍写 R1–R6 pending；v0.3.0.md:16 是发版当时口径。",
+      "docs/workbench.md:231 仍写 runtime 预览 rc.1/rc.2 门禁，与 README.md:56-57 latest 冲突。不要用旧永久白名单覆盖 latest+执行精确版本。",
+      "src/shared/workbench.ts:76 仍有 recoveryRequired，属 B1 合同收敛，不是把旧恢复页移植回来。",
+      "正常快照创建仍在 workbench-maintenance.ts:1217 与 i18n snapshots.create/delete；安装 worker 仍在 supervisor README。B3/B5 不得按文件名删除。用户文档缺口见 missingItems。",
+      "历史 179/135 PASS、视频成片、rc.1/rc.2 浏览器验收是当时记录；q-coverage.md 与 global-llm A25 仍是未跑/未交付。Catppuccin 原主题失败、外部发现、npm 未发布仍是现行缺口。",
+      "B 阶段欠账不要当成 A1 旧分支补丁：双端 acquire 协议、桌面第二写者、package-upgrade 测试未进默认入口、升级独占交接。"
+    ]
+  }
+}

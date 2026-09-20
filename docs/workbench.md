@@ -20,8 +20,9 @@ Chinese: [中文](#dsh-spaces-工作台).
 - Ordinary spaces install `@dsh-spaces/view-bridge` only. If someone installs the full `@dsh-spaces/plugin` there, that space only offers **Return to workbench**. It does not recursively host another manager.
 - One writer per Home. Desktop and Web can share the same Home; the other side stays read-only until you take over.
 - Long jobs persist across refresh as the **same** job. Refresh reads that job; it does not replay the command. Interrupted jobs show interrupted failure or “result cannot be confirmed.” Spaces does not resume them.
+- User-initiated Home backups: **create**, **list**, and **delete**. Creating a backup stops owned spaces first; ordinary workspaces stay stopped when it finishes. This is not restore. Product restore commands remain unsupported.
 
-Default DSH channel is official **`latest`**. First install and upgrade candidates resolve that tag to an exact version and pin it. Any exact installed CLI can bind; a version number that Spaces has not tested is not by itself read-only. Plugin peers on SDK `0.1.5-rc.2` for this repo's build; that is not a CLI allowlist. Isolated candidate builds are a verification channel for this repo, not a user tutorial.
+Default DSH channel is official **`latest`**. First install and upgrade candidates resolve that tag to an exact version, pin it, and bind that exact installed CLI. Compatibility is required interfaces and actual capability, not a permanent rc.1 / rc.2 allowlist. A version number that Spaces has not tested is not by itself read-only. Plugin peers on SDK `0.1.5-rc.2` for this repo's build; that is not a CLI allowlist. Isolated candidate builds are a verification channel for this repo, not a user tutorial. Historical isolated-Home acceptance recorded official CLI `0.1.5-rc.1` and `0.1.5-rc.2`; that is evidence of those runs, not the current gate.
 
 ## Still being accepted
 
@@ -96,7 +97,7 @@ Required for a working manager and iframe handshake **with the current superviso
 Optional:
 
 - `--port` omitted: reuse `{home}/.dsh-spaces-control/entry-port.json` when it is valid; first listen still binds `127.0.0.1`. `--port 0` always asks the OS for a new port.
-- `--snapshot-root`: default is the sibling `{parent}/{homeName}-snapshots`, not a folder inside Home. Current binaries may still write snapshot files. Creating those files is not a restore promise; applying them as disaster recovery is revoked.
+- `--snapshot-root`: default is the sibling `{parent}/{homeName}-snapshots`, not a folder inside Home. Create / list / delete of user backups use this directory. Writing a backup file is ordinary management, not a restore promise. Applying a snapshot as disaster recovery is revoked. Do not delete backups the user already has in order to prove restore is gone.
 - `--allow-real-home`: only when `--home` is a Home you intend to manage (including `~/.dsh`). Never add this to a disposable experiment.
 - `--supervisor-asset-root`: static files for the stable entry. Not needed for the default page.
 
@@ -146,8 +147,9 @@ Inside the manager UI (default Chinese):
 - Closing the browser tab is not shutdown.
 - **设置 → 释放写控制权** (preview `controller.release`) hands the Home to the other end.
 - **设置 → 预览关闭** (preview `controller.shutdown`) stops the supervisor. Confirm the plan first.
+- Backups on the snapshots tab: **Create Home snapshot**, list existing backups, **Preview delete**. Create stops owned spaces first. Restore is not offered.
 
-Do not document or use **救援入口**, **需要恢复**, **检查并恢复**, **恢复中断的工作**, **配置恢复**, or **整 Home 恢复** as current capability.
+Do not document or use **救援入口**, **需要恢复**, **检查并恢复**, **恢复中断的工作**, **配置恢复**, or **整 Home 恢复** as current capability. Create / list / delete of backups are not those actions.
 
 ### Errors
 
@@ -216,6 +218,18 @@ dsh plugin --profile <ordinary-space> remove @dsh-spaces/plugin
 
 Themes: 竹青 and EternalNight have been shown in an isolated Home. Original XP 0.1.1 draws a nested desktop unless the explicit adapter is applied; inner chat works with that adapter. Original Catppuccin still fails on missing dependencies. Spaces does not auto-switch themes to make a space look healthy.
 
+### Backups (create, view, delete)
+
+Ordinary Home backups stay in the workbench. They are not disaster recovery.
+
+- **Create Home snapshot** / **创建整 Home 快照** — preview, then stop owned running spaces, write a backup, leave ordinary workspaces stopped.
+- **View** the list: created time, recorded DSH version, size, space ids. An empty list shows **No snapshots yet.** / **还没有快照。**
+- **Preview delete** / **预览删除** — user-initiated removal of a backup you no longer want.
+
+There is no current Restore product action (`snapshot.restore` is unsupported; the UI may label a row **Restore is not supported** / **不支持恢复**). Creating a backup is not “save a restore point so Spaces can put the Home back later.” Spaces does not delete backups you already have in order to prove restore is gone.
+
+Start still requires `--snapshot-worker`: that worker also runs runtime install and other non-restore IO. Backup files go under `--snapshot-root` (default sibling of Home). Do not point that directory at `profiles`, `hub`, `sessions`, `storages`, or `.dsh-spaces-restore`.
+
 ### Long jobs
 
 Dangerous work is **preview → confirm plan → execute**. Plans expire in five minutes and are checked again at execute. Cancel is only for queued / still-reversible phases. Cancel does not roll back work that already happened.
@@ -228,7 +242,7 @@ Import of a space definition can succeed while plugin install or space start fai
 
 Browser requests never carry disk paths. Snapshot and runtime roots are Node flags / private `toolchain.json`, not form fields.
 
-Runtime **预览安装** / **预览升级** still go through the rc.1 / rc.2 gate. A candidate that never becomes current is a failed prepare, not a rollback. After the pointer has switched, a later fault is reported in place.
+Runtime **预览安装** / **预览升级** follow official **`latest`**: resolve the tag to an exact version, pin it, and bind that exact installed CLI. Compatibility is required interfaces and actual capability. A version number Spaces has not tested is not by itself read-only. Historical isolated-Home acceptance recorded official CLI `0.1.5-rc.1` and `0.1.5-rc.2`; that is evidence of those runs, not a permanent write allowlist. A candidate that never becomes current is a failed prepare, not a rollback. After the pointer has switched, a later fault is reported in place.
 
 ### Logs and doctor
 
@@ -280,8 +294,9 @@ Production Home: add `--allow-real-home` and an explicit `--home`. Doctor does n
 - 普通空间只装 `@dsh-spaces/view-bridge`。若误装完整 `@dsh-spaces/plugin`，该空间只有 **返回工作台**，不会递归再开一层管理。
 - 同一 Home 只有一个写控制者。桌面和 Web 可共用 Home，另一端只读，直到你明确接管。
 - 长任务刷新后读取**同一个**任务，不重放命令。中断任务显示中断失败或结果无法确认。不续跑。
+- 用户主动的 Home 备份：**创建**、**查看**、**删除**。创建备份会先停止自有空间，完成后普通工作空间保持停止。这不是恢复。公开恢复命令仍不受理。
 
-默认跟随官方 **`latest`**。首次安装和升级候选会把该 tag 解析成精确版本再钉住。任意已安装的精确 CLI 都可以绑定；Spaces 没测过的版本号本身不会变成只读。本仓库插件 peer 的 SDK `0.1.5-rc.2` 不是 CLI 白名单。仓库里的 candidate 构建只是隔离验证通道。
+默认跟随官方 **`latest`**。首次安装和升级候选会把该 tag 解析成精确版本再钉住，并绑定该精确已安装 CLI。兼容看所需接口和实际能力，不是永久的 rc.1 / rc.2 白名单。Spaces 没测过的版本号本身不会变成只读。本仓库插件 peer 的 SDK `0.1.5-rc.2` 不是 CLI 白名单。仓库里的 candidate 构建只是隔离验证通道。隔离 Home 上曾用官方 CLI `0.1.5-rc.1` 和 `0.1.5-rc.2` 做过验收，那是当时跑次的证据，不是现行门禁。
 
 ## 尚未写进「已完成」的部分
 
@@ -354,7 +369,7 @@ node packages/supervisor/lib/index.js `
 可选：
 
 - 不传 `--port`：有效时复用 `{home}/.dsh-spaces-control/entry-port.json`；始终只绑 `127.0.0.1`。`--port 0` 每次向系统要新端口。
-- `--snapshot-root`：默认是兄弟目录 `{上一级}/{Home名}-snapshots`，不在 Home 里面。当前二进制仍可能写入快照文件；写入不等于承诺恢复。
+- `--snapshot-root`：默认是兄弟目录 `{上一级}/{Home名}-snapshots`，不在 Home 里面。用户创建 / 查看 / 删除备份使用这个目录。写入备份文件是普通管理，不是恢复承诺。把快照当作灾难恢复来套用已撤销。不要为了证明恢复已移除而删除用户已有备份。
 - `--allow-real-home`：仅当你真的要管理那个 Home（包括 `~/.dsh`）。一次性试验不要加。
 - `--supervisor-asset-root`：稳定入口静态资源，默认页不需要。
 
@@ -384,8 +399,9 @@ node packages/supervisor/lib/index.js `
 - 关掉浏览器标签 ≠ 关闭工作台。
 - **设置 → 释放写控制权**（预览 `controller.release`）把 Home 交给另一端。
 - **设置 → 预览关闭**（预览 `controller.shutdown`）才停监督进程。先确认计划。
+- 快照页上的备份：**创建整 Home 快照**、列出已有备份、**预览删除**。创建会先停止自有空间。不提供恢复。
 
-不要把 **救援入口**、**需要恢复**、**检查并恢复**、**恢复中断的工作**、**配置恢复**、**整 Home 恢复** 写成当前能力。
+不要把 **救援入口**、**需要恢复**、**检查并恢复**、**恢复中断的工作**、**配置恢复**、**整 Home 恢复** 写成当前能力。创建 / 查看 / 删除备份不是那些动作。
 
 ### 错误
 
@@ -452,6 +468,18 @@ Windows 上 CLI `0.1.5-rc.1` 转发 `dsh plugin add` 时，带空格的绝对路
 
 主题：隔离 Home 里竹青、EternalNight 已实际显示。原版 XP 0.1.1 在 iframe 里会画一层桌面，显式适配后内层聊天可用。原版 Catppuccin 仍会因缺依赖失败。Spaces 不会自动换主题把空间打扮成正常。
 
+### 备份（创建、查看、删除）
+
+工作台里仍可管理普通 Home 备份。这不是灾难恢复。
+
+- **创建整 Home 快照** — 先预览，再停止自有运行中的空间，写入一份备份，完成后普通工作空间保持停止。
+- **查看**列表：创建时间、记录的 DSH 版本、大小、空间 id。空列表显示 **还没有快照。**
+- **预览删除** — 用户主动删掉不再需要的备份。
+
+没有现行的恢复产品动作（`snapshot.restore` 不受理；界面上可能标 **不支持恢复**）。创建备份不是“存一个恢复点，好让 Spaces 以后把 Home 套回去”。不要为了证明恢复已移除而删除用户已有备份。
+
+启动仍需要 `--snapshot-worker`：同一 worker 还跑运行时安装等非恢复 IO。备份文件落在 `--snapshot-root`（默认是 Home 的兄弟目录）。不要把它指到 `profiles`、`hub`、`sessions`、`storages`、`.dsh-spaces-restore`。
+
 ### 长任务
 
 危险操作都是 **预览 → 确认计划 → 执行**。计划约五分钟过期，执行时再核对。只能取消仍在队列或尚未进入不可逆阶段的任务。取消不会回滚已经发生的副作用。
@@ -464,7 +492,7 @@ Windows 上 CLI `0.1.5-rc.1` 转发 `dsh plugin add` 时，带空格的绝对路
 
 浏览器请求不含磁盘路径。快照和运行时根目录是 Node 参数 / 私有 `toolchain.json`，不是表单字段。
 
-运行时 **预览安装** / **预览升级** 仍受 rc.1 / rc.2 门禁。候选从未成为当前指针是准备失败，不是回滚。指针切换之后再出错，就报告现场。
+运行时 **预览安装** / **预览升级** 跟随官方 **`latest`**：把 tag 解析成精确版本再钉住，并绑定该精确已安装 CLI。兼容看所需接口和实际能力。Spaces 没测过的版本号本身不会变成只读。隔离 Home 上曾用官方 CLI `0.1.5-rc.1` 和 `0.1.5-rc.2` 做过验收，那是当时跑次的证据，不是永久写白名单。候选从未成为当前指针是准备失败，不是回滚。指针切换之后再出错，就报告现场。
 
 ### 日志和 doctor
 

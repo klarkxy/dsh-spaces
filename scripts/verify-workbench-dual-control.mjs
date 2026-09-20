@@ -706,11 +706,18 @@ async function main() {
     assertSingleOwner(await api('state'), desktopState, readLease(home), 'electron attached while web owns');
     pass('desktop IPC getControllerState is read-only with ownerKind=web');
 
-    await electronPage.getByText(/只读 — Web 工作台正在控制此 Home|Read-only — the web workbench holds this Home/).waitFor({
-      timeout: 30000,
-    });
+    const takeoverButtons = await electronPage
+      .getByRole('button', { name: /接管|Take over|移交|Hand off/ })
+      .count();
+    if (takeoverButtons) {
+      throw new Error(
+        `desktop still shows ${takeoverButtons} takeover/hand-off button(s) while web owns this Home`,
+      );
+    }
     await electronPage.screenshot({ path: join(output, 'screenshots', 'desktop-readonly.png') });
-    pass('desktop UI shows the web-owned read-only status and a screenshot was captured');
+    pass(
+      'desktop has no takeover/hand-off buttons while web owns; screenshot records current appearance only (removed badge copy is not asserted)',
+    );
 
     const profilesReadonly = await desktopInvoke(electronPage, 'listProfiles');
     assertNoManager(profilesReadonly, managerId, 'read-only listProfiles');
