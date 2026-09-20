@@ -15,6 +15,7 @@ import {
   workbenchPlanSchema,
   workbenchPluginListSchema,
   workbenchRuntimeListSchema,
+  workbenchPackageResultSchema,
   workbenchSnapshotSchema,
   workbenchStateSchema,
   workbenchViewSchema,
@@ -35,6 +36,7 @@ export const WORKBENCH_HTTP_METHODS = [
   "snapshots",
   "snapshot",
   "runtimes",
+  "workbenchPackage",
   "backups",
 ] as const;
 
@@ -80,6 +82,7 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
     snapshots: () => call("snapshots", {}, workbenchSnapshotSchema.array()),
     snapshot: (id) => call("snapshot", { id: snapshotIdSchema.parse(id) }, workbenchSnapshotSchema),
     runtimes: () => call("runtimes", {}, workbenchRuntimeListSchema),
+    workbenchPackage: () => call("workbenchPackage", {}, workbenchPackageResultSchema),
     backups: (spaceId) => call("backups", { spaceId: spaceIdSchema.parse(spaceId) }, backupsResultSchema),
   };
 }

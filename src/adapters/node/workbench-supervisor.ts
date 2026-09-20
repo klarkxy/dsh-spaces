@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -15,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import type { Server } from "node:http";
 import { atomicWrite } from "../../main/atomic";
 import { CooperativeChildren } from "./cooperative-children";
+import { observeMaintenanceChild, withChildObservation } from "../../main/owned-process-record";
 import { inspectHomeToolchain } from "../desktop/control-residue";
 import { CoordinatedUpgrade } from "../../main/coordinated-upgrade";
 import { DiagnosticsService, sanitizeLogText } from "../../main/diagnostics";
@@ -43,6 +45,7 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime as WorkbenchRuntimeDto,
+  WorkbenchPackageRelease,
   WorkbenchSnapshot,
   WorkbenchSpace,
   WorkbenchState,
@@ -50,6 +53,8 @@ import type {
 } from "../../shared/workbench";
 import {
   COMPATIBLE_DSH_CLI_VERSION,
+  COMPATIBLE_DSH_CLI_VERSIONS,
+  isCompatibleDshCliVersion,
   NodeSpacesControl,
   bindDshCli,
   parseSpaceId,
@@ -70,13 +75,16 @@ import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
 import {
   WorkbenchJobError,
   WorkbenchJobStore,
+  WORKBENCH_JOBS_DIR_NAME,
   type WorkbenchJobContext,
 } from "./workbench-jobs";
 import {
   WorkbenchMaintenance as WorkbenchMaintenanceService,
+  WORKBENCH_PLANS_DIR_NAME,
   type WorkbenchRecoveryOutcome,
 } from "./workbench-maintenance";
 import type { WorkbenchMaintenancePorts } from "./workbench-maintenance-ports";
+import { WorkbenchPackageUpgrade } from "./workbench-package-upgrade";
 import {
   expectedAuthCookieName,
   renderEntryPage,
@@ -88,7 +96,7 @@ import {
 } from "./workbench-http";
 
 export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./workbench-http";
-export { COMPATIBLE_DSH_CLI_VERSION };
+export { COMPATIBLE_DSH_CLI_VERSION, COMPATIBLE_DSH_CLI_VERSIONS, isCompatibleDshCliVersion };
 
 const SPACES_PLUGIN = "@dsh-spaces/plugin";
 const VIEW_ENV = {
@@ -149,6 +157,7 @@ export interface WorkbenchMaintenance {
   snapshots(): Promise<WorkbenchSnapshot[]>;
   snapshot(id: string): Promise<WorkbenchSnapshot>;
   runtimes(): Promise<WorkbenchRuntimeDto[]>;
+  workbenchPackage?(): Promise<WorkbenchPackageRelease | null>;
   backups(spaceId: string): Promise<WorkbenchBackup[]>;
   recover(ctx?: WorkbenchJobContext): Promise<void>;
   recoveryOutcome?(): WorkbenchRecoveryOutcome | undefined;
@@ -242,6 +251,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private managerId: string | null = null;
   private managerInstall: "missing" | "manager" | "ordinary" | "damaged" = "missing";
   private maintenanceFlag = false;
+  // Inventory is a display snapshot while maintenance swaps its backing tree.
+  // Admission still uses the live controller and transaction locks.
+  private maintenanceInventory: { mode: WorkbenchState["mode"]; spaces: WorkbenchSpace[] } | null = null;
   private recoveryRequired = false;
   private reasons: string[] = [];
   private readonly generations = new Map<string, number>();
@@ -255,6 +267,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private maintenanceBlocked = false;
   private runtimeStore: RuntimeStore | undefined;
   private readonly unmanaged = new Set<string>();
+  /** Skip starting the manager while recovery jobs are still being bound. */
+  private holdManagerStart = false;
   private readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   private readonly pidAlive: PidAliveFn;
 
@@ -413,6 +427,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "runtimes":
         expectKeys(body, []);
         return this.runtimes();
+      case "workbenchPackage":
+        expectKeys(body, []);
+        return this.maintenance?.workbenchPackage?.() ?? null;
       case "backups":
         expectKeys(body, ["spaceId"]);
         return this.backups(parseSpaceName(body.spaceId));
@@ -473,18 +490,26 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   async state(): Promise<WorkbenchState> {
     this.refreshRecovery();
-    const owner = this.readOwner();
+    const owner = this.maintenanceFlag && this.handle
+      ? { kind: this.handle.owner.kind, since: this.handle.owner.startedAt }
+      : this.readOwner();
+    const inventory = this.maintenanceFlag ? this.maintenanceInventory : null;
     return {
       role: this.role(),
       managerId: this.managerId,
       owner,
       writable: Boolean(this.handle),
-      mode: this.spaces?.capabilities().mode ?? "unknown-readonly",
+      mode: inventory?.mode ?? this.spaces?.capabilities().mode ?? "unknown-readonly",
       dshVersion: this.cli?.version ?? null,
       maintenance: this.maintenanceFlag,
       recoveryRequired: this.recoveryRequired,
       reasons: [...this.reasons],
-      spaces: this.listSpaces(),
+      spaces: inventory ? inventory.spaces.map(row => ({
+        ...row,
+        status: this.unmanaged.has(row.id) ? "unknown" : this.publicStatus(row.id),
+        generation: this.views.get(row.id)?.generation ?? this.generations.get(row.id) ?? row.generation,
+        managed: Boolean(this.handle) && !this.unmanaged.has(row.id),
+      })) : this.listSpaces(),
       jobs: this.jobs?.list() ?? [],
     };
   }
@@ -516,7 +541,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (command.kind === "controller.acquire") {
       return this.acquireCommand(requestId);
     }
-    if (this.sealing || this.relinquishKind) {
+    if (this.closed || this.sealing || this.relinquishKind) {
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     this.assertWritable();
@@ -527,7 +552,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.recoveryRequired && command.kind !== "recovery.resume") {
       throw new WorkbenchPublicError("workbench/unavailable");
     }
-    const job = await this.jobs.submit(command, requestId, (ctx) => this.runCommand(command, ctx));
+    const job = await this.jobs.submit(command, requestId, (ctx) =>
+      this.observeChildWork(() => this.runCommand(command, ctx)),
+    );
     if (command.kind === "plan.execute") {
       void this.jobs.whenIdle().then(() => this.finishRelinquish());
     }
@@ -605,6 +632,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async acquireCommand(requestId: string): Promise<WorkbenchJob> {
+    if (this.closed) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
+    }
     if (this.handle) {
       return syntheticJob(requestId, "controller.acquire", "succeeded", "Run rights already held.");
     }
@@ -618,6 +648,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
     }
     this.handle = this.controller.acquire("web", this.origin);
+    this.sealing = false;
+    this.relinquishKind = null;
     this.writeHostBearer();
     this.writeEndpointFile();
     await this.initWritable();
@@ -634,7 +666,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now });
     this.processes = this.createProcessManager();
     this.reconcileInstanceRecords();
-    if (this.hasMaintenanceEvidence() || this.unmanaged.size ||
+    if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size ||
       this.jobs.list().some(job => job.status === "recovery-required")) {
       this.maintenance = this.createMaintenance();
       this.refreshRecovery();
@@ -665,7 +697,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return;
       }
       try {
-        await this.bootstrapManager(identity.profileId);
+        await this.observeChildWork(() => this.bootstrapManager(identity.profileId));
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
         this.recoveryRequired = true;
@@ -773,10 +805,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       join(this.controlDir, ENDPOINT_FILE),
       `${JSON.stringify({ version: 1, origin, bearer: this.bearer })}\n`,
     );
+    if (this.options.port === undefined) {
+      atomicWrite(join(this.controlDir, "entry-port.json"),
+        `${JSON.stringify({ version: 1, port: Number(new URL(origin).port) })}\n`);
+    }
   }
 
-  private async bootstrapManager(profileId: string): Promise<void> {
-    await this.lock.run("bootstrap-manager", async () => {
+  private async bootstrapManager(profileId: string, lockHeld = false): Promise<void> {
+    const initialize = async () => this.observeChildWork(async () => {
       const existing = inspectManagerInstall(this.home, profileId);
       const pending = this.ownsBootstrap(profileId);
       if ((existing === "ordinary" && !pending) || existing === "damaged") {
@@ -788,6 +824,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (existing === "manager" && !pending) return;
       const marker = join(this.controlDir, "manager-bootstrap.json");
       if (!pending) atomicWrite(marker, `${JSON.stringify({ version: 1, profileId })}\n`);
+      // A standalone first launch can precede any user-created DSH profile.
+      // Materialize the official root once; existing web configuration is untouched.
+      if (!existsSync(join(this.home, "profiles", "web"))) {
+        const seeded = await this.runBoundCli([
+          "--profile", "web", "--from-default-profile", "web", "--dump-config",
+        ]);
+        if (seeded.code !== 0) throw new WorkbenchPublicError("workbench/failed", "The official web profile could not be initialized.");
+      }
       if (existing === "missing") {
         const created = await this.runBoundCli([
         "--profile",
@@ -821,6 +865,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.registry.updateMeta(profileId, { displayName: "Spaces", order: 0 });
       unlinkSync(marker);
     });
+    if (lockHeld) await initialize();
+    else await this.lock.run("bootstrap-manager", initialize);
   }
 
   private ownsBootstrap(profileId: string): boolean {
@@ -854,9 +900,21 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           ...this.childViewEnv(profile),
         };
         const spawnFn = injected.spawn ?? children.spawn;
-        const child = spawnFn(args, { ...options, env });
+        const port = Number(args[args.indexOf("--port") + 1]);
+        mkdirSync(this.instancesDir(), { recursive: true });
+        atomicWrite(this.instancePath(profile), `${JSON.stringify({ version: 1, spaceId: profile,
+          phase: "spawning", port, generation: this.generations.get(profile) ?? 0,
+          origin: `http://127.0.0.1:${port}`, startedAt: this.now().toISOString() })}\n`);
+        let child;
+        try { child = spawnFn(args, { ...options, env }); }
+        catch (error) { this.removeInstanceRecord(profile); throw error; }
         if (child.pid) {
           this.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
+          try { this.writeInstanceRecord(profile, port, this.generations.get(profile) ?? 0); }
+          catch {
+            this.maintenanceBlocked = true;
+            this.reasons.push("The child identity record could not be saved. Run rights were kept.");
+          }
           child.once("exit", () => {
             const recorded = this.spawned.get(profile);
             if (recorded?.pid === child.pid) {
@@ -864,7 +922,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
               this.removeInstanceRecord(profile);
             }
           });
-        }
+        } else child.once("error", () => this.removeInstanceRecord(profile));
         return child;
       },
       ensureCli: injected.ensureCli ?? (async () => this.cli?.bin ?? this.options.bin),
@@ -903,6 +961,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       workerFile: worker,
     });
     const runtimes = new RuntimeStore({
+      installWorker: { file: worker, home: this.home },
       root: this.runtimeRoot(),
       snapshotRoot,
       source: () => inferPackageSource(),
@@ -911,6 +970,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.runtimeStore = runtimes;
     const upgrades = new CoordinatedUpgrade({
       home: this.home,
+      workerFile: worker,
+      observeChild: () => observeMaintenanceChild(this.home, () => { this.maintenanceBlocked = true; }),
       profiles: () => this.homeProfileNames(),
       stopAll: () => this.stopOwnedAll(),
       snapshots,
@@ -925,7 +986,26 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       isMaintenance: () => this.maintenanceFlag,
     });
     const ports = this.maintenancePorts(snapshots, runtimes, upgrades, diagnostics);
-    const create = this.options.createMaintenance ?? ((next) => new WorkbenchMaintenanceService(next));
+    ports.packageUpgrade = new WorkbenchPackageUpgrade({
+      home: this.home, managerId: () => this.managerId,
+      pluginArtifact: this.options.pluginArtifact, viewBridgeArtifact: this.options.viewBridgeArtifact,
+      snapshots, upgrades, currentRuntime: () => this.currentRuntime(),
+      stopAll: () => this.stopOwnedAll(), reinitializeManager: () => this.reinitializeManager(),
+      pluginAdd: this.options.pluginAdd,
+    });
+    const create = this.options.createMaintenance ?? ((next) => new WorkbenchMaintenanceService(next, {
+      log: (operation, error) => {
+        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error ?? "")).slice(0, 4000);
+        try {
+          appendFileSync(join(this.controlDir, "maintenance-errors.jsonl"), `${JSON.stringify({
+            at: this.now().toISOString(), operation, detail,
+          })}\n`, { encoding: "utf8", mode: 0o600 });
+        } catch {
+          this.maintenanceBlocked = true;
+          this.reasons.push("Maintenance diagnostics could not be saved. Further changes are blocked.");
+        }
+      },
+    }));
     return create(ports);
   }
 
@@ -952,13 +1032,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ownedSpaceIds: () => this.ownedSpaceIds(),
       stopSpace: (spaceId) => this.stopOwned(spaceId),
       stopAll: () => this.stopOwnedAll(),
-      startSpace: (spaceId) => this.startOwned(spaceId),
+      startSpace: async (spaceId) => { await this.startSpace(spaceId, silentJobContext()); },
       currentRuntime: () => this.currentRuntime(),
       reinitializeManager: () => this.reinitializeManager(),
       setMaintenance: (active) => {
+        if (active && !this.maintenanceFlag) {
+          this.maintenanceInventory = {
+            mode: this.spaces?.capabilities().mode ?? "unknown-readonly",
+            spaces: this.listSpaces(),
+          };
+        }
         this.maintenanceFlag = active;
+        if (!active) this.maintenanceInventory = null;
       },
-      isCompatibleRuntime: (version) => version === COMPATIBLE_DSH_CLI_VERSION,
+      hasUnfinishedPlan: planId => this.jobs?.hasUnfinishedPlan(planId) ?? false,
+      unfinishedPlanIds: () => this.jobs?.unfinishedPlanIds() ?? [],
+      isCompatibleRuntime: (version) => isCompatibleDshCliVersion(version),
     };
   }
 
@@ -1014,7 +1103,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private async reinitializeManager(): Promise<void> {
     const selected = this.runtimeStore?.current();
-    if (selected && selected.version === COMPATIBLE_DSH_CLI_VERSION) {
+    if (selected && isCompatibleDshCliVersion(selected.version)) {
       this.cli = { bin: selected.bin, version: selected.version };
     } else if (selected) {
       throw new WorkbenchPublicError("workbench/incompatible");
@@ -1028,8 +1117,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         dshVersion: this.cli.version, boundAt: this.now().toISOString() }, null, 2)}\n`);
     }
     setSelectedDshResolver(() => this.cli?.bin);
+    if (this.managerId) {
+      this.managerInstall = inspectManagerInstall(this.home, this.managerId);
+      if (this.managerInstall === "missing") {
+        await this.bootstrapManager(this.managerId, true);
+        this.managerInstall = inspectManagerInstall(this.home, this.managerId);
+      }
+      if (this.managerInstall !== "manager") throw new WorkbenchPublicError("workbench/unavailable");
+    }
     const loader = this.managerId ? await this.syncLoader(this.managerId) : undefined;
     this.spaces = this.createSpacesControlWithLoader(loader);
+    if (this.holdManagerStart) return;
     if (this.managerId && this.managerInstall === "manager" && !this.unmanaged.has(this.managerId)) {
       const runningWorkspaces = this.ownedSpaceIds().filter(
         (id) => id !== this.managerId && this.statusOf(id) === "running",
@@ -1132,6 +1230,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const id = this.requireSpace(spaceId);
     if (id === "web") throw new WorkbenchPublicError("workbench/protected");
     if (this.unmanaged.has(id)) throw new WorkbenchPublicError("workbench/unmanaged");
+    if (this.statusOf(id) === "running") {
+      if (!this.views.has(id)) throw new WorkbenchPublicError("workbench/unavailable");
+      return { spaceId: id, view: await this.view(id) };
+    }
     if (id !== this.managerId) await this.ensureViewBridge(id);
     const gen = (this.generations.get(id) ?? 0) + 1;
     this.generations.set(id, gen);
@@ -1144,6 +1246,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       issued: false,
     });
     await this.startOwned(id);
+    if (this.maintenanceBlocked) throw new WorkbenchPublicError("workbench/unavailable");
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/failed");
     const childOrigin = `http://127.0.0.1:${port}`;
@@ -1261,20 +1364,71 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     ctx.phase("inspect-journal");
     ctx.cancellable(false);
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    await this.stopOwnedAll();
-    if (this.maintenance) await this.maintenance.recover(ctx);
-    const outcome = this.maintenance?.recoveryOutcome?.();
-    if (outcome?.settleInterruptedJobs) {
-      for (const job of this.jobs.list()) {
-        if (job.status !== "recovery-required") continue;
-        if (!provedByRecovery(job.kind, outcome)) continue;
-        await this.jobs.settleRecovery(job.id, {
-          status: "cancelled",
-          message: outcome.message,
-        });
+    this.holdManagerStart = true;
+    try {
+      await this.stopOwnedAll();
+      this.unmanaged.clear();
+      this.reconcileInstanceRecords();
+      if (this.unmanaged.size) {
+        throw new WorkbenchPublicError("workbench/unavailable", "Leftover processes must be proven stopped before recovery.");
+      }
+      if (this.lock.inspect().held) {
+        const reclaimed = this.lock.unlockDead();
+        if (!reclaimed.unlocked && reclaimed.reason !== "not-held") {
+          throw new WorkbenchPublicError("workbench/busy", "The Home transaction lock is live or ambiguous and was left in place.");
+        }
+      }
+      if (this.maintenance) {
+        try {
+          await this.maintenance.recover(ctx);
+        } catch {
+          const failed = this.maintenance.recoveryOutcome?.();
+          const detail = failed?.message?.trim()
+            || "Snapshot or upgrade recovery failed. Diagnostic journals were left in place.";
+          ctx.message(detail);
+          this.refreshRecovery();
+          throw new WorkbenchPublicError(
+            "workbench/unavailable",
+            `${detail} Use doctor if this entry cannot finish remaining records.`,
+          );
+        }
+      }
+      const outcome = this.maintenance?.recoveryOutcome?.();
+      if (outcome?.settleInterruptedJobs) {
+        await this.settleProvedRecoveryJobs(outcome);
+      }
+      this.refreshRecovery();
+      const leftovers = this.jobs.list().filter((job) => job.status === "recovery-required");
+      if (leftovers.length || this.hasMaintenanceEvidence() || this.unmanaged.size) {
+        const message =
+          "Recovery is still required. Unproved jobs were left in place. Use doctor if this entry cannot finish them.";
+        ctx.message(message);
+        throw new WorkbenchPublicError("workbench/unavailable", message);
+      }
+      this.holdManagerStart = false;
+      this.maintenanceBlocked = false;
+      if (outcome?.settleInterruptedJobs) await this.reinitializeManager();
+    } finally {
+      this.holdManagerStart = false;
+      this.refreshRecovery();
+    }
+  }
+
+  private async settleProvedRecoveryJobs(outcome: WorkbenchRecoveryOutcome): Promise<void> {
+    if (!this.jobs) return;
+    for (const job of this.jobs.list()) {
+      if (job.status !== "recovery-required") continue;
+      const planId = job.kind === "plan.execute" ? readJobPlanId(this.home, job.id) : undefined;
+      const plan = planId ? readPlanEvidence(this.home, planId) : undefined;
+      const settlement = settlementForRecoveredJob(job.kind, planId, plan, outcome);
+      if (!settlement) continue;
+      try {
+        await this.jobs.settleRecovery(job.id, settlement);
+        if (planId) markHandledPlan(this.home, planId, settlement.status);
+      } catch {
+        /* unreadable/unknown records stay for doctor */
       }
     }
-    this.refreshRecovery();
   }
 
   private async finishRelinquish(): Promise<void> {
@@ -1283,9 +1437,21 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.relinquishKind = null;
     this.dropWritable();
     if (kind === "controller.shutdown") {
+      this.sealing = true;
       this.closed = true;
       await this.httpClose?.();
+      return;
     }
+    this.sealing = false;
+  }
+
+  private observeChildWork<T>(action: () => T): T {
+    return withChildObservation(
+      () => observeMaintenanceChild(this.home, () => {
+        this.maintenanceBlocked = true;
+      }),
+      action,
+    );
   }
 
   private dropWritable(): void {
@@ -1472,7 +1638,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private refreshRecovery(): void {
     const extra: string[] = [];
     if (!this.jobs?.list().some(job => job.status === "running")) {
-      if (this.hasMaintenanceEvidence()) extra.push("Unfinished Home maintenance must be recovered before new changes.");
+      if (this.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance must be recovered before new changes.");
     }
     if (this.jobs?.list().some((job) => job.status === "recovery-required")) {
       extra.push("Interrupted work must be recovered before new changes.");
@@ -1494,6 +1660,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         join(this.home, ".dsh-spaces-upgrade", "journal.json"),
         join(this.home, ".dsh-spaces-mutation.json"),
         join(this.controlDir, "plugin-mutation.json"),
+        join(this.controlDir, "workbench-upgrade.json"),
     ].some(path => {
         try { lstatSync(path); return true; }
         catch (error) { return (error as NodeJS.ErrnoException).code !== "ENOENT"; }
@@ -1598,7 +1765,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     for (const name of names) {
       const path = join(this.instancesDir(), name);
       const id = name.replace(/\.json$/, "");
-      let record: { version?: number; spaceId?: string; pid?: number; startedAt?: string; port?: number; generation?: number; origin?: string };
+      let record: { version?: number; kind?: string; spaceId?: string; pid?: number; startedAt?: string; port?: number; generation?: number; origin?: string };
       try {
         const stat = lstatSync(path);
         if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("ambiguous record");
@@ -1608,11 +1775,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.unmanaged.add("unknown-records");
         continue;
       }
+      const maintenanceChild = record?.kind === "maintenance" && /^maintenance-[a-f0-9]{12}$/.test(id);
       if (record?.version !== 1 || record.spaceId !== id || !Number.isInteger(record.pid) || record.pid! <= 0 ||
         typeof record.startedAt !== "string" || !Number.isFinite(Date.parse(record.startedAt)) ||
-        !Number.isInteger(record.port) || record.port! < 1 || record.port! > 65535 ||
+        (!maintenanceChild && (!Number.isInteger(record.port) || record.port! < 1 || record.port! > 65535 ||
         !Number.isInteger(record.generation) || record.generation! < 0 ||
-        record.origin !== `http://127.0.0.1:${record.port}`) {
+        record.origin !== `http://127.0.0.1:${record.port}`))) {
         this.unmanaged.add(id);
         continue;
       }
@@ -1676,7 +1844,20 @@ export async function createWorkbenchSupervisor(
   options: WorkbenchSupervisorOptions,
 ): Promise<WorkbenchSupervisorHandle> {
   const runtime = new WorkbenchSupervisorRuntime(options);
-  const http = await startWorkbenchHttp(runtime, options.port ?? 0);
+  let port = options.port;
+  if (port === undefined) {
+    const path = join(resolve(options.home), HOME_CONTROL_DIR_NAME, "entry-port.json");
+    if (existsSync(path)) {
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Workbench entry port record needs recovery.");
+      const saved = JSON.parse(readFileSync(path, "utf8"));
+      if (saved.version !== 1 || !Number.isInteger(saved.port) || saved.port < 1 || saved.port > 65535) {
+        throw new Error("Workbench entry port record needs recovery.");
+      }
+      port = saved.port;
+    }
+  }
+  const http = await startWorkbenchHttp(runtime, port ?? 0);
   runtime.attachHttp(http.origin, http.close);
   try {
     await runtime.tryOwn();
@@ -1775,10 +1956,10 @@ function bindSelectedCli(bin: string): BoundCli {
   if (!bound) {
     throw new WorkbenchPublicError("workbench/incompatible", "The selected DSH CLI could not be bound from disk.");
   }
-  if (bound.version !== COMPATIBLE_DSH_CLI_VERSION) {
+  if (!isCompatibleDshCliVersion(bound.version)) {
     throw new WorkbenchPublicError(
       "workbench/incompatible",
-      `Supported CLI is ${COMPATIBLE_DSH_CLI_VERSION}; ${bound.version} is not enabled.`,
+      `Supported CLI is ${COMPATIBLE_DSH_CLI_VERSIONS.join(", ")}; ${bound.version} is not enabled.`,
     );
   }
   return bound;
@@ -1814,10 +1995,122 @@ function publicPluginVersion(spec: unknown): string | null {
   return isExactRuntimeVersion(spec) ? spec : null;
 }
 
-function provedByRecovery(kind: string, outcome: WorkbenchRecoveryOutcome): boolean {
-  if (kind.startsWith("snapshot.") && outcome.restoreCompleted) return true;
-  if (kind.startsWith("runtime.") && (outcome.upgradeRolledBack || outcome.restoreCompleted)) return true;
-  return false;
+function isPlanIdentity(value: string): boolean {
+  return ENTITY_RE.test(value);
+}
+
+function readContainedJson(home: string, parts: string[]): unknown | undefined {
+  let current = home;
+  for (const part of parts) {
+    if (!part || part === "." || part === ".." || /[\\/]/.test(part)) return undefined;
+    const next = join(current, part);
+    try {
+      const st = lstatSync(next);
+      if (st.isSymbolicLink()) return undefined;
+      current = next;
+    } catch {
+      return undefined;
+    }
+  }
+  try {
+    const st = lstatSync(current);
+    if (!st.isFile() || st.isSymbolicLink()) return undefined;
+    return JSON.parse(readFileSync(current, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function readJobPlanId(home: string, jobId: string): string | undefined {
+  if (!isPlanIdentity(jobId)) return undefined;
+  const parsed = readContainedJson(home, [HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, `${jobId}.json`]) as
+    | { command?: { planId?: unknown } }
+    | undefined;
+  const planId = parsed?.command?.planId;
+  return typeof planId === "string" && isPlanIdentity(planId) ? planId : undefined;
+}
+
+function readPlanEvidence(
+  home: string,
+  planId: string,
+): { kind: string; snapshotId?: string } | undefined {
+  if (!isPlanIdentity(planId)) return undefined;
+  const parsed = readContainedJson(home, [HOME_CONTROL_DIR_NAME, WORKBENCH_PLANS_DIR_NAME, `${planId}.json`]) as
+    | { schemaVersion?: unknown; id?: unknown; command?: { kind?: unknown; snapshotId?: unknown } }
+    | undefined;
+  if (!parsed || parsed.schemaVersion !== 1 || parsed.id !== planId) return undefined;
+  const kind = parsed.command?.kind;
+  if (typeof kind !== "string" || !kind) return undefined;
+  const snapshotId = parsed.command?.snapshotId;
+  return {
+    kind,
+    snapshotId: typeof snapshotId === "string" ? snapshotId : undefined,
+  };
+}
+
+function settlementForRecoveredJob(
+  kind: string,
+  planId: string | undefined,
+  plan: { kind: string; snapshotId?: string } | undefined,
+  outcome: WorkbenchRecoveryOutcome,
+): { status: "succeeded" | "failed" | "cancelled"; message: string } | undefined {
+  if (kind !== "plan.execute" || !planId || !plan) return undefined;
+  if (plan.kind === "workbench.upgrade" && outcome.workbenchPlanId === planId) {
+    return outcome.workbenchSucceeded
+      ? { status: "succeeded", message: "Workbench package update completed; its durable receipt was recovered." }
+      : { status: "failed", message: outcome.workbenchRolledBack
+        ? "Workbench package update was rolled back to its whole-home snapshot."
+        : "Workbench package update was abandoned before replacing packages." };
+  }
+  if (
+    plan.kind === "snapshot.restore" &&
+    (outcome.restoreCompleted || outcome.restoreRolledBack) &&
+    outcome.restorePlanId === planId &&
+    typeof outcome.snapshotId === "string" &&
+    plan.snapshotId === outcome.snapshotId
+  ) {
+    return outcome.restoreRolledBack
+      ? { status: "failed", message: "Interrupted whole-home restore was rolled back; previous data was retained." }
+      : { status: "succeeded", message: "Whole-home restore completed by recovery." };
+  }
+  if (
+    plan.kind === "runtime.upgrade" &&
+    outcome.upgradeRolledBack &&
+    typeof outcome.upgradePlanId === "string" &&
+    planId === outcome.upgradePlanId
+  ) {
+    return { status: "failed", message: "Runtime upgrade was rolled back by recovery." };
+  }
+  if (
+    plan.kind.startsWith("plugin.") &&
+    outcome.restoreCompleted &&
+    outcome.pluginPlanId &&
+    planId === outcome.pluginPlanId
+  ) {
+    return {
+      status: "failed",
+      message: "Plugin mutation was overwritten by a whole-home restore. Audit evidence was kept.",
+    };
+  }
+  return undefined;
+}
+
+function markHandledPlan(home: string, planId: string, status: "succeeded" | "failed" | "cancelled"): void {
+  if (!isPlanIdentity(planId)) return;
+  const existing = readContainedJson(home, [HOME_CONTROL_DIR_NAME, WORKBENCH_PLANS_DIR_NAME, `${planId}.json`]);
+  if (!existing || typeof existing !== "object") return;
+  const parsed = existing as Record<string, unknown>;
+  if (parsed.schemaVersion !== 1 || parsed.id !== planId) return;
+  parsed.status = status;
+  parsed.finishedAt = new Date().toISOString();
+  const path = join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_PLANS_DIR_NAME, `${planId}.json`);
+  try {
+    const st = lstatSync(path);
+    if (!st.isFile() || st.isSymbolicLink()) return;
+    atomicWrite(path, `${JSON.stringify(parsed, null, 2)}\n`);
+  } catch {
+    /* keep original plan bytes */
+  }
 }
 
 function profileHasViewBridge(home: string, profileId: string): boolean {
@@ -1909,6 +2202,10 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
     case "runtime.upgrade":
       expectKeys(body, ["kind", "version"]);
       return { kind, version: parseId(body.version) };
+    case "workbench.upgrade":
+      expectKeys(body, ["kind", "catalogId", "version"]);
+      if (body.catalogId !== "bundled-workbench") throw new WorkbenchPublicError("workbench/invalid-input");
+      return { kind, catalogId: "bundled-workbench", version: parseId(body.version) };
     default:
       throw new WorkbenchPublicError("workbench/invalid-input");
   }

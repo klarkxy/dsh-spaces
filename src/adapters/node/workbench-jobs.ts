@@ -68,6 +68,11 @@ export class WorkbenchJobError extends Error {
   }
 }
 
+function requiresRecovery(error: unknown): boolean {
+  return error instanceof WorkbenchJobError &&
+    (error.code === "workbench/persist-failed" || error.code === "workbench/recovery-required");
+}
+
 export class WorkbenchJobAbortError extends Error {
   readonly name = "AbortError";
   constructor(message = "The job was aborted.") {
@@ -169,6 +174,18 @@ export class WorkbenchJobStore {
     return [...this.records.values()]
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
       .map(publicJob);
+  }
+
+  hasUnfinishedPlan(planId: string): boolean {
+    return [...this.records.values()].some(job =>
+      ["queued", "running", "recovery-required"].includes(job.status) &&
+      job.command?.kind === "plan.execute" && job.command.planId === planId);
+  }
+
+  unfinishedPlanIds(): string[] {
+    return [...new Set([...this.records.values()].flatMap(job =>
+      ["queued", "running", "recovery-required"].includes(job.status) && job.command?.kind === "plan.execute"
+        ? [job.command.planId] : []))];
   }
 
   cancel(id: string): Promise<WorkbenchJob> {
@@ -362,7 +379,7 @@ export class WorkbenchJobStore {
         }
         this.write(current);
       } catch (error) {
-        if (error instanceof WorkbenchJobError && error.code === "workbench/persist-failed") {
+        if (requiresRecovery(error)) {
           this.markRecovery(id);
           return;
         }
@@ -392,7 +409,7 @@ export class WorkbenchJobStore {
         this.pendingResults.delete(id);
       }
     } catch (error) {
-      if (error instanceof WorkbenchJobError && error.code === "workbench/persist-failed") {
+      if (requiresRecovery(error)) {
         this.markRecovery(id);
         return;
       }

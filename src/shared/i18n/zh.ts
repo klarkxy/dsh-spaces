@@ -127,6 +127,7 @@ export const zh: Messages = {
   "tray.show": "显示 DSH Spaces",
   "tray.stopAll": "停止全部空间",
   "tray.quit": "退出",
+  "tray.stillRunning": "DSH Spaces 仍在运行。从托盘图标退出。",
   "tray.running": "{name} — 运行中",
   "tray.starting": "{name} — 启动中",
   "tray.stopped": "{name} — 已停止",

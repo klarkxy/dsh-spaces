@@ -1,0 +1,5 @@
+# Test-only hang fixture. Official `dsh plugin add` appends this bundle.
+- insert:
+    - id: dsh-spaces-hang-fixture
+      name: '@dsh-spaces/hang-fixture'
+      config: {}

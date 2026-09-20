@@ -576,6 +576,7 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
   const current = ui.runtimes.find((row) => row.current);
   return (
     <>
+      <WorkbenchPackageSection ui={ui} controller={controller} />
       <p>
         {t(locale, "runtime.current")}: {current?.version ?? t(locale, "runtime.none")}
       </p>
@@ -606,6 +607,77 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
         </div>
       ))}
     </>
+  );
+}
+
+function WorkbenchPackageSection({ ui, controller }: WorkbenchViewProps): ReactElement {
+  const locale = ui.locale;
+  const pkg = ui.workbenchPackage;
+  const writable = controller.canMutate();
+  const busy = controller.isBusy();
+  const contentUpdate = Boolean(
+    pkg && pkg.updateAvailable && pkg.installedVersion !== null && pkg.version === pkg.installedVersion,
+  );
+  const canUpgrade = Boolean(writable && !busy && pkg?.updateAvailable);
+  return (
+    <section className="dsh-wb-package" data-workbench-package="true" aria-labelledby="dsh-wb-package-title">
+      <h2 id="dsh-wb-package-title" className="dsh-wb-title">
+        {t(locale, "workbenchPackage.title")}
+      </h2>
+      <p className="dsh-wb-muted">{t(locale, "workbenchPackage.hint")}</p>
+      {ui.workbenchPackageStatus === "loading" ? (
+        <p role="status">{t(locale, "app.loading")}</p>
+      ) : null}
+      {ui.workbenchPackageStatus === "error" ? (
+        <p className="dsh-wb-alert" role="alert">
+          {ui.commandError ?? t(locale, "app.genericError")}
+        </p>
+      ) : null}
+      {ui.workbenchPackageStatus === "ready" && !pkg ? (
+        <p className="dsh-wb-muted" data-workbench-package-unavailable="true">
+          {t(locale, "workbenchPackage.none")}
+        </p>
+      ) : null}
+      {pkg ? (
+        <>
+          <dl className="dsh-wb-dl">
+            <dt>{t(locale, "workbenchPackage.installed")}</dt>
+            <dd data-installed-version={pkg.installedVersion ?? ""}>
+              {pkg.installedVersion ?? t(locale, "runtime.none")}
+            </dd>
+            <dt>{t(locale, "workbenchPackage.candidate")}</dt>
+            <dd data-candidate-version={pkg.version}>{pkg.version}</dd>
+          </dl>
+          {contentUpdate ? (
+            <p className="dsh-wb-notice" data-content-update="true">
+              {t(locale, "workbenchPackage.contentUpdate")}
+            </p>
+          ) : null}
+          {!pkg.updateAvailable ? (
+            <p className="dsh-wb-muted">{t(locale, "workbenchPackage.current")}</p>
+          ) : (
+            <p className="dsh-wb-muted">{t(locale, "workbenchPackage.consequences")}</p>
+          )}
+          <div className="dsh-wb-actions">
+            <button
+              type="button"
+              className="dsh-wb-btn primary"
+              data-workbench-upgrade="true"
+              disabled={!canUpgrade}
+              onClick={() =>
+                controller.preview({
+                  kind: "workbench.upgrade",
+                  catalogId: "bundled-workbench",
+                  version: pkg.version,
+                })
+              }
+            >
+              {t(locale, "workbenchPackage.preview")}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </section>
   );
 }
 

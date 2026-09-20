@@ -149,6 +149,8 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(!t("settings.quitHint", undefined, "en").toLowerCase().includes("profile"));
   assert.ok(!t("settings.quitKeepMigrate", undefined, "en").toLowerCase().includes("profile"));
   assert.ok(t("tray.stopAll", undefined, "en").toLowerCase().includes("space"));
+  assert.match(t("tray.stillRunning", undefined, "zh"), /托盘/);
+  assert.match(t("tray.stillRunning", undefined, "en"), /tray/i);
   assert.ok(!t("errors.stopFailed", { detail: "x" }, "en").toLowerCase().includes("profile"));
   assert.ok(!t("errors.portNotReady", undefined, "en").toLowerCase().includes("port"));
   assert.ok(!t("errors.portNotReady", undefined, "zh").includes("端口"));

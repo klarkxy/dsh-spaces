@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,9 +28,11 @@ import type { WorkbenchMaintenancePorts } from "../src/adapters/node/workbench-m
 import {
   WORKBENCH_CONTROL_DIR_NAME,
   WorkbenchJobAbortError,
+  WorkbenchJobError,
   type WorkbenchJobContext,
 } from "../src/adapters/node/workbench-jobs.ts";
 import { CoordinatedUpgrade } from "../src/main/coordinated-upgrade.ts";
+import { ProcessTerminationError } from "../src/main/terminate-process.ts";
 import { DiagnosticsService } from "../src/main/diagnostics.ts";
 import { CATALOG_CACHE_FILE } from "../src/main/plugin-catalog.ts";
 import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../src/main/plugin-library.ts";
@@ -45,8 +48,49 @@ const BASE = "@deepseek-ai/dsh-base";
 const WEB = "@deepseek-ai/dsh-web-app";
 const temps: string[] = [];
 
+test("ROOT package preview binds server content and executes without a second manager restart", async () => {
+  let digest = "a".repeat(64);
+  const inputs: unknown[] = [];
+  const packageUpgrade = {
+    describe: async () => ({ id: "bundled-workbench", version: "0.2.0", installedVersion: "0.2.0", digest, updateAvailable: true }),
+    hasEvidence: () => false,
+    execute: async (input: unknown) => { inputs.push(input); return { snapshotId: "saved-snapshot" }; },
+  } as unknown as WorkbenchMaintenancePorts["packageUpgrade"];
+  const { maintenance, state } = harness({ packageUpgrade });
+  const request = { kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" } as const;
+  const stale = await maintenance.preview(request);
+  digest = "b".repeat(64);
+  await assert.rejects(() => maintenance.execute(stale.id, jobCtx()), matchCode("workbench/stale"));
+  assert.equal(inputs.length, 0);
+  const plan = await maintenance.preview(request);
+  assert.equal(plan.scope, "home");
+  assert.deepEqual(plan.runningSpaceIds, ["spaces-hub", "coding"]);
+  assert.equal(JSON.stringify(plan).includes(digest), false);
+  await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(inputs, [{ ...request, expectedDigest: digest, planId: plan.id }]);
+  assert.equal(state.reinitialized, 0, "module owns reinitialization; wrapper must not restart it again");
+  assert.deepEqual(state.maintenance, [true, false]);
+});
+
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+test("ROOT abandoned package recovery cannot report successful update", async () => {
+  let active = true;
+  const packageUpgrade = {
+    hasEvidence: () => active,
+    recover: async () => {
+      active = false;
+      return { planId: "11111111-1111-4111-8111-111111111111", rolledBack: false, outcome: "abandoned" };
+    },
+  } as unknown as WorkbenchMaintenancePorts["packageUpgrade"];
+  const { maintenance } = harness({ packageUpgrade });
+  await maintenance.recover();
+  const result = maintenance.recoveryOutcome();
+  assert.equal(result?.workbenchSucceeded, false);
+  assert.equal(result?.workbenchRolledBack, false);
+  assert.equal(result?.workbenchPlanId, "11111111-1111-4111-8111-111111111111");
 });
 
 test("preview hands space and controller actions to supervisor runtime", async () => {
@@ -286,6 +330,21 @@ test("runtime upgrade of an incompatible version is refused, but install remains
   assert.equal(result?.runtimeVersion, "0.1.5-rc.2");
 });
 
+test("lost progress persistence or uncertain child termination keeps the plan open for recovery", async () => {
+  for (const failure of [new WorkbenchJobError("workbench/persist-failed"), new ProcessTerminationError("unknown child")]) {
+    const { maintenance, home, state } = harness();
+    const plan = await maintenance.preview({ kind: "runtime.install", version: "0.1.5-rc.1" });
+    const ctx = jobCtx();
+    const phase = ctx.phase;
+    ctx.phase = value => { if (value === "install") throw failure; phase(value); };
+    await assert.rejects(() => maintenance.execute(plan.id, ctx), (error: unknown) =>
+      error instanceof WorkbenchJobError && ["workbench/persist-failed", "workbench/recovery-required"].includes(error.code));
+    assert.equal(JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`), "utf8")).status, "running");
+    assert.equal(state.reinitialized, 0);
+    assert.equal(state.maintenance.at(-1), true);
+  }
+});
+
 test("upgrade failure with proven live home may reinitialize the manager", async () => {
   const ctx = await upgradeHarness();
   const plan = await ctx.maintenance.preview({ kind: "runtime.upgrade", version: "0.9.9" });
@@ -380,6 +439,7 @@ test("recover reconciles a pending snapshot and refuses to wipe an unreadable up
   assert.equal(outcome?.consistent, true);
   assert.equal(outcome?.settleInterruptedJobs, true);
   assert.equal(outcome?.restoreCompleted, true);
+  assert.equal(outcome?.snapshotId, "11111111-1111-1111-1111-111111111111");
   assert.equal(state.reinitialized, 1);
   assert.ok(state.order.indexOf("stopAll") < state.order.indexOf("recover"));
   assert.ok(state.order.indexOf("recover") < state.order.indexOf("reinitialize"));
@@ -468,6 +528,85 @@ test("recover does not change pointers when stopAll fails", async () => {
   assert.equal(recovered, false);
   assert.equal(state.reinitialized, 0);
   assert.equal(maintenance.recoveryOutcome()?.settleInterruptedJobs, false);
+});
+
+test("upgrade stage rollback does not clear plugin-mutation evidence", async () => {
+  const { home, maintenance, state } = harness();
+  mkdirSync(join(home, UPGRADE_STAGE_DIR), { recursive: true });
+  const journal = join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
+  writeFileSync(
+    journal,
+    `${JSON.stringify({ phase: "preparing", planId: "plan-upgrade-1", snapshotId: "11111111-1111-1111-1111-111111111111" })}\n`,
+  );
+  const mutation = `${JSON.stringify({
+    schemaVersion: 1,
+    phase: "mutating",
+    planId: "plan-plugin-1",
+    spaceIds: ["coding"],
+    expected: [],
+    startedAt: "2026-01-01T00:00:00.000Z",
+  })}\n`;
+  mkdirSync(join(home, WORKBENCH_CONTROL_DIR_NAME), { recursive: true });
+  writeFileSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE), mutation);
+  state.recoverUpgrade = async () => {
+    rmSync(journal, { force: true });
+    return { upgradeRolledBack: true };
+  };
+  await maintenance.recover(jobCtx());
+  const outcome = maintenance.recoveryOutcome();
+  assert.equal(outcome?.upgradeRolledBack, true);
+  assert.equal(outcome?.restoreCompleted, false);
+  assert.equal(outcome?.settleInterruptedJobs, true);
+  assert.equal(outcome?.pluginPlanId, undefined);
+  assert.equal(outcome?.upgradePlanId, "plan-upgrade-1");
+  assert.equal(readFileSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE), "utf8"), mutation);
+  assert.equal(state.reinitialized, 1);
+});
+
+test("runtime upgrade execute passes the stored plan id", async () => {
+  const { maintenance, state } = harness();
+  state.upgrade = async (version) => ({
+    version,
+    snapshotId: "11111111-1111-1111-1111-111111111111",
+    profiles: ["coding", "spaces-hub"],
+    official: {},
+  });
+  const plan = await maintenance.preview({ kind: "runtime.upgrade", version: "0.1.5-rc.1" });
+  await maintenance.execute(plan.id, jobCtx());
+  assert.equal(state.lastUpgradePlanId, plan.id);
+});
+
+test("recover does not treat a junctioned profiles directory as readable home config", async () => {
+  let pending: {
+    snapshotId: string;
+    beforeRestoreId: string;
+    runtimeVersion: string;
+    binRelative: string;
+    startedAt: string;
+  } | undefined = {
+    snapshotId: "11111111-1111-1111-1111-111111111111",
+    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
+    runtimeVersion: "0.1.5-rc.1",
+    binRelative: "bin.js",
+    startedAt: "2026-09-12T00:00:00.000Z",
+  };
+  const { home, maintenance } = harness({
+    pendingRestore: () => pending,
+    recoverUpgrade: async () => {
+      pending = undefined;
+      return { restoreCompleted: true };
+    },
+  });
+  const profiles = join(home, "profiles");
+  const hidden = join(home, "elsewhere-profiles");
+  rmSync(hidden, { recursive: true, force: true });
+  rmSync(profiles, { recursive: true, force: true });
+  mkdirSync(hidden, { recursive: true });
+  symlinkSync(hidden, profiles, process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/failed"));
+  const outcome = maintenance.recoveryOutcome();
+  assert.equal(outcome?.settleInterruptedJobs, false);
+  assert.match(outcome?.message ?? "", /configuration could not be read/i);
 });
 
 test("plugin mutation failure keeps diagnostic files, stops the target, and does not fake a manifest rollback", async () => {
@@ -648,10 +787,12 @@ interface HarnessState {
   stopAllImpl?: () => Promise<void>;
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
   recoverUpgrade?: CoordinatedUpgrade["recover"];
-  upgrade?: (version: string) => Promise<{ version: string; snapshotId: string; profiles: string[]; official: { base?: string; web?: string } }>;
+  lastUpgradePlanId?: string;
+  upgrade?: (version: string, planId?: string) => Promise<{ version: string; snapshotId: string; profiles: string[]; official: { base?: string; web?: string } }>;
 }
 
 function harness(overrides: {
+  packageUpgrade?: WorkbenchMaintenancePorts["packageUpgrade"];
   now?: () => Date;
   fetch?: MaintenanceFetcher;
   compatible?: (version: string) => boolean;
@@ -689,6 +830,7 @@ function createMaintenance(
   home: string,
   state: HarnessState,
   overrides: {
+    packageUpgrade?: WorkbenchMaintenancePorts["packageUpgrade"];
     now?: () => Date;
     fetch?: MaintenanceFetcher;
     compatible?: (version: string) => boolean;
@@ -732,8 +874,9 @@ function createMaintenance(
     } as WorkbenchMaintenancePorts["runtimes"],
     upgrades: {
       preview: (version: string) => ({ version, currentVersion: "0.1.5-rc.1", profiles: [] }),
-      upgrade: async (version: string) => {
-        if (state.upgrade) return state.upgrade(version);
+      upgrade: async (version: string, planId?: string) => {
+        state.lastUpgradePlanId = planId;
+        if (state.upgrade) return state.upgrade(version, planId);
         throw new Error("upgrade not stubbed");
       },
       restore: async () => {
@@ -795,6 +938,7 @@ function createMaintenance(
       state.maintenance.push(active);
     },
     isCompatibleRuntime: overrides.compatible ?? ((version: string) => version === "0.1.5-rc.1"),
+    packageUpgrade: overrides.packageUpgrade,
   };
   return new WorkbenchMaintenance(ports, {
     now: overrides.now,

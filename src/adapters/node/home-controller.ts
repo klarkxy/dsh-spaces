@@ -117,6 +117,10 @@ export class HomeController {
   }
 
   async ensureManager(): Promise<ManagerIdentity> {
+    // Existing identity is a read-only fact. A dead maintenance lock must not
+    // prevent the stable entry from opening its recovery controls.
+    const recorded = this.readManagerRecord();
+    if (recorded && recorded !== "ambiguous") return this.toIdentity(recorded);
     return this.lock.run("ensure-manager", async () => {
       const existing = this.readManagerRecord();
       if (existing === "ambiguous") {

@@ -25,9 +25,10 @@ import {
   bootstrapSupervisor,
   writeEndpointFile,
 } from "../packages/plugin/src/host/supervisor-bootstrap.ts";
-import { catalogIdSchema, workbenchCommandSchema, workbenchViewSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
+import { catalogIdSchema, workbenchCommandSchema, workbenchViewSchema, workbenchPackageResultSchema, workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import {
   createWorkbenchGuideRemote,
+  createWorkbenchRemote,
   displayWorkbenchMessage,
   isTrustedLoopbackHref,
   readHostHint,
@@ -40,6 +41,22 @@ import { PARENT_PING_SOURCE, acceptParentMessage, postViewState } from "../packa
 
 const temps: string[] = [];
 const contexts: Context[] = [];
+
+test("package update RPC preserves a missing candidate and rejects browser paths", async () => {
+  const endpoints: string[] = [];
+  const remote = createWorkbenchRemote({ rpc: { call: async (_channel: string, endpoint: string) => {
+    endpoints.push(endpoint);
+    return { ok: true, value: null };
+  } } } as never);
+  assert.equal(await remote.workbenchPackage?.(), null);
+  assert.deepEqual(endpoints, ["workbench/workbenchPackage"]);
+  const request = { kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" };
+  assert.deepEqual(workbenchPlanRequestSchema.parse(request), request);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, path: "C:/replacement.tgz" }).success, false);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, expectedDigest: "a".repeat(64) }).success, false);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, catalogId: "file:replacement.tgz" }).success, false);
+  assert.equal(workbenchPackageResultSchema.parse(null), null);
+});
 
 afterEach(async () => {
   for (const ctx of contexts.splice(0)) {

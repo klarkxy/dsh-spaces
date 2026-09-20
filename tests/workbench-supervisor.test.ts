@@ -5,7 +5,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +16,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { HomeController } from "../src/adapters/node/home-controller.ts";
+import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home-operation-lock.ts";
 import {
   createWorkbenchSupervisor,
   parseSupervisorArgs,
@@ -36,6 +39,17 @@ test("stable entry scripts parse before any DSH instance is available", () => {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   assert.ok(scripts.length);
   for (const [, source] of scripts) assert.doesNotThrow(() => new Script(source));
+});
+
+test("default entry origin survives clean cold restart while explicit port zero stays ephemeral", async () => {
+  const home = tempHome();
+  const first = await startSupervisor(home, { port: undefined });
+  const origin = first.origin;
+  await first.close();
+  const second = await startSupervisor(home, { port: undefined });
+  assert.equal(second.origin, origin);
+  const saved = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "entry-port.json"), "utf8"));
+  assert.equal(saved.port, Number(new URL(origin).port));
 });
 
 test("ROOT: interrupted owned manager install resumes without claiming an existing ordinary profile", async () => {
@@ -95,6 +109,60 @@ function writeFakeCli(home: string, version = "0.1.5-rc.1"): string {
   writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version })}\n`);
   writeFileSync(join(root, "lib", "bin.js"), "console.log('fake-dsh');\n");
   return join(root, "lib", "bin.js");
+}
+
+function writeInterruptedJob(
+  home: string,
+  input: {
+    id: string;
+    kind: string;
+    command: Record<string, unknown>;
+    phase: string;
+    affectedSpaceIds?: string[];
+  },
+): void {
+  const dir = join(home, ".dsh-spaces-control", "jobs");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${input.id}.json`),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: input.id,
+      requestId: input.id,
+      kind: input.kind,
+      command: input.command,
+      commandCanonical: JSON.stringify(input.command),
+      status: "recovery-required",
+      phase: input.phase,
+      message: "",
+      affectedSpaceIds: input.affectedSpaceIds ?? [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      canCancel: false,
+    })}\n`,
+  );
+}
+
+function writeInterruptedPlan(
+  home: string,
+  id: string,
+  command: { kind: string; snapshotId?: string },
+): void {
+  const dir = join(home, ".dsh-spaces-control", "plans");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${id}.json`),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id,
+      public: { id, kind: command.kind, title: command.kind, scope: "home", affectedSpaceIds: [], runningSpaceIds: [], changes: [], destructive: true, expiresAt: "2026-01-01T00:05:00.000Z" },
+      command,
+      fingerprint: "fp",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:05:00.000Z",
+      status: "running",
+    })}\n`,
+  );
 }
 
 function writeProfile(home: string, name: string, pkg: unknown = {}): void {
@@ -304,26 +372,30 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>, label: str
   throw new Error(`timed out waiting for ${label}`);
 }
 
+function jobStatus(home: string, id: string): string {
+  return (JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "jobs", `${id}.json`), "utf8")) as { status: string }).status;
+}
+
 async function waitJob(
   origin: string,
   cookie: string,
   id: string,
   status = "succeeded",
-): Promise<{ status: string; error?: { message?: string } }> {
-  let last: { status?: string; error?: { message?: string } } | undefined;
+): Promise<{ status: string; message?: string; error?: { message?: string } }> {
+  let last: { status?: string; message?: string; error?: { message?: string } } | undefined;
   try {
     await waitUntil(async () => {
       const job = await api(origin, cookie, "job", { id });
-      last = job.body.value as { status?: string; error?: { message?: string } };
+      last = job.body.value as { status?: string; message?: string; error?: { message?: string } };
       return last?.status === status || last?.status === "failed" || last?.status === "cancelled";
     }, `job ${id} -> ${status}`);
   } catch (error) {
     throw new Error(`${String(error)}; last=${JSON.stringify(last)}`);
   }
   if (last?.status !== status) {
-    throw new Error(`job ${id} ended ${last?.status}: ${last?.error?.message ?? ""}`);
+    throw new Error(`job ${id} ended ${last?.status}: ${last?.error?.message ?? last?.message ?? ""}`);
   }
-  return last as { status: string; error?: { message?: string } };
+  return last as { status: string; message?: string; error?: { message?: string } };
 }
 
 test("HTTP rejects unknown method, unauthenticated calls, foreign origin, and arbitrary URLs", async () => {
@@ -437,6 +509,53 @@ test("role/identity guard does not overwrite an ordinary profile reserved as man
   assert.equal(value.recoveryRequired, true);
   assert.match(value.reasons.join(" "), /ordinary profile/i);
   assert.equal(readFileSync(join(home, "profiles", "spaces-hub", "package.json"), "utf8"), before);
+});
+
+test("maintenance polling preserves inventory during a Home swap and reads live job progress", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  let release!: () => void;
+  const paused = new Promise<void>(resolvePause => { release = resolvePause; });
+  const handle = await startSupervisor(home, {
+    createMaintenance: ports => ({
+      ...fakeMaintenance(),
+      execute: async (_plan, ctx) => {
+        ports.setMaintenance(true);
+        const original = join(home, "profiles", "alpha");
+        const staged = join(home, "alpha-held-by-restore");
+        renameSync(original, staged);
+        try {
+          writeProfile(home, "beta");
+          ctx.phase("stage");
+          await paused;
+        } finally {
+          renameSync(staged, original);
+          ports.setMaintenance(false);
+        }
+      },
+    }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await handle.runtime.preview({ kind: "snapshot.create" });
+  await handle.runtime.submit({ kind: "plan.execute", planId: "maint-plan" }, "inventory-swap");
+  try {
+    await waitUntil(async () => (await handle.runtime.job("inventory-swap")).phase === "stage", "maintenance stage");
+    const response = await api(handle.origin, cookie, "state");
+    assert.equal(response.body.ok, true);
+    const state = response.body.value as Awaited<ReturnType<typeof handle.runtime.state>>;
+    assert.equal(state.maintenance, true);
+    assert.equal(state.recoveryRequired, false);
+    assert.ok(state.spaces.some(row => row.id === "alpha"));
+    assert.equal(state.spaces.some(row => row.id === "beta"), false);
+    assert.equal(state.jobs.find(job => job.id === "inventory-swap")?.phase, "stage");
+    const entry = await fetch(handle.origin, { headers: { cookie } });
+    assert.equal(entry.status, 200);
+    await entry.body?.cancel();
+  } finally { release(); }
+  await waitJob(handle.origin, cookie, "inventory-swap");
+  const refreshed = await handle.runtime.state();
+  assert.equal(refreshed.maintenance, false);
+  assert.ok(refreshed.spaces.some(row => row.id === "beta"));
 });
 
 test("jobs.submit is idempotent and maintenance preview is delegated", async () => {
@@ -568,6 +687,65 @@ test("busy home keeps a read-only entry and does not write the job store", async
   holder.release();
 });
 
+test("web release then desktop acquire refuses web writes as read-only or busy, not as releasing", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha", { name: "alpha" });
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const preview = await api(handle.origin, cookie, "preview", { request: { kind: "controller.release" } });
+  assert.equal(preview.body.ok, true, JSON.stringify(preview.body));
+  const planId = (preview.body.value as { id: string }).id;
+  const submitted = await api(handle.origin, cookie, "submit", {
+    command: { kind: "plan.execute", planId },
+    requestId: "rel-1",
+  });
+  assert.equal(submitted.body.ok, true, JSON.stringify(submitted.body));
+  await waitUntil(() => {
+    if (!existsSync(join(home, ".dsh-spaces-control", "jobs", "rel-1.json"))) return false;
+    const record = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "jobs", "rel-1.json"), "utf8")) as {
+      status: string;
+    };
+    return record.status === "succeeded";
+  }, "release job persisted");
+  await waitUntil(() => !existsSync(join(home, ".dsh-spaces-control", "run", "owner.json")), "web owner released");
+
+  const afterRelease = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "web-should-not-write" },
+    requestId: "web-after-release",
+  });
+  assert.equal(afterRelease.body.ok, false);
+  assert.equal(afterRelease.body.error?.code, "workbench/read-only");
+  assert.doesNotMatch(afterRelease.body.error?.message ?? "", /releasing run rights/i);
+
+  const desktop = new HomeController(home).acquire("desktop");
+  const whileDesktop = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "web-should-not-write" },
+    requestId: "web-while-desktop",
+  });
+  assert.equal(whileDesktop.body.ok, false);
+  assert.match(whileDesktop.body.error?.code ?? "", /read-only|busy/);
+  assert.doesNotMatch(whileDesktop.body.error?.message ?? "", /releasing run rights/i);
+  const steal = await api(handle.origin, cookie, "submit", {
+    command: { kind: "controller.acquire" },
+    requestId: "web-steal",
+  });
+  assert.equal(steal.body.ok, false);
+  assert.equal(steal.body.error?.code, "workbench/busy");
+
+  desktop.release();
+  const reacquire = await api(handle.origin, cookie, "submit", {
+    command: { kind: "controller.acquire" },
+    requestId: "web-reacquire",
+  });
+  assert.equal(reacquire.body.ok, true, JSON.stringify(reacquire.body));
+  const write = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "alpha", displayName: "web-after-reacquire" },
+    requestId: "web-write",
+  });
+  assert.equal(write.body.ok, true, JSON.stringify(write.body));
+  await waitJob(handle.origin, cookie, "web-write");
+});
+
 test("shutdown persists the job then releases rights without deadlocking on whenIdle", async () => {
   const home = tempHome();
   const handle = await startSupervisor(home);
@@ -590,6 +768,19 @@ test("shutdown persists the job then releases rights without deadlocking on when
   const record = JSON.parse(readFileSync(jobFile, "utf8")) as { status: string; kind: string };
   assert.equal(record.status, "succeeded");
   assert.equal(record.kind, "plan.execute");
+  let shutdownWrite: { ok?: boolean; error?: { code?: string; message?: string } } | undefined;
+  try {
+    shutdownWrite = (await api(handle.origin, cookie, "submit", {
+      command: { kind: "controller.acquire" },
+      requestId: "after-shutdown",
+    })).body;
+  } catch {
+    shutdownWrite = { ok: false };
+  }
+  assert.notEqual(shutdownWrite?.ok, true);
+  if (shutdownWrite?.error?.message) {
+    assert.match(shutdownWrite.error.message, /releasing run rights|read-only|unavailable/i);
+  }
 });
 
 test("incompatible rc.2 CLI is not admitted; CLI flags stay Node-only paths", async () => {
@@ -642,31 +833,20 @@ test("CLI accepts --cli as an alias of --bin and writes a private endpoint file"
   const page = await fetch(`${handle.origin}/`, { headers: { cookie } });
   const html = await page.text();
   assert.match(html, /检查并恢复/);
+  assert.match(html, /api\("job"/);
   assert.doesNotMatch(html, /标记恢复完成/);
 });
 
 test("recovery resume does not cancel unrelated interrupted jobs", async () => {
   const home = tempHome();
   writeProfile(home, "alpha", { name: "alpha" });
-  mkdirSync(join(home, ".dsh-spaces-control", "jobs"), { recursive: true });
-  writeFileSync(
-    join(home, ".dsh-spaces-control", "jobs", "old-space.json"),
-    `${JSON.stringify({
-      schemaVersion: 1,
-      id: "old-space",
-      requestId: "old-space",
-      kind: "space.start",
-      command: { kind: "space.start", spaceId: "alpha" },
-      commandCanonical: JSON.stringify({ kind: "space.start", spaceId: "alpha" }),
-      status: "recovery-required",
-      phase: "start",
-      message: "",
-      affectedSpaceIds: ["alpha"],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      canCancel: false,
-    })}\n`,
-  );
+  writeInterruptedJob(home, {
+    id: "old-space",
+    kind: "space.start",
+    command: { kind: "space.start", spaceId: "alpha" },
+    phase: "start",
+    affectedSpaceIds: ["alpha"],
+  });
   const handle = await startSupervisor(home, {
     createMaintenance: () => ({
       ...fakeMaintenance(),
@@ -686,11 +866,311 @@ test("recovery resume does not cancel unrelated interrupted jobs", async () => {
     requestId: "resume-1",
   });
   assert.equal(resume.body.ok, true, JSON.stringify(resume.body));
-  await waitJob(handle.origin, cookie, "resume-1");
+  await waitJob(handle.origin, cookie, "resume-1", "failed");
   const leftover = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "jobs", "old-space.json"), "utf8")) as {
     status: string;
   };
   assert.equal(leftover.status, "recovery-required");
+  const state = await handle.runtime.state();
+  assert.equal(state.recoveryRequired, true);
+  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+});
+
+test("recovery resume settles only the matching plan.execute restore and fails while others remain", async () => {
+  const home = tempHome();
+  const snapA = "11111111-1111-1111-1111-111111111111";
+  const snapB = "22222222-2222-2222-2222-222222222222";
+  writeInterruptedPlan(home, "plan-restore-a", { kind: "snapshot.restore", snapshotId: snapA });
+  writeInterruptedPlan(home, "plan-restore-b", { kind: "snapshot.restore", snapshotId: snapB });
+  writeInterruptedPlan(home, "plan-upgrade", { kind: "runtime.upgrade" });
+  writeInterruptedJob(home, {
+    id: "job-restore-a",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-restore-a" },
+    phase: "restore",
+  });
+  writeInterruptedJob(home, {
+    id: "job-restore-b",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-restore-b" },
+    phase: "restore",
+  });
+  writeInterruptedJob(home, {
+    id: "job-upgrade",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-upgrade" },
+    phase: "commit",
+  });
+  writeFileSync(join(home, ".dsh-spaces-control", "jobs", "broken.json"), "{\"schemaVersion\":1,\"status\":\"running\"");
+  const outcome = {
+    restoreCompleted: true,
+    upgradeRolledBack: false,
+    consistent: true,
+    settleInterruptedJobs: true,
+    snapshotId: snapA,
+    restorePlanId: "plan-restore-a",
+    message: "Pending snapshot or upgrade state was reconciled.",
+  };
+  const handle = await startSupervisor(home, {
+    createMaintenance: () => ({
+      ...fakeMaintenance(),
+      recover: async () => undefined,
+      recoveryOutcome: () => outcome,
+    }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const first = await api(handle.origin, cookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId: "resume-match-1",
+  });
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  const firstJob = await waitJob(handle.origin, cookie, "resume-match-1", "failed");
+  assert.match(`${firstJob.message ?? ""} ${firstJob.error?.message ?? ""}`, /still required|doctor/i);
+  assert.equal(jobStatus(home, "job-restore-a"), "succeeded");
+  assert.equal(jobStatus(home, "job-restore-b"), "recovery-required");
+  assert.equal(jobStatus(home, "job-upgrade"), "recovery-required");
+  assert.equal(readFileSync(join(home, ".dsh-spaces-control", "jobs", "broken.json"), "utf8"), "{\"schemaVersion\":1,\"status\":\"running\"");
+  const afterFirst = await handle.runtime.state();
+  assert.equal(afterFirst.recoveryRequired, true);
+  assert.notEqual(afterFirst.spaces.find((space) => space.id === afterFirst.managerId)?.status, "running");
+
+  const second = await api(handle.origin, cookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId: "resume-match-2",
+  });
+  assert.equal(second.body.ok, true, JSON.stringify(second.body));
+  await waitJob(handle.origin, cookie, "resume-match-2", "failed");
+  assert.equal(jobStatus(home, "job-restore-a"), "succeeded");
+  assert.equal(jobStatus(home, "job-restore-b"), "recovery-required");
+  assert.equal(jobStatus(home, "job-upgrade"), "recovery-required");
+  const afterSecond = await handle.runtime.state();
+  assert.equal(afterSecond.recoveryRequired, true);
+  assert.notEqual(afterSecond.spaces.find((space) => space.id === afterSecond.managerId)?.status, "running");
+});
+
+test("recovery resume does not settle jobs or start the manager when pending recover fails", async () => {
+  const home = tempHome();
+  writeInterruptedPlan(home, "plan-restore-a", {
+    kind: "snapshot.restore",
+    snapshotId: "11111111-1111-1111-1111-111111111111",
+  });
+  writeInterruptedJob(home, {
+    id: "job-restore-a",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-restore-a" },
+    phase: "restore",
+  });
+  mkdirSync(join(home, ".dsh-spaces-control"), { recursive: true });
+  writeFileSync(
+    join(home, ".dsh-spaces-control", "plugin-mutation.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      phase: "mutating",
+      planId: "plan-plugin-1",
+      spaceIds: ["alpha"],
+      expected: [],
+      startedAt: "2026-01-01T00:00:00.000Z",
+    })}\n`,
+  );
+  const mutation = readFileSync(join(home, ".dsh-spaces-control", "plugin-mutation.json"), "utf8");
+  const handle = await startSupervisor(home, {
+    createMaintenance: () => ({
+      ...fakeMaintenance(),
+      recover: async () => {
+        throw new Error("pending restore unreadable");
+      },
+      recoveryOutcome: () => ({
+        restoreCompleted: false,
+        upgradeRolledBack: false,
+        consistent: false,
+        settleInterruptedJobs: false,
+        message: "Pending restore metadata is unreadable. Original bytes were left in place.",
+      }),
+    }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await api(handle.origin, cookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId: "resume-fail-1",
+  });
+  await waitJob(handle.origin, cookie, "resume-fail-1", "failed");
+  assert.equal(jobStatus(home, "job-restore-a"), "recovery-required");
+  assert.equal(readFileSync(join(home, ".dsh-spaces-control", "plugin-mutation.json"), "utf8"), mutation);
+  const state = await handle.runtime.state();
+  assert.equal(state.recoveryRequired, true);
+  assert.equal(state.writable, true);
+  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+  const blocked = await api(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "web" },
+    requestId: "should-block",
+  });
+  assert.equal(blocked.body.ok, false);
+  assert.equal(blocked.body.error?.code, "workbench/unavailable");
+});
+
+test("ROOT cold recovery opens with a dead transaction lock and reclaims only after explicit resume", async () => {
+  for (const pid of [2147483647, process.pid]) {
+    const home = tempHome();
+    await new HomeController(home).ensureManager();
+    const lockDir = join(home, HOME_LOCK_DIR_NAME);
+    mkdirSync(lockDir);
+    const owner = JSON.stringify({ pid, nonce: "a".repeat(32), startedAt: new Date().toISOString(), label: "interrupted-restore" });
+    writeFileSync(join(lockDir, HOME_LOCK_OWNER_FILE), owner);
+    const handle = await startSupervisor(home, { createMaintenance: () => fakeMaintenance() });
+    const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+    assert.equal((await handle.runtime.state()).writable, true);
+    assert.equal(readFileSync(join(lockDir, HOME_LOCK_OWNER_FILE), "utf8"), owner);
+    await api(handle.origin, cookie, "submit", { command: { kind: "recovery.resume" }, requestId: "resume-lock" });
+    await waitJob(handle.origin, cookie, "resume-lock", pid === process.pid ? "failed" : "succeeded");
+    assert.equal(existsSync(lockDir), pid === process.pid);
+    await handle.close();
+  }
+});
+
+test("ROOT package recovery settles only its matching job and preserves abandoned failure", async () => {
+  for (const succeeded of [true, false]) {
+    const home = tempHome();
+    for (const suffix of ["a", "b"]) {
+      writeInterruptedPlan(home, `plan-package-${suffix}`, { kind: "workbench.upgrade" });
+      writeInterruptedJob(home, {
+        id: `job-package-${suffix}`, kind: "plan.execute", phase: "install",
+        command: { kind: "plan.execute", planId: `plan-package-${suffix}` },
+      });
+    }
+    const handle = await startSupervisor(home, {
+      createMaintenance: () => ({ ...fakeMaintenance(), recover: async () => {}, recoveryOutcome: () => ({
+        restoreCompleted: false, upgradeRolledBack: false, consistent: true, settleInterruptedJobs: true,
+        workbenchPlanId: "plan-package-a", workbenchSucceeded: succeeded, workbenchRolledBack: false,
+        message: "Exact package receipt recovered.",
+      }) }),
+    });
+    const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+    await api(handle.origin, cookie, "submit", { command: { kind: "recovery.resume" }, requestId: "resume-package" });
+    await waitJob(handle.origin, cookie, "resume-package", "failed");
+    assert.equal(jobStatus(home, "job-package-a"), succeeded ? "succeeded" : "failed");
+    assert.equal(jobStatus(home, "job-package-b"), "recovery-required");
+    await handle.close();
+  }
+});
+
+test("recovery resume settles only the matching runtime.upgrade planId", async () => {
+  const home = tempHome();
+  writeInterruptedPlan(home, "plan-upgrade-a", { kind: "runtime.upgrade" });
+  writeInterruptedPlan(home, "plan-upgrade-b", { kind: "runtime.upgrade" });
+  writeInterruptedJob(home, {
+    id: "job-upgrade-a",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-upgrade-a" },
+    phase: "commit",
+  });
+  writeInterruptedJob(home, {
+    id: "job-upgrade-b",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-upgrade-b" },
+    phase: "commit",
+  });
+  const handle = await startSupervisor(home, {
+    createMaintenance: () => ({
+      ...fakeMaintenance(),
+      recover: async () => undefined,
+      recoveryOutcome: () => ({
+        restoreCompleted: false,
+        upgradeRolledBack: true,
+        consistent: true,
+        settleInterruptedJobs: true,
+        upgradePlanId: "plan-upgrade-a",
+        message: "Pending snapshot or upgrade state was reconciled.",
+      }),
+    }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await api(handle.origin, cookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId: "resume-upgrade-1",
+  });
+  await waitJob(handle.origin, cookie, "resume-upgrade-1", "failed");
+  assert.equal(jobStatus(home, "job-upgrade-a"), "failed");
+  assert.equal(jobStatus(home, "job-upgrade-b"), "recovery-required");
+  await handle.close();
+
+  const homeLegacy = tempHome();
+  writeInterruptedPlan(homeLegacy, "plan-upgrade-old", { kind: "runtime.upgrade" });
+  writeInterruptedJob(homeLegacy, {
+    id: "job-upgrade-old",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-upgrade-old" },
+    phase: "commit",
+  });
+  const legacy = await startSupervisor(homeLegacy, {
+    createMaintenance: () => ({
+      ...fakeMaintenance(),
+      recover: async () => undefined,
+      recoveryOutcome: () => ({
+        restoreCompleted: false,
+        upgradeRolledBack: true,
+        consistent: true,
+        settleInterruptedJobs: true,
+        message: "Pending snapshot or upgrade state was reconciled.",
+      }),
+    }),
+  });
+  const legacyCookie = await bootstrap(legacy.origin, legacy.bootstrapUrl);
+  await api(legacy.origin, legacyCookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId: "resume-upgrade-old",
+  });
+  await waitJob(legacy.origin, legacyCookie, "resume-upgrade-old", "failed");
+  assert.equal(jobStatus(homeLegacy, "job-upgrade-old"), "recovery-required");
+});
+
+test("recovery resume does not follow a junctioned plans directory", async () => {
+  const home = tempHome();
+  const snapA = "11111111-1111-1111-1111-111111111111";
+  const outside = join(home, "outside-plans");
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(
+    join(outside, "plan-restore-a.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: "plan-restore-a",
+      public: { id: "plan-restore-a", kind: "snapshot.restore" },
+      command: { kind: "snapshot.restore", snapshotId: snapA },
+      fingerprint: "fp",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      expiresAt: "2026-01-01T00:05:00.000Z",
+      status: "running",
+    })}\n`,
+  );
+  mkdirSync(join(home, ".dsh-spaces-control"), { recursive: true });
+  symlinkSync(outside, join(home, ".dsh-spaces-control", "plans"), process.platform === "win32" ? "junction" : "dir");
+  writeInterruptedJob(home, {
+    id: "job-restore-a",
+    kind: "plan.execute",
+    command: { kind: "plan.execute", planId: "plan-restore-a" },
+    phase: "restore",
+  });
+  const handle = await startSupervisor(home, {
+    createMaintenance: () => ({
+      ...fakeMaintenance(),
+      recover: async () => undefined,
+      recoveryOutcome: () => ({
+        restoreCompleted: true,
+        upgradeRolledBack: false,
+        consistent: true,
+        settleInterruptedJobs: true,
+        snapshotId: snapA,
+        message: "Pending snapshot or upgrade state was reconciled.",
+      }),
+    }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await api(handle.origin, cookie, "submit", {
+    command: { kind: "recovery.resume" },
+    requestId: "resume-symlink-1",
+  });
+  await waitJob(handle.origin, cookie, "resume-symlink-1", "failed");
+  assert.equal(jobStatus(home, "job-restore-a"), "recovery-required");
+  assert.equal(existsSync(join(outside, "plan-restore-a.json")), true);
 });
 
 test("entry cookie helper names match the A0 authority digest", () => {

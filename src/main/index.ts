@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from "electron";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { atomicWrite } from "./atomic";
@@ -31,6 +31,7 @@ import {
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { RuntimeStore } from "./runtime-store";
 import { CooperativeChildren } from "../adapters/node/cooperative-children";
+import { observeMaintenanceChild, ownsObservedChild, withChildObservation } from "./owned-process-record";
 import { SnapshotExecutor } from "./snapshot-executor";
 import {
   createDesktopController,
@@ -58,7 +59,14 @@ import { smokeLifecycle } from "./smoke";
 import { startAutoUpdate } from "./updater";
 import { ViewManager } from "./view-manager";
 import { pickSpaceIcon } from "./space-icon";
-import { appIconPng, createAppTray, type TrayElectron, type TrayHandle } from "./tray";
+import {
+  appIconPng,
+  concealWindowToTray,
+  createAppTray,
+  revealWindowFromTray,
+  type TrayElectron,
+  type TrayHandle,
+} from "./tray";
 import { loadPluginCatalog, searchPluginCatalog } from "./plugin-catalog";
 import {
   downloadPlugin,
@@ -99,7 +107,10 @@ function startMain(): void {
   applyAppLocale(settings.locale);
   applyNativeTheme(settings.theme);
   let allowForceKill = false;
-  const cooperativeChildren = new CooperativeChildren();
+  const cooperativeChildren = new CooperativeChildren({
+    journalHome: dshHome,
+    onJournalFailure: () => desktop.revokeAdmission("The owned process record requires recovery before further changes."),
+  });
   const processes = new ProcessManager(dshHome, patchWriter, settings.portStart, settings.portEnd, {
     spawn: cooperativeChildren.spawn,
     kill: async (pid, kind) => {
@@ -115,10 +126,12 @@ function startMain(): void {
   let quitInProgress = false;
   let initialized = false;
   let tray: TrayHandle | null = null;
+  let trayHintShown = false;
   const homeControl = createDesktopHomeControl(dshHome);
   const maintenance = homeControl.maintenance;
   const desktop = createDesktopController(dshHome, {
     homeControl,
+    ownsInstanceRecord: record => cooperativeChildren.ownsRecord(record) || ownsObservedChild(dshHome, record),
     stopOwned: async () => {
       allowForceKill = false;
       try {
@@ -167,6 +180,7 @@ function startMain(): void {
   const snapshotRoot = sharedResources?.snapshotRoot ?? join(app.getPath("userData"), "snapshots");
   const runtimeRoot = sharedResources?.runtimeRoot ?? join(app.getPath("userData"), "runtimes");
   const runtimes = new RuntimeStore({
+    installWorker: { file: join(__dirname, "snapshot-worker.mjs").replace("app.asar", "app.asar.unpacked"), home: dshHome },
     root: runtimeRoot,
     snapshotRoot,
     source: () => currentSettings.packageSource,
@@ -188,6 +202,8 @@ function startMain(): void {
   setSelectedDshResolver(() => runtimes.current()?.bin);
   const upgrades = new CoordinatedUpgrade({
     home: dshHome, profiles: () => registry.scanOnboarding().profiles.map(row => row.name),
+    workerFile: join(__dirname, "snapshot-worker.mjs").replace("app.asar", "app.asar.unpacked"),
+    observeChild: () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Maintenance process identity needs recovery.")),
     stopAll: () => processes.stopAll(), drainPlugins: drainPluginQueue,
     snapshots, runtimes, runtimeDescriptor: () => describeRuntime(runtimes.current()),
     onProgress: (progress) => broadcast("maintenance-progress", progress),
@@ -220,15 +236,17 @@ function startMain(): void {
 
   async function mutate<T>(action: () => T | Promise<T>): Promise<T> {
     assertAvailable();
-    return desktop.mutate(action);
+    return desktop.mutate(() => withChildObservation(
+      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity needs recovery.")), action));
   }
 
   function runMaintenance<T>(label: string, action: () => Promise<T>): Promise<T> {
-    return desktop.runMaintenance(label, async () => {
+    return desktop.runMaintenance(label, () => withChildObservation(
+      () => observeMaintenanceChild(dshHome, () => desktop.revokeAdmission("Subprocess identity needs recovery.")), async () => {
       const result = await action();
       persistHomeToolchain();
       return result;
-    });
+    }));
   }
 
   function persistHomeToolchain(): void {
@@ -304,8 +322,12 @@ function startMain(): void {
     win.on("close", (event) => {
       if (allowClose) return;
       event.preventDefault();
-      if (tray?.available) win.hide();
-      else win.minimize();
+      if (tray?.available) {
+        concealWindowToTray(win);
+        notifyHiddenToTray();
+      } else {
+        win.minimize();
+      }
     });
 
     return win;
@@ -317,9 +339,23 @@ function startMain(): void {
       mainWindow = createWindow();
       views = new ViewManager(mainWindow);
     }
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    revealWindowFromTray(mainWindow);
+  }
+
+  function notifyHiddenToTray(): void {
+    if (trayHintShown || !Notification.isSupported()) return;
+    trayHintShown = true;
+    try {
+      const toast = new Notification({
+        title: t("cli.brand"),
+        body: t("tray.stillRunning"),
+        icon: nativeImage.createFromBuffer(appIconPng()),
+      });
+      toast.on("click", () => showMainWindow());
+      toast.show();
+    } catch {
+      /* Finding the tray icon is enough if the toast cannot be shown. */
+    }
   }
 
   function broadcast(channel: string, payload: unknown): void {
@@ -601,7 +637,10 @@ function startMain(): void {
     handle("updateMeta", (_event, name: string, patch: Partial<SpaceMeta>) => {
       if ("displayName" in patch) desktop.assertMutableProfile(name, "rename");
       if ("icon" in patch) patch = { ...patch, icon: sanitizeSpaceIcon(patch.icon) };
-      return registry.updateMeta(name, patch);
+      const meta = registry.updateMeta(name, patch);
+      broadcast("profile-status", { name, status: processes.statusOf(name), port: processes.portOf(name) });
+      tray?.refresh();
+      return meta;
     });
     handle("reorderProfiles", (_event, names: string[]) => {
       registry.reorder(names);
@@ -711,7 +750,6 @@ function startMain(): void {
   void app.whenReady().then(async () => {
     setManagedCliPrefix(join(app.getPath("userData"), "dsh-cli"));
     setToolchainRoot(sharedResources?.toolchainRoot ?? join(app.getPath("userData"), "toolchain"));
-    setPackageSource(currentSettings.packageSource);
     if (desktop.held) {
       await desktop.admitWrites();
       if (desktop.writable) {

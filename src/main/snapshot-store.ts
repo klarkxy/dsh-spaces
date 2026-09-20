@@ -12,6 +12,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { parseDocument } from "yaml";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { atomicWrite, renameDirectory as renameSync } from "./atomic";
 import { assertNotRealHome, samePath } from "./home-guard";
@@ -22,6 +23,7 @@ import {
   SNAPSHOT_ID_RE,
   type PendingRestore,
   type RestoreJournal,
+  type RestoreRecoveryReceipt,
   type RestoreResult,
   type RestoreSnapshotOptions,
   type SnapshotMeta,
@@ -32,6 +34,7 @@ import {
 const MANIFEST = "manifest.json";
 const PENDING_FILE = "pending-restore.json";
 const JOURNAL_FILE = "journal.json";
+const RECEIPT_FILE = "restore-receipt.json";
 const DATA_DIR = "data";
 const RUNTIME_DIR = "runtime";
 const INCOMING_DIR = "incoming";
@@ -42,6 +45,8 @@ export type SnapshotInject = (op: string, detail?: string) => void;
 export type SnapshotRestoreOptions = RestoreSnapshotOptions & {
   /** Layout recorded from a damaged current pointer. Never copied as a runtime. */
   recordedRuntime?: SnapshotRuntime;
+  /** Workbench plan identity. Strict UUID; omit for legacy desktop restores. */
+  planId?: string;
 };
 
 export interface SnapshotStoreOptions {
@@ -97,8 +102,24 @@ export function retargetTree(dir: string, oldRoot: string, newRoot: string): voi
       retargetLink(child, oldRoot, newRoot);
     } else if (childSt.isDirectory()) {
       retargetTree(child, oldRoot, newRoot);
+    } else if (childSt.isFile()) {
+      retargetPnpmMetadata(child, oldRoot, newRoot);
     }
   }
+}
+
+/** Relocate pnpm's private store pointer, never arbitrary user configuration. */
+function retargetPnpmMetadata(file: string, oldRoot: string, newRoot: string): void {
+  if (basename(file) !== ".modules.yaml" || basename(dirname(file)) !== "node_modules") return;
+  const text = readFileSync(file, "utf8");
+  const document = parseDocument(text);
+  // A recovery backup must retain even damaged metadata; pnpm will diagnose it.
+  if (document.errors.length) return;
+  const pointer = document.get("virtualStoreDir");
+  if (typeof pointer !== "string" || !isAbsolute(pointer) || !isInside(oldRoot, pointer)) return;
+  document.set("virtualStoreDir", resolve(newRoot, relative(resolve(oldRoot), resolve(pointer))));
+  atomicWrite(file, text.trimStart().startsWith("{")
+    ? `${JSON.stringify(document.toJSON(), null, 2)}\n` : document.toString());
 }
 
 export class SnapshotStore {
@@ -166,6 +187,7 @@ export class SnapshotStore {
 
   restore(id: string, currentRuntime?: SnapshotRuntime, options?: SnapshotRestoreOptions): RestoreResult {
     this.assertWritable();
+    const planId = parseOptionalPlanId(options?.planId, "restore options");
     const restored = this.preview(id);
     if (restored.runtimeMissing) {
       throw new Error(`Snapshot ${restored.id} saved data only and cannot be used as a restore target`);
@@ -185,6 +207,7 @@ export class SnapshotStore {
       runtimeVersion: restored.runtimeVersion,
       binRelative: restored.binRelative,
       startedAt,
+      ...(planId ? { planId } : {}),
     };
     this.writeJournal(journal);
     try {
@@ -219,12 +242,27 @@ export class SnapshotStore {
     return parsePending(readFileSync(path, "utf8"), path);
   }
 
+  restoreJournal(): RestoreJournal | undefined {
+    const path = join(this.stageDir(), JOURNAL_FILE);
+    if (!lexists(path)) return undefined;
+    this.assertInsideHome(path);
+    return parseJournal(readFileSync(path, "utf8"), path);
+  }
+
+  recoveryReceipt(): RestoreRecoveryReceipt | undefined {
+    const path = join(this.root, RECEIPT_FILE);
+    if (!lexists(path)) return undefined;
+    this.assertInsideStore(path);
+    return parseReceipt(readFileSync(path, "utf8"), path);
+  }
+
   completeRestore(): void {
     const pending = this.pendingRestore();
     if (!pending) {
       throw new Error("No pending restore to complete");
     }
     this.hook("restore:complete");
+    this.writeRecoveryReceipt("completed", pending);
     rmContained(this.home, this.stageDir());
     this.hook("restore:complete-pending");
     const pendingPath = join(this.root, PENDING_FILE);
@@ -252,13 +290,7 @@ export class SnapshotStore {
         }
       }
       if (!this.pendingRestore()) {
-        this.writePending({
-          snapshotId: journal.snapshotId,
-          beforeRestoreId: journal.beforeRestoreId,
-          runtimeVersion: journal.runtimeVersion,
-          binRelative: journal.binRelative,
-          startedAt: journal.startedAt,
-        });
+        this.writePending(pendingFromJournal(journal));
       }
       return this.pendingRestore();
     }
@@ -515,6 +547,7 @@ export class SnapshotStore {
       runtimeVersion: restored.runtimeVersion,
       binRelative: restored.binRelative,
       startedAt: journal.startedAt,
+      ...(journal.planId ? { planId: journal.planId } : {}),
     });
     this.hook("restore:pending");
     rmContained(stage, join(stage, INCOMING_DIR));
@@ -537,6 +570,7 @@ export class SnapshotStore {
         rmContained(this.home, live);
       }
     }
+    this.writeRecoveryReceipt("rolled-back", pendingFromJournal(journal));
     const pendingPath = join(this.root, PENDING_FILE);
     if (lexists(pendingPath)) {
       this.assertInsideStore(pendingPath);
@@ -612,6 +646,23 @@ export class SnapshotStore {
     atomicWrite(path, `${JSON.stringify(pending, null, 2)}\n`);
   }
 
+  private writeRecoveryReceipt(outcome: RestoreRecoveryReceipt["outcome"], source: PendingRestore): void {
+    const receipt: RestoreRecoveryReceipt = {
+      schemaVersion: 1,
+      outcome,
+      snapshotId: source.snapshotId,
+      beforeRestoreId: source.beforeRestoreId,
+      runtimeVersion: source.runtimeVersion,
+      binRelative: source.binRelative,
+      startedAt: source.startedAt,
+      ...(source.planId ? { planId: source.planId } : {}),
+    };
+    this.hook("restore:receipt", outcome);
+    const path = join(this.root, RECEIPT_FILE);
+    this.assertInsideStore(path);
+    atomicWrite(path, `${JSON.stringify(receipt, null, 2)}\n`);
+  }
+
   private hook(op: string, detail?: string): void {
     this.inject?.(op, detail);
   }
@@ -675,6 +726,7 @@ function copyNode(from: string, to: string, srcRoot: string, destRoot: string, f
   if (st.isFile()) {
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);
+    retargetPnpmMetadata(to, srcRoot, destRoot);
     return;
   }
   throw new Error(`Unsupported file type at ${from}`);
@@ -870,6 +922,7 @@ function parsePending(raw: string, path: string): PendingRestore {
     runtimeVersion: parsed.runtimeVersion,
     binRelative: normalizeRel(parsed.binRelative),
     startedAt: parsed.startedAt,
+    ...optionalPlanIdField(parsed.planId, path),
   };
 }
 
@@ -901,7 +954,66 @@ function parseJournal(raw: string, path: string): RestoreJournal {
     runtimeVersion: parsed.runtimeVersion,
     binRelative: normalizeRel(parsed.binRelative),
     startedAt: parsed.startedAt,
+    ...optionalPlanIdField(parsed.planId, path),
   };
+}
+
+function parseReceipt(raw: string, path: string): RestoreRecoveryReceipt {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`Restore receipt is not valid JSON: ${path}`);
+  }
+  if (!isRecord(parsed) || parsed.schemaVersion !== 1) {
+    throw new Error(`Restore receipt schema is not supported: ${path}`);
+  }
+  if (
+    (parsed.outcome !== "completed" && parsed.outcome !== "rolled-back") ||
+    typeof parsed.snapshotId !== "string" ||
+    !SNAPSHOT_ID_RE.test(parsed.snapshotId) ||
+    typeof parsed.beforeRestoreId !== "string" ||
+    !SNAPSHOT_ID_RE.test(parsed.beforeRestoreId) ||
+    typeof parsed.runtimeVersion !== "string" ||
+    typeof parsed.binRelative !== "string" ||
+    typeof parsed.startedAt !== "string"
+  ) {
+    throw new Error(`Restore receipt is invalid: ${path}`);
+  }
+  return {
+    schemaVersion: 1,
+    outcome: parsed.outcome,
+    snapshotId: parsed.snapshotId,
+    beforeRestoreId: parsed.beforeRestoreId,
+    runtimeVersion: parsed.runtimeVersion,
+    binRelative: normalizeRel(parsed.binRelative),
+    startedAt: parsed.startedAt,
+    ...optionalPlanIdField(parsed.planId, path),
+  };
+}
+
+function pendingFromJournal(journal: RestoreJournal): PendingRestore {
+  return {
+    snapshotId: journal.snapshotId,
+    beforeRestoreId: journal.beforeRestoreId,
+    runtimeVersion: journal.runtimeVersion,
+    binRelative: journal.binRelative,
+    startedAt: journal.startedAt,
+    ...(journal.planId ? { planId: journal.planId } : {}),
+  };
+}
+
+function parseOptionalPlanId(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !SNAPSHOT_ID_RE.test(value)) {
+    throw new Error(`${label} planId is not a UUID`);
+  }
+  return value;
+}
+
+function optionalPlanIdField(value: unknown, path: string): { planId?: string } {
+  const planId = parseOptionalPlanId(value, path);
+  return planId ? { planId } : {};
 }
 
 function parsePresence(value: unknown, path: string): SnapshotPresence {

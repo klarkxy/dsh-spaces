@@ -60,6 +60,17 @@ function controlModuleHref(): string {
   ).href;
 }
 
+test("ROOT existing manager identity remains readable while a maintenance lock is held", async () => {
+  const home = tempHome();
+  const controller = new HomeController(home);
+  const identity = await controller.ensureManager();
+  const lock = new HomeOperationLock(home);
+  await lock.run("held-maintenance", async () => {
+    assert.deepEqual(await controller.ensureManager(), identity);
+    assert.equal(lock.inspect().held, true);
+  });
+});
+
 function spawnHolder(home: string): { child: ChildProcess; waitFor: (text: string) => Promise<void> } {
   const script = join(home, "hold-control.mts");
   writeFileSync(

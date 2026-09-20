@@ -8,6 +8,7 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime,
+  WorkbenchPackageRelease,
   WorkbenchSnapshot,
   WorkbenchState,
   WorkbenchView,
@@ -86,6 +87,11 @@ export class WorkbenchManagerHost extends TypertRemoteService {
   @Remote("backups")
   async backups(spaceId: string): Promise<WorkbenchBackup[]> {
     return this.guard((api) => api.backups(spaceId));
+  }
+
+  @Remote("workbenchPackage")
+  async workbenchPackage(): Promise<WorkbenchPackageRelease | null> {
+    return this.guard((api) => api.workbenchPackage?.() ?? Promise.resolve(null));
   }
 
   private async guard<T>(action: (api: Awaited<ReturnType<WorkbenchHostRuntime["managerApi"]>>) => Promise<T>): Promise<T> {

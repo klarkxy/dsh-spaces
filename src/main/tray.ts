@@ -20,6 +20,31 @@ export interface TrayHandle {
   destroy: () => void;
 }
 
+/** Minimal window surface used to hide to the tray without remaining on the taskbar. */
+export interface TrayWindow {
+  isDestroyed?: () => boolean;
+  isMinimized?: () => boolean;
+  restore?: () => void;
+  setSkipTaskbar: (skip: boolean) => void;
+  hide: () => void;
+  show: () => void;
+  focus: () => void;
+}
+
+/** Close must leave the taskbar. hide() alone still looks like minimize on Windows. */
+export function concealWindowToTray(win: TrayWindow): void {
+  win.setSkipTaskbar(true);
+  win.hide();
+}
+
+export function revealWindowFromTray(win: TrayWindow): void {
+  if (win.isDestroyed?.()) return;
+  win.setSkipTaskbar(false);
+  if (win.isMinimized?.()) win.restore?.();
+  win.show();
+  win.focus();
+}
+
 type TrayIcon = {
   isEmpty?: () => boolean;
 };

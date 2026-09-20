@@ -17,6 +17,7 @@ import {
   WorkbenchJobStore,
 } from "../../../src/adapters/node/workbench-jobs.ts";
 import { atomicWrite } from "../../../src/main/atomic.ts";
+import { WorkbenchPackageUpgrade, type WorkbenchPackageRecovery } from "../../../src/adapters/node/workbench-package-upgrade.ts";
 import { CoordinatedUpgrade } from "../../../src/main/coordinated-upgrade.ts";
 import { describeRuntime } from "../../../src/main/runtime-descriptor.ts";
 import { RuntimeStore, type RunProcessFn } from "../../../src/main/runtime-store.ts";
@@ -144,6 +145,28 @@ function hasPendingHomeWork(home: string): boolean {
   const restore = readRestoreJournal(home);
   const upgrade = readUpgradeJournal(home);
   return restore.needed === true || upgrade.needed === true;
+}
+
+function hasWorkbenchPackageWork(home: string): boolean {
+  return lexists(join(home, WORKBENCH_CONTROL_DIR_NAME, "workbench-upgrade.json"));
+}
+
+/** Inspect identities without constructing the job store, which persists crash classification. */
+function unfinishedPlanIds(home: string): string[] {
+  const dir = containedPath(home, [WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME], "dir");
+  if (!dir) return [];
+  const ids = new Set<string>();
+  for (const name of readdirSync(dir).filter(name => name.endsWith(".json"))) {
+    const path = containedPath(home, [WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, name], "file");
+    if (!path) continue;
+    try {
+      const row = JSON.parse(readFileSync(path, "utf8"));
+      if (row.schemaVersion !== 1 || row.kind !== "plan.execute" || !["queued", "running", "recovery-required"].includes(row.status)) continue;
+      const planId = readJobPlanId(home, name.slice(0, -5));
+      if (planId) ids.add(planId);
+    } catch { /* Unreadable jobs are left for the normal diagnostic path. */ }
+  }
+  return [...ids];
 }
 
 function pluginMutationOpen(home: string): boolean {
@@ -330,10 +353,14 @@ function requireVerifiedRuntime(
 
 async function settleJobs(home: string, outcome: {
   restoreCompleted: boolean;
+  restoreRolledBack?: boolean;
+  restorePlanId?: string;
   upgradeRolledBack: boolean;
+  upgradePlanId?: string;
   wholeHomeRolledBack: boolean;
   snapshotId?: string;
   pluginPlanId?: string;
+  workbench?: WorkbenchPackageRecovery;
 }): Promise<{ settled: Json[]; remaining: Json[]; unreadableStore: boolean }> {
   let store: WorkbenchJobStore;
   try {
@@ -370,19 +397,26 @@ async function settleJobs(home: string, outcome: {
     const planId = job.kind === "plan.execute" ? readJobPlanId(home, job.id) : undefined;
     const plan = planId ? plans.find((row) => row.id === planId) : undefined;
     let settlement: { status: "succeeded" | "failed" | "cancelled"; message: string } | undefined;
-    if (
+    if (job.kind === "plan.execute" && plan?.kind === "workbench.upgrade" && outcome.workbench && outcome.workbench.planId === planId) {
+      settlement = outcome.workbench.outcome === "succeeded"
+        ? { status: "succeeded", message: "Workbench package update completed; its receipt was verified by doctor." }
+        : { status: "failed", message: "Workbench package update was rolled back or abandoned by doctor." };
+    } else if (
       job.kind === "plan.execute" &&
       plan?.kind === "snapshot.restore" &&
-      outcome.restoreCompleted &&
+      (outcome.restoreCompleted || outcome.restoreRolledBack) &&
+      outcome.restorePlanId === planId &&
       typeof outcome.snapshotId === "string" &&
       plan.snapshotId === outcome.snapshotId
     ) {
-      settlement = { status: "succeeded", message: "Whole-home restore completed by offline doctor." };
+      settlement = outcome.restoreRolledBack
+        ? { status: "failed", message: "Interrupted whole-home restore was rolled back by offline doctor." }
+        : { status: "succeeded", message: "Whole-home restore completed by offline doctor." };
     } else if (
       job.kind === "plan.execute" &&
       plan?.kind === "runtime.upgrade" &&
       outcome.upgradeRolledBack &&
-      (!plan.snapshotId || plan.snapshotId === outcome.snapshotId)
+      outcome.upgradePlanId === planId
     ) {
       settlement = { status: "failed", message: "Runtime upgrade was rolled back by offline doctor." };
     } else if (
@@ -397,7 +431,7 @@ async function settleJobs(home: string, outcome: {
         status: "failed",
         message: "Plugin mutation was overwritten by a whole-home rollback. Audit evidence was kept.",
       };
-    } else if (job.kind === "recovery.resume" && (outcome.restoreCompleted || outcome.upgradeRolledBack)) {
+    } else if (job.kind === "recovery.resume" && (outcome.restoreCompleted || outcome.restoreRolledBack || outcome.upgradeRolledBack)) {
       settlement = { status: "succeeded", message: "Pending snapshot or upgrade state was reconciled." };
     }
 
@@ -527,7 +561,7 @@ export async function runRecover(lock: HomeOperationLock, flags: Record<string, 
     throw fail(EXIT.recovery, "RECOVERY_NEEDED", unknown, { command: "recover" });
   }
 
-  if (hasPendingHomeWork(lock.home) && !resources.snapshotRoot) {
+  if ((hasPendingHomeWork(lock.home) || hasWorkbenchPackageWork(lock.home)) && !resources.snapshotRoot) {
     throw fail(
       EXIT.usage,
       "SNAPSHOT_ROOT_REQUIRED",
@@ -587,10 +621,62 @@ export async function runRecover(lock: HomeOperationLock, flags: Record<string, 
       }
 
       const stores = makeStores(lock.home, write.snapshotRoot, write.runtimeRoot);
+      const interruptedPlans = unfinishedPlanIds(lock.home);
+      const plans = readPlans(lock.home);
+      const packagePlanIds = interruptedPlans.filter(id => plans.some(plan => plan.id === id && plan.kind === "workbench.upgrade"));
+      if (hasWorkbenchPackageWork(lock.home) || packagePlanIds.length) {
+        const managerPath = containedPath(lock.home, [WORKBENCH_CONTROL_DIR_NAME, "manager.json"], "file");
+        const managerId = () => {
+          if (!managerPath || inspectNamedFile(managerPath) !== "ok") return null;
+          const row = JSON.parse(readFileSync(managerPath, "utf8"));
+          return typeof row.profileId === "string" && controller.roleOf(row.profileId) === "manager" ? row.profileId : null;
+        };
+        const packageUpgrade = new WorkbenchPackageUpgrade({
+          home: lock.home, managerId,
+          snapshots: { create: async (...args) => stores.snapshots.create(...args) },
+          upgrades: makeUpgrade({ home: lock.home, ...stores, cli: write.cli }),
+          currentRuntime: () => describeRuntime({ bin: write.cli.bin, version: write.cli.version }),
+          stopAll: async () => {
+            if (readInstances(lock.home).recoveryMode) throw fail(EXIT.recovery, "RECOVERY_MODE", "Instance identity must be resolved before package recovery.");
+          },
+          reinitializeManager: async () => { /* Offline doctor leaves all instances stopped. */ },
+        });
+        const ids: Array<string | undefined> = packageUpgrade.hasEvidence() ? [undefined] : packagePlanIds;
+        for (const planId of ids) {
+          const workbench = await packageUpgrade.recover({
+            signal: new AbortController().signal, phase: () => {}, message: () => {}, cancellable: () => {}, result: () => {},
+          }, planId);
+          if (!workbench) continue;
+          if (packageUpgrade.hasEvidence() || hasPendingHomeWork(lock.home) || !homeConfigReadable(lock.home)) {
+            throw fail(EXIT.recovery, "RECOVERY_NEEDED", "Workbench package recovery left unresolved Home evidence.");
+          }
+          const expected = workbench.snapshotId ? stores.snapshots.preview(workbench.snapshotId).runtimeVersion : undefined;
+          const verified = stores.runtimes.current() || workbench.rolledBack
+            ? requireVerifiedRuntime(stores.runtimes, expected)
+            : verifyBoundRuntime(write.cli.bin, write.cli.version);
+          if (expected && verified.version !== expected) throw fail(EXIT.recovery, "RUNTIME_MISMATCH", "Workbench package recovery runtime does not match its snapshot.");
+          syncHomeToolchain(lock.home, verified, write);
+          const jobs = await settleJobs(lock.home, {
+            restoreCompleted: false, upgradeRolledBack: false, wholeHomeRolledBack: false, workbench,
+          });
+          return finishOrBlock({
+            command: "recover", restoreCompleted: false, upgradeRolledBack: false, runtimeVersion: verified.version, jobs,
+            blockers: pluginMutationOpen(lock.home) ? ["Unrelated plugin mutation evidence remains unresolved."] : [],
+            extra: { workbench, instancesReclaimed: reclaimed.reclaimed },
+          });
+        }
+      }
       let pendingSnapshotId: string | undefined;
       let expectedRuntimeVersion: string | undefined;
+      let restorePending = false;
+      let receipt: ReturnType<SnapshotStore["recoveryReceipt"]>;
+      let receiptPlanId: string | undefined;
       try {
-        const pending = stores.snapshots.pendingRestore();
+        const pending = stores.snapshots.pendingRestore() ?? stores.snapshots.restoreJournal();
+        restorePending = Boolean(pending);
+        receipt = stores.snapshots.recoveryReceipt();
+        receiptPlanId = pending?.planId ?? (receipt?.planId && interruptedPlans.includes(receipt.planId)
+          ? receipt.planId : undefined);
         pendingSnapshotId = pending?.snapshotId;
         expectedRuntimeVersion = pending?.runtimeVersion;
       } catch {
@@ -602,15 +688,25 @@ export async function runRecover(lock: HomeOperationLock, flags: Record<string, 
         );
       }
 
-      const needsHomeRecover = hasPendingHomeWork(lock.home) || Boolean(pendingSnapshotId);
+      const needsHomeRecover = hasPendingHomeWork(lock.home) || Boolean(pendingSnapshotId) || Boolean(receiptPlanId);
       let restoreCompleted = false;
+      let restoreRolledBack = false;
       let upgradeRolledBack = false;
+      let upgradePlanId: string | undefined;
       if (needsHomeRecover) {
         const upgrade = makeUpgrade({ home: lock.home, ...stores, cli: write.cli });
         try {
-          const result = await upgrade.recover();
+          const result = await upgrade.recover({ receiptPlanId });
           restoreCompleted = result.restoreCompleted === true;
+          restoreRolledBack = result.restoreRolledBack === true;
           upgradeRolledBack = result.upgradeRolledBack === true;
+          upgradePlanId = result.upgradePlanId;
+          receipt = result.restoreReceipt;
+          if (receipt) {
+            pendingSnapshotId = receipt.snapshotId;
+            expectedRuntimeVersion = restoreRolledBack
+              ? stores.snapshots.preview(receipt.beforeRestoreId).runtimeVersion : receipt.runtimeVersion;
+          }
         } catch (error) {
           if (error instanceof Fail) throw error;
           throw fail(
@@ -633,7 +729,8 @@ export async function runRecover(lock: HomeOperationLock, flags: Record<string, 
         );
       }
 
-      const wholeHome = restoreCompleted || upgradeRolledBack;
+      const wholeHome = restoreCompleted || restoreRolledBack || upgradeRolledBack;
+      const restoredNow = restoreCompleted && restorePending;
       if (wholeHome && !homeConfigReadable(lock.home)) {
         throw fail(
           EXIT.recovery,
@@ -662,19 +759,22 @@ export async function runRecover(lock: HomeOperationLock, flags: Record<string, 
 
       const jobs = await settleJobs(lock.home, {
         restoreCompleted,
+        restoreRolledBack,
+        restorePlanId: receipt?.planId,
         upgradeRolledBack,
-        wholeHomeRolledBack: wholeHome,
+        upgradePlanId,
+        wholeHomeRolledBack: restoredNow,
         snapshotId: pendingSnapshotId,
-        pluginPlanId: wholeHome ? mutation.planId : undefined,
+        pluginPlanId: restoredNow ? mutation.planId : undefined,
       });
 
       const blockers: string[] = [];
-      if (mutation.status === "open" && !wholeHome) {
+      if (mutation.status === "open" && !restoredNow) {
         blockers.push(
           "Plugin mutation evidence is still present. Doctor will not rebuild a single manifest. Pass rollback --snapshot <id> for a whole-home restore.",
         );
       }
-      if (wholeHome && mutation.status === "open") {
+      if (restoredNow && mutation.status === "open") {
         if (!archivePluginMutation(lock.home)) {
           blockers.push("Plugin-mutation evidence could not be archived after whole-home restore.");
         }
@@ -687,7 +787,7 @@ export async function runRecover(lock: HomeOperationLock, flags: Record<string, 
         runtimeVersion,
         jobs,
         blockers,
-        extra: { instancesReclaimed: reclaimed.reclaimed },
+        extra: { instancesReclaimed: reclaimed.reclaimed, restoreRolledBack },
       });
     });
   } catch (error) {
