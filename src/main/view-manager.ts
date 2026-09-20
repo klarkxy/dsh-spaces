@@ -1,156 +1,215 @@
-import { BrowserWindow, WebContentsView } from "electron";
-import { RAIL_WIDTH, TITLEBAR_HEIGHT } from "../shared/layout";
+import { BrowserWindow, WebContentsView, shell, type Session } from "electron";
+import {
+  consumeBootstrapIfNeeded,
+  decideWindowOpen,
+  decideWorkbenchNavigation,
+  redactDesktopShellText,
+} from "../shared/desktop-shell";
+import { TITLEBAR_HEIGHT } from "../shared/layout";
 
-export { RAIL_WIDTH, TITLEBAR_HEIGHT };
+export { TITLEBAR_HEIGHT };
 
-const TIP_HEIGHT = 32;
-const TIP_GAP = 8;
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function estimateTipWidth(text: string): number {
-  let units = 0;
-  for (const char of text) {
-    units += char.charCodeAt(0) > 0xff ? 1.9 : 1;
-  }
-  return Math.ceil(Math.min(320, Math.max(40, 24 + units * 7.2)));
-}
-
-function tooltipSrc(text: string): string {
-  const html = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  html, body {
-    margin: 0;
-    height: 100%;
-    background: #09090b;
-    color: #f2f3f5;
-    font: 13px/32px "Segoe UI", system-ui, sans-serif;
-    overflow: hidden;
-    user-select: none;
-  }
-  body { padding: 0 12px; white-space: nowrap; }
-</style>
-</head>
-<body>${escapeHtml(text)}</body>
-</html>`;
-  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+export interface WorkbenchViewPresent {
+  entryUrl: string;
+  managerOrigin: string;
+  onError: (message: string) => void;
 }
 
 export class ViewManager {
-  private readonly views = new Map<string, WebContentsView>();
-  private selected: string | null = null;
+  private view: WebContentsView | null = null;
   private overlayOpen = false;
-  private tooltip: WebContentsView | null = null;
-  private tooltipText = "";
+  private managerOrigin: string | null = null;
+  private bootstrapUrl: string | null = null;
+  private bootstrapConsumed = false;
+  private onError: ((message: string) => void) | null = null;
+  private closed = false;
+  private readonly workbenchSession: Session;
 
-  constructor(private readonly window: BrowserWindow) {
+  constructor(
+    private readonly window: BrowserWindow,
+    workbenchSession: Session,
+  ) {
+    this.workbenchSession = workbenchSession;
+    hardenSession(this.workbenchSession);
     this.window.on("resize", () => this.layout());
     this.window.on("show", () => this.layout());
     this.window.on("restore", () => this.layout());
+    this.window.on("focus", () => this.focusView());
   }
 
-  select(name: string, port: number, url = `http://127.0.0.1:${port}`): void {
-    this.selected = name;
-    let view = this.views.get(name);
-    if (!view) {
-      view = new WebContentsView();
-      this.views.set(name, view);
-      this.window.contentView.addChildView(view);
-      void view.webContents.loadURL(url);
-    }
+  presentWorkbench(input: WorkbenchViewPresent): void {
+    if (this.closed) return;
+    this.destroyView();
+    this.managerOrigin = input.managerOrigin;
+    this.bootstrapUrl = input.entryUrl;
+    this.bootstrapConsumed = false;
+    this.onError = input.onError;
+    this.overlayOpen = false;
+
+    const view = new WebContentsView({
+      webPreferences: {
+        session: this.workbenchSession,
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        javascript: true,
+        webSecurity: true,
+        navigateOnDragDrop: false,
+      },
+    });
+    this.view = view;
+    this.window.contentView.addChildView(view);
+    this.attachGuards(view);
     this.layout();
+    void view.webContents.loadURL(input.entryUrl);
   }
 
   setOverlayOpen(open: boolean): void {
     this.overlayOpen = open;
-    if (open) this.hideTooltip();
     this.layout();
   }
 
-  showTooltip(text: string, top: number): void {
-    if (this.overlayOpen) return;
-    const view = this.ensureTooltip();
-    if (this.tooltipText !== text) {
-      this.tooltipText = text;
-      void view.webContents.loadURL(tooltipSrc(text));
-    }
-    view.setBounds({
-      x: RAIL_WIDTH + TIP_GAP,
-      y: Math.max(TITLEBAR_HEIGHT + 4, Math.round(top - 8)),
-      width: estimateTipWidth(text),
-      height: TIP_HEIGHT,
-    });
-    view.setVisible(true);
-    this.window.contentView.addChildView(view);
+  focusView(): void {
+    if (this.overlayOpen || !this.view) return;
+    if (this.window.isDestroyed()) return;
+    this.view.webContents.focus();
   }
 
-  hideTooltip(): void {
-    this.tooltipText = "";
-    this.tooltip?.setVisible(false);
+  destroy(): void {
+    this.closed = true;
+    this.destroyView();
+    this.onError = null;
   }
 
-  hideAll(): void {
-    this.hideTooltip();
-    this.selected = null;
-    for (const view of this.views.values()) view.setVisible(false);
-  }
-
-  selectedName(): string | null {
-    return this.selected;
-  }
-
-  destroy(name: string): void {
-    const view = this.views.get(name);
+  private destroyView(): void {
+    const view = this.view;
+    this.view = null;
+    this.managerOrigin = null;
+    this.bootstrapUrl = null;
+    this.bootstrapConsumed = false;
     if (!view) return;
-    this.window.contentView.removeChildView(view);
+    try {
+      this.window.contentView.removeChildView(view);
+    } catch {
+      /* window may already be gone */
+    }
     view.webContents.close();
-    this.views.delete(name);
-    if (this.selected === name) this.selected = null;
   }
 
-  private ensureTooltip(): WebContentsView {
-    if (this.tooltip) return this.tooltip;
-    const view = new WebContentsView({
-      webPreferences: {
-        sandbox: true,
-        javascript: false,
-        contextIsolation: true,
-      },
+  private attachGuards(view: WebContentsView): void {
+    const contents = view.webContents;
+    contents.setVisualZoomLevelLimits(1, 3);
+    contents.setWindowOpenHandler((details) => {
+      const decision = decideWindowOpen({
+        url: details.url,
+        userInitiated: isUserNavigation(details.disposition),
+      });
+      if ("openExternal" in decision) {
+        void shell.openExternal(details.url);
+      }
+      return { action: "deny" };
     });
-    view.setBackgroundColor("#09090b");
-    view.setBorderRadius(6);
-    view.setVisible(false);
-    this.window.contentView.addChildView(view);
-    this.tooltip = view;
-    return view;
+    contents.on("will-navigate", (event, url) => {
+      if (!this.allowTopLevel(url)) event.preventDefault();
+    });
+    contents.on("will-redirect", (event, url) => {
+      if (!this.allowTopLevel(url)) event.preventDefault();
+    });
+    contents.on("will-frame-navigate", (event) => {
+      if (event.isMainFrame) {
+        if (!this.allowTopLevel(event.url)) event.preventDefault();
+        return;
+      }
+      if (!this.managerOrigin) {
+        event.preventDefault();
+        return;
+      }
+      const nested = decideWorkbenchNavigation({
+        url: event.url,
+        managerOrigin: this.managerOrigin,
+        bootstrapUrl: this.bootstrapUrl,
+        bootstrapConsumed: this.bootstrapConsumed,
+        isTopLevel: false,
+      });
+      if (!nested.allow) event.preventDefault();
+    });
+    contents.on("did-navigate", (_event, url) => {
+      this.markConsumed(url);
+    });
+    contents.on("did-navigate-in-page", (_event, url) => {
+      this.markConsumed(url);
+    });
+    contents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3) return;
+      this.reportError(errorDescription || `Load failed (${errorCode})`);
+    });
+    contents.on("render-process-gone", (_event, details) => {
+      this.reportError(details.reason || "The workbench page stopped.");
+    });
+    contents.on("unresponsive", () => {
+      this.reportError("The workbench page stopped responding.");
+    });
+  }
+
+  private allowTopLevel(url: string): boolean {
+    if (!this.managerOrigin) return false;
+    const decision = decideWorkbenchNavigation({
+      url,
+      managerOrigin: this.managerOrigin,
+      bootstrapUrl: this.bootstrapUrl,
+      bootstrapConsumed: this.bootstrapConsumed,
+      isTopLevel: true,
+    });
+    if (decision.allow) {
+      this.markConsumed(url);
+      return true;
+    }
+    return false;
+  }
+
+  private markConsumed(url: string): void {
+    if (!this.managerOrigin) return;
+    if (
+      consumeBootstrapIfNeeded({
+        url,
+        managerOrigin: this.managerOrigin,
+        bootstrapUrl: this.bootstrapUrl,
+        bootstrapConsumed: this.bootstrapConsumed,
+      })
+    ) {
+      this.bootstrapConsumed = true;
+    }
+  }
+
+  private reportError(message: string): void {
+    this.overlayOpen = true;
+    this.layout();
+    this.onError?.(redactDesktopShellText(message));
   }
 
   private layout(): void {
+    if (!this.view || this.window.isDestroyed()) return;
     const bounds = this.window.getContentBounds();
-    for (const [key, child] of this.views) {
-      const visible = !this.overlayOpen && key === this.selected;
-      child.setVisible(visible);
-      if (visible) {
-        child.setBounds({
-          x: RAIL_WIDTH,
-          y: TITLEBAR_HEIGHT,
-          width: Math.max(0, bounds.width - RAIL_WIDTH),
-          height: Math.max(0, bounds.height - TITLEBAR_HEIGHT),
-        });
-      }
-    }
-    if (this.tooltip?.getVisible()) {
-      this.window.contentView.addChildView(this.tooltip);
-    }
+    const visible = !this.overlayOpen;
+    this.view.setVisible(visible);
+    if (!visible) return;
+    this.view.setBounds({
+      x: 0,
+      y: TITLEBAR_HEIGHT,
+      width: Math.max(0, bounds.width),
+      height: Math.max(0, bounds.height - TITLEBAR_HEIGHT),
+    });
   }
+}
+
+function hardenSession(target: Session): void {
+  target.setPermissionRequestHandler((_contents, _permission, callback) => {
+    callback(false);
+  });
+  target.setPermissionCheckHandler(() => false);
+  target.setDevicePermissionHandler(() => false);
+}
+
+function isUserNavigation(disposition: string): boolean {
+  return disposition === "foreground-tab" || disposition === "new-window" || disposition === "default";
 }

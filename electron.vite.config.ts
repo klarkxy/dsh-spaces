@@ -8,9 +8,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        input: { index: resolve("src/main/index.ts"), "snapshot-worker": resolve("src/main/snapshot-worker.ts") },
+        input: { index: resolve("src/main/index.ts") },
         output: {
-          entryFileNames: chunk => chunk.name === "snapshot-worker" ? "snapshot-worker.mjs" : "[name].js",
+          entryFileNames: "[name].js",
           chunkFileNames: "chunks/[name]-[hash].mjs",
         },
       },
@@ -18,6 +18,11 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        output: { format: "cjs", entryFileNames: "index.cjs" },
+      },
+    },
   },
   renderer: {
     resolve: {

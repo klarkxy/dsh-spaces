@@ -21,7 +21,7 @@ export function CliSetup({
   const { t } = useI18n();
   const failed = status.state === "error";
   const busy = status.state === "installing" || status.state === "checking";
-  const waiting = status.state === "idle" || failed;
+  const waiting = status.state === "idle";
   const title = failed
     ? t("cli.titleFailed")
     : busy
@@ -40,6 +40,7 @@ export function CliSetup({
     : status.state === "idle"
       ? t("cli.idleMessage")
       : t("cli.readyWhen");
+  const details = status.message || fallbackMessage;
   return (
     <Overlay>
       <Card className="w-[480px]">
@@ -71,7 +72,7 @@ export function CliSetup({
           className={`mt-3 rounded-lg px-3 py-2 text-sm leading-6 ${failed ? "bg-red-500/10 text-red-500" : "muted"}`}
           style={failed ? undefined : { background: "var(--bg-input)" }}
         >
-          {status.message || fallbackMessage}
+          {details}
         </p>
         {waiting ? (
           <button
@@ -79,7 +80,16 @@ export function CliSetup({
             onClick={() => onInstall(packageSource)}
             className="btn-primary mt-4 w-full rounded-lg py-2 text-sm font-medium"
           >
-            {failed ? t("common.retry") : t("cli.install")}
+            {t("cli.install")}
+          </button>
+        ) : null}
+        {failed ? (
+          <button
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(details)}
+            className="btn-ghost mt-4 w-full rounded-lg py-2 text-sm"
+          >
+            {t("shell.copyLogs")}
           </button>
         ) : null}
       </Card>
