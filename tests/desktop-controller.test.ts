@@ -349,7 +349,7 @@ test("manager profile and full Spaces plugin are blocked on the ordinary desktop
   assert.equal(isFullSpacesManagerSpec("dsh-outline"), false);
 });
 
-test("leftover instance records and truncated jobs block writes without rewriting jobs", async () => {
+test("truncated jobs block writes without rewriting them", async () => {
   const home = tempHome();
   const jobs = join(home, HOME_CONTROL_DIR_NAME, "jobs");
   mkdirSync(jobs, { recursive: true });
@@ -363,17 +363,29 @@ test("leftover instance records and truncated jobs block writes without rewritin
   assert.equal(desktop.writable, false);
   await assert.rejects(async () => desktop.runMaintenance("upgrade", async () => "no"));
   assert.equal(readFileSync(jobFile, "utf8"), original);
+});
+
+test("stale dead instance records do not block writes; live leftovers still do", async () => {
+  const home = tempHome();
+  const instances = join(home, HOME_CONTROL_DIR_NAME, "instances");
+  mkdirSync(instances, { recursive: true });
+  const record = JSON.stringify({ version: 1, spaceId: "notes", pid: 9, startedAt: "2026-01-01T00:00:00.000Z" });
+  writeFileSync(join(instances, "notes.json"), record);
+  const stale = session(home, { pidAlive: () => "dead" });
+  stale.acquireOnStart();
+  await stale.hydrateManager();
+  assert.equal(stale.writable, true);
+  assert.equal(readFileSync(join(instances, "notes.json"), "utf8"), record);
+  await stale.release();
 
   const home2 = tempHome();
   mkdirSync(join(home2, HOME_CONTROL_DIR_NAME, "instances"), { recursive: true });
-  writeFileSync(
-    join(home2, HOME_CONTROL_DIR_NAME, "instances", "notes.json"),
-    JSON.stringify({ version: 1, spaceId: "notes", pid: 9, startedAt: "2026-01-01T00:00:00.000Z" }),
-  );
-  const blocked = session(home2);
+  writeFileSync(join(home2, HOME_CONTROL_DIR_NAME, "instances", "notes.json"), record);
+  const blocked = session(home2, { pidAlive: () => "alive" });
   blocked.acquireOnStart();
   await blocked.hydrateManager();
   await assert.rejects(async () => blocked.mutate(() => "no"));
+  assert.equal(readFileSync(join(home2, HOME_CONTROL_DIR_NAME, "instances", "notes.json"), "utf8"), record);
   await blocked.release();
   assert.equal(blocked.held, false);
 });
