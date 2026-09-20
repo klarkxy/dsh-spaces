@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   lstatSync,
   mkdirSync,
@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { atomicWrite } from "../../main/atomic";
 import { samePath } from "../../main/home-guard";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
-import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
+import { HomeLockBusyError, HomeOperationLock, canonicalHome } from "./home-operation-lock";
+import { deriveServiceEpoch, digestHomeIdentity } from "./workbench-protocol";
 
 export const HOME_CONTROL_DIR_NAME = ".dsh-spaces-control";
 export const HOME_CONTROL_MANAGER_FILE = "manager.json";
@@ -45,12 +46,82 @@ export interface HomeControlOwner {
   endpoint?: string;
 }
 
+export type HomeControlHandoffPhase = "launcher" | "authorized";
+
+export type HomeControlHandoffErrorCode =
+  | "not-held"
+  | "nonce-mismatch"
+  | "pid-mismatch"
+  | "home-mismatch"
+  | "binding-mismatch"
+  | "phase-mismatch"
+  | "duplicate"
+  | "invalid-target"
+  | "invalid-token"
+  | "incomplete"
+  | "ambiguous"
+  | "busy"
+  | "write-failed";
+
+/** Reservation bound into the run-owner record. Node-only; not a public DTO. */
+export interface HomeControlHandoffBinding {
+  homeDigest: string;
+  handoffId: string;
+  serviceEpoch: string;
+  artifactDigest: string;
+}
+
+/**
+ * Capability returned to the trusted Node launcher. `secret` is never copied
+ * into inspect() or public workbench DTOs.
+ */
+export interface HomeControlHandoffToken {
+  readonly v: 1;
+  readonly homeDigest: string;
+  readonly handoffId: string;
+  readonly serviceEpoch: string;
+  readonly artifactDigest: string;
+  readonly nonce: string;
+  readonly secret: string;
+}
+
+export interface HomeControlHandoffEvidence {
+  phase: HomeControlHandoffPhase;
+  binding: HomeControlHandoffBinding;
+  original: { pid: number; kind: ControlKind; startedAt: string };
+  target?: { pid: number; startedAt: string };
+}
+
+export interface HomeControlTransferToLauncherRequest {
+  nonce: string;
+  binding: HomeControlHandoffBinding;
+  /** Defaults to this process. Spawned launcher pid must already exist. */
+  launcher?: { pid: number; startedAt: string };
+}
+
+export interface HomeControlAuthorizeHandoffRequest {
+  token: HomeControlHandoffToken;
+  target: { pid: number; startedAt: string };
+}
+
+export interface HomeControlAcceptHandoffRequest {
+  token: HomeControlHandoffToken;
+  kind: ControlKind;
+  endpoint?: string;
+}
+
 export type HomeControlInspect =
   | { held: false; runDir: string }
   | { held: true; incomplete: true; runDir: string }
   | { held: true; reclaim: true; runDir: string }
   | { held: true; ambiguous: true; reason: string; runDir: string }
-  | { held: true; owner: HomeControlOwner; liveness: PidLiveness; runDir: string };
+  | {
+      held: true;
+      owner: HomeControlOwner;
+      liveness: PidLiveness;
+      runDir: string;
+      handoff?: HomeControlHandoffEvidence;
+    };
 
 export type ReclaimDeadResult =
   | { reclaimed: false; reason: "not-held" }
@@ -59,6 +130,7 @@ export type ReclaimDeadResult =
   | { reclaimed: false; reason: "ambiguous"; detail: string }
   | { reclaimed: false; reason: "owner-alive"; pid: number }
   | { reclaimed: false; reason: "remove-failed"; detail: string }
+  | { reclaimed: false; reason: "handoff" }
   | { reclaimed: true; owner: HomeControlOwner };
 
 export interface HomeControlHandle {
@@ -88,6 +160,16 @@ export class HomeControlReleaseError extends Error {
 
 export class HomeControlPathError extends Error {
   readonly name = "HomeControlPathError";
+}
+
+export class HomeControlHandoffError extends Error {
+  readonly name = "HomeControlHandoffError";
+  constructor(
+    message: string,
+    readonly code: HomeControlHandoffErrorCode,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -205,6 +287,31 @@ export class HomeController {
     };
   }
 
+  /**
+   * Current owner (this process.pid + nonce) atomically replaces occupancy
+   * with a one-shot launcher in the same run directory. Caller confirms stop;
+   * this method only checks identity and keeps the lock held.
+   */
+  async transferToLauncher(request: HomeControlTransferToLauncherRequest): Promise<HomeControlHandoffToken> {
+    return this.withHandoffLock(() => this.transferToLauncherLocked(request));
+  }
+
+  /**
+   * Launcher occupancy (this process.pid + token) binds the new Supervisor
+   * pid/startedAt. Those values must come from this trusted local process.
+   */
+  async authorizeHandoff(request: HomeControlAuthorizeHandoffRequest): Promise<HomeControlHandoffToken> {
+    return this.withHandoffLock(() => this.authorizeHandoffLocked(request));
+  }
+
+  /**
+   * New Supervisor accepts only if token + current record + this process.pid
+   * match the launcher-authorized target. Disk-readable state alone is not enough.
+   */
+  async acceptHandoff(request: HomeControlAcceptHandoffRequest): Promise<HomeControlHandle> {
+    return this.withHandoffLock(() => this.acceptHandoffLocked(request));
+  }
+
   reclaimDead(): ReclaimDeadResult {
     const first = this.inspect();
     if (!first.held) return { reclaimed: false, reason: "not-held" };
@@ -216,6 +323,9 @@ export class HomeController {
     }
     if ("incomplete" in first && first.incomplete) {
       return { reclaimed: false, reason: "incomplete" };
+    }
+    if ("handoff" in first && first.handoff) {
+      return { reclaimed: false, reason: "handoff" };
     }
     if (!("owner" in first)) return { reclaimed: false, reason: "incomplete" };
     if (first.liveness === "ambiguous") {
@@ -236,30 +346,38 @@ export class HomeController {
 
     try {
       const owner = readOwnerFile(this.ownerFile);
-      if (!owner) {
+      if (owner.state === "missing") {
         dropReclaim(this.reclaimDir);
         return { reclaimed: false, reason: "not-held" };
       }
-      if (owner === "ambiguous") {
+      if (owner.state === "symlink") {
         dropReclaim(this.reclaimDir);
         return { reclaimed: false, reason: "ambiguous", detail: "control owner file is a symlink" };
       }
-      if (owner.nonce !== first.owner.nonce || owner.pid !== first.owner.pid) {
+      if (owner.state === "unknown") {
         dropReclaim(this.reclaimDir);
-        return { reclaimed: false, reason: "owner-alive", pid: owner.pid };
+        return { reclaimed: false, reason: "ambiguous", detail: owner.reason };
       }
-      const liveness = this.pidAlive(owner.pid, owner.startedAt);
+      if (owner.state === "handoff") {
+        dropReclaim(this.reclaimDir);
+        return { reclaimed: false, reason: "handoff" };
+      }
+      if (owner.owner.nonce !== first.owner.nonce || owner.owner.pid !== first.owner.pid) {
+        dropReclaim(this.reclaimDir);
+        return { reclaimed: false, reason: "owner-alive", pid: owner.owner.pid };
+      }
+      const liveness = this.pidAlive(owner.owner.pid, owner.owner.startedAt);
       if (liveness === "ambiguous") {
         dropReclaim(this.reclaimDir);
         return { reclaimed: false, reason: "ambiguous", detail: "owner pid liveness is ambiguous" };
       }
       if (liveness !== "dead") {
         dropReclaim(this.reclaimDir);
-        return { reclaimed: false, reason: "owner-alive", pid: owner.pid };
+        return { reclaimed: false, reason: "owner-alive", pid: owner.owner.pid };
       }
-      removeOwnedRun(this.ownerFile, this.runDir, owner.nonce);
+      removeOwnedRun(this.ownerFile, this.runDir, owner.owner.nonce);
       dropReclaim(this.reclaimDir);
-      return { reclaimed: true, owner };
+      return { reclaimed: true, owner: owner.owner };
     } catch (error) {
       try {
         dropReclaim(this.reclaimDir);
@@ -272,6 +390,183 @@ export class HomeController {
         detail: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  private async withHandoffLock<T>(action: () => T): Promise<T> {
+    try {
+      return await this.lock.run("control-handoff", async () => action());
+    } catch (error) {
+      if (error instanceof HomeLockBusyError) {
+        throw new HomeControlHandoffError(
+          `handoff is blocked by the home transaction lock: ${error.message}`,
+          "busy",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private transferToLauncherLocked(request: HomeControlTransferToLauncherRequest): HomeControlHandoffToken {
+    const binding = requireBinding(request.binding);
+    this.assertHomeDigest(binding.homeDigest);
+    const current = this.requireMutableOwnerFile();
+    if (current.state === "handoff") {
+      throw new HomeControlHandoffError("handoff is already in progress", "duplicate");
+    }
+    const owner = current.owner;
+    this.assertCurrentOwner(owner, request.nonce);
+    if (!secretsEqual(binding.serviceEpoch, deriveServiceEpoch(owner.nonce))) {
+      throw new HomeControlHandoffError(
+        "handoff serviceEpoch does not match the current owner",
+        "binding-mismatch",
+      );
+    }
+    const launcher = this.requireLiveProcess(request.launcher ?? { pid: process.pid, startedAt: new Date().toISOString() });
+    const nonce = randomBytes(16).toString("hex");
+    const secret = randomBytes(32).toString("hex");
+    const disk: HandoffDiskRecord = {
+      version: 2,
+      phase: "launcher",
+      pid: launcher.pid,
+      nonce,
+      startedAt: launcher.startedAt,
+      handoffId: binding.handoffId,
+      homeDigest: binding.homeDigest,
+      serviceEpoch: binding.serviceEpoch,
+      artifactDigest: binding.artifactDigest,
+      secretHash: hashSecret(secret),
+      original: {
+        pid: owner.pid,
+        nonce: owner.nonce,
+        startedAt: owner.startedAt,
+        kind: owner.kind,
+        ...(owner.endpoint ? { endpoint: owner.endpoint } : {}),
+      },
+    };
+    replaceOwnerFile(this.ownerFile, disk);
+    return freezeToken({ ...binding, nonce, secret });
+  }
+
+  private authorizeHandoffLocked(request: HomeControlAuthorizeHandoffRequest): HomeControlHandoffToken {
+    const token = requireToken(request.token);
+    this.assertHomeDigest(token.homeDigest);
+    const current = this.requireHandoffFile();
+    if (current.disk.phase !== "launcher") {
+      throw new HomeControlHandoffError(
+        "handoff is not waiting for launcher authorization",
+        current.disk.phase === "authorized" ? "duplicate" : "phase-mismatch",
+      );
+    }
+    this.assertLauncherCaller(current, token);
+    const target = this.requireLiveProcess(request.target);
+    const disk: HandoffDiskRecord = {
+      ...current.disk,
+      phase: "authorized",
+      target: { pid: target.pid, startedAt: target.startedAt },
+    };
+    replaceOwnerFile(this.ownerFile, disk);
+    return freezeToken(token);
+  }
+
+  private acceptHandoffLocked(request: HomeControlAcceptHandoffRequest): HomeControlHandle {
+    const token = requireToken(request.token);
+    this.assertHomeDigest(token.homeDigest);
+    const kind = requireKind(request.kind);
+    const endpoint = request.endpoint === undefined ? undefined : parseControlEndpoint(request.endpoint);
+    const current = this.requireHandoffFile();
+    if (current.disk.phase !== "authorized" || !current.disk.target) {
+      throw new HomeControlHandoffError("handoff is not authorized for a new supervisor", "phase-mismatch");
+    }
+    assertTokenMatchesDisk(token, current.disk);
+    if (process.pid !== current.disk.target.pid) {
+      throw new HomeControlHandoffError("accepting process is not the authorized target", "pid-mismatch");
+    }
+    if (this.pidAlive(process.pid, current.disk.target.startedAt) !== "alive") {
+      throw new HomeControlHandoffError("authorized target startedAt does not match this process", "invalid-target");
+    }
+    const owner: HomeControlOwner = {
+      pid: current.disk.target.pid,
+      nonce: randomBytes(16).toString("hex"),
+      startedAt: current.disk.target.startedAt,
+      kind,
+      ...(endpoint ? { endpoint } : {}),
+    };
+    replaceOwnerFile(this.ownerFile, serializeLegacyOwner(owner));
+    return {
+      owner,
+      release: () => {
+        removeOwnedRun(this.ownerFile, this.runDir, owner.nonce);
+      },
+    };
+  }
+
+  private requireMutableOwnerFile(): { state: "legacy"; owner: HomeControlOwner } | { state: "handoff"; occupant: HomeControlOwner; disk: HandoffDiskRecord } {
+    const inspection = this.inspect();
+    if (!inspection.held) {
+      throw new HomeControlHandoffError("control run lock is not held", "not-held");
+    }
+    if ("reclaim" in inspection && inspection.reclaim) {
+      throw new HomeControlHandoffError("control reclaim is in progress", "busy");
+    }
+    if ("incomplete" in inspection && inspection.incomplete) {
+      throw new HomeControlHandoffError("control owner is incomplete", "incomplete");
+    }
+    if ("ambiguous" in inspection && inspection.ambiguous) {
+      throw new HomeControlHandoffError(`control owner is ambiguous (${inspection.reason})`, "ambiguous");
+    }
+    const owner = readOwnerFile(this.ownerFile);
+    if (owner.state === "legacy") return owner;
+    if (owner.state === "handoff") return owner;
+    if (owner.state === "missing") {
+      throw new HomeControlHandoffError("control owner is incomplete", "incomplete");
+    }
+    if (owner.state === "symlink") {
+      throw new HomeControlHandoffError("control owner path is a symlink", "ambiguous");
+    }
+    throw new HomeControlHandoffError(owner.reason, "ambiguous");
+  }
+
+  private requireHandoffFile(): { state: "handoff"; occupant: HomeControlOwner; disk: HandoffDiskRecord } {
+    const current = this.requireMutableOwnerFile();
+    if (current.state !== "handoff") {
+      throw new HomeControlHandoffError("control owner is not in a handoff", "phase-mismatch");
+    }
+    return current;
+  }
+
+  private assertHomeDigest(homeDigest: string): void {
+    if (!secretsEqual(homeDigest, digestHomeIdentity(this.home))) {
+      throw new HomeControlHandoffError("handoff home digest does not match this Home", "home-mismatch");
+    }
+  }
+
+  private assertCurrentOwner(owner: HomeControlOwner, nonce: string): void {
+    if (!secretsEqual(owner.nonce, nonce)) {
+      throw new HomeControlHandoffError("handoff nonce does not match the current owner", "nonce-mismatch");
+    }
+    if (owner.pid !== process.pid) {
+      throw new HomeControlHandoffError("handoff must be initiated by the current owner process", "pid-mismatch");
+    }
+  }
+
+  private assertLauncherCaller(
+    current: { occupant: HomeControlOwner; disk: HandoffDiskRecord },
+    token: HomeControlHandoffToken,
+  ): void {
+    assertTokenMatchesDisk(token, current.disk);
+    if (current.occupant.pid !== process.pid) {
+      throw new HomeControlHandoffError("handoff must be continued by the current launcher process", "pid-mismatch");
+    }
+  }
+
+  private requireLiveProcess(input: { pid: number; startedAt: string }): { pid: number; startedAt: string } {
+    const pid = requirePid(input.pid);
+    const startedAt = requireStartedAt(input.startedAt);
+    const liveness = this.pidAlive(pid, startedAt);
+    if (liveness !== "alive") {
+      throw new HomeControlHandoffError("target pid is not a live process", "invalid-target");
+    }
+    return { pid, startedAt };
   }
 
   private toIdentity(record: ManagerRecord): ManagerIdentity {
@@ -345,6 +640,10 @@ export class HomeController {
       throw new HomeControlPathError(`control directory is not a real directory: ${this.controlDir}`);
     }
   }
+}
+
+export function homeControlDigest(home: string, options: HomeControllerOptions = {}): string {
+  return digestHomeIdentity(canonicalHome(home, options));
 }
 
 export function parseControlEndpoint(raw: string): string {
@@ -488,11 +787,23 @@ function inspectRunLock(
   }
 
   const owner = readOwnerFile(ownerFile);
-  if (owner === undefined) return { held: true, incomplete: true, runDir };
-  if (owner === "ambiguous") {
+  if (owner.state === "missing") return { held: true, incomplete: true, runDir };
+  if (owner.state === "symlink") {
     return { held: true, ambiguous: true, reason: "control owner file is a symlink", runDir };
   }
-  return { held: true, owner, liveness: pidAlive(owner.pid, owner.startedAt), runDir };
+  if (owner.state === "unknown") {
+    return { held: true, ambiguous: true, reason: owner.reason, runDir };
+  }
+  if (owner.state === "handoff") {
+    return {
+      held: true,
+      owner: owner.occupant,
+      liveness: pidAlive(owner.occupant.pid, owner.occupant.startedAt),
+      runDir,
+      handoff: publicHandoffEvidence(owner.disk),
+    };
+  }
+  return { held: true, owner: owner.owner, liveness: pidAlive(owner.owner.pid, owner.owner.startedAt), runDir };
 }
 
 function readManagerFile(managerFile: string): ManagerRecord | "ambiguous" | undefined {
@@ -532,34 +843,93 @@ function parseManager(raw: string): ManagerRecord | "ambiguous" {
   };
 }
 
-function readOwnerFile(ownerFile: string): HomeControlOwner | "ambiguous" | undefined {
+interface HandoffDiskRecord {
+  version: 2;
+  phase: HomeControlHandoffPhase;
+  pid: number;
+  nonce: string;
+  startedAt: string;
+  handoffId: string;
+  homeDigest: string;
+  serviceEpoch: string;
+  artifactDigest: string;
+  secretHash: string;
+  original: {
+    pid: number;
+    nonce: string;
+    startedAt: string;
+    kind: ControlKind;
+    endpoint?: string;
+  };
+  target?: { pid: number; startedAt: string };
+}
+
+type OwnerFileState =
+  | { state: "missing" }
+  | { state: "symlink" }
+  | { state: "unknown"; reason: string }
+  | { state: "legacy"; owner: HomeControlOwner }
+  | { state: "handoff"; occupant: HomeControlOwner; disk: HandoffDiskRecord };
+
+const HEX32 = /^[0-9a-f]{32}$/;
+const HEX64 = /^[0-9a-f]{64}$/;
+const HANDOFF_ID_RE = /^[A-Za-z0-9._:-]{8,128}$/;
+
+function readOwnerFile(ownerFile: string): OwnerFileState {
   let ownerStat;
   try {
     ownerStat = lstatSync(ownerFile);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { state: "missing" };
     throw error;
   }
-  if (ownerStat.isSymbolicLink()) return "ambiguous";
-  if (!ownerStat.isFile()) return "ambiguous";
+  if (ownerStat.isSymbolicLink()) return { state: "symlink" };
+  if (!ownerStat.isFile()) {
+    return { state: "unknown", reason: "control owner path is not a regular file" };
+  }
   let raw: string;
   try {
     raw = readFileSync(ownerFile, "utf8");
   } catch {
-    return undefined;
+    return { state: "missing" };
   }
-  return parseOwner(raw);
+  return parseOwnerRecord(raw);
 }
 
-function parseOwner(raw: string): HomeControlOwner | undefined {
+function parseOwnerRecord(raw: string): OwnerFileState {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return undefined;
+    return { state: "missing" };
   }
-  if (!parsed || typeof parsed !== "object") return undefined;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { state: "missing" };
   const row = parsed as Record<string, unknown>;
+  if (row.version === 2) {
+    const disk = parseHandoffRecord(row);
+    if (!disk) {
+      return { state: "unknown", reason: "control owner handoff record is unknown or damaged" };
+    }
+    return {
+      state: "handoff",
+      occupant: {
+        pid: disk.pid,
+        nonce: disk.nonce,
+        startedAt: disk.startedAt,
+        kind: disk.original.kind,
+      },
+      disk,
+    };
+  }
+  if (row.version !== undefined && row.version !== 1) {
+    return { state: "unknown", reason: "control owner record uses an unknown schema" };
+  }
+  const owner = parseLegacyOwner(row);
+  if (!owner) return { state: "missing" };
+  return { state: "legacy", owner };
+}
+
+function parseLegacyOwner(row: Record<string, unknown>): HomeControlOwner | undefined {
   if (!Number.isInteger(row.pid) || (row.pid as number) <= 0) return undefined;
   if (typeof row.nonce !== "string" || !row.nonce) return undefined;
   if (typeof row.startedAt !== "string" || !row.startedAt) return undefined;
@@ -580,7 +950,59 @@ function parseOwner(raw: string): HomeControlOwner | undefined {
   return owner;
 }
 
-function writeOwnerFile(ownerFile: string, owner: HomeControlOwner): void {
+function parseHandoffRecord(row: Record<string, unknown>): HandoffDiskRecord | undefined {
+  if (row.phase !== "launcher" && row.phase !== "authorized") return undefined;
+  if (!Number.isInteger(row.pid) || (row.pid as number) <= 0) return undefined;
+  if (typeof row.nonce !== "string" || !HEX32.test(row.nonce)) return undefined;
+  if (typeof row.startedAt !== "string" || !Number.isFinite(Date.parse(row.startedAt))) return undefined;
+  if (typeof row.handoffId !== "string" || !HANDOFF_ID_RE.test(row.handoffId)) return undefined;
+  if (typeof row.homeDigest !== "string" || !HEX64.test(row.homeDigest)) return undefined;
+  if (typeof row.serviceEpoch !== "string" || !HEX64.test(row.serviceEpoch)) return undefined;
+  if (typeof row.artifactDigest !== "string" || !HEX64.test(row.artifactDigest)) return undefined;
+  if (typeof row.secretHash !== "string" || !HEX64.test(row.secretHash)) return undefined;
+  if (!row.original || typeof row.original !== "object" || Array.isArray(row.original)) return undefined;
+  const originalRow = row.original as Record<string, unknown>;
+  const original = parseLegacyOwner({
+    pid: originalRow.pid,
+    nonce: originalRow.nonce,
+    startedAt: originalRow.startedAt,
+    kind: originalRow.kind,
+    ...(originalRow.endpoint !== undefined ? { endpoint: originalRow.endpoint } : {}),
+  });
+  if (!original) return undefined;
+  let target: { pid: number; startedAt: string } | undefined;
+  if (row.target !== undefined) {
+    if (!row.target || typeof row.target !== "object" || Array.isArray(row.target)) return undefined;
+    const targetRow = row.target as Record<string, unknown>;
+    if (!Number.isInteger(targetRow.pid) || (targetRow.pid as number) <= 0) return undefined;
+    if (typeof targetRow.startedAt !== "string" || !Number.isFinite(Date.parse(targetRow.startedAt))) return undefined;
+    target = { pid: targetRow.pid as number, startedAt: targetRow.startedAt };
+  }
+  if (row.phase === "launcher" && target) return undefined;
+  if (row.phase === "authorized" && !target) return undefined;
+  return {
+    version: 2,
+    phase: row.phase,
+    pid: row.pid as number,
+    nonce: row.nonce,
+    startedAt: row.startedAt,
+    handoffId: row.handoffId,
+    homeDigest: row.homeDigest,
+    serviceEpoch: row.serviceEpoch,
+    artifactDigest: row.artifactDigest,
+    secretHash: row.secretHash,
+    original: {
+      pid: original.pid,
+      nonce: original.nonce,
+      startedAt: original.startedAt,
+      kind: original.kind,
+      ...(original.endpoint ? { endpoint: original.endpoint } : {}),
+    },
+    ...(target ? { target } : {}),
+  };
+}
+
+function serializeLegacyOwner(owner: HomeControlOwner): HomeControlOwner {
   const payload: HomeControlOwner = {
     pid: owner.pid,
     nonce: owner.nonce,
@@ -588,10 +1010,31 @@ function writeOwnerFile(ownerFile: string, owner: HomeControlOwner): void {
     kind: owner.kind,
   };
   if (owner.endpoint) payload.endpoint = owner.endpoint;
-  writeFileSync(ownerFile, `${JSON.stringify(payload)}\n`, {
+  return payload;
+}
+
+function writeOwnerFile(ownerFile: string, owner: HomeControlOwner): void {
+  writeFileSync(ownerFile, `${JSON.stringify(serializeLegacyOwner(owner))}\n`, {
     encoding: "utf8",
     flag: "wx",
   });
+}
+
+function replaceOwnerFile(ownerFile: string, payload: unknown): void {
+  const tmp = `${ownerFile}.${process.pid}.tmp`;
+  try {
+    atomicWrite(ownerFile, `${JSON.stringify(payload)}\n`);
+  } catch (error) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* leave any tmp; never delete owner.json */
+    }
+    throw new HomeControlHandoffError(
+      `handoff owner write failed; previous owner left in place: ${error instanceof Error ? error.message : String(error)}`,
+      "write-failed",
+    );
+  }
 }
 
 function removeOwnedRun(ownerFile: string, runDir: string, nonce: string): void {
@@ -607,13 +1050,19 @@ function removeOwnedRun(ownerFile: string, runDir: string, nonce: string): void 
   }
 
   const owner = readOwnerFile(ownerFile);
-  if (owner === undefined) {
+  if (owner.state === "missing") {
     throw new HomeControlReleaseError(`control owner is missing during release; lock left in place: ${runDir}`);
   }
-  if (owner === "ambiguous") {
+  if (owner.state === "symlink") {
     throw new HomeControlReleaseError(`control owner path is ambiguous during release: ${ownerFile}`);
   }
-  if (owner.nonce !== nonce) {
+  if (owner.state === "unknown") {
+    throw new HomeControlReleaseError(`control owner is unknown during release; lock left in place: ${owner.reason}`);
+  }
+  if (owner.state === "handoff") {
+    throw new HomeControlReleaseError("control release refused during handoff; lock left in place");
+  }
+  if (owner.owner.nonce !== nonce) {
     throw new HomeControlReleaseError("control release nonce mismatch; lock left in place");
   }
   try {
@@ -622,6 +1071,116 @@ function removeOwnedRun(ownerFile: string, runDir: string, nonce: string): void 
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new HomeControlReleaseError(`control release failed; lock left in place: ${detail}`);
+  }
+}
+
+function publicHandoffEvidence(disk: HandoffDiskRecord): HomeControlHandoffEvidence {
+  return {
+    phase: disk.phase,
+    binding: {
+      homeDigest: disk.homeDigest,
+      handoffId: disk.handoffId,
+      serviceEpoch: disk.serviceEpoch,
+      artifactDigest: disk.artifactDigest,
+    },
+    original: {
+      pid: disk.original.pid,
+      kind: disk.original.kind,
+      startedAt: disk.original.startedAt,
+    },
+    ...(disk.target ? { target: { pid: disk.target.pid, startedAt: disk.target.startedAt } } : {}),
+  };
+}
+
+function hashSecret(secret: string): string {
+  return createHash("sha256").update(secret, "utf8").digest("hex");
+}
+
+function secretsEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function freezeToken(input: HomeControlHandoffBinding & { nonce: string; secret: string }): HomeControlHandoffToken {
+  return Object.freeze({
+    v: 1 as const,
+    homeDigest: input.homeDigest,
+    handoffId: input.handoffId,
+    serviceEpoch: input.serviceEpoch,
+    artifactDigest: input.artifactDigest,
+    nonce: input.nonce,
+    secret: input.secret,
+  });
+}
+
+function requireBinding(binding: HomeControlHandoffBinding): HomeControlHandoffBinding {
+  if (!binding || typeof binding !== "object") {
+    throw new HomeControlHandoffError("handoff binding is required", "invalid-token");
+  }
+  return {
+    homeDigest: requireHex64("homeDigest", binding.homeDigest),
+    handoffId: requireHandoffId(binding.handoffId),
+    serviceEpoch: requireHex64("serviceEpoch", binding.serviceEpoch),
+    artifactDigest: requireHex64("artifactDigest", binding.artifactDigest),
+  };
+}
+
+function requireToken(token: HomeControlHandoffToken): HomeControlHandoffToken {
+  if (!token || typeof token !== "object" || token.v !== 1) {
+    throw new HomeControlHandoffError("handoff token is invalid", "invalid-token");
+  }
+  if (typeof token.nonce !== "string" || !HEX32.test(token.nonce)) {
+    throw new HomeControlHandoffError("handoff token nonce is invalid", "invalid-token");
+  }
+  if (typeof token.secret !== "string" || !HEX64.test(token.secret)) {
+    throw new HomeControlHandoffError("handoff token secret is invalid", "invalid-token");
+  }
+  const binding = requireBinding(token);
+  return freezeToken({ ...binding, nonce: token.nonce, secret: token.secret });
+}
+
+function requireHex64(name: string, value: unknown): string {
+  if (typeof value !== "string" || !HEX64.test(value)) {
+    throw new HomeControlHandoffError(`${name} must be a 64-character lowercase hex digest`, "invalid-token");
+  }
+  return value;
+}
+
+function requireHandoffId(value: unknown): string {
+  if (typeof value !== "string" || !HANDOFF_ID_RE.test(value)) {
+    throw new HomeControlHandoffError("handoffId is invalid", "invalid-token");
+  }
+  return value;
+}
+
+function requirePid(pid: unknown): number {
+  if (!Number.isInteger(pid) || (pid as number) <= 0) {
+    throw new HomeControlHandoffError("target pid is invalid", "invalid-target");
+  }
+  return pid as number;
+}
+
+function requireStartedAt(value: unknown): string {
+  if (typeof value !== "string" || !value || !Number.isFinite(Date.parse(value))) {
+    throw new HomeControlHandoffError("target startedAt is invalid", "invalid-target");
+  }
+  return value;
+}
+
+function assertTokenMatchesDisk(token: HomeControlHandoffToken, disk: HandoffDiskRecord): void {
+  if (!secretsEqual(token.homeDigest, disk.homeDigest) || token.handoffId !== disk.handoffId) {
+    throw new HomeControlHandoffError("handoff token does not match the current reservation", "binding-mismatch");
+  }
+  if (token.serviceEpoch !== disk.serviceEpoch || token.artifactDigest !== disk.artifactDigest) {
+    throw new HomeControlHandoffError("handoff token does not match the current reservation", "binding-mismatch");
+  }
+  if (!secretsEqual(token.nonce, disk.nonce)) {
+    throw new HomeControlHandoffError("handoff token nonce does not match the current launcher", "nonce-mismatch");
+  }
+  if (!secretsEqual(hashSecret(token.secret), disk.secretHash)) {
+    throw new HomeControlHandoffError("handoff token secret does not match the current reservation", "invalid-token");
   }
 }
 
@@ -668,6 +1227,12 @@ function busyError(inspection: HomeControlInspect): HomeControlBusyError {
   if ("incomplete" in inspection && inspection.incomplete) {
     return new HomeControlBusyError(
       `control run lock is incomplete and cannot be stolen: ${inspection.runDir}`,
+      inspection,
+    );
+  }
+  if ("handoff" in inspection && inspection.handoff) {
+    return new HomeControlBusyError(
+      `control run lock is held by handoff ${inspection.handoff.phase} (${inspection.handoff.binding.handoffId})`,
       inspection,
     );
   }
