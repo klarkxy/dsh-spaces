@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, Tray } from "electron";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { atomicWrite } from "./atomic";
@@ -57,7 +57,14 @@ import { smokeLifecycle } from "./smoke";
 import { startAutoUpdate } from "./updater";
 import { ViewManager } from "./view-manager";
 import { pickSpaceIcon } from "./space-icon";
-import { appIconPng, createAppTray, type TrayElectron, type TrayHandle } from "./tray";
+import {
+  appIconPng,
+  concealWindowToTray,
+  createAppTray,
+  revealWindowFromTray,
+  type TrayElectron,
+  type TrayHandle,
+} from "./tray";
 import { loadPluginCatalog, searchPluginCatalog } from "./plugin-catalog";
 import {
   downloadPlugin,
@@ -131,6 +138,7 @@ function startMain(): void {
   let quitInProgress = false;
   let initialized = false;
   let tray: TrayHandle | null = null;
+  let trayHintShown = false;
   const homeControl = createDesktopHomeControl(dshHome);
   const maintenance = homeControl.maintenance;
   const desktop = createDesktopController(dshHome, {
@@ -327,8 +335,12 @@ function startMain(): void {
     win.on("close", (event) => {
       if (allowClose) return;
       event.preventDefault();
-      if (tray?.available) win.hide();
-      else win.minimize();
+      if (tray?.available) {
+        concealWindowToTray(win);
+        notifyHiddenToTray();
+      } else {
+        win.minimize();
+      }
     });
 
     return win;
@@ -340,9 +352,23 @@ function startMain(): void {
       mainWindow = createWindow();
       views = new ViewManager(mainWindow);
     }
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    revealWindowFromTray(mainWindow);
+  }
+
+  function notifyHiddenToTray(): void {
+    if (trayHintShown || !Notification.isSupported()) return;
+    trayHintShown = true;
+    try {
+      const toast = new Notification({
+        title: t("cli.brand"),
+        body: t("tray.stillRunning"),
+        icon: nativeImage.createFromBuffer(appIconPng()),
+      });
+      toast.on("click", () => showMainWindow());
+      toast.show();
+    } catch {
+      /* Finding the tray icon is enough if the toast cannot be shown. */
+    }
   }
 
   function broadcast(channel: string, payload: unknown): void {

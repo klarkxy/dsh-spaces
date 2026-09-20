@@ -16,7 +16,9 @@ import {
 import {
   appIconPng,
   buildTrayMenuItems,
+  concealWindowToTray,
   createAppTray,
+  revealWindowFromTray,
   trayIconPng,
   type TrayElectron,
 } from "../src/main/tray.ts";
@@ -666,6 +668,59 @@ test("createAppTray wires show, stop all, and quit", () => {
   assert.deepEqual(clicks, ["show", "stop-all", "quit"]);
   handle.destroy();
   assert.equal(constructed.destroyed, true);
+});
+
+test("close conceals the window to the tray instead of minimizing", () => {
+  const calls: string[] = [];
+  const win = {
+    setSkipTaskbar: (skip: boolean) => {
+      calls.push(`skip:${skip}`);
+    },
+    hide: () => {
+      calls.push("hide");
+    },
+    show: () => {
+      calls.push("show");
+    },
+    focus: () => {
+      calls.push("focus");
+    },
+    restore: () => {
+      calls.push("restore");
+    },
+    isMinimized: () => false,
+    isDestroyed: () => false,
+  };
+  concealWindowToTray(win);
+  assert.deepEqual(calls, ["skip:true", "hide"]);
+  revealWindowFromTray(win);
+  assert.deepEqual(calls, ["skip:true", "hide", "skip:false", "show", "focus"]);
+});
+
+test("revealing a minimized hidden window restores it onto the taskbar", () => {
+  const calls: string[] = [];
+  const win = {
+    setSkipTaskbar: (skip: boolean) => {
+      calls.push(`skip:${skip}`);
+    },
+    hide: () => {
+      calls.push("hide");
+    },
+    show: () => {
+      calls.push("show");
+    },
+    focus: () => {
+      calls.push("focus");
+    },
+    restore: () => {
+      calls.push("restore");
+    },
+    isMinimized: () => true,
+    isDestroyed: () => false,
+  };
+  concealWindowToTray(win);
+  revealWindowFromTray(win);
+  assert.deepEqual(calls, ["skip:true", "hide", "skip:false", "restore", "show", "focus"]);
 });
 
 test("handled rejected start does not create unhandledRejection", async () => {
