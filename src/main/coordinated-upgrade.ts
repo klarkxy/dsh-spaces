@@ -124,6 +124,7 @@ export class CoordinatedUpgrade {
   private readonly home: string;
   private readonly children = new Set<ChildProcess>();
   private committed = false;
+  private journalPhase: UpgradeJournal["phase"] | undefined;
   private readonly progressListeners = new Set<(progress: UpgradeProgress) => void>();
 
   onProgress(listener: (progress: UpgradeProgress) => void): () => void {
@@ -168,6 +169,7 @@ export class CoordinatedUpgrade {
     const exact = requireVersion(version);
     this.assertClear();
     this.committed = false;
+    this.journalPhase = undefined;
     const names = this.opts.profiles();
     if (names.length === 0) throw new Error("No profiles to upgrade");
     if (!names.includes("web")) throw new Error("web profile is required for upgrade smoke");
@@ -223,6 +225,7 @@ export class CoordinatedUpgrade {
       });
       await this.clearFallback(join(stageHome, "profiles"), installed.dir);
       await this.commitProfiles(stageHome);
+      this.hook("commit:select");
       this.opts.runtimes.select(exact);
       this.clearJournal();
       this.committed = true;
@@ -235,7 +238,7 @@ export class CoordinatedUpgrade {
       } catch (killErr) {
         throw combine(err, killErr);
       }
-      if (!this.committed && this.readJournal()?.phase !== "committing") {
+      if (!this.committed && this.journalPhase !== "committing") {
         this.clearJournal();
         await this.discardStage();
       }
@@ -258,7 +261,7 @@ export class CoordinatedUpgrade {
     if (this.opts.snapshots.pendingRestore()) {
       throw new Error("Unfinished restore evidence was reported. Writes are blocked.");
     }
-    if (this.readJournal()) {
+    if (this.journalEvidencePresent()) {
       throw new Error("Unfinished upgrade evidence was reported. Writes are blocked.");
     }
   }
@@ -396,37 +399,10 @@ export class CoordinatedUpgrade {
     if (lexists(backup)) await this.discardPath(backup);
     this.hook("commit:backup");
     if (lexists(live)) await this.renameTree(live, backup);
-    try {
-      this.hook("commit:swap");
-      await this.renameTree(staged, live);
-      this.hook("commit:retarget");
-      if (lstatSync(live).isDirectory()) await this.retarget(live, staged, live);
-    } catch (err) {
-      await this.restoreProfilesBackup();
-      throw err;
-    }
-  }
-
-  private async restoreProfilesBackup(): Promise<void> {
-    if (this.stageIsLink()) return;
-    const live = join(this.home, "profiles");
-    const backup = this.profilesBackup();
-    if (!lexists(backup) || lstatSync(backup).isSymbolicLink()) return;
-    assertContained(this.stageRoot(), backup, "profile backup");
-    if (lexists(live)) await this.discardPath(live);
-    await this.renameTree(backup, live);
-  }
-
-  private async rollbackSnapshot(snapshotId: string): Promise<void> {
-    await this.restoreProfilesBackup();
-    const originalRuntime = this.readJournal()?.originalRuntime;
-    if (originalRuntime) await this.clearFallback(join(this.home, "profiles"), originalRuntime.root);
-    const result = await this.opts.snapshots.restore(snapshotId, this.opts.runtimeDescriptor());
-    await this.opts.runtimes.selectExisting({
-      bin: this.opts.snapshots.runtimeBin(snapshotId),
-      version: result.restored.runtimeVersion,
-    });
-    await this.opts.snapshots.completeRestore();
+    this.hook("commit:swap");
+    await this.renameTree(staged, live);
+    this.hook("commit:retarget");
+    if (lstatSync(live).isDirectory()) await this.retarget(live, staged, live);
   }
 
   private async runCli(
@@ -585,7 +561,19 @@ export class CoordinatedUpgrade {
     assertContained(this.home, dir, "upgrade stage");
     if (lexists(dir) && lstatSync(dir).isSymbolicLink()) unlinkSync(dir);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(this.journalPath(), `${JSON.stringify(journal, null, 2)}\n`);
+    const path = this.journalPath();
+    if (lexists(path)) {
+      if (lstatSync(path).isSymbolicLink() || !this.readJournal()) {
+        throw new Error("Upgrade journal is unreadable");
+      }
+    }
+    writeFileSync(path, `${JSON.stringify(journal, null, 2)}\n`);
+    this.journalPhase = journal.phase;
+  }
+
+  private journalEvidencePresent(): boolean {
+    if (this.stageIsLink()) return false;
+    return lexists(this.journalPath());
   }
 
   private readJournal(): UpgradeJournal | undefined {
@@ -606,6 +594,7 @@ export class CoordinatedUpgrade {
     if (this.stageIsLink()) return;
     const path = this.journalPath();
     if (lexists(path) && lstatSync(path).isFile()) unlinkSync(path);
+    this.journalPhase = undefined;
   }
 
   private async discardStage(): Promise<void> {

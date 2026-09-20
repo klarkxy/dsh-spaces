@@ -298,4 +298,3 @@ function normalizeFilePath(pathname: string): string {
   if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
   return path.replace(/\\/g, "/").toLowerCase();
 }
-

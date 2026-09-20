@@ -18,7 +18,7 @@
   "scripts": {
     "postinstall": "node scripts/ensure-electron.mjs",
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "npm run build:spaces && electron-vite build",
     "build:spaces": "node scripts/build-spaces.mjs",
     "typecheck:spaces": "tsc --noEmit -p tsconfig.spaces.json",
     "test:spaces": "tsx --test tests/spaces-core.test.ts tests/spaces-lock.test.ts tests/spaces-host.test.ts tests/spaces-panel.test.tsx tests/spaces-doctor.test.ts tests/compatible-dsh-cli.test.ts",
@@ -119,10 +119,6 @@
       "out/**/*"
     ],
     "asar": true,
-    "asarUnpack": [
-      "out/main/snapshot-worker.mjs",
-      "out/main/chunks/**"
-    ],
     "win": {
       "icon": "resources/icon.png",
       "target": [
@@ -149,6 +145,18 @@
       "owner": "klarkxy",
       "repo": "dsh-spaces",
       "releaseType": "release"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "packages/plugin",
+        "to": "spaces-payload",
+        "filter": [
+          "package.json",
+          "cordis.patch.yml",
+          "LICENSE",
+          "lib/**/*"
+        ]
+      }
+    ]
   }
 }
