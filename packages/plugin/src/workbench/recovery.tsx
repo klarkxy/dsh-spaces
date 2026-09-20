@@ -9,8 +9,8 @@ export interface RecoverySurfaceProps {
 }
 
 /**
- * Stable-entry page. Shows jobs, read-only reasons, and acquire.
- * Does not embed or fake a manager frame; the supervisor wires that later.
+ * Stable-entry page. Shows jobs and read-only reasons.
+ * Does not embed a manager frame, take control, or stop the supervisor.
  */
 export function RecoverySurface({ api, env }: RecoverySurfaceProps): ReactElement {
   const controller = useMemo(() => new WorkbenchController(api, env), [api, env]);
@@ -26,7 +26,6 @@ export function RecoverySurface({ api, env }: RecoverySurfaceProps): ReactElemen
       error={ui.error}
       commandError={ui.commandError}
       onLocale={controller.setLocale}
-      onAcquire={controller.acquire}
       onCancelJob={controller.cancelJob}
       onRefresh={() => void controller.poll()}
     />

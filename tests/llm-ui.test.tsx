@@ -135,7 +135,7 @@ test("model center lists redacted connections and required copy without secrets"
       locale="zh"
       writable
       client={client()}
-      spaces={[{ spaceId: "alpha", displayName: "Alpha", status: "running", generation: 1 }]}
+      spaces={[{ spaceId: "alpha", displayName: "Alpha", status: "running", generation: 1, serviceEpoch: "aa".repeat(32) }]}
       uuid={() => "op1"}
       initialDescribe={describeResult()}
     />,
@@ -155,14 +155,17 @@ test("create space submits the explicit shared-connection choice", async () => {
   const api = {
     state: async () =>
       ({
+        protocolVersion: 2,
+        serviceEpoch: "aa".repeat(32),
+        revision: "bb".repeat(32),
+        availability: "ready",
         role: "manager",
         managerId: "hub",
-        owner: { kind: "web", since: "2026-09-18T00:00:00.000Z" },
+        owner: { kind: "supervisor", since: "2026-09-18T00:00:00.000Z" },
         writable: true,
         mode: "verified-full",
         dshVersion: "0.1.5-rc.2",
         maintenance: false,
-        recoveryRequired: false,
         reasons: [],
         spaces: [],
         jobs: [],
@@ -195,6 +198,9 @@ test("create space submits the explicit shared-connection choice", async () => {
       throw new Error("unused");
     },
     preview: async () => {
+      throw new Error("unused");
+    },
+    product: async () => {
       throw new Error("unused");
     },
     plugins: async () => [],

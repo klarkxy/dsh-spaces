@@ -28,6 +28,7 @@ export type LlmUiSpace = {
   displayName: string;
   status: WorkbenchSpace["status"];
   generation: number;
+  serviceEpoch: string;
 };
 
 export interface LlmUiClient {

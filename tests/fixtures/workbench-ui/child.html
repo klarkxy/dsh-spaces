@@ -10,10 +10,12 @@
       const spaceId = location.pathname.replace(/^\//, "") || "alpha";
       const generation = 1;
       const channel = "ch-" + spaceId + "-" + generation;
+      const serviceEpoch = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       function notify(state) {
         window.parent.postMessage(
           {
             source: "dsh-spaces-view",
+            serviceEpoch: serviceEpoch,
             spaceId: spaceId,
             generation: generation,
             channel: channel,

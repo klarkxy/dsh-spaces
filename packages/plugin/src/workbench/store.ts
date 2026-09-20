@@ -1,9 +1,12 @@
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
+import type { SpaceImportResult, SpaceSharePreview, SpaceTemplate } from "../../../../src/shared/space-share";
+import type { LocalePreference, PluginCatalogSnapshot, ThemePreference } from "../../../../src/shared/types";
 import type {
   WorkbenchApi,
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
+  WorkbenchMutationContext,
   WorkbenchPackageRelease,
   WorkbenchPlan,
   WorkbenchPlanRequest,
@@ -14,6 +17,14 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../../../src/shared/workbench";
+import {
+  MAX_WORKBENCH_SHARE_BASE64,
+  type WorkbenchDiagnostics,
+  type WorkbenchHomeSettings,
+  type WorkbenchLibraryItem,
+  type WorkbenchProductObservation,
+  type WorkbenchProductOutcome,
+} from "../../../../src/shared/workbench-product";
 import { createWorkbenchLlmClient, type LlmUiClient } from "./llm/client";
 import { validateWorkbenchIcon } from "./icons";
 import { localizeError, t, type WorkbenchLocale, type WorkbenchMessageKey } from "./i18n";
@@ -21,6 +32,7 @@ import {
   defaultStorage,
   homeSelectionId,
   isHomeSelection,
+  persistWasEmpty,
   readPersist,
   writePersist,
   type StorageLike,
@@ -37,7 +49,7 @@ const NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 const RESERVED = new Set(["web", "hub", "headless", "node_modules", "spaces-hub"]);
 const ACTIVE_JOB = new Set(["queued", "running"]);
 
-export type HomeTab = "overview" | "spaces" | "plugins" | "snapshots" | "runtime";
+export type HomeTab = "overview" | "spaces" | "plugins" | "snapshots" | "runtime" | "templates";
 
 export type OverlayKind =
   | { type: "create" }
@@ -45,8 +57,23 @@ export type OverlayKind =
   | { type: "icon"; spaceId: string }
   | { type: "detail"; spaceId: string }
   | { type: "settings" }
+  | { type: "import" }
   | { type: "menu"; spaceId: string; x: number; y: number }
   | null;
+
+export interface SettingsDraft {
+  settings: WorkbenchHomeSettings;
+  observation: WorkbenchProductObservation;
+  dirty: boolean;
+}
+
+export interface ImportPreviewState {
+  importId: string;
+  expiresAt: string;
+  preview: SpaceSharePreview;
+  observation: WorkbenchProductObservation;
+  fileName: string;
+}
 
 export interface WorkbenchEnv {
   uuid(): string;
@@ -59,11 +86,13 @@ export interface WorkbenchEnv {
   handshakeTimeoutMs: number;
   startTimeoutMs: number;
   openUrl(url: string): void;
+  downloadFile(fileName: string, archiveBase64: string): void;
   addMessageListener(listener: (event: ViewMessageEvent) => void): () => void;
 }
 
 export interface WorkbenchUiState {
   locale: WorkbenchLocale;
+  theme: ThemePreference;
   boot: "loading" | "ready" | "error";
   error: string | null;
   state: WorkbenchState | null;
@@ -80,27 +109,64 @@ export interface WorkbenchUiState {
   commandPending: boolean;
   homeTab: HomeTab;
   settingsTab: "general" | "llm";
+  settingsDraft: SettingsDraft | null;
+  settingsStatus: "idle" | "loading" | "ready" | "error";
   detail: SpaceDetail | null;
   detailStatus: "idle" | "loading" | "ready" | "error";
   backups: WorkbenchBackup[];
+  diagnostics: WorkbenchDiagnostics | null;
+  diagnosticsStatus: "idle" | "loading" | "ready" | "error";
   plugins: WorkbenchPlugin[];
   pluginQuery: string;
   pluginSpaceId: string;
   pluginCatalogId: string;
   pluginVersion: string;
+  pluginSpec: string;
   pluginsStatus: "idle" | "loading" | "ready" | "error";
+  catalog: PluginCatalogSnapshot | null;
+  catalogStatus: "idle" | "loading" | "ready" | "error";
+  library: WorkbenchLibraryItem[];
+  libraryStatus: "idle" | "loading" | "ready" | "error";
   snapshots: WorkbenchSnapshot[];
   snapshotsStatus: "idle" | "loading" | "ready" | "error";
   runtimes: WorkbenchRuntime[];
   runtimesStatus: "idle" | "loading" | "ready" | "error";
   workbenchPackage: WorkbenchPackageRelease | null;
   workbenchPackageStatus: "idle" | "loading" | "ready" | "error";
+  templates: SpaceTemplate[];
+  templatesStatus: "idle" | "loading" | "ready" | "error";
+  templateId: string;
+  templateName: string;
+  templateDisplayName: string;
+  templateSpaceId: string;
+  templateIncludeConfig: boolean;
+  shareSpaceId: string;
+  shareIncludeConfig: boolean;
+  importPreview: ImportPreviewState | null;
+  importName: string;
+  importDisplayName: string;
+  lastProductOutcome: WorkbenchProductOutcome | null;
 }
 
 function defaultOpenUrl(url: string): void {
   if (typeof window !== "undefined" && typeof window.open === "function") {
     window.open(url, "_blank", "noopener,noreferrer");
   }
+}
+
+function defaultDownloadFile(fileName: string, archiveBase64: string): void {
+  if (typeof document === "undefined" || typeof atob !== "function") return;
+  const binary = atob(archiveBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = "noopener";
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function createDefaultEnv(): WorkbenchEnv {
@@ -119,6 +185,7 @@ export function createDefaultEnv(): WorkbenchEnv {
     handshakeTimeoutMs: 45_000,
     startTimeoutMs: 90_000,
     openUrl: defaultOpenUrl,
+    downloadFile: defaultDownloadFile,
     addMessageListener: (listener) => {
       if (typeof window === "undefined") return () => undefined;
       const wrapped = (event: MessageEvent) => listener(event);
@@ -144,22 +211,41 @@ function errorCode(error: unknown): { code?: string; message?: string } {
   return {};
 }
 
+function intentKey(command: WorkbenchCommand): string {
+  return JSON.stringify(command);
+}
+
+function mapLocale(value: LocalePreference): WorkbenchLocale {
+  if (value === "en") return "en";
+  if (value === "zh") return "zh";
+  return "zh";
+}
+
 export class WorkbenchController {
   readonly views = new ViewSession();
   private readonly pendingViewRequests = new Set<string>();
   private readonly env: WorkbenchEnv;
   private readonly iframeWindows = new Map<string, unknown>();
   private readonly listeners = new Set<() => void>();
+  private readonly intentRequestIds = new Map<string, string>();
+  private readonly intentInflight = new Set<string>();
   private pollTimer: unknown = null;
   private waitTimer: unknown = null;
   private unsubVisibility: (() => void) | null = null;
   private unsubMessages: (() => void) | null = null;
   private running = false;
   private stateGeneration = 0;
+  private cycle = 0;
+  private wrapDepth = 0;
+  private handledProductJobs = new Set<string>();
+  private primedProductJobs = false;
+  private submittedSettingsJson: string | null = null;
   private restoreId: string | null;
   private notedCreates = new Set<string>();
   private awaitingPackagePlanId: string | null = null;
   private awaitingPackageJobId: string | null = null;
+  private persistEmpty: boolean;
+  private appliedClientDefaults = false;
   private ui: WorkbenchUiState;
 
   constructor(
@@ -167,10 +253,12 @@ export class WorkbenchController {
     env?: Partial<WorkbenchEnv>,
   ) {
     this.env = { ...createDefaultEnv(), ...env };
+    this.persistEmpty = persistWasEmpty(this.env.storage);
     const persist = readPersist(this.env.storage);
     this.restoreId = isHomeSelection(persist.selectedId) ? null : persist.selectedId;
     this.ui = {
       locale: persist.locale,
+      theme: persist.theme,
       boot: "loading",
       error: null,
       state: null,
@@ -187,21 +275,43 @@ export class WorkbenchController {
       commandPending: false,
       homeTab: "overview",
       settingsTab: "general",
+      settingsDraft: null,
+      settingsStatus: "idle",
       detail: null,
       detailStatus: "idle",
       backups: [],
+      diagnostics: null,
+      diagnosticsStatus: "idle",
       plugins: [],
       pluginQuery: "",
       pluginSpaceId: "",
       pluginCatalogId: "",
       pluginVersion: "",
+      pluginSpec: "",
       pluginsStatus: "idle",
+      catalog: null,
+      catalogStatus: "idle",
+      library: [],
+      libraryStatus: "idle",
       snapshots: [],
       snapshotsStatus: "idle",
       runtimes: [],
       runtimesStatus: "idle",
       workbenchPackage: null,
       workbenchPackageStatus: "idle",
+      templates: [],
+      templatesStatus: "idle",
+      templateId: "",
+      templateName: "",
+      templateDisplayName: "",
+      templateSpaceId: "",
+      templateIncludeConfig: false,
+      shareSpaceId: "",
+      shareIncludeConfig: false,
+      importPreview: null,
+      importName: "",
+      importDisplayName: "",
+      lastProductOutcome: null,
     };
   }
 
@@ -220,8 +330,11 @@ export class WorkbenchController {
     void this.poll();
   }
 
+  /** Disconnect this client only. Does not stop the supervisor or spaces. */
   stop(): void {
     this.running = false;
+    this.cycle += 1;
+    this.stateGeneration += 1;
     if (this.pollTimer !== null) this.env.clearTimeout(this.pollTimer);
     this.pollTimer = null;
     this.clearWait();
@@ -231,17 +344,31 @@ export class WorkbenchController {
     this.unsubMessages = null;
   }
 
+  private stillOpen(cycle: number): boolean {
+    return cycle === this.cycle;
+  }
+
   setLocale = (locale: WorkbenchLocale): void => {
     this.patch({ locale });
     this.writePersist();
   };
 
+  setTheme = (theme: ThemePreference): void => {
+    this.patch({ theme });
+    this.writePersist();
+  };
+
   setHomeTab = (homeTab: HomeTab): void => {
     this.patch({ homeTab });
-    if (homeTab === "plugins" && this.ui.pluginsStatus === "idle") void this.searchPlugins("");
+    if (homeTab === "plugins") {
+      if (this.ui.pluginsStatus === "idle") void this.searchPlugins(this.ui.pluginQuery);
+      if (this.ui.catalogStatus === "idle") void this.loadCatalog(this.ui.pluginQuery);
+      if (this.ui.libraryStatus === "idle") void this.loadLibrary();
+    }
     if (homeTab === "snapshots" && this.ui.snapshotsStatus === "idle") void this.loadSnapshots();
     if (homeTab === "runtime" && this.ui.runtimesStatus === "idle") void this.loadRuntimes();
     if (homeTab === "runtime" && this.ui.workbenchPackageStatus === "idle") void this.loadWorkbenchPackage();
+    if (homeTab === "templates" && this.ui.templatesStatus === "idle") void this.loadTemplates();
   };
 
   selectHome = (): void => {
@@ -295,8 +422,10 @@ export class WorkbenchController {
   };
 
   openIndependent = (spaceId: string): void => {
+    const cycle = this.cycle;
     void this.wrap(async () => {
       const view = await this.api.view(spaceId);
+      if (!this.stillOpen(cycle)) return;
       this.env.openUrl(authorizedViewSrc(view));
     });
   };
@@ -319,7 +448,10 @@ export class WorkbenchController {
     this.patch({ overlay: { type: "icon", spaceId } });
   };
 
-  openSettings = (): void => this.patch({ overlay: { type: "settings" }, settingsTab: "general" });
+  openSettings = (): void => {
+    this.patch({ overlay: { type: "settings" }, settingsTab: "general" });
+    void this.loadSettings();
+  };
 
   setSettingsTab = (settingsTab: "general" | "llm"): void => {
     this.patch({ settingsTab });
@@ -332,13 +464,16 @@ export class WorkbenchController {
     return this.cachedLlmClient;
   };
 
-  llmSpaces = (): import("./llm/client").LlmUiSpace[] =>
-    (this.ui.state?.spaces ?? []).map((space) => ({
+  llmSpaces = (): import("./llm/client").LlmUiSpace[] => {
+    const epoch = this.ui.state?.serviceEpoch ?? "";
+    return (this.ui.state?.spaces ?? []).map((space) => ({
       spaceId: space.id,
       displayName: space.displayName,
       status: space.status,
       generation: space.generation,
+      serviceEpoch: epoch,
     }));
+  };
 
   openDetail = (spaceId: string): void => {
     this.patch({ overlay: { type: "detail", spaceId } });
@@ -352,6 +487,12 @@ export class WorkbenchController {
   closeOverlay = (): void => this.patch({ overlay: null, planError: null });
 
   closePlan = (): void => this.patch({ pendingPlan: null, planError: null });
+
+  closeImport = (): void => this.patch({ overlay: null, importPreview: null, planError: null });
+
+  reportFailure = (error: unknown): void => {
+    this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
+  };
 
   createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean }): void => {
     const name = input.name.trim().toLowerCase();
@@ -454,14 +595,12 @@ export class WorkbenchController {
   cancelJob = (id: string): void => {
     const job = this.ui.state?.jobs.find((item) => item.id === id);
     if (!job?.canCancel) return;
+    const cycle = this.cycle;
     void this.wrap(async () => {
       const next = await this.api.cancel(id);
+      if (!this.stillOpen(cycle)) return;
       this.mergeJob(next);
     });
-  };
-
-  acquire = (): void => {
-    void this.submit({ kind: "controller.acquire" });
   };
 
   setPluginQuery = (pluginQuery: string): void => this.patch({ pluginQuery });
@@ -473,13 +612,78 @@ export class WorkbenchController {
     });
   };
   setPluginVersion = (pluginVersion: string): void => this.patch({ pluginVersion });
+  setPluginSpec = (pluginSpec: string): void => this.patch({ pluginSpec });
 
   searchPlugins = (query: string): Promise<void> => {
+    const cycle = this.cycle;
     this.patch({ pluginQuery: query, pluginsStatus: "loading" });
     return this.wrap(async () => {
       const plugins = await this.api.plugins(query);
+      if (!this.stillOpen(cycle)) return;
       this.patch({ plugins: Array.isArray(plugins) ? plugins : [], pluginsStatus: "ready" });
-    }, () => this.patch({ pluginsStatus: "error" }));
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ pluginsStatus: "error" });
+    });
+  };
+
+  loadCatalog = (query?: string): Promise<void> => {
+    const cycle = this.cycle;
+    this.patch({ catalogStatus: "loading" });
+    return this.wrap(async () => {
+      const result = await this.api.product({ method: "catalog", query: query ?? this.ui.pluginQuery });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "catalog") {
+        this.patch({ catalogStatus: "error" });
+        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+      }
+      this.patch({ catalog: result.catalog, catalogStatus: "ready" });
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ catalogStatus: "error", catalog: this.ui.catalog });
+    });
+  };
+
+  loadLibrary = (): Promise<void> => {
+    const cycle = this.cycle;
+    this.patch({ libraryStatus: "loading" });
+    return this.wrap(async () => {
+      const result = await this.api.product({ method: "library" });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "library") {
+        this.patch({ libraryStatus: "error" });
+        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+      }
+      this.patch({ library: result.items, libraryStatus: "ready" });
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ libraryStatus: "error" });
+    });
+  };
+
+  refreshCatalog = (): void => {
+    const url = this.ui.settingsDraft?.settings.catalogUrl?.trim();
+    void this.submit({ kind: "catalog.refresh", ...(url ? { url } : {}) });
+  };
+
+  downloadPlugin = (): void => {
+    const catalogId = this.ui.pluginCatalogId.trim();
+    const spec = this.ui.pluginSpec.trim();
+    const version = this.ui.pluginVersion.trim();
+    if (!catalogId && !spec) {
+      this.patch({ commandError: this.msg("plugins.needDownload") });
+      return;
+    }
+    void this.submit({
+      kind: "plugin.download",
+      ...(catalogId ? { catalogId } : {}),
+      ...(spec ? { spec } : {}),
+      ...(version ? { version } : {}),
+    });
+  };
+
+  removeLibraryItem = (libraryId: string): void => {
+    void this.submit({ kind: "plugin.library.remove", libraryId });
   };
 
   previewInstallSelected = (): void => {
@@ -497,19 +701,29 @@ export class WorkbenchController {
   };
 
   loadSnapshots = (): Promise<void> => {
+    const cycle = this.cycle;
     this.patch({ snapshotsStatus: "loading" });
     return this.wrap(async () => {
       const snapshots = await this.api.snapshots();
+      if (!this.stillOpen(cycle)) return;
       this.patch({ snapshots: Array.isArray(snapshots) ? snapshots : [], snapshotsStatus: "ready" });
-    }, () => this.patch({ snapshotsStatus: "error" }));
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ snapshotsStatus: "error" });
+    });
   };
 
   loadRuntimes = (): Promise<void> => {
+    const cycle = this.cycle;
     this.patch({ runtimesStatus: "loading" });
     return this.wrap(async () => {
       const runtimes = await this.api.runtimes();
+      if (!this.stillOpen(cycle)) return;
       this.patch({ runtimes: Array.isArray(runtimes) ? runtimes : [], runtimesStatus: "ready" });
-    }, () => this.patch({ runtimesStatus: "error" }));
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ runtimesStatus: "error" });
+    });
   };
 
   loadWorkbenchPackage = (): Promise<void> => {
@@ -518,36 +732,288 @@ export class WorkbenchController {
       this.patch({ workbenchPackage: null, workbenchPackageStatus: "ready" });
       return Promise.resolve();
     }
+    const cycle = this.cycle;
     this.patch({ workbenchPackageStatus: "loading" });
     return this.wrap(async () => {
       const release = await loader();
+      if (!this.stillOpen(cycle)) return;
       this.patch({
         workbenchPackage: release?.id === "bundled-workbench" ? release : null,
         workbenchPackageStatus: "ready",
       });
-    }, () => this.patch({ workbenchPackage: null, workbenchPackageStatus: "error" }));
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ workbenchPackage: null, workbenchPackageStatus: "error" });
+    });
+  };
+
+  loadSettings = (): Promise<void> => {
+    if (this.ui.settingsDraft?.dirty) return Promise.resolve();
+    const cycle = this.cycle;
+    this.patch({ settingsStatus: "loading" });
+    return this.wrap(async () => {
+      const result = await this.api.product({ method: "settings" });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "settings") {
+        this.patch({ settingsStatus: "error" });
+        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+      }
+      if (this.ui.settingsDraft?.dirty) return;
+      this.applyClientDefaults(result.clientDefaults);
+      this.patch({
+        settingsDraft: { settings: result.settings, observation: result.observation, dirty: false },
+        settingsStatus: "ready",
+      });
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ settingsStatus: "error" });
+    });
+  };
+
+  setHomeSettings = (patch: Partial<WorkbenchHomeSettings>): void => {
+    const draft = this.ui.settingsDraft;
+    if (!draft) return;
+    this.patch({
+      settingsDraft: {
+        settings: { ...draft.settings, ...patch },
+        observation: draft.observation,
+        dirty: true,
+      },
+    });
+  };
+
+  saveHomeSettings = (): void => {
+    const draft = this.ui.settingsDraft;
+    if (!draft) return;
+    this.submittedSettingsJson = JSON.stringify(draft.settings);
+    void this.submit({ kind: "settings.update", settings: draft.settings }, draft.observation);
+  };
+
+  loadTemplates = (): Promise<void> => {
+    const cycle = this.cycle;
+    this.patch({ templatesStatus: "loading" });
+    return this.wrap(async () => {
+      const result = await this.api.product({ method: "templates" });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "templates") {
+        this.patch({ templatesStatus: "error" });
+        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+      }
+      const templates = result.templates;
+      const templateId = this.ui.templateId && templates.some((row) => row.id === this.ui.templateId)
+        ? this.ui.templateId
+        : templates[0]?.id ?? "";
+      const workspaces = this.workspaceSpaces();
+      const templateSpaceId =
+        this.ui.templateSpaceId && workspaces.some((space) => space.id === this.ui.templateSpaceId)
+          ? this.ui.templateSpaceId
+          : workspaces[0]?.id ?? "";
+      const shareSpaceId =
+        this.ui.shareSpaceId && workspaces.some((space) => space.id === this.ui.shareSpaceId)
+          ? this.ui.shareSpaceId
+          : workspaces[0]?.id ?? "";
+      this.patch({
+        templates,
+        templatesStatus: "ready",
+        templateId,
+        templateSpaceId,
+        shareSpaceId,
+      });
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ templatesStatus: "error" });
+    });
+  };
+
+  setTemplateId = (templateId: string): void => this.patch({ templateId });
+  setTemplateName = (templateName: string): void => this.patch({ templateName });
+  setTemplateDisplayName = (templateDisplayName: string): void => this.patch({ templateDisplayName });
+  setTemplateSpaceId = (templateSpaceId: string): void => this.patch({ templateSpaceId });
+  setTemplateIncludeConfig = (templateIncludeConfig: boolean): void => this.patch({ templateIncludeConfig });
+  setShareSpaceId = (shareSpaceId: string): void => this.patch({ shareSpaceId });
+  setShareIncludeConfig = (shareIncludeConfig: boolean): void => this.patch({ shareIncludeConfig });
+  setImportName = (importName: string): void => this.patch({ importName });
+  setImportDisplayName = (importDisplayName: string): void => this.patch({ importDisplayName });
+
+  saveTemplate = (): void => {
+    const spaceId = this.ui.templateSpaceId;
+    const name = this.ui.templateName.trim();
+    if (!spaceId || !name) {
+      this.patch({ commandError: this.msg("templates.needName") });
+      return;
+    }
+    void this.submit({
+      kind: "template.save",
+      spaceId,
+      name,
+      includeConfig: this.ui.templateIncludeConfig,
+    });
+  };
+
+  createFromTemplate = (): void => {
+    const templateId = this.ui.templateId;
+    const name = this.ui.templateName.trim().toLowerCase();
+    if (!templateId || !NAME_RE.test(name)) {
+      this.patch({ commandError: this.msg("app.nameInvalid") });
+      return;
+    }
+    if (RESERVED.has(name)) {
+      this.patch({ commandError: this.msg("app.nameReserved") });
+      return;
+    }
+    void this.submit({
+      kind: "template.create",
+      templateId,
+      name,
+      displayName: this.ui.templateDisplayName.trim() || undefined,
+    });
+  };
+
+  exportShare = (): void => {
+    const spaceId = this.ui.shareSpaceId;
+    if (!spaceId) {
+      this.patch({ commandError: this.msg("share.needSpace") });
+      return;
+    }
+    const cycle = this.cycle;
+    void this.wrap(async () => {
+      const result = await this.api.product({
+        method: "share.export",
+        spaceId,
+        includeConfig: this.ui.shareIncludeConfig,
+      });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "share.export") {
+        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+      }
+      this.env.downloadFile(result.fileName, result.archiveBase64);
+    });
+  };
+
+  previewImportArchive = (archiveBase64: string, fileName: string): void => {
+    if (archiveBase64.length > MAX_WORKBENCH_SHARE_BASE64) {
+      this.patch({ commandError: this.msg("share.tooLarge"), importPreview: null });
+      return;
+    }
+    const cycle = this.cycle;
+    void this.wrap(async () => {
+      const result = await this.api.product({ method: "share.previewImport", archiveBase64 });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "share.previewImport") {
+        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+      }
+      this.patch({
+        overlay: { type: "import" },
+        importPreview: {
+          importId: result.importId,
+          expiresAt: result.expiresAt,
+          preview: result.preview,
+          observation: result.observation,
+          fileName,
+        },
+        importName: "",
+        importDisplayName: "",
+        commandError: null,
+      });
+    });
+  };
+
+  confirmImport = (): void => {
+    const preview = this.ui.importPreview;
+    if (!preview) {
+      this.patch({ commandError: this.msg("share.noPreview") });
+      return;
+    }
+    const name = this.ui.importName.trim().toLowerCase();
+    if (!NAME_RE.test(name)) {
+      this.patch({ commandError: this.msg("app.nameInvalid") });
+      return;
+    }
+    if (RESERVED.has(name)) {
+      this.patch({ commandError: this.msg("app.nameReserved") });
+      return;
+    }
+    const liveEpoch = this.ui.state?.serviceEpoch;
+    if (!liveEpoch || liveEpoch !== preview.observation.serviceEpoch) {
+      this.patch({ commandError: this.msg("share.epochChanged") });
+      return;
+    }
+    const expires = Date.parse(preview.expiresAt);
+    if (!Number.isFinite(expires) || this.env.now() >= expires) {
+      this.patch({ commandError: this.msg("share.expired") });
+      return;
+    }
+    const importId = preview.importId;
+    this.patch({ overlay: null, importPreview: null });
+    void this.submit(
+      {
+        kind: "space.import",
+        importId,
+        name,
+        displayName: this.ui.importDisplayName.trim() || undefined,
+      },
+      preview.observation,
+    );
+  };
+
+  copyDiagnostics = (): string => {
+    const diag = this.ui.diagnostics;
+    const lines = [
+      diag?.lastError,
+      ...(diag?.logs ?? []).map((entry) => `${entry.at} ${entry.channel} ${entry.text}`),
+      diag?.logError,
+    ].filter((line): line is string => Boolean(line));
+    return lines.join("\n");
   };
 
   loadDetail = (spaceId: string): Promise<void> => {
-    this.patch({ detailStatus: "loading" });
+    const cycle = this.cycle;
+    this.patch({ detailStatus: "loading", diagnosticsStatus: "loading", diagnostics: null });
     return this.wrap(async () => {
-      const [detail, backups] = await Promise.all([this.api.detail(spaceId), this.api.backups(spaceId)]);
+      const [detailResult, backupsResult, diagResult] = await Promise.allSettled([
+        this.api.detail(spaceId),
+        this.api.backups(spaceId),
+        this.api.product({ method: "diagnostics", spaceId }),
+      ]);
+      if (!this.stillOpen(cycle)) return;
+      const backups = backupsResult.status === "fulfilled" && Array.isArray(backupsResult.value)
+        ? backupsResult.value
+        : [];
+      let diagnostics: WorkbenchDiagnostics | null = null;
+      let diagnosticsStatus: WorkbenchUiState["diagnosticsStatus"] = "error";
+      if (diagResult.status === "fulfilled" && diagResult.value.method === "diagnostics") {
+        diagnostics = diagResult.value.diagnostics;
+        diagnosticsStatus = "ready";
+      }
+      if (detailResult.status !== "fulfilled") {
+        this.patch({ detailStatus: "error", backups, diagnostics, diagnosticsStatus });
+        throw detailResult.reason;
+      }
       this.patch({
-        detail,
-        backups: Array.isArray(backups) ? backups : [],
+        detail: detailResult.value,
+        backups,
+        diagnostics,
+        diagnosticsStatus,
         detailStatus: "ready",
       });
-    }, () => this.patch({ detailStatus: "error" }));
+      if (diagResult.status === "rejected") {
+        this.patch({ commandError: localizeError(this.ui.locale, errorCode(diagResult.reason)) });
+      }
+    }, () => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ detailStatus: "error" });
+    });
   };
 
   poll = async (): Promise<void> => {
+    const cycle = this.cycle;
     const generation = ++this.stateGeneration;
     try {
       const state = await this.api.state();
-      if (generation !== this.stateGeneration) return;
+      if (!this.stillOpen(cycle) || generation !== this.stateGeneration) return;
       this.applyState(state);
     } catch (error) {
-      if (generation !== this.stateGeneration) return;
+      if (!this.stillOpen(cycle) || generation !== this.stateGeneration) return;
       this.patch({
         boot: this.ui.state || this.ui.frames.length > 0 ? "ready" : "error",
         error: localizeError(this.ui.locale, errorCode(error)),
@@ -560,6 +1026,8 @@ export class WorkbenchController {
   canMutate(): boolean {
     const state = this.ui.state;
     if (!state) return false;
+    if (state.protocolVersion !== 2) return false;
+    if (state.availability === "unavailable") return false;
     return state.writable === true;
   }
 
@@ -587,8 +1055,9 @@ export class WorkbenchController {
   }
 
   private applyState(state: WorkbenchState): void {
+    const epochDestroyed = this.views.syncServiceEpoch(state.serviceEpoch);
     const destroyed = this.views.syncGenerations(state.spaces);
-    for (const spaceId of destroyed) {
+    for (const spaceId of [...epochDestroyed, ...destroyed]) {
       for (const key of [...this.iframeWindows.keys()]) {
         if (key.startsWith(`${spaceId}:`)) this.iframeWindows.delete(key);
       }
@@ -606,21 +1075,40 @@ export class WorkbenchController {
       this.ui.pluginSpaceId && state.spaces.some((space) => space.id === this.ui.pluginSpaceId)
         ? this.ui.pluginSpaceId
         : this.workspaceSpacesFrom(state)[0]?.id ?? "";
+    const templateSpaceId =
+      this.ui.templateSpaceId && state.spaces.some((space) => space.id === this.ui.templateSpaceId)
+        ? this.ui.templateSpaceId
+        : pluginSpaceId;
+    const shareSpaceId =
+      this.ui.shareSpaceId && state.spaces.some((space) => space.id === this.ui.shareSpaceId)
+        ? this.ui.shareSpaceId
+        : pluginSpaceId;
+    const protocolError =
+      state.protocolVersion !== 2 ? localizeError(this.ui.locale, "workbench/unsupported") : this.ui.error;
     this.patch({
       boot: "ready",
-      error: null,
+      error: state.protocolVersion === 2 ? null : protocolError,
       state,
       selected,
       createdNotice: noticeId === selected || noticeRemoved ? null : this.ui.createdNotice,
       pluginSpaceId,
+      templateSpaceId,
+      shareSpaceId,
       frames: this.views.list(),
       visibleSpaceId: this.views.visibleSpaceId,
       viewError: this.views.viewError,
     });
     if (selectedWasRemoved) this.writePersist();
+    if (!this.primedProductJobs) {
+      this.primedProductJobs = true;
+      for (const item of state.jobs) {
+        if (!ACTIVE_JOB.has(item.status)) this.handledProductJobs.add(item.id);
+      }
+    }
     for (const item of state.jobs) {
       this.noteCreated(item, true);
       this.onUpgradeJobUpdate(item);
+      this.onProductJob(item);
     }
     const restoreId = this.restoreId;
     if (restoreId) {
@@ -691,12 +1179,14 @@ export class WorkbenchController {
   }
 
   private async loadAuthorizedView(spaceId: string, token: number): Promise<void> {
+    const cycle = this.cycle;
     const requestKey = `${spaceId}:${token}`;
     if (this.pendingViewRequests.has(requestKey)) return;
     this.pendingViewRequests.add(requestKey);
     if (this.views.isCurrentToken(token)) this.armWait(token, this.env.handshakeTimeoutMs, spaceId, "handshake");
     try {
       const view: WorkbenchView = await this.api.view(spaceId);
+      if (!this.stillOpen(cycle)) return;
       if (!this.views.isCurrentToken(token)) {
         this.views.applyView(spaceId, token, view);
         this.syncSelection();
@@ -705,6 +1195,7 @@ export class WorkbenchController {
       this.views.applyView(spaceId, token, view);
       this.syncSelection();
     } catch {
+      if (!this.stillOpen(cycle)) return;
       this.views.failView(spaceId, token, "view-failed");
       this.syncSelection();
     } finally {
@@ -748,12 +1239,31 @@ export class WorkbenchController {
     this.waitTimer = null;
   }
 
+  private mutationContext(): WorkbenchMutationContext | null {
+    const state = this.ui.state;
+    if (!state || state.protocolVersion !== 2) return null;
+    if (!state.serviceEpoch || !state.revision) return null;
+    return { serviceEpoch: state.serviceEpoch, expectedRevision: state.revision };
+  }
+
   private async runPreview(request: WorkbenchPlanRequest): Promise<void> {
+    const context = this.mutationContext();
+    if (!context) {
+      this.patch({
+        pendingPlan: null,
+        planError: localizeError(this.ui.locale, "workbench/unsupported"),
+        commandPending: false,
+      });
+      return;
+    }
+    const cycle = this.cycle;
     this.patch({ planError: null, pendingPlan: null, commandPending: true });
     try {
-      const plan = await this.api.preview(request);
+      const plan = await this.api.preview(request, context);
+      if (!this.stillOpen(cycle)) return;
       this.patch({ pendingPlan: { request, plan }, planError: null, commandPending: false, overlay: null });
     } catch (error) {
+      if (!this.stillOpen(cycle)) return;
       this.patch({
         pendingPlan: null,
         planError: localizeError(this.ui.locale, errorCode(error)),
@@ -762,21 +1272,38 @@ export class WorkbenchController {
     }
   }
 
-  private async submit(command: WorkbenchCommand): Promise<void> {
-    if (command.kind !== "controller.acquire" && !this.canMutate()) {
+  private async submit(command: WorkbenchCommand, contextOverride?: WorkbenchMutationContext): Promise<void> {
+    if (!this.canMutate()) {
       this.rejectReadonly();
       return;
     }
-    const requestId = this.env.uuid();
-    await this.wrap(async () => {
-      const job = await this.api.submit(command, requestId);
-      if (command.kind === "plan.execute" && command.planId === this.awaitingPackagePlanId) {
-        this.awaitingPackageJobId = job.id;
-      }
-      this.mergeJob(job);
-      this.noteCreated(job);
-      await this.poll();
-    });
+    const context = contextOverride ?? this.mutationContext();
+    if (!context) {
+      this.patch({ commandError: localizeError(this.ui.locale, "workbench/unsupported") });
+      return;
+    }
+    const key = intentKey(command);
+    if (this.intentInflight.has(key)) return;
+    const requestId = this.intentRequestIds.get(key) ?? this.env.uuid();
+    this.intentRequestIds.set(key, requestId);
+    this.intentInflight.add(key);
+    const cycle = this.cycle;
+    try {
+      await this.wrap(async () => {
+        const job = await this.api.submit(command, requestId, context);
+        if (!this.stillOpen(cycle)) return;
+        if (command.kind === "plan.execute" && command.planId === this.awaitingPackagePlanId) {
+          this.awaitingPackageJobId = job.id;
+        }
+        this.mergeJob(job);
+        this.noteCreated(job);
+        this.onProductJob(job);
+        if (!ACTIVE_JOB.has(job.status)) this.intentRequestIds.delete(key);
+        await this.poll();
+      });
+    } finally {
+      this.intentInflight.delete(key);
+    }
   }
 
   private mergeJob(job: WorkbenchJob): void {
@@ -787,14 +1314,69 @@ export class WorkbenchController {
     this.patch({ state: { ...state, jobs } });
     this.noteCreated(job);
     this.onUpgradeJobUpdate(job);
+    this.onProductJob(job);
+  }
+
+  private onProductJob(job: WorkbenchJob): void {
+    if (ACTIVE_JOB.has(job.status)) return;
+    for (const [key, requestId] of [...this.intentRequestIds.entries()]) {
+      if (requestId === job.requestId) this.intentRequestIds.delete(key);
+    }
+    if (this.handledProductJobs.has(job.id)) return;
+    this.handledProductJobs.add(job.id);
+    const product = job.result?.product;
+    if (product) this.patch({ lastProductOutcome: product });
+    if (job.status === "succeeded" && product?.kind === "settings.update") {
+      const draft = this.ui.settingsDraft;
+      const submitted = this.submittedSettingsJson;
+      this.submittedSettingsJson = null;
+      const newerEdit = Boolean(draft && submitted && JSON.stringify(draft.settings) !== submitted);
+      if (draft && !newerEdit) {
+        this.patch({
+          settingsDraft: {
+            settings: product.settings,
+            observation: draft.observation,
+            dirty: false,
+          },
+          settingsStatus: "idle",
+        });
+        void this.loadSettings();
+      }
+    } else if (job.status === "succeeded") {
+      if (job.kind === "catalog.refresh" || product?.kind === "catalog.refresh") {
+        this.patch({ catalogStatus: "idle" });
+        if (this.ui.homeTab === "plugins") void this.loadCatalog(this.ui.pluginQuery);
+      }
+      if (
+        job.kind === "plugin.download" ||
+        job.kind === "plugin.library.remove" ||
+        product?.kind === "plugin.download" ||
+        product?.kind === "plugin.library.remove"
+      ) {
+        this.patch({ libraryStatus: "idle" });
+        if (this.ui.homeTab === "plugins") void this.loadLibrary();
+      }
+      if (
+        job.kind === "template.save" ||
+        job.kind === "template.create" ||
+        job.kind === "space.import" ||
+        product?.kind === "template.save" ||
+        product?.kind === "template.create" ||
+        product?.kind === "space.import"
+      ) {
+        this.patch({ templatesStatus: "idle" });
+        if (this.ui.homeTab === "templates") void this.loadTemplates();
+      }
+    }
   }
 
   private noteCreated(job: WorkbenchJob, fromSnapshot = false): void {
-    if (job.kind !== "space.create" || job.status !== "succeeded" || !job.result?.spaceId) return;
-    if (fromSnapshot && !this.ui.state?.spaces.some(space => space.id === job.result?.spaceId)) return;
-    if (this.notedCreates.has(job.result.spaceId)) return;
-    this.notedCreates.add(job.result.spaceId);
-    this.patch({ createdNotice: { spaceId: job.result.spaceId } });
+    const spaceId = job.result?.spaceId ?? importSpaceId(job.result?.product);
+    if ((job.kind !== "space.create" && job.kind !== "template.create" && job.kind !== "space.import") || job.status !== "succeeded" || !spaceId) return;
+    if (fromSnapshot && !this.ui.state?.spaces.some(space => space.id === spaceId)) return;
+    if (this.notedCreates.has(spaceId)) return;
+    this.notedCreates.add(spaceId);
+    this.patch({ createdNotice: { spaceId } });
   }
 
   hasActiveJobs(): boolean {
@@ -812,21 +1394,40 @@ export class WorkbenchController {
   }
 
   private async wrap(action: () => Promise<void>, onError?: () => void): Promise<void> {
-    this.patch({ commandPending: true, commandError: null });
+    const cycle = this.cycle;
+    if (!this.stillOpen(cycle)) return;
+    this.wrapDepth += 1;
+    this.patch({ commandPending: true, commandError: this.wrapDepth === 1 ? null : this.ui.commandError });
     try {
       await action();
-      this.patch({ commandPending: false });
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ commandPending: this.wrapDepth - 1 > 0 });
     } catch (error) {
+      if (!this.stillOpen(cycle)) return;
       onError?.();
       this.patch({
-        commandPending: false,
+        commandPending: this.wrapDepth - 1 > 0,
         commandError: localizeError(this.ui.locale, errorCode(error)),
       });
+    } finally {
+      this.wrapDepth = Math.max(0, this.wrapDepth - 1);
     }
   }
 
   private rejectReadonly(): void {
-    this.patch({ commandError: localizeError(this.ui.locale, "workbench/read-only"), pendingPlan: null });
+    const state = this.ui.state;
+    const code = state && state.protocolVersion !== 2 ? "workbench/unsupported" : "workbench/read-only";
+    this.patch({ commandError: localizeError(this.ui.locale, code), pendingPlan: null });
+  }
+
+  private applyClientDefaults(defaults: { locale: LocalePreference; theme: ThemePreference }): void {
+    if (this.appliedClientDefaults || !this.persistEmpty) return;
+    this.appliedClientDefaults = true;
+    this.patch({
+      locale: mapLocale(defaults.locale),
+      theme: defaults.theme,
+    });
+    this.writePersist();
   }
 
   private previewWorkbenchUpgrade(): void {
@@ -869,9 +1470,11 @@ export class WorkbenchController {
   }
 
   private writePersist(): void {
+    this.persistEmpty = false;
     writePersist(this.env.storage, {
       selectedId: this.ui.selected === "home" ? homeSelectionId() : this.ui.selected,
       locale: this.ui.locale,
+      theme: this.ui.theme,
     });
   }
 
@@ -880,3 +1483,13 @@ export class WorkbenchController {
     for (const listener of this.listeners) listener();
   }
 }
+
+function importSpaceId(product: WorkbenchProductOutcome | undefined): string | undefined {
+  if (!product) return undefined;
+  if (product.kind === "template.create" || product.kind === "space.import") {
+    return product.import.spaceId;
+  }
+  return undefined;
+}
+
+export type { SpaceImportResult };
