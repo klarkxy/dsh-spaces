@@ -1,9 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { applyIsolationPatch, patchTextLooksIsolated } from "../core/domain/isolation";
 import { isGitSpec } from "../shared/plugin";
 import { isExactRuntimeVersion } from "../shared/runtime";
-import { FULL_SPACES_PACKAGE, isFullSpacesManagerSpec } from "../shared/desktop-controller";
+import { FULL_SPACES_PACKAGE } from "../shared/desktop-controller";
 import {
   SPACE_SHARE_FORMAT_VERSION,
   SPACE_SHARE_KIND,
@@ -14,12 +13,19 @@ import {
   type SpaceSharePluginSource,
   type SpaceSharePreview,
 } from "../shared/space-share";
+import { MAX_WORKBENCH_SHARE_BYTES } from "../shared/workbench-product";
 import {
   LLM_SHARE_FILENAME,
   assertShareSecretFree,
   parseLlmShareManifest,
   type LlmShareManifest,
 } from "../core/domain/llm-share";
+import {
+  applySpaceRecipe,
+  isNpmRangeOrExact,
+  isSafeNpmPackageName,
+  recipeFromShareParts,
+} from "../core/application/space-recipe";
 import {
   PROFILE_NAME_RE,
   PROTECTED_PLUGIN_PACKAGES,
@@ -29,12 +35,11 @@ import {
 import { listProfilePlugins, parseNpmNameAndVersion } from "./plugin-ops";
 import { isHubPluginArchive, readPluginLibrary } from "./plugin-library";
 import { packZip, unpackZip } from "./space-share-zip";
-import { runBatch } from "../shared/batch";
 
 const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, FULL_SPACES_PACKAGE]);
-const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i;
-const NPM_RANGE_RE = /^[~^=]?v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\+[0-9A-Za-z.]+)?$/;
 const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "unknown"]);
+
+export { canonicalNpmInstallSpec, isNpmRangeOrExact, isSafeNpmPackageName, validateImportedPatch } from "../core/application/space-recipe";
 
 export interface SpaceSharePorts {
   createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;
@@ -49,27 +54,6 @@ export interface PluginShareContext {
   library?: PluginLibraryEntry[];
   dshHome?: string;
   spaceId?: string;
-}
-
-export function isSafeNpmPackageName(name: string): boolean {
-  if (!name || name.length > 214) return false;
-  if (name.startsWith(".") || name.startsWith("_")) return false;
-  return NPM_NAME_RE.test(name);
-}
-
-export function isNpmRangeOrExact(spec: string): boolean {
-  return NPM_RANGE_RE.test(spec.trim());
-}
-
-export function canonicalNpmInstallSpec(plugin: SpaceSharePlugin): string | null {
-  if (!isSafeNpmPackageName(plugin.packageName)) return null;
-  if (HOST_PACKAGES.has(plugin.packageName) || isFullSpacesManagerSpec(plugin.packageName)) return null;
-  if (plugin.source !== "npm") return null;
-  const version = plugin.resolvedVersion;
-  if (!version || !isExactRuntimeVersion(version)) return null;
-  const expected = `${plugin.packageName}@${version}`;
-  if (plugin.installSpec && plugin.installSpec !== expected) return null;
-  return expected;
 }
 
 export function classifyPluginSource(spec?: string): SpaceSharePluginSource {
@@ -281,12 +265,44 @@ function assertShareManifest(value: unknown): SpaceShareManifest {
   };
 }
 
+export function assertSafeShareArchive(archive: Buffer, maxBytes = MAX_WORKBENCH_SHARE_BYTES): void {
+  if (!Buffer.isBuffer(archive) || archive.length === 0) {
+    throw new Error("The space share archive is not a zip.");
+  }
+  if (archive.length > maxBytes) {
+    throw new Error("The space share archive is too large.");
+  }
+  const unpacked = unpackZip(archive);
+  let total = 0;
+  for (const entry of unpacked) {
+    const name = entry.name.replaceAll("\\", "/");
+    if (
+      !name ||
+      name.includes("\0") ||
+      name.startsWith("/") ||
+      name.includes("..") ||
+      name.includes("/") ||
+      /^[A-Za-z]:/.test(name)
+    ) {
+      throw new Error("The space share archive contains an unsafe path.");
+    }
+    if (entry.data.length > maxBytes) {
+      throw new Error("The space share archive contains an entry that is too large.");
+    }
+    total += entry.data.length;
+    if (total > maxBytes) {
+      throw new Error("The space share archive is too large.");
+    }
+  }
+}
+
 export function parseSpaceShare(archive: Buffer): {
   manifest: SpaceShareManifest;
   plugins: SpaceSharePlugin[];
   patch?: string;
   llm?: LlmShareManifest;
 } {
+  assertSafeShareArchive(archive);
   const unpacked = unpackZip(archive);
   assertShareSecretFree(unpacked);
   const files = new Map(unpacked.map((entry) => [entry.name, entry.data]));
@@ -301,21 +317,6 @@ export function parseSpaceShare(archive: Buffer): {
   const llmRaw = files.get(LLM_SHARE_FILENAME);
   const llm = llmRaw ? parseLlmShareManifest(JSON.parse(llmRaw.toString("utf8")) as unknown) : undefined;
   return { manifest, plugins, patch, llm };
-}
-
-export function validateImportedPatch(patch: string, spaceId: string): string {
-  if (spaceId === "web") throw new Error("The web space cannot be imported onto.");
-  const applied = applyIsolationPatch(patch, spaceId, "profile.patch.yml");
-  if (!patchTextLooksIsolated(applied, spaceId)) {
-    throw new Error("The imported config does not isolate this space.");
-  }
-  if (/dshHomePath\s*\(\s*['"][^'"]*\.\./i.test(applied)) {
-    throw new Error("The imported config contains a path that is not allowed.");
-  }
-  if (/(?:hub|profiles)\/web\b/i.test(applied) && spaceId !== "web") {
-    throw new Error("The imported config points at the web space.");
-  }
-  return applied;
 }
 
 export function previewSpaceShare(archive: Buffer): SpaceSharePreview {
@@ -375,7 +376,6 @@ export async function importSpaceArchive(
   ports: SpaceSharePorts,
   options: { writePatch?: (spaceId: string, patch: string) => void } = {},
 ): Promise<SpaceImportResult> {
-  const errors: string[] = [];
   let parsed: ReturnType<typeof parseSpaceShare>;
   try {
     parsed = parseSpaceShare(archive);
@@ -390,107 +390,23 @@ export async function importSpaceArchive(
   }
 
   const name = uniqueSpaceName(parsed.manifest.space.displayName, ports.listSpaceIds());
-  let isolatedPatch: string | undefined;
-  if (parsed.patch) {
-    try {
-      isolatedPatch = validateImportedPatch(parsed.patch, name);
-    } catch (error) {
-      return {
-        definition: "failed",
-        plugins: "not-run",
-        start: "not-run",
-        errors: [error instanceof Error ? error.message : String(error)],
-        pendingManual: [],
-      };
-    }
-  }
-
-  try {
-    await ports.createSpace({
-      name,
+  return applySpaceRecipe(
+    recipeFromShareParts({
       displayName: parsed.manifest.space.displayName,
       icon: parsed.manifest.space.icon,
-    });
-  } catch (error) {
-    return {
-      definition: "failed",
-      plugins: "not-run",
-      start: "not-run",
-      errors: [error instanceof Error ? error.message : String(error)],
-      pendingManual: [],
-    };
-  }
-
-  if (isolatedPatch && options.writePatch) {
-    try {
-      options.writePatch(name, isolatedPatch);
-    } catch (error) {
-      return {
-        definition: "imported",
-        plugins: "not-run",
-        start: "not-run",
-        spaceId: name,
-        errors: [error instanceof Error ? error.message : String(error)],
-        pendingManual: [],
-        llm: llmImportResult(parsed.llm),
-      };
-    }
-  }
-
-  if (parsed.llm && ports.writeLlmShare) {
-    try {
-      await ports.writeLlmShare(name, parsed.llm);
-    } catch (error) {
-      return {
-        definition: "imported",
-        plugins: "not-run",
-        start: "not-run",
-        spaceId: name,
-        errors: [error instanceof Error ? error.message : String(error)],
-        pendingManual: [],
-        llm: llmImportResult(parsed.llm),
-      };
-    }
-  }
-
-  const auto: { plugin: SpaceSharePlugin; spec: string }[] = [];
-  const pendingManual: SpaceSharePlugin[] = [];
-  for (const plugin of parsed.plugins) {
-    const spec = canonicalNpmInstallSpec(plugin);
-    if (spec) auto.push({ plugin, spec });
-    else pendingManual.push(plugin);
-  }
-  let pluginStatus: SpaceImportResult["plugins"] = auto.length
-    ? "completed"
-    : pendingManual.length
-      ? "pending-manual"
-      : "completed";
-  const batch = await runBatch(auto, async (row) => {
-    await ports.installPlugin(name, row.spec);
-  });
-  if (batch.failed) {
-    errors.push(batch.failed.error);
-    pluginStatus = "failed";
-  } else if (pendingManual.length) pluginStatus = "pending-manual";
-
-  return {
-    definition: "imported",
-    plugins: pluginStatus,
-    start: "not-run",
-    spaceId: name,
-    errors,
-    pendingManual,
-    llm: llmImportResult(parsed.llm),
-  };
-}
-
-function llmImportResult(manifest: LlmShareManifest | undefined): SpaceImportResult["llm"] {
-  if (!manifest || manifest.requirements.length === 0) return undefined;
-  return {
-    mappingRequired: true,
-    requirements: manifest.requirements,
-    mapped: false,
-  };
+      plugins: parsed.plugins,
+      patch: parsed.patch,
+      llm: parsed.llm,
+      source: parsed.manifest.source,
+    }),
+    {
+      createSpace: ports.createSpace,
+      installPlugin: ports.installPlugin,
+      writePatch: options.writePatch,
+      writeLlmShare: ports.writeLlmShare,
+    },
+    { name, displayName: parsed.manifest.space.displayName },
+  );
 }
 
 export function writeSpaceArchiveFile(path: string, archive: Buffer): void {
