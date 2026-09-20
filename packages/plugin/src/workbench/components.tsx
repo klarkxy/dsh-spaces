@@ -11,6 +11,15 @@ import type {
 import { glyphPath, isDataImageIcon, KNOWN_GLYPHS } from "./icons";
 import { t, type WorkbenchLocale } from "./i18n";
 import { LlmModelCenter } from "./llm/center";
+import {
+  DiagnosticsSection,
+  HomeSettingsFields,
+  ImportPreviewDialog,
+  ImportResultCard,
+  PluginsCatalogLibrary,
+  TemplatesShareTab,
+  ThemeSwitch,
+} from "./product-ui";
 import type { HomeTab, WorkbenchController, WorkbenchUiState } from "./store";
 import { WORKBENCH_CSS } from "./styles";
 import type { ViewFrameState } from "./view-session";
@@ -28,7 +37,7 @@ export interface WorkbenchViewProps {
 export function WorkbenchView({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   return (
-    <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale}>
+    <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme}>
       <style>{WORKBENCH_CSS}</style>
       <Rail ui={ui} controller={controller} />
       <div className="dsh-wb-main">
@@ -217,7 +226,7 @@ function GearGlyph(): ReactElement {
 
 function HomePane({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
-  const tabs: HomeTab[] = ["overview", "spaces", "plugins", "snapshots", "runtime"];
+  const tabs: HomeTab[] = ["overview", "spaces", "plugins", "snapshots", "runtime", "templates"];
   return (
     <div className="dsh-wb-home">
       <div className="dsh-wb-row">
@@ -238,7 +247,7 @@ function HomePane({ ui, controller }: WorkbenchViewProps): ReactElement {
             aria-selected={ui.homeTab === tab}
             onClick={() => controller.setHomeTab(tab)}
           >
-            {t(locale, `home.${tab}` as "home.overview" | "home.spaces" | "home.plugins" | "home.snapshots" | "home.runtime")}
+            {t(locale, `home.${tab}` as "home.overview" | "home.spaces" | "home.plugins" | "home.snapshots" | "home.runtime" | "home.templates")}
           </button>
         ))}
       </div>
@@ -247,6 +256,7 @@ function HomePane({ ui, controller }: WorkbenchViewProps): ReactElement {
       {ui.homeTab === "plugins" && <PluginsTab ui={ui} controller={controller} />}
       {ui.homeTab === "snapshots" && <SnapshotsTab ui={ui} controller={controller} />}
       {ui.homeTab === "runtime" && <RuntimeTab ui={ui} controller={controller} />}
+      {ui.homeTab === "templates" && <TemplatesShareTab ui={ui} controller={controller} />}
     </div>
   );
 }
@@ -262,9 +272,9 @@ function StatusBanners({ ui }: { ui: WorkbenchUiState }): ReactElement | null {
         </p>
       )}
       {state?.maintenance && <p className="dsh-wb-notice">{t(locale, "app.maintenance")}</p>}
-      {state?.recoveryRequired && (
+      {state?.availability === "unavailable" && (
         <p className="dsh-wb-alert" role="alert">
-          {t(locale, "app.recovery")}
+          {t(locale, "home.availability.unavailable")}
         </p>
       )}
       {ui.commandError && (
@@ -290,6 +300,19 @@ function OverviewTab({ ui, controller }: WorkbenchViewProps): ReactElement {
       <dl className="dsh-wb-dl">
         <dt>{t(locale, "home.mode")}</dt>
         <dd>{state.mode}</dd>
+        <dt>{t(locale, "home.protocol")}</dt>
+        <dd>{state.protocolVersion}</dd>
+        <dt>{t(locale, "home.availability")}</dt>
+        <dd>
+          {t(
+            locale,
+            state.availability === "limited"
+              ? "home.availability.limited"
+              : state.availability === "unavailable"
+                ? "home.availability.unavailable"
+                : "home.availability.ready",
+          )}
+        </dd>
         <dt>{t(locale, "home.dshVersion")}</dt>
         <dd>{state.dshVersion ?? "—"}</dd>
         <dt>{t(locale, "home.owner")}</dt>
@@ -365,11 +388,15 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
 function PluginsTab({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   const writable = controller.canMutate();
+  const busy = controller.isBusy();
   const spaces = controller.workspaceSpaces();
   const managerSelected = controller.isManagerId(ui.pluginSpaceId);
   return (
     <>
       <p className="dsh-wb-muted">{t(locale, "plugins.toggleHint")}</p>
+      <p className="dsh-wb-muted">{t(locale, "plugins.notInstalled")}</p>
+      <PluginsCatalogLibrary ui={ui} controller={controller} />
+      <h3 className="dsh-wb-title">{t(locale, "plugins.installed")}</h3>
       <form
         className="dsh-wb-form"
         onSubmit={(event) => {
@@ -413,7 +440,7 @@ function PluginsTab({ ui, controller }: WorkbenchViewProps): ReactElement {
           <button
             type="button"
             className="dsh-wb-btn primary"
-            disabled={!writable || managerSelected}
+            disabled={!writable || busy || managerSelected}
             onClick={controller.previewInstallSelected}
           >
             {t(locale, "plugins.previewInstall")}
@@ -430,7 +457,7 @@ function PluginsTab({ ui, controller }: WorkbenchViewProps): ReactElement {
           plugin={plugin}
           locale={locale}
           spaceId={ui.pluginSpaceId}
-          writable={writable && !managerSelected}
+          writable={writable && !managerSelected && !busy}
           onPick={() => controller.setPluginCatalog(plugin.id, plugin.version ?? ui.pluginVersion)}
           onToggle={(enabled) =>
             controller.preview({
@@ -453,7 +480,7 @@ function PluginsTab({ ui, controller }: WorkbenchViewProps): ReactElement {
       <button
         type="button"
         className="dsh-wb-btn"
-        disabled={!writable || !ui.pluginSpaceId || managerSelected}
+        disabled={!writable || busy || !ui.pluginSpaceId || managerSelected}
         onClick={() => controller.preview({ kind: "plugin.cleanup-manager", spaceId: ui.pluginSpaceId })}
       >
         {t(locale, "plugins.cleanup")}
@@ -855,6 +882,19 @@ function Overlays({ ui, controller }: WorkbenchViewProps): ReactElement | null {
         <IconDialog locale={ui.locale} space={controller.space(ui.overlay.spaceId)} controller={controller} />
       )}
       {ui.overlay?.type === "settings" && <SettingsDialog ui={ui} controller={controller} />}
+      {ui.overlay?.type === "import" && ui.importPreview && (
+        <ImportPreviewDialog
+          locale={ui.locale}
+          preview={ui.importPreview}
+          importName={ui.importName}
+          importDisplayName={ui.importDisplayName}
+          busy={controller.isBusy()}
+          onName={controller.setImportName}
+          onDisplayName={controller.setImportDisplayName}
+          onCancel={controller.closeImport}
+          onConfirm={controller.confirmImport}
+        />
+      )}
       {ui.overlay?.type === "detail" && <DetailDialog ui={ui} controller={controller} spaceId={ui.overlay.spaceId} />}
       {ui.overlay?.type === "menu" && (
         <SpaceMenu ui={ui} controller={controller} spaceId={ui.overlay.spaceId} x={ui.overlay.x} y={ui.overlay.y} />
@@ -954,7 +994,7 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
             {t(locale, "app.cancel")}
           </button>
-          <button type="submit" className="dsh-wb-btn primary">
+          <button type="submit" className="dsh-wb-btn primary" disabled={controller.isBusy()}>
             {t(locale, "app.create")}
           </button>
         </div>
@@ -1084,9 +1124,10 @@ function IconPicker({
 function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   const writable = controller.canMutate();
+  const busy = controller.isBusy();
   return (
     <div className="dsh-wb-overlay">
-      <div className="dsh-wb-dialog wide" role="dialog" aria-labelledby="dsh-wb-settings-title">
+      <div className="dsh-wb-dialog wide" role="dialog" aria-labelledby="dsh-wb-settings-title" data-settings-dialog="true">
         <h2 id="dsh-wb-settings-title" className="dsh-wb-title">
           {t(locale, "settings.title")}
         </h2>
@@ -1112,23 +1153,22 @@ function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
         </div>
         {ui.settingsTab === "general" && (
           <>
+            <h3 className="dsh-wb-title">{t(locale, "settings.clientPrefs")}</h3>
             <p>{t(locale, "settings.locale")}</p>
             <LanguageSwitch locale={locale} onChange={controller.setLocale} />
+            <p>{t(locale, "settings.theme")}</p>
+            <ThemeSwitch locale={locale} theme={ui.theme} onChange={controller.setTheme} />
+            <HomeSettingsFields ui={ui} controller={controller} />
+            <h3 className="dsh-wb-title">{t(locale, "settings.shutdown")}</h3>
             <p className="dsh-wb-muted">{t(locale, "settings.shutdownHint")}</p>
+            <p className="dsh-wb-muted">{t(locale, "settings.shutdownVsSpace")}</p>
+            <p className="dsh-wb-muted">{t(locale, "settings.shutdownVsExit")}</p>
             <div className="dsh-wb-actions">
               <button
                 type="button"
-                className="dsh-wb-btn"
-                disabled={!writable}
-                onClick={() => controller.preview({ kind: "controller.release" })}
-              >
-                {t(locale, "settings.release")}
-              </button>
-              <button
-                type="button"
                 className="dsh-wb-btn danger"
-                disabled={!writable}
-                onClick={() => controller.preview({ kind: "controller.shutdown" })}
+                disabled={!writable || busy}
+                onClick={() => controller.preview({ kind: "service.shutdown" })}
               >
                 {t(locale, "settings.exit")}
               </button>
@@ -1144,7 +1184,7 @@ function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
             uuid={crypto.randomUUID.bind(crypto)}
           />
         )}
-        <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
+        <button type="button" className="dsh-wb-btn" data-settings-close="true" onClick={controller.closeOverlay}>
           {t(locale, "app.close")}
         </button>
       </div>
@@ -1203,6 +1243,11 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
             </ul>
           </>
         )}
+        <DiagnosticsSection
+          ui={ui}
+          locale={locale}
+          onCopy={() => copyRedacted(controller.copyDiagnostics())}
+        />
         <h3>{t(locale, "detail.backups")}</h3>
         {ui.backups.length === 0 ? <p className="dsh-wb-muted">{t(locale, "detail.backupsEmpty")}</p> : null}
         {ui.backups.map((backup) => (
@@ -1343,6 +1388,9 @@ export function JobsList({
                   : ""}
             </p>
           )}
+          {job.result?.product && (job.result.product.kind === "space.import" || job.result.product.kind === "template.create") ? (
+            <ImportResultCard locale={locale} result={job.result.product.import} />
+          ) : null}
           {job.canCancel ? (
             <button type="button" className="dsh-wb-btn" onClick={() => onCancel(job.id)}>
               {t(locale, "jobs.cancel")}
@@ -1388,7 +1436,6 @@ export function RecoveryView({
   error,
   commandError,
   onLocale,
-  onAcquire,
   onCancelJob,
   onRefresh,
 }: {
@@ -1397,7 +1444,6 @@ export function RecoveryView({
   error: string | null;
   commandError: string | null;
   onLocale: (locale: WorkbenchLocale) => void;
-  onAcquire: () => void;
   onCancelJob: (id: string) => void;
   onRefresh: () => void;
 }): ReactElement {
@@ -1448,9 +1494,6 @@ export function RecoveryView({
         </section>
         <JobsList locale={locale} jobs={state?.jobs ?? []} onCancel={onCancelJob} />
         <div className="dsh-wb-actions">
-          <button type="button" className="dsh-wb-btn primary" onClick={onAcquire}>
-            {t(locale, "recovery.acquire")}
-          </button>
           <button type="button" className="dsh-wb-btn" onClick={() => copyRedacted(logText)}>
             {t(locale, "app.copyLogs")}
           </button>

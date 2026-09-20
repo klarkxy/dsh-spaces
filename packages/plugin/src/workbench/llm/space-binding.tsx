@@ -361,6 +361,7 @@ export function SpaceBindingPanel({
                     generation: space?.generation ?? 0,
                     catalogRevision: policies[index]?.runningCatalogRevision ?? null,
                     busy: space?.status === "starting" || space?.status === "stopping",
+                    serviceEpoch: space?.serviceEpoch ?? "",
                   };
                 });
                 return client.applyPlan(applyIds, describe.revision, observations, `apply-${Date.now()}`);
