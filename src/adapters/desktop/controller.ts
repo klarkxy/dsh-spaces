@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  defaultPidAlive,
   HomeControlBusyError,
   HomeControlPathError,
   HomeController,
@@ -73,6 +74,7 @@ export class DesktopController {
   private readonly profileNames: () => string[];
   private readonly ownedSpaces: () => DesktopReleaseSpace[];
   private readonly ownsInstanceRecord?: DesktopControllerOptions["ownsInstanceRecord"];
+  private readonly pidAlive: PidAliveFn;
   private readonly onAdmit?: () => void | Promise<void>;
   private readonly onState?: (state: DesktopControllerState) => void;
 
@@ -91,6 +93,7 @@ export class DesktopController {
     this.profileNames = options.profileNames ?? (() => []);
     this.ownedSpaces = options.ownedSpaces ?? (() => []);
     this.ownsInstanceRecord = options.ownsInstanceRecord;
+    this.pidAlive = options.pidAlive ?? defaultPidAlive;
     this.onAdmit = options.onAdmit;
     this.onState = options.onState;
   }
@@ -389,7 +392,9 @@ export class DesktopController {
       this.managerProfileId = null;
       live.push("Manager identity no longer matches the recorded profile and was not rebuilt.");
     }
-    live.push(...inspectControlResidue(this.home, this.handle ? this.ownsInstanceRecord : undefined));
+    live.push(
+      ...inspectControlResidue(this.home, this.handle ? this.ownsInstanceRecord : undefined, this.pidAlive),
+    );
     const toolchain = inspectHomeToolchain(this.home);
     if (toolchain.kind === "invalid") live.push(toolchain.reason);
     return uniqueReasons(this.extraReasons, live);
@@ -402,7 +407,11 @@ export class DesktopController {
       if (error instanceof HomeControlPathError) return "damaged";
       throw error;
     }
-    if (inspectControlResidue(this.home, this.handle ? this.ownsInstanceRecord : undefined).length > 0) return "skip-create";
+    if (
+      inspectControlResidue(this.home, this.handle ? this.ownsInstanceRecord : undefined, this.pidAlive).length > 0
+    ) {
+      return "skip-create";
+    }
     return "ok";
   }
 
@@ -481,7 +490,7 @@ function publicState(
       held: false,
       writable: false,
       recoveryRequired: blocking.length > 0,
-      reasons: uniqueReasons(blocking, ["No controller holds this Home. Take over to make changes."]),
+      reasons: uniqueReasons(blocking, ["No controller holds this Home."]),
       transferPending: false,
     };
   }

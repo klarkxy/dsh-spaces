@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { HOME_CONTROL_DIR_NAME } from "../node/home-controller";
+import { defaultPidAlive, HOME_CONTROL_DIR_NAME, type PidAliveFn } from "../node/home-controller";
 import { readRuntimeRef } from "../../main/runtime-descriptor";
 
 export const CONTROL_JOBS_DIR_NAME = "jobs";
@@ -29,10 +29,14 @@ export type HomeToolchainInspect =
   | VerifiedHomeToolchain;
 
 /** Read-only scan of leftover control-dir work. Never writes or kills. */
-export function inspectControlResidue(home: string, ownsRecord?: (value: Record<string, unknown>) => boolean): string[] {
+export function inspectControlResidue(
+  home: string,
+  ownsRecord?: (value: Record<string, unknown>) => boolean,
+  pidAlive: PidAliveFn = defaultPidAlive,
+): string[] {
   return [
     ...inspectJobs(join(home, HOME_CONTROL_DIR_NAME, CONTROL_JOBS_DIR_NAME)),
-    ...inspectInstances(join(home, HOME_CONTROL_DIR_NAME, CONTROL_INSTANCES_DIR_NAME), ownsRecord),
+    ...inspectInstances(join(home, HOME_CONTROL_DIR_NAME, CONTROL_INSTANCES_DIR_NAME), ownsRecord, pidAlive),
     ...inspectExistingFile(
       join(home, HOME_UPGRADE_STAGE_DIR, HOME_UPGRADE_JOURNAL_FILE),
       "An upgrade journal is unfinished and was not replayed.",
@@ -158,7 +162,11 @@ function inspectJobFile(path: string): string | undefined {
   return undefined;
 }
 
-function inspectInstances(dir: string, ownsRecord?: (value: Record<string, unknown>) => boolean): string[] {
+function inspectInstances(
+  dir: string,
+  ownsRecord?: (value: Record<string, unknown>) => boolean,
+  pidAlive: PidAliveFn = defaultPidAlive,
+): string[] {
   const state = inspectNamedDir(dir);
   if (state === "missing") return [];
   if (state === "ambiguous") return ["Instance records are ambiguous and were not adopted."];
@@ -168,18 +176,40 @@ function inspectInstances(dir: string, ownsRecord?: (value: Record<string, unkno
   } catch {
     return ["Instance records could not be read."];
   }
-  if (names.every(name => {
-    if (!ownsRecord) return false;
-    try {
-      const path = join(dir, name);
-      const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink()) return false;
-      const value = JSON.parse(readFileSync(path, "utf8"));
-      return value && typeof value === "object" && !Array.isArray(value) &&
-        value.spaceId === name.slice(0, -5) && ownsRecord(value);
-    } catch { return false; }
-  })) return [];
-  return ["Leftover instance records were not adopted and unknown processes were not killed."];
+  for (const name of names) {
+    const blocking = inspectInstanceFile(join(dir, name), name.slice(0, -5), ownsRecord, pidAlive);
+    if (blocking) {
+      return ["Leftover instance records were not adopted and unknown processes were not killed."];
+    }
+  }
+  return [];
+}
+
+function inspectInstanceFile(
+  path: string,
+  spaceId: string,
+  ownsRecord: ((value: Record<string, unknown>) => boolean) | undefined,
+  pidAlive: PidAliveFn,
+): boolean {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return true;
+  }
+  if (st.isSymbolicLink() || !st.isFile()) return true;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return true;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return true;
+  const value = parsed as Record<string, unknown>;
+  if (value.spaceId !== spaceId) return true;
+  if (ownsRecord?.(value)) return false;
+  if (typeof value.pid !== "number" || typeof value.startedAt !== "string") return true;
+  return pidAlive(value.pid, value.startedAt) !== "dead";
 }
 
 function inspectExistingFile(path: string, reason: string): string[] {
