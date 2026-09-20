@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { MaintenanceGate } from "../src/core/application/maintenance-gate.ts";
-import { RestoreSession } from "../src/core/application/restore-session.ts";
 import {
   PatchForbiddenError,
   PatchVerifyError,
@@ -35,8 +34,6 @@ import {
   packageHasWebApp,
 } from "../src/core/domain/registry.ts";
 import type { OperationLock } from "../src/core/ports/operation-lock.ts";
-import type { DescribeRuntimePort, RestoreSessionSnapshots } from "../src/core/ports/restore.ts";
-import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 import { t } from "../src/shared/i18n/index.ts";
 
 const coreRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "core");
@@ -52,10 +49,8 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
     "domain/llm-connections.ts",
     "domain/llm-resolution.ts",
     "application/maintenance-gate.ts",
-    "application/restore-session.ts",
     "application/global-llm-service.ts",
     "ports/operation-lock.ts",
-    "ports/restore.ts",
     "ports/llm-store.ts",
   ];
   const forbidden = /from ["'](?:node:fs|node:process|electron|react|react\/jsx-runtime|cordis)/;
@@ -236,51 +231,4 @@ test("optional OperationLock serializes admitted maintenance and mutations", asy
   assert.equal(maxActive, 1);
   assert.ok(seen.includes("enter:mutation"));
   assert.ok(seen.includes("enter:upgrade"));
-});
-
-test("RestoreSession uses an injected runtime descriptor port", async () => {
-  const described: string[] = [];
-  const describeRuntime: DescribeRuntimePort = {
-    describe(ref): SnapshotRuntime {
-      if (!ref) throw new Error("missing");
-      described.push(`${ref.version}:${ref.bin}`);
-      return { root: "/runtime", version: ref.version, binRelative: "bin.js" };
-    },
-  };
-  let pending: { snapshotId: string; runtimeVersion: string } | undefined;
-  const restored: string[] = [];
-  const snapshots: RestoreSessionSnapshots = {
-    recover() {},
-    restore(id, runtime) {
-      restored.push(`${id}:${runtime?.version ?? "none"}`);
-      pending = { snapshotId: id, runtimeVersion: runtime?.version ?? "1.0.0" };
-    },
-    pendingRestore() {
-      return pending;
-    },
-    completeRestore() {
-      pending = undefined;
-    },
-    runtimeBin() {
-      return "/runtime/bin.js";
-    },
-  };
-  let selected: string | undefined;
-  const restore = new RestoreSession({
-    snapshots,
-    runtimes: {
-      current: () => ({ bin: "/runtime/bin.js", version: "1.0.0" }),
-      recordedRef: () => ({ bin: "/runtime/bin.js", version: "1.0.0" }),
-      async selectExisting(ref) {
-        selected = ref.bin;
-      },
-    },
-    applyRestoredSettings() {},
-    describeRuntime,
-  });
-  await restore.restoreSnapshot("snap-1");
-  assert.deepEqual(restored, ["snap-1:1.0.0"]);
-  assert.equal(selected, "/runtime/bin.js");
-  assert.ok(described.length > 0);
-  assert.doesNotThrow(() => restore.assertAvailable(false));
 });

@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CooperativeChildren } from "../src/adapters/node/cooperative-children.ts";
 import { observeMaintenanceChild, ownsObservedChild, withChildObservation } from "../src/main/owned-process-record.ts";
-import { inspectControlResidue } from "../src/adapters/desktop/control-residue.ts";
+import {
+  CONTROL_INSTANCES_DIR_NAME,
+  CONTROL_JOBS_DIR_NAME,
+  HOME_MUTATION_JOURNAL,
+  inspectControlResidue,
+} from "../src/adapters/desktop/control-residue.ts";
+import { HOME_CONTROL_DIR_NAME } from "../src/adapters/node/home-controller.ts";
 import { runProcess } from "../src/main/toolchain.ts";
 
 test("package-manager child identity is journaled in its async Home scope and removed on exit", async () => {
@@ -140,6 +146,65 @@ test("maintenance spawn intent is durable before attach and removed only after e
   } finally {
     clearTimeout(timer);
     if (child.exitCode === null) { const exited = once(child, "exit"); child.kill(); await exited; }
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("truncated and unfinished jobs are residue and their original bytes stay", () => {
+  const home = mkdtempSync(join(tmpdir(), "spaces-residue-jobs-"));
+  try {
+    const jobs = join(home, HOME_CONTROL_DIR_NAME, CONTROL_JOBS_DIR_NAME);
+    mkdirSync(jobs, { recursive: true });
+    const truncated = join(jobs, "cut.json");
+    const queued = join(jobs, "left.json");
+    const truncatedBytes = "{\"schemaVersion\":1,\"status\":\"queued\"";
+    const queuedBytes = `${JSON.stringify({ schemaVersion: 1, status: "queued" })}\n`;
+    writeFileSync(truncated, truncatedBytes);
+    writeFileSync(queued, queuedBytes);
+    const reasons = inspectControlResidue(home);
+    assert.ok(reasons.some((row) => /truncated|unreadable/i.test(row)));
+    assert.ok(reasons.some((row) => /interrupted workbench jobs/i.test(row)));
+    assert.equal(readFileSync(truncated, "utf8"), truncatedBytes);
+    assert.equal(readFileSync(queued, "utf8"), queuedBytes);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("stale dead instance records do not count as residue; live leftovers still do", () => {
+  const home = mkdtempSync(join(tmpdir(), "spaces-residue-dead-"));
+  try {
+    const instances = join(home, HOME_CONTROL_DIR_NAME, CONTROL_INSTANCES_DIR_NAME);
+    mkdirSync(instances, { recursive: true });
+    const record = JSON.stringify({
+      version: 1,
+      spaceId: "notes",
+      pid: 9,
+      startedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const file = join(instances, "notes.json");
+    writeFileSync(file, record);
+    assert.deepEqual(inspectControlResidue(home, undefined, () => "dead"), []);
+    assert.equal(readFileSync(file, "utf8"), record);
+    const live = inspectControlResidue(home, undefined, () => "alive");
+    assert.ok(live.some((row) => /leftover instance/i.test(row)));
+    assert.equal(readFileSync(file, "utf8"), record);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("mutation journal is reported as residue and is not rewritten", () => {
+  const home = mkdtempSync(join(tmpdir(), "spaces-residue-journal-"));
+  try {
+    const journal = join(home, HOME_MUTATION_JOURNAL);
+    const original = '{"op":"create","spaceId":"unfinished"}';
+    writeFileSync(journal, original);
+    const reasons = inspectControlResidue(home);
+    assert.ok(reasons.some((row) => /unfinished evidence/i.test(row)));
+    assert.equal(readFileSync(journal, "utf8"), original);
+    assert.equal(existsSync(journal), true);
+  } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
