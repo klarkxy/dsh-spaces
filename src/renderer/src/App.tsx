@@ -243,9 +243,8 @@ export default function App() {
   const refuseWrite = (message?: string) => {
     setError(
       message ||
-        (locale === "zh"
-          ? "当前为只读。接管 Home 后才能更改。"
-          : "Home is read-only. Take over before making changes."),
+        controller?.reasons[0] ||
+        (locale === "zh" ? "当前无法更改此 Home。" : "This Home cannot be changed right now."),
     );
   };
 
