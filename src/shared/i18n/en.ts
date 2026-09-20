@@ -131,6 +131,7 @@ export const en = {
   "tray.show": "Show DSH Spaces",
   "tray.stopAll": "Stop all spaces",
   "tray.quit": "Quit",
+  "tray.stillRunning": "DSH Spaces is still running. Quit from the tray icon.",
   "tray.running": "{name} — running",
   "tray.starting": "{name} — starting",
   "tray.stopped": "{name} — stopped",
