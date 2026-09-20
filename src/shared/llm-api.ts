@@ -74,6 +74,7 @@ export type LlmSpaceObservation = {
   generation: number;
   catalogRevision: number | null;
   busy: boolean;
+  serviceEpoch: string;
 };
 
 export type LlmCapabilities = {
