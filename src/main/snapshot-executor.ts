@@ -46,12 +46,16 @@ export class SnapshotExecutor {
   pendingRestore(): PendingRestore | undefined { return this.store.pendingRestore(); }
   restoreJournal(): RestoreJournal | undefined { return this.store.restoreJournal(); }
   recoveryReceipt(): RestoreRecoveryReceipt | undefined { return this.store.recoveryReceipt(); }
-  completeRestore(): Promise<void> { return this.run("completeRestore", {}); }
-  create(runtime: SnapshotRuntime, reason?: string): Promise<SnapshotMeta> { return this.run("create", { runtime, reason }); }
-  restore(id: string, runtime?: SnapshotRuntime, options?: SnapshotRestoreOptions): Promise<RestoreResult> {
-    return this.run("restore", { id, runtime, options });
+  completeRestore(): Promise<void> {
+    return Promise.reject(new Error("Snapshot restore is not supported."));
   }
-  recover(): Promise<PendingRestore | undefined> { return this.run("recover", {}); }
+  create(runtime: SnapshotRuntime, reason?: string): Promise<SnapshotMeta> { return this.run("create", { runtime, reason }); }
+  restore(_id: string, _runtime?: SnapshotRuntime, _options?: SnapshotRestoreOptions): Promise<RestoreResult> {
+    return Promise.reject(new Error("Snapshot restore is not supported."));
+  }
+  recover(): Promise<PendingRestore | undefined> {
+    return Promise.reject(new Error("Upgrade recovery is not supported."));
+  }
   async delete(id: string): Promise<void> {
     if (this.options.inUse?.(id)) throw new Error("The active snapshot cannot be deleted.");
     await this.run("delete", { id });

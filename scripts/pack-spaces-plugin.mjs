@@ -27,8 +27,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { build } from "esbuild";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_DIR = join(REPO, "packages", "plugin");
@@ -36,6 +37,9 @@ const VIEW_DIR = join(REPO, "packages", "view-bridge");
 const LLM_DIR = join(REPO, "packages", "llm-bridge");
 const SUPERVISOR_DIR = join(REPO, "packages", "supervisor");
 const PACK_MS = 60_000;
+
+/** v2 component payload. The plugin tarball is the distribution unit; this script does not publish. */
+const COMPONENT_PAYLOAD_MANIFEST = "lib/supervisor/manifest.json";
 
 const PLUGIN_REQUIRED = [
   "package.json",
@@ -47,7 +51,7 @@ const PLUGIN_REQUIRED = [
   "lib/typert.host.js",
   "lib/typert.remote-client.js",
   "lib/supervisor/index.js",
-  "lib/supervisor/manifest.json",
+  COMPONENT_PAYLOAD_MANIFEST,
   "lib/supervisor/snapshot-worker.mjs",
   "lib/view-bridge/package.json",
   "lib/view-bridge/LICENSE",
@@ -395,6 +399,7 @@ function packOne(nodeExe, npmCli, packageDir, dest, required, label) {
 async function main() {
   const preflightOnly = process.argv.includes("--preflight");
   const { pluginPkg, dest } = preflightOnDisk();
+  const payload = await validateBuiltPayload();
   const nodeExe = process.execPath;
   const npmCli = resolveNpmCli(nodeExe);
   mkdirSync(dest, { recursive: true });
@@ -414,6 +419,7 @@ async function main() {
   }
 
   const plugin = packOne(nodeExe, npmCli, PLUGIN_DIR, dest, PLUGIN_REQUIRED, "@dsh-spaces/plugin");
+  verifyPackedPayload(plugin.path, payload);
   const view = packOne(nodeExe, npmCli, VIEW_DIR, dest, VIEW_REQUIRED, "@dsh-spaces/view-bridge");
   const llm = packOne(nodeExe, npmCli, LLM_DIR, dest, LLM_REQUIRED, "@dsh-spaces/llm-bridge");
   const command = printAddCommand(plugin.path);
@@ -425,11 +431,56 @@ async function main() {
     llm,
     add: command,
     unpublished: true,
+    componentDigest: payload.digest,
     note: `${pluginPkg.name}@${pluginPkg.version} is the distribution unit. Supervisor stays private. Not on npm.`,
     at: new Date().toISOString(),
   };
   writeFileSync(join(dest, "pack-report.json"), `${JSON.stringify(report, null, 2)}\n`);
   return report;
+}
+
+async function validateBuiltPayload() {
+  const scratch = mkdtempSync(join(tmpdir(), "dsh-spaces-pack-validate-"));
+  try {
+    const outfile = join(scratch, "validator.mjs");
+    await build({ absWorkingDir: REPO, entryPoints: ["src/adapters/node/component-payload.ts"],
+      outfile, bundle: true, platform: "node", format: "esm", logLevel: "silent" });
+    const validator = await import(pathToFileURL(outfile).href);
+    return validator.validateComponentPayload(join(PLUGIN_DIR, "lib"));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function verifyPackedPayload(archive, payload) {
+  const bytes = gunzipSync(readFileSync(archive));
+  const files = new Map();
+  for (let offset = 0; offset + 512 <= bytes.length;) {
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every(value => value === 0)) break;
+    const string = (start, end) => header.subarray(start, end).toString("utf8").replace(/\0.*$/, "");
+    const name = string(0, 100), prefix = string(345, 500);
+    const size = Number.parseInt(string(124, 136).trim(), 8);
+    if (!Number.isSafeInteger(size) || size < 0 || offset + 512 + size > bytes.length) throw new Error("Invalid packed payload size");
+    const path = normalizePacked(prefix ? `${prefix}/${name}` : name);
+    const type = header[156];
+    if (type === 0 || type === 48) {
+      if (files.has(path)) throw new Error(`Duplicate packed payload file: ${path}`);
+      files.set(path, bytes.subarray(offset + 512, offset + 512 + size));
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  const manifest = files.get(COMPONENT_PAYLOAD_MANIFEST);
+  if (!manifest || JSON.stringify(JSON.parse(manifest.toString("utf8"))) !== JSON.stringify(payload.manifest)) {
+    throw new Error("Packed component manifest differs from the verified build");
+  }
+  for (const file of payload.files) {
+    const content = files.get(file.path);
+    if (!content || content.length !== file.size || createHash("sha256").update(content).digest("hex") !== file.sha256) {
+      throw new Error(`Packed component differs from the verified build: ${file.path}`);
+    }
+  }
+  pass(`packed component payload verified digest=${payload.digest}`);
 }
 
 if (import.meta.main) {
@@ -440,6 +491,7 @@ if (import.meta.main) {
 }
 
 export {
+  COMPONENT_PAYLOAD_MANIFEST,
   PLUGIN_REQUIRED,
   VIEW_REQUIRED,
   LLM_REQUIRED,
