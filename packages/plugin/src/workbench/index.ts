@@ -9,6 +9,8 @@ export {
   type WorkbenchUiState,
   type HomeTab,
 } from "./store";
+export { BlueprintSession, type BlueprintUiState } from "./blueprint-session";
+export { BlueprintsPage, BlueprintApplyResult } from "./blueprint-ui";
 export {
   ViewSession,
   authorizedViewSrc,

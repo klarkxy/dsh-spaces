@@ -25,6 +25,7 @@
     "test:llm": "tsx --test tests/llm-domain.test.ts tests/llm-compat.test.ts tests/llm-settings-bridge.test.ts tests/llm-multi-space.test.ts tests/llm-store.test.ts tests/llm-stream.test.ts tests/llm-api-auth.test.ts tests/llm-space-settings.test.ts tests/llm-ui.test.tsx tests/llm-share.test.ts tests/llm-packaging.test.ts tests/llm-default-resolution.test.ts tests/llm-credentials.test.ts tests/llm-concurrency.test.ts tests/llm-secret-leaks.test.ts tests/llm-gates.test.ts",
     "test:llm:integration": "tsx --test tests/llm-multi-space.test.ts tests/llm-stream.test.ts tests/llm-integration.test.ts",
     "test:llm:browser": "tsx --test tests/llm-ui-dom.test.ts",
+    "test:blueprints": "tsx --test tests/blueprint-domain.test.ts tests/blueprint-codec.test.ts tests/blueprint-package.test.ts tests/blueprint-runtime.test.ts tests/workbench-blueprint.test.ts tests/workbench-blueprint-file.test.ts tests/workbench-blueprint-ui.test.tsx tests/workbench-blueprint-store.test.ts tests/workbench-blueprint-lifecycle.test.ts tests/workbench-blueprint-contract.test.ts tests/workbench-entry-clipboard.test.ts tests/llm-packaging.test.ts",
     "validate:llm:secrets": "node scripts/validate-llm-secrets.mjs",
     "validate:llm:distribution": "node scripts/validate-llm-distribution.mjs",
     "test:workbench": "tsx --test tests/home-controller.test.ts tests/workbench-jobs.test.ts tests/workbench-supervisor.test.ts tests/workbench-maintenance.test.ts tests/workbench-ui.test.tsx tests/workbench-plugin.test.ts tests/q-let-it-crash.test.ts tests/sample-plugins.test.ts tests/workbench-package-upgrade.test.ts tests/workbench-protocol.test.ts tests/workbench-endpoint-v2.test.ts tests/workbench-forwarding-v2.test.ts tests/workbench-products.test.ts tests/space-recipe.test.ts tests/desktop-service-client.test.ts tests/component-payload.test.ts tests/component-selection.test.ts tests/component-handoff.test.ts tests/workbench-supervisor-handoff.test.ts tests/supervisor-pack.test.ts tests/home-controller-handoff.test.ts tests/runtime-installation.test.ts tests/workbench-http-port.test.ts tests/component-update-wait-job.test.ts",
@@ -57,7 +58,9 @@
     "js-yaml": "^4.2.0",
     "lucide-react": "^0.542.0",
     "motion": "^12.23.12",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "semver": "7.7.2",
+    "tar": "7.5.22"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
@@ -106,7 +109,8 @@
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@types/semver": "7.7.0"
   },
   "build": {
     "appId": "dev.dshspaces.app",

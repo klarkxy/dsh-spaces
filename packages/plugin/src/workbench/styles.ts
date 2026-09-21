@@ -56,7 +56,8 @@ export const WORKBENCH_CSS = `
 }
 .dsh-workbench button:focus-visible,
 .dsh-workbench input:focus-visible,
-.dsh-workbench select:focus-visible {
+.dsh-workbench select:focus-visible,
+.dsh-workbench textarea:focus-visible {
   outline: 2px solid var(--wb-text);
   outline-offset: 2px;
 }
@@ -241,12 +242,27 @@ export const WORKBENCH_CSS = `
 }
 .dsh-wb-space-row > span { flex: 1; min-width: 0; }
 .dsh-wb-form { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.dsh-wb-form.wide { max-width: min(720px, 100%); }
 .dsh-wb-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .dsh-wb-field input, .dsh-wb-field select, .dsh-wb-field textarea {
   background: var(--wb-input);
   border: 1px solid var(--wb-border);
   border-radius: 8px;
   padding: 7px 10px;
+}
+.dsh-wb-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.dsh-wb-pre {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--wb-input);
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
 }
 .dsh-wb-btn {
   cursor: pointer;

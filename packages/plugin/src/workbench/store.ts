@@ -44,12 +44,16 @@ import {
   type ViewFrameState,
   type ViewMessageEvent,
 } from "./view-session";
+import {
+  BlueprintSession,
+  type BlueprintUiState,
+} from "./blueprint-session";
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 const RESERVED = new Set(["web", "hub", "headless", "node_modules", "spaces-hub"]);
 const ACTIVE_JOB = new Set(["queued", "running"]);
 
-export type HomeTab = "overview" | "spaces" | "plugins" | "snapshots" | "runtime" | "templates";
+export type HomeTab = "overview" | "spaces" | "plugins" | "snapshots" | "runtime" | "templates" | "blueprints";
 
 export type OverlayKind =
   | { type: "create" }
@@ -87,6 +91,7 @@ export interface WorkbenchEnv {
   startTimeoutMs: number;
   openUrl(url: string): void;
   downloadFile(fileName: string, archiveBase64: string): void;
+  writeClipboard(text: string): Promise<void>;
   addMessageListener(listener: (event: ViewMessageEvent) => void): () => void;
 }
 
@@ -146,12 +151,19 @@ export interface WorkbenchUiState {
   importName: string;
   importDisplayName: string;
   lastProductOutcome: WorkbenchProductOutcome | null;
+  blueprint: BlueprintUiState;
 }
 
 function defaultOpenUrl(url: string): void {
   if (typeof window !== "undefined" && typeof window.open === "function") {
     window.open(url, "_blank", "noopener,noreferrer");
   }
+}
+
+async function defaultWriteClipboard(text: string): Promise<void> {
+  const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+  if (!clipboard?.writeText) throw new Error("clipboard");
+  await clipboard.writeText(text);
 }
 
 function defaultDownloadFile(fileName: string, archiveBase64: string): void {
@@ -186,6 +198,7 @@ export function createDefaultEnv(): WorkbenchEnv {
     startTimeoutMs: 90_000,
     openUrl: defaultOpenUrl,
     downloadFile: defaultDownloadFile,
+    writeClipboard: defaultWriteClipboard,
     addMessageListener: (listener) => {
       if (typeof window === "undefined") return () => undefined;
       const wrapped = (event: MessageEvent) => listener(event);
@@ -223,6 +236,7 @@ function mapLocale(value: LocalePreference): WorkbenchLocale {
 
 export class WorkbenchController {
   readonly views = new ViewSession();
+  readonly blueprint: BlueprintSession;
   private readonly pendingViewRequests = new Set<string>();
   private readonly env: WorkbenchEnv;
   private readonly iframeWindows = new Map<string, unknown>();
@@ -257,6 +271,22 @@ export class WorkbenchController {
     this.persistEmpty = persistWasEmpty(this.env.storage);
     const persist = readPersist(this.env.storage);
     this.restoreId = isHomeSelection(persist.selectedId) ? null : persist.selectedId;
+    this.blueprint = new BlueprintSession({
+      product: (request) => this.api.product(request),
+      submitApply: (planId, observation) => this.submitBlueprintApply(planId, observation),
+      describeLlm: () => this.llmClient().describe(),
+      uuid: () => this.env.uuid(),
+      now: () => this.env.now(),
+      downloadFile: (fileName, archiveBase64) => this.env.downloadFile(fileName, archiveBase64),
+      writeClipboard: (text) => this.env.writeClipboard(text),
+      locale: () => this.ui.locale,
+      canMutate: () => this.canMutate(),
+      serviceEpoch: () => this.ui.state?.serviceEpoch ?? null,
+      emit: () => {
+        this.ui = { ...this.ui, blueprint: this.blueprint.getSnapshot() };
+        for (const listener of this.listeners) listener();
+      },
+    });
     this.ui = {
       locale: persist.locale,
       theme: persist.theme,
@@ -313,10 +343,17 @@ export class WorkbenchController {
       importName: "",
       importDisplayName: "",
       lastProductOutcome: null,
+      blueprint: this.blueprint.getSnapshot(),
     };
   }
 
-  getSnapshot = (): WorkbenchUiState => this.ui;
+  getSnapshot = (): WorkbenchUiState => {
+    const blueprint = this.blueprint.getSnapshot();
+    if (this.ui.blueprint !== blueprint) this.ui = { ...this.ui, blueprint };
+    return this.ui;
+  };
+
+  now = (): number => this.env.now();
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -343,6 +380,7 @@ export class WorkbenchController {
     this.unsubMessages?.();
     this.unsubVisibility = null;
     this.unsubMessages = null;
+    this.blueprint.abortPending();
   }
 
   private stillOpen(cycle: number): boolean {
@@ -370,6 +408,17 @@ export class WorkbenchController {
     if (homeTab === "runtime" && this.ui.runtimesStatus === "idle") void this.loadRuntimes();
     if (homeTab === "runtime" && this.ui.workbenchPackageStatus === "idle") void this.loadWorkbenchPackage();
     if (homeTab === "templates" && this.ui.templatesStatus === "idle") void this.loadTemplates();
+  };
+
+  blueprintSourceSpaces = (): WorkbenchSpace[] => {
+    return this.workspaceSpaces().filter((space) => space.id !== "web");
+  };
+
+  openBlueprintGenerate = (spaceId: string): void => {
+    if (this.isManagerId(spaceId) || spaceId === "web") return;
+    this.selectHome();
+    this.setHomeTab("blueprints");
+    this.blueprint.openGenerate(spaceId);
   };
 
   selectHome = (): void => {
@@ -1069,6 +1118,7 @@ export class WorkbenchController {
   }
 
   private applyState(state: WorkbenchState): void {
+    const previousEpoch = this.ui.state?.serviceEpoch;
     const epochDestroyed = this.views.syncServiceEpoch(state.serviceEpoch);
     const destroyed = this.views.syncGenerations(state.spaces);
     for (const spaceId of [...epochDestroyed, ...destroyed]) {
@@ -1113,6 +1163,9 @@ export class WorkbenchController {
       viewError: this.views.viewError,
     });
     if (selectedWasRemoved) this.writePersist();
+    if (previousEpoch && previousEpoch !== state.serviceEpoch) {
+      this.blueprint.onServiceEpoch(state.serviceEpoch);
+    }
     if (!this.primedProductJobs) {
       this.primedProductJobs = true;
       for (const item of state.jobs) {
@@ -1286,6 +1339,38 @@ export class WorkbenchController {
     }
   }
 
+  private async submitBlueprintApply(
+    planId: string,
+    observation: WorkbenchProductObservation,
+  ): Promise<void> {
+    if (!this.canMutate()) {
+      this.rejectReadonly();
+      throw Object.assign(new Error("workbench/read-only"), { code: "workbench/read-only" });
+    }
+    const command: WorkbenchCommand = { kind: "blueprint.apply", planId };
+    const key = intentKey(command);
+    if (this.intentInflight.has(key)) return;
+    const requestId = this.intentRequestIds.get(key) ?? this.env.uuid();
+    this.intentRequestIds.set(key, requestId);
+    this.intentInflight.add(key);
+    const cycle = this.cycle;
+    try {
+      const job = await this.api.submit(command, requestId, observation);
+      if (!this.stillOpen(cycle)) return;
+      this.mergeJob(job);
+      this.noteCreated(job);
+      this.onProductJob(job);
+      if (!ACTIVE_JOB.has(job.status)) this.intentRequestIds.delete(key);
+      await this.poll();
+    } catch (error) {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
+      throw error;
+    } finally {
+      this.intentInflight.delete(key);
+    }
+  }
+
   private async submit(command: WorkbenchCommand, contextOverride?: WorkbenchMutationContext): Promise<void> {
     if (!this.canMutate()) {
       this.rejectReadonly();
@@ -1332,6 +1417,7 @@ export class WorkbenchController {
   }
 
   private onProductJob(job: WorkbenchJob): void {
+    if (job.kind === "blueprint.apply") this.blueprint.onApplyJob(job);
     if (ACTIVE_JOB.has(job.status)) return;
     for (const [key, requestId] of [...this.intentRequestIds.entries()]) {
       if (requestId === job.requestId) this.intentRequestIds.delete(key);
@@ -1509,7 +1595,7 @@ export class WorkbenchController {
   }
 
   private patch(partial: Partial<WorkbenchUiState>): void {
-    this.ui = { ...this.ui, ...partial };
+    this.ui = { ...this.ui, ...partial, blueprint: this.blueprint.getSnapshot() };
     for (const listener of this.listeners) listener();
   }
 }

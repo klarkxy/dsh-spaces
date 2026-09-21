@@ -64,6 +64,12 @@ import {
   type WorkbenchProductResult,
   type WorkbenchDiagnostics,
 } from "../../shared/workbench-product";
+import {
+  BlueprintWorkbench,
+  type BlueprintWorkbenchPorts,
+} from "./blueprint-workbench";
+import type { PreparedBlueprintPackage } from "./blueprint-package";
+import type { BlueprintPackage } from "../../shared/blueprint";
 
 const MAX_PENDING_IMPORTS = 16;
 const PLUGIN_LIBRARY_SCHEMA_VERSION = 1;
@@ -97,6 +103,20 @@ export interface WorkbenchProductPorts {
   packGit?: GitPacker;
   writePatch?(spaceId: string, patch: string): void;
   writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
+  dshVersion?(): string | null;
+  spacesVersion?(): string | null;
+  llmBridgeAvailable?(): boolean;
+  llmAdmitted?(request: LlmApiRequest): Promise<LlmApiResult>;
+  llmCatalogObservation?(): { revision: number; digest: string };
+  prepareBlueprintPackage?(
+    home: string,
+    pkg: BlueprintPackage,
+    options?: { fetchImpl?: WorkbenchProductFetcher; signal?: AbortSignal },
+  ): Promise<PreparedBlueprintPackage>;
+  runtimeBin?(): string | undefined;
+  inspectRuntime?: BlueprintWorkbenchPorts["inspectRuntime"];
+  composeRuntime?: BlueprintWorkbenchPorts["composeRuntime"];
+  resolveModule?: BlueprintWorkbenchPorts["resolveModule"];
 }
 
 interface StagedImport {
@@ -118,10 +138,12 @@ interface StagedImport {
 export class WorkbenchProductService {
   private readonly ports: WorkbenchProductPorts;
   private readonly imports = new Map<string, StagedImport>();
+  private readonly blueprints: BlueprintWorkbench;
 
   constructor(ports: WorkbenchProductPorts) {
     assertNotRealHome(ports.home);
     this.ports = ports;
+    this.blueprints = new BlueprintWorkbench(ports as BlueprintWorkbenchPorts);
   }
 
   async read(request: WorkbenchProductRequest): Promise<WorkbenchProductResult> {
@@ -149,6 +171,30 @@ export class WorkbenchProductService {
         return { method: "share.export", ...(await this.exportShare(request.spaceId, request.includeConfig === true)), observation };
       case "share.previewImport":
         return { method: "share.previewImport", ...this.previewImport(request.archiveBase64, observation), observation };
+      case "blueprint.source":
+        return { ...await this.blueprints.source(request.spaceId), observation };
+      case "blueprint.generate":
+        return {
+          ...await this.blueprints.generate({
+            spaceId: request.spaceId,
+            selection: request.selection,
+            metadata: request.metadata,
+            bindingOverrides: request.bindingOverrides,
+          }),
+          observation,
+        };
+      case "blueprint.inspect":
+        return { ...await this.blueprints.inspect(request.content), observation };
+      case "blueprint.preview":
+        return {
+          ...await this.blueprints.preview({
+            content: request.content,
+            name: request.name,
+            displayName: request.displayName,
+            values: request.values,
+          }),
+          observation,
+        };
       default: {
         const method = (request as { method: string }).method;
         throw new Error(`Unsupported product request ${method}.`);
@@ -186,6 +232,8 @@ export class WorkbenchProductService {
         return this.createFromTemplate(command, ctx);
       case "space.import":
         return this.importSpace(command, ctx);
+      case "blueprint.apply":
+        return this.blueprints.apply(command.planId, ctx);
       default: {
         const kind = (command as { kind: string }).kind;
         throw new Error(`Unsupported product command ${kind}.`);

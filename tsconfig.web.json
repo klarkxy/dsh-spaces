@@ -25,6 +25,7 @@
     "src/core/domain/llm-connections.ts",
     "src/core/domain/llm-share.ts",
     "src/core/domain/llm-resolution.ts",
+    "src/core/domain/blueprint.ts",
     "packages/plugin/src/workbench/**/*"
   ]
 }

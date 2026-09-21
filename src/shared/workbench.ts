@@ -1,4 +1,4 @@
-/** Browser-safe workbench contracts. Never carry file paths, cookies or child launch tokens. */
+/** Browser-safe workbench contracts. Jobs and durable records never carry file paths, cookies or child launch tokens. Transient blueprint product responses may include receiver-local input values. */
 import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest, LlmSpaceObservation } from './llm-api';
 import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './spaces-control';
 import type {
