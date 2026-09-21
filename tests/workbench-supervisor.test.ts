@@ -259,7 +259,7 @@ test("HTTP state during owned manager bootstrap stays limited without latching b
   const handle = await creating;
   if (!handles.includes(handle)) handles.push(handle);
   const ready = await handle.runtime.state();
-  assert.equal(ready.availability, "ready");
+  assert.equal(ready.availability, "ready", JSON.stringify(ready));
   assert.equal(ready.role, "manager");
   assert.equal(ready.spaces.find((space) => space.id === ready.managerId)?.status, "running");
   const again = await handle.runtime.state();
