@@ -34,7 +34,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run typecheck:spaces
       - run: npm run test:desktop-startup
-      - run: npx tsx --test tests/frontend-recovery.test.ts
       - run: npm run build
 
   windows-desktop:
@@ -52,6 +51,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      # The existing shell suite includes Windows drive-letter path fixtures.
+      - run: npx tsx --test tests/frontend-recovery.test.ts
       - run: npm run build
       - run: npx playwright install chromium
       - name: Install official CLI for a disposable Home
