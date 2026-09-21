@@ -47,6 +47,7 @@ export function CliSetup({
         <p className="ui-kicker">{t("cli.brand")}</p>
         <h2 className="mt-1 text-xl font-semibold">{title}</h2>
         <p className="muted mt-2 text-sm">{t("cli.intro")}</p>
+        {!failed ? <p className="muted mt-2 text-sm">{t("shell.prepareHint")}</p> : null}
         <div className="mt-4">
           <LocaleSelect value={locale} onChange={onLocale} disabled={busy} />
         </div>

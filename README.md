@@ -6,6 +6,8 @@ Download desktop builds from [GitHub Releases](https://github.com/klarkxy/dsh-sp
 
 Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI channel: official **`latest`**, pinned to the resolved exact version. The local plugin is not on npm.
 
+Opening the desktop connects to a healthy workbench or starts it once when no service exists and the runtime is ready. First-time environment installation continues into the workbench automatically. A stopped service is not an error; genuine startup failures and ownership conflicts remain visible, without automatic retry or lock takeover.
+
 One Supervisor owns Home run rights and management writes. Desktop is a local shell (window, tray, first Node/pnpm/CLI prepare, connect). The workbench page is the same spaces-hub UI in the browser and in a sandboxed desktop view. Ordinary spaces get a view bridge, not a second manager.
 
 DSH Spaces does **not** promise that arbitrary plugin combinations will run. Failures are recorded and reported. Spaces does not recover a failed environment.
@@ -89,6 +91,8 @@ MIT. See `LICENSE`.
 **Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
 
 桌面安装包见 [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases)。现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。本次合并验证见 [验收记录](tasks/merge-execution.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
+
+打开桌面会连接健康的工作台；确认没有后台且运行环境就绪时，正常启动一次。首次安装环境完成后会自动进入工作台。尚未启动不再显示成错误；真正的启动失败与运行权冲突仍明确报告，不自动重试或接管锁。
 
 一个 Supervisor 持有 Home 运行权和管理写入。桌面是本地壳（窗口、托盘、首次 Node/pnpm/CLI 准备、连接服务）。浏览器和桌面沙箱 view 使用同一套 spaces-hub 工作台。普通空间只装 view-bridge。
 

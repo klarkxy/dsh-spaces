@@ -11,6 +11,7 @@ import {
   type DesktopServiceClientOptions,
   type DesktopSupervisorEndpoint,
 } from "../src/adapters/desktop/service-client.ts";
+import { createDesktopStartup } from "../src/main/desktop-startup.ts";
 import type { SupervisorBootstrapOptions, SupervisorBootstrapResult } from "../packages/plugin/src/host/supervisor-bootstrap.ts";
 
 const CLIENT_SOURCE = fileURLToPath(new URL("../src/adapters/desktop/service-client.ts", import.meta.url));
@@ -139,10 +140,8 @@ test("connect without a service does not spawn", async () => {
   const bootstraps: SupervisorBootstrapOptions[] = [];
   const service = client({ attachResult: { missing: true }, bootstraps });
   const state = await service.connect();
-  assert.equal(state.status, "unavailable");
-  assert.deepEqual(state.reasons, [
-    "No running workbench was found. This profile does not start a second controller.",
-  ]);
+  assert.equal(state.status, "stopped");
+  assert.deepEqual(state.reasons, []);
   assert.equal(bootstraps.length, 0);
   assert.throws(() => service.getApi(), DesktopServiceClientError);
 });
@@ -457,4 +456,86 @@ test("start does not bootstrap when attach already found a healthy service", asy
   const state = await service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN });
   assert.equal(state.status, "connected");
   assert.equal(bootstraps.length, 0);
+});
+
+
+test("desktop launch uses the real client's attach-then-start path without a manual click", async () => {
+  const bootstraps: SupervisorBootstrapOptions[] = [];
+  const service = client({ bootstrap: async (options) => {
+    bootstraps.push(options);
+    return connectedBoot();
+  }});
+  const startup = createDesktopStartup({
+    connect: async () => { await service.connect(); },
+    status: () => service.publicState().status,
+    canStart: () => true,
+    start: () => service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN }),
+  });
+  await startup.open();
+  assert.equal(service.publicState().status, "connected");
+  assert.equal(bootstraps.length, 1);
+  assert.equal(bootstraps[0].allowColdStart, true);
+  await startup.environmentPrepared();
+  assert.equal(bootstraps.length, 1);
+});
+
+test("first installation continues from a normal stopped client into the workbench", async () => {
+  let ready = false;
+  let boots = 0;
+  const service = client({ bootstrap: async () => { boots += 1; return connectedBoot(); } });
+  const startup = createDesktopStartup({
+    connect: async () => { await service.connect(); },
+    status: () => service.publicState().status,
+    canStart: () => ready,
+    start: () => service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN }),
+  });
+  await startup.open();
+  assert.deepEqual(service.publicState(), { status: "stopped", reasons: [] });
+  assert.equal(boots, 0);
+  ready = true;
+  await startup.environmentPrepared();
+  assert.equal(service.publicState().status, "connected");
+  assert.equal(boots, 1);
+});
+
+test("automatic launch preserves real blocked and stale reasons without bootstrapping", async () => {
+  for (const attached of [
+    { blocked: true, reasons: ["A different controller already holds the workbench endpoint."] },
+    { blocked: true, reasons: ["The supervisor protocol is not supported."] },
+    { stale: true, reasons: ["The recorded supervisor endpoint did not accept a private bearer state ping."] },
+  ] as DesktopAttachResult[]) {
+    const bootstraps: SupervisorBootstrapOptions[] = [];
+    const service = client({ attachResult: attached, bootstraps });
+    const startup = createDesktopStartup({
+      connect: async () => { await service.connect(); },
+      status: () => service.publicState().status,
+      canStart: () => true,
+      start: () => service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN }),
+    });
+    await startup.open();
+    await startup.environmentPrepared();
+    assert.equal(service.publicState().status, "unavailable");
+    assert.deepEqual(service.publicState().reasons, "reasons" in attached ? attached.reasons : []);
+    assert.equal(bootstraps.length, 0);
+  }
+});
+
+test("a returned bootstrap failure is retained, not converted to stopped or retried", async () => {
+  let boots = 0;
+  const failure = "Packaged supervisor payload is missing.";
+  const service = client({ bootstrap: async () => {
+    boots += 1;
+    return { connected: false, origin: null, reasons: [failure] };
+  }});
+  const startup = createDesktopStartup({
+    connect: async () => { await service.connect(); },
+    status: () => service.publicState().status,
+    canStart: () => true,
+    start: () => service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN }),
+  });
+  await startup.open();
+  await startup.environmentPrepared();
+  await startup.open();
+  assert.deepEqual(service.publicState(), { status: "unavailable", reasons: [failure] });
+  assert.equal(boots, 1);
 });
