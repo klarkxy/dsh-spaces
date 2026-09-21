@@ -1,0 +1,37 @@
+name: Desktop startup regression
+
+on:
+  push:
+    branches: [fix/desktop-startup-flow]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/verify-spaces-desktop.mjs'
+      - 'package*.json'
+      - '.github/workflows/desktop-startup.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Export exact source for isolated regression work
+        run: git archive --format=tar.gz HEAD -o "$RUNNER_TEMP/desktop-startup-source.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-startup-source
+          path: ${{ runner.temp }}/desktop-startup-source.tar.gz
+          retention-days: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx tsx --test tests/desktop-service-client.test.ts
