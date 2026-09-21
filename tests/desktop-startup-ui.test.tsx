@@ -49,7 +49,9 @@ for (const locale of ["en", "zh"] as const) {
       assert.ok(html.includes(t("shell.copyLogs")));
       assert.match(html, /text-red-500/);
       assert.doesNotMatch(html, /btn-primary/);
-      assert.ok(!html.includes(t("shell.startService")));
+      // A diagnostic sentence may mention "start"; assert actual controls, not prose.
+      const buttons = Array.from(html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g), ([, text]) => text);
+      assert.deepEqual(buttons, [t("shell.copyLogs")]);
       assert.ok(!html.includes(t("shell.prepareHint")));
       assert.doesNotMatch(html, /Node|pnpm/);
     });
