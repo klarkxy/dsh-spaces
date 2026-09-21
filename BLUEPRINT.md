@@ -1,6 +1,6 @@
 # DSH Spaces 蓝图规范 v1
 
-状态：v1 规范与使用指南。蓝图功能已完成本地验收，正在随 0.4.0 发布。验证结果与限制见[蓝图实施记录](tasks/blueprint-implementation.md)。
+状态：v1 规范与使用指南。蓝图功能已随 [0.4.0](https://github.com/klarkxy/dsh-spaces/releases/tag/v0.4.0) 发布。验证结果与限制见[蓝图实施记录](tasks/blueprint-implementation.md)及[发布验收记录](tasks/release-0.4.0.md)。
 
 日期：2026-09-21。规范标识：`dsh-blueprint`。JSON 格式版本：`1`。
 
