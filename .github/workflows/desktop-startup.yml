@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-startup-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   startup:
     runs-on: ubuntu-latest
@@ -22,16 +26,48 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Export exact source for isolated regression work
-        run: git archive --format=tar.gz HEAD -o "$RUNNER_TEMP/desktop-startup-source.tar.gz"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-startup-source
-          path: ${{ runner.temp }}/desktop-startup-source.tar.gz
-          retention-days: 1
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npx tsx --test tests/desktop-service-client.test.ts
+      - run: npm run typecheck
+      - run: npm run typecheck:spaces
+      - run: npm run test:desktop-startup
+      - run: npx tsx --test tests/frontend-recovery.test.ts
+      - run: npm run build
+
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.29.2'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Install official CLI for a disposable Home
+        run: npm install --prefix "${{ runner.temp }}/desktop-tools" @deepseek-ai/dsh@latest --no-audit --no-fund
+      - name: Real desktop launch without clicking Start service
+        shell: pwsh
+        env:
+          DSH_TEST_CLI_BIN: ${{ runner.temp }}/desktop-tools/node_modules/@deepseek-ai/dsh/lib/bin.js
+          DSH_TEST_OUTPUT: ${{ runner.temp }}/desktop-startup-acceptance
+        run: npm run validate:desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-startup-windows
+          path: |
+            ${{ runner.temp }}/desktop-startup-acceptance/*.json
+            ${{ runner.temp }}/desktop-startup-acceptance/*.log
+            ${{ runner.temp }}/desktop-startup-acceptance/*.png
+          retention-days: 7
