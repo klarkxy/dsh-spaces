@@ -47,6 +47,7 @@ import {
   setSelectedDshResolver,
 } from "../adapters/node/dsh-cli";
 import { resolveDshHome } from "./dsh-home";
+import { createDesktopStartup } from "./desktop-startup";
 import { authorizeProductHome } from "../adapters/node/home-guard";
 import { applyNativeTheme, currentColorScheme } from "./native-theme";
 import {
@@ -156,7 +157,6 @@ function startMain(): void {
   let allowClose = false;
   let quitInProgress = false;
   let initialized = false;
-  let connectedOnce = false;
   let preparing = false;
   let starting = false;
   const prepareInflight: InflightHolder<DesktopShellPublicState> = { current: null };
@@ -167,6 +167,13 @@ function startMain(): void {
   let traySpaces: TraySpace[] = [];
   let lastService: DesktopServicePublicState = client.publicState();
   let workbenchSession: Session | null = null;
+  const startup = createDesktopStartup({
+    connect: connectOnce,
+    status: () => lastService.status,
+    canStart: () => !preparing && cliStatusSnapshot().state !== "error" &&
+      toolchain.kind !== "invalid" && toolsReady(),
+    start: startService,
+  });
 
   function requireWorkbenchSession(): Session {
     if (!workbenchSession) {
@@ -235,8 +242,8 @@ function startMain(): void {
     if (starting || lastService.status === "connecting") return "connecting";
     if (lastService.status === "connected") return "connected";
     if (toolchain.kind === "invalid") return "blocked";
-    if (!toolsReady()) return "needs-tools";
     if (lastService.status === "unavailable") return "unavailable";
+    if (cliStatusSnapshot().state === "error" || !toolsReady()) return "needs-tools";
     return "tools-ready";
   }
 
@@ -254,8 +261,10 @@ function startMain(): void {
       locale: prefs.locale,
       theme: prefs.theme,
       packageSource: prefs.packageSource,
-      canPrepare: toolchain.kind === "absent" && !preparing,
-      canStart: toolchain.kind !== "invalid" && toolsReady() && lastService.status !== "connected" && !starting,
+      canPrepare: toolchain.kind === "absent" && phase === "needs-tools" && !preparing,
+      canStart: toolchain.kind !== "invalid" && toolsReady() &&
+        lastService.status !== "connected" && lastService.status !== "connecting" &&
+        !starting && !preparing,
       overlay: phase !== "connected",
     };
   }
@@ -330,8 +339,8 @@ function startMain(): void {
   }
 
   async function connectOnce(): Promise<void> {
-    if (connectedOnce) return;
-    connectedOnce = true;
+    lastService = { status: "connecting", reasons: [] };
+    broadcastState();
     lastService = await client.connect();
     if (lastService.status === "connected") {
       await presentWorkbench();
@@ -356,6 +365,7 @@ function startMain(): void {
         throw error;
       }
       preparing = false;
+      await startup.environmentPrepared();
       return snapshotAndEmit();
     });
   }
@@ -373,6 +383,7 @@ function startMain(): void {
         if (lastService.status === "connected") await presentWorkbench();
       } catch (error) {
         starting = false;
+        workbenchError = redactDesktopShellText(error instanceof Error ? error.message : String(error), secrets());
         broadcastState();
         throw error;
       }
@@ -667,7 +678,7 @@ function startMain(): void {
     });
     broadcastState();
     try {
-      await connectOnce();
+      await startup.open();
     } catch (error) {
       lastService = client.publicState();
       if (lastService.status !== "unavailable") {

@@ -124,7 +124,7 @@ export default function App() {
             onInstall={onInstall}
           />
         ) : showStatus && state ? (
-          <ShellStatus state={state} />
+          <ShellStatus state={state} onStart={onStart} />
         ) : null}
       </main>
     </div>
