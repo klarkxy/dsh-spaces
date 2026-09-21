@@ -1,6 +1,6 @@
 {
   "name": "@dsh-spaces/doctor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Standalone DSH Spaces doctor CLI. Diagnoses disposable homes; never defaults to ~/.dsh.",
   "license": "MIT",
   "type": "module",

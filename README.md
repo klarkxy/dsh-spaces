@@ -2,7 +2,7 @@
 
 **Spaces for DeepSeek Harness — switch your DSH workspaces like Discord servers.**
 
-> **This development branch is still under construction and acceptance. It is not a release.** Isolation, safety, and license below still apply. Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge plan: [docs/plans/spaces-merge-convergence.md](docs/plans/spaces-merge-convergence.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
+Download desktop builds from [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases). Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
 
 Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI channel: official **`latest`**, pinned to the resolved exact version. The local plugin is not on npm.
 
@@ -45,7 +45,7 @@ Build lists five immutable components in `lib/supervisor/manifest.json` (schemaV
 
 `--snapshot-worker` remains required for **normal Home snapshots** and remaining installation IO. Runtime-installation has been extracted; the worker is not a restore product.
 
-**Intended (B5, not verified here):** after a user-confirmed component upgrade, the old service stages the candidate, stops owned processes, and hands the Home lock to a one-shot launcher that selects the new payload and starts Supervisor once. **Verified in this branch:** isolated unit/CLI tests around payload, pack, and archive parse. **Not claimed:** real UI dual-end acceptance, published tarball/installer, or a completed launcher handoff.
+After a user-confirmed component upgrade, the old service stages the candidate, stops owned processes, and hands the Home lock to a one-shot launcher that selects the new payload and starts Supervisor once. Acceptance covers a real component handoff, standard plugin installation, and a packaged Windows desktop sharing an active job with Chromium. See [the acceptance record](tasks/merge-execution.md) for exact builds and platform limits.
 
 ## Requirements
 
@@ -88,7 +88,7 @@ MIT. See `LICENSE`.
 
 **Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
 
-> **本分支仍在施工和验收，不是一次发布。** 现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
+桌面安装包见 [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases)。现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。本次合并验证见 [验收记录](tasks/merge-execution.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
 
 一个 Supervisor 持有 Home 运行权和管理写入。桌面是本地壳（窗口、托盘、首次 Node/pnpm/CLI 准备、连接服务）。浏览器和桌面沙箱 view 使用同一套 spaces-hub 工作台。普通空间只装 view-bridge。
 
