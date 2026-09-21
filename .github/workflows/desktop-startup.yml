@@ -1,0 +1,74 @@
+name: Desktop startup regression
+
+on:
+  push:
+    branches: [fix/desktop-startup-flow]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/verify-spaces-desktop.mjs'
+      - 'package*.json'
+      - '.github/workflows/desktop-startup.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-startup-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run typecheck:spaces
+      - run: npm run test:desktop-startup
+      - run: npm run build
+
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.29.2'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      # The existing shell suite includes Windows drive-letter path fixtures.
+      - run: npx tsx --test tests/frontend-recovery.test.ts
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Install official CLI for a disposable Home
+        run: npm install --prefix "${{ runner.temp }}/desktop-tools" @deepseek-ai/dsh@latest --no-audit --no-fund
+      - name: Real desktop launch without clicking Start service
+        shell: pwsh
+        env:
+          DSH_TEST_CLI_BIN: ${{ runner.temp }}/desktop-tools/node_modules/@deepseek-ai/dsh/lib/bin.js
+          DSH_TEST_OUTPUT: ${{ runner.temp }}/desktop-startup-acceptance
+        run: npm run validate:desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-startup-windows
+          path: |
+            ${{ runner.temp }}/desktop-startup-acceptance/*.json
+            ${{ runner.temp }}/desktop-startup-acceptance/*.log
+            ${{ runner.temp }}/desktop-startup-acceptance/*.png
+          retention-days: 7

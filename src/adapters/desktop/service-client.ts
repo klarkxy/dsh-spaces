@@ -14,9 +14,8 @@ import {
   type WorkbenchHttpFetch,
 } from "../../../packages/plugin/src/host/workbench-http";
 import type { WorkbenchApi } from "../../shared/workbench";
+import type { DesktopServicePublicStatus } from "../../shared/desktop-shell";
 
-const NO_RUNNING_SERVICE =
-  "No running workbench was found. This profile does not start a second controller.";
 const ATTACH_FAILED = "The supervisor endpoint could not be attached.";
 const START_FAILED = "The supervisor process could not be started.";
 const ENTRY_UNAVAILABLE = "The workbench entry is not available yet.";
@@ -28,7 +27,7 @@ const CONNECTION_FAILED = "The supervisor connection failed.";
 const MAX_REASONS = 32;
 const MAX_REASON_CHARS = 500;
 
-export type DesktopServiceStatus = "idle" | "connecting" | "connected" | "unavailable";
+export type DesktopServiceStatus = DesktopServicePublicStatus;
 
 export interface DesktopServicePublicState {
   status: DesktopServiceStatus;
@@ -228,7 +227,7 @@ export class DesktopServiceClient {
       const allowBootstrap = this.allowBootstrap;
       const startArgs = this.startArgs;
       if (!allowBootstrap || !startArgs) {
-        this.becomeUnavailable(generation, [NO_RUNNING_SERVICE]);
+        this.becomeStopped(generation);
         return this.publicState();
       }
 
@@ -265,6 +264,17 @@ export class DesktopServiceClient {
       fetch: this.fetch,
     });
     this.status = "connected";
+    this.reasons = [];
+    this.allowBootstrap = false;
+    this.startArgs = null;
+  }
+
+  /** A verified absence is a normal state, not an attach or startup failure. */
+  private becomeStopped(generation: number): void {
+    if (!this.live(generation)) return;
+    this.endpoint = null;
+    this.api = null;
+    this.status = "stopped";
     this.reasons = [];
     this.allowBootstrap = false;
     this.startArgs = null;
