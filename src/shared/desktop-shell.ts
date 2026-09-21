@@ -46,7 +46,7 @@ export type DesktopShellPhase =
   | "blocked"
   | "workbench-error";
 
-export type DesktopServicePublicStatus = "idle" | "connecting" | "connected" | "unavailable";
+export type DesktopServicePublicStatus = "idle" | "connecting" | "connected" | "stopped" | "unavailable";
 
 export interface DesktopShellRuntimeFlags {
   node: boolean;
