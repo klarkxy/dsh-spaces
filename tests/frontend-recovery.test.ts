@@ -675,7 +675,7 @@ test("tray menu keeps stop-all and quit, and adds a scoped stop-service item", (
   assert.equal(ids.includes("acquire"), false);
 });
 
-test("prepare and start stay in the title bar; error cards copy logs and do not retry", () => {
+test("normal stopped cards offer start; error cards copy logs and do not retry", () => {
   const rendererDir = fileURLToPath(new URL("../src/renderer/src/", import.meta.url));
   assert.equal(existsSync(join(rendererDir, "recovery.ts")), false);
   const app = readFileSync(join(rendererDir, "App.tsx"), "utf8");
@@ -687,7 +687,8 @@ test("prepare and start stay in the title bar; error cards copy logs and do not 
   assert.match(title, /shell\.startService/);
   assert.equal(/common\.retry/.test(cli), false);
   assert.match(cli, /shell\.copyLogs/);
-  assert.equal(/onStart|shell\.startService/.test(status), false);
+  assert.match(status, /state\.phase === "tools-ready" && state\.canStart && onStart/);
+  assert.equal(/shell\.prepareHint/.test(status), false);
   assert.match(status, /shell\.copyLogs/);
   assert.match(app, /aliveRef/);
   assert.match(app, /seqRef/);

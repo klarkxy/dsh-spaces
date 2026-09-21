@@ -61,7 +61,6 @@ const DRAFT_CATALOG = "https://example.invalid/catalog.json";
 const ACTIVE_JOB = new Set(["queued", "running"]);
 const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
 
-const START_BTN = /^(Start workbench service|启动工作台服务)$/;
 const NEW_SPACE = /^(New space|新建空间)$/;
 const PLUGIN_SEARCH = /^(Search plugins|搜索插件)$/;
 
@@ -811,13 +810,14 @@ try {
   assert.ok(windowState.width >= 800 && windowState.height >= 560, "main window smaller than product minimum");
   pass(`main window visible ${windowState.width}x${windowState.height}`);
 
-  const start = page.getByRole("button", { name: START_BTN });
-  await start.waitFor({ timeout: 30_000 });
-  pass("shell Start service control (Start workbench service / 启动工作台服务)");
-  await start.click();
-  stage("start: Start workbench service clicked; waiting for manager frame");
-
+  stage("start: waiting for automatic workbench entry; no Start service click");
   const entryPage = await electronEntryPage();
+  const shellState = await page.evaluate(() => window.dshSpaces.getState());
+  assert.equal(shellState.serviceStatus, "connected");
+  assert.equal(shellState.phase, "connected");
+  assert.equal(shellState.canPrepare, false);
+  assert.equal(shellState.canStart, false);
+  pass("desktop launch automatically connected or started the workbench without a Start service click");
   origin = new URL(entryPage.url()).origin;
   const desktopWorkbench = await waitSharedWorkbench(entryPage);
   presentedSnippet = redact(await desktopWorkbench.locator(".dsh-workbench").innerText()).slice(0, 240);
