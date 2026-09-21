@@ -384,7 +384,8 @@ test("failed stop blocks direct LLM and credential writes", async () => {
     { serviceEpoch: started.serviceEpoch, expectedRevision: started.revision },
   );
   await waitJob(handle, "p1-start");
-  assert.equal((await handle.runtime.job("p1-start")).status, "succeeded");
+  const prep = await handle.runtime.job("p1-start");
+  assert.equal(prep.status, "succeeded", JSON.stringify({ prep, state: await handle.runtime.state() }));
   const beforeStop = await handle.runtime.state();
   const shutdown = await handle.runtime.preview(
     { kind: "service.shutdown" },
@@ -962,8 +963,9 @@ async function startSupervisor(
     home,
     bin,
     port: extra.port ?? 0,
-    portStart: 34000,
-    portEnd: 34999,
+    // Disjoint from tests/workbench-supervisor.test.ts (34000-34999); files run concurrently.
+    portStart: 36000,
+    portEnd: 36999,
     patchWriter: fakePatchWriter(home),
     processRuntime: extra.processRuntime ?? {
       spawn: spawnFixture(),
