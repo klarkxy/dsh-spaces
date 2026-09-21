@@ -1,0 +1,99 @@
+{
+  "kind": "dsh-blueprint",
+  "formatVersion": 1,
+  "metadata": {
+    "id": "example.writing",
+    "name": "写作工作台（规范示例）",
+    "version": "1.0.0",
+    "description": "教学示例。包名、版本和配置均为虚构，不能用于实际安装。",
+    "author": "Example Author"
+  },
+  "packages": [
+    {
+      "name": "@example/theme-paper",
+      "version": "1.2.0",
+      "source": { "type": "npm" }
+    },
+    {
+      "name": "@example/theme-night",
+      "version": "1.0.0",
+      "source": { "type": "npm" }
+    },
+    {
+      "name": "@example/writing-tools",
+      "version": "2.1.0",
+      "source": { "type": "npm" }
+    }
+  ],
+  "profile": {
+    "base": "web",
+    "bundles": [
+      "@example/theme-paper",
+      "@example/writing-tools"
+    ],
+    "patch": [
+      {
+        "id": "example-writing-tools",
+        "config": {
+          "outputDirectory": null,
+          "outlineMode": "chapter"
+        }
+      }
+    ],
+    "settings": {
+      "example-writing-preferences": {
+        "fontSize": 18,
+        "showWordCount": true,
+        "prompt": "保留作者的叙述视角。\n修改前先说明理由。"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "output-directory",
+      "type": "directory",
+      "label": "文稿输出目录",
+      "required": true
+    },
+    {
+      "id": "writing-model",
+      "type": "model",
+      "label": "写作模型",
+      "required": true
+    }
+  ],
+  "bindings": [
+    {
+      "input": "output-directory",
+      "target": {
+        "kind": "value",
+        "pointer": "/profile/patch/0/config/outputDirectory"
+      }
+    },
+    {
+      "input": "writing-model",
+      "target": { "kind": "default-model" }
+    }
+  ],
+  "relations": [
+    {
+      "type": "requires",
+      "from": "@example/writing-tools",
+      "to": "@example/theme-paper",
+      "toVersion": "^1.2.0",
+      "reason": "示例写作布局使用纸张主题提供的组件。"
+    },
+    {
+      "type": "after",
+      "from": "@example/writing-tools",
+      "to": "@example/theme-paper",
+      "reason": "先加入纸张主题，再应用写作布局。"
+    },
+    {
+      "type": "conflicts",
+      "from": "@example/theme-paper",
+      "to": "@example/theme-night",
+      "reason": "示例中的两套主题均替换同一个布局入口。"
+    }
+  ]
+}

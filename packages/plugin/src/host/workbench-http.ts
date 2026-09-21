@@ -1,6 +1,12 @@
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../../src/shared/space-icon";
+import {
+  isBlueprintLargeRequestMethod,
+  isBlueprintLargeResponseMethod,
+  WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT,
+  WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT,
+} from "../../../../src/shared/workbench-blueprint";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../../src/shared/workbench-product";
 import type { WorkbenchApi, WorkbenchMutationContext } from "../../../../src/shared/workbench";
 import type { LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
@@ -223,12 +229,18 @@ function requestBodyLimit(method: WorkbenchHttpMethod, body: unknown): number {
   if (method === "product" && productMethodOf(body) === "share.previewImport") {
     return WORKBENCH_PRODUCT_SHARE_BODY_LIMIT;
   }
+  if (method === "product" && isBlueprintLargeRequestMethod(productMethodOf(body) ?? "")) {
+    return WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT;
+  }
   return WORKBENCH_HTTP_BODY_LIMIT;
 }
 
 function responseBodyLimit(method: WorkbenchHttpMethod, body: unknown): number {
   if (method === "product" && productMethodOf(body) === "share.export") {
     return WORKBENCH_PRODUCT_SHARE_BODY_LIMIT;
+  }
+  if (method === "product" && isBlueprintLargeResponseMethod(productMethodOf(body) ?? "")) {
+    return WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT;
   }
   return WORKBENCH_HTTP_BODY_LIMIT;
 }

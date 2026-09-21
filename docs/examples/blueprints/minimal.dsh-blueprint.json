@@ -1,0 +1,13 @@
+{
+  "kind": "dsh-blueprint",
+  "formatVersion": 1,
+  "metadata": {
+    "name": "空白 Web 工作台",
+    "version": "1.0.0"
+  },
+  "packages": [],
+  "profile": {
+    "base": "web",
+    "bundles": []
+  }
+}

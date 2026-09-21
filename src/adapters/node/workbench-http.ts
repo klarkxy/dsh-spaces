@@ -1,6 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../shared/space-icon";
+import {
+  isBlueprintLargeRequestMethod,
+  WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT,
+} from "../../shared/workbench-blueprint";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../shared/workbench-product";
 
 export const WORKBENCH_API_PREFIX = "/api/workbench/";
@@ -291,7 +295,9 @@ async function handleApi(
     deny(res, 403, "workbench/forbidden", "Origin is not allowed.");
     return;
   }
-  const readLimit = method === "product" ? WORKBENCH_PRODUCT_SHARE_BODY_LIMIT : WORKBENCH_HTTP_BODY_LIMIT;
+  const readLimit = method === "product"
+    ? Math.max(WORKBENCH_PRODUCT_SHARE_BODY_LIMIT, WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT)
+    : WORKBENCH_HTTP_BODY_LIMIT;
   let payload: unknown;
   let bytes = 0;
   try {
@@ -306,7 +312,7 @@ async function handleApi(
     deny(res, 400, "workbench/invalid-input", "The request is not valid JSON.");
     return;
   }
-  if (method === "product" && productMethodOf(payload) !== "share.previewImport" && bytes > WORKBENCH_HTTP_BODY_LIMIT) {
+  if (method === "product" && !productRequestWithinLimit(productMethodOf(payload), bytes)) {
     deny(res, 413, "workbench/invalid-input", "The request body is too large.");
     return;
   }
@@ -476,6 +482,12 @@ function productMethodOf(body: unknown): string | null {
   if (!request || typeof request !== "object" || Array.isArray(request)) return null;
   const method = (request as { method?: unknown }).method;
   return typeof method === "string" ? method : null;
+}
+
+function productRequestWithinLimit(productMethod: string | null, bytes: number): boolean {
+  if (productMethod === "share.previewImport") return bytes <= WORKBENCH_PRODUCT_SHARE_BODY_LIMIT;
+  if (isBlueprintLargeRequestMethod(productMethod ?? "")) return bytes <= WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT;
+  return bytes <= WORKBENCH_HTTP_BODY_LIMIT;
 }
 
 function looksLikeProxy(url: URL): boolean {
@@ -717,7 +729,7 @@ ul{padding-left:1.2rem}
 <div id="error"></div>
 <div id="banner"><strong id="banner-title">工作台入口</strong><span id="banner-sub"></span></div>
 <div id="jobs"><div id="job-list"></div></div>
-<iframe id="manager-frame" title="spaces-hub" hidden></iframe>
+<iframe id="manager-frame" title="spaces-hub" hidden allow="clipboard-write *"></iframe>
 <main id="idle">
 <h1 id="idle-title">工作台入口</h1>
 <p>监督进程不随管理 profile 停机。关闭浏览器标签不会停止已启动的工作空间。</p>

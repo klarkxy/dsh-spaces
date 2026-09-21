@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
   appendFileSync,
@@ -28,6 +28,7 @@ import { archiveAbsPath } from "./plugin-library";
 import { pluginAdd } from "./plugin-ops";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
+import { llmCatalogPath } from "./llm-paths";
 import { ProfileRegistry } from "./profile-registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
@@ -74,6 +75,11 @@ import {
   parseMutationContext,
 } from "./workbench-protocol";
 import { WorkbenchProductService } from "./workbench-products";
+import {
+  composeBlueprintRuntime,
+  inspectBlueprintRuntime,
+  resolveBlueprintModule,
+} from "./blueprint-runtime";
 import {
   isCompatibleDshCliVersion,
   NodeSpacesControl,
@@ -605,6 +611,36 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+  }
+
+  private async dispatchLlmAdmitted(body: unknown): Promise<LlmApiResult> {
+    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
+    return this.jobs.runAdmitted(async () => {
+      const method = body && typeof body === "object" ? (body as { method?: unknown }).method : undefined;
+      if (typeof method === "string" && isLlmWriteMethod(method)) {
+        this.assertLlmMutationAllowed();
+      }
+      const result = await this.llmHost.dispatch(body);
+      await this.maybeInstallLlmBridge(body);
+      return result as LlmApiResult;
+    });
+  }
+
+  private llmCatalogObservation(): { revision: number; digest: string } {
+    const path = llmCatalogPath(this.home);
+    let digest = createHash("sha256").update("").digest("hex");
+    let revision = 0;
+    try {
+      const bytes = readFileSync(path);
+      digest = createHash("sha256").update(bytes).digest("hex");
+      const parsed = JSON.parse(bytes.toString("utf8")) as { revision?: unknown };
+      if (typeof parsed.revision === "number" && Number.isInteger(parsed.revision) && parsed.revision >= 0) {
+        revision = parsed.revision;
+      }
+    } catch {
+      /* missing catalog is an empty observation */
+    }
+    return { revision, digest };
   }
 
   private async maybeInstallLlmBridge(body: unknown): Promise<void> {
@@ -2220,10 +2256,19 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const add = this.options.pluginAdd ?? pluginAdd;
         await add(this.home, spaceId, spec);
       },
-      llm: (request) => {
-        if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-        return this.jobs.runAdmitted(async () => this.llmHost.dispatch(request) as Promise<LlmApiResult>);
+      llm: (request) => this.dispatchLlmAdmitted(request),
+      llmAdmitted: (request) => this.dispatchLlmAdmitted(request),
+      llmBridgeAvailable: () => Boolean(this.options.llmBridgeArtifact),
+      dshVersion: () => this.cli?.version ?? null,
+      spacesVersion: () => {
+        const version = this.selectedPayload?.manifest.version;
+        return typeof version === "string" && version.length > 0 ? version : null;
       },
+      runtimeBin: () => this.cli?.bin ?? this.options.bin,
+      inspectRuntime: (options) => inspectBlueprintRuntime(options),
+      composeRuntime: (options, input) => composeBlueprintRuntime(options, input),
+      resolveModule: (options, input) => resolveBlueprintModule(options, input),
+      llmCatalogObservation: () => this.llmCatalogObservation(),
       diagnostics: (spaceId) => this.productDiagnostics(spaceId),
       withWrite: (label, action) => this.lock.run(label, action),
       settingsChanged: (settings) => {

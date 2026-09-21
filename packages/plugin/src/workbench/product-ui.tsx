@@ -3,6 +3,8 @@ import type { PluginCatalogEntry, ThemePreference } from "../../../../src/shared
 import type { SpaceImportResult, SpaceSharePreview } from "../../../../src/shared/space-share";
 import type { WorkbenchProductOutcome } from "../../../../src/shared/workbench-product";
 import { t, type WorkbenchLocale } from "./i18n";
+import { BlueprintApplyResult } from "./blueprint-ui";
+import { isBlueprintApplyOutcome } from "./blueprint-session";
 import type { ImportPreviewState, WorkbenchController, WorkbenchUiState } from "./store";
 
 function fileToBase64(file: File): Promise<string> {
@@ -553,6 +555,9 @@ export function ProductOutcomeCard({
   outcome: WorkbenchProductOutcome | null;
 }): ReactElement | null {
   if (!outcome) return null;
+  if (isBlueprintApplyOutcome(outcome)) {
+    return <BlueprintApplyResult locale={locale} outcome={outcome} />;
+  }
   if (outcome.kind !== "template.create" && outcome.kind !== "space.import") {
     return (
       <p className="dsh-wb-notice" data-product-outcome={outcome.kind}>

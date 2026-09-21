@@ -1,0 +1,21 @@
+{
+  "kind": "dsh-blueprint",
+  "formatVersion": 1,
+  "metadata": {
+    "name": "竹青主题",
+    "version": "1.0.0",
+    "description": "创建使用 dsh-theme-plugin 0.3.3 的新空间。需要联网安装，创建后由用户启动。"
+  },
+  "packages": [
+    {
+      "name": "dsh-theme-plugin",
+      "version": "0.3.3",
+      "source": { "type": "npm" },
+      "integrity": "sha512-zza5CvWNyVyvvvWKsjoODer+lqOmxOqNtdfGOwAxSi4inkWyyo2Uc2XhNKxGD1stCLgZxqCe17QbjfPEP/CXMQ=="
+    }
+  ],
+  "profile": {
+    "base": "web",
+    "bundles": ["dsh-theme-plugin"]
+  }
+}

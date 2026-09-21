@@ -20,6 +20,7 @@ import {
   TemplatesShareTab,
   ThemeSwitch,
 } from "./product-ui";
+import { BlueprintJobResult, BlueprintsPage } from "./blueprint-ui";
 import type { HomeTab, WorkbenchController, WorkbenchUiState } from "./store";
 import { WORKBENCH_CSS } from "./styles";
 import type { ViewFrameState } from "./view-session";
@@ -226,7 +227,7 @@ function GearGlyph(): ReactElement {
 
 function HomePane({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
-  const tabs: HomeTab[] = ["overview", "spaces", "plugins", "snapshots", "runtime", "templates"];
+  const tabs: HomeTab[] = ["overview", "spaces", "plugins", "snapshots", "runtime", "templates", "blueprints"];
   return (
     <div className="dsh-wb-home">
       <div className="dsh-wb-row">
@@ -247,7 +248,17 @@ function HomePane({ ui, controller }: WorkbenchViewProps): ReactElement {
             aria-selected={ui.homeTab === tab}
             onClick={() => controller.setHomeTab(tab)}
           >
-            {t(locale, `home.${tab}` as "home.overview" | "home.spaces" | "home.plugins" | "home.snapshots" | "home.runtime" | "home.templates")}
+            {t(
+              locale,
+              `home.${tab}` as
+                | "home.overview"
+                | "home.spaces"
+                | "home.plugins"
+                | "home.snapshots"
+                | "home.runtime"
+                | "home.templates"
+                | "home.blueprints",
+            )}
           </button>
         ))}
       </div>
@@ -256,7 +267,15 @@ function HomePane({ ui, controller }: WorkbenchViewProps): ReactElement {
       {ui.homeTab === "plugins" && <PluginsTab ui={ui} controller={controller} />}
       {ui.homeTab === "snapshots" && <SnapshotsTab ui={ui} controller={controller} />}
       {ui.homeTab === "runtime" && <RuntimeTab ui={ui} controller={controller} />}
-      {ui.homeTab === "templates" && <TemplatesShareTab ui={ui} controller={controller} />}
+      {ui.homeTab === "templates" ? <TemplatesShareTab ui={ui} controller={controller} /> : null}
+      {ui.homeTab === "blueprints" ? (
+        <BlueprintsPage
+          locale={locale}
+          ui={ui.blueprint}
+          controller={controller}
+          spaces={controller.blueprintSourceSpaces()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1364,6 +1383,17 @@ function SpaceMenu({
         <button
           type="button"
           role="menuitem"
+          disabled={manager || spaceId === "web"}
+          onClick={() => {
+            controller.closeOverlay();
+            controller.openBlueprintGenerate(spaceId);
+          }}
+        >
+          {t(locale, "blueprints.generate")}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
           disabled={!writable || manager}
           onClick={() => {
             controller.closeOverlay();
@@ -1420,6 +1450,7 @@ export function JobsList({
           {job.result?.product && (job.result.product.kind === "space.import" || job.result.product.kind === "template.create") ? (
             <ImportResultCard locale={locale} result={job.result.product.import} />
           ) : null}
+          <BlueprintJobResult locale={locale} job={job} />
           {job.canCancel ? (
             <button type="button" className="dsh-wb-btn" onClick={() => onCancel(job.id)}>
               {t(locale, "jobs.cancel")}

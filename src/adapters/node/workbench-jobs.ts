@@ -1,3 +1,4 @@
+/** Job records never persist local paths, credentials, blueprint content or raw config. Transient blueprint product responses are not jobs. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   lstatSync,

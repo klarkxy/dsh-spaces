@@ -1,7 +1,15 @@
-/** Strict product DTO validators. Shape/format/limits only; no local paths or URL credentials. */
+/** Strict product DTO validators. Shape/format/limits only. Durable fields reject local paths and URL credentials; transient blueprint input values may include receiver-local directories. */
 import { z } from "zod";
+import { parseBlueprint } from "../core/domain/blueprint";
 import { LLM_SHARE_NOTE } from "../core/domain/llm-share";
+import {
+  BLUEPRINT_INPUT_ID_RE,
+  BLUEPRINT_JSON_MAX_BYTES,
+  BLUEPRINT_SHARE_MAX_BYTES,
+  type Blueprint,
+} from "./blueprint";
 import { isExactRuntimeVersion } from "./runtime";
+import { WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT } from "./workbench-blueprint";
 import {
   MAX_WORKBENCH_SHARE_BASE64,
   type WorkbenchProductCommand,
@@ -9,6 +17,11 @@ import {
   type WorkbenchProductRequest,
   type WorkbenchProductResult,
 } from "./workbench-product";
+
+/** Arrays copied from a valid blueprint cannot exceed the 1MiB JSON envelope. */
+const BLUEPRINT_DOCUMENT_ITEM_MAX = BLUEPRINT_JSON_MAX_BYTES;
+/** Generated inspect/preview/generate rows are bounded by the 16MiB response envelope. */
+const BLUEPRINT_RESULT_ITEM_MAX = WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT;
 
 const SPACE_ID_RE = /^(?:web|[a-z0-9][a-z0-9-]{0,38})$/;
 const ENTITY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -298,6 +311,353 @@ const downloadSpecSchema = z
   .refine((value) => !/^(file|git|git\+|https?|ssh):/i.test(value), "download spec protocol")
   .refine((value) => !/[\s;|&$`<>(){}]/.test(value), "download spec");
 
+const blueprintContentSchema = z.string().min(1).max(BLUEPRINT_SHARE_MAX_BYTES);
+const blueprintPointerSchema = z
+  .string()
+  .min(2)
+  .max(BLUEPRINT_JSON_MAX_BYTES)
+  .regex(/^\/profile\/(?:patch|settings)(?:\/|$)/);
+const blueprintInputIdSchema = z.string().regex(BLUEPRINT_INPUT_ID_RE);
+const blueprintConnectionIdSchema = z
+  .string()
+  .min(8)
+  .max(80)
+  .regex(/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i);
+const blueprintModelRefSchema = z
+  .object({
+    connectionId: blueprintConnectionIdSchema,
+    modelId: z.string().min(1).max(200),
+  })
+  .strict();
+const transientBlueprintValueSchema = z.union([
+  z.string().max(BLUEPRINT_JSON_MAX_BYTES).refine((value) => !containsCredentialUrl(value), "blueprint input"),
+  z.number().finite(),
+  z.boolean(),
+  blueprintModelRefSchema,
+]);
+const blueprintInputValuesSchema = z
+  .record(blueprintInputIdSchema, transientBlueprintValueSchema)
+  .refine((value) => Object.keys(value).length <= BLUEPRINT_DOCUMENT_ITEM_MAX, "too many blueprint inputs");
+const blueprintInputDeclarationSchema = z
+  .object({
+    id: blueprintInputIdSchema,
+    type: z.enum(["string", "number", "boolean", "directory", "model"]),
+    label: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES),
+    required: z.boolean(),
+    description: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES).optional(),
+    default: z.union([z.string().max(BLUEPRINT_JSON_MAX_BYTES), z.number().finite(), z.boolean()]).optional(),
+  })
+  .strict();
+const blueprintDiagnosticSchema = z
+  .object({
+    code: z.string().min(1).max(120),
+    message: z
+      .string()
+      .min(1)
+      .max(BLUEPRINT_RESULT_ITEM_MAX)
+      .refine((value) => !containsCredentialUrl(value), "diagnostic"),
+    severity: z.enum(["info", "warning", "error"]),
+    path: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES).optional(),
+  })
+  .strict();
+const blueprintEligibilitySchema = z.union([
+  z.object({ available: z.literal(true), reason: z.string().min(1).max(300).optional() }).strict(),
+  z.object({ available: z.literal(false), reason: z.string().min(1).max(300) }).strict(),
+]);
+const blueprintHostVersionsSchema = z
+  .object({
+    dsh: z.union([exactVersionSchema, z.null()]),
+    spaces: z.union([exactVersionSchema, z.null()]),
+    node: z.string().min(1).max(80),
+    os: z.string().min(1).max(32),
+    arch: z.string().min(1).max(32),
+    base: z.union([exactVersionSchema, z.null()]),
+    webApp: z.union([exactVersionSchema, z.null()]),
+  })
+  .strict();
+const blueprintObjectSchema: z.ZodType<Blueprint> = z.custom<Blueprint>((value) => {
+  try {
+    parseBlueprint(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, "blueprint");
+const publicBlueprintTextSchema = z
+  .string()
+  .min(1)
+  .max(BLUEPRINT_SHARE_MAX_BYTES)
+  .refine((value) => !containsCredentialUrl(value) && !HEX_COLORLESS_PATH.test(value), "blueprint text");
+
+const blueprintSourceRequestSchema = z
+  .object({
+    method: z.literal("blueprint.source"),
+    spaceId: spaceIdSchema,
+  })
+  .strict();
+const blueprintGenerateRequestSchema = z
+  .object({
+    method: z.literal("blueprint.generate"),
+    spaceId: spaceIdSchema,
+    selection: z
+      .object({
+        packages: z.array(packageNameSchema).max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+        includePatch: z.boolean(),
+        settingsNamespaces: z.array(z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES)).max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+      })
+      .strict(),
+    metadata: z
+      .object({
+        name: z.string().min(1).max(80),
+        version: exactVersionSchema,
+        description: z.string().min(1).max(500).optional(),
+      })
+      .strict(),
+    bindingOverrides: z
+      .array(
+        z
+          .object({
+            pointer: blueprintPointerSchema,
+            input: blueprintInputDeclarationSchema,
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX)
+      .optional(),
+  })
+  .strict();
+const blueprintInspectRequestSchema = z
+  .object({
+    method: z.literal("blueprint.inspect"),
+    content: blueprintContentSchema,
+  })
+  .strict();
+const blueprintPreviewRequestSchema = z
+  .object({
+    method: z.literal("blueprint.preview"),
+    content: blueprintContentSchema,
+    name: spaceIdSchema,
+    displayName: displayNameSchema.optional(),
+    values: blueprintInputValuesSchema,
+  })
+  .strict();
+
+const blueprintSourceResultSchema = z
+  .object({
+    method: z.literal("blueprint.source"),
+    spaceId: spaceIdSchema,
+    packages: z
+      .array(
+        z
+          .object({
+            name: packageNameSchema,
+            version: z.union([exactVersionSchema, z.null()]),
+            requestedSpec: z
+              .string()
+              .max(214)
+              .refine((value) => !containsLocalPath(value) && !containsCredentialUrl(value), "requested spec")
+              .optional(),
+            source: z.enum(["npm", "local", "unknown"]),
+            integrity: z.string().max(200).optional(),
+            inBundles: z.boolean(),
+            hasBundlePatch: z.boolean(),
+            eligibility: blueprintEligibilitySchema,
+            lifecycleScripts: z.array(z.string().min(1).max(40)).max(8),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    bundles: z
+      .array(
+        z
+          .object({
+            name: packageNameSchema,
+            order: z.number().int().nonnegative().max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+            eligible: z.boolean(),
+            reason: z.string().min(1).max(300).optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    patch: z
+      .object({
+        exists: z.boolean(),
+        shareable: z.boolean(),
+        reason: z.string().min(1).max(300).optional(),
+      })
+      .strict(),
+    settingsNamespaces: z
+      .array(
+        z
+          .object({
+            namespace: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES),
+            eligible: z.boolean(),
+            shareable: z.boolean(),
+            convertible: z.boolean(),
+            reason: z.string().min(1).max(300).optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    localObservations: z
+      .array(
+        z
+          .object({
+            pointer: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES),
+            kind: z.enum(["directory", "model", "dynamic", "managed", "unknown"]),
+            reason: z.string().min(1).max(300),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_RESULT_ITEM_MAX),
+    host: blueprintHostVersionsSchema,
+    observation: workbenchMutationContextSchema,
+  })
+  .strict();
+const blueprintGenerateResultSchema = z
+  .object({
+    method: z.literal("blueprint.generate"),
+    fileName: z.string().regex(FILE_NAME_RE),
+    json: z
+      .string()
+      .min(1)
+      .max(BLUEPRINT_JSON_MAX_BYTES)
+      .refine((value) => !containsCredentialUrl(value) && !HEX_COLORLESS_PATH.test(value), "blueprint json"),
+    shareCode: publicBlueprintTextSchema,
+    blueprint: blueprintObjectSchema,
+    diagnostics: z.array(blueprintDiagnosticSchema).max(BLUEPRINT_RESULT_ITEM_MAX),
+    observation: workbenchMutationContextSchema,
+  })
+  .strict();
+const blueprintInspectResultSchema = z
+  .object({
+    method: z.literal("blueprint.inspect"),
+    blueprint: blueprintObjectSchema,
+    diagnostics: z.array(blueprintDiagnosticSchema).max(BLUEPRINT_RESULT_ITEM_MAX),
+    observation: workbenchMutationContextSchema,
+  })
+  .strict();
+const blueprintPreviewResultSchema = z
+  .object({
+    method: z.literal("blueprint.preview"),
+    blueprint: blueprintObjectSchema,
+    packages: z
+      .array(
+        z
+          .object({
+            name: packageNameSchema,
+            version: exactVersionSchema,
+            source: z.enum(["npm", "github"]),
+            bundled: z.boolean(),
+            order: z.number().int().nonnegative().max(BLUEPRINT_DOCUMENT_ITEM_MAX).optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    inputs: z
+      .array(
+        z
+          .object({
+            id: blueprintInputIdSchema,
+            type: z.enum(["string", "number", "boolean", "directory", "model"]),
+            origin: z.enum(["explicit", "default", "missing"]),
+            value: transientBlueprintValueSchema.optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    host: blueprintHostVersionsSchema,
+    planId: entityIdSchema.optional(),
+    expiresAt: isoDateSchema.optional(),
+    diagnostics: z.array(blueprintDiagnosticSchema).max(BLUEPRINT_RESULT_ITEM_MAX),
+    missingInputs: z.array(blueprintInputIdSchema).max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    observation: workbenchMutationContextSchema,
+  })
+  .strict();
+const DURABLE_PATH_RE = /(?:^|[\s"'=:])(?:\/(?:home|Users|root|opt|var|tmp)\/|[A-Za-z]:[\\/]|\\\\|\bfile:)/i;
+const durableTextSchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine(
+    (value) => !containsLocalPath(value) && !containsCredentialUrl(value) && !HEX_COLORLESS_PATH.test(value) && !DURABLE_PATH_RE.test(value),
+    "durable text",
+  );
+const blueprintApplyStageSchema = z
+  .object({
+    status: z.enum(["succeeded", "failed", "not-run"]),
+    error: durableTextSchema.optional(),
+  })
+  .strict();
+const blueprintApplyOutcomeSchema = z
+  .object({
+    kind: z.literal("blueprint.apply"),
+    spaceId: spaceIdSchema.optional(),
+    stages: z
+      .object({
+        "space-create": blueprintApplyStageSchema,
+        packages: blueprintApplyStageSchema,
+        presets: blueprintApplyStageSchema,
+        start: z.object({ status: z.literal("not-run") }).strict(),
+      })
+      .strict(),
+    installed: z
+      .array(
+        z
+          .object({
+            name: packageNameSchema,
+            version: exactVersionSchema,
+            integrity: z.string().max(200).optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    packageResults: z
+      .array(
+        z
+          .object({
+            name: packageNameSchema,
+            version: exactVersionSchema,
+            status: z.enum(["succeeded", "failed", "not-run"]),
+            error: durableTextSchema.optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    writes: z
+      .array(
+        z
+          .object({
+            kind: z.enum(["patch", "settings", "model", "provenance"]),
+            status: z.enum(["succeeded", "failed", "not-run"]),
+            error: durableTextSchema.optional(),
+            namespace: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES).optional(),
+          })
+          .strict(),
+      )
+      .max(BLUEPRINT_DOCUMENT_ITEM_MAX),
+    host: z
+      .object({
+        dsh: z.union([exactVersionSchema, z.null()]),
+        spaces: z.union([exactVersionSchema, z.null()]),
+        base: z.union([exactVersionSchema, z.null()]),
+        webApp: z.union([exactVersionSchema, z.null()]),
+      })
+      .strict(),
+    source: z
+      .object({
+        name: z
+          .string()
+          .min(1)
+          .max(80)
+          .refine((value) => !containsLocalPath(value) && !containsCredentialUrl(value), "source name"),
+        version: exactVersionSchema,
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> = z.discriminatedUnion("method", [
   z.object({ method: z.literal("settings") }).strict(),
   z.object({ method: z.literal("catalog"), query: z.string().max(200).optional() }).strict(),
@@ -312,6 +672,10 @@ export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> =
     })
     .strict(),
   z.object({ method: z.literal("share.previewImport"), archiveBase64: archiveBase64Schema }).strict(),
+  blueprintSourceRequestSchema,
+  blueprintGenerateRequestSchema,
+  blueprintInspectRequestSchema,
+  blueprintPreviewRequestSchema,
 ]);
 
 export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> = z.discriminatedUnion("kind", [
@@ -351,6 +715,7 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
       displayName: displayNameSchema.optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("blueprint.apply"), planId: entityIdSchema }).strict(),
 ]);
 
 export const workbenchProductOutcomeSchema: z.ZodType<WorkbenchProductOutcome> = z.discriminatedUnion("kind", [
@@ -366,6 +731,7 @@ export const workbenchProductOutcomeSchema: z.ZodType<WorkbenchProductOutcome> =
   z.object({ kind: z.literal("template.save"), templateId: entityIdSchema }).strict(),
   z.object({ kind: z.literal("template.create"), import: spaceImportResultSchema }).strict(),
   z.object({ kind: z.literal("space.import"), import: spaceImportResultSchema }).strict(),
+  blueprintApplyOutcomeSchema,
 ]);
 
 const productObservationSchema = workbenchMutationContextSchema;
@@ -412,6 +778,10 @@ export const workbenchProductResultSchema: z.ZodType<WorkbenchProductResult> = z
       observation: productObservationSchema,
     })
     .strict(),
+  blueprintSourceResultSchema,
+  blueprintGenerateResultSchema,
+  blueprintInspectResultSchema,
+  blueprintPreviewResultSchema,
 ]);
 
 export function parseWorkbenchProductRequest(value: unknown): WorkbenchProductRequest {

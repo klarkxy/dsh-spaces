@@ -9,6 +9,7 @@ import type {
 } from "../../../src/shared/workbench";
 import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../src/shared/workbench-product";
 import type { SpaceSharePreview } from "../../../src/shared/space-share";
+import type { Blueprint } from "../../../src/shared/blueprint";
 import { WorkbenchApp } from "../../../packages/plugin/src/workbench/app";
 
 declare global {
@@ -150,6 +151,73 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
       observation: OBSERVATION,
     };
   }
+  const emptyBlueprint: Blueprint = {
+    kind: "dsh-blueprint",
+    formatVersion: 1,
+    metadata: { name: "空白 Web 工作台", version: "1.0.0" },
+    packages: [],
+    profile: { base: "web", bundles: [], patch: [], settings: {} },
+    inputs: [],
+    bindings: [],
+    relations: [],
+  };
+  if (request.method === "blueprint.inspect") {
+    return { method: "blueprint.inspect", blueprint: emptyBlueprint, diagnostics: [], observation: OBSERVATION };
+  }
+  if (request.method === "blueprint.preview") {
+    return {
+      method: "blueprint.preview",
+      blueprint: emptyBlueprint,
+      packages: [],
+      inputs: [],
+      host: {
+        dsh: "0.1.5-rc.2",
+        spaces: "0.3.1",
+        node: "22.0.0",
+        os: "win32",
+        arch: "x64",
+        base: "0.1.5-rc.2",
+        webApp: "0.1.5-rc.2",
+      },
+      planId: "plan-blueprint-1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      diagnostics: [],
+      missingInputs: [],
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "blueprint.source") {
+    return {
+      method: "blueprint.source",
+      spaceId: request.spaceId,
+      packages: [],
+      bundles: [],
+      patch: { exists: false, shareable: false },
+      settingsNamespaces: [],
+      localObservations: [],
+      host: {
+        dsh: "0.1.5-rc.2",
+        spaces: "0.3.1",
+        node: "22.0.0",
+        os: "win32",
+        arch: "x64",
+        base: "0.1.5-rc.2",
+        webApp: "0.1.5-rc.2",
+      },
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "blueprint.generate") {
+    return {
+      method: "blueprint.generate",
+      fileName: "demo.dsh-blueprint.json",
+      json: JSON.stringify(emptyBlueprint),
+      shareCode: "DSHBP1:J:e30",
+      blueprint: emptyBlueprint,
+      diagnostics: [],
+      observation: OBSERVATION,
+    };
+  }
   return {
     method: "share.previewImport",
     importId: "imp-1",
@@ -281,6 +349,11 @@ createRoot(root).render(
     env: {
       downloadFile: (fileName) => {
         (window.__WB_DOWNLOADS ??= []).push({ fileName });
+      },
+      writeClipboard: async (text) => {
+        const clipboard = navigator.clipboard;
+        if (!clipboard?.writeText) throw new Error("clipboard");
+        await clipboard.writeText(text);
       },
     },
   }),

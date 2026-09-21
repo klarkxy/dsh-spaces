@@ -1,8 +1,20 @@
-/** Public product contracts. Local paths, archive bytes and credentials never enter a job. */
+/** Public product contracts. Jobs never carry local paths, archive bytes or credentials. Transient blueprint preview/generate responses may include receiver-local input values. */
 import type { ConfigBackupMeta, DiagnosticLogEntry } from './diagnostics';
 import type { SpaceImportResult, SpaceSharePreview, SpaceTemplate } from './space-share';
 import type { LocalePreference, PackageSource, PluginCatalogSnapshot, PluginLibrarySource, ThemePreference } from './types';
 import type { WorkbenchPackageRelease } from './workbench';
+import type {
+  WorkbenchBlueprintApplyCommand,
+  WorkbenchBlueprintApplyOutcome,
+  WorkbenchBlueprintGeneratePayload,
+  WorkbenchBlueprintGenerateRequest,
+  WorkbenchBlueprintInspectPayload,
+  WorkbenchBlueprintInspectRequest,
+  WorkbenchBlueprintPreviewPayload,
+  WorkbenchBlueprintPreviewRequest,
+  WorkbenchBlueprintSourcePayload,
+  WorkbenchBlueprintSourceRequest,
+} from './workbench-blueprint';
 
 export const MAX_WORKBENCH_SHARE_BYTES = 8 * 1024 * 1024;
 export const MAX_WORKBENCH_SHARE_BASE64 = Math.ceil(MAX_WORKBENCH_SHARE_BYTES / 3) * 4;
@@ -41,7 +53,11 @@ export type WorkbenchProductRequest =
   | { method: 'diagnostics'; spaceId: string }
   | { method: 'templates' }
   | { method: 'share.export'; spaceId: string; includeConfig?: boolean }
-  | { method: 'share.previewImport'; archiveBase64: string };
+  | { method: 'share.previewImport'; archiveBase64: string }
+  | WorkbenchBlueprintSourceRequest
+  | WorkbenchBlueprintGenerateRequest
+  | WorkbenchBlueprintInspectRequest
+  | WorkbenchBlueprintPreviewRequest;
 
 /** Read observations bind drafts to the state they displayed. */
 export interface WorkbenchProductObservation {
@@ -57,6 +73,10 @@ export type WorkbenchProductResult = (
   | { method: 'templates'; templates: SpaceTemplate[] }
   | { method: 'share.export'; fileName: string; archiveBase64: string; preview: SpaceSharePreview }
   | { method: 'share.previewImport'; importId: string; expiresAt: string; preview: SpaceSharePreview }
+  | WorkbenchBlueprintSourcePayload
+  | WorkbenchBlueprintGeneratePayload
+  | WorkbenchBlueprintInspectPayload
+  | WorkbenchBlueprintPreviewPayload
 ) & { observation: WorkbenchProductObservation };
 
 export type WorkbenchProductCommand =
@@ -67,7 +87,8 @@ export type WorkbenchProductCommand =
   | { kind: 'plugin.library.remove'; libraryId: string }
   | { kind: 'template.save'; spaceId: string; name: string; includeConfig?: boolean }
   | { kind: 'template.create'; templateId: string; name: string; displayName?: string }
-  | { kind: 'space.import'; importId: string; name: string; displayName?: string };
+  | { kind: 'space.import'; importId: string; name: string; displayName?: string }
+  | WorkbenchBlueprintApplyCommand;
 
 /** This is safe to persist in succeeded or partially failed jobs. */
 export type WorkbenchProductOutcome =
@@ -77,9 +98,10 @@ export type WorkbenchProductOutcome =
   | { kind: 'plugin.download'; item: WorkbenchLibraryItem }
   | { kind: 'plugin.library.remove'; libraryId: string }
   | { kind: 'template.save'; templateId: string }
-  | { kind: 'template.create' | 'space.import'; import: SpaceImportResult };
+  | { kind: 'template.create' | 'space.import'; import: SpaceImportResult }
+  | WorkbenchBlueprintApplyOutcome;
 
 export function isWorkbenchProductCommand(value: { kind: string }): value is WorkbenchProductCommand {
   return ['workbench.prepare', 'settings.update', 'catalog.refresh', 'plugin.download', 'plugin.library.remove',
-    'template.save', 'template.create', 'space.import'].includes(value.kind);
+    'template.save', 'template.create', 'space.import', 'blueprint.apply'].includes(value.kind);
 }

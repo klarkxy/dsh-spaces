@@ -2,6 +2,8 @@
 
 **Spaces for DeepSeek Harness — switch your DSH workspaces like Discord servers.**
 
+**Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md), the first-level guide and format contract for sharing plugin compositions and configuration presets as JSON or copyable codes. Implementation and acceptance status: [blueprint work record](tasks/blueprint-implementation.md).
+
 Download desktop builds from [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases). Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
 
 Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI channel: official **`latest`**, pinned to the resolved exact version. The local plugin is not on npm.
@@ -87,6 +89,8 @@ MIT. See `LICENSE`.
 # DSH Spaces (中文)
 
 **Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
+
+**使用或开发蓝图能力，请先阅读根目录 [BLUEPRINT.md](BLUEPRINT.md)。** 蓝图以 JSON 或分享码分发插件组合与配置预设。实现与验收状态见[蓝图实施记录](tasks/blueprint-implementation.md)。
 
 桌面安装包见 [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases)。现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。本次合并验证见 [验收记录](tasks/merge-execution.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
 
