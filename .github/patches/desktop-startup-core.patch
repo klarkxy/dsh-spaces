@@ -1,0 +1,213 @@
+diff --git a/package.json b/package.json
+index 00253cd..74e1f82 100644
+--- a/package.json
++++ b/package.json
+@@ -27,7 +27,7 @@
+     "test:llm:browser": "tsx --test tests/llm-ui-dom.test.ts",
+     "validate:llm:secrets": "node scripts/validate-llm-secrets.mjs",
+     "validate:llm:distribution": "node scripts/validate-llm-distribution.mjs",
+-    "test:workbench": "tsx --test tests/home-controller.test.ts tests/workbench-jobs.test.ts tests/workbench-supervisor.test.ts tests/workbench-maintenance.test.ts tests/workbench-ui.test.tsx tests/workbench-plugin.test.ts tests/q-let-it-crash.test.ts tests/sample-plugins.test.ts tests/workbench-package-upgrade.test.ts tests/workbench-protocol.test.ts tests/workbench-endpoint-v2.test.ts tests/workbench-forwarding-v2.test.ts tests/workbench-products.test.ts tests/space-recipe.test.ts tests/desktop-service-client.test.ts tests/component-payload.test.ts tests/component-selection.test.ts tests/component-handoff.test.ts tests/workbench-supervisor-handoff.test.ts tests/supervisor-pack.test.ts tests/home-controller-handoff.test.ts tests/runtime-installation.test.ts tests/workbench-http-port.test.ts tests/component-update-wait-job.test.ts",
++    "test:workbench": "tsx --test tests/home-controller.test.ts tests/workbench-jobs.test.ts tests/workbench-supervisor.test.ts tests/workbench-maintenance.test.ts tests/workbench-ui.test.tsx tests/workbench-plugin.test.ts tests/q-let-it-crash.test.ts tests/sample-plugins.test.ts tests/workbench-package-upgrade.test.ts tests/workbench-protocol.test.ts tests/workbench-endpoint-v2.test.ts tests/workbench-forwarding-v2.test.ts tests/workbench-products.test.ts tests/space-recipe.test.ts tests/desktop-service-client.test.ts tests/component-payload.test.ts tests/component-selection.test.ts tests/component-handoff.test.ts tests/workbench-supervisor-handoff.test.ts tests/supervisor-pack.test.ts tests/home-controller-handoff.test.ts tests/runtime-installation.test.ts tests/workbench-http-port.test.ts tests/component-update-wait-job.test.ts tests/desktop-startup.test.ts",
+     "test:workbench:browser": "tsx --test tests/workbench-ui-dom.test.ts",
+     "test:workbench:recovery": "tsx --test tests/workbench-doctor.test.ts tests/cooperative-children.test.ts tests/maintenance-responsiveness.test.ts tests/xp-compatibility.test.ts",
+     "validate:plugin": "node scripts/verify-spaces-plugin.mjs",
+@@ -48,7 +48,8 @@
+     "dist": "npm run build && electron-builder",
+     "dist:win": "npm run build && electron-builder --win",
+     "dist:mac": "npm run build && electron-builder --mac",
+-    "dist:linux": "npm run build && electron-builder --linux"
++    "dist:linux": "npm run build && electron-builder --linux",
++    "test:desktop-startup": "tsx --test tests/desktop-startup.test.ts tests/desktop-service-client.test.ts && tsx --tsconfig tsconfig.web.json --test tests/desktop-startup-ui.test.tsx"
+   },
+   "dependencies": {
+     "@fontsource-variable/geist": "^5.3.0",
+diff --git a/scripts/verify-spaces-desktop.mjs b/scripts/verify-spaces-desktop.mjs
+index 48c3c41..9ce27bf 100644
+--- a/scripts/verify-spaces-desktop.mjs
++++ b/scripts/verify-spaces-desktop.mjs
+@@ -61,7 +61,6 @@ const DRAFT_CATALOG = "https://example.invalid/catalog.json";
+ const ACTIVE_JOB = new Set(["queued", "running"]);
+ const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
+ 
+-const START_BTN = /^(Start workbench service|启动工作台服务)$/;
+ const NEW_SPACE = /^(New space|新建空间)$/;
+ const PLUGIN_SEARCH = /^(Search plugins|搜索插件)$/;
+ 
+@@ -811,13 +810,14 @@ try {
+   assert.ok(windowState.width >= 800 && windowState.height >= 560, "main window smaller than product minimum");
+   pass(`main window visible ${windowState.width}x${windowState.height}`);
+ 
+-  const start = page.getByRole("button", { name: START_BTN });
+-  await start.waitFor({ timeout: 30_000 });
+-  pass("shell Start service control (Start workbench service / 启动工作台服务)");
+-  await start.click();
+-  stage("start: Start workbench service clicked; waiting for manager frame");
+-
++  stage("start: waiting for automatic workbench entry; no Start service click");
+   const entryPage = await electronEntryPage();
++  const shellState = await page.evaluate(() => window.dshSpaces.getState());
++  assert.equal(shellState.serviceStatus, "connected");
++  assert.equal(shellState.phase, "connected");
++  assert.equal(shellState.canPrepare, false);
++  assert.equal(shellState.canStart, false);
++  pass("desktop launch automatically connected or started the workbench without a Start service click");
+   origin = new URL(entryPage.url()).origin;
+   const desktopWorkbench = await waitSharedWorkbench(entryPage);
+   presentedSnippet = redact(await desktopWorkbench.locator(".dsh-workbench").innerText()).slice(0, 240);
+diff --git a/src/adapters/desktop/service-client.ts b/src/adapters/desktop/service-client.ts
+index b122e69..feabbd4 100644
+--- a/src/adapters/desktop/service-client.ts
++++ b/src/adapters/desktop/service-client.ts
+@@ -14,9 +14,8 @@ import {
+   type WorkbenchHttpFetch,
+ } from "../../../packages/plugin/src/host/workbench-http";
+ import type { WorkbenchApi } from "../../shared/workbench";
++import type { DesktopServicePublicStatus } from "../../shared/desktop-shell";
+ 
+-const NO_RUNNING_SERVICE =
+-  "No running workbench was found. This profile does not start a second controller.";
+ const ATTACH_FAILED = "The supervisor endpoint could not be attached.";
+ const START_FAILED = "The supervisor process could not be started.";
+ const ENTRY_UNAVAILABLE = "The workbench entry is not available yet.";
+@@ -28,7 +27,7 @@ const CONNECTION_FAILED = "The supervisor connection failed.";
+ const MAX_REASONS = 32;
+ const MAX_REASON_CHARS = 500;
+ 
+-export type DesktopServiceStatus = "idle" | "connecting" | "connected" | "unavailable";
++export type DesktopServiceStatus = DesktopServicePublicStatus;
+ 
+ export interface DesktopServicePublicState {
+   status: DesktopServiceStatus;
+@@ -228,7 +227,7 @@ export class DesktopServiceClient {
+       const allowBootstrap = this.allowBootstrap;
+       const startArgs = this.startArgs;
+       if (!allowBootstrap || !startArgs) {
+-        this.becomeUnavailable(generation, [NO_RUNNING_SERVICE]);
++        this.becomeStopped(generation);
+         return this.publicState();
+       }
+ 
+@@ -270,6 +269,17 @@ export class DesktopServiceClient {
+     this.startArgs = null;
+   }
+ 
++  /** A verified absence is a normal state, not an attach or startup failure. */
++  private becomeStopped(generation: number): void {
++    if (!this.live(generation)) return;
++    this.endpoint = null;
++    this.api = null;
++    this.status = "stopped";
++    this.reasons = [];
++    this.allowBootstrap = false;
++    this.startArgs = null;
++  }
++
+   private becomeUnavailable(generation: number, reasons: string[]): void {
+     if (!this.live(generation)) return;
+     this.endpoint = null;
+diff --git a/src/main/index.ts b/src/main/index.ts
+index 0608889..64e471e 100644
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -47,6 +47,7 @@ import {
+   setSelectedDshResolver,
+ } from "../adapters/node/dsh-cli";
+ import { resolveDshHome } from "./dsh-home";
++import { createDesktopStartup } from "./desktop-startup";
+ import { authorizeProductHome } from "../adapters/node/home-guard";
+ import { applyNativeTheme, currentColorScheme } from "./native-theme";
+ import {
+@@ -156,7 +157,6 @@ function startMain(): void {
+   let allowClose = false;
+   let quitInProgress = false;
+   let initialized = false;
+-  let connectedOnce = false;
+   let preparing = false;
+   let starting = false;
+   const prepareInflight: InflightHolder<DesktopShellPublicState> = { current: null };
+@@ -167,6 +167,13 @@ function startMain(): void {
+   let traySpaces: TraySpace[] = [];
+   let lastService: DesktopServicePublicState = client.publicState();
+   let workbenchSession: Session | null = null;
++  const startup = createDesktopStartup({
++    connect: connectOnce,
++    status: () => lastService.status,
++    canStart: () => !preparing && cliStatusSnapshot().state !== "error" &&
++      toolchain.kind !== "invalid" && toolsReady(),
++    start: startService,
++  });
+ 
+   function requireWorkbenchSession(): Session {
+     if (!workbenchSession) {
+@@ -235,8 +242,8 @@ function startMain(): void {
+     if (starting || lastService.status === "connecting") return "connecting";
+     if (lastService.status === "connected") return "connected";
+     if (toolchain.kind === "invalid") return "blocked";
+-    if (!toolsReady()) return "needs-tools";
+     if (lastService.status === "unavailable") return "unavailable";
++    if (cliStatusSnapshot().state === "error" || !toolsReady()) return "needs-tools";
+     return "tools-ready";
+   }
+ 
+@@ -254,8 +261,10 @@ function startMain(): void {
+       locale: prefs.locale,
+       theme: prefs.theme,
+       packageSource: prefs.packageSource,
+-      canPrepare: toolchain.kind === "absent" && !preparing,
+-      canStart: toolchain.kind !== "invalid" && toolsReady() && lastService.status !== "connected" && !starting,
++      canPrepare: toolchain.kind === "absent" && phase === "needs-tools" && !preparing,
++      canStart: toolchain.kind !== "invalid" && toolsReady() &&
++        lastService.status !== "connected" && lastService.status !== "connecting" &&
++        !starting && !preparing,
+       overlay: phase !== "connected",
+     };
+   }
+@@ -330,8 +339,8 @@ function startMain(): void {
+   }
+ 
+   async function connectOnce(): Promise<void> {
+-    if (connectedOnce) return;
+-    connectedOnce = true;
++    lastService = { status: "connecting", reasons: [] };
++    broadcastState();
+     lastService = await client.connect();
+     if (lastService.status === "connected") {
+       await presentWorkbench();
+@@ -356,6 +365,7 @@ function startMain(): void {
+         throw error;
+       }
+       preparing = false;
++      await startup.environmentPrepared();
+       return snapshotAndEmit();
+     });
+   }
+@@ -373,6 +383,7 @@ function startMain(): void {
+         if (lastService.status === "connected") await presentWorkbench();
+       } catch (error) {
+         starting = false;
++        workbenchError = redactDesktopShellText(error instanceof Error ? error.message : String(error), secrets());
+         broadcastState();
+         throw error;
+       }
+@@ -667,7 +678,7 @@ function startMain(): void {
+     });
+     broadcastState();
+     try {
+-      await connectOnce();
++      await startup.open();
+     } catch (error) {
+       lastService = client.publicState();
+       if (lastService.status !== "unavailable") {
+diff --git a/src/shared/desktop-shell.ts b/src/shared/desktop-shell.ts
+index c7cd90a..7db3d62 100644
+--- a/src/shared/desktop-shell.ts
++++ b/src/shared/desktop-shell.ts
+@@ -46,7 +46,7 @@ export type DesktopShellPhase =
+   | "blocked"
+   | "workbench-error";
+ 
+-export type DesktopServicePublicStatus = "idle" | "connecting" | "connected" | "unavailable";
++export type DesktopServicePublicStatus = "idle" | "connecting" | "connected" | "stopped" | "unavailable";
+ 
+ export interface DesktopShellRuntimeFlags {
+   node: boolean;
