@@ -1,6 +1,6 @@
 {
   "name": "@dsh-spaces/plugin",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "description": "DSH Host plugin for observing and verifying non-host spaces",
   "author": "dsh-spaces",

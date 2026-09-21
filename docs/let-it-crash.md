@@ -18,7 +18,7 @@
 
 运行时安装 IO 已抽到 `src/adapters/node/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及升级过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。
 
-维护成功路径可以 `reinitializeManager`（同一 Supervisor `serviceEpoch`）；失败路径保持 maintenance、不重启管理 profile。组件升级的一次性 launcher 交接已在源码接线（`--accept-handoff`、`packages/supervisor/src/launcher.ts`、`workbench.upgrade` 的 `handoff-pending`）。**这不是真实验收通过：** 现行 `scripts/verify-plugin-standard-install.mjs` 在诊断中失败；desktop / component-update / maintenance-product 真实运行尚未记录 PASS。不要把实现完成写成验收完成。进度由 Primary 维护 [合并执行记录](../tasks/merge-execution.md)。
+维护成功路径可以 `reinitializeManager`（同一 Supervisor `serviceEpoch`）；失败路径保持 maintenance、不重启管理 profile。组件升级通过一次性 launcher 交接（`--accept-handoff`、`packages/supervisor/src/launcher.ts`、`workbench.upgrade` 的 `handoff-pending`），新管理器就绪后才确认成功。标准安装、组件更新、正常维护及桌面真实流程的具体版本、结果和限制见 [合并执行记录](../tasks/merge-execution.md)；实现完成与实际验收分别记录。
 
 ## 两个必须明确的解释
 
