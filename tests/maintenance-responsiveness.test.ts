@@ -252,6 +252,9 @@ test("sync rename of a large published runtime tree stalls HTTP; install publish
     renameSync(syncSrc, syncDest);
   });
 
+  const fixtureReady = deferred();
+  const releaseInstall = deferred();
+  let fixturePrepared = false;
   const root = fakeDirPath("dsh-rename-async-");
   const runtime = new RuntimeStore({
     root,
@@ -259,12 +262,20 @@ test("sync rename of a large published runtime tree stalls HTTP; install publish
     legacy: () => undefined,
     run: async (_command, args) => {
       if (args.includes("install")) {
-        const spec = args.find((item) => item.startsWith("@deepseek-ai/dsh@"));
-        assert.ok(spec);
-        const version = spec.slice("@deepseek-ai/dsh@".length);
-        const prefix = args[args.indexOf("--prefix") + 1];
-        writeCandidate(prefix, version, version, version);
-        fillTree(join(prefix, "bulk"), FILE_COUNT);
+        try {
+          const spec = args.find((item) => item.startsWith("@deepseek-ai/dsh@"));
+          assert.ok(spec);
+          const version = spec.slice("@deepseek-ai/dsh@".length);
+          const prefix = args[args.indexOf("--prefix") + 1];
+          writeCandidate(prefix, version, version, version);
+          fillTree(join(prefix, "bulk"), FILE_COUNT);
+        } catch (err) {
+          fixtureReady.reject(err);
+          throw err;
+        }
+        fixturePrepared = true;
+        fixtureReady.resolve();
+        await releaseInstall.promise;
         return { code: 0, stdout: "added", stderr: "" };
       }
       if (args.includes("--version")) {
@@ -277,15 +288,34 @@ test("sync rename of a large published runtime tree stalls HTTP; install publish
     },
     fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
   });
-  const pulse = await withHeartbeat(async () => {
-    const installed = await runtime.install("0.1.1-rc.2");
-    assert.equal(existsSync(join(installed.dir, "bulk", "b0", "f0.dat")), true);
-  });
-  if (syncPulse.elapsed >= STALL_MS) {
-    assert.equal(syncPulse.during, 0, `sync renameSync must block the loop (${syncPulse.elapsed}ms, hits=${syncPulse.during})`);
-  }
-  if (pulse.elapsed >= STALL_MS) {
-    assert.ok(pulse.during > 0, `async runtime publish rename blocked HTTP (${pulse.elapsed}ms, hits=${pulse.during})`);
+  const pendingInstall = runtime.install("0.1.1-rc.2");
+  try {
+    await Promise.race([
+      fixtureReady.promise,
+      pendingInstall.then(
+        () => {
+          if (!fixturePrepared) throw new Error("runtime.install finished before fixtureReady");
+        },
+        (err: unknown) => {
+          fixtureReady.reject(err);
+          throw err;
+        },
+      ),
+    ]);
+    const pulse = await withHeartbeat(async () => {
+      releaseInstall.resolve();
+      const installed = await pendingInstall;
+      assert.equal(existsSync(join(installed.dir, "bulk", "b0", "f0.dat")), true);
+    });
+    if (syncPulse.elapsed >= STALL_MS) {
+      assert.equal(syncPulse.during, 0, `sync renameSync must block the loop (${syncPulse.elapsed}ms, hits=${syncPulse.during})`);
+    }
+    if (pulse.elapsed >= STALL_MS) {
+      assert.ok(pulse.during > 0, `async runtime publish rename blocked HTTP (${pulse.elapsed}ms, hits=${pulse.during})`);
+    }
+  } finally {
+    releaseInstall.resolve();
+    await pendingInstall.then(() => undefined, () => undefined);
   }
 });
 
@@ -380,6 +410,20 @@ function pendingStageFixture(prefix: string): { home: string; root: string; stor
   );
   fillTree(join(home, RESTORE_STAGE_DIR, "backup"), FILE_COUNT);
   return { home, root, store };
+}
+
+function deferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error?: unknown) => void;
+} {
+  let resolve!: () => void;
+  let reject!: (error?: unknown) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = () => res();
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 async function withHeartbeat(work: () => void | Promise<void>): Promise<{ during: number; elapsed: number }> {
