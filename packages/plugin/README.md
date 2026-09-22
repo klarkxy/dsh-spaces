@@ -12,6 +12,8 @@ Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations ma
 pnpm run pack:plugin
 ```
 
+From this checkout, `pnpm run dev:web` packs the plugin, installs it into a disposable Home at `.sandbox/dsh-web-home`, and starts official `dsh web`. `pnpm run dev` remains the Electron shell.
+
 Run the printed `dsh plugin --profile web add <tarball> --config.auto-install-peers=true` command, then `dsh web`. In the ordinary DSH sidebar choose **工作台 / Workbench**, then **初始化 Spaces / Initialize Spaces**.
 
 No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@latest` in place of `dsh`. Package output defaults to `%TEMP%/dsh-spaces-pack`, outside package trees. Windows local tarball paths must not contain spaces; the pack script checks this and never requires a pre-existing `$artifacts` variable.

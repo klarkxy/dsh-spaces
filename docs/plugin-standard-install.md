@@ -16,6 +16,8 @@ Official CLI channel: **`latest`**. Spaces pins the resolved exact version. An u
 
 在项目根目录运行以下命令。插件会使用该 DSH Web 自己的数据目录，无需另填路径。
 
+从本仓库开发时，`pnpm run dev:web` 会重建 `.sandbox/dsh-web-home`、打包并预装当前插件、启动官方 `dsh web`。Electron 仍是 `pnpm run dev`。浏览器里再点 **初始化 Spaces**。
+
 ```powershell
 pnpm run pack:plugin
 pnpm dlx @deepseek-ai/dsh@latest plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.3.0.tgz" --config.auto-install-peers=true
@@ -45,6 +47,7 @@ Uninstall the ordinary entry: `dsh plugin --profile web remove @dsh-spaces/plugi
 ```
 pnpm run pack:plugin
 pnpm run check:plugin-package
+pnpm run dev:web
 pnpm run validate:plugin-install -- --preflight
 pnpm run validate:plugin-install
 ```

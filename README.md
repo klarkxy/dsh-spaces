@@ -69,9 +69,10 @@ npm run typecheck
 npm run validate:isolation
 npm run validate:llm:secrets
 npm run dev
+npm run dev:web
 ```
 
-`npm run dev` uses `.sandbox/dsh-home`. Supervisor flags: [docs/workbench.md](docs/workbench.md). Do not run isolation/lifecycle scripts while the app uses the same sandbox profiles. Activity ledger: [tasks/todo.md](tasks/todo.md).
+`npm run dev` starts the Electron shell against `.sandbox/dsh-home`. `npm run dev:web` recreates `.sandbox/dsh-web-home`, installs this checkout's plugin into official `web`, and starts `dsh web`. Click **初始化 Spaces / Initialize Spaces** in the browser. Supervisor flags: [docs/workbench.md](docs/workbench.md). Do not run isolation/lifecycle scripts while the app uses the same sandbox profiles. Activity ledger: [tasks/todo.md](tasks/todo.md).
 
 ## Build
 
@@ -115,4 +116,4 @@ MIT. See `LICENSE`.
 
 通用 Node 模块在 `src/adapters/node`。构建清单覆盖 Supervisor、管理插件、view-bridge、llm-bridge、安装 worker 五组件。启动仍需要同组 `--snapshot-worker`，运行时安装 IO 已抽出。组件升级采用一次性启动器交接，新管理器就绪后才确认成功。本次源码测试、标准插件、组件更新和桌面包的验证范围见 [合并验收记录](tasks/merge-execution.md)。
 
-`npm run dev` 使用 `.sandbox/dsh-home`。监督进程参数见 [docs/workbench.md](docs/workbench.md)。活动账本：[tasks/todo.md](tasks/todo.md)。
+`npm run dev` 启动 Electron，Home 为 `.sandbox/dsh-home`。`npm run dev:web` 每次重建 `.sandbox/dsh-web-home`，把当前仓库插件装进官方 `web`，再启动 `dsh web`。浏览器里点 **初始化 Spaces**。监督进程参数见 [docs/workbench.md](docs/workbench.md)。活动账本：[tasks/todo.md](tasks/todo.md)。

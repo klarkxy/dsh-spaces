@@ -18,6 +18,7 @@
   "scripts": {
     "postinstall": "node scripts/ensure-electron.mjs",
     "dev": "electron-vite dev",
+    "dev:web": "node scripts/dev-dsh-web.mjs",
     "build": "npm run build:spaces && electron-vite build",
     "build:spaces": "node scripts/build-spaces.mjs",
     "typecheck:spaces": "tsc --noEmit -p tsconfig.spaces.json",
