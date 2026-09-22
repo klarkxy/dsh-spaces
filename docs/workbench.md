@@ -25,7 +25,7 @@ Default DSH channel is official **`latest`**, resolved to an exact version and p
 | | Development | Product Home |
 |---|---|---|
 | Purpose | Disposable directory | A Home you chose, often `~/.dsh` in a packaged desktop |
-| How | Absolute `--home` **without** `--allow-real-home`. `npm run dev` uses `.sandbox/dsh-home` | Packaged desktop defaults to `~/.dsh`. Supervisor / doctor need `--home` **and** `--allow-real-home` |
+| How | Absolute `--home` **without** `--allow-real-home`. `npm run dev` uses `.sandbox/dsh-home`. `npm run dev:web` recreates `.sandbox/dsh-web-home` | Packaged desktop defaults to `~/.dsh`. Supervisor / doctor need `--home` **and** `--allow-real-home` |
 | Do not | Point experiments at `~/.dsh` | Use production as a tutorial Home |
 
 Browser callers never submit filesystem paths, CLI commands, or launch tokens.
