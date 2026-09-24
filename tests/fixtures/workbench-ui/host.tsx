@@ -346,6 +346,7 @@ if (!root) throw new Error("missing root");
 createRoot(root).render(
   React.createElement(WorkbenchApp, {
     api: makeApi(cfg.supervisor, cfg.child),
+    homeUrl: `${cfg.child}/home`,
     env: {
       downloadFile: (fileName) => {
         (window.__WB_DOWNLOADS ??= []).push({ fileName });

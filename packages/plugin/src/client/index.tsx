@@ -5,8 +5,10 @@ import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import { WorkbenchApp } from "../workbench";
+import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
 import { SpacesPanelIcon } from "./icon";
+import { registerSpacesBranding } from "./branding";
 import {
   createWorkbenchGuideRemote,
   createWorkbenchRemote,
@@ -24,17 +26,22 @@ export const SPACES_PANEL_LABEL = "Workbench";
 export const inject = ["slots", "connection"];
 
 /**
- * Manager profiles replace the DSH root with WorkbenchApp.
+ * Manager profiles mount Spaces around a persistent native DSH home.
  * Ordinary / uninitialized / identity-blocked profiles only add a guide panel
  * (initialize or enter). No second rail, no management write UI.
  */
 export function apply(ctx: Context): void {
   const connection: ConnectionHandle = ctx.get("connection");
   const hint = readHostHint();
+  if (hint && !hint.unavailable) registerSpacesBranding(ctx);
   if (hint?.role === "manager" && !hint.unavailable) {
+    // The embedded home uses this profile's unmodified DSH root. Do not
+    // recursively mount Spaces inside it or change the profile on disk.
+    if (typeof window !== "undefined" && window.location && isHomeView(window.location.href)) return;
     const api = createWorkbenchRemote(connection);
+    const homeUrl = typeof window !== "undefined" && window.location ? homeViewUrl(window.location.href) : undefined;
     ctx.slots.inject("root", () =>
-      ctx.slots.register({ name: "root", priority: -1 }, () => createElement(WorkbenchApp, { api })),
+      ctx.slots.register({ name: "root", priority: -1 }, () => createElement(WorkbenchApp, { api, homeUrl })),
     );
     return;
   }

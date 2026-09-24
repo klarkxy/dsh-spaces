@@ -44,7 +44,7 @@ import {
   WORKBENCH_STORAGE_KEY,
   writePersist,
 } from "../packages/plugin/src/workbench/persistence.ts";
-import { t } from "../packages/plugin/src/workbench/i18n.ts";
+import { localizeError, t } from "../packages/plugin/src/workbench/i18n.ts";
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
@@ -249,6 +249,9 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
       },
       observation: OBSERVATION,
     };
+  }
+  if (request.method === "logs" || request.method === "log.record") {
+    return { method: "logs", entries: [], logError: null, observation: OBSERVATION };
   }
   if (request.method === "templates") {
     return {
@@ -717,7 +720,7 @@ test("preview confirmation is required; preview errors do not look like success"
   await flush();
   let ui = ctrl.getSnapshot();
   assert.equal(ui.pendingPlan, null);
-  assert.equal(ui.planError, t("zh", "app.invalidInput"));
+  assert.equal(ui.planError, `${t("zh", "app.invalidInput")}\n${t("zh", "app.errorReason", { reason: "nope" })}`);
   let html = ready(ctrl);
   assert.ok(html.includes(t("zh", "app.invalidInput")));
   assert.ok(!html.includes(t("zh", "plan.title")));
@@ -794,6 +797,7 @@ test("cancel is only offered when canCancel is true", async () => {
   });
   const ctrl = controller(api);
   await ctrl.poll();
+  ctrl.setHomeTab("overview");
   const html = ready(ctrl);
   assert.ok(html.includes('data-job-id="c1"'));
   assert.ok(html.includes(t("zh", "jobs.cancel")));
@@ -862,6 +866,74 @@ test("SSR WorkbenchApp defaults to Chinese loading chrome with a 72px rail", () 
   assert.ok(html.includes("<style>"));
 });
 
+test("plugin read failures keep their own reasons", async () => {
+  const api = fakeApi({
+    plugins: async () => {
+      throw Object.assign(new Error("plugin index unreadable"), { code: "workbench/failed" });
+    },
+    product: async (request) => {
+      if (request.method === "catalog") {
+        throw Object.assign(new Error("Plugin catalog cache could not be read."), { code: "workbench/failed" });
+      }
+      return productResult(request);
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("plugins");
+  await flush();
+  const html = ready(ctrl);
+  const snapshot = ctrl.getSnapshot();
+  assert.equal(snapshot.commandError, null);
+  assert.match(snapshot.readError.catalog ?? "", /Plugin catalog cache could not be read/);
+  assert.match(snapshot.readError.plugins ?? "", /plugin index unreadable/);
+  assert.equal(snapshot.readError.library, undefined);
+  assert.ok(html.includes("Plugin catalog cache could not be read."));
+  assert.ok(html.includes("plugin index unreadable"));
+  assert.equal(
+    localizeError("zh", { code: "workbench/unavailable", message: "The supervisor is releasing run rights." }).includes("releasing run rights"),
+    true,
+  );
+  assert.equal(
+    localizeError("zh", { code: "workbench/unavailable", message: "The workbench service could not complete this request." }),
+    t("zh", "app.unavailable"),
+  );
+});
+
+test("status tab shows workbench log lines", async () => {
+  const api = fakeApi({
+    product: async (request) => {
+      if (request.method === "logs") {
+        return {
+          method: "logs" as const,
+          entries: [
+            {
+              at: "2026-09-22T00:00:00.000Z",
+              level: "error" as const,
+              area: "http",
+              event: "product.catalog",
+              code: "workbench/failed",
+              message: "Plugin catalog cache could not be read.",
+            },
+          ],
+          logError: null,
+          observation: OBSERVATION,
+        };
+      }
+      return productResult(request);
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setHomeTab("overview");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "logs.title")));
+  assert.ok(html.includes("product.catalog"));
+  assert.ok(html.includes("Plugin catalog cache could not be read."));
+  assert.equal(ctrl.copyWorkbenchLog().includes("Plugin catalog cache could not be read."), true);
+});
+
 test("SSR ready home shows management actions and plugin install wording", async () => {
   const ctrl = controller();
   await ctrl.poll();
@@ -920,6 +992,7 @@ test("RecoverySurface shows reasons and jobs without acquire or a manager iframe
   assert.ok(html.includes(t("zh", "app.copyLogs")));
   assert.ok(html.includes(t("zh", "app.errorDetails")));
   assert.ok(!html.includes("<iframe"));
+  ctrl.setHomeTab("overview");
   const readyHtml = renderToStaticMarkup(
     React.createElement(WorkbenchView, {
       ui: { ...ctrl.getSnapshot(), boot: "ready" },
@@ -1333,6 +1406,7 @@ test("workbench package reloads after a confirmed upgrade reaches a terminal job
   ctrl.confirmPlan();
   await flush();
   assert.equal(packageCalls, 2);
+  ctrl.setHomeTab("runtime");
   const html = ready(ctrl);
   assert.ok(upgradeButton(html).includes("disabled"));
   assert.ok(html.includes(t("zh", "workbenchPackage.current")));
@@ -1458,6 +1532,7 @@ test("prepare update submits workbench.prepare through CAS and reloads the candi
   assert.deepEqual(submittedArg.context, { serviceEpoch: EPOCH, expectedRevision: REVISION });
   assert.equal(api.calls.filter((item) => item.method === "product").length, 0);
   assert.equal(packageCalls, 2);
+  ctrl.setHomeTab("runtime");
   const html = ready(ctrl);
   assert.ok(html.includes('data-candidate-version="0.2.0"'));
   assert.ok(html.includes(`data-candidate-digest="${prepared.digest}"`));
@@ -1594,7 +1669,10 @@ test("dirty settings draft keeps its observation and does not take a later state
   assert.equal(arg.context.serviceEpoch, EPOCH);
   assert.equal(ctrl.getSnapshot().settingsDraft?.settings.portStart, 4100);
   assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
-  assert.equal(ctrl.getSnapshot().commandError, t("zh", "app.conflict"));
+  assert.equal(
+    ctrl.getSnapshot().commandError,
+    `${t("zh", "app.conflict")}\n${t("zh", "app.errorReason", { reason: "revision conflict" })}`,
+  );
 });
 
 test("old-service view frames are rejected without serviceEpoch", async () => {
@@ -1728,6 +1806,7 @@ test("service shutdown is a preview, not acquire", async () => {
   const ctrl = controller(api);
   await ctrl.poll();
   ctrl.openSettings();
+  ctrl.setSettingsTab("advanced");
   await flush();
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "settings.shutdown")));

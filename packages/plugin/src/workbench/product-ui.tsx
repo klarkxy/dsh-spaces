@@ -75,7 +75,7 @@ export function HomeSettingsFields({
       {ui.settingsStatus === "loading" ? <p role="status">{t(locale, "app.loading")}</p> : null}
       {ui.settingsStatus === "error" ? (
         <p className="dsh-wb-alert" role="alert">
-          {ui.commandError ?? t(locale, "app.genericError")}
+          {ui.readError.settings ?? t(locale, "app.genericError")}
         </p>
       ) : null}
       {draft ? (
@@ -177,7 +177,7 @@ export function PluginsCatalogLibrary({
         ) : null}
         {ui.catalogStatus === "error" ? (
           <p className="dsh-wb-alert" role="alert">
-            {ui.commandError ?? t(locale, "app.genericError")}
+            {ui.readError.catalog ?? t(locale, "app.genericError")}
           </p>
         ) : null}
         <div className="dsh-wb-actions">
@@ -212,7 +212,7 @@ export function PluginsCatalogLibrary({
         <p className="dsh-wb-muted">{t(locale, "plugins.notInstalled")}</p>
         {ui.libraryStatus === "error" ? (
           <p className="dsh-wb-alert" role="alert">
-            {ui.commandError ?? t(locale, "app.genericError")}
+            {ui.readError.library ?? t(locale, "app.genericError")}
           </p>
         ) : null}
         <label className="dsh-wb-field">
@@ -308,7 +308,7 @@ export function TemplatesShareTab({
       <h2 className="dsh-wb-title">{t(locale, "templates.title")}</h2>
       {ui.templatesStatus === "error" ? (
         <p className="dsh-wb-alert" role="alert">
-          {ui.commandError ?? t(locale, "app.genericError")}
+          {ui.readError.templates ?? t(locale, "app.genericError")}
         </p>
       ) : null}
       {ui.templates.length === 0 && ui.templatesStatus === "ready" ? (
@@ -618,7 +618,7 @@ export function DiagnosticsSection({
       {ui.diagnosticsStatus === "loading" ? <p role="status">{t(locale, "app.loading")}</p> : null}
       {ui.diagnosticsStatus === "error" ? (
         <p className="dsh-wb-alert" role="alert">
-          {ui.commandError ?? t(locale, "app.genericError")}
+          {ui.readError.diagnostics ?? t(locale, "app.genericError")}
         </p>
       ) : null}
       {diag?.lastError ? (

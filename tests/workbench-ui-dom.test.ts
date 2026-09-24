@@ -126,6 +126,34 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
+  const browserPage = page as unknown as import("playwright").Page;
+  await browserPage.setViewportSize({ width: 1280, height: 800 });
+  const home = browserPage.frameLocator('[data-home-view]');
+  await home.locator('textarea').fill('home draft');
+  assert.equal(await browserPage.getByRole('tab').count(), 0, 'management is absent from the home');
+  await browserPage.getByRole('button', { name: '设置', exact: true }).click();
+  const close = browserPage.locator('[data-settings-close]');
+  assert.equal(await close.evaluate(el => document.activeElement === el), true);
+  await browserPage.getByRole('button', { name: 'English', exact: true }).click();
+  await browserPage.evaluate(() => document.documentElement.style.setProperty('--dsw-alias-bg-base', '#ffffff'));
+  await browserPage.getByRole('button', { name: 'Dark', exact: true }).click();
+  assert.equal(await browserPage.locator('[data-settings-dialog]').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(24, 25, 29)', 'explicit dark theme overrides host colors');
+  await browserPage.getByRole('button', { name: 'Light', exact: true }).click();
+  assert.equal(await browserPage.locator('[data-settings-dialog]').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
+  await browserPage.getByRole('button', { name: '中文', exact: true }).click();
+  await browserPage.getByRole('tab', { name: '高级', exact: true }).click();
+  await browserPage.setViewportSize({ width: 390, height: 520 });
+  await browserPage.locator('[data-settings-home]').waitFor({ state: 'visible' });
+  await browserPage.locator('.dsh-wb-settings-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
+  const rect = await close.boundingBox();
+  assert.ok(rect && rect.y >= 0 && rect.y + rect.height <= 520 && rect.x + rect.width <= 390, 'close stays in the viewport');
+  await close.click();
+  assert.equal(await browserPage.getByRole('button', { name: '设置', exact: true }).evaluate(el => document.activeElement === el), true, 'focus returns to settings trigger');
+  await browserPage.getByRole('button', { name: '设置', exact: true }).click();
+  await browserPage.keyboard.press('Escape');
+  assert.equal(await browserPage.locator('[data-settings-dialog]').count(), 0);
+  assert.equal(await home.locator('textarea').inputValue(), 'home draft');
+  await browserPage.setViewportSize({ width: 1280, height: 800 });
   await page.getByRole("button", { name: "Alpha" }).click();
   const iframe = page.locator('iframe[data-space-id="alpha"]');
   await iframe.waitFor({ state: "attached", timeout: 15_000 });
@@ -151,6 +179,7 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
     () => (window as Window & { __iframe?: Element }).__iframe === document.querySelector('iframe[data-space-id="alpha"]'),
   );
   assert.equal(sameAfterReturn, true);
+  assert.equal(await home.locator("textarea").inputValue(), "home draft");
   const draft = await frame.locator("textarea").inputValue();
   assert.equal(draft, "draft-keep");
 });
@@ -223,6 +252,7 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
 
   await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "高级" }).click();
   await page.locator("[data-settings-home]").waitFor({ state: "visible", timeout: 15_000 });
   const port = await page.locator("[data-settings-home] input[type=\"number\"]").first().inputValue();
   assert.equal(port, "3100");
@@ -233,6 +263,7 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
     close?.click();
   });
 
+  await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "模板" }).click();
   await page.locator("[data-templates]").waitFor({ state: "visible", timeout: 15_000 });
   await page.getByRole("button", { name: "导出分享" }).click();

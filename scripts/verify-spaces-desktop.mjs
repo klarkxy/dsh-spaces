@@ -906,6 +906,7 @@ try {
   await desktopWorkbench.getByRole("button", { name: /^(Settings|设置)$/ }).click();
   const settings = desktopWorkbench.locator("[data-settings-dialog='true']");
   await settings.waitFor({ timeout: 30_000 });
+  await settings.getByRole("tab", { name: /^(Advanced|高级)$/ }).click();
   const catalog = settings.getByLabel(/^(Catalog URL|目录 URL)$/);
   await catalog.waitFor({ timeout: 30_000 });
   await catalog.fill(DRAFT_CATALOG);
@@ -916,20 +917,22 @@ try {
   const described = await api.llm({ method: "describe" });
   assert.ok(described && typeof described === "object");
   pass("backend: llm describe callable without credentials");
-  await settings.getByRole("tab", { name: /^(General|常规)$/ }).click();
+  await settings.getByRole("tab", { name: /^(Advanced|高级)$/ }).click();
   await catalog.waitFor({ timeout: 15_000 });
   assert.equal(await catalog.inputValue(), DRAFT_CATALOG);
-  pass("UI: settings draft survived General ↔ Models navigation (not saved)");
+  pass("UI: settings draft survived Advanced ↔ Models navigation (not saved)");
   const settingsProduct = await api.product({ method: "settings" });
   assert.equal(settingsProduct.method, "settings");
   assert.notEqual(settingsProduct.settings.catalogUrl, DRAFT_CATALOG);
   pass("backend: product settings still the saved catalog, not the unsaved draft");
   await settings.locator("[data-settings-close='true']").click();
 
+  if (await desktopWorkbench.locator("[data-settings-dialog]").count()) await desktopWorkbench.locator("[data-settings-close]").click();
   await desktopWorkbench.getByRole("button", { name: /^(Home|首页)$/ }).click();
+  await desktopWorkbench.getByRole("button", { name: /^(Settings|设置)$/ }).click();
   const pluginSearch = pluginSearchSubmit(desktopWorkbench);
   const homeTabs = [
-    { name: /^(Overview|总览)$/ },
+    { name: /^(Status and tasks|状态与任务)$/ },
     { name: /^(Spaces|空间)$/ },
     { name: /^(Plugins|插件)$/, control: pluginSearch },
     { name: /^(Snapshots|快照)$/, marker: /^(Create Home snapshot|创建整 Home 快照)$/ },
@@ -942,7 +945,7 @@ try {
     if (tab.marker) await desktopWorkbench.getByRole("button", { name: tab.marker }).waitFor({ timeout: 30_000 });
     if (tab.attr) await desktopWorkbench.locator(tab.attr).waitFor({ timeout: 30_000 });
   }
-  pass("UI: Home tabs overview/spaces/plugins/snapshots/runtime/templates opened");
+  pass("UI: settings categories status/spaces/plugins/snapshots/runtime/templates opened");
 
   await desktopWorkbench.getByRole("tab", { name: /^(Plugins|插件)$/ }).click();
   await pluginSearch.waitFor({ timeout: 30_000 });
@@ -976,8 +979,10 @@ try {
   pass("backend: product diagnostics + detail callable");
   await desktopWorkbench.locator(".dsh-wb-dialog").getByRole("button", { name: /^(Close|关闭)$/ }).click();
 
+  if (await desktopWorkbench.locator("[data-settings-dialog]").count()) await desktopWorkbench.locator("[data-settings-close]").click();
   await desktopWorkbench.getByRole("button", { name: /^(Home|首页)$/ }).click();
-  await desktopWorkbench.getByRole("tab", { name: /^(Overview|总览)$/ }).click();
+  await desktopWorkbench.getByRole("button", { name: /^(Settings|设置)$/ }).click();
+  await desktopWorkbench.getByRole("tab", { name: /^(Status and tasks|状态与任务)$/ }).click();
   await desktopWorkbench.locator(`[data-job-id="${createJob.id}"]`).waitFor({ timeout: 30_000 });
   pass("UI: overview lists the create job");
 
@@ -989,8 +994,10 @@ try {
   const browserWorkbench = await waitSharedWorkbench(browserPage);
   await browserWorkbench.getByRole("button", { name: NEW_SPACE }).waitFor({ timeout: 30_000 });
   await browserWorkbench.getByRole("button", { name: SPACE_RENAMED }).waitFor({ timeout: 30_000 });
+  if (await browserWorkbench.locator("[data-settings-dialog]").count()) await browserWorkbench.locator("[data-settings-close]").click();
   await browserWorkbench.getByRole("button", { name: /^(Home|首页)$/ }).click();
-  await browserWorkbench.getByRole("tab", { name: /^(Overview|总览)$/ }).click();
+  await browserWorkbench.getByRole("button", { name: /^(Settings|设置)$/ }).click();
+  await browserWorkbench.getByRole("tab", { name: /^(Status and tasks|状态与任务)$/ }).click();
   const browserJob = browserWorkbench.locator(`[data-job-id="${createJob.id}"]`);
   await browserJob.waitFor({ timeout: 30_000 });
   assert.equal(await browserJob.getAttribute("data-status"), createJob.status);
@@ -1011,6 +1018,7 @@ try {
     win.show();
     win.focus();
   });
+  if (await desktopWorkbench.locator("[data-settings-dialog]").count()) await desktopWorkbench.locator("[data-settings-close]").click();
   await desktopWorkbench.getByRole("button", { name: /^(Home|首页)$/ }).click();
   await desktopWorkbench.getByRole("button", { name: NEW_SPACE }).click();
   const persistForm = desktopWorkbench.locator('form[aria-label="Create space"], form[aria-label="创建空间"]');
@@ -1034,8 +1042,10 @@ try {
   stage(`persist: captured active ${persistJob.kind} ${persistJob.id} status=${persistJob.status}`);
   pass(`backend: captured active ${persistJob.kind} ${persistJob.id} status=${persistJob.status} before desktop quit`);
 
+  if (await browserWorkbench.locator("[data-settings-dialog]").count()) await browserWorkbench.locator("[data-settings-close]").click();
   await browserWorkbench.getByRole("button", { name: /^(Home|首页)$/ }).click();
-  await browserWorkbench.getByRole("tab", { name: /^(Overview|总览)$/ }).click();
+  await browserWorkbench.getByRole("button", { name: /^(Settings|设置)$/ }).click();
+  await browserWorkbench.getByRole("tab", { name: /^(Status and tasks|状态与任务)$/ }).click();
   const browserPersist = browserWorkbench.locator(`[data-job-id="${persistJob.id}"]`);
   await browserPersist.waitFor({ timeout: 30_000 });
   const aligned = await until(async () => {

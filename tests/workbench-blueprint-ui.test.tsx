@@ -257,9 +257,10 @@ function defaultProduct(request: WorkbenchProductRequest): WorkbenchProductResul
   throw new Error(request.method);
 }
 
-test("home navigation adds Blueprints without renaming templates or import", async () => {
+test("settings navigation includes Blueprints without renaming templates or import", async () => {
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
+  ctrl.openSettings();
   const home = html(ctrl);
   assert.ok(home.includes(t("zh", "home.blueprints")));
   assert.ok(home.includes(t("zh", "home.templates")));

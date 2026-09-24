@@ -1018,6 +1018,7 @@ async function runBrowserSuccessUpdate({
     const frame = page.frameLocator("iframe#manager-frame");
     await frame.locator(".dsh-workbench").waitFor({ timeout: 60_000 });
     await frame.getByRole("button", { name: /^(Home|首页)$/ }).click();
+    await frame.getByRole("button", { name: /^(Settings|设置)$/ }).click();
     await frame.getByRole("tab", { name: /^(Runtime|运行时)$/ }).click();
     const prepareBtn = frame.locator('[data-workbench-prepare="true"]');
     await prepareBtn.waitFor({ timeout: 30_000 });
@@ -1264,7 +1265,7 @@ async function live() {
     bin,
     home,
     tooling,
-    ["plugin", "--profile", WEB_PROFILE, "add", packedOld.path, "--config.auto-install-peers=true"],
+    ["plugin", "--profile", WEB_PROFILE, "add", packedOld.path],
     PLUGIN_MS,
     "dsh plugin add web (old built tarball)",
     join(out, "plugin-add.log"),

@@ -1,4 +1,5 @@
 /** Workbench copy. Default locale is Chinese; English is an explicit switch. */
+import { reportedOrFallback } from "../../../../src/shared/public-reason";
 
 export type WorkbenchLocale = "zh" | "en";
 
@@ -33,12 +34,13 @@ const en = {
   "app.conflict": "A job with this request already exists for a different command.",
   "app.locked": "Another workbench operation is already running.",
   "app.unavailable": "The workbench cannot complete this request.",
+  "app.errorReason": "Reason: {reason}",
   "app.notCancellable": "This job cannot be cancelled in its current phase.",
   "app.readOnlyError": "The workbench is read-only.",
   "app.unmanaged": "This instance is not managed here. It can be viewed only.",
   "app.managerProtected": "The manager space cannot be deleted or given ordinary plugins and themes.",
   "app.iconInvalid": "Use a known glyph or a local image. Remote URLs are not allowed.",
-  "app.iconTooLarge": "Choose a smaller image (at most 240 KB encoded, 64 KB for SVG).",
+  "app.iconTooLarge": "This image is still too large after shrinking (at most 240 KB encoded, 64 KB for SVG).",
   "app.nameInvalid": "Use lowercase letters, numbers and hyphens (max 39 characters).",
   "app.nameReserved": "That name is reserved.",
   "app.previewFailed": "Preview failed. Nothing was executed.",
@@ -89,6 +91,11 @@ const en = {
   "home.ownerNone": "No controller holds write access.",
   "home.dshVersion": "DSH version",
   "home.reasons": "Why this workbench is restricted",
+  "logs.title": "Workbench log",
+  "logs.empty": "No workbench log lines.",
+  "logs.level.info": "info",
+  "logs.level.warn": "warning",
+  "logs.level.error": "error",
   "home.noReasons": "No restriction reasons.",
   "home.writable": "Writable",
   "home.readonlyFlag": "Read-only",
@@ -101,16 +108,17 @@ const en = {
   "create.icon": "Icon",
   "create.glyph": "Known glyph",
   "create.upload": "Upload local image",
+  "create.iconShrinking": "Shrinking image…",
   "create.hint": "Name becomes the space id. Display name is what the rail shows.",
   "rename.title": "Rename space",
   "icon.title": "Space icon",
-  "icon.whale": "Whale",
+  "icon.whale": "Spaces",
   "icon.hash": "Hash",
   "icon.code": "Code",
   "icon.chat": "Chat",
   "icon.lab": "Lab",
   "icon.book": "Book",
-  "icon.default": "Use default whale",
+  "icon.default": "Use default icon",
   "detail.title": "Space details",
   "detail.id": "ID",
   "detail.status": "Status",
@@ -211,10 +219,12 @@ const en = {
   "settings.theme.light": "Light",
   "settings.theme.dark": "Dark",
   "settings.tabGeneral": "General",
+  "settings.tabStatus": "Status and tasks",
+  "settings.tabAdvanced": "Advanced",
   "settings.tabLlm": "Models and connections",
   "settings.models": "Models and connections",
   "settings.clientPrefs": "This client",
-  "settings.homeSettings": "Home settings",
+  "settings.homeSettings": "Service settings",
   "settings.ports": "Port range",
   "settings.portStart": "Start port",
   "settings.portEnd": "End port",
@@ -223,7 +233,7 @@ const en = {
   "settings.packageSource.official": "Official",
   "settings.catalogUrl": "Catalog URL",
   "settings.catalogUrlHint": "HTTPS catalog URL. Empty uses the built-in catalog.",
-  "settings.saveHome": "Save Home settings",
+  "settings.saveHome": "Save service settings",
   "settings.shutdown": "Stop the whole service",
   "settings.shutdownHint":
     "This stops the supervisor and every owned space. Closing this tab or leaving the client only disconnects this page and does not stop the service.",
@@ -460,12 +470,13 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "app.conflict": "同一请求编号已用于不同命令。",
   "app.locked": "已有工作台操作正在进行。",
   "app.unavailable": "工作台无法完成该请求。",
+  "app.errorReason": "原因：{reason}",
   "app.notCancellable": "当前阶段不能取消该任务。",
   "app.readOnlyError": "工作台为只读。",
   "app.unmanaged": "此实例不由本工作台管理，只能查看。",
   "app.managerProtected": "管理空间不能删除，也不能安装普通插件或主题。",
   "app.iconInvalid": "请使用已知图标或本地图片。不允许远程 URL。",
-  "app.iconTooLarge": "请选更小的图片（编码后不超过 240 KB，SVG 不超过 64 KB）。",
+  "app.iconTooLarge": "这张图片缩小后仍然太大（编码后不超过 240 KB，SVG 不超过 64 KB）。",
   "app.nameInvalid": "请使用小写字母、数字和连字符（最长 39 个字符）。",
   "app.nameReserved": "该名称为保留名称。",
   "app.previewFailed": "预览失败，未执行任何操作。",
@@ -516,6 +527,11 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "home.ownerNone": "当前没有写控制者。",
   "home.dshVersion": "DSH 版本",
   "home.reasons": "受限原因",
+  "logs.title": "工作台日志",
+  "logs.empty": "没有工作台日志。",
+  "logs.level.info": "信息",
+  "logs.level.warn": "警告",
+  "logs.level.error": "错误",
   "home.noReasons": "没有受限原因。",
   "home.writable": "可写",
   "home.readonlyFlag": "只读",
@@ -528,16 +544,17 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "create.icon": "图标",
   "create.glyph": "已知图标",
   "create.upload": "上传本地图片",
+  "create.iconShrinking": "正在缩小图片…",
   "create.hint": "名称会成为空间 id。显示名称出现在空间栏。",
   "rename.title": "重命名空间",
   "icon.title": "空间图标",
-  "icon.whale": "鲸鱼",
+  "icon.whale": "Spaces",
   "icon.hash": "井号",
   "icon.code": "代码",
   "icon.chat": "对话",
   "icon.lab": "实验",
   "icon.book": "书本",
-  "icon.default": "使用默认鲸鱼",
+  "icon.default": "使用默认图标",
   "detail.title": "空间详情",
   "detail.id": "ID",
   "detail.status": "状态",
@@ -637,10 +654,12 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "settings.theme.light": "浅色",
   "settings.theme.dark": "深色",
   "settings.tabGeneral": "常规",
+  "settings.tabStatus": "状态与任务",
+  "settings.tabAdvanced": "高级",
   "settings.tabLlm": "模型与连接",
   "settings.models": "模型与连接",
   "settings.clientPrefs": "当前客户端",
-  "settings.homeSettings": "Home 设置",
+  "settings.homeSettings": "服务设置",
   "settings.ports": "端口范围",
   "settings.portStart": "起始端口",
   "settings.portEnd": "结束端口",
@@ -649,7 +668,7 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "settings.packageSource.official": "官方源",
   "settings.catalogUrl": "目录 URL",
   "settings.catalogUrlHint": "HTTPS 目录地址。留空则使用内置目录。",
-  "settings.saveHome": "保存 Home 设置",
+  "settings.saveHome": "保存服务设置",
   "settings.shutdown": "停止整个服务",
   "settings.shutdownHint":
     "这会停止监督进程及所有自有空间。关闭此标签或退出客户端只断开本页，不会停止后台。",
@@ -858,6 +877,18 @@ export const WORKBENCH_MESSAGES: Record<WorkbenchLocale, Record<WorkbenchMessage
   zh,
 };
 
+const VAGUE_REASONS = new Set([
+  "The workbench cannot complete this request.",
+  "The workbench cannot accept this request.",
+  "The workbench service could not complete this request.",
+  "The workbench request failed.",
+  "The workbench request failed. Try again later.",
+  "The job failed.",
+  "The maintenance operation failed.",
+  "工作台无法完成该请求。",
+  "工作台请求失败，请稍后重试。",
+]);
+
 export function t(locale: WorkbenchLocale, key: WorkbenchMessageKey, vars?: Record<string, string>): string {
   const template = WORKBENCH_MESSAGES[locale][key] ?? WORKBENCH_MESSAGES.en[key];
   if (!vars) return template;
@@ -888,6 +919,11 @@ const ERROR_CODE_TO_KEY: Record<string, WorkbenchMessageKey> = {
   LLM_RESULT_UNKNOWN: "llm.error.unknown",
 };
 
+function summaryFor(locale: WorkbenchLocale, code: string | undefined): string {
+  if (code && ERROR_CODE_TO_KEY[code]) return t(locale, ERROR_CODE_TO_KEY[code]);
+  return t(locale, "app.genericError");
+}
+
 export function localizeError(
   locale: WorkbenchLocale,
   error: { code?: string | null; message?: string | null } | string | null | undefined,
@@ -895,8 +931,15 @@ export function localizeError(
   if (!error) return t(locale, "app.genericError");
   if (typeof error === "string") {
     if (ERROR_CODE_TO_KEY[error]) return t(locale, ERROR_CODE_TO_KEY[error]);
-    return t(locale, "app.genericError");
+    const reported = reportedOrFallback(error, "");
+    if (!reported || VAGUE_REASONS.has(reported)) return t(locale, "app.genericError");
+    return `${t(locale, "app.genericError")}\n${t(locale, "app.errorReason", { reason: reported })}`;
   }
-  if (error.code && ERROR_CODE_TO_KEY[error.code]) return t(locale, ERROR_CODE_TO_KEY[error.code]);
-  return t(locale, "app.genericError");
+  const code = error.code ?? undefined;
+  const summary = summaryFor(locale, code);
+  const reason = reportedOrFallback(error.message, "");
+  if (!reason || reason === summary || VAGUE_REASONS.has(reason)) return summary;
+  const english = code && ERROR_CODE_TO_KEY[code] ? t("en", ERROR_CODE_TO_KEY[code]) : "";
+  if (reason === english) return summary;
+  return `${summary}\n${t(locale, "app.errorReason", { reason })}`;
 }

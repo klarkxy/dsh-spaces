@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { spawn as spawnChild } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +17,7 @@ import {
   HomeController,
   type HomeControlHandle,
 } from "../src/adapters/node/home-controller.ts";
-import { canonicalHome } from "../src/adapters/node/home-operation-lock.ts";
+import { canonicalHome, HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
 import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
 import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/spaces-control.ts";
 import { resolveHostIdentity } from "../packages/plugin/src/host/identity.ts";
@@ -36,6 +37,7 @@ import {
   readSelectedComponentPayload,
   selectComponentPayload,
   stageComponentPayload,
+  coldStartLockLabel,
 } from "../src/adapters/node/component-selection.ts";
 import { catalogIdSchema, workbenchCommandSchema, workbenchInitializeResultSchema, workbenchViewSchema, workbenchPackageResultSchema, workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import { GUIDE_METHODS, TYPERT } from "../packages/plugin/src/typert.host.ts";
@@ -48,6 +50,7 @@ import {
   WorkbenchRemoteError,
 } from "../packages/plugin/src/client/workbench-remote.ts";
 import { apply as applyClient, GuidePanelView, ReturnToWorkbenchPanel } from "../packages/plugin/src/client/index.tsx";
+import { homeViewUrl, isHomeView } from "../packages/plugin/src/client/home-view.ts";
 import { GUIDE_COPY } from "../packages/plugin/src/client/i18n.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -164,6 +167,7 @@ function writePayload(pluginRoot: string, marker = "payload"): string {
     ["lib/view-bridge/cordis.patch.yml", "view: dummy\n"],
     ["lib/view-bridge/lib/index.js", "export {};\n"],
     ["lib/view-bridge/lib/client.js", "export {};\n"],
+    ["lib/view-bridge/lib/settings.js", "export {};\n"],
     ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
@@ -456,6 +460,89 @@ test("bootstrap copies payload, packs artifacts, passes CLI flags, and pings bef
   }
 });
 
+test("two bootstrap callers serialize preparation and connect to the same single owner", async () => {
+  const home = tempDir("dsh-wb-concurrent-");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-concurrent-payload-"));
+  const toolsRoot = tempDir("dsh-wb-concurrent-tools-");
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  let spawns = 0;
+  let packs = 0;
+  const options = {
+    home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+    allowRealHome: false, timeoutMs: 3_000, pollMs: 10,
+    pack: async (request: { packageRoot: string; destination: string }) => { packs++; return stubPack(request); },
+    spawn: () => {
+      spawns++;
+      const handle = leaseWeb(home, fixture.origin);
+      epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+      writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+    },
+  };
+  try {
+    const results = await Promise.all([bootstrapSupervisor(options), bootstrapSupervisor(options)]);
+    for (const result of results) assert.equal(result.connected, true, JSON.stringify(result));
+    assert.equal(spawns, 1);
+    assert.equal(packs, 3);
+    assert.equal(new HomeOperationLock(toolsRoot).inspect().held, false);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("an actual early child exit is reported promptly with exit code and no second spawn", async () => {
+  const home = tempDir("dsh-wb-early-exit-");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-exit-payload-"));
+  const toolsRoot = tempDir("dsh-wb-exit-tools-" );
+  let spawns = 0;
+  const before = Date.now();
+  const result = await bootstrapSupervisor({
+    home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+    allowRealHome: false, timeoutMs: 30_000, pollMs: 10, pack: stubPack,
+    spawn: (request) => {
+      spawns++;
+      return spawnChild(process.execPath, ["-e", "process.exit(23)"], { env: request.env, stdio: "ignore", windowsHide: true });
+    },
+  });
+  assert.equal(result.connected, false);
+  assert.equal(spawns, 1);
+  assert.ok(Date.now() - before < 10_000, "must not wait for endpoint timeout");
+  assert.match(result.connected ? "" : result.reasons.join(" "), /exit code: 23/);
+});
+
+test("an opener that overlaps preparation does not start again after that preparation ends", async () => {
+  const home = tempDir("dsh-wb-overlap-");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-overlap-payload-"));
+  const toolsRoot = tempDir("dsh-wb-overlap-tools-");
+  let ready!: () => void;
+  let finish!: () => void;
+  const entered = new Promise<void>((resolve) => { ready = resolve; });
+  const hold = new HomeOperationLock(toolsRoot).run(coldStartLockLabel(home), async () => {
+    ready();
+    await new Promise<void>((resolve) => { finish = resolve; });
+  });
+  await entered;
+  // The previous owner is still on disk at bootstrap invocation, but its
+  // release continuation runs before bootstrap resumes its first await.
+  finish();
+  let spawns = 0;
+  let packs = 0;
+  const result = await bootstrapSupervisor({
+    home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+    allowRealHome: false, timeoutMs: 500, pollMs: 10,
+    pack: async (request) => { packs++; return stubPack(request); },
+    spawn: () => { spawns++; },
+  });
+  await hold;
+  assert.equal(result.connected, false);
+  assert.equal(spawns, 0);
+  assert.equal(packs, 0);
+});
+
 test("missing supervisor payload diagnoses instead of mocking a connection", async () => {
   const home = tempDir("dsh-wb-missing-sup-");
   writeProfile(home, "web");
@@ -508,9 +595,7 @@ test("selected pointer is authoritative and is not overwritten by a new bundled 
   const toolsRoot = tempDir("dsh-wb-selected-tools-");
   const firstLib = writePayload(tempDir("dsh-wb-selected-first-"), "first");
   const staged = stageComponentPayload(home, toolsRoot, firstLib);
-  mkdirSync(join(toolsRoot, "coldstart.lock"));
-  const selected = selectComponentPayload(home, toolsRoot, staged.digest);
-  rmSync(join(toolsRoot, "coldstart.lock"), { recursive: true, force: true });
+  const selected = await new HomeOperationLock(toolsRoot).run(coldStartLockLabel(home), async () => selectComponentPayload(home, toolsRoot, staged.digest));
   const bundled = writePayload(tempDir("dsh-wb-selected-bundled-"), "bundled");
   const bearer = "B".repeat(32);
   const epochRef = { value: HEX64_A };
@@ -1116,4 +1201,32 @@ test("removing a loaded ordinary profile never turns a query into a cold start",
   assert.equal((await runtime.initialize()).ok, false);
   assert.equal(coldStarts, 0);
   assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE)), false);
+});
+
+
+test("native home keeps the manager origin and skips the Spaces root registration", () => {
+  const href = homeViewUrl("http://127.0.0.1:3100/?existing=1#chat");
+  assert.equal(href, "http://127.0.0.1:3100/?existing=1&dsh-spaces-home=1#chat");
+  assert.equal(isHomeView(href), true);
+  assert.equal(isHomeView("http://127.0.0.1:3100/"), false);
+  const priorWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const priorHint = Object.getOwnPropertyDescriptor(globalThis, "__DSH_SPACES_HOST__");
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { location: { href } } });
+  Object.defineProperty(globalThis, "__DSH_SPACES_HOST__", { configurable: true, value: { role: "manager", unavailable: false } });
+  const slots: string[] = [];
+  try {
+    applyClient({
+      get: () => ({}),
+      slots: {
+        inject: (name: string, callback: () => void) => { slots.push(name); callback(); },
+        register: () => () => undefined,
+      },
+    } as never);
+    assert.deepEqual(slots, ["sidebar.brand.mark", "conversation.hero.brand.mark"]);
+  } finally {
+    if (priorWindow) Object.defineProperty(globalThis, "window", priorWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (priorHint) Object.defineProperty(globalThis, "__DSH_SPACES_HOST__", priorHint);
+    else Reflect.deleteProperty(globalThis, "__DSH_SPACES_HOST__");
+  }
 });
