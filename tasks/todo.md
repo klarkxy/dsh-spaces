@@ -1,3 +1,14 @@
+# 2026-09-25 首页看板首批施工
+
+用户授权按 [DASHBOARD.md](../DASHBOARD.md) 开工并通过 PR 提交。本批以文档 PR #10 为依赖，仅新增核心代码、测试与 CI；不合并 main、不发布、不迁移或修改用户 Home。实现边界和本次证据见 [核心实现记录](../docs/dashboard/core-implementation.md)。
+
+- [x] 将 v1 DTO 落入 src/shared；严格 JSON 与发布、查询、布局、授权计划运行时校验；类型/实例引用、字段封闭、字节和数量边界。
+- [x] 纯投影与布局候选 reducer：run/grant/sequence、重复确认、CAS、回执/tombstone、当前权限下的读取过滤。候选准备不冒充原子存储已提交。
+- [x] 可注入端口的 provider/发布和读取状态机：snapshot 串行、有界合并、超时与失败终态、取消、无自动重连或补传；不依赖 Electron。
+- [x] Linux Node 22.16.0 / TypeScript 5.8.3 下 strict 编译和 52 项核心测试通过，0 失败/跳过；包含 DTO 同步与 500 组确定性 JSON 对照检查。新增 Node 24 双平台核心 CI，实际 Actions 结果另查，不在这里预先认定通过。
+- [ ] P0 真实 SDK/命名 profile/认证/存储/共享 React/凭据与 Windows ACL：依赖获取探针 DNS EAI_AGAIN，尚未通过。不能以核心测试代替。
+- [ ] P1–P5：local 插件完整闭环、Home 聚合与授权、真正首页、两类真实业务 provider、安装与组件过渡及 D01–D22 集成验收。当前没有替换首页、安装新 provider 或新增可调用网络端点。
+
 # 2026-09-22 官方 alpha 全面迁移
 
 - [x] 默认 CLI、开发下载入口、CI 与 SDK / peer / 锁文件统一到 `0.1.7-alpha.1`；移除旧 settings-file 合同。
