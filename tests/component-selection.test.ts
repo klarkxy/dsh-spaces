@@ -6,6 +6,7 @@ import { afterEach, describe, test } from "node:test";
 import { COMPONENT_PAYLOAD_PACKAGES, writeComponentPayloadManifest } from "../src/adapters/node/component-payload.ts";
 import {
   COLD_START_LOCK_NAME,
+  coldStartLockLabel,
   ComponentSelectionError,
   readSelectedComponentPayload,
   selectComponentPayload,
@@ -18,6 +19,7 @@ import {
   homeControlDigest,
 } from "../src/adapters/node/home-controller.ts";
 import { deriveServiceEpoch } from "../src/adapters/node/workbench-protocol.ts";
+import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
 
 describe("component-selection", { concurrency: 1 }, () => {
 const temps: string[] = [];
@@ -58,6 +60,7 @@ function dummyPayload(): { root: string; lib: string } {
     ["lib/view-bridge/LICENSE", "view-license\n"],
     ["lib/view-bridge/lib/index.js", "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
+    ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
     ["lib/llm-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], version: "4.0.0" })}\n`],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
@@ -102,6 +105,7 @@ test("stage reads a validated payload from profiles/web inside the target Home",
     ["lib/view-bridge/LICENSE", "view-license\n"],
     ["lib/view-bridge/lib/index.js", "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
+    ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
     ["lib/llm-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], version: "4.0.0" })}\n`],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
@@ -151,7 +155,7 @@ test("readSelected throws and keeps invalid pointer bytes", () => {
   assert.deepEqual(readFileSync(pointer), before);
 });
 
-test("select requires a cold-start reservation when no owner is held", () => {
+test("select requires this process's cold-start reservation when no owner is held", async () => {
   const home = tempDir("dsh-sel-home-");
   const tools = tempDir("dsh-sel-tools-");
   const { lib } = dummyPayload();
@@ -159,7 +163,8 @@ test("select requires a cold-start reservation when no owner is held", () => {
   assert.throws(() => selectComponentPayload(home, tools, staged.digest), /reservation|occupancy/);
   assert.equal(readSelectedComponentPayload(home, tools), undefined);
   mkdirSync(join(tools, COLD_START_LOCK_NAME));
-  const selected = selectComponentPayload(home, tools, staged.digest);
+  assert.throws(() => selectComponentPayload(home, tools, staged.digest), /reservation/);
+  const selected = await new HomeOperationLock(tools).run(coldStartLockLabel(home), async () => selectComponentPayload(home, tools, staged.digest));
   assert.equal(selected.digest, staged.digest);
   const again = readSelectedComponentPayload(home, tools);
   assert.ok(again);

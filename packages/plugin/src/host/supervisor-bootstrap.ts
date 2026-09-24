@@ -4,7 +4,6 @@ import {
   lstatSync,
   mkdirSync,
   realpathSync,
-  rmdirSync,
 } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +11,8 @@ import {
   readSelectedComponentPayload,
   selectComponentPayload,
   stageComponentPayload,
+  coldStartLockLabel,
+  COLD_START_LOCK_NAME,
 } from "../../../../src/adapters/node/component-selection";
 import {
   COMPONENT_PAYLOAD_ENTRIES,
@@ -20,7 +21,10 @@ import {
 } from "../../../../src/adapters/node/component-payload";
 import { bindDshCli } from "../../../../src/adapters/node/spaces-control";
 import { authorizeProductHome } from "../../../../src/adapters/node/home-guard";
-import { HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home-controller";
+import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner } from "../../../../src/adapters/node/home-controller";
+import { HomeOperationLock, HomeLockBusyError } from "../../../../src/adapters/node/home-operation-lock";
+import { retirePreviousSupervisor, beginLaunchDiagnostics, readLaunchMarker, readLastSupervisorDiagnostics } from "../../../../src/adapters/node/supervisor-launch";
+import { readSupervisorDiagnostics, reportSupervisorLaunchFailure, reportSupervisorExit } from "../../../../src/adapters/node/supervisor-diagnostics";
 import { packLocalArtifacts, validateSnapshotRoot, type PackOneRequest } from "./supervisor-pack";
 import { attachExistingSupervisor } from "./supervisor-attach";
 import {
@@ -33,6 +37,7 @@ import type { WorkbenchHttpFetch } from "./workbench-http";
 
 export { SUPERVISOR_ENDPOINT_FILE, readEndpointFile, writeEndpointFile } from "./supervisor-endpoint";
 export type { SupervisorEndpoint } from "./supervisor-endpoint";
+export { readLastSupervisorDiagnostics } from "../../../../src/adapters/node/supervisor-launch";
 
 export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";
 export const VIEW_BRIDGE_PAYLOAD_DIRNAME = "view-bridge";
@@ -113,6 +118,25 @@ export async function bootstrapSupervisor(
   const home = realDirectory(options.home);
   if (!home) return fail(["The DSH home is not a real directory."]);
 
+  // Capture before the first await: delayed openers must not retry a different
+  // launch that completed or failed while discovery was in flight.
+  let initialLaunch: string | undefined;
+  let initiallyPreparing = false;
+  let markerError: string | undefined;
+  try {
+    initialLaunch = readLaunchMarker(home, options.toolsRoot ?? defaultToolsRoot(home));
+    const initialTools = realDirectory(options.toolsRoot ?? defaultToolsRoot(home));
+    if (initialTools) {
+      const initialReservation = new HomeOperationLock(initialTools).inspect();
+      initiallyPreparing = initialReservation.held && "owner" in initialReservation &&
+        validLaunchOwner(initialReservation.owner) &&
+        initialReservation.owner.label === coldStartLockLabel(home, { allowRealHome: options.allowRealHome === true }) &&
+        defaultPidAlive(initialReservation.owner.pid, initialReservation.owner.startedAt) !== "dead";
+    }
+  } catch (error) {
+    markerError = reasonOf(error);
+  }
+
   const attached = await attachExistingSupervisor({
     home,
     allowRealHome: options.allowRealHome === true,
@@ -132,6 +156,7 @@ export async function bootstrapSupervisor(
   if (options.allowColdStart === false) {
     return fail(["No running workbench was found. This profile does not start a second controller."]);
   }
+  if (markerError) return fail([markerError]);
 
   const access = { allowRealHome: options.allowRealHome === true };
   if (access.allowRealHome) authorizeProductHome(home);
@@ -167,98 +192,149 @@ export async function bootstrapSupervisor(
     return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
   }
 
-  const reservation = join(toolsRoot, "coldstart.lock");
-  if (!reserveColdStart(reservation)) {
+  // A legacy ownerless reservation cannot safely be declared dead by its age.
+  if (pathExists(join(toolsRoot, COLD_START_LOCK_NAME))) {
+    return fail(["A legacy startup reservation has no process identity. Ownership could not be verified."]);
+  }
+  const reservation = new HomeOperationLock(toolsRoot);
+  if (initiallyPreparing) {
     return await pollEndpoint(home, selected?.payloadRootLib ?? payloadRoot, toolsRoot, options, [
-      "Another supervisor cold start is already in progress.",
+      "Another supervisor cold start was already in progress when this request began.",
     ]);
   }
-
+  const label = coldStartLockLabel(home, access);
+  const preparing = reservation.inspect();
+  if (preparing.held && (!("owner" in preparing) || !validLaunchOwner(preparing.owner) || preparing.owner.label !== label)) {
+    return fail(["Startup reservation ownership is incomplete or does not match this Home."]);
+  }
+  if (preparing.held && "owner" in preparing && preparing.owner.label === label && validLaunchOwner(preparing.owner) &&
+      defaultPidAlive(preparing.owner.pid, preparing.owner.startedAt) === "dead") {
+    const retired = reservation.unlockDead(preparing.owner);
+    if (!retired.unlocked && retired.reason !== "not-held") {
+      return fail([`The previous startup reservation could not be released: ${retired.reason}.`]);
+    }
+  }
+  let entered = false;
+  let diagnosticFile: string | undefined;
   try {
-    if (!selected) {
+    const result = await reservation.run<SupervisorBootstrapResult>(label, async () => {
+      entered = true;
+      // The initial discovery is bound to this launch. A failed competing launch
+      // must not become a second automatic attempt by a waiter.
+      const current = await attachExistingSupervisor({ home, allowRealHome: access.allowRealHome, fetch: options.fetch });
+      if ("endpoint" in current) return { connected: true, origin: current.endpoint.origin, endpoint: current.endpoint, payloadDir: selected?.payloadRootLib ?? payloadRoot, toolsDir: toolsRoot };
+      if (!("missing" in current)) return fail(current.reasons);
+      if (readLaunchMarker(home, toolsRoot) !== initialLaunch) {
+        return fail(["Another startup finished before this request obtained ownership. No second startup was attempted.", ...readLastSupervisorDiagnostics(home, toolsRoot)]);
+      }
+      diagnosticFile = beginLaunchDiagnostics(home, toolsRoot);
+      retirePreviousSupervisor(home, "missing" in attached ? attached.previousOwner : undefined, access.allowRealHome);
       try {
         selected = readSelectedComponentPayload(home, toolsRoot, access);
       } catch (error) {
         return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
       }
-    }
-    if (!selected) {
-      try {
-        validateComponentPayload(payloadRoot);
-        const staged = stageComponentPayload(home, toolsRoot, payloadRoot, access);
-        selected = selectComponentPayload(home, toolsRoot, staged.digest, access);
-      } catch (error) {
-        return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
+      if (!selected) {
+        try {
+          validateComponentPayload(payloadRoot);
+          const staged = stageComponentPayload(home, toolsRoot, payloadRoot, access);
+          selected = selectComponentPayload(home, toolsRoot, staged.digest, access);
+        } catch (error) {
+          return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
+        }
       }
-    }
-    if (!selected) return fail(["Selected component payload is missing."]);
+      if (!selected) return fail(["Selected component payload is missing."]);
 
-    const destEntry = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES.supervisor.split("/"));
-    const destWorker = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES["installation-worker"].split("/"));
-    if (!isRealFile(destEntry) || !inside(selected.packageRoot, destEntry)) {
-      return fail(["Selected supervisor entry is missing or not a real file."]);
-    }
-    if (!isRealFile(destWorker) || !inside(selected.packageRoot, destWorker)) {
-      return fail(["Selected snapshot-worker.mjs is missing or not a real file."]);
-    }
+      const destEntry = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES.supervisor.split("/"));
+      const destWorker = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES["installation-worker"].split("/"));
+      if (!isRealFile(destEntry) || !inside(selected.packageRoot, destEntry)) {
+        return fail(["Selected supervisor entry is missing or not a real file."]);
+      }
+      if (!isRealFile(destWorker) || !inside(selected.packageRoot, destWorker)) {
+        return fail(["Selected snapshot-worker.mjs is missing or not a real file."]);
+      }
 
-    const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
-    const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
-    if (!viewRoot || !llmRoot) {
-      return fail(["Installed plugin package, view-bridge, or llm-bridge payload is missing."]);
-    }
-    const packedArtifacts = await packLocalArtifacts({
-      pluginPackageRoot: selected.packageRoot,
-      viewBridgeRoot: viewRoot,
-      llmBridgeRoot: llmRoot,
-      artifactDir: join(toolsRoot, "artifacts"),
-      home,
-      execPath,
-      env,
-      timeoutMs: options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS,
-      pack: options.pack,
+      const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
+      const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
+      if (!viewRoot || !llmRoot) {
+        return fail(["Installed plugin package, view-bridge, or llm-bridge payload is missing."]);
+      }
+      const packedArtifacts = await packLocalArtifacts({
+        pluginPackageRoot: selected.packageRoot,
+        viewBridgeRoot: viewRoot,
+        llmBridgeRoot: llmRoot,
+        artifactDir: join(toolsRoot, "artifacts"),
+        home,
+        execPath,
+        env,
+        timeoutMs: options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS,
+        pack: options.pack,
+      });
+      if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
+      if (!packedArtifacts.llmBridgeArtifact) {
+        return fail(["llm-bridge artifact was not packed from the selected payload."]);
+      }
+
+      const childArgv = [
+        ...(options.allowRealHome ? ["--allow-real-home"] : []),
+        SUPERVISOR_CLI_FLAGS.home,
+        home,
+        SUPERVISOR_CLI_FLAGS.bin,
+        runtime.bin,
+        SUPERVISOR_CLI_FLAGS.node,
+        execPath,
+        SUPERVISOR_CLI_FLAGS.pluginArtifact,
+        packedArtifacts.pluginArtifact,
+        SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
+        packedArtifacts.viewBridgeArtifact,
+        SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
+        packedArtifacts.llmBridgeArtifact,
+        SUPERVISOR_CLI_FLAGS.controlToolRoot,
+        toolsRoot,
+        SUPERVISOR_CLI_FLAGS.snapshotWorker,
+        destWorker,
+        COMPONENT_PAYLOAD_ARGV_FLAG,
+        selected.payloadRootLib,
+      ];
+      if (snapshotRoot) childArgv.push(SUPERVISOR_CLI_FLAGS.snapshotRoot, snapshotRoot);
+
+      const observation: { failure?: string; diagnosticFile: string } = { diagnosticFile };
+      let spawned: ChildProcess | void;
+      try {
+        spawned = (options.spawn ?? defaultSpawn)({
+        execPath,
+        entry: destEntry,
+        argv: childArgv,
+        cwd: join(selected.payloadRootLib, SUPERVISOR_PAYLOAD_DIRNAME),
+        env: { ...env, DSH_HOME: home, DSH_SPACES_SUPERVISOR_DIAGNOSTICS: diagnosticFile },
+        });
+      } catch (error) {
+        reportSupervisorLaunchFailure(diagnosticFile, reasonOf(error));
+        return fail(["The supervisor process could not be started.", ...readSupervisorDiagnostics(diagnosticFile)]);
+      }
+      if (spawned) {
+        spawned.once("error", (error) => {
+          observation.failure = "The supervisor process could not be started.";
+          reportSupervisorLaunchFailure(observation.diagnosticFile, reasonOf(error));
+        });
+        spawned.once("exit", (code, signal) => {
+          observation.failure = `The supervisor exited before startup completed (exit code: ${code ?? "unknown"}, signal: ${signal ?? "none"}).`;
+          reportSupervisorExit(observation.diagnosticFile, code, signal);
+        });
+      }
+      if (spawned) spawned.unref();
+      return await pollEndpoint(home, selected.payloadRootLib, toolsRoot, options, [], observation);
     });
-    if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
-    if (!packedArtifacts.llmBridgeArtifact) {
-      return fail(["llm-bridge artifact was not packed from the selected payload."]);
-    }
-
-    const childArgv = [
-      ...(options.allowRealHome ? ["--allow-real-home"] : []),
-      SUPERVISOR_CLI_FLAGS.home,
-      home,
-      SUPERVISOR_CLI_FLAGS.bin,
-      runtime.bin,
-      SUPERVISOR_CLI_FLAGS.node,
-      execPath,
-      SUPERVISOR_CLI_FLAGS.pluginArtifact,
-      packedArtifacts.pluginArtifact,
-      SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
-      packedArtifacts.viewBridgeArtifact,
-      SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
-      packedArtifacts.llmBridgeArtifact,
-      SUPERVISOR_CLI_FLAGS.controlToolRoot,
-      toolsRoot,
-      SUPERVISOR_CLI_FLAGS.snapshotWorker,
-      destWorker,
-      COMPONENT_PAYLOAD_ARGV_FLAG,
-      selected.payloadRootLib,
-    ];
-    if (snapshotRoot) childArgv.push(SUPERVISOR_CLI_FLAGS.snapshotRoot, snapshotRoot);
-
-    const spawned = (options.spawn ?? defaultSpawn)({
-      execPath,
-      entry: destEntry,
-      argv: childArgv,
-      cwd: join(selected.payloadRootLib, SUPERVISOR_PAYLOAD_DIRNAME),
-      env: { ...env, DSH_HOME: home },
-    });
-    if (spawned) spawned.unref();
-    return await pollEndpoint(home, selected.payloadRootLib, toolsRoot, options, []);
+    if (!result.connected && diagnosticFile) reportSupervisorLaunchFailure(diagnosticFile, result.reasons.join("\n"));
+    return result;
   } catch (error) {
+    if (!entered && error instanceof HomeLockBusyError) {
+      return await pollEndpoint(home, selected?.payloadRootLib ?? payloadRoot, toolsRoot, options, [
+        "Another supervisor cold start is already in progress.",
+      ]);
+    }
+    if (diagnosticFile) reportSupervisorLaunchFailure(diagnosticFile, reasonOf(error));
     return fail(["The supervisor process could not be started.", reasonOf(error)]);
-  } finally {
-    releaseColdStart(reservation);
   }
 }
 
@@ -276,6 +352,7 @@ async function pollEndpoint(
   toolsDir: string,
   options: SupervisorBootstrapOptions,
   extraReasons: string[],
+  observation?: { failure?: string; diagnosticFile: string },
 ): Promise<SupervisorBootstrapResult> {
   const endpointPath = join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE);
   const timeoutMs = options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS;
@@ -285,6 +362,7 @@ async function pollEndpoint(
   const deadline = now() + timeoutMs;
   const reasons = [...extraReasons];
   while (now() < deadline) {
+    if (observation?.failure) return fail([observation.failure, ...readSupervisorDiagnostics(observation.diagnosticFile)]);
     const attached = await attachExistingSupervisor({
       home,
       allowRealHome: options.allowRealHome === true,
@@ -299,11 +377,16 @@ async function pollEndpoint(
         toolsDir,
       };
     }
+    if (!observation && !new HomeOperationLock(toolsDir).inspect().held) {
+      return fail(["The other startup ended without a ready supervisor. No second startup was attempted.",
+        ...("reasons" in attached ? attached.reasons : []), ...readLastSupervisorDiagnostics(home, toolsDir)]);
+    }
     const blocked = diagnoseEndpointResidue(endpointPath);
     if (blocked) reasons.push(blocked);
     await sleep(pollMs);
   }
   reasons.push("Timed out waiting for an authenticated supervisor endpoint.");
+  reasons.push(...(observation ? readSupervisorDiagnostics(observation.diagnosticFile) : readLastSupervisorDiagnostics(home, toolsDir)));
   if (!existsSync(join(home, HOME_CONTROL_DIR_NAME))) {
     reasons.push("Control directory was not created.");
   }
@@ -315,12 +398,12 @@ function defaultSpawn(request: SupervisorSpawnRequest): ChildProcess {
     cwd: request.cwd,
     env: request.env,
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    // The Supervisor owns its durable diagnostics; parent-owned pipes would
+    // lose output and outlive (or break when exiting) the desktop shell.
+    stdio: "ignore",
     windowsHide: true,
     shell: false,
   });
-  child.stdout?.resume();
-  child.stderr?.resume();
   return child;
 }
 
@@ -328,20 +411,13 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
 }
 
-function reserveColdStart(path: string): boolean {
+function pathExists(path: string): boolean {
   try {
-    mkdirSync(path);
+    lstatSync(path);
     return true;
-  } catch {
-    return false;
-  }
-}
-
-function releaseColdStart(path: string): void {
-  try {
-    rmdirSync(path);
-  } catch {
-    /* reservation is advisory */
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

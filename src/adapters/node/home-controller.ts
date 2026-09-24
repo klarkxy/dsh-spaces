@@ -135,7 +135,7 @@ export type ReclaimDeadResult =
 
 export interface HomeControlHandle {
   readonly owner: HomeControlOwner;
-  release(): void;
+  release(beforeRelease?: () => void): void;
 }
 
 interface ManagerRecord {
@@ -281,8 +281,8 @@ export class HomeController {
     }
     return {
       owner,
-      release: () => {
-        removeOwnedRun(this.ownerFile, this.runDir, owner.nonce);
+      release: (beforeRelease) => {
+        removeOwnedRun(this.ownerFile, this.runDir, owner.nonce, beforeRelease);
       },
     };
   }
@@ -312,7 +312,7 @@ export class HomeController {
     return this.withHandoffLock(() => this.acceptHandoffLocked(request));
   }
 
-  reclaimDead(): ReclaimDeadResult {
+  reclaimDead(options?: { expectedOwner: HomeControlOwner; beforeRelease: (owner: HomeControlOwner) => void }): ReclaimDeadResult {
     const first = this.inspect();
     if (!first.held) return { reclaimed: false, reason: "not-held" };
     if ("reclaim" in first && first.reclaim) {
@@ -328,6 +328,9 @@ export class HomeController {
       return { reclaimed: false, reason: "handoff" };
     }
     if (!("owner" in first)) return { reclaimed: false, reason: "incomplete" };
+    if (options && !sameControlOwner(first.owner, options.expectedOwner)) {
+      return { reclaimed: false, reason: "ambiguous", detail: "controller changed since this launch began" };
+    }
     if (first.liveness === "ambiguous") {
       return { reclaimed: false, reason: "ambiguous", detail: "owner pid liveness is ambiguous" };
     }
@@ -362,7 +365,7 @@ export class HomeController {
         dropReclaim(this.reclaimDir);
         return { reclaimed: false, reason: "handoff" };
       }
-      if (owner.owner.nonce !== first.owner.nonce || owner.owner.pid !== first.owner.pid) {
+      if (!sameControlOwner(owner.owner, first.owner)) {
         dropReclaim(this.reclaimDir);
         return { reclaimed: false, reason: "owner-alive", pid: owner.owner.pid };
       }
@@ -375,7 +378,7 @@ export class HomeController {
         dropReclaim(this.reclaimDir);
         return { reclaimed: false, reason: "owner-alive", pid: owner.owner.pid };
       }
-      removeOwnedRun(this.ownerFile, this.runDir, owner.owner.nonce);
+      removeOwnedRun(this.ownerFile, this.runDir, owner.owner.nonce, () => options?.beforeRelease(owner.owner));
       dropReclaim(this.reclaimDir);
       return { reclaimed: true, owner: owner.owner };
     } catch (error) {
@@ -494,8 +497,8 @@ export class HomeController {
     replaceOwnerFile(this.ownerFile, serializeLegacyOwner(owner));
     return {
       owner,
-      release: () => {
-        removeOwnedRun(this.ownerFile, this.runDir, owner.nonce);
+      release: (beforeRelease) => {
+        removeOwnedRun(this.ownerFile, this.runDir, owner.nonce, beforeRelease);
       },
     };
   }
@@ -1037,7 +1040,19 @@ function replaceOwnerFile(ownerFile: string, payload: unknown): void {
   }
 }
 
-function removeOwnedRun(ownerFile: string, runDir: string, nonce: string): void {
+export function sameControlOwner(a: HomeControlOwner, b: HomeControlOwner): boolean {
+  return a.pid === b.pid && a.nonce === b.nonce && a.kind === b.kind &&
+    a.startedAt === b.startedAt && a.endpoint === b.endpoint;
+}
+
+/** Narrow eligibility for new-launch retirement; legacy inspection stays read-only. */
+export function validLaunchOwner(owner: { pid: number; nonce: string; startedAt: string }): boolean {
+  return Number.isSafeInteger(owner.pid) && owner.pid > 0 && /^[a-f0-9]{32}$/.test(owner.nonce) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(owner.startedAt) &&
+    Number.isFinite(Date.parse(owner.startedAt));
+}
+
+function removeOwnedRun(ownerFile: string, runDir: string, nonce: string, beforeRelease?: () => void): void {
   let runStat;
   try {
     runStat = lstatSync(runDir);
@@ -1066,6 +1081,8 @@ function removeOwnedRun(ownerFile: string, runDir: string, nonce: string): void 
     throw new HomeControlReleaseError("control release nonce mismatch; lock left in place");
   }
   try {
+    // Related endpoint cleanup must happen while this owner still excludes a successor.
+    beforeRelease?.();
     unlinkSync(ownerFile);
     rmdirSync(runDir);
   } catch (error) {

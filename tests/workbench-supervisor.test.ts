@@ -938,7 +938,13 @@ test("controller.release and controller.acquire are unsupported; desktop holder 
 
 test("shutdown persists the job then releases rights without deadlocking on whenIdle", async () => {
   const home = tempHome();
-  const handle = await startSupervisor(home);
+  let normalExit = false;
+  const handle = await startSupervisor(home, { onNormalExit: () => {
+    const record = JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "jobs", "bye-1.json"), "utf8"));
+    assert.equal(record.status, "succeeded");
+    assert.equal(existsSync(join(home, ".dsh-spaces-control", "run", "owner.json")), false);
+    normalExit = true;
+  } });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const preview = await mutate(handle.origin, cookie, "preview", { request: { kind: "service.shutdown" } });
   assert.equal(preview.body.ok, true);
@@ -955,6 +961,7 @@ test("shutdown persists the job then releases rights without deadlocking on when
     return record.status === "succeeded";
   }, "shutdown job persisted");
   await waitUntil(() => !existsSync(join(home, ".dsh-spaces-control", "run", "owner.json")), "owner released");
+  await waitUntil(() => normalExit, "normal exit is reported after durable shutdown");
   const record = JSON.parse(readFileSync(jobFile, "utf8")) as { status: string; kind: string };
   assert.equal(record.status, "succeeded");
   assert.equal(record.kind, "plan.execute");
@@ -1355,9 +1362,35 @@ test("entry cookie helper names match the A0 authority digest", () => {
   assert.equal(cookieValue("a=1; dsh-auth-x=secret; b=2", "dsh-auth-x"), "secret");
 });
 
-test("official web seed omits --from-default-profile; shipped web clone args are refused; manager still clones from web", async () => {
+test("shutdown with unconfirmed final persistence keeps ownership and never announces normal exit", async () => {
+  const home = tempHome();
+  let normalExit = false;
+  const jobFile = join(home, ".dsh-spaces-control", "jobs", "unconfirmed-stop.json");
+  const handle = await startSupervisor(home, {
+    onNormalExit: () => { normalExit = true; },
+    jobsInject: (op, id) => {
+      if (op !== "write" || id !== "unconfirmed-stop" || !existsSync(jobFile)) return;
+      const record = JSON.parse(readFileSync(jobFile, "utf8"));
+      if (record.phase === "finalizing" && record.status === "running") throw new Error("injected final persistence failure");
+    },
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const preview = await mutate(handle.origin, cookie, "preview", { request: { kind: "service.shutdown" } });
+  const submitted = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "plan.execute", planId: (preview.body.value as { id: string }).id },
+    requestId: "unconfirmed-stop",
+  });
+  assert.equal(submitted.body.ok, true);
+  await waitUntil(async () => (await handle.runtime.state()).reasons.some(row => row.includes("Shutdown completion could not be saved")), "unconfirmed shutdown remains visible");
+  assert.equal(normalExit, false);
+  assert.equal(new HomeController(home).inspect().held, true);
+  const record = JSON.parse(readFileSync(jobFile, "utf8"));
+  assert.equal(record.status, "running");
+  assert.equal(record.phase, "finalizing");
+});
+
+test("first startup clones the shipped preset into the manager without materializing web", async () => {
   const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node/workbench-supervisor.ts"), "utf8");
-  assert.match(source, /runBoundCli\(\["--profile", "web", "--dump-config"\]\)/);
   assert.doesNotMatch(
     source,
     /runBoundCli\(\[\s*"--profile",\s*"web",\s*"--from-default-profile",\s*"web"/,
@@ -1393,8 +1426,9 @@ test("official web seed omits --from-default-profile; shipped web clone args are
   assert.notEqual(state.availability, "unavailable");
   assert.deepEqual(
     calls.find((args) => args[args.indexOf("--profile") + 1] === "web" && args.includes("--dump-config")),
-    ["--profile", "web", "--dump-config"],
+    undefined,
   );
+  assert.equal(existsSync(join(home, "profiles", "web")), false);
   assert.equal(
     calls.some((args) => args[args.indexOf("--profile") + 1] === "web" && args.includes("--from-default-profile")),
     false,

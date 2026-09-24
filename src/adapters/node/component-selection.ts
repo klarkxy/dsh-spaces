@@ -10,13 +10,17 @@ import {
   type ValidatedComponentPayload,
 } from "./component-payload";
 import { HomeController } from "./home-controller";
-import { canonicalHome } from "./home-operation-lock";
+import { canonicalHome, HomeOperationLock } from "./home-operation-lock";
 import { digestHomeIdentity } from "./workbench-protocol";
 
 export const COMPONENT_SELECTION_SCHEMA_VERSION = 2 as const;
 export const COMPONENT_SELECTION_CODE = "component-selection/invalid" as const;
 export const COMPONENT_STAGED_DIR_NAME = "components";
 export const COLD_START_LOCK_NAME = "coldstart.lock";
+
+export function coldStartLockLabel(home: string, access?: ComponentHomeAccess): string {
+  return `supervisor-start:${digestHomeIdentity(boundHome(home, access))}`;
+}
 
 const DIGEST_RE = /^[a-f0-9]{64}$/;
 const POINTER_KEYS = ["schemaVersion", "homeDigest", "artifactDigest"] as const;
@@ -191,27 +195,10 @@ function assertSelectionReservation(home: string, toolsRoot: string, access?: Co
     }
     throw fail("Component selection is refused while another owner holds the Home.");
   }
-  const reservation = join(toolsRoot, COLD_START_LOCK_NAME);
-  let st;
-  try {
-    st = lstatSync(reservation);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw fail("Component selection requires a cold-start reservation or launcher occupancy.");
-    }
-    throw fail("Component selection reservation could not be read.");
-  }
-  if (st.isSymbolicLink() || !st.isDirectory()) {
-    throw fail("Component selection reservation is not a real directory.");
-  }
-  try {
-    const real = realpathSync(reservation);
-    if (process.platform === "win32" ? real.toLowerCase() !== reservation.toLowerCase() : real !== reservation) {
-      throw fail("Component selection reservation is a path alias.");
-    }
-  } catch (error) {
-    if (error instanceof ComponentSelectionError) throw error;
-    throw fail("Component selection reservation could not be resolved.");
+  const reservation = new HomeOperationLock(toolsRoot).inspect();
+  if (!reservation.held || !("owner" in reservation) ||
+      reservation.owner.pid !== process.pid || reservation.owner.label !== coldStartLockLabel(home, access)) {
+    throw fail("Component selection requires this process's cold-start reservation or launcher occupancy.");
   }
 }
 

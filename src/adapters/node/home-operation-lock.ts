@@ -89,7 +89,7 @@ export class HomeOperationLock implements OperationLock {
     return inspectLock(this.lockDir, this.ownerFile, this.reclaimDir);
   }
 
-  unlockDead(): UnlockDeadResult {
+  unlockDead(expectedOwner?: HomeLockOwner): UnlockDeadResult {
     const first = this.inspect();
     if (!first.held) return { unlocked: false, reason: "not-held" };
     if ("reclaim" in first && first.reclaim) {
@@ -102,6 +102,10 @@ export class HomeOperationLock implements OperationLock {
       return { unlocked: false, reason: "incomplete" };
     }
     if (!("owner" in first)) return { unlocked: false, reason: "incomplete" };
+    if (expectedOwner && (first.owner.nonce !== expectedOwner.nonce || first.owner.pid !== expectedOwner.pid ||
+        first.owner.startedAt !== expectedOwner.startedAt || first.owner.label !== expectedOwner.label)) {
+      return { unlocked: false, reason: "ambiguous", detail: "lock owner changed since this launch began" };
+    }
 
     const liveness = pidLiveness(first.owner.pid);
     if (liveness !== "dead") {
@@ -126,7 +130,9 @@ export class HomeOperationLock implements OperationLock {
         dropReclaim(this.reclaimDir);
         return { unlocked: false, reason: "ambiguous", detail: "lock owner file is a symlink" };
       }
-      if (owner.nonce !== first.owner.nonce || owner.pid !== first.owner.pid) {
+      if (owner.nonce !== first.owner.nonce || owner.pid !== first.owner.pid ||
+          owner.startedAt !== first.owner.startedAt || owner.label !== first.owner.label ||
+          pidLiveness(owner.pid) !== "dead") {
         dropReclaim(this.reclaimDir);
         return { unlocked: false, reason: "owner-alive", pid: owner.pid };
       }
