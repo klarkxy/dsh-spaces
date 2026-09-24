@@ -364,7 +364,9 @@ test("public job views omit internal fields; unknown errors stay static", async 
   assert.equal("commandCanonical" in job, false);
   assert.equal("schemaVersion" in job, false);
   assert.equal(job.error?.code, "workbench/failed");
-  assert.equal(job.error?.message, WORKBENCH_JOB_ERROR["workbench/failed"]);
+  assert.match(job.error?.message ?? "", /ENOENT/);
+  assert.equal(job.error?.message?.includes("private-launch-token"), false);
+  assert.equal(job.error?.message?.includes("D:"), false);
   assert.equal(job.message.includes("D:"), false);
   assert.equal(job.message.includes("private-launch-token"), false);
   assert.equal(job.message.includes("dsh-auth-fixture"), false);

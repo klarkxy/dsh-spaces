@@ -3,6 +3,7 @@ import type { ConfigBackupMeta, DiagnosticLogEntry } from './diagnostics';
 import type { SpaceImportResult, SpaceSharePreview, SpaceTemplate } from './space-share';
 import type { LocalePreference, PackageSource, PluginCatalogSnapshot, PluginLibrarySource, ThemePreference } from './types';
 import type { WorkbenchPackageRelease } from './workbench';
+import type { WorkbenchLogEntry } from './workbench-log';
 import type {
   WorkbenchBlueprintApplyCommand,
   WorkbenchBlueprintApplyOutcome,
@@ -51,6 +52,8 @@ export type WorkbenchProductRequest =
   | { method: 'catalog'; query?: string }
   | { method: 'library' }
   | { method: 'diagnostics'; spaceId: string }
+  | { method: 'logs' }
+  | { method: 'log.record'; level: 'error'; area: 'client'; event: 'request'; message: string }
   | { method: 'templates' }
   | { method: 'share.export'; spaceId: string; includeConfig?: boolean }
   | { method: 'share.previewImport'; archiveBase64: string }
@@ -70,6 +73,7 @@ export type WorkbenchProductResult = (
   | { method: 'catalog'; catalog: PluginCatalogSnapshot }
   | { method: 'library'; items: WorkbenchLibraryItem[] }
   | { method: 'diagnostics'; diagnostics: WorkbenchDiagnostics }
+  | { method: 'logs'; entries: WorkbenchLogEntry[]; logError: string | null }
   | { method: 'templates'; templates: SpaceTemplate[] }
   | { method: 'share.export'; fileName: string; archiveBase64: string; preview: SpaceSharePreview }
   | { method: 'share.previewImport'; importId: string; expiresAt: string; preview: SpaceSharePreview }

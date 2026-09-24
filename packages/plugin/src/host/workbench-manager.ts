@@ -16,7 +16,15 @@ import type {
 } from "../../../../src/shared/workbench";
 import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../../src/shared/workbench-product";
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
-import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
+import { reportedOrFallback } from "../../../../src/shared/public-reason";
+import {
+  LLM_PUBLIC_ERROR,
+  SPACES_PUBLIC_ERROR,
+  WORKBENCH_PUBLIC_ERROR,
+  type LlmRemoteCode,
+  type SpacesRemoteCode,
+  type WorkbenchRemoteCode,
+} from "./remote-errors";
 import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
 import type { WorkbenchHostRuntime } from "./runtime";
 
@@ -127,13 +135,24 @@ export class WorkbenchManagerHost extends TypertRemoteService {
       const code = error instanceof Error && (error.message.startsWith("workbench/") || error.message.startsWith("LLM_"))
         ? error.message
         : "";
+      const reported = error instanceof Error ? error.message : undefined;
       if (code in WORKBENCH_PUBLIC_ERROR) {
-        throw new RemoteError(code as WorkbenchRemoteCode, WORKBENCH_PUBLIC_ERROR[code as WorkbenchRemoteCode], {});
+        const known = code as WorkbenchRemoteCode;
+        throw new RemoteError(known, reportedOrFallback(reported, WORKBENCH_PUBLIC_ERROR[known]), {});
       }
       if (code in LLM_PUBLIC_ERROR) {
-        throw new RemoteError(code as LlmRemoteCode, LLM_PUBLIC_ERROR[code as LlmRemoteCode], {});
+        const known = code as LlmRemoteCode;
+        throw new RemoteError(known, reportedOrFallback(reported, LLM_PUBLIC_ERROR[known]), {});
       }
-      throw new RemoteError("workbench/unavailable", WORKBENCH_PUBLIC_ERROR["workbench/unavailable"], {});
+      if (code in SPACES_PUBLIC_ERROR) {
+        const known = code as SpacesRemoteCode;
+        throw new RemoteError(known, reportedOrFallback(reported, SPACES_PUBLIC_ERROR[known]), {});
+      }
+      throw new RemoteError(
+        "workbench/unavailable",
+        reportedOrFallback(reported, WORKBENCH_PUBLIC_ERROR["workbench/unavailable"]),
+        {},
+      );
     }
   }
 }

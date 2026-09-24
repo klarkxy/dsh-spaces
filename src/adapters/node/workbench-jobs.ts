@@ -80,8 +80,14 @@ export class WorkbenchJobError extends Error {
     message: string = WORKBENCH_JOB_ERROR[code],
     readonly context?: WorkbenchFailureContext,
   ) {
-    super(WORKBENCH_JOB_ERROR[code] || sanitizeJobText(message));
+    super(visibleJobMessage(code, message));
   }
+}
+
+function visibleJobMessage(code: WorkbenchJobErrorCode, message: string): string {
+  const fallback = WORKBENCH_JOB_ERROR[code] || "The job failed.";
+  const cleaned = sanitizeJobText(message).trim().slice(0, 500);
+  return cleaned || fallback;
 }
 
 export class WorkbenchJobAbortError extends Error {
@@ -596,7 +602,8 @@ export class WorkbenchJobStore {
       const snapshot = this.persisted.get(record.id);
       if (snapshot) this.records.set(record.id, JSON.parse(snapshot) as StoredJob);
       else this.records.delete(record.id);
-      throw new WorkbenchJobError("workbench/persist-failed");
+      const cause = error instanceof Error ? error.message : "";
+      throw new WorkbenchJobError("workbench/persist-failed", cause || WORKBENCH_JOB_ERROR["workbench/persist-failed"]);
     }
   }
 
@@ -734,9 +741,10 @@ function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
     };
   }
   if (error instanceof WorkbenchJobError) {
+    const code = isJobErrorCode(error.code) ? error.code : "workbench/failed";
     const info: WorkbenchJobErrorInfo = {
-      code: isJobErrorCode(error.code) ? error.code : "workbench/failed",
-      message: WORKBENCH_JOB_ERROR[isJobErrorCode(error.code) ? error.code : "workbench/failed"],
+      code,
+      message: sanitizeJobText(error.message).trim().slice(0, 500) || WORKBENCH_JOB_ERROR[code] || "The job failed.",
     };
     if (error.context) {
       if (error.context.spaceId) info.spaceId = error.context.spaceId;
@@ -751,7 +759,18 @@ function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
   if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string") {
     const code = (error as { code: string }).code;
     if (isJobErrorCode(code)) {
-      return { code, message: WORKBENCH_JOB_ERROR[code] };
+      const reported = (error as { message?: unknown }).message;
+      const message = typeof reported === "string" ? sanitizeJobText(reported).trim().slice(0, 500) : "";
+      return {
+        code,
+        message: message && message !== WORKBENCH_JOB_ERROR[code] ? message : WORKBENCH_JOB_ERROR[code],
+      };
+    }
+  }
+  if (error instanceof Error) {
+    const message = sanitizeJobText(error.message).trim().slice(0, 500);
+    if (message) {
+      return { code: "workbench/failed", message, pluginAttribution: "unknown" };
     }
   }
   return {

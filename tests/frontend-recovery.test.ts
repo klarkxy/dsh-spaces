@@ -324,6 +324,12 @@ test("public reasons redact paths and bearers", () => {
   assert.equal(text.includes("abcdefghijklmnop"), false);
   assert.equal(text.includes("C:\\Users"), false);
   assert.deepEqual(publishShellReasons(["", "  ok  "]), ["ok"]);
+  const spaced = redactDesktopShellText("open 'D:\\0 code\\dsh-spaces\\.sandbox\\plugin.tgz' ENOENT");
+  assert.equal(spaced.includes("dsh-spaces"), false);
+  assert.match(spaced, /ENOENT/);
+  const tail = redactDesktopShellText(`${"x".repeat(2000)} ENOENT missing-file`);
+  assert.match(tail, /ENOENT missing-file/);
+  assert.ok(tail.length <= 1200);
 });
 
 test("mutation context uses strict 64-hex fields and rejects string protocol 2", () => {

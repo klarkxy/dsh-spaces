@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { redactPublicReason } from "../../shared/public-reason";
+import { sanitizeLogText } from "./diagnostics";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../shared/space-icon";
 import {
   isBlueprintLargeRequestMethod,
@@ -597,13 +599,21 @@ function deny(res: ServerResponse, status: number, code: string, message: string
 function publicError(error: unknown): { code: string; message: string; details?: Record<string, string | number> } {
   if (error && typeof error === "object" && "code" in error && "message" in error) {
     const code = String((error as { code: unknown }).code);
-    const message = String((error as { message: unknown }).message);
     if (code.startsWith("workbench/") || code.startsWith("spaces/") || code.startsWith("LLM_")) {
       const details = "details" in error ? safeLlmDetails((error as { details?: unknown }).details) : undefined;
+      const message = exposeFailureMessage(error);
       return details ? { code, message, details } : { code, message };
     }
   }
-  return { code: "workbench/failed", message: "The workbench request failed." };
+  return { code: "workbench/failed", message: exposeFailureMessage(error) };
+}
+
+function exposeFailureMessage(error: unknown): string {
+  const fallback = "The workbench request failed.";
+  if (!(error instanceof Error) || !error.message.trim()) return fallback;
+  const cleaned = redactPublicReason(sanitizeLogText(error.message));
+  if (!cleaned || cleaned === "[omitted credential material]" || cleaned === "[omitted chat payload]") return fallback;
+  return cleaned;
 }
 
 const SAFE_LLM_DETAIL_KEYS = new Set([

@@ -3,7 +3,7 @@ import type { CliEnsureStatus, LocalePreference, PackageSource, ThemePreference 
 
 export const DESKTOP_SHELL_PARTITION = "dsh-spaces-workbench";
 export const MAX_SHELL_REASONS = 32;
-export const MAX_SHELL_REASON_CHARS = 500;
+export const MAX_SHELL_REASON_CHARS = 1200;
 
 export const DESKTOP_SHELL_IPC = {
   getState: "desktop-shell:getState",
@@ -248,9 +248,13 @@ export function redactDesktopShellText(text: string, secrets: readonly string[] 
     .replace(/\bAuthorization\s*:\s*Bearer\s+\S+/gi, "Authorization: Bearer [redacted]")
     .replace(/\bBearer\s+[A-Za-z0-9._\-+=/]+/gi, "Bearer [redacted]")
     .replace(/\bsk-[A-Za-z0-9]{10,}/g, "[redacted]")
-    .replace(/(?:[A-Za-z]:\\|\\\\)[^\s"'`<>]+/g, "[path]")
+    .replace(/(?:[A-Za-z]:\\|\\\\)(?:[^\s"'`<>|\r\n]+(?: (?=[^\s"'`<>|\r\n]*\\)[^\s"'`<>|\r\n]+)*)/g, "[path]")
     .replace(/(?:\/(?:home|Users|tmp|var|root)\/|~\/)[^\s"'`<>]+/g, "[path]");
-  if (out.length > MAX_SHELL_REASON_CHARS) out = out.slice(0, MAX_SHELL_REASON_CHARS);
+  if (out.length > MAX_SHELL_REASON_CHARS) {
+    const head = 180;
+    const tail = MAX_SHELL_REASON_CHARS - head - 1;
+    out = `${out.slice(0, head)}…${out.slice(-tail)}`;
+  }
   return out;
 }
 

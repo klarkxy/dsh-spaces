@@ -5,6 +5,7 @@ import { FileLlmSpaceSettings } from "./llm-space-settings";
 import type { WorkbenchJobContext } from "./workbench-jobs";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
+import { WorkbenchLog } from "./workbench-log";
 import { settingsPath } from "./hub-settings";
 import {
   loadPluginCatalog,
@@ -95,6 +96,7 @@ export interface WorkbenchProductPorts {
   installPlugin(spaceId: string, spec: string): Promise<void>;
   llm(request: LlmApiRequest): Promise<LlmApiResult>;
   diagnostics(spaceId: string): WorkbenchDiagnostics;
+  workbenchLog?(): WorkbenchLog;
   withWrite<T>(label: string, action: () => Promise<T>): Promise<T>;
   settingsChanged?(settings: WorkbenchHomeSettings): void;
   prepareWorkbench?(input: { version?: string }, ctx: WorkbenchJobContext): Promise<WorkbenchPackageRelease>;
@@ -161,6 +163,16 @@ export class WorkbenchProductService {
           diagnostics: this.ports.diagnostics(request.spaceId),
           observation,
         };
+      case "logs":
+        return { method: "logs", ...this.readLogs(), observation };
+      case "log.record":
+        this.requireLog().append({
+          level: request.level,
+          area: request.area,
+          event: request.event,
+          message: request.message,
+        });
+        return { method: "logs", ...this.readLogs(), observation };
       case "templates":
         return {
           method: "templates",
@@ -258,6 +270,16 @@ export class WorkbenchProductService {
       };
     }
     return parseHomeSettingsFile(raw);
+  }
+
+  private requireLog(): WorkbenchLog {
+    const log = this.ports.workbenchLog?.();
+    if (!log) throw new Error("The workbench log is not available.");
+    return log;
+  }
+
+  private readLogs() {
+    return this.requireLog().read();
   }
 
   private readCatalog(query?: string) {

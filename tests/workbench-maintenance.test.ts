@@ -710,7 +710,9 @@ test("plugin install failure names space, stage, and package", async () => {
       assert.equal(error.context?.packageName, "dsh-outline");
       assert.equal(error.context?.pluginAttribution, "known");
       assert.equal(error.context?.stage, "install");
-      assert.match(error.message, /The job failed/);
+      assert.match(error.message, /coding/);
+      assert.match(error.message, /dsh-outline/);
+      assert.match(error.message, /missing peer/);
       return true;
     },
   );
@@ -886,7 +888,7 @@ test("unknown errors become the static public message and plans are not executed
   await assert.rejects(() => maintenance.preview({ kind: "snapshot.create" }), (error: unknown) => {
     assert.ok(error instanceof WorkbenchMaintenanceError);
     assert.equal(error.code, "workbench/forbidden");
-    assert.equal(error.message, WORKBENCH_MAINTENANCE_ERROR["workbench/forbidden"]);
+    assert.match(error.message, /owner missing/);
     assert.equal(error.message.includes("C:\\"), false);
     return true;
   });
@@ -903,9 +905,10 @@ test("unknown errors become the static public message and plans are not executed
   const plan = await exploding.maintenance.preview({ kind: "snapshot.create" });
   await assert.rejects(() => exploding.maintenance.execute(plan.id, jobCtx()), (error: unknown) => {
     assert.ok(error instanceof WorkbenchMaintenanceError);
-    assert.equal(error.message, WORKBENCH_MAINTENANCE_ERROR["workbench/failed"]);
-    assert.equal(String(error.message).includes("token="), false);
-    assert.equal(String(error.message).includes("bin.js"), false);
+    assert.match(error.message, /ENOENT/);
+    assert.equal(error.message.includes("abcd"), false);
+    assert.equal(error.message.includes("bin.js"), false);
+    assert.equal(error.message.includes("C:\\"), false);
     return true;
   });
   assert.ok(logs.some((line) => line.includes("bin.js")));

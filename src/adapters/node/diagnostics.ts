@@ -385,7 +385,7 @@ function redactSecrets(text: string): string {
       if (value.startsWith("'")) return `${prefix}'[redacted]'`;
       return `${prefix}[redacted]`;
     })
-    .replace(/\bsk-[A-Za-z0-9]{10,}/g, "[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[redacted]")
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[redacted]");
 }
 

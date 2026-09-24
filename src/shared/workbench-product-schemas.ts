@@ -663,6 +663,16 @@ export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> =
   z.object({ method: z.literal("catalog"), query: z.string().max(200).optional() }).strict(),
   z.object({ method: z.literal("library") }).strict(),
   z.object({ method: z.literal("diagnostics"), spaceId: spaceIdSchema }).strict(),
+  z.object({ method: z.literal("logs") }).strict(),
+  z
+    .object({
+      method: z.literal("log.record"),
+      level: z.literal("error"),
+      area: z.literal("client"),
+      event: z.literal("request"),
+      message: z.string().min(1).max(2000),
+    })
+    .strict(),
   z.object({ method: z.literal("templates") }).strict(),
   z
     .object({
@@ -753,6 +763,27 @@ export const workbenchProductResultSchema: z.ZodType<WorkbenchProductResult> = z
   z.object({ method: z.literal("catalog"), catalog: catalogSnapshotSchema, observation: productObservationSchema }).strict(),
   z.object({ method: z.literal("library"), items: z.array(libraryItemSchema).max(256), observation: productObservationSchema }).strict(),
   z.object({ method: z.literal("diagnostics"), diagnostics: diagnosticsSchema, observation: productObservationSchema }).strict(),
+  z
+    .object({
+      method: z.literal("logs"),
+      entries: z
+        .array(
+          z
+            .object({
+              at: z.string().max(40),
+              level: z.enum(["info", "warn", "error"]),
+              area: z.string().min(1).max(32),
+              event: z.string().min(1).max(80),
+              message: z.string().max(2000),
+              code: z.string().max(80).optional(),
+            })
+            .strict(),
+        )
+        .max(400),
+      logError: z.string().max(500).nullable(),
+      observation: productObservationSchema,
+    })
+    .strict(),
   z
     .object({
       method: z.literal("templates"),

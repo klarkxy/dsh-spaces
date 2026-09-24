@@ -35,7 +35,7 @@ import {
 import { npmPackumentUrl } from "./package-source";
 import { currentPackageSource } from "./toolchain";
 import { ProcessTerminationError } from "./terminate-process";
-import { WorkbenchJobError } from "./workbench-jobs";
+import { sanitizeJobText, WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { runBatch } from "../../shared/batch";
@@ -107,7 +107,9 @@ export class WorkbenchMaintenanceError extends Error {
     readonly code: WorkbenchMaintenanceErrorCode,
     message: string = WORKBENCH_MAINTENANCE_ERROR[code],
   ) {
-    super(WORKBENCH_MAINTENANCE_ERROR[code] || message);
+    const fallback = WORKBENCH_MAINTENANCE_ERROR[code] || "The maintenance operation failed.";
+    const cleaned = sanitizeJobText(message).trim().slice(0, 500);
+    super(cleaned || fallback);
   }
 }
 
@@ -1576,7 +1578,8 @@ export class WorkbenchMaintenance {
     if (error instanceof WorkbenchJobError) throw error;
     if (error instanceof WorkbenchMaintenanceError || error instanceof WorkbenchJobAbortError) throw error;
     this.log(op, error);
-    throw new WorkbenchMaintenanceError(code);
+    const cause = error instanceof Error ? sanitizeJobText(error.message).trim() : "";
+    throw new WorkbenchMaintenanceError(code, cause || WORKBENCH_MAINTENANCE_ERROR[code]);
   }
 }
 

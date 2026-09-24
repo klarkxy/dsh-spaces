@@ -10,7 +10,15 @@ import {
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../../src/shared/workbench-product";
 import type { WorkbenchApi, WorkbenchMutationContext } from "../../../../src/shared/workbench";
 import type { LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
-import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR, type LlmRemoteCode, type WorkbenchRemoteCode } from "./remote-errors";
+import { reportedOrFallback } from "../../../../src/shared/public-reason";
+import {
+  LLM_PUBLIC_ERROR,
+  SPACES_PUBLIC_ERROR,
+  WORKBENCH_PUBLIC_ERROR,
+  type LlmRemoteCode,
+  type SpacesRemoteCode,
+  type WorkbenchRemoteCode,
+} from "./remote-errors";
 import {
   backupsResultSchema,
   jobIdSchema,
@@ -165,27 +173,27 @@ export async function workbenchPost<T>(
       redirect: "error",
     });
   } catch {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench request did not reach the supervisor.");
   }
   const text = await readLimitedText(response, responseBodyLimit(method, body));
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench response was not valid JSON.");
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench response was not a completed result.");
   }
   const row = parsed as { ok?: unknown; value?: unknown; error?: unknown };
   if (row.ok === false) {
     throw remoteFromSupervisorError(row.error);
   }
-  if (row.ok !== true) throw publicError("workbench/unavailable");
+  if (row.ok !== true) throw publicError("workbench/unavailable", "The workbench response was not a completed result.");
   try {
     return resultSchema.parse(row.value);
   } catch {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench response did not match the expected result.");
   }
 }
 
@@ -193,7 +201,7 @@ function originOf(raw: string): string {
   try {
     return new URL(parseControlEndpoint(raw)).origin;
   } catch {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench endpoint is not a valid loopback origin.");
   }
 }
 
@@ -251,17 +259,23 @@ function utf8Bytes(text: string): number {
 
 function remoteFromSupervisorError(error: unknown): RemoteError {
   if (!error || typeof error !== "object" || Array.isArray(error)) {
-    return publicError("workbench/unavailable");
+    return publicError("workbench/unavailable", "The workbench error did not include a code.");
   }
   const code = (error as { code?: unknown }).code;
+  const reported = (error as { message?: unknown }).message;
   if (typeof code !== "string") {
-    return publicError("workbench/unavailable");
+    return publicError("workbench/unavailable", "The workbench error did not include a code.");
   }
   if (Object.hasOwn(WORKBENCH_PUBLIC_ERROR, code)) {
-    return publicError(code as WorkbenchRemoteCode);
+    return publicError(code as WorkbenchRemoteCode, reported);
   }
   if (Object.hasOwn(LLM_PUBLIC_ERROR, code)) {
-    return new RemoteError(code as LlmRemoteCode, LLM_PUBLIC_ERROR[code as LlmRemoteCode], {});
+    const known = code as LlmRemoteCode;
+    return new RemoteError(known, reportedOrFallback(reported, LLM_PUBLIC_ERROR[known]), {});
+  }
+  if (Object.hasOwn(SPACES_PUBLIC_ERROR, code)) {
+    const known = code as SpacesRemoteCode;
+    return new RemoteError(known, reportedOrFallback(reported, SPACES_PUBLIC_ERROR[known]), {});
   }
   return publicError("workbench/unavailable");
 }
@@ -270,7 +284,7 @@ async function readLimitedText(response: Response, limit: number): Promise<strin
   const reader = response.body?.getReader();
   if (!reader) {
     const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > limit) throw publicError("workbench/unavailable");
+    if (buffer.byteLength > limit) throw publicError("workbench/unavailable", "The workbench response was too large.");
     return new TextDecoder().decode(buffer);
   }
   const chunks: Uint8Array[] = [];
@@ -283,14 +297,14 @@ async function readLimitedText(response: Response, limit: number): Promise<strin
       total += value.byteLength;
       if (total > limit) {
         await reader.cancel().catch(() => undefined);
-        throw publicError("workbench/unavailable");
+        throw publicError("workbench/unavailable", "The workbench response was too large.");
       }
       chunks.push(value);
     }
   } catch (error) {
     await reader.cancel().catch(() => undefined);
     if (error instanceof RemoteError) throw error;
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench response could not be read.");
   }
   const merged = new Uint8Array(total);
   let offset = 0;
@@ -301,8 +315,8 @@ async function readLimitedText(response: Response, limit: number): Promise<strin
   return new TextDecoder().decode(merged);
 }
 
-function publicError(code: WorkbenchRemoteCode): RemoteError {
-  return new RemoteError(code, WORKBENCH_PUBLIC_ERROR[code], {});
+function publicError(code: WorkbenchRemoteCode, reported?: unknown): RemoteError {
+  return new RemoteError(code, reportedOrFallback(reported, WORKBENCH_PUBLIC_ERROR[code]), {});
 }
 
 /** POST /internal/bootstrap with the Node bearer. Returns a relative /bootstrap/<token> path. */
@@ -324,18 +338,18 @@ export async function mintSupervisorHandoff(
       redirect: "error",
     });
   } catch {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench request did not reach the supervisor.");
   }
   const text = await readLimitedText(response, WORKBENCH_HTTP_BODY_LIMIT);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw publicError("workbench/unavailable");
+    throw publicError("workbench/unavailable", "The workbench response was not valid JSON.");
   }
   const url = parsed && typeof parsed === "object" ? (parsed as { url?: unknown }).url : undefined;
-  if (typeof url !== "string") throw publicError("workbench/unavailable");
+  if (typeof url !== "string") throw publicError("workbench/unavailable", "The workbench response was not a completed result.");
   const path = parseSupervisorHandoffPath(url, origin);
-  if (!path) throw publicError("workbench/unavailable");
+  if (!path) throw publicError("workbench/unavailable", "The supervisor handoff path was not accepted.");
   return path;
 }
