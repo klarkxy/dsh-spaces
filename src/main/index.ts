@@ -17,6 +17,8 @@ import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectControlResidue, inspectHomeToolchain } from "../adapters/desktop";
+import { resolveControlToolsRoot } from "../adapters/node/control-residue";
+import { assertDevelopmentPath, refreshDevelopmentRuntime } from "../adapters/node/development-refresh";
 import {
   DesktopServiceClient,
   type DesktopServicePublicState,
@@ -87,6 +89,7 @@ import { ViewManager } from "./view-manager";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEV_RENDERER_URL = process.env.ELECTRON_RENDERER_URL?.trim() || undefined;
+const REFRESH_DEVELOPMENT = !app.isPackaged && process.env.DSH_SPACES_DEVELOPMENT === "1";
 const TRUSTED_SHELL_URL = trustedShellUrl({
   devRendererUrl: DEV_RENDERER_URL,
   moduleDir: __dirname,
@@ -94,6 +97,7 @@ const TRUSTED_SHELL_URL = trustedShellUrl({
 
 if (process.env.DSH_SPACES_USER_DATA) {
   const userData = resolve(process.env.DSH_SPACES_USER_DATA);
+  if (REFRESH_DEVELOPMENT) assertDevelopmentPath(userData);
   mkdirSync(userData, { recursive: true });
   app.setPath("userData", userData);
 }
@@ -103,12 +107,31 @@ if (process.platform === "win32") {
 }
 
 if (!app.requestSingleInstanceLock()) {
-  app.exit(0);
+  if (REFRESH_DEVELOPMENT) console.error("[dev] A development window is already open. Exit its dev command before launching another build. The running service was not changed.");
+  app.exit(REFRESH_DEVELOPMENT ? 1 : 0);
+} else if (REFRESH_DEVELOPMENT) {
+  // Own the desktop instance BEFORE changing the service. A second invocation
+  // must never stop the backend and then merely focus an obsolete shell.
+  void app.whenReady().then(async () => {
+    const result = await refreshDevelopmentRuntime({
+      home: resolveDshHome(),
+      userData: app.getPath("userData"),
+      payloadRoot: resolveSpacesPayloadRoot({ packaged: false, resourcesPath: process.resourcesPath, moduleDir: __dirname }),
+      log: message => console.log(`[dev] ${message}`),
+    });
+    console.log(`[dev] ${result.status}: ${result.digest.slice(0, 12)} (${result.home})`);
+    startMain();
+  }).catch(error => {
+    const message = redactDesktopShellText(error instanceof Error ? error.message : String(error));
+    console.error(`[dev] ${message}`);
+    console.error("[dev] The development update did not finish. Opening the existing service.");
+    startMain(message);
+  });
 } else {
   startMain();
 }
 
-function startMain(): void {
+function startMain(startupNotice?: string): void {
   const dshHome = resolveDshHome();
   mkdirSync(dshHome, { recursive: true });
   authorizeProductHome(dshHome);
@@ -134,7 +157,8 @@ function startMain(): void {
     resourcesPath: process.resourcesPath,
     moduleDir: __dirname,
   });
-  const toolsRoot = join(userData, "supervisor-tools");
+  const toolsRoot = toolchain.kind === "invalid" ? join(userData, "supervisor-tools")
+    : resolveControlToolsRoot(dshHome, userData, toolchain);
   const recordedSnapshotRoot =
     toolchain.kind === "verified" && typeof toolchain.snapshotRoot === "string" && toolchain.snapshotRoot.trim()
       ? toolchain.snapshotRoot
@@ -163,7 +187,7 @@ function startMain(): void {
   const startInflight: InflightHolder<DesktopShellPublicState> = { current: null };
   let viewGeneration = 0;
   let stateSeq = 0;
-  let workbenchError: string | null = null;
+  let workbenchError: string | null = startupNotice?.trim() ? startupNotice.trim() : null;
   let traySpaces: TraySpace[] = [];
   let lastService: DesktopServicePublicState = client.publicState();
   let workbenchSession: Session | null = null;

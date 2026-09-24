@@ -28,7 +28,7 @@ Historical recovery plans, tests, and screenshots are evidence of what was built
 2. `node scripts/setup-sandbox.mjs` (once, after a global `dsh` install)
 3. `npm test` and `npm run typecheck`
 4. Isolation gate: `npm run validate:isolation` (do not run while the Electron app holds the same sandbox profiles)
-5. `npm run dev` for the Electron shell, or `npm run dev:web` for a fresh official `dsh web` with this plugin preinstalled
+5. `npm run dev` builds current components and refreshes the existing idle development sandbox before opening Electron. Quit the previous dev command first; the manager plugin is not served by renderer HMR. Run `npm run test:development` for the refresh/ownership/failure checks. `npm run dev:web` is a separate fresh official `dsh web` workflow.
 
 ## Phase gates
 
