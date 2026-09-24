@@ -24,7 +24,7 @@ import type {
   WorkbenchBlueprintPreviewPayload,
   WorkbenchBlueprintSourcePayload,
 } from "../../../../src/shared/workbench-blueprint";
-import { t, type WorkbenchLocale, type WorkbenchMessageKey } from "./i18n";
+import { localizeError, t, type WorkbenchLocale, type WorkbenchMessageKey } from "./i18n";
 
 export const BLUEPRINT_SPACE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 export const BLUEPRINT_RESERVED_SPACE_NAMES = new Set([
@@ -566,7 +566,7 @@ export class BlueprintSession {
       if (this.snapshot.content !== content) return;
       if (epoch && this.host.serviceEpoch() && epoch !== this.host.serviceEpoch()) return;
       if (result.method !== "blueprint.inspect") {
-        this.patch({ inspectStatus: "error", inspect: null, inspectError: this.msg("app.unavailable") });
+        this.patch({ inspectStatus: "error", inspect: null, inspectError: this.mismatch("blueprint.inspect", result.method) });
         return;
       }
       this.patch({
@@ -629,7 +629,7 @@ export class BlueprintSession {
       if (latest.invalidNumber || JSON.stringify(latest.values) !== JSON.stringify(values)) return;
       if (epoch && this.host.serviceEpoch() && epoch !== this.host.serviceEpoch()) return;
       if (result.method !== "blueprint.preview") {
-        this.patch({ previewStatus: "error", preview: null, previewObservation: null, previewError: this.msg("app.unavailable") });
+        this.patch({ previewStatus: "error", preview: null, previewObservation: null, previewError: this.mismatch("blueprint.preview", result.method) });
         return;
       }
       this.patch({
@@ -851,7 +851,7 @@ export class BlueprintSession {
           sourceStatus: "error",
           source: null,
           sourceObservation: null,
-          sourceError: this.msg("app.unavailable"),
+          sourceError: this.mismatch("blueprint.source", result.method),
         });
         return;
       }
@@ -922,7 +922,7 @@ export class BlueprintSession {
       if (JSON.stringify(this.snapshot.selectedNamespaces) !== JSON.stringify(selection.settingsNamespaces)) return;
       if (epoch && this.host.serviceEpoch() && epoch !== this.host.serviceEpoch()) return;
       if (result.method !== "blueprint.generate") {
-        this.patch({ generateStatus: "error", generate: null, generateError: this.msg("app.unavailable") });
+        this.patch({ generateStatus: "error", generate: null, generateError: this.mismatch("blueprint.generate", result.method) });
         return;
       }
       this.patch({
@@ -1097,10 +1097,21 @@ export class BlueprintSession {
   }
 
   private hostError(error: unknown): string {
-    if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message) {
-      return error.message;
+    if (error && typeof error === "object") {
+      const record = error as { code?: unknown; message?: unknown };
+      return localizeError(this.host.locale(), {
+        code: typeof record.code === "string" ? record.code : null,
+        message: typeof record.message === "string" ? record.message : null,
+      });
     }
     return this.msg("app.genericError");
+  }
+
+  private mismatch(expected: string, actual: string): string {
+    return localizeError(this.host.locale(), {
+      code: "workbench/unavailable",
+      message: `Expected ${expected}, received ${actual}.`,
+    });
   }
 
   private msg(key: WorkbenchMessageKey): string {

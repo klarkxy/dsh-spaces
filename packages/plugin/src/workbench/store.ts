@@ -25,6 +25,7 @@ import {
   type WorkbenchProductObservation,
   type WorkbenchProductOutcome,
 } from "../../../../src/shared/workbench-product";
+import type { WorkbenchLogEntry } from "../../../../src/shared/workbench-log";
 import { createWorkbenchLlmClient, type LlmUiClient } from "./llm/client";
 import { validateWorkbenchIcon } from "./icons";
 import { localizeError, t, type WorkbenchLocale, type WorkbenchMessageKey } from "./i18n";
@@ -112,8 +113,9 @@ export interface WorkbenchUiState {
   planError: string | null;
   commandError: string | null;
   commandPending: boolean;
+  readError: Partial<Record<WorkbenchReadSurface, string>>;
   homeTab: HomeTab;
-  settingsTab: "general" | "llm";
+  settingsTab: "general" | "llm" | "advanced" | HomeTab;
   settingsDraft: SettingsDraft | null;
   settingsStatus: "idle" | "loading" | "ready" | "error";
   detail: SpaceDetail | null;
@@ -121,6 +123,9 @@ export interface WorkbenchUiState {
   backups: WorkbenchBackup[];
   diagnostics: WorkbenchDiagnostics | null;
   diagnosticsStatus: "idle" | "loading" | "ready" | "error";
+  logs: WorkbenchLogEntry[];
+  logsStatus: "idle" | "loading" | "ready" | "error";
+  logsError: string | null;
   plugins: WorkbenchPlugin[];
   pluginQuery: string;
   pluginSpaceId: string;
@@ -208,9 +213,41 @@ export function createDefaultEnv(): WorkbenchEnv {
   };
 }
 
+export type WorkbenchReadSurface =
+  | "settings"
+  | "catalog"
+  | "library"
+  | "plugins"
+  | "templates"
+  | "snapshots"
+  | "runtimes"
+  | "package"
+  | "diagnostics"
+  | "detail"
+  | "logs";
+
 export function pollDelayMs(activeJobs: boolean, hidden: boolean): number {
   if (hidden) return activeJobs ? 2000 : 4000;
   return activeJobs ? 500 : 1000;
+}
+
+function localLogMessage(error: unknown): string | null {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (!message) return null;
+  if (
+    message.startsWith("The workbench request did not reach") ||
+    message.startsWith("The workbench response") ||
+    message.startsWith("The workbench endpoint") ||
+    message.startsWith("The workbench error did not include") ||
+    message.startsWith("Expected ")
+  ) {
+    return message;
+  }
+  return null;
+}
+
+function wrongProduct(expected: string, actual: string): Error {
+  return Object.assign(new Error(`Expected ${expected}, received ${actual}.`), { code: "workbench/unavailable" });
 }
 
 function errorCode(error: unknown): { code?: string; message?: string } {
@@ -304,6 +341,7 @@ export class WorkbenchController {
       planError: null,
       commandError: null,
       commandPending: false,
+      readError: {},
       homeTab: "overview",
       settingsTab: "general",
       settingsDraft: null,
@@ -313,6 +351,9 @@ export class WorkbenchController {
       backups: [],
       diagnostics: null,
       diagnosticsStatus: "idle",
+      logs: [],
+      logsStatus: "idle",
+      logsError: null,
       plugins: [],
       pluginQuery: "",
       pluginSpaceId: "",
@@ -398,7 +439,7 @@ export class WorkbenchController {
   };
 
   setHomeTab = (homeTab: HomeTab): void => {
-    this.patch({ homeTab });
+    this.patch({ homeTab, settingsTab: homeTab, overlay: { type: "settings" } });
     if (homeTab === "plugins") {
       if (this.ui.pluginsStatus === "idle") void this.searchPlugins(this.ui.pluginQuery);
       if (this.ui.catalogStatus === "idle") void this.loadCatalog(this.ui.pluginQuery);
@@ -408,6 +449,7 @@ export class WorkbenchController {
     if (homeTab === "runtime" && this.ui.runtimesStatus === "idle") void this.loadRuntimes();
     if (homeTab === "runtime" && this.ui.workbenchPackageStatus === "idle") void this.loadWorkbenchPackage();
     if (homeTab === "templates" && this.ui.templatesStatus === "idle") void this.loadTemplates();
+    if (homeTab === "overview") void this.loadLogs();
   };
 
   blueprintSourceSpaces = (): WorkbenchSpace[] => {
@@ -503,7 +545,11 @@ export class WorkbenchController {
     void this.loadSettings();
   };
 
-  setSettingsTab = (settingsTab: "general" | "llm"): void => {
+  setSettingsTab = (settingsTab: WorkbenchUiState["settingsTab"]): void => {
+    if (settingsTab !== "general" && settingsTab !== "llm" && settingsTab !== "advanced") {
+      this.setHomeTab(settingsTab);
+      return;
+    }
     this.patch({ settingsTab });
   };
 
@@ -666,48 +712,46 @@ export class WorkbenchController {
 
   searchPlugins = (query: string): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ pluginQuery: query, pluginsStatus: "loading" });
+    this.patch({ pluginQuery: query, pluginsStatus: "loading", readError: this.readErrors("plugins") });
     return this.wrap(async () => {
       const plugins = await this.api.plugins(query);
       if (!this.stillOpen(cycle)) return;
-      this.patch({ plugins: Array.isArray(plugins) ? plugins : [], pluginsStatus: "ready" });
-    }, () => {
+      this.patch({ plugins: Array.isArray(plugins) ? plugins : [], pluginsStatus: "ready", readError: this.readErrors("plugins") });
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ pluginsStatus: "error" });
+      this.patch({ pluginsStatus: "error", readError: this.readErrors("plugins", message) });
     });
   };
 
   loadCatalog = (query?: string): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ catalogStatus: "loading" });
+    this.patch({ catalogStatus: "loading", readError: this.readErrors("catalog") });
     return this.wrap(async () => {
       const result = await this.api.product({ method: "catalog", query: query ?? this.ui.pluginQuery });
       if (!this.stillOpen(cycle)) return;
       if (result.method !== "catalog") {
-        this.patch({ catalogStatus: "error" });
-        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+        throw wrongProduct("catalog", result.method);
       }
-      this.patch({ catalog: result.catalog, catalogStatus: "ready" });
-    }, () => {
+      this.patch({ catalog: result.catalog, catalogStatus: "ready", readError: this.readErrors("catalog") });
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ catalogStatus: "error", catalog: this.ui.catalog });
+      this.patch({ catalogStatus: "error", catalog: this.ui.catalog, readError: this.readErrors("catalog", message) });
     });
   };
 
   loadLibrary = (): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ libraryStatus: "loading" });
+    this.patch({ libraryStatus: "loading", readError: this.readErrors("library") });
     return this.wrap(async () => {
       const result = await this.api.product({ method: "library" });
       if (!this.stillOpen(cycle)) return;
       if (result.method !== "library") {
-        this.patch({ libraryStatus: "error" });
-        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+        throw wrongProduct("library", result.method);
       }
-      this.patch({ library: result.items, libraryStatus: "ready" });
-    }, () => {
+      this.patch({ library: result.items, libraryStatus: "ready", readError: this.readErrors("library") });
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ libraryStatus: "error" });
+      this.patch({ libraryStatus: "error", readError: this.readErrors("library", message) });
     });
   };
 
@@ -765,71 +809,72 @@ export class WorkbenchController {
 
   loadSnapshots = (): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ snapshotsStatus: "loading" });
+    this.patch({ snapshotsStatus: "loading", readError: this.readErrors("snapshots") });
     return this.wrap(async () => {
       const snapshots = await this.api.snapshots();
       if (!this.stillOpen(cycle)) return;
-      this.patch({ snapshots: Array.isArray(snapshots) ? snapshots : [], snapshotsStatus: "ready" });
-    }, () => {
+      this.patch({ snapshots: Array.isArray(snapshots) ? snapshots : [], snapshotsStatus: "ready", readError: this.readErrors("snapshots") });
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ snapshotsStatus: "error" });
+      this.patch({ snapshotsStatus: "error", readError: this.readErrors("snapshots", message) });
     });
   };
 
   loadRuntimes = (): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ runtimesStatus: "loading" });
+    this.patch({ runtimesStatus: "loading", readError: this.readErrors("runtimes") });
     return this.wrap(async () => {
       const runtimes = await this.api.runtimes();
       if (!this.stillOpen(cycle)) return;
-      this.patch({ runtimes: Array.isArray(runtimes) ? runtimes : [], runtimesStatus: "ready" });
-    }, () => {
+      this.patch({ runtimes: Array.isArray(runtimes) ? runtimes : [], runtimesStatus: "ready", readError: this.readErrors("runtimes") });
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ runtimesStatus: "error" });
+      this.patch({ runtimesStatus: "error", readError: this.readErrors("runtimes", message) });
     });
   };
 
   loadWorkbenchPackage = (): Promise<void> => {
     const loader = this.api.workbenchPackage;
     if (typeof loader !== "function") {
-      this.patch({ workbenchPackage: null, workbenchPackageStatus: "ready" });
+      this.patch({ workbenchPackage: null, workbenchPackageStatus: "ready", readError: this.readErrors("package") });
       return Promise.resolve();
     }
     const cycle = this.cycle;
-    this.patch({ workbenchPackageStatus: "loading" });
+    this.patch({ workbenchPackageStatus: "loading", readError: this.readErrors("package") });
     return this.wrap(async () => {
       const release = await loader();
       if (!this.stillOpen(cycle)) return;
       this.patch({
         workbenchPackage: release?.id === "bundled-workbench" ? release : null,
         workbenchPackageStatus: "ready",
+        readError: this.readErrors("package"),
       });
-    }, () => {
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ workbenchPackage: null, workbenchPackageStatus: "error" });
+      this.patch({ workbenchPackage: null, workbenchPackageStatus: "error", readError: this.readErrors("package", message) });
     });
   };
 
   loadSettings = (): Promise<void> => {
     if (this.ui.settingsDraft?.dirty) return Promise.resolve();
     const cycle = this.cycle;
-    this.patch({ settingsStatus: "loading" });
+    this.patch({ settingsStatus: "loading", readError: this.readErrors("settings") });
     return this.wrap(async () => {
       const result = await this.api.product({ method: "settings" });
       if (!this.stillOpen(cycle)) return;
       if (result.method !== "settings") {
-        this.patch({ settingsStatus: "error" });
-        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+        throw wrongProduct("settings", result.method);
       }
       if (this.ui.settingsDraft?.dirty) return;
       this.applyClientDefaults(result.clientDefaults);
       this.patch({
         settingsDraft: { settings: result.settings, observation: result.observation, dirty: false },
         settingsStatus: "ready",
+        readError: this.readErrors("settings"),
       });
-    }, () => {
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ settingsStatus: "error" });
+      this.patch({ settingsStatus: "error", readError: this.readErrors("settings", message) });
     });
   };
 
@@ -852,15 +897,63 @@ export class WorkbenchController {
     void this.submit({ kind: "settings.update", settings: draft.settings }, draft.observation);
   };
 
+  loadLogs = (): Promise<void> => {
+    const cycle = this.cycle;
+    this.patch({ logsStatus: "loading", readError: this.readErrors("logs") });
+    return this.wrap(async () => {
+      const result = await this.api.product({ method: "logs" });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "logs") throw wrongProduct("logs", result.method);
+      this.patch({
+        logs: result.entries,
+        logsError: result.logError,
+        logsStatus: "ready",
+        readError: this.readErrors("logs"),
+      });
+    }, (message) => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({ logsStatus: "error", readError: this.readErrors("logs", message) });
+    });
+  };
+
+  copyWorkbenchLog = (): string => {
+    return this.ui.logs
+      .map((entry) => [entry.at, entry.level, entry.area, entry.event, entry.code, entry.message].filter(Boolean).join(" "))
+      .join("\n");
+  };
+
+  private lastLocalLog = "";
+
+  private persistLocalLog(message: string): void {
+    if (!message || message === this.lastLocalLog) return;
+    this.lastLocalLog = message;
+    const entry: WorkbenchLogEntry = {
+      at: new Date().toISOString(),
+      level: "error",
+      area: "client",
+      event: "request",
+      message,
+    };
+    void this.api.product({ method: "log.record", level: "error", area: "client", event: "request", message }).then(
+      (result) => {
+        if (!this.running || result.method !== "logs") return;
+        this.patch({ logs: result.entries, logsError: result.logError, logsStatus: "ready" });
+      },
+      () => {
+        if (!this.running) return;
+        this.patch({ logs: [...this.ui.logs, entry].slice(-400) });
+      },
+    );
+  };
+
   loadTemplates = (): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ templatesStatus: "loading" });
+    this.patch({ templatesStatus: "loading", readError: this.readErrors("templates") });
     return this.wrap(async () => {
       const result = await this.api.product({ method: "templates" });
       if (!this.stillOpen(cycle)) return;
       if (result.method !== "templates") {
-        this.patch({ templatesStatus: "error" });
-        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+        throw wrongProduct("templates", result.method);
       }
       const templates = result.templates;
       const templateId = this.ui.templateId && templates.some((row) => row.id === this.ui.templateId)
@@ -881,10 +974,11 @@ export class WorkbenchController {
         templateId,
         templateSpaceId,
         shareSpaceId,
+        readError: this.readErrors("templates"),
       });
-    }, () => {
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ templatesStatus: "error" });
+      this.patch({ templatesStatus: "error", readError: this.readErrors("templates", message) });
     });
   };
 
@@ -947,7 +1041,7 @@ export class WorkbenchController {
       });
       if (!this.stillOpen(cycle)) return;
       if (result.method !== "share.export") {
-        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+        throw wrongProduct("share.export", result.method);
       }
       this.env.downloadFile(result.fileName, result.archiveBase64);
     });
@@ -963,7 +1057,7 @@ export class WorkbenchController {
       const result = await this.api.product({ method: "share.previewImport", archiveBase64 });
       if (!this.stillOpen(cycle)) return;
       if (result.method !== "share.previewImport") {
-        throw Object.assign(new Error("workbench/unavailable"), { code: "workbench/unavailable" });
+        throw wrongProduct("share.previewImport", result.method);
       }
       this.patch({
         overlay: { type: "import" },
@@ -1031,7 +1125,9 @@ export class WorkbenchController {
 
   loadDetail = (spaceId: string): Promise<void> => {
     const cycle = this.cycle;
-    this.patch({ detailStatus: "loading", diagnosticsStatus: "loading", diagnostics: null });
+    const cleared = this.readErrors("detail");
+    delete cleared.diagnostics;
+    this.patch({ detailStatus: "loading", diagnosticsStatus: "loading", diagnostics: null, readError: cleared });
     return this.wrap(async () => {
       const [detailResult, backupsResult, diagResult] = await Promise.allSettled([
         this.api.detail(spaceId),
@@ -1044,27 +1140,38 @@ export class WorkbenchController {
         : [];
       let diagnostics: WorkbenchDiagnostics | null = null;
       let diagnosticsStatus: WorkbenchUiState["diagnosticsStatus"] = "error";
+      let diagnosticsMessage: string | undefined;
       if (diagResult.status === "fulfilled" && diagResult.value.method === "diagnostics") {
         diagnostics = diagResult.value.diagnostics;
         diagnosticsStatus = "ready";
+      } else if (diagResult.status === "rejected") {
+        diagnosticsMessage = localizeError(this.ui.locale, errorCode(diagResult.reason));
+      } else if (diagResult.status === "fulfilled") {
+        diagnosticsMessage = localizeError(this.ui.locale, errorCode(wrongProduct("diagnostics", diagResult.value.method)));
       }
+      const detailParts: string[] = [];
       if (detailResult.status !== "fulfilled") {
-        this.patch({ detailStatus: "error", backups, diagnostics, diagnosticsStatus });
-        throw detailResult.reason;
+        detailParts.push(localizeError(this.ui.locale, errorCode(detailResult.reason)));
       }
+      if (backupsResult.status === "rejected") {
+        detailParts.push(localizeError(this.ui.locale, errorCode(backupsResult.reason)));
+      }
+      const readError = { ...this.ui.readError };
+      delete readError.detail;
+      delete readError.diagnostics;
+      if (diagnosticsMessage) readError.diagnostics = diagnosticsMessage;
+      if (detailParts.length > 0) readError.detail = detailParts.join("\n");
       this.patch({
-        detail: detailResult.value,
+        detail: detailResult.status === "fulfilled" ? detailResult.value : null,
         backups,
         diagnostics,
         diagnosticsStatus,
-        detailStatus: "ready",
+        detailStatus: detailResult.status === "fulfilled" ? "ready" : "error",
+        readError,
       });
-      if (diagResult.status === "rejected") {
-        this.patch({ commandError: localizeError(this.ui.locale, errorCode(diagResult.reason)) });
-      }
-    }, () => {
+    }, (message) => {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ detailStatus: "error" });
+      this.patch({ detailStatus: "error", readError: this.readErrors("detail", message) });
     });
   };
 
@@ -1508,7 +1615,14 @@ export class WorkbenchController {
     }, delay);
   }
 
-  private async wrap(action: () => Promise<void>, onError?: () => void): Promise<void> {
+  private readErrors(surface: WorkbenchReadSurface, message?: string): WorkbenchUiState["readError"] {
+    const next = { ...this.ui.readError };
+    if (message) next[surface] = message;
+    else delete next[surface];
+    return next;
+  }
+
+  private async wrap(action: () => Promise<void>, onError?: (message: string) => void): Promise<void> {
     const cycle = this.cycle;
     if (!this.stillOpen(cycle)) return;
     this.wrapDepth += 1;
@@ -1519,10 +1633,13 @@ export class WorkbenchController {
       this.patch({ commandPending: this.wrapDepth - 1 > 0 });
     } catch (error) {
       if (!this.stillOpen(cycle)) return;
-      onError?.();
+      const message = localizeError(this.ui.locale, errorCode(error));
+      onError?.(message);
+      const local = localLogMessage(error);
+      if (local) this.persistLocalLog(local);
       this.patch({
         commandPending: this.wrapDepth - 1 > 0,
-        commandError: localizeError(this.ui.locale, errorCode(error)),
+        commandError: onError ? this.ui.commandError : message,
       });
     } finally {
       this.wrapDepth = Math.max(0, this.wrapDepth - 1);
