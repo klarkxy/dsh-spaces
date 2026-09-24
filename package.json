@@ -17,8 +17,9 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/ensure-electron.mjs",
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev-electron.mjs",
     "dev:web": "node scripts/dev-dsh-web.mjs",
+    "test:development": "node --import tsx --test tests/development-refresh.test.ts",
     "build": "npm run build:spaces && electron-vite build",
     "build:spaces": "node scripts/build-spaces.mjs",
     "typecheck:spaces": "tsc --noEmit -p tsconfig.spaces.json",
