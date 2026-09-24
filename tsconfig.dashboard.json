@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "rootDir": "."
+  },
+  "include": ["src/shared/dashboard.ts", "src/core/domain/dashboard/**/*.ts"]
+}
