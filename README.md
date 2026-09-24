@@ -6,7 +6,7 @@
 
 Download desktop builds from [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases). Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
 
-Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI channel: official **`latest`**, pinned to the resolved exact version. The local plugin is not on npm.
+Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI version: official **`0.1.7-alpha.1`**, pinned for new installations. The local plugin is not on npm.
 
 Opening the desktop connects to a healthy workbench or starts it once when no service exists and the runtime is ready. First-time environment installation continues into the workbench automatically. A stopped service is not an error; genuine startup failures and ownership conflicts remain visible, without automatic retry or lock takeover.
 
@@ -18,7 +18,7 @@ DSH Spaces does **not** promise that arbitrary plugin combinations will run. Fai
 
 ## Why
 
-Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces gives every workbench its own session, storage, settings, and local credentials under `$DSH_HOME/hub/<name>/`. Shared LLM connections live in a Home-level catalog, not in `web` settings. `web` stays on the official home `settings.yaml` unless it is explicitly joined.
+Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces keeps each workbench's sessions, storage and local credentials under `$DSH_HOME/hub/<name>/`; alpha settings persist in `profiles/<name>/cordis.patch.yml` through the native ConfigEditor. Shared LLM connections live in a Home-level catalog. Named Spaces never import the root Home `settings.yaml` or write the default `web` profile. See the [alpha migration and acceptance record](tasks/alpha-migration.md).
 
 `web` is the unique home profile. Spaces never writes its isolation patch. The manager profile is `spaces-hub` (suffix if taken). Ordinary spaces install `@dsh-spaces/view-bridge`. Putting the full `@dsh-spaces/plugin` on an ordinary space is a misinstall.
 
@@ -55,8 +55,8 @@ After a user-confirmed component upgrade, the old service stages the candidate, 
 
 - Node 24 for contributing; first desktop launch can install managed Node, pnpm, and DSH CLI
 - Package source: China (npmmirror) or official (npmjs / nodejs.org)
-- First install uses `@deepseek-ai/dsh@latest` and pins the resolved exact version
-- Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. Plugin peers on SDK `0.1.5-rc.2` for this repo's build; that is not a CLI allowlist
+- First install uses `@deepseek-ai/dsh@0.1.7-alpha.1`; existing selected runtimes are upgraded explicitly
+- Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. Plugin peers on SDK `0.1.7-alpha.1` for this repo's build; that is not a CLI allowlist
 
 ## Develop
 
@@ -72,7 +72,11 @@ npm run dev
 npm run dev:web
 ```
 
-`npm run dev` starts the Electron shell against `.sandbox/dsh-home`. `npm run dev:web` recreates `.sandbox/dsh-web-home`, installs this checkout's plugin into official `web`, and starts `dsh web`. Click **初始化 Spaces / Initialize Spaces** in the browser. Supervisor flags: [docs/workbench.md](docs/workbench.md). Do not run isolation/lifecycle scripts while the app uses the same sandbox profiles. Activity ledger: [tasks/todo.md](tasks/todo.md).
+`npm run dev` (or `pnpm run dev`) builds the current component group, then opens Electron against the existing `.sandbox/dsh-home`. After acquiring the desktop instance lock, it compares installed content with the build, normally stops an idle older service, installs the current manager packages, and selects the matching Supervisor. Unchanged content skips installation. Space data stays in place; the default `web` profile is not modified. Electron browser storage uses `.sandbox/electron-user-data`; `DSH_SPACES_HOME` and `DSH_SPACES_USER_DATA` can override the development paths.
+
+Exit the previous development command before launching another build, and normally stop active ordinary spaces before updating components. An already-open development window, active job, ambiguous ownership or unfinished maintenance causes an explicit refusal. Failed updates preserve evidence and are not replayed. Manager-plugin changes take effect on the next explicit `dev` launch; this is not plugin hot reload. `npm run test:development` checks this workflow.
+
+`npm run dev:web` recreates `.sandbox/dsh-web-home`, installs this checkout's plugin into official `web`, and starts `dsh web`. Click **初始化 Spaces / Initialize Spaces** in the browser. Supervisor flags: [docs/workbench.md](docs/workbench.md). Do not run isolation/lifecycle scripts while the app uses the same sandbox profiles. Activity ledger: [tasks/todo.md](tasks/todo.md).
 
 ## Build
 
@@ -116,4 +120,8 @@ MIT. See `LICENSE`.
 
 通用 Node 模块在 `src/adapters/node`。构建清单覆盖 Supervisor、管理插件、view-bridge、llm-bridge、安装 worker 五组件。启动仍需要同组 `--snapshot-worker`，运行时安装 IO 已抽出。组件升级采用一次性启动器交接，新管理器就绪后才确认成功。本次源码测试、标准插件、组件更新和桌面包的验证范围见 [合并验收记录](tasks/merge-execution.md)。
 
-`npm run dev` 启动 Electron，Home 为 `.sandbox/dsh-home`。`npm run dev:web` 每次重建 `.sandbox/dsh-web-home`，把当前仓库插件装进官方 `web`，再启动 `dsh web`。浏览器里点 **初始化 Spaces**。监督进程参数见 [docs/workbench.md](docs/workbench.md)。活动账本：[tasks/todo.md](tasks/todo.md)。
+`npm run dev` / `pnpm run dev` 先构建当前组件，再打开 Electron，沿用 `.sandbox/dsh-home`。取得桌面单实例锁后，按内容比较已安装组件；有变化时正常停止空闲旧服务、安装管理插件并选择匹配的 Supervisor，没有变化则跳过安装。保留空间数据，不修改默认 `web`。开发窗口的浏览器数据位于 `.sandbox/electron-user-data`，可通过 `DSH_SPACES_HOME` / `DSH_SPACES_USER_DATA` 指定开发目录。
+
+启动下一次开发构建前，退出上一次开发命令；更新组件前正常停止运行中的普通空间。已有开发窗口、执行中的任务、归属不明或中断维护都会明确拒绝；失败留证，不续跑。管理插件源码改动在下一次主动运行 `dev` 时生效，不提供插件热重载。定向验证：`npm run test:development`。
+
+`npm run dev:web` 每次重建 `.sandbox/dsh-web-home`，把当前仓库插件装进官方 `web`，再启动 `dsh web`。浏览器里点 **初始化 Spaces**。监督进程参数见 [docs/workbench.md](docs/workbench.md)。活动账本：[tasks/todo.md](tasks/todo.md)。
