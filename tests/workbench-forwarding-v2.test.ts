@@ -7,7 +7,7 @@ import {
   WORKBENCH_PRODUCT_SHARE_BODY_LIMIT,
   workbenchPost,
 } from "../packages/plugin/src/host/workbench-http.ts";
-import { LLM_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR } from "../packages/plugin/src/host/remote-errors.ts";
+import { WORKBENCH_PUBLIC_ERROR } from "../packages/plugin/src/host/remote-errors.ts";
 import { workbenchStateSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import { createWorkbenchRemote } from "../packages/plugin/src/client/workbench-remote.ts";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../src/shared/workbench-product.ts";
@@ -380,7 +380,7 @@ test("LLM public errors pass through the Host client without leaking details", a
     (error: unknown) => {
       assert.ok(error instanceof RemoteError);
       assert.equal(error.code, "LLM_REVISION_CONFLICT");
-      assert.equal(error.message, LLM_PUBLIC_ERROR.LLM_REVISION_CONFLICT);
+      assert.equal(error.message, "catalog revision moved");
       assert.deepEqual(error.details, {});
       return true;
     },
@@ -395,7 +395,7 @@ test("LLM public errors pass through the Host client without leaking details", a
     (error: unknown) => {
       assert.ok(error instanceof RemoteError);
       assert.equal(error.code, "LLM_APPLY_FAILED");
-      assert.equal(error.message, LLM_PUBLIC_ERROR.LLM_APPLY_FAILED);
+      assert.equal(error.message, "observed space state no longer matches");
       assert.deepEqual(error.details, {});
       return true;
     },
@@ -410,8 +410,9 @@ test("LLM public errors pass through the Host client without leaking details", a
     (error: unknown) => {
       assert.ok(error instanceof RemoteError);
       assert.equal(error.code, "workbench/conflict");
-      assert.equal(error.message, WORKBENCH_PUBLIC_ERROR["workbench/conflict"]);
+      assert.equal(error.message, "internal conflict diagnostic");
       assert.deepEqual(error.details, {});
+      assert.equal(JSON.stringify(error).includes("secrets"), false);
       return true;
     },
   );

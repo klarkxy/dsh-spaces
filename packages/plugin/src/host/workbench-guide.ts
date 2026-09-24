@@ -6,6 +6,7 @@ import type {
   WorkbenchInitializeResult,
   WorkbenchReturnTarget,
 } from "../types";
+import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import { WORKBENCH_PUBLIC_ERROR } from "./remote-errors";
 import type { WorkbenchHostRuntime } from "./runtime";
 
@@ -27,8 +28,13 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   async bootstrap(): Promise<WorkbenchBootstrapResult> {
     try {
       return await this.runtime.bootstrap();
-    } catch {
-      throw new RemoteError("workbench/unavailable", WORKBENCH_PUBLIC_ERROR["workbench/unavailable"], {});
+    } catch (error) {
+      if (error instanceof RemoteError) throw error;
+      throw new RemoteError(
+        "workbench/unavailable",
+        reportedOrFallback(error instanceof Error ? error.message : undefined, WORKBENCH_PUBLIC_ERROR["workbench/unavailable"]),
+        {},
+      );
     }
   }
 
@@ -36,8 +42,13 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   async returnTarget(): Promise<WorkbenchReturnTarget> {
     try {
       return await this.runtime.returnTarget();
-    } catch {
-      throw new RemoteError("workbench/unavailable", WORKBENCH_PUBLIC_ERROR["workbench/unavailable"], {});
+    } catch (error) {
+      if (error instanceof RemoteError) throw error;
+      throw new RemoteError(
+        "workbench/unavailable",
+        reportedOrFallback(error instanceof Error ? error.message : undefined, WORKBENCH_PUBLIC_ERROR["workbench/unavailable"]),
+        {},
+      );
     }
   }
 
@@ -45,8 +56,13 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   async initialize(): Promise<WorkbenchInitializeResult> {
     try {
       return await this.runtime.initialize();
-    } catch {
-      throw new RemoteError("workbench/unavailable", WORKBENCH_PUBLIC_ERROR["workbench/unavailable"], {});
+    } catch (error) {
+      if (error instanceof RemoteError) throw error;
+      throw new RemoteError(
+        "workbench/unavailable",
+        reportedOrFallback(error instanceof Error ? error.message : undefined, WORKBENCH_PUBLIC_ERROR["workbench/unavailable"]),
+        {},
+      );
     }
   }
 }

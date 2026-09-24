@@ -17,6 +17,13 @@ declare module "@deepseek-ai/dsh-typert-protocol/types" {
     "workbench/read-only": {};
     "workbench/forbidden": {};
     "workbench/not-cancellable": {};
+    "workbench/failed": {};
+    "workbench/maintenance": {};
+    "workbench/busy": {};
+    "workbench/unmanaged": {};
+    "workbench/protected": {};
+    "workbench/incompatible": {};
+    "workbench/unauthorized": {};
     LLM_REVISION_CONFLICT: {};
     LLM_WRITE_OWNER_REQUIRED: {};
     LLM_CONFIG_INVALID: {};
@@ -57,6 +64,13 @@ export const WORKBENCH_REMOTE_CODES = [
   "workbench/read-only",
   "workbench/forbidden",
   "workbench/not-cancellable",
+  "workbench/failed",
+  "workbench/maintenance",
+  "workbench/busy",
+  "workbench/unmanaged",
+  "workbench/protected",
+  "workbench/incompatible",
+  "workbench/unauthorized",
 ] as const;
 
 export const LLM_REMOTE_CODES = [
@@ -93,6 +107,23 @@ export const WORKBENCH_PUBLIC_ERROR: Record<WorkbenchRemoteCode, string> = {
   "workbench/read-only": "The workbench is read-only until control is acquired.",
   "workbench/forbidden": "This profile cannot perform that workbench action.",
   "workbench/not-cancellable": "This job cannot be cancelled in its current phase.",
+  "workbench/failed": "The workbench request failed.",
+  "workbench/maintenance": "That maintenance action is not available yet.",
+  "workbench/busy": "Another controller already holds run rights for this home.",
+  "workbench/unmanaged": "This instance is not managed here. It can be viewed only.",
+  "workbench/protected": "The web profile and manager space cannot be changed this way.",
+  "workbench/incompatible": "The bound DSH CLI could not be validated as an exact installed version.",
+  "workbench/unauthorized": "Authentication is required.",
+};
+
+export const SPACES_PUBLIC_ERROR: Record<SpacesRemoteCode, string> = {
+  "spaces/read-only": "Spaces are read-only until the host identity and runtime are confirmed.",
+  "spaces/host-denied": "The current host space cannot be modified this way.",
+  "spaces/invalid-input": "The request is not a valid space operation.",
+  "spaces/not-found": "That space was not found.",
+  "spaces/already-exists": "A space with that name already exists.",
+  "spaces/locked": "Another space operation is already running.",
+  "spaces/unavailable": "A previous space operation did not finish.",
 };
 
 export const LLM_PUBLIC_ERROR: Record<LlmRemoteCode, string> = {
