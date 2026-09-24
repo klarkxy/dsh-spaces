@@ -178,8 +178,8 @@ test("empty, crash, and delete copy tell a non-engineer the next step", () => {
   assert.ok(!t("create.folderHint", undefined, "en").toLowerCase().includes("official"));
   assert.ok(!t("create.folderHint", undefined, "zh").includes("官方"));
   assert.ok(t("create.folderHint", undefined, "en").toLowerCase().includes("disk"));
-  assert.ok(t("icon.hint", undefined, "en").toLowerCase().includes("whale"));
-  assert.ok(t("icon.hint", undefined, "zh").includes("鲸鱼"));
+  assert.ok(t("icon.hint", undefined, "en").includes("Spaces icon"));
+  assert.ok(t("icon.hint", undefined, "zh").includes("Spaces 图标"));
   assert.ok(t("icon.upload", undefined, "zh").includes("上传"));
 });
 

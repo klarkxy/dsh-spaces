@@ -225,9 +225,9 @@ export const zh: Messages = {
   "rename.folderStays": "磁盘上的文件夹名仍是 {name}。",
 
   "icon.title": "图标",
-  "icon.hint": "默认是 DSH 鲸鱼图标，也可以上传自己的图片。",
+  "icon.hint": "默认是 Spaces 图标，也可以上传自己的图片。",
   "icon.upload": "上传图片",
-  "icon.useDefault": "使用 DSH 鲸鱼",
+  "icon.useDefault": "使用 Spaces 图标",
   "icon.choose": "选择图标",
   "icon.images": "图片",
 
