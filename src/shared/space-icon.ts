@@ -1,6 +1,6 @@
 import { t } from "./i18n";
 
-/** Max size of a file chosen in the picker, before we downscale it. */
+/** Workbench JSON body cap. The icon picker shrinks images before they are submitted. */
 export const MAX_SPACE_ICON_FILE_BYTES = 2 * 1024 * 1024;
 
 /** Max size of the stored data URL (processed PNG/SVG). */

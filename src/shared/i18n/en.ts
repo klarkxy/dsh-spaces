@@ -234,9 +234,9 @@ export const en = {
   "rename.folderStays": "The folder on disk stays {name}.",
 
   "icon.title": "Icon",
-  "icon.hint": "Default is the DSH whale. You can upload your own picture.",
+  "icon.hint": "Default is the Spaces icon. You can upload your own picture.",
   "icon.upload": "Upload image",
-  "icon.useDefault": "Use DSH whale",
+  "icon.useDefault": "Use Spaces icon",
   "icon.choose": "Choose an icon",
   "icon.images": "Images",
 
