@@ -1,7 +1,9 @@
 import type { PackageSource } from "./types";
 
 export const DSH_RUNTIME_PACKAGE = "@deepseek-ai/dsh";
-/** Official npm dist-tag used for first install. Resolved to an exact version, then pinned. */
+/** Default for a new installation; existing selected runtimes keep their version. */
+export const DSH_DEFAULT_VERSION = "0.1.7-alpha.1";
+/** Official stable channel used when browsing the runtime catalog. */
 export const DSH_DEFAULT_CHANNEL = "latest";
 
 /** Where the active CLI binary came from. Independent of npm dist-tags. */

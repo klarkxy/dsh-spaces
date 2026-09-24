@@ -49,6 +49,8 @@ if (!process.argv.includes('--core-only')) {
 
   await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
     entryPoints: ['packages/view-bridge/src/index.ts'], outfile: 'packages/view-bridge/lib/index.js' });
+  await build({ ...common, platform: 'node', external: sdkExternal,
+    entryPoints: ['packages/view-bridge/src/settings.ts'], outfile: 'packages/view-bridge/lib/settings.js' });
   await buildClient('@dsh-spaces/view-bridge', 'packages/view-bridge/src/client.ts', 'packages/view-bridge/lib/client.js');
   await copyFile(at('LICENSE'), at('packages/view-bridge/LICENSE'));
 

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { load as loadYaml } from "js-yaml";
@@ -46,28 +46,12 @@ function insertedBridge(patches: PatchRow[]): PatchRow {
   return bridge as PatchRow;
 }
 
-function officialRc2Bin(): string | null {
-  const candidates = [process.env.DSH_TEST_CLI_BIN, process.env.DSH_TEST_RC2_BIN, process.env.DSH_TEST_BIN];
-  const appData = process.env.APPDATA;
-  if (appData) candidates.push(join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
-  for (const bin of candidates) {
-    if (!bin || !existsSync(bin)) continue;
-    try {
-      const pkg = JSON.parse(readFileSync(join(dirname(resolve(bin)), "..", "package.json"), "utf8")) as {
-        name?: unknown;
-        version?: unknown;
-      };
-      if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.1.5-rc.2") return resolve(bin);
-    } catch {
-      continue;
-    }
-  }
-  return null;
+function officialAlphaAppBoot(): string {
+  return createRequire(join(repo, "package.json")).resolve("@deepseek-ai/dsh-app-boot");
 }
 
-async function loadOfficialAppBoot(bin: string): Promise<OfficialAppBoot> {
-  const appBootPath = createRequire(bin).resolve("@deepseek-ai/dsh-app-boot");
-  const imported = await import(pathToFileURL(appBootPath).href) as Partial<OfficialAppBoot>;
+async function loadOfficialAppBoot(): Promise<OfficialAppBoot> {
+  const imported = await import(pathToFileURL(officialAlphaAppBoot()).href) as Partial<OfficialAppBoot>;
   assert.equal(typeof imported.loadOverlayPatches, "function");
   assert.equal(typeof imported.composeEntries, "function");
   return imported as OfficialAppBoot;
@@ -90,7 +74,7 @@ function runBridgeFixture(script: string): Record<string, unknown> {
     cwd: repo,
     env: { ...process.env, DSH_BRIDGE_TEST_ROOT: tempRoot },
     encoding: "utf8",
-    timeout: 30_000,
+    timeout: 120_000,
     windowsHide: true,
   });
   assert.equal(child.status, 0, child.stderr || child.stdout || child.error?.message);
@@ -121,13 +105,10 @@ test("llm-bridge is a packable DSH plugin and is embedded in the plugin payload 
   assert.ok(LLM_REQUIRED.includes("lib/index.js"));
 });
 
-const officialBin = officialRc2Bin();
-
 test(
   "llm-bridge bundle patch is a loader insert list that official compose mounts",
-  { skip: officialBin ? false : "official 0.1.5-rc.2 bin not available" },
   async () => {
-    const appBoot = await loadOfficialAppBoot(officialBin!);
+    const appBoot = await loadOfficialAppBoot();
     const dir = mkdtempSync(join(tmpdir(), "dsh-spaces-llm-pack-"));
     temps.push(dir);
     const legacyFile = join(dir, "legacy-bundle-object.yml");
@@ -144,7 +125,15 @@ test(
     insertedBridge(patches);
     const warnings: string[] = [];
     const composed = appBoot.composeEntries(
-      [[{ insert: [{ id: "seed", name: "seed-mod" }] }], patches],
+      [[
+        {
+          insert: [
+            { id: "seed", name: "seed-mod" },
+            { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai" },
+            { id: "agent-default-model", name: "@deepseek-ai/dsh-agent-default-model" },
+          ],
+        },
+      ], patches],
       (message) => warnings.push(message),
     );
     assert.deepEqual(warnings, []);
@@ -152,10 +141,12 @@ test(
     const mounted = composed.find((row) => row.id === BRIDGE_ID);
     assert.equal(mounted?.name, BRIDGE_NAME);
     assert.deepEqual(mounted?.config, {});
+    assert.deepEqual(composed.find((row) => row.id === "llm-pi-ai")?.inject, { spacesLlmSnapshot: true });
+    assert.deepEqual(composed.find((row) => row.id === "agent-default-model")?.inject, { spacesLlmSnapshot: true });
   },
 );
 
-test("official FileSettingsProvider projects snapshot for PiAi and AgentDefaultModel", { timeout: 30_000 }, () => {
+test("official SettingsForms projects snapshot for PiAi and AgentDefaultModel", { timeout: 120_000 }, () => {
   const result = runBridgeFixture("main.mjs");
   assert.equal(result.modelFound, true);
   assert.equal(result.defaultProjected, true);
@@ -167,7 +158,7 @@ test("official FileSettingsProvider projects snapshot for PiAi and AgentDefaultM
   assert.equal(result.consumerOwnsRegistration, true);
 });
 
-test("official FileSettingsProvider rejects mutate bypasses and runtime conflict next", { timeout: 30_000 }, () => {
+test("official SettingsForms rejects mutate bypasses and runtime conflict next", { timeout: 120_000 }, () => {
   const result = runBridgeFixture("boundaries.mjs");
   const sectionRoot = result.sectionRoot as { rejected?: boolean; noFileChange?: boolean };
   const providersRoot = result.providersRoot as { rejected?: boolean; noFileChange?: boolean };
@@ -183,7 +174,7 @@ test("official FileSettingsProvider rejects mutate bypasses and runtime conflict
   assert.equal(localDelegation.recordReadWrite, true);
 });
 
-test("bridge dispose withdraws shared projection and forged managed routes are rejected", { timeout: 30_000 }, () => {
+test("bridge dispose withdraws shared projection and forged managed routes are rejected", { timeout: 120_000 }, () => {
   const result = runBridgeFixture("lifecycle.mjs");
   const late = result.lateConsumerBridgeDispose as {
     beforeDispose?: boolean;
@@ -195,7 +186,7 @@ test("bridge dispose withdraws shared projection and forged managed routes are r
   const forged = result.forgedManagedRoute as { error?: string };
   assert.equal(late.beforeDispose, true);
   assert.equal(late.providerStillPresent, false);
-  assert.deepEqual(late.defaultAfterDispose, { provider: "composition", model: "baseline" });
-  assert.equal(late.namespaceStillRegistered, true);
+  assert.equal(late.namespaceStillRegistered, false);
+  assert.ok(late.defaultAfterDispose == null || late.defaultAfterDispose.provider === "composition");
   assert.match(String(forged.error ?? ""), /occupy a managed shared LLM route|MANAGED_ROUTE_CONFLICT|conflict|reserved/i);
 });

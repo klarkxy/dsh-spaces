@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -20,23 +20,24 @@ function home(): string {
   const dir = mkdtempSync(join(tmpdir(), "dsh-llm-settings-"));
   temps.push(dir);
   mkdirSync(join(dir, "hub", "alpha"), { recursive: true });
+  mkdirSync(join(dir, "profiles", "alpha"), { recursive: true });
   return dir;
 }
 
-test("space default writes only agent-default-model and keeps other YAML comments", () => {
+test("space default writes only agent-default-model and keeps other YAML comments", async () => {
   const root = home();
-  const path = join(root, "hub", "alpha", "settings.yaml");
+  const path = join(root, "profiles", "alpha", "cordis.patch.yml");
   writeFileSync(
     path,
-    ["# keep me", "theme:", "  name: dark", "agent-default-model:", "  provider: local-openai", "  model: old", ""].join("\n"),
+    ["# keep me", "- id: theme", "  config:", "    name: dark", "- id: agent-default-model", "  config:", "    provider: local-openai", "    model: old", ""].join("\n"),
   );
   assert.deepEqual(readSpaceDefaultModel(root, "alpha"), { provider: "local-openai", model: "old" });
-  writeSpaceDefaultModel(root, "alpha", { provider: "spaces-llm-aa", model: "demo-large" });
+  await writeSpaceDefaultModel(root, "alpha", { provider: "spaces-llm-aa", model: "demo-large" });
   const text = readFileSync(path, "utf8");
   assert.match(text, /# keep me/);
   assert.match(text, /name: dark/);
   assert.deepEqual(readSpaceDefaultModel(root, "alpha"), { provider: "spaces-llm-aa", model: "demo-large" });
-  writeSpaceDefaultModel(root, "alpha", null);
+  await writeSpaceDefaultModel(root, "alpha", null);
   assert.equal(readSpaceDefaultModel(root, "alpha"), null);
   assert.match(readFileSync(path, "utf8"), /# keep me/);
 });
@@ -44,20 +45,21 @@ test("space default writes only agent-default-model and keeps other YAML comment
 test("local candidates skip managed routes and never surface keys", () => {
   const root = home();
   writeFileSync(
-    join(root, "hub", "alpha", "settings.yaml"),
+    join(root, "profiles", "alpha", "cordis.patch.yml"),
     [
-      "llm-pi-ai:",
-      "  providers:",
-      "    local-openai:",
-      "      displayName: Local",
-      "      api: openai-completions",
-      "      baseURL: http://127.0.0.1:9/v1",
-      "      apiKeyEnv: LOCAL_KEY",
-      "      models:",
-      "        - id: demo-large",
-      "    spaces-llm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:",
-      "      api: openai-completions",
-      "      baseURL: http://example.invalid",
+      "- id: llm-pi-ai",
+      "  config:",
+      "    providers:",
+      "      local-openai:",
+      "        displayName: Local",
+      "        api: openai-completions",
+      "        baseURL: http://127.0.0.1:9/v1",
+      "        apiKeyEnv: LOCAL_KEY",
+      "        models:",
+      "          - id: demo-large",
+      "      spaces-llm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:",
+      "        api: openai-completions",
+      "        baseURL: http://example.invalid",
       "",
     ].join("\n"),
   );
@@ -75,4 +77,10 @@ test("local candidates skip managed routes and never surface keys", () => {
 test("redactEndpoint drops userinfo and query", () => {
   assert.equal(redactEndpoint("https://host.example/v1"), "https://host.example/v1");
   assert.equal(redactEndpoint("https://user:pass@host.example/v1?key=1"), "https://host.example/v1");
+});
+
+test("protected web is rejected before a settings lock can create its directory", async () => {
+  const root = home();
+  await assert.rejects(writeSpaceDefaultModel(root, "web", { provider: "local", model: "demo" }), /protected/);
+  assert.equal(existsSync(join(root, "profiles", "web")), false);
 });

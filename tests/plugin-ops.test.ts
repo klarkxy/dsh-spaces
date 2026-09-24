@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -175,4 +175,45 @@ test("parseNpmNameAndVersion requires an exact version and never reads latest", 
   assert.equal(parseNpmNameAndVersion("dsh-outline"), null);
   assert.equal(parseNpmNameAndVersion("dsh-outline@latest"), null);
   assert.equal(parseNpmNameAndVersion("github:owner/repo"), null);
+});
+
+test("owned archive paths with spaces reach alpha CLI as one absolute unquoted argument", async () => {
+  const dir = join(home(), "Home with spaces");
+  writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
+  const plugins = join(dir, "hub", "plugins");
+  mkdirSync(plugins, { recursive: true });
+  const archive = join(plugins, "dsh-spaces-plugin.tgz");
+  writeFileSync(archive, "fixture");
+  const capture = join(dir, "argv.json");
+  const bin = join(dir, "fake-dsh.cjs");
+  writeFileSync(bin, `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));`);
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.1.7-alpha.1" }));
+  setSelectedDshResolver(() => bin); resetDshBinCache();
+  try {
+    await pluginAdd(dir, "coding", archive);
+    assert.deepEqual(JSON.parse(readFileSync(capture, "utf8")), ["plugin", "--profile", "coding", "add", archive]);
+  } finally { setSelectedDshResolver(() => undefined); resetDshBinCache(); }
+});
+
+test("older Windows CLI receives one quoted profile-relative archive", async () => {
+  const dir = join(home(), "Home with spaces");
+  writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
+  const plugins = join(dir, "hub", "plugins");
+  mkdirSync(plugins, { recursive: true });
+  const archive = join(plugins, "dsh-spaces-plugin.tgz");
+  writeFileSync(archive, "fixture");
+  const capture = join(dir, "argv.json");
+  const bin = join(dir, "lib", "bin.js");
+  mkdirSync(join(dir, "lib"), { recursive: true });
+  writeFileSync(bin, `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));`);
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.1.5-rc.2" }));
+  setSelectedDshResolver(() => bin); resetDshBinCache();
+  try {
+    await pluginAdd(dir, "coding", archive);
+    const argv = JSON.parse(readFileSync(capture, "utf8")) as string[];
+    const expected = process.platform === "win32"
+      ? `"file:../../hub/plugins/dsh-spaces-plugin.tgz"`
+      : archive;
+    assert.deepEqual(argv, ["plugin", "--profile", "coding", "add", expected]);
+  } finally { setSelectedDshResolver(() => undefined); resetDshBinCache(); }
 });

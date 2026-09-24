@@ -68,6 +68,7 @@ export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, read
     "lib/view-bridge/cordis.patch.yml",
     "lib/view-bridge/lib/index.js",
     "lib/view-bridge/lib/client.js",
+    "lib/view-bridge/lib/settings.js",
   ],
   "llm-bridge": ["lib/llm-bridge/package.json", "lib/llm-bridge/cordis.patch.yml", "lib/llm-bridge/lib/index.js"],
   "installation-worker": ["lib/supervisor/snapshot-worker.mjs"],

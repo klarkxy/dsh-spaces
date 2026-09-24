@@ -144,7 +144,7 @@ function resolveDshBin(envName = "DSH_TEST_BIN") {
   const fromGlobal = globalRoot ? dshBinFromPackage(join(globalRoot, "@deepseek-ai", "dsh")) : null;
   if (fromGlobal) return fromGlobal;
   throw new Error(
-    "Official DSH CLI not found. Install the global package (@deepseek-ai/dsh@latest) or set DSH_TEST_BIN to that package's lib/bin.js. This script does not guess a machine-local Temp path.",
+    "Official DSH CLI not found. Install the global package (@deepseek-ai/dsh@0.1.7-alpha.1) or set DSH_TEST_BIN to that package's lib/bin.js. This script does not guess a machine-local Temp path.",
   );
 }
 
@@ -1180,7 +1180,7 @@ async function main() {
     bin,
     home,
     tooling,
-    ["plugin", "--profile", WEB_PROFILE, "add", pluginTgz, "--config.auto-install-peers=true"],
+    ["plugin", "--profile", WEB_PROFILE, "add", pluginTgz],
     PLUGIN_MS,
     "dsh plugin add web",
     join(out, "plugin-add.log"),

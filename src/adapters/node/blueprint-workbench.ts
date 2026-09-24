@@ -99,6 +99,7 @@ import { assertNotRealHome, isInsideRealHome, realDshHome } from "./home-guard";
 import { settingsPath } from "./hub-settings";
 import { spaceDataRoot } from "./llm-policy-store";
 import { spaceSettingsPath } from "./llm-space-settings";
+import { readProfileSettings, writeProfileSettings } from "./profile-settings";
 import { parseNpmNameAndVersion, type PluginFetcher } from "./plugin-ops";
 import { isHubPluginArchive, readPluginLibrary } from "./plugin-library";
 import type { WorkbenchJobContext } from "./workbench-jobs";
@@ -1415,12 +1416,11 @@ function describeSettings(
 ): Array<{ info: BlueprintSourceNamespace; observations: BlueprintLocalObservation[]; value: BlueprintJson }> {
   const path = spaceSettingsPath(home, spaceId);
   if (!existsSync(path)) return [];
-  const text = readFileSync(path, "utf8");
-  const doc = parseDocument(text, { customTags: [jsTag], prettyErrors: true });
+  const doc = readProfileSettings(home, spaceId, true);
   if (!isMap(doc.contents)) return [];
   const rows: Array<{ info: BlueprintSourceNamespace; observations: BlueprintLocalObservation[]; value: BlueprintJson }> = [];
   for (const item of doc.contents.items) {
-    const namespace = isScalar(item.key) ? String(item.key.value ?? "") : "";
+    const namespace = typeof item.key === "string" ? item.key : isScalar(item.key) ? String(item.key.value ?? "") : "";
     if (!namespace) continue;
     const pointer = `/profile/settings/${jsonPointerToken(namespace)}`;
     if (FORBIDDEN_SETTINGS.has(namespace)) {
@@ -1768,19 +1768,9 @@ function isOwnedPathScalar(node: unknown, spaceId: string, file: "settings.yaml"
 }
 
 function writeBoundSettings(home: string, spaceId: string, settings: BlueprintSettings): void {
-  const path = spaceSettingsPath(home, spaceId);
-  mkdirSync(spaceDataRoot(home, spaceId), { recursive: true });
-  const original = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const doc = parseDocument(original || "{}", { keepSourceTokens: true });
-  if (doc.contents == null || !isMap(doc.contents)) {
-    doc.contents = new YAMLMap() as unknown as typeof doc.contents;
-  }
-  for (const namespace of Object.keys(settings)) {
-    if (FORBIDDEN_SETTINGS.has(namespace)) continue;
-    doc.set(namespace, settings[namespace]);
-  }
-  const next = doc.toString({ lineWidth: 0 });
-  atomicWrite(path, next.endsWith("\n") ? next : `${next}\n`);
+  writeProfileSettings(home, spaceId, Object.fromEntries(
+    Object.entries(settings).filter(([namespace]) => !FORBIDDEN_SETTINGS.has(namespace)),
+  ));
 }
 
 function writeProvenance(home: string, spaceId: string, blueprint: Blueprint, values: BlueprintInputValues): void {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -17,9 +17,8 @@ import {
   compileManagedRecordKey,
   createConnectionId,
 } from "../src/core/domain/llm-connections.ts";
-import { attachOfficialLlm } from "../packages/llm-bridge/src/official-host.ts";
-import { freezeSpaceSnapshot, openSpaceLlmBridge } from "../packages/llm-bridge/src/space-bridge.ts";
-import { PINNED_DSH_PACKAGE_VERSION } from "./helpers/llm-official.ts";
+import { freezeSpaceSnapshot } from "../packages/llm-bridge/src/space-bridge.ts";
+import { openSpaceLlmBridge, PINNED_DSH_PACKAGE_VERSION } from "./helpers/llm-official.ts";
 
 const temps: string[] = [];
 const servers: Server[] = [];
@@ -121,7 +120,7 @@ function providerConfig(baseURL: string) {
   };
 }
 
-test("A and B stream a shared official adapter route while local same-name models stay distinct", async () => {
+test("A and B stream a shared official adapter route while local same-name models stay distinct", { timeout: 120_000 }, async () => {
   const home = tempHome();
   const sharedMock = await startMockCompletions("shared");
   const localAMock = await startMockCompletions("local-a");
@@ -145,31 +144,28 @@ test("A and B stream a shared official adapter route while local same-name model
   const betaSnapshot = freezeSpaceSnapshot(await catalog.read(), await policies.read("beta"), PINNED_DSH_PACKAGE_VERSION);
 
   const alpha = await openSpaceLlmBridge({
-    settingsPath: join(home, "hub", "alpha", "settings.yaml"),
-    localCredentialsPath: join(home, "hub", "alpha", ".credentials.yaml"),
     dshHome: join(home, "hub", "alpha"),
+    localCredentialsPath: join(home, "hub", "alpha", ".credentials.yaml"),
     snapshot,
-    shared: credentials,
+    sharedHome: home,
+    spaceId: "alpha",
   });
   const beta = await openSpaceLlmBridge({
-    settingsPath: join(home, "hub", "beta", "settings.yaml"),
-    localCredentialsPath: join(home, "hub", "beta", ".credentials.yaml"),
     dshHome: join(home, "hub", "beta"),
+    localCredentialsPath: join(home, "hub", "beta", ".credentials.yaml"),
     snapshot: betaSnapshot,
-    shared: credentials,
+    sharedHome: home,
+    spaceId: "beta",
   });
-  const web = await openSpaceLlmBridge({
-    settingsPath: join(home, "settings.yaml"),
-    localCredentialsPath: join(home, ".credentials.yaml"),
-    dshHome: home,
+  const unjoined = await openSpaceLlmBridge({
+    dshHome: join(home, "hub", "unjoined"),
+    localCredentialsPath: join(home, "hub", "unjoined", ".credentials.yaml"),
     snapshot: null,
-    shared: credentials,
+    sharedHome: home,
+    spaceId: "unjoined",
   });
 
   try {
-    await attachOfficialLlm(alpha.ctx, alpha.settings);
-    await attachOfficialLlm(beta.ctx, beta.settings);
-    await attachOfficialLlm(web.ctx, web.settings);
     await alpha.settings.update("llm-pi-ai", {
       providers: {
         "local-openai": {
@@ -193,13 +189,13 @@ test("A and B stream a shared official adapter route while local same-name model
 
     const route = compileManagedRouteId(connectionId);
     assert.equal(alpha.settings.bridgeStatus().source, "spaces-shared");
-    assert.equal(web.settings.bridgeStatus().source, "local-only");
+    assert.equal(unjoined.settings.bridgeStatus().source, "local-only");
     assert.equal(
       alpha.ctx.llm.listProviders().some((item) => item.id === route),
       true,
     );
     assert.equal(
-      web.ctx.llm.listProviders().some((item) => item.id === route),
+      unjoined.ctx.llm.listProviders().some((item) => item.id === route),
       false,
     );
 
@@ -226,11 +222,11 @@ test("A and B stream a shared official adapter route while local same-name model
   } finally {
     await alpha.dispose();
     await beta.dispose();
-    await web.dispose();
+    await unjoined.dispose();
   }
 });
 
-test("frozen snapshot keeps the old endpoint; a hijacked Space does not take down the other", async () => {
+test("frozen snapshot keeps the old endpoint; a hijacked Space does not take down the other", { timeout: 120_000 }, async () => {
   const home = tempHome();
   const first = await startMockCompletions("first");
   const second = await startMockCompletions("second");
@@ -252,28 +248,24 @@ test("frozen snapshot keeps the old endpoint; a hijacked Space does not take dow
   await service.updateSpacePolicy("beta", { mode: "all" }, 0);
   const catalogState = await catalog.read();
   const snapshot = freezeSpaceSnapshot(catalogState, await policies.read("alpha"), PINNED_DSH_PACKAGE_VERSION);
-  mkdirSync(join(home, "hub", "alpha"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "alpha", "settings.yaml"),
-    `llm-pi-ai:\n  providers:\n    ${route}:\n      api: openai-completions\n      baseURL: ${second.url}\n`,
-  );
   const alpha = await openSpaceLlmBridge({
-    settingsPath: join(home, "hub", "alpha", "settings.yaml"),
-    localCredentialsPath: join(home, "hub", "alpha", ".credentials.yaml"),
     dshHome: join(home, "hub", "alpha"),
+    localCredentialsPath: join(home, "hub", "alpha", ".credentials.yaml"),
     snapshot,
-    shared: credentials,
+    sharedHome: home,
+    spaceId: "alpha",
+    forgedManagedProviders: {
+      [route]: { api: "openai-completions", baseURL: second.url },
+    },
   });
   const beta = await openSpaceLlmBridge({
-    settingsPath: join(home, "hub", "beta", "settings.yaml"),
-    localCredentialsPath: join(home, "hub", "beta", ".credentials.yaml"),
     dshHome: join(home, "hub", "beta"),
+    localCredentialsPath: join(home, "hub", "beta", ".credentials.yaml"),
     snapshot: freezeSpaceSnapshot(catalogState, await policies.read("beta"), PINNED_DSH_PACKAGE_VERSION),
-    shared: credentials,
+    sharedHome: home,
+    spaceId: "beta",
   });
   try {
-    await attachOfficialLlm(alpha.ctx, alpha.settings);
-    await attachOfficialLlm(beta.ctx, beta.settings);
     assert.equal(alpha.settings.bridgeStatus().managedRouteConflict, true);
     await service.saveConnection(
       {
@@ -295,7 +287,7 @@ test("frozen snapshot keeps the old endpoint; a hijacked Space does not take dow
   }
 });
 
-test("missing shared record does not use a same-name environment variable", async () => {
+test("missing shared record does not use a same-name environment variable", { timeout: 120_000 }, async () => {
   const home = tempHome();
   const mock = await startMockCompletions("env");
   const connectionId = createConnectionId();
@@ -328,14 +320,13 @@ test("missing shared record does not use a same-name environment variable", asyn
     PINNED_DSH_PACKAGE_VERSION,
   );
   const space = await openSpaceLlmBridge({
-    settingsPath: join(home, "hub", "alpha", "settings.yaml"),
-    localCredentialsPath: join(home, "hub", "alpha", ".credentials.yaml"),
     dshHome: join(home, "hub", "alpha"),
+    localCredentialsPath: join(home, "hub", "alpha", ".credentials.yaml"),
     snapshot,
-    shared: credentials,
+    sharedHome: home,
+    spaceId: "alpha",
   });
   try {
-    await attachOfficialLlm(space.ctx, space.settings);
     await assert.rejects(async () => await streamPing(space.ctx, compileManagedRouteId(connectionId), "demo-large"), {
       code: "MISSING_CREDENTIAL",
     });

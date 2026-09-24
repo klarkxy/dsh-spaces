@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { lt as semverLt, valid as semverValid } from "semver";
 import { t } from "../../shared/i18n";
 import { formatWorkbenchFailure } from "../../shared/workbench";
-import { isExactRuntimeVersion } from "../../shared/runtime";
+import { DSH_RUNTIME_PACKAGE, isExactRuntimeVersion } from "../../shared/runtime";
 import {
   PROTECTED_PLUGIN_PACKAGES,
   type InstalledPlugin,
@@ -10,7 +11,7 @@ import {
   type PluginInstallResult,
   type PluginLibraryEntry,
 } from "../../shared/types";
-import { enqueuePlugin, runDsh } from "./dsh-cli";
+import { enqueuePlugin, findDshBin, runDsh } from "./dsh-cli";
 import { sanitizeLogText } from "./diagnostics";
 import { assertNotRealHome } from "./home-guard";
 import { npmPackumentUrl } from "./package-source";
@@ -156,12 +157,13 @@ function pluginError(spaceId: string, spec: string, code: number, stdout: string
 
 /** Official `dsh` stderr is often only "pnpm failed"; the useful pnpm text is on stdout. */
 function boundedProcessDetail(stdout: string, stderr: string): string {
-  const errHead = String(stderr ?? "").slice(0, 400);
+  const err = String(stderr ?? "");
+  const errPart = err.length <= 800 ? err : `${err.slice(0, 300)}\n…\n${err.slice(-500)}`;
   const outTail = String(stdout ?? "").slice(-1600);
-  const parts = [errHead, outTail].filter((part) => part.trim());
+  const parts = [errPart, outTail].filter((part) => part.trim());
   let detail = parts.join("\n");
-  if (parts.length === 2 && errHead.includes(outTail)) detail = errHead;
-  if (detail.length > 2400) detail = detail.slice(0, 2400);
+  if (parts.length === 2 && errPart.includes(outTail)) detail = errPart;
+  if (detail.length > 2400) detail = `${detail.slice(0, 400)}\n…\n${detail.slice(-1800)}`;
   return sanitizeLogText(detail);
 }
 
@@ -171,14 +173,39 @@ function addableSpec(dshHome: string, spec: string): string {
   throw new Error(t("errors.pluginSpecInvalid", { spec }));
 }
 
+/**
+ * 0.1.7-alpha.1 forwards pnpm with execa and keeps each argument intact.
+ * Older Windows builds use `shell: true`, which concatenates argv for cmd.exe
+ * and splits a Home path at the first space.
+ */
+const ARGV_PRESERVING_CLI = "0.1.7-alpha.1";
+
+function selectedCliVersion(): string | undefined {
+  const bin = findDshBin();
+  if (!bin) return undefined;
+  for (const path of [join(dirname(bin), "package.json"), join(dirname(bin), "..", "package.json")]) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { name?: unknown; version?: unknown };
+      if (parsed.name === DSH_RUNTIME_PACKAGE && typeof parsed.version === "string") return parsed.version;
+    } catch {
+      // The binary layout varies; the other candidate is the package root.
+    }
+  }
+  return undefined;
+}
+
+function archiveAddArgument(dshHome: string, profile: string, target: string): string {
+  if (process.platform !== "win32" || !isHubPluginArchive(dshHome, target)) return target;
+  const version = selectedCliVersion();
+  if (!version || !semverValid(version) || !semverLt(version, ARGV_PRESERVING_CLI)) return target;
+  const spec = relative(profileDir(dshHome, profile), target).replaceAll("\\", "/");
+  return `"file:${spec}"`;
+}
+
 export async function pluginAdd(dshHome: string, name: string, spec: string): Promise<void> {
   assertProfile(dshHome, name);
   const target = addableSpec(dshHome, spec);
-  // DSH forwards pnpm via a Windows command shell. Owned archive paths can
-  // contain spaces in Home; a profile-relative file reference stays one argument.
-  const cliTarget = process.platform === "win32" && isHubPluginArchive(dshHome, target)
-    ? `"file:${relative(profileDir(dshHome, name), target).replaceAll("\\", "/")}"`
-    : target;
+  const cliTarget = archiveAddArgument(dshHome, name, target);
   await enqueuePlugin(t("queue.pluginAddSpec", { name, spec: target }), async () => {
     const { stdout, stderr, code } = await runDsh(
       dshHome,

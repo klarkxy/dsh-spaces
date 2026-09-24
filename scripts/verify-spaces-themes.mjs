@@ -450,7 +450,7 @@ async function runOneTheme(ctx, theme) {
     bin,
     home,
     tooling,
-    ["plugin", "--profile", profile, "add", spacesTarball.used, "--config.auto-install-peers=true"],
+    ["plugin", "--profile", profile, "add", spacesTarball.used],
     PLUGIN_MS,
     `${theme.id} spaces add`,
     addLog,

@@ -59,6 +59,7 @@ const PLUGIN_REQUIRED = [
   "lib/view-bridge/cordis.patch.yml",
   "lib/view-bridge/lib/index.js",
   "lib/view-bridge/lib/client.js",
+  "lib/view-bridge/lib/settings.js",
   "lib/llm-bridge/package.json",
   "lib/llm-bridge/LICENSE",
   "lib/llm-bridge/cordis.patch.yml",
@@ -72,6 +73,7 @@ const VIEW_REQUIRED = [
   "cordis.patch.yml",
   "lib/index.js",
   "lib/client.js",
+  "lib/settings.js",
 ];
 
 const LLM_REQUIRED = [
@@ -316,7 +318,7 @@ function nestedTgzFixture() {
 function printAddCommand(pluginTgz) {
   const abs = resolve(pluginTgz);
   assertNoSpaces(abs, "plugin tarball path");
-  const command = `dsh plugin --profile web add ${abs} --config.auto-install-peers=true`;
+  const command = `dsh plugin --profile web add ${abs}`;
   console.log("");
   console.log("User install (ordinary web). Pack first with: pnpm run pack:plugin");
   console.log(`  ${command}`);

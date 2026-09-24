@@ -58,6 +58,7 @@ function writeV2Plugin(pluginRoot: string): string {
     ["lib/view-bridge/cordis.patch.yml", "view: dummy\n"],
     ["lib/view-bridge/lib/index.js", "export {};\n"],
     ["lib/view-bridge/lib/client.js", "export {};\n"],
+    ["lib/view-bridge/lib/settings.js", "export {};\n"],
     ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],

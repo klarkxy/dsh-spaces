@@ -39,6 +39,14 @@ test("a different port is rejected rather than probing an unrelated listener", a
   (child.stdout as PassThrough).write("dsh web: http://127.0.0.1:3211\n");
   await assert.rejects(ready, /instead of the reserved/);
 });
+
+test("alpha directory-relative authentication redirect keeps the owned cookie", async () => {
+  const fetchImpl = (async () => new Response(null, { status: 303,
+    headers: { location: "./", "set-cookie": "dsh-auth-fixture=private-cookie; HttpOnly" },
+  })) as typeof fetch;
+  assert.equal(await dshSessionCookie("http://127.0.0.1:3210/?token=private-token", fetchImpl,
+    new AbortController().signal), "dsh-auth-fixture=private-cookie");
+});
 test("cancelled startup removes endpoint listeners", async () => {
   const child = childFixture(); const abort = new AbortController();
   const ready = waitForDshEndpoint(child, 3210, abort.signal, 1000);

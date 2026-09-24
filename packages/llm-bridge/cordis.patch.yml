@@ -2,3 +2,9 @@
     - id: dsh-spaces-llm-bridge
       name: '@dsh-spaces/llm-bridge'
       config: {}
+- id: llm-pi-ai
+  inject:
+    spacesLlmSnapshot: true
+- id: agent-default-model
+  inject:
+    spacesLlmSnapshot: true

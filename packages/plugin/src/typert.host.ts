@@ -66,7 +66,7 @@ function param(name: string, schema: z.ZodType, typeSymbol: string) {
     codec: {
       mode: "strict" as const,
       typeSymbol,
-      schema,
+      create: () => schema,
     },
   };
 }
@@ -75,7 +75,7 @@ function result(typeSymbol: string, schema: z.ZodType) {
   return {
     mode: "strict" as const,
     typeSymbol,
-    schema,
+    create: () => schema,
   };
 }
 

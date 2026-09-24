@@ -544,7 +544,7 @@ export const llmApiResultSchema = z.union([
       capabilities: z
         .object({
           adapter: z.literal("llm-pi-ai"),
-          adapterVersion: z.literal("0.1.5-rc.2"),
+          adapterVersion: z.literal("0.1.7-alpha.1"),
           protocols: z.tuple([z.literal("openai-completions"), z.literal("openai-responses"), z.literal("anthropic-messages")]),
           keyless: z.literal(false),
         })

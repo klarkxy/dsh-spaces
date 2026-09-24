@@ -20,7 +20,7 @@ export const LLM_SNAPSHOT_ENV = {
   snapshot: "DSH_SPACES_LLM_SNAPSHOT",
   home: "DSH_SPACES_LLM_HOME",
 } as const;
-export const PINNED_LLM_ADAPTER_VERSION = "0.1.5-rc.2";
+export const PINNED_LLM_ADAPTER_VERSION = "0.1.7-alpha.1";
 
 export type LlmLaunchSnapshotFile = {
   schemaVersion: typeof LLM_LAUNCH_SNAPSHOT_SCHEMA_VERSION;

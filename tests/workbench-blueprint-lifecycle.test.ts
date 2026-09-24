@@ -1,3 +1,4 @@
+import { readProfileSettings } from "../src/adapters/node/profile-settings.ts";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -361,9 +362,9 @@ test("one plan through JobStore, ProductService, and HomeOperationLock creates a
   assert.equal(product.stages.start.status, "not-run");
   assert.equal(product.writes.find((row) => row.kind === "settings")?.status, "succeeded");
   assert.equal(existsSync(join(dshHome, "profiles", "life-once", "package.json")), true);
-  const settingsFile = join(dshHome, "hub", "life-once", "settings.yaml");
+  const settingsFile = join(dshHome, "profiles", "life-once", "cordis.patch.yml");
   assert.equal(existsSync(settingsFile), true);
-  const settings = parseYaml(readFileSync(settingsFile, "utf8")) as { demo?: { theme?: unknown } };
+  const settings = readProfileSettings(dshHome, "life-once").toJS() as { demo?: { theme?: unknown } };
   assert.equal(settings.demo?.theme, "paper");
 
   const second = stack.jobs.job(otherId);

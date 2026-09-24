@@ -56,7 +56,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install chromium
       - name: Install official CLI for a disposable Home
-        run: npm install --prefix "${{ runner.temp }}/desktop-tools" @deepseek-ai/dsh@latest --no-audit --no-fund
+        run: npm install --prefix "${{ runner.temp }}/desktop-tools" @deepseek-ai/dsh@0.1.7-alpha.1 --no-audit --no-fund
       - name: Real desktop launch without clicking Start service
         shell: pwsh
         env:

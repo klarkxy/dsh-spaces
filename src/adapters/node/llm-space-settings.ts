@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parseDocument, isMap, isScalar, isSeq, type YAMLMap } from "yaml";
+import { isMap, isScalar, isSeq, type YAMLMap } from "yaml";
+import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   LLM_ERROR,
   LlmConfigError,
@@ -13,6 +14,7 @@ import type { LlmLocalCandidate } from "../../shared/llm-api";
 import type { LlmSpaceSettingsPort } from "../../core/ports/llm-runtime";
 import { parseLlmShareManifest, type LlmShareManifest } from "../../core/domain/llm-share";
 import { assertSafeSpaceId, spaceDataRoot } from "./llm-policy-store";
+import { profileSettingsPath, readProfileSettings, writeProfileSettings } from "./profile-settings";
 
 export const AGENT_DEFAULT_MODEL_NAMESPACE = "agent-default-model";
 export const LLM_PI_AI_NAMESPACE = "llm-pi-ai";
@@ -25,7 +27,7 @@ export type SpaceDefaultModel = {
 
 export function spaceSettingsPath(home: string, spaceId: string): string {
   assertSafeSpaceId(spaceId);
-  return join(spaceDataRoot(home, spaceId), "settings.yaml");
+  return profileSettingsPath(home, spaceId);
 }
 
 export function spaceCredentialsPath(home: string, spaceId: string): string {
@@ -36,7 +38,7 @@ export function spaceCredentialsPath(home: string, spaceId: string): string {
 export function readSpaceDefaultModel(home: string, spaceId: string): SpaceDefaultModel | null {
   const path = spaceSettingsPath(home, spaceId);
   if (!existsSync(path)) return null;
-  const doc = parseDocument(readFileSync(path, "utf8"), { keepSourceTokens: true });
+  const doc = readProfileSettings(home, spaceId);
   const node = doc.get(AGENT_DEFAULT_MODEL_NAMESPACE);
   if (!isMap(node)) return null;
   const provider = node.get("provider");
@@ -46,30 +48,25 @@ export function readSpaceDefaultModel(home: string, spaceId: string): SpaceDefau
   return { provider, model };
 }
 
-export function writeSpaceDefaultModel(home: string, spaceId: string, value: SpaceDefaultModel | null): void {
+export async function writeSpaceDefaultModel(home: string, spaceId: string, value: SpaceDefaultModel | null): Promise<void> {
+  if (spaceId === "web") throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "The default web profile is protected.");
   const path = spaceSettingsPath(home, spaceId);
   if (!existsSync(path) && value === null) return;
   if (!existsSync(path) && !existsSync(dirname(path))) {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "space settings path is not available", { spaceId });
   }
-  const original = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const doc = parseDocument(original, { keepSourceTokens: true });
-  if (value === null) {
-    doc.delete(AGENT_DEFAULT_MODEL_NAMESPACE);
-  } else {
-    if (value.provider.trim() === "" || value.model.trim() === "") {
-      throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "space default requires provider and model");
-    }
-    doc.set(AGENT_DEFAULT_MODEL_NAMESPACE, { provider: value.provider, model: value.model });
+  if (value && (value.provider.trim() === "" || value.model.trim() === "")) {
+    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "space default requires provider and model");
   }
-  const next = doc.toString({ lineWidth: 0 });
-  atomicWrite(path, next.endsWith("\n") ? next : `${next}\n`);
+  await withFileLock(join(dirname(path), "package.json"), async () => {
+    writeProfileSettings(home, spaceId, { [AGENT_DEFAULT_MODEL_NAMESPACE]: value });
+  });
 }
 
 export function listLocalLlmCandidates(home: string, spaceId: string): LlmLocalCandidate[] {
   const path = spaceSettingsPath(home, spaceId);
   if (!existsSync(path)) return [];
-  const doc = parseDocument(readFileSync(path, "utf8"));
+  const doc = readProfileSettings(home, spaceId);
   const ns = doc.get(LLM_PI_AI_NAMESPACE);
   if (!isMap(ns)) return [];
   const providers = ns.get("providers");
@@ -95,7 +92,7 @@ export function readLocalProviderConfig(home: string, spaceId: string, routeId: 
   if (isManagedRouteId(routeId)) {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "managed routes cannot be adopted as local connections");
   }
-  const doc = parseDocument(readFileSync(path, "utf8"));
+  const doc = readProfileSettings(home, spaceId);
   const ns = doc.get(LLM_PI_AI_NAMESPACE);
   if (!isMap(ns)) {
     throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "local connection was not found", { spaceId });
@@ -116,7 +113,7 @@ export function readLocalProviderConfig(home: string, spaceId: string, routeId: 
 export function readCopyableLocalSecret(home: string, spaceId: string, routeId: string): string | undefined {
   const path = spaceSettingsPath(home, spaceId);
   if (!existsSync(path) || isManagedRouteId(routeId)) return undefined;
-  const doc = parseDocument(readFileSync(path, "utf8"));
+  const doc = readProfileSettings(home, spaceId);
   const ns = doc.get(LLM_PI_AI_NAMESPACE);
   if (!isMap(ns)) return undefined;
   const providers = ns.get("providers");
@@ -211,7 +208,7 @@ export class FileLlmSpaceSettings implements LlmSpaceSettingsPort {
   }
 
   async writeDefault(spaceId: string, value: SpaceDefaultModel | null) {
-    writeSpaceDefaultModel(this.home, spaceId, value);
+    await writeSpaceDefaultModel(this.home, spaceId, value);
   }
 
   async listLocal(spaceId: string) {

@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import z from "@deepseek-ai/schemastery";
-import { Config as LlmPiAiConfig } from "@deepseek-ai/dsh-llm-pi-ai";
 import { credentialKey, credentialRef } from "@deepseek-ai/dsh-credentials";
 import {
   LLM_ERROR,
@@ -13,12 +11,20 @@ import {
   compileManagedRouteId,
   createConnectionId,
 } from "../src/core/domain/llm-connections.ts";
-import { startBridgedCredentials, startLocalCredentials, startLocalSettings, startPlainSettings } from "./helpers/llm-official.ts";
+import {
+  openSpaceLlmBridge,
+  startBridgedCredentials,
+  startLocalCredentials,
+  startPlainSettings,
+  type OpenedNativeSpace,
+} from "./helpers/llm-official.ts";
 
 const temps: string[] = [];
-const THEME = z.object({ color: z.string().default("gray") });
+const opened: OpenedNativeSpace[] = [];
+const PINNED = "0.1.7-alpha.1";
 
-afterEach(() => {
+afterEach(async () => {
+  for (const space of opened.splice(0)) await space.dispose();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -49,7 +55,7 @@ function sharedConnection(secretRecord = true) {
   };
 }
 
-test("independent settings files do not copy shared routes or keys into the user document", async () => {
+test("independent profile patches do not copy shared routes or keys into the user document", { timeout: 60_000 }, async () => {
   const root = tempDir();
   const connection = sharedConnection();
   const snapshot = {
@@ -57,14 +63,11 @@ test("independent settings files do not copy shared routes or keys into the user
     policyRevision: 1,
     connections: [connection],
     defaultModel: { connectionId: connection.id, modelId: "demo-large" },
-    adapterVersion: "0.1.5-rc.2",
+    adapterVersion: PINNED,
   };
-  const a = await startLocalSettings(join(root, "a.yaml"), join(root, "a"), snapshot);
-  const b = await startLocalSettings(join(root, "b.yaml"), join(root, "b"), snapshot);
-  a.settings.register("spaces-theme", THEME);
-  b.settings.register("spaces-theme", THEME);
-  a.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
-  b.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
+  const a = await openSpaceLlmBridge({ dshHome: join(root, "a"), snapshot, spaceId: "alpha" });
+  const b = await openSpaceLlmBridge({ dshHome: join(root, "b"), snapshot, spaceId: "beta" });
+  opened.push(a, b);
   await a.settings.update("spaces-theme", { color: "red" });
   await b.settings.update("spaces-theme", { color: "blue" });
   assert.equal((a.settings.get("spaces-theme") as { color: string }).color, "red");
@@ -75,38 +78,86 @@ test("independent settings files do not copy shared routes or keys into the user
   assert.equal(aLlm.providers[route].baseURL, "http://127.0.0.1:9/v1");
   assert.equal(bLlm.providers[route].baseURL, "http://127.0.0.1:9/v1");
   assert.equal(aLlm.providers[route].apiKeyEnv, compileManagedCredentialRef(connection.id, 1));
-  const aFile = readFileSync(join(root, "a.yaml"), "utf8");
-  const bFile = readFileSync(join(root, "b.yaml"), "utf8");
+  const aFile = readFileSync(a.patchPath, "utf8");
+  const bFile = readFileSync(b.patchPath, "utf8");
   assert.match(aFile, /color: red/);
   assert.match(bFile, /color: blue/);
-  assert.doesNotMatch(aFile, /spaces-llm-/);
-  assert.doesNotMatch(bFile, /spaces-llm-/);
+  assert.doesNotMatch(aFile, /spaces-llm-[0-9a-f]{32}/);
+  assert.doesNotMatch(bFile, /spaces-llm-[0-9a-f]{32}/);
   assert.doesNotMatch(aFile, /sk-|apiKeyEnv|127\.0\.0\.1:9/);
   assert.doesNotMatch(bFile, /sk-|apiKeyEnv|127\.0\.0\.1:9/);
 });
 
-test("web without a snapshot keeps the home settings file and no shared route", async () => {
+test("unjoined composition keeps a local patch and no shared route", { timeout: 60_000 }, async () => {
   const root = tempDir();
-  const web = await startPlainSettings(join(root, "settings.yaml"), root);
-  web.settings.register("spaces-theme", THEME);
-  web.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
-  await web.settings.update("spaces-theme", { color: "web-only" });
-  const llm = web.settings.get("llm-pi-ai") as { providers?: Record<string, unknown> };
+  const space = await startPlainSettings(join(root, "unused.yaml"), root);
+  opened.push(space);
+  await space.settings.update("spaces-theme", { color: "web-only" });
+  const llm = space.settings.get("llm-pi-ai") as { providers?: Record<string, unknown> };
   assert.equal(Object.keys(llm.providers ?? {}).some((key) => key.startsWith("spaces-llm-")), false);
-  assert.match(readFileSync(join(root, "settings.yaml"), "utf8"), /web-only/);
+  assert.match(readFileSync(space.patchPath, "utf8"), /web-only/);
 });
 
-test("official settings writes to a managed route are rejected", async () => {
+test("native SettingsForms CAS uses describe revision after shared merge", { timeout: 60_000 }, async () => {
   const root = tempDir();
   const connection = sharedConnection();
-  const space = await startLocalSettings(join(root, "settings.yaml"), root, {
-    catalogRevision: 1,
-    policyRevision: 1,
-    connections: [connection],
-    defaultModel: null,
-    adapterVersion: "0.1.5-rc.2",
+  const route = compileManagedRouteId(connection.id);
+  const space = await openSpaceLlmBridge({
+    dshHome: root,
+    snapshot: {
+      catalogRevision: 1,
+      policyRevision: 1,
+      connections: [connection],
+      defaultModel: null,
+      adapterVersion: PINNED,
+    },
+    spaceId: "cas",
   });
-  space.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
+  opened.push(space);
+  const described = space.settings.describe().find((row) => row.ns === "llm-pi-ai");
+  assert.ok(described);
+  const value = described.value as { providers?: Record<string, { baseURL?: string }> };
+  const user = described.user as { providers?: Record<string, unknown> };
+  const base = described.base as { providers?: Record<string, unknown> };
+  assert.equal(value.providers?.[route]?.baseURL, "http://127.0.0.1:9/v1");
+  assert.equal(user?.providers?.[route], undefined);
+  assert.equal(base?.providers?.[route], undefined);
+  await space.settings.update(
+    "llm-pi-ai",
+    {
+      providers: {
+        "local-openai": {
+          api: "openai-completions",
+          baseURL: "http://127.0.0.1:8/v1",
+          models: [{ id: "demo-large" }],
+        },
+      },
+    },
+    described.revision,
+  );
+  const again = space.settings.describe().find((row) => row.ns === "llm-pi-ai");
+  const againValue = again?.value as { providers?: Record<string, { baseURL?: string }> };
+  const againUser = again?.user as { providers?: Record<string, { baseURL?: string }> };
+  assert.equal(againUser?.providers?.["local-openai"]?.baseURL, "http://127.0.0.1:8/v1");
+  assert.equal(againValue?.providers?.[route]?.baseURL, "http://127.0.0.1:9/v1");
+  assert.equal(againUser?.providers?.[route], undefined);
+  assert.doesNotMatch(readFileSync(space.patchPath, "utf8"), /spaces-llm-[0-9a-f]{32}/);
+});
+
+test("official settings writes to a managed route are rejected", { timeout: 60_000 }, async () => {
+  const root = tempDir();
+  const connection = sharedConnection();
+  const space = await openSpaceLlmBridge({
+    dshHome: root,
+    snapshot: {
+      catalogRevision: 1,
+      policyRevision: 1,
+      connections: [connection],
+      defaultModel: null,
+      adapterVersion: PINNED,
+    },
+  });
+  opened.push(space);
   const route = compileManagedRouteId(connection.id);
   await assert.rejects(
     async () =>
@@ -117,22 +168,24 @@ test("official settings writes to a managed route are rejected", async () => {
   assert.equal(llm.providers[route].baseURL, "http://127.0.0.1:9/v1");
 });
 
-test("forged managed routes in the user file do not become the resolved endpoint", async () => {
+test("forged managed routes in the profile override do not become the resolved endpoint", { timeout: 60_000 }, async () => {
   const root = tempDir();
   const connection = sharedConnection();
   const route = compileManagedRouteId(connection.id);
-  writeFileSync(
-    join(root, "settings.yaml"),
-    `llm-pi-ai:\n  providers:\n    ${route}:\n      baseURL: http://127.0.0.1:1/forged\n`,
-  );
-  const space = await startLocalSettings(join(root, "settings.yaml"), root, {
-    catalogRevision: 1,
-    policyRevision: 1,
-    connections: [connection],
-    defaultModel: null,
-    adapterVersion: "0.1.5-rc.2",
+  const space = await openSpaceLlmBridge({
+    dshHome: root,
+    snapshot: {
+      catalogRevision: 1,
+      policyRevision: 1,
+      connections: [connection],
+      defaultModel: null,
+      adapterVersion: PINNED,
+    },
+    forgedManagedProviders: {
+      [route]: { api: "openai-completions", baseURL: "http://127.0.0.1:1/forged" },
+    },
   });
-  space.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
+  opened.push(space);
   const llm = space.settings.get("llm-pi-ai") as { providers: Record<string, { baseURL?: string }> };
   assert.equal(llm.providers[route].baseURL, "http://127.0.0.1:9/v1");
   assert.equal(space.settings.bridgeStatus().managedRouteConflict, true);
@@ -159,7 +212,7 @@ test("shared credential resolve uses the record and ignores a same-name environm
         policyRevision: 1,
         connections: [connection],
         defaultModel: null,
-        adapterVersion: "0.1.5-rc.2",
+        adapterVersion: PINNED,
       },
       shared: {
         describe: async (id) => {

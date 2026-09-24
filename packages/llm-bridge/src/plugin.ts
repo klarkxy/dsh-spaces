@@ -1,5 +1,5 @@
-import { Context } from "@deepseek-ai/cordis";
-import { deepFreeze } from "@deepseek-ai/dsh-util-values";
+import { Context, type Fiber } from "@deepseek-ai/cordis";
+import { deepEqualJson } from "@deepseek-ai/dsh-util-values";
 import { existsSync } from "node:fs";
 import { FileLlmCredentialStore } from "../../../src/adapters/node/llm-credential-store";
 import {
@@ -19,16 +19,18 @@ import { installManagedRequestGuard } from "./request-guard";
 import {
   AGENT_DEFAULT_MODEL_NAMESPACE,
   LLM_PI_AI_NAMESPACE,
-  assertNoManagedUserSection,
+  asRecord,
+  assertManagedMutate,
+  assertUserWrite,
+  snapshotBridgeStatus,
   type LlmBridgeStatus,
-  type SpacesFileSettingsProvider,
 } from "./settings-provider";
 import { sharedReadOnlyError } from "./errors";
 
 export const name = "dsh-spaces-llm-bridge";
-export const inject = ["settings", "credentials", "llm"];
+export const SNAPSHOT_SERVICE = "spacesLlmSnapshot";
+export const inject = ["loader", "configEditor", "settings", "credentials", "llm"];
 
-const MANAGED_NAMESPACES = [LLM_PI_AI_NAMESPACE, AGENT_DEFAULT_MODEL_NAMESPACE] as const;
 const CREDENTIAL_METHODS = [
   "resolve",
   "describe",
@@ -62,274 +64,220 @@ type CredentialService = {
   deleteRecord: (...args: never[]) => unknown;
 };
 
-type OfficialRegistration = {
-  ns: string;
-  schema: (value: unknown) => unknown;
-  base?: unknown;
-  validate?: (value: unknown) => void;
+type LoaderEntry = {
+  options: { id?: string; name?: string; config?: Record<string, unknown> };
 };
 
-type OfficialSettingsSeam = {
-  registrations: Map<string, OfficialRegistration>;
-  section: (ns: string) => unknown;
-  resolve: (
-    schema: OfficialRegistration["schema"],
-    base: unknown,
-    section: unknown,
-    validate?: (value: unknown) => void,
-  ) => unknown;
-  commit: (registration: OfficialRegistration, next: unknown, source: "provider" | "update") => void;
-  register?: (ns: string, schema: unknown, options?: { base?: object }) => unknown;
-  update?: (ns: string, patch: object, expected?: number) => Promise<void>;
-  replace?: (ns: string, section: object, expected?: number) => Promise<void>;
-  mutate?: (ns: string, ops: readonly unknown[], expected?: number) => Promise<void>;
+type ConfigFiber = {
+  entry?: LoaderEntry;
 };
 
-type TouchedRegistration = {
-  ns: string;
-  registration: OfficialRegistration;
-  originalBase: unknown;
+type ConfigEditorSeam = {
+  edit(
+    entry: LoaderEntry,
+    change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<void>;
+  configuration(): Array<{ entry: LoaderEntry; inherited: Record<string, unknown>; override: Record<string, unknown> }>;
 };
 
-type HostSettings = SpacesFileSettingsProvider & {
-  register?: (...args: never[]) => unknown;
-  update?: (ns: string, patch: object, expected?: number) => Promise<void>;
-  replace?: (ns: string, section: object, expected?: number) => Promise<void>;
-  mutate?: (ns: string, ops: readonly unknown[], expected?: number) => Promise<void>;
-  get?: (ns: string) => unknown;
-  replaceSharedSnapshot?: (next: LlmSharedSnapshot | null) => void;
+type NativeSettingsSeam = {
+  update(ns: string, patch: object, expected?: number): Promise<void>;
+  replace(ns: string, section: object, expected?: number): Promise<void>;
+  mutate(ns: string, ops: readonly unknown[], expected?: number): Promise<void>;
+  describe?(options?: { redactSecrets?: boolean }): Array<{ ns: string; user?: unknown; value?: unknown }>;
+  register?: unknown;
+  registrations?: unknown;
+  section?: unknown;
+  resolve?: unknown;
+  commit?: unknown;
   bridgeStatus?: () => LlmBridgeStatus;
 };
 
 export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = process.env): void {
+  const snapshot = readSnapshot(env);
+  const settings = requireNativeSettings(ctx);
+  const editor = requireConfigEditor(ctx);
+  const restorers: Array<() => void> = [];
+  ctx.effect(() => () => {
+    for (const restore of restorers.reverse()) restore();
+  });
+  ctx.on(
+    "internal/config",
+    function (this: Fiber, config: unknown, next: () => unknown) {
+      return projectInternalConfig(this as ConfigFiber, config, next, snapshot, editor);
+    },
+    { global: true, prepend: true },
+  );
+  installSettingsGuards(settings, restorers);
+  installConfigEditorGuard(editor, restorers);
+  const status = () => snapshotBridgeStatus(snapshot, conflictRouteIds(settings, editor));
+  const previousStatus = settings.bridgeStatus;
+  const ownStatus = Object.prototype.hasOwnProperty.call(settings, "bridgeStatus");
+  settings.bridgeStatus = status;
+  restorers.push(() => {
+    if (ownStatus) settings.bridgeStatus = previousStatus;
+    else delete settings.bridgeStatus;
+  });
+  installManagedRequestGuard(ctx, { bridgeStatus: status });
+  const home = env[LLM_SNAPSHOT_ENV.home] ?? env.DSH_HOME;
+  const credentials = ctx.credentials as CredentialService | undefined;
+  if (snapshot && home && credentials) {
+    attachSharedCredentials(ctx, home, snapshot, credentials);
+  }
+  ctx.provide(SNAPSHOT_SERVICE, snapshot ?? true);
+}
+
+function readSnapshot(env: NodeJS.ProcessEnv): LlmSharedSnapshot | null {
   const snapshotPath = env[LLM_SNAPSHOT_ENV.snapshot];
-  if (!snapshotPath) return;
+  if (!snapshotPath) return null;
   if (!existsSync(snapshotPath)) {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llm launch snapshot path is missing");
   }
-  const file = readLaunchSnapshotFile(snapshotPath);
-  const snapshot = file.snapshot;
-  if (!snapshot) return;
-  const settings = ctx.settings as HostSettings;
-  if (typeof settings.replaceSharedSnapshot === "function") {
-    settings.replaceSharedSnapshot(snapshot);
-  } else {
-    wrapOfficialSettings(ctx, settings, snapshot);
-  }
-  const home = env[LLM_SNAPSHOT_ENV.home] ?? env.DSH_HOME;
-  const credentials = ctx.credentials as CredentialService | undefined;
-  if (home && credentials) {
-    attachSharedCredentials(ctx, home, snapshot, credentials);
-  }
-  if (ctx.llm) {
-    installManagedRequestGuard(ctx, {
-      bridgeStatus: () => liveBridgeStatus(settings, snapshot),
-    });
-  }
+  return readLaunchSnapshotFile(snapshotPath).snapshot;
 }
 
-function wrapOfficialSettings(ctx: Context, settings: object, snapshot: LlmSharedSnapshot): void {
-  const seam = requireOfficialSettingsSeam(settings);
-  assertNoManagedUserSection(seam.section(LLM_PI_AI_NAMESPACE));
-  ctx.effect(() => {
-    const touched: TouchedRegistration[] = [];
-    try {
-      projectExistingManaged(seam, snapshot, touched);
-      const restoreMethods = installSettingsGuards(seam, snapshot, touched);
-      return () => {
-        restoreMethods();
-        restoreTouched(seam, touched);
-      };
-    } catch (error) {
-      restoreTouched(seam, touched);
-      throw error;
-    }
-  });
+function projectInternalConfig(
+  fiber: ConfigFiber,
+  config: unknown,
+  next: () => unknown,
+  snapshot: LlmSharedSnapshot | null,
+  editor: ConfigEditorSeam,
+): unknown {
+  const id = fiber.entry?.options.id;
+  if (id !== LLM_PI_AI_NAMESPACE && id !== AGENT_DEFAULT_MODEL_NAMESPACE) return next();
+  if (!snapshot) return next();
+  if (id === LLM_PI_AI_NAMESPACE) {
+    const raw = asRecord(config) ?? {};
+    collectManagedWritePaths(raw);
+    const resolved = asRecord(next()) ?? raw;
+    return mergeSharedProvidersIntoBase(resolved, snapshot.connections);
+  }
+  const resolved = asRecord(next()) ?? asRecord(config) ?? {};
+  const override = editor.configuration().find((row) => row.entry.options.id === AGENT_DEFAULT_MODEL_NAMESPACE)?.override;
+  if (hasPersistedDefault(override)) return resolved;
+  return mergeGlobalDefaultIntoBase(resolved, snapshot);
 }
 
-function requireOfficialSettingsSeam(settings: object): OfficialSettingsSeam {
-  const candidate = settings as Partial<OfficialSettingsSeam>;
+function requireNativeSettings(ctx: Context): NativeSettingsSeam {
+  const settings = ctx.settings as NativeSettingsSeam | undefined;
   if (
-    !(candidate.registrations instanceof Map) ||
-    typeof candidate.section !== "function" ||
-    typeof candidate.resolve !== "function" ||
-    typeof candidate.commit !== "function"
+    !settings ||
+    typeof settings.update !== "function" ||
+    typeof settings.replace !== "function" ||
+    typeof settings.mutate !== "function"
   ) {
     throw new LlmConfigError(
       LLM_ERROR.UNSUPPORTED_RUNTIME,
-      "official settings provider is missing the in-memory registration commit seam required to project shared LLM connections",
+      "official settings service is missing SettingsForms update/replace/mutate",
     );
   }
-  return candidate as OfficialSettingsSeam;
-}
-
-function liveBridgeStatus(settings: HostSettings, snapshot: LlmSharedSnapshot): LlmBridgeStatus {
-  if (typeof settings.bridgeStatus === "function") return settings.bridgeStatus();
-  const seam = requireOfficialSettingsSeam(settings);
-  const conflictRouteIds = collectManagedWritePaths(seam.section(LLM_PI_AI_NAMESPACE));
-  return {
-    source: snapshot.connections.length > 0 ? "spaces-shared" : "local-only",
-    catalogRevision: snapshot.catalogRevision,
-    policyRevision: snapshot.policyRevision,
-    connectionRevisions: Object.fromEntries(snapshot.connections.map((item) => [item.id, item.revision])),
-    adapterVersion: snapshot.adapterVersion,
-    managedRouteConflict: conflictRouteIds.length > 0,
-    conflictRouteIds,
-  };
-}
-
-function projectExistingManaged(
-  seam: OfficialSettingsSeam,
-  snapshot: LlmSharedSnapshot,
-  touched: TouchedRegistration[],
-): void {
-  for (const ns of MANAGED_NAMESPACES) {
-    const registration = seam.registrations.get(ns);
-    if (!registration) continue;
-    if (typeof registration.schema !== "function") {
-      throw new LlmConfigError(
-        LLM_ERROR.UNSUPPORTED_RUNTIME,
-        `official settings registration for ${ns} is missing a schema for in-memory projection`,
-      );
-    }
-    if (ns === LLM_PI_AI_NAMESPACE) assertNoManagedUserSection(seam.section(ns));
-    const originalBase = registration.base;
-    rememberTouched(touched, ns, registration, originalBase);
-    registration.base = sharedBaseForNamespace(ns, originalBase, snapshot);
-    commitResolved(seam, registration, ns);
+  if (
+    settings.registrations instanceof Map ||
+    typeof settings.section === "function" ||
+    typeof settings.resolve === "function" ||
+    typeof settings.commit === "function" ||
+    typeof settings.register === "function"
+  ) {
+    throw new LlmConfigError(
+      LLM_ERROR.UNSUPPORTED_RUNTIME,
+      "official settings provider still exposes the removed rc2 register/section/commit seam",
+    );
   }
+  return settings;
 }
 
-function rememberTouched(
-  touched: TouchedRegistration[],
-  ns: string,
-  registration: OfficialRegistration,
-  originalBase: unknown,
-): void {
-  if (touched.some((item) => item.registration === registration)) return;
-  touched.push({ ns, registration, originalBase });
-}
-
-function restoreTouched(seam: OfficialSettingsSeam, touched: readonly TouchedRegistration[]): void {
-  for (const item of [...touched].reverse()) {
-    if (seam.registrations.get(item.ns) !== item.registration) continue;
-    item.registration.base = item.originalBase;
-    commitResolved(seam, item.registration, item.ns);
+function requireConfigEditor(ctx: Context): ConfigEditorSeam {
+  const editor = (ctx as Context & { configEditor?: ConfigEditorSeam }).configEditor;
+  if (!editor || typeof editor.edit !== "function" || typeof editor.configuration !== "function") {
+    throw new LlmConfigError(
+      LLM_ERROR.UNSUPPORTED_RUNTIME,
+      "official configEditor.edit is required to persist local LLM config without writing shared routes",
+    );
   }
+  return editor;
 }
 
-function commitResolved(seam: OfficialSettingsSeam, registration: OfficialRegistration, ns: string): void {
-  const next = deepFreeze(
-    seam.resolve(registration.schema, registration.base, seam.section(ns), registration.validate),
+function hasPersistedDefault(override: Record<string, unknown> | undefined): boolean {
+  return (
+    typeof override?.provider === "string" &&
+    override.provider.trim() !== "" &&
+    typeof override?.model === "string" &&
+    override.model.trim() !== ""
   );
-  seam.commit(registration, next, "provider");
 }
 
-function installSettingsGuards(
-  settings: OfficialSettingsSeam,
-  snapshot: LlmSharedSnapshot,
-  touched: TouchedRegistration[],
-): () => void {
-  const restorers: Array<() => void> = [];
-  patchMethod(settings, "register", restorers, (original) =>
-    function (this: OfficialSettingsSeam, ns: string, schema: unknown, options?: { base?: object }) {
-      if (ns === LLM_PI_AI_NAMESPACE) assertNoManagedUserSection(settings.section(ns));
-      const originalBase = options?.base;
-      const result = original.apply(this, [ns, schema, withSharedBase(ns, options, snapshot)]);
-      if (ns === LLM_PI_AI_NAMESPACE || ns === AGENT_DEFAULT_MODEL_NAMESPACE) {
-        const registration = settings.registrations.get(ns);
-        if (registration) rememberTouched(touched, ns, registration, originalBase);
-      }
-      return result;
-    },
-  );
+function installSettingsGuards(settings: NativeSettingsSeam, restorers: Array<() => void>): void {
   patchMethod(settings, "update", restorers, (original) =>
-    function (this: OfficialSettingsSeam, ns: string, patch: object, expected?: number) {
+    function (this: NativeSettingsSeam, ns: string, patch: object, expected?: number) {
       assertUserWrite(ns, patch);
-      return original.apply(this, [ns, patch, expected]);
+      return original.call(this, ns, patch, expected);
     },
   );
   patchMethod(settings, "replace", restorers, (original) =>
-    function (this: OfficialSettingsSeam, ns: string, section: object, expected?: number) {
+    function (this: NativeSettingsSeam, ns: string, section: object, expected?: number) {
       assertUserWrite(ns, section);
-      return original.apply(this, [ns, section, expected]);
+      return original.call(this, ns, section, expected);
     },
   );
   patchMethod(settings, "mutate", restorers, (original) =>
-    function (this: OfficialSettingsSeam, ns: string, ops: readonly unknown[], expected?: number) {
+    function (this: NativeSettingsSeam, ns: string, ops: readonly unknown[], expected?: number) {
       assertManagedMutate(ns, ops);
-      return original.apply(this, [ns, ops, expected]);
+      return original.call(this, ns, ops, expected);
     },
   );
-  return () => {
-    for (const restore of restorers.reverse()) restore();
-  };
 }
 
-function patchMethod<K extends "register" | "update" | "replace" | "mutate">(
-  target: OfficialSettingsSeam,
-  name: K,
-  restorers: Array<() => void>,
-  wrap: (original: NonNullable<OfficialSettingsSeam[K]>) => NonNullable<OfficialSettingsSeam[K]>,
-): void {
-  const current = target[name];
-  if (typeof current !== "function") return;
-  const own = Object.prototype.hasOwnProperty.call(target, name);
-  target[name] = wrap(current);
+function installConfigEditorGuard(editor: ConfigEditorSeam, restorers: Array<() => void>): void {
+  const original = editor.edit.bind(editor);
+  const own = Object.prototype.hasOwnProperty.call(editor, "edit");
+  editor.edit = async (entry, change) => {
+    await original(entry, (current, inherited) => {
+      const next = change(current, inherited);
+      if (entry.options.id === LLM_PI_AI_NAMESPACE) {
+        refuseManagedConfigMutation(current, next);
+      }
+      return next;
+    });
+  };
   restorers.push(() => {
-    if (own) target[name] = current;
-    else delete target[name];
+    if (own) editor.edit = original;
+    else delete (editor as { edit?: ConfigEditorSeam["edit"] }).edit;
   });
 }
 
-function withSharedBase(
-  ns: string,
-  options: { base?: object } | undefined,
-  snapshot: LlmSharedSnapshot,
-): { base?: object } | undefined {
-  if (ns === LLM_PI_AI_NAMESPACE || ns === AGENT_DEFAULT_MODEL_NAMESPACE) {
-    return { ...options, base: sharedBaseForNamespace(ns, options?.base, snapshot) };
+function refuseManagedConfigMutation(current: Record<string, unknown>, next: Record<string, unknown>): void {
+  const currentProviders = asRecord(current.providers) ?? {};
+  const nextProviders = asRecord(next.providers) ?? {};
+  const keys = new Set([...Object.keys(currentProviders), ...Object.keys(nextProviders)]);
+  for (const key of keys) {
+    if (!isManagedRouteId(key)) continue;
+    if (!deepEqualJson(nextProviders[key], currentProviders[key])) throw sharedReadOnlyError(key);
   }
-  return options;
 }
 
-function sharedBaseForNamespace(ns: string, base: unknown, snapshot: LlmSharedSnapshot): Record<string, unknown> {
-  const record = asRecord(base);
-  if (ns === LLM_PI_AI_NAMESPACE) return mergeSharedProvidersIntoBase(record, snapshot.connections);
-  return mergeGlobalDefaultIntoBase(record, snapshot);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function assertUserWrite(ns: string, section: object): void {
-  if (ns !== LLM_PI_AI_NAMESPACE) return;
-  const routes = collectManagedWritePaths(section);
-  if (routes.length > 0) throw sharedReadOnlyError(routes[0]);
-}
-
-function assertManagedMutate(ns: string, ops: readonly unknown[]): void {
-  if (ns !== LLM_PI_AI_NAMESPACE) return;
-  for (const op of ops) {
-    if (!op || typeof op !== "object" || !("path" in op) || !Array.isArray(op.path)) continue;
-    const path = op.path;
-    const value = "value" in op ? op.value : undefined;
-    if (path.length === 0) {
-      if (value && typeof value === "object") assertUserWrite(ns, value as object);
-      continue;
-    }
-    if (path[0] !== "providers") continue;
-    if (path.length === 1) {
-      if (value !== undefined) assertUserWrite(ns, { providers: value });
-      continue;
-    }
-    if (typeof path[1] === "string" && isManagedRouteId(path[1])) {
-      throw sharedReadOnlyError(path[1]);
-    }
+function conflictRouteIds(settings: NativeSettingsSeam, editor: ConfigEditorSeam | undefined): string[] {
+  if (editor) {
+    const row = editor.configuration().find((item) => item.entry.options.id === LLM_PI_AI_NAMESPACE);
+    return collectManagedWritePaths(row?.override);
   }
+  const described = settings.describe?.()?.find((row) => row.ns === LLM_PI_AI_NAMESPACE);
+  return collectManagedWritePaths(described?.user);
+}
+
+function patchMethod<K extends "update" | "replace" | "mutate">(
+  target: NativeSettingsSeam,
+  method: K,
+  restorers: Array<() => void>,
+  wrap: (original: NativeSettingsSeam[K]) => NativeSettingsSeam[K],
+): void {
+  const current = target[method];
+  if (typeof current !== "function") return;
+  const own = Object.prototype.hasOwnProperty.call(target, method);
+  target[method] = wrap(current);
+  restorers.push(() => {
+    if (own) target[method] = current;
+    else delete target[method];
+  });
 }
 
 function captureLocalCredentials(existing: CredentialService): { local: CredentialService; restore(): void } {

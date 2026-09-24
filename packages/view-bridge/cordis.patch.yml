@@ -2,3 +2,8 @@
     - id: dsh-spaces-view-bridge
       name: '@dsh-spaces/view-bridge'
       config: {}
+- id: settings
+  disabled: true
+- insert:
+    - id: dsh-spaces-settings
+      name: '@dsh-spaces/view-bridge/settings'

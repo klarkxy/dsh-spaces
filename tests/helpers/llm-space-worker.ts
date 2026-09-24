@@ -1,15 +1,9 @@
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import z from "@deepseek-ai/schemastery";
-import { Config as LlmPiAiConfig } from "@deepseek-ai/dsh-llm-pi-ai";
-import { AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA } from "@deepseek-ai/dsh-agent-default-model";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { createUserMessage, type StreamChunk } from "@deepseek-ai/dsh-llm";
-import { SpacesCredentialsProvider } from "../../packages/llm-bridge/src/credentials-provider.ts";
-import { attachOfficialLlm } from "../../packages/llm-bridge/src/official-host.ts";
-import type { SpacesFileSettingsProvider } from "../../packages/llm-bridge/src/settings-provider.ts";
-import { startLocalCredentials, startLocalSettings, startPlainSettings } from "./llm-official.ts";
+import { openSpaceLlmBridge, type OpenedNativeSpace } from "./llm-official.ts";
 import { compileManagedRouteId, LLM_ERROR, type LlmSharedSnapshot } from "../../src/core/domain/llm-connections.ts";
 import { snapshotCredentialRef } from "../../src/core/domain/llm-resolution.ts";
 
@@ -18,35 +12,23 @@ type WorkerConfig = {
   settingsPath: string;
   credentialsPath: string;
   home: string;
+  sharedHome?: string;
   snapshot: LlmSharedSnapshot | null;
   sharedCredentialsPath: string | null;
 };
 
-const THEME_SCHEMA = z.object({ color: z.string().default("gray") });
-
 async function main(): Promise<void> {
   const config = JSON.parse(process.argv[2] ?? "{}") as WorkerConfig;
-  const settings = config.snapshot
-    ? await startLocalSettings(config.settingsPath, config.home, config.snapshot)
-    : await startPlainSettings(config.settingsPath, config.home);
-  settings.settings.register("spaces-theme", THEME_SCHEMA);
-  if (!config.snapshot) {
-    settings.settings.register("llm-pi-ai", LlmPiAiConfig, { base: { providers: {} } });
+  if (config.spaceId === "web") {
+    throw new Error("native llm tests must not write profiles/web");
   }
-  settings.settings.register("agent-default-model", AGENT_DEFAULT_MODEL_SETTINGS_SCHEMA, {
-    base: { provider: "xai-oauth", model: "grok-4.5" },
+  const opened: OpenedNativeSpace = await openSpaceLlmBridge({
+    dshHome: config.home,
+    snapshot: config.snapshot,
+    sharedHome: config.sharedHome,
+    localCredentialsPath: config.credentialsPath,
+    spaceId: config.spaceId,
   });
-
-  const sharedLookup = config.sharedCredentialsPath
-    ? await sharedLookupFromFile(config.sharedCredentialsPath, config.home)
-    : { describe: async () => ({ configured: false }), readSecret: async () => undefined };
-  const localCredentials = await startLocalCredentials(config.credentialsPath, config.home);
-  const credentials = config.snapshot
-    ? new SpacesCredentialsProvider(settings.ctx, localCredentials.credentials, sharedLookup, config.snapshot)
-    : localCredentials.credentials;
-  if (config.snapshot) {
-    await attachOfficialLlm(settings.ctx, settings.settings as SpacesFileSettingsProvider);
-  }
 
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -55,12 +37,12 @@ async function main(): Promise<void> {
     try {
       const result = await dispatch(body, {
         spaceId: config.spaceId,
-        settings: settings.settings,
-        credentials,
+        settings: opened.settings,
+        credentials: opened.credentials,
         snapshot: config.snapshot,
-        settingsPath: config.settingsPath,
-        credentialsPath: config.credentialsPath,
-        llm: (settings.ctx as { llm?: { stream(options: object): AsyncIterable<StreamChunk> } }).llm,
+        patchPath: opened.patchPath,
+        credentialsPath: opened.credentialsPath,
+        llm: (opened.ctx as { llm?: { stream(options: object): AsyncIterable<StreamChunk> } }).llm,
       });
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, result }));
@@ -79,34 +61,14 @@ async function main(): Promise<void> {
   process.stdout.write(`LISTENING ${address.port}\n`);
 }
 
-async function sharedLookupFromFile(path: string, home: string) {
-  const store = await startLocalCredentials(path, home);
-  return {
-    async describe(recordId: string) {
-      const record = await store.credentials.readRecord(recordId as never);
-      return { configured: Boolean(record && record.kind === "api-key" && record.key) };
-    },
-    async readSecret(recordId: string) {
-      const record = await store.credentials.readRecord(recordId as never);
-      return record && record.kind === "api-key" ? record.key : undefined;
-    },
-  };
-}
-
 async function dispatch(
   body: { op?: string; color?: string; provider?: string; model?: string; ref?: string; value?: string },
   ctx: {
     spaceId: string;
-    settings: {
-      get(ns: string): unknown;
-      update(ns: string, patch: object): Promise<void>;
-      describe(): { ns: string; value: unknown; user?: unknown; base?: unknown }[];
-      documentPath: string | undefined;
-      bridgeStatus?: () => unknown;
-    };
-    credentials: SpacesCredentialsProvider | { set(ref: never, value: string): Promise<void>; describe(ref: never): Promise<unknown>; resolve(ref: never): Promise<unknown> };
+    settings: OpenedNativeSpace["settings"];
+    credentials: OpenedNativeSpace["credentials"];
     snapshot: LlmSharedSnapshot | null;
-    settingsPath: string;
+    patchPath: string;
     credentialsPath: string;
     llm?: { stream(options: object): AsyncIterable<StreamChunk> };
   },
@@ -120,7 +82,7 @@ async function dispatch(
         llm: ctx.settings.get("llm-pi-ai"),
         defaultModel: ctx.settings.get("agent-default-model"),
         describe: ctx.settings.describe(),
-        bridge: typeof ctx.settings.bridgeStatus === "function" ? ctx.settings.bridgeStatus() : null,
+        bridge: ctx.settings.bridgeStatus(),
       };
     case "update-theme":
       await ctx.settings.update("spaces-theme", { color: body.color });
@@ -153,7 +115,7 @@ async function dispatch(
     }
     case "files":
       return {
-        settings: existsSync(ctx.settingsPath) ? readFileSync(ctx.settingsPath, "utf8") : "",
+        settings: existsSync(ctx.patchPath) ? readFileSync(ctx.patchPath, "utf8") : "",
         credentials: existsSync(ctx.credentialsPath) ? readFileSync(ctx.credentialsPath, "utf8") : "",
       };
     case "stream": {

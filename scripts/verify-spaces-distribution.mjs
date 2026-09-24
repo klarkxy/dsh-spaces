@@ -622,7 +622,7 @@ async function sessionCookie(launchUrl) {
   const cookies = response.headers.getSetCookie();
   await response.body?.cancel();
   const cookie = cookies.map((value) => value.split(";", 1)[0]).find((value) => /^dsh-auth-[^=]+=.+$/.test(value));
-  if (response.status !== 303 || response.headers.get("location") !== "/" || !cookie) {
+  if (response.status !== 303 || !["/", "./"].includes(response.headers.get("location") ?? "") || !cookie) {
     throw new Error("DSH browser authentication failed");
   }
   return cookie;
@@ -816,7 +816,7 @@ async function optionalUnknownVersion(nodeExe, compatibleBin, tooling, tarball) 
     compatibleBin,
     home,
     tooling,
-    ["plugin", "--profile", HOST_PROFILE, "add", tarball, "--config.auto-install-peers=true"],
+    ["plugin", "--profile", HOST_PROFILE, "add", tarball],
     PLUGIN_MS,
     "unknown plugin add",
     join(ARTIFACT, "unknown-plugin-add.log"),
@@ -962,7 +962,7 @@ async function main() {
     bin,
     home,
     tooling,
-    ["plugin", "--profile", HOST_PROFILE, "add", tarball, "--config.auto-install-peers=true"],
+    ["plugin", "--profile", HOST_PROFILE, "add", tarball],
     PLUGIN_MS,
     "dsh plugin add",
     addLog,
@@ -1072,7 +1072,7 @@ async function main() {
     bin,
     home,
     tooling,
-    ["plugin", "--profile", HOST_PROFILE, "add", tarball, "--force", "--config.auto-install-peers=true"],
+    ["plugin", "--profile", HOST_PROFILE, "add", tarball, "--force"],
     PLUGIN_MS,
     "dsh plugin add --force replace",
     replaceLog,

@@ -173,6 +173,7 @@ const officialPkgBefore = await hashPaths(OFFICIAL_PACKAGE_JSON.map(at));
 await requireOfficial('packages/core/lib/index.js', 'official core lib');
 await requireOfficial('packages/plugin/lib/client.js', 'official plugin client');
 await requireOfficial('packages/view-bridge/lib/client.js', 'official view-bridge client');
+await requireOfficial('packages/view-bridge/lib/settings.js', 'official view-bridge settings');
 
 await mkdir(at('.sandbox'), { recursive: true });
 await rm(candidatePackages, { recursive: true, force: true });
@@ -208,6 +209,7 @@ await buildNode({
   external: sdkExternal,
 });
 await copyExisting(at('packages/view-bridge/lib/client.js'), join(candidatePackages, 'view-bridge/lib/client.js'));
+await copyExisting(at('packages/view-bridge/lib/settings.js'), join(candidatePackages, 'view-bridge/lib/settings.js'));
 await copyExisting(at('packages/view-bridge/package.json'), join(candidatePackages, 'view-bridge/package.json'));
 await copyExisting(at('LICENSE'), join(candidatePackages, 'view-bridge/LICENSE'));
 await copyExisting(at('packages/view-bridge/cordis.patch.yml'), join(candidatePackages, 'view-bridge/cordis.patch.yml'));

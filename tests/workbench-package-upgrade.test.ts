@@ -1407,6 +1407,7 @@ function packPair(
     "lib/view-bridge/cordis.patch.yml": "view: dummy\n",
     "lib/view-bridge/lib/index.js": opts.bridgeBody ?? "bridge-index",
     "lib/view-bridge/lib/client.js": "bridge-client",
+    "lib/view-bridge/lib/settings.js": "bridge-settings",
     "lib/llm-bridge/package.json": JSON.stringify({ name: "@dsh-spaces/llm-bridge", version: llmVersion }),
     "lib/llm-bridge/cordis.patch.yml": "llm: dummy\n",
     "lib/llm-bridge/lib/index.js": "llm-index",

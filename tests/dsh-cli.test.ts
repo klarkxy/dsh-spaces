@@ -14,7 +14,7 @@ import {
   spawnNode,
 } from "../src/adapters/node/dsh-cli.ts";
 import { setToolchainRoot } from "../src/adapters/node/toolchain.ts";
-import { DSH_DEFAULT_CHANNEL } from "../src/shared/runtime.ts";
+import { DSH_DEFAULT_VERSION } from "../src/shared/runtime.ts";
 
 const temps: string[] = [];
 const children: ChildProcess[] = [];
@@ -61,9 +61,9 @@ afterEach(() => {
   }
 });
 
-test("managed CLI install follows the official latest dist-tag", () => {
-  assert.equal(DSH_DEFAULT_CHANNEL, "latest");
-  assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_CHANNEL}`);
+test("managed CLI install pins the default official release", () => {
+  assert.equal(DSH_DEFAULT_VERSION, "0.1.7-alpha.1");
+  assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_VERSION}`);
 });
 
 test("candidates prefer the managed prefix over a global npm root", () => {
