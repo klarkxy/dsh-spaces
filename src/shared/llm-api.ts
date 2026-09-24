@@ -79,7 +79,7 @@ export type LlmSpaceObservation = {
 
 export type LlmCapabilities = {
   adapter: "llm-pi-ai";
-  adapterVersion: "0.1.5-rc.2";
+  adapterVersion: "0.1.7-alpha.1";
   protocols: readonly ["openai-completions", "openai-responses", "anthropic-messages"];
   keyless: false;
 };

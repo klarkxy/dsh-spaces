@@ -57,7 +57,6 @@ export function patchTextLooksIsolated(text: string, name: string): boolean {
 export function patchTextLooksConfigIsolated(text: string, name: string): boolean {
   return (
     patchTextLooksIsolated(text, name) &&
-    text.includes(`hub/${name}/settings.yaml`) &&
     text.includes(`hub/${name}/.credentials.yaml`)
   );
 }
@@ -87,7 +86,10 @@ export function applyIsolationPatch(original: string, name: string, source: stri
 
   upsertJsConfigField(seq, sessionRows[0], SESSION_ROW_ID, "root", isolationExpr(name, "sessions"));
   upsertJsConfigField(seq, storageRows[0], STORAGE_ROW_ID, "root", isolationExpr(name, "storages"));
-  upsertJsConfigField(seq, settingsRows[0], SETTINGS_ROW_ID, "path", configPathExpr(name, "settings.yaml"));
+  // Alpha settings persist in the active profile patch through ConfigEditor.
+  // The removed file provider's path must not remain as a false isolation claim.
+  const settingsConfig = settingsRows[0]?.get("config", true);
+  if (isMap(settingsConfig)) settingsConfig.delete("path");
   upsertJsConfigField(
     seq,
     credentialsRows[0],
@@ -140,21 +142,14 @@ export function assertDumpPatched(dump: string, name: string): void {
   }
 }
 
-/** Session/storage plus per-space settings and credentials paths. */
+/** Session/storage and credentials paths. Alpha settings are profile-owned. */
 export function assertDumpConfigIsolated(dump: string, name: string): void {
   assertDumpPatched(dump, name);
   const settingsPath = extractConfigField(dump, SETTINGS_ROW_ID, "path");
   const credentialsPath = extractConfigField(dump, CREDENTIALS_ROW_ID, "path");
-  if (!settingsPath) {
-    throw new PatchVerifyError(t("errors.missingDumpRow", { id: SETTINGS_ROW_ID, name }));
-  }
+  if (settingsPath) throw new PatchVerifyError("Legacy settings.path is not an alpha isolation boundary.");
   if (!credentialsPath) {
     throw new PatchVerifyError(t("errors.missingDumpRow", { id: CREDENTIALS_ROW_ID, name }));
-  }
-  if (!isExpectedIsolationPath(settingsPath, name, "settings.yaml")) {
-    throw new PatchVerifyError(
-      t("errors.dumpPathMismatch", { id: SETTINGS_ROW_ID, actual: settingsPath, name, file: "settings.yaml" }),
-    );
   }
   if (!isExpectedIsolationPath(credentialsPath, name, ".credentials.yaml")) {
     throw new PatchVerifyError(

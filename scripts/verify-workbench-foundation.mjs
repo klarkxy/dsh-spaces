@@ -565,7 +565,7 @@ async function probeUpstreamAuth(launchUrl) {
   const setCookies = tokenExchange.headers.getSetCookie();
   await tokenExchange.body?.cancel();
   const raw = setCookies.find((value) => /^dsh-auth-[^=]+=.+$/.test(value.split(";", 1)[0] ?? ""));
-  if (tokenExchange.status !== 303 || tokenExchange.headers.get("location") !== "/" || !raw) {
+  if (tokenExchange.status !== 303 || !["/", "./"].includes(tokenExchange.headers.get("location") ?? "") || !raw) {
     throw new Error("DSH token exchange did not mint an HttpOnly session cookie");
   }
   const parsed = parseSetCookie(raw);
@@ -626,7 +626,7 @@ async function exchangeWorkspaceCookie(space) {
   const response = await fetch(launchUrl.href, { redirect: "manual", signal: AbortSignal.timeout(RPC_MS) });
   const setCookies = response.headers.getSetCookie();
   await response.body?.cancel();
-  if (response.status !== 303 || response.headers.get("location") !== "/" || !setCookies.length) {
+  if (response.status !== 303 || !["/", "./"].includes(response.headers.get("location") ?? "") || !setCookies.length) {
     throw new Error(`DSH cookie mint failed for ${space.id}`);
   }
   const target = new URL(`http://${HOST}:${space.port}/`);

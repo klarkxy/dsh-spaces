@@ -79,93 +79,97 @@ export interface LlmUiClient {
   operationStatus(operationId: string): Promise<LlmOperationStatusResult>;
 }
 
+function unavailable(reason: string): never {
+  throw Object.assign(new Error(reason), { code: "workbench/unavailable" });
+}
+
 function asDescribe(result: LlmApiResult): LlmDescribeResult {
   if (!result || typeof result !== "object" || !("capabilities" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The describe result did not include capabilities.");
   }
   return result as LlmDescribeResult;
 }
 
 function asCatalog(result: LlmApiResult): LlmCatalogResult {
   if (!result || typeof result !== "object" || !("connections" in result) || !("revision" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The catalog result did not include connections.");
   }
   return result as LlmCatalogResult;
 }
 
 function asPreview(result: LlmApiResult): LlmChangePreview {
   if (!result || typeof result !== "object" || !("affectedSpaceIds" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The preview result did not include affected spaces.");
   }
   return result as LlmChangePreview;
 }
 
 function asDeletePreview(result: LlmApiResult): LlmDeletePreview {
   if (!result || typeof result !== "object" || !("references" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The delete preview did not include references.");
   }
   return result as LlmDeletePreview;
 }
 
 function asDiscover(result: LlmApiResult): LlmDiscoverResult {
   if (!result || typeof result !== "object" || !("models" in result) || !("truncated" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The discovery result did not include models.");
   }
   return result as LlmDiscoverResult;
 }
 
 function asTest(result: LlmApiResult): LlmTestResult {
   if (!result || typeof result !== "object" || !("ok" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The test result did not include an outcome.");
   }
   return result as LlmTestResult;
 }
 
 function asPolicy(result: LlmApiResult): LlmSpacePolicyResult {
   if (!result || typeof result !== "object" || !("policy" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The space policy result did not include a policy.");
   }
   return result as LlmSpacePolicyResult;
 }
 
 function asDefault(result: LlmApiResult): LlmSpaceDefaultResult {
   if (!result || typeof result !== "object" || !("inheritGlobal" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The space default result did not include inheritance.");
   }
   return result as LlmSpaceDefaultResult;
 }
 
 function asShare(result: LlmApiResult): LlmSharePreviewResult {
   if (!result || typeof result !== "object" || !("requirements" in result) || !("adapterRequired" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The share preview did not include requirements.");
   }
   return result as LlmSharePreviewResult;
 }
 
 function asImported(result: LlmApiResult): LlmImportedRequirementsResult {
   if (!result || typeof result !== "object" || !("mappingRequired" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The imported requirements result did not include a mapping flag.");
   }
   return result as LlmImportedRequirementsResult;
 }
 
 function asLocals(result: LlmApiResult): LlmLocalCandidatesResult {
   if (!result || typeof result !== "object" || !("candidates" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The local candidate result did not include candidates.");
   }
   return result as LlmLocalCandidatesResult;
 }
 
 function asJob(result: LlmApiResult): WorkbenchJob {
   if (!result || typeof result !== "object" || !("requestId" in result) || !("kind" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The apply result was not a workbench job.");
   }
   return result as WorkbenchJob;
 }
 
 function asOperation(result: LlmApiResult): LlmOperationStatusResult {
   if (!result || typeof result !== "object" || !("operationId" in result)) {
-    throw new Error("workbench/unavailable");
+    unavailable("The operation result did not include an operation id.");
   }
   return result as LlmOperationStatusResult;
 }

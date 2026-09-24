@@ -1,3 +1,5 @@
+import { parse as parseYaml } from "yaml";
+import { writeProfileSettings } from "../src/adapters/node/profile-settings.ts";
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -137,7 +139,7 @@ function writeSpace(
     writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: pkg, version }));
   }
   mkdirSync(join(dshHome, "hub", name), { recursive: true });
-  if (extras.settings !== undefined) writeFileSync(join(dshHome, "hub", name, "settings.yaml"), extras.settings);
+  if (extras.settings !== undefined) writeProfileSettings(dshHome, name, parseYaml(extras.settings));
 }
 
 function inspectOf(dshHome: string): (options: { home: string; bin: string }) => Promise<BlueprintRuntimeInspect> {
@@ -1339,7 +1341,7 @@ test("provenance failure keeps skipped model not-run and retains partial setting
   const dumped = JSON.stringify(last);
   assert.equal(dumped.includes(dshHome), false);
   assert.equal(dumped.includes("canary"), false);
-  const settings = readFileSync(join(dshHome, "hub", "partial-writes", "settings.yaml"), "utf8");
+  const settings = readFileSync(join(dshHome, "profiles", "partial-writes", "cordis.patch.yml"), "utf8");
   assert.match(settings, /title: kept/);
 });
 

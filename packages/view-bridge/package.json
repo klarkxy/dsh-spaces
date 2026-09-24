@@ -29,6 +29,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./settings": "./lib/settings.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -40,9 +41,11 @@
     "bundle": {"patch": "./cordis.patch.yml"}
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.2"
+    "@deepseek-ai/cordis": "^4.0.3",
+    "@deepseek-ai/dsh-app-boot": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-settings": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-client-connection": "^0.1.7-alpha.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-alpha.1"
   }
 }

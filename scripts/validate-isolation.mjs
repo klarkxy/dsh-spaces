@@ -247,7 +247,7 @@ export async function sessionCookie(url) {
   const cookie = setCookies
     .map((value) => value.split(";", 1)[0])
     .find((value) => /^dsh-auth-[^=]+=.+$/.test(value));
-  if (response.status !== 303 || response.headers.get("location") !== "/" || !cookie) {
+  if (response.status !== 303 || !["/", "./"].includes(response.headers.get("location") ?? "") || !cookie) {
     throw new Error("DSH browser authentication failed");
   }
   return cookie;

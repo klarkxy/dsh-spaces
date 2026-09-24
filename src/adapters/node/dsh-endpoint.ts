@@ -46,8 +46,11 @@ export async function dshSessionCookie(url: string, fetchImpl: typeof fetch, sig
   const cookies = response.headers.getSetCookie();
   await response.body?.cancel();
   const cookie = cookies.map(value => value.split(";", 1)[0]).find(value => /^dsh-auth-[^=]+=.+$/.test(value));
-  if (response.status !== 303 || response.headers.get("location") !== "/" || !cookie) {
-    throw new Error("DSH browser authentication failed; restart the space to obtain a new launch URL.");
+  // Alpha uses a directory-relative clean redirect for mounted web apps.
+  // Accept only the two known root forms; never follow arbitrary locations.
+  const location = response.headers.get("location");
+  if (response.status !== 303 || (location !== "/" && location !== "./") || !cookie) {
+    throw new Error("DSH browser authentication failed.");
   }
   return cookie;
 }

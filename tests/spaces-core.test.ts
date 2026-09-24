@@ -94,9 +94,9 @@ test("isolation expressions and dump verification stay host-independent", () => 
   const patched = applyIsolationPatch("- id: keep-me\n  config:\n    foo: 1\n", "coding", "patch");
   assert.match(patched, /hub\/coding\/sessions/);
   assert.match(patched, /hub\/coding\/storages/);
-  assert.match(patched, /hub\/coding\/settings\.yaml/);
+  assert.doesNotMatch(patched, /hub\/coding\/settings\.yaml/);
   assert.match(patched, /hub\/coding\/\.credentials\.yaml/);
-  assert.equal(extractConfigField(patched, "settings", "path"), "!!js dshHomePath('hub/coding/settings.yaml')");
+  assert.equal(extractConfigField(patched, "settings", "path"), null);
   assert.doesNotThrow(() => assertDumpConfigIsolated(patched, "coding"));
   assert.throws(
     () =>

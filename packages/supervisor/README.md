@@ -19,7 +19,7 @@ Public restore APIs fail explicitly. `--snapshot-worker` is required for normal 
 - Stable entry at `origin`. Closing a browser tab does not stop instances. Stopping the manager does not stop this process — if the entry is still alive it can show the manager’s real failure (**查看错误详情**, **复制脱敏日志**). If this process itself dies, use stderr / launcher / existing logs. There is no watchdog.
 - One writer per Home. A second client attaches to a healthy existing service. Live or unclear owners are refused. There is no take-over.
 
-Default DSH channel is official **`latest`**, pinned to the resolved exact version. Any exact installed CLI can bind. SDK `0.1.5-rc.2` is this repo's plugin peer, not a CLI allowlist. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
+New installations pin official DSH **`0.1.7-alpha.1`**; existing runtimes require an explicit upgrade. Any exact installed CLI can bind. SDK `0.1.7-alpha.1` is this repo's plugin peer, not a CLI allowlist. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md). Manager plugin self-upgrade is not delivered yet.
 
 ## Launch (runnable local build)
 
@@ -136,4 +136,4 @@ Private `{home}/.dsh-spaces-control/endpoint.json` is protocol v2 (`version`, `p
 
 开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。默认快照目录是 Home 的兄弟 `{上一级}/{Home名}-snapshots`，不是 Home 内部文件夹。启动需要 `--component-payload`、三份同组制品和同组 `--snapshot-worker`（正常快照与树 IO；运行时安装已抽出）。这不是恢复产品。没有自动修复或重试。
 
-关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。默认跟随官方 `latest` 并钉住精确版本。未登记的手工 DSH 不会被接管。
+关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。新安装默认固定官方 `0.1.7-alpha.1`；已有运行时通过正常升级操作更新。未登记的手工 DSH 不会被接管。

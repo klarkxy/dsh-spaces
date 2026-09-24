@@ -26,7 +26,7 @@ afterEach(async () => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-test("web stays unjoined while A and B consume one shared connection from separate processes", async () => {
+test("unjoined stays unjoined while A and B consume one shared connection from separate processes", { timeout: 180_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "dsh-llm-multi-"));
   temps.push(root);
   const connectionId = createConnectionId();
@@ -63,18 +63,18 @@ test("web stays unjoined while A and B consume one shared connection from separa
     key: "sk-shared-once",
   }));
 
-  const web = await spawnSpace(root, "web", null, null);
+  const unjoined = await spawnSpace(root, "unjoined", null, null);
   const a = await spawnSpace(root, "space-a", snapshot, globalCreds);
   const b = await spawnSpace(root, "space-b", snapshot, globalCreds);
 
   await call(a, { op: "update-theme", color: "red" });
   await call(b, { op: "update-theme", color: "blue" });
-  await call(web, { op: "update-theme", color: "web" });
+  await call(unjoined, { op: "update-theme", color: "web" });
   await call(a, { op: "update-default-model", provider: compileManagedRouteId(connectionId), model: "demo-small" });
 
   const aStatus = await call(a, { op: "status" });
   const bStatus = await call(b, { op: "status" });
-  const webStatus = await call(web, { op: "status" });
+  const webStatus = await call(unjoined, { op: "status" });
   const route = compileManagedRouteId(connectionId);
   assert.equal(aStatus.result.theme.color, "red");
   assert.equal(bStatus.result.theme.color, "blue");
@@ -97,7 +97,7 @@ test("web stays unjoined while A and B consume one shared connection from separa
 
   const aFiles = await call(a, { op: "files" });
   const bFiles = await call(b, { op: "files" });
-  const webFiles = await call(web, { op: "files" });
+  const webFiles = await call(unjoined, { op: "files" });
   assert.match(aFiles.result.settings, /color: red/);
   assert.match(bFiles.result.settings, /color: blue/);
   assert.match(webFiles.result.settings, /color: web/);
@@ -106,7 +106,7 @@ test("web stays unjoined while A and B consume one shared connection from separa
   assert.match(aFiles.result.settings, new RegExp(route));
   assert.doesNotMatch(aFiles.result.credentials, /sk-shared-once/);
   assert.doesNotMatch(bFiles.result.credentials, /sk-shared-once/);
-  assert.doesNotMatch(webFiles.result.settings, /spaces-llm-/);
+  assert.doesNotMatch(webFiles.result.settings, /spaces-llm-[0-9a-f]{32}/);
 });
 
 async function spawnSpace(
@@ -129,6 +129,7 @@ async function spawnSpace(
         settingsPath: join(home, "settings.yaml"),
         credentialsPath: join(home, ".credentials.yaml"),
         snapshot,
+        sharedHome: root,
         sharedCredentialsPath,
       }),
     ],

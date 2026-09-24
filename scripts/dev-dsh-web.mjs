@@ -32,7 +32,7 @@ const WEB_PROFILE = "web";
 const CANONICAL_NAME = "@dsh-spaces/plugin";
 const BUILD_SCRIPT = join(REPO, "scripts", "build-spaces.mjs");
 const PACK_SCRIPT = join(REPO, "scripts", "pack-spaces-plugin.mjs");
-const DSH_DLX_SPEC = "@deepseek-ai/dsh@latest";
+const DSH_DLX_SPEC = "@deepseek-ai/dsh@0.1.7-alpha.1";
 const BUILD_MS = 180_000;
 const PACK_MS = 120_000;
 const DUMP_MS = 300_000;
@@ -264,7 +264,7 @@ function main() {
   info(`installing ${CANONICAL_NAME} into web`);
   run(
     process.execPath,
-    cliArgv(cli, ["plugin", "--profile", WEB_PROFILE, "add", pluginTgz, "--config.auto-install-peers=true"]),
+    cliArgv(cli, ["plugin", "--profile", WEB_PROFILE, "add", pluginTgz]),
     {
       cwd: REPO,
       env,

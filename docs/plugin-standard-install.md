@@ -4,13 +4,13 @@
 
 初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。
 
-默认使用官方 **`latest`**。安装时解析成精确版本并钉住。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@latest plugin --profile web add <完整包路径> --config.auto-install-peers=true` 安装，再用 `pnpm dlx @deepseek-ai/dsh@latest web` 启动。
+新安装默认固定官方 **`0.1.7-alpha.1`**。已有运行时通过正常升级操作更新。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1 plugin --profile web add <完整包路径>` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1 web` 启动。
 
 现行验收脚本是 `scripts/verify-plugin-standard-install.mjs`（`pnpm run validate:plugin-install`）。本次完整安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/merge-execution.md)。历史 rc.1 / rc.2 浏览器记录见 [tasks/plugin-standard-install.md](../tasks/plugin-standard-install.md)，不替代当前版本验证。`@dsh-spaces/plugin` **尚未发布到 npm**；现在使用本地预构建包。
 
 The distribution unit is the prebuilt **plugin tarball** (supervisor + view-bridge payload inside). `@dsh-spaces/supervisor` stays private.
 
-Official CLI channel: **`latest`**. Spaces pins the resolved exact version. An untested version number is not by itself read-only.
+Default official CLI version for new installations: **`0.1.7-alpha.1`**. An untested version number is not by itself read-only.
 
 ## User steps (pnpm)
 
@@ -20,8 +20,8 @@ Official CLI channel: **`latest`**. Spaces pins the resolved exact version. An u
 
 ```powershell
 pnpm run pack:plugin
-pnpm dlx @deepseek-ai/dsh@latest plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.3.0.tgz" --config.auto-install-peers=true
-pnpm dlx @deepseek-ai/dsh@latest web
+pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1 plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.3.0.tgz"
+pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1 web
 ```
 
 In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click **初始化 Spaces / Initialize Spaces**. That is an explicit `guide.initialize()` with no path arguments. The independent supervisor creates `spaces-hub` and hands off. This is **not** a misinstall. If initialization fails, that request ends and the page reports the failure; the next visit does not silently finish it.

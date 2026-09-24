@@ -62,16 +62,13 @@ function writePatch(name) {
   const path = join(HOME, "profiles", name, "cordis.patch.yml");
   writeFileSync(
     path,
-    `# DSH Spaces workbench isolation: session, storage, settings, and credentials paths.
+    `# DSH Spaces isolation: sessions, storage and credentials; settings are profile-owned.
 - id: session-persistence-jsonl
   config:
     root: !!js dshHomePath('hub/${name}/sessions')
 - id: storage-json
   config:
     root: !!js dshHomePath('hub/${name}/storages')
-- id: settings
-  config:
-    path: !!js dshHomePath('hub/${name}/settings.yaml')
 - id: credentials
   config:
     path: !!js dshHomePath('hub/${name}/.credentials.yaml')
@@ -86,13 +83,12 @@ function main() {
   }
   mkdirSync(HOME, { recursive: true });
   console.log(`INFO  sandbox ${HOME}`);
-  run(["--profile", "web", "--dump-config"]);
   const ver = version();
   for (const name of ["coding", "writing"]) {
     const dir = join(HOME, "profiles", name);
     if (!existsSync(join(dir, "package.json"))) {
       console.log(`INFO  creating ${name} with dsh-web-app@${ver}`);
-      run(["plugin", "--profile", name, "add", `@deepseek-ai/dsh-web-app@${ver}`]);
+      run(["--profile", name, "--from-default-profile", "web", "--dump-config"]);
     }
     writePatch(name);
     const dump = run(["--profile", name, "--dump-config"]);

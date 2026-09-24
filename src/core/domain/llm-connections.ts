@@ -7,7 +7,7 @@ export const LLM_MANAGED_CREDENTIAL_REF_PREFIX = "SPACES_LLM_";
 export const LLM_MANAGED_RECORD_SCOPE = "spaces-llm";
 export const LLM_SHARED_BACKEND = "llm-pi-ai";
 
-/** Protocols `llm-pi-ai@0.1.5-rc.2` `supportedProtocols()` actually constructs. */
+/** Protocols `llm-pi-ai@0.1.7-alpha.1` `supportedProtocols()` actually constructs. */
 export const PINNED_LLM_PI_AI_PROTOCOLS = [
   "openai-completions",
   "openai-responses",

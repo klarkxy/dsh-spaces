@@ -792,6 +792,7 @@ function dummyPayloadLib(opts: { viewBody?: string; llmBody?: string } = {}): Va
     ["lib/view-bridge/LICENSE", "x\n"],
     ["lib/view-bridge/lib/index.js", opts.viewBody ?? "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
+    ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
     ["lib/llm-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], version: "4.0.0" })}\n`],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "x\n"],

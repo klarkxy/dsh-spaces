@@ -31,10 +31,10 @@ jobs:
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
       - run: npm run build:spaces
-      - name: Install official DSH CLI (latest)
+      - name: Install official DSH CLI (0.1.7-alpha.1)
         run: |
           pnpm --version
-          npm install -g @deepseek-ai/dsh@latest
+          npm install -g @deepseek-ai/dsh@0.1.7-alpha.1
           dsh --version
       - name: Official CLI integration check
         shell: pwsh
@@ -72,8 +72,8 @@ jobs:
       - run: npm run build:spaces
       - run: npx playwright install chromium
       - run: npm run test:llm:browser
-      - name: Install official latest CLI and package manager for acceptance
-        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@latest pnpm@10.29.2 --no-audit --no-fund
+      - name: Install official alpha CLI and package manager for acceptance
+        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.29.2 --no-audit --no-fund
       - name: Blueprint and official model bridge regressions
         env:
           DSH_TEST_CLI_BIN: ${{ runner.temp }}/plugin-tools/node_modules/@deepseek-ai/dsh/lib/bin.js

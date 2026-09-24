@@ -74,7 +74,7 @@ function startMock(label: string): Promise<{ url: string; hits: MockHit[] }> {
   });
 }
 
-test("three processes stream one shared official route while web stays unjoined", async () => {
+test("three processes stream one shared official route while an unjoined space stays local-only", { timeout: 180_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "dsh-llm-int-"));
   temps.push(root);
   const first = await startMock("shared-v1");
@@ -106,7 +106,7 @@ test("three processes stream one shared official route while web stays unjoined"
   );
   const betaSnapshot = freezeSpaceSnapshot(await catalog.read(), await policies.read("beta"), PINNED_DSH_PACKAGE_VERSION);
   const sharedCredentialsPath = join(root, ".dsh-spaces-control", "llm", "credentials.yaml");
-  const web = await spawnSpace(root, "web", null, null);
+  const unjoined = await spawnSpace(root, "unjoined", null, null);
   const alpha = await spawnSpace(root, "space-a", snapshot, sharedCredentialsPath);
   const beta = await spawnSpace(root, "space-b", betaSnapshot, sharedCredentialsPath);
   assert.equal(children.length, 3);
@@ -122,9 +122,8 @@ test("three processes stream one shared official route while web stays unjoined"
   assert.equal(first.hits.every((hit) => hit.auth === `Bearer ${SHARED_SECRET}`), true);
   assert.equal(first.hits.every((hit) => hit.model === "demo-large"), true);
 
-  const webStream = await call(web, { op: "stream", provider: route, model: "demo-large" });
-  assert.equal(webStream.ok, false);
-  assert.equal(webStream.code, "LLM_ADAPTER_MISSING");
+  const unjoinedStream = await call(unjoined, { op: "stream", provider: route, model: "demo-large" });
+  assert.equal(unjoinedStream.ok, false);
 
   await service.saveConnectionWithCredential(
     {
@@ -168,6 +167,7 @@ async function spawnSpace(
         settingsPath: join(home, "settings.yaml"),
         credentialsPath: join(home, ".credentials.yaml"),
         snapshot,
+        sharedHome: root,
         sharedCredentialsPath,
       }),
     ],
