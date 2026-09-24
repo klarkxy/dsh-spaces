@@ -9,6 +9,10 @@ import {
   type HomeControlHandle,
 } from "../../../src/adapters/node/home-controller.ts";
 import {
+  bindSupervisorDiagnostics,
+  type SupervisorDiagnosticsReporter,
+} from "../../../src/adapters/node/supervisor-diagnostics.ts";
+import {
   assertHandoffTokenMatchesSelectedPayload,
   bindSupervisorComponentPayload,
   createWorkbenchSupervisor,
@@ -35,7 +39,10 @@ export type { SupervisorCliOptions };
  * accepted from a browser DTO. Downstream DSH bootstrap/view-bridge should
  * spawn this CLI or call createWorkbenchSupervisor() with the same flags.
  */
-export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+export async function main(
+  argv: string[] = process.argv.slice(2),
+  diagnostics?: SupervisorDiagnosticsReporter,
+): Promise<number> {
   const options = parseSupervisorArgs(argv);
   let acceptSession: ReturnType<typeof beginAcceptHandoffChild> | undefined;
   let acceptedHandle: HomeControlHandle | undefined;
@@ -74,6 +81,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       ...options,
       acceptedHandle,
       onNormalExit: () => {
+        recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: 0 }));
         process.exit(0);
       },
     });
@@ -88,24 +96,67 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   process.stdout.write(`origin=${handle.origin}\n`);
   process.stdout.write(`bootstrap=${handle.bootstrapUrl}\n`);
-  const stop = async () => {
+  recordQuietly(diagnostics, (reporter) => reporter.recordReady());
+  let stopping = false;
+  const stop = async (signal?: string) => {
+    if (stopping) return;
+    stopping = true;
     await handle.close();
+    recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: 0, signal: signal ?? null }));
     process.exit(0);
   };
-  process.on("SIGINT", () => void stop());
-  process.on("SIGTERM", () => void stop());
+  const onSignal = (signal: string) => {
+    void stop(signal).catch((error) => {
+      recordQuietly(diagnostics, (reporter) => reporter.recordFailure(error, { exit: 1, signal }));
+      const message = error instanceof Error ? error.message : "supervisor stop failed";
+      try {
+        process.stderr.write(`${message}\n`);
+      } catch {
+        /* ignore */
+      }
+      process.exit(1);
+    });
+  };
+  process.on("SIGINT", () => onSignal("SIGINT"));
+  process.on("SIGTERM", () => onSignal("SIGTERM"));
   await new Promise(() => undefined);
   return 0;
 }
 
-const invoked = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (invoked) {
-  main().then(
-    (code) => process.exit(code),
+function recordQuietly(
+  diagnostics: SupervisorDiagnosticsReporter | undefined,
+  write: (reporter: SupervisorDiagnosticsReporter) => void,
+): void {
+  if (!diagnostics) return;
+  try {
+    write(diagnostics);
+  } catch {
+    /* reporting must not recurse into another fatal exception */
+  }
+}
+
+function runInvokedSupervisor(): void {
+  const diagnostics = bindSupervisorDiagnostics();
+  recordQuietly(diagnostics, (reporter) => reporter.recordStarting());
+  main(process.argv.slice(2), diagnostics).then(
+    (code) => {
+      recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: code }));
+      process.exit(code);
+    },
     (error) => {
+      recordQuietly(diagnostics, (reporter) => reporter.recordFailure(error, { exit: 1 }));
       const message = error instanceof Error ? error.message : "supervisor failed";
-      process.stderr.write(`${message}\n`);
+      try {
+        process.stderr.write(`${message}\n`);
+      } catch {
+        /* ignore */
+      }
       process.exit(1);
     },
   );
+}
+
+const invoked = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invoked) {
+  runInvokedSupervisor();
 }

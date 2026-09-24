@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { defaultPidAlive, HOME_CONTROL_DIR_NAME, type PidAliveFn } from "./home-controller";
 import { readRuntimeRef } from "./runtime-descriptor";
 
@@ -27,6 +27,13 @@ export type HomeToolchainInspect =
   | { kind: "absent" }
   | { kind: "invalid"; reason: string }
   | VerifiedHomeToolchain;
+
+/** The persisted Supervisor tools root owns this Home's selected component pointer. */
+export function resolveControlToolsRoot(home: string, userData: string, recorded = inspectHomeToolchain(home)): string {
+  if (recorded.kind === "invalid") throw new Error(recorded.reason);
+  return resolve(recorded.kind === "verified" && recorded.toolchainRoot
+    ? recorded.toolchainRoot : join(userData, "supervisor-tools"));
+}
 
 /** Read-only scan of leftover control-dir work. Never writes or kills. */
 export function inspectControlResidue(

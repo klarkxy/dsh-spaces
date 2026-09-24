@@ -2,8 +2,10 @@ import { join } from "node:path";
 import {
   HOME_CONTROL_DIR_NAME,
   HomeController,
+  validLaunchOwner,
   parseControlEndpoint,
   type HomeControlInspect,
+  type HomeControlOwner,
 } from "../../../../src/adapters/node/home-controller";
 import { workbenchStateSchema } from "./workbench-schemas";
 import { workbenchPost, type WorkbenchHttpFetch } from "./workbench-http";
@@ -73,7 +75,7 @@ export async function attachExistingSupervisor(options: {
   fetch?: WorkbenchHttpFetch;
 }): Promise<
   | { endpoint: SupervisorEndpoint }
-  | { missing: true }
+  | { missing: true; previousOwner?: HomeControlOwner }
   | { blocked: true; reasons: string[] }
   | { stale: true; reasons: string[] }
 > {
@@ -91,6 +93,7 @@ export async function attachExistingSupervisor(options: {
 
   if ("missing" in recorded) {
     if (!before.held) return { missing: true };
+    if (isDeadLaunchOwner(before)) return { missing: true, previousOwner: before.owner };
     return blocked([heldReason(before)]);
   }
   if ("invalid" in recorded) {
@@ -104,6 +107,11 @@ export async function attachExistingSupervisor(options: {
     homeId: endpoint.homeId,
     serviceEpoch: endpoint.serviceEpoch,
   });
+  // Discovery never mutates disk. Only a subsequent explicit launch may retire
+  // this exact dead owner; a polling client cannot start or clear anything.
+  if (beforeVerdict === "dead" && isDeadLaunchOwner(before)) {
+    return { missing: true, previousOwner: before.owner };
+  }
   const beforeBlock = leaseRejection(beforeVerdict);
   if (beforeBlock) return beforeBlock;
 
@@ -150,7 +158,6 @@ function verdictOf(
   if ("handoff" in inspection && inspection.handoff) return "ambiguous";
   if (!("owner" in inspection)) return "ambiguous";
   if (inspection.liveness === "ambiguous") return "ambiguous";
-  if (inspection.liveness === "dead") return "dead";
   if (inspection.owner.kind !== "web") return "foreign";
   const ownerOrigin = ownerOriginOf(inspection.owner.endpoint);
   if (!ownerOrigin) return "unbound";
@@ -162,7 +169,14 @@ function verdictOf(
       return "mismatch";
     }
   }
+  if (inspection.liveness === "dead") return "dead";
   return "ok";
+}
+
+function isDeadLaunchOwner(inspection: HomeControlInspect): inspection is Extract<HomeControlInspect, { owner: HomeControlOwner }> {
+  return inspection.held && "owner" in inspection && !("handoff" in inspection) &&
+    (inspection.owner.kind === "web" || (inspection.owner.kind === "desktop" && !inspection.owner.endpoint)) &&
+    inspection.liveness === "dead" && validLaunchOwner(inspection.owner);
 }
 
 function leaseRejection(

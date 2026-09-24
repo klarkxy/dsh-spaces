@@ -1,7 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
-  appendFileSync,
   chmodSync,
   copyFileSync,
   existsSync,
@@ -21,6 +20,7 @@ import { observeMaintenanceChild, withChildObservation } from "./owned-process-r
 import { inspectHomeToolchain } from "./control-residue";
 import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
+import { WorkbenchLog } from "./workbench-log";
 import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver, spawnNode } from "./dsh-cli";
 import { assertNotRealHome, authorizeProductHome, samePath } from "./home-guard";
 import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
@@ -32,10 +32,15 @@ import { llmCatalogPath } from "./llm-paths";
 import { ProfileRegistry } from "./profile-registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
+import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile-settings";
+import { migrateProfileToAlpha } from "./profile-alpha-migration";
+import { cliLoadError, dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
 import { SnapshotExecutor } from "./snapshot-executor";
 import { setPackageSource, setToolchainRoot } from "./toolchain";
+import { beginLaunchDiagnostics } from "./supervisor-launch";
 import type { ProfileStatus } from "../../shared/types";
 import { isExactRuntimeVersion } from "../../shared/runtime";
+import { redactPublicReason } from "../../shared/public-reason";
 import { sanitizeSpaceIcon } from "../../shared/space-icon";
 import type { SnapshotRuntime } from "../../shared/snapshots";
 import type { SpaceDetail } from "../../shared/spaces-control";
@@ -235,7 +240,7 @@ export interface WorkbenchSupervisorOptions {
   componentPayloadRoot?: string;
   /** Internal-only accepted run owner. Never a public browser field. */
   acceptedHandle?: HomeControlHandle;
-  /** CLI-only: process may exit normally after a flushed handoff commit. */
+  /** CLI-only: process may exit after a durable shutdown or flushed handoff commit. */
   onNormalExit?: () => void | Promise<void>;
   /** Test seam forwarded to WorkbenchJobStore. */
   jobsInject?: WorkbenchJobsInject;
@@ -305,6 +310,16 @@ interface BoundCli {
  * Independent web supervisor: stable 127.0.0.1 entry, HomeController run
  * rights, profile/view/lifecycle, and WorkbenchApi over POST JSON.
  */
+function dispatchEventName(method: string, payload: unknown): string {
+  if (method === "product" && payload && typeof payload === "object") {
+    const request = (payload as { request?: unknown }).request;
+    const inner = request && typeof request === "object" ? (request as { method?: unknown }).method : "";
+    if (typeof inner === "string" && /^[a-z][a-z0-9.-]{0,40}$/.test(inner)) return `product.${inner}`.slice(0, 80);
+  }
+  const event = method.replace(/[^A-Za-z0-9._:-]/g, "").slice(0, 80);
+  return event || "request";
+}
+
 export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, WorkbenchApi {
   readonly home: string;
   readonly controlDir: string;
@@ -345,6 +360,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly plans = new Map<string, StoredPlan>();
   private httpClose: (() => Promise<void>) | undefined;
   private relinquishKind: "service.shutdown" | null = null;
+  private relinquishJobId: string | null = null;
   private closed = false;
   private sealing = false;
   private maintenanceBlocked = false;
@@ -518,6 +534,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async dispatch(method: WorkbenchApiMethod, payload: unknown): Promise<unknown> {
+    try {
+      return await this.dispatchRequest(method, payload);
+    } catch (error) {
+      this.rememberDispatchFailure(method, payload, error);
+      throw error;
+    }
+  }
+
+  private async dispatchRequest(method: WorkbenchApiMethod, payload: unknown): Promise<unknown> {
     const body = expectObject(payload);
     switch (method) {
       case "state":
@@ -701,7 +726,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const response = await this.fetchImpl(launch, { redirect: "manual", signal: AbortSignal.timeout(8_000) });
     const setCookies = response.headers.getSetCookie();
     await response.body?.cancel();
-    if (response.status !== 303 || response.headers.get("location") !== "/" || setCookies.length === 0) {
+    if (response.status !== 303 || !["/", "./"].includes(response.headers.get("location") ?? "") || setCookies.length === 0) {
       return { status: 502, message: "The child authentication exchange failed." };
     }
     const expected = expectedAuthCookieName(`127.0.0.1:${port}`);
@@ -952,7 +977,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         await this.startSpace(identity.profileId, silentJobContext());
       } catch (error) {
         this.blocked = true;
-        const detail = error instanceof WorkbenchPublicError ? error.message : "The manager process could not be started.";
+        const detail = (error instanceof Error && error.message
+          ? error.message
+          : "The manager process could not be started.").slice(0, 400);
         this.reasons.push(`${detail} The stable entry is still available.`);
       }
     }
@@ -1056,13 +1083,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (existing === "manager" && !pending) return;
       const marker = join(this.controlDir, "manager-bootstrap.json");
       if (!pending) atomicWrite(marker, `${JSON.stringify({ version: 1, profileId })}\n`);
-      // A standalone first launch can precede any user-created DSH profile.
-      // Materialize the official shipped web root; do not pass --from-default-profile
-      // (rc.2 rejects cloning the shipped `web` profile onto itself).
-      if (!existsSync(join(this.home, "profiles", "web"))) {
-        const seeded = await this.runBoundCli(["--profile", "web", "--dump-config"]);
-        if (seeded.code !== 0) throw new WorkbenchPublicError("workbench/failed", "The official web profile could not be initialized.");
-      }
+      // Clone the shipped preset directly into the dedicated manager. Reading
+      // the shipped web profile through the CLI would materialize user defaults.
       if (existing === "missing") {
         const created = await this.runBoundCli([
         "--profile",
@@ -1112,6 +1134,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private async installArtifact(profileId: string, artifact: string, id: string): Promise<void> {
     const dest = archiveAbsPath(this.home, id);
+    assertOwnedProfilePath(this.home, dest);
     mkdirSync(dirname(dest), { recursive: true });
     copyFileSync(resolve(artifact), dest);
     const add = this.options.pluginAdd ?? pluginAdd;
@@ -1158,13 +1181,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return child;
       },
       ensureCli: injected.ensureCli ?? (async () => this.cli?.bin ?? this.options.bin),
-      prepareHome:
-        injected.prepareHome ??
-        (async () => {
-          if (existsSync(join(this.home, "profiles", "web"))) {
-            await this.runBoundCli(["--profile", "web", "--dump-config"]);
-          }
-        }),
+      // Managed profiles are already prepared independently. Even dump-config
+      // can materialize files in the user's default web profile.
+      prepareHome: injected.prepareHome ?? (async () => undefined),
       fetch: injected.fetch ?? this.fetchImpl,
       kill: async (pid: number, kind: KillKind) => {
         if (kind === "kill") throw new Error(STOP_NOT_FORCED);
@@ -1181,6 +1200,37 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.options.portEnd ?? 3199,
       runtime,
     );
+  }
+
+  private workbenchLogStore: WorkbenchLog | null = null;
+  private lastDispatchLog = "";
+
+  private workbenchLog(): WorkbenchLog {
+    this.workbenchLogStore ??= new WorkbenchLog(this.home, () => this.now());
+    return this.workbenchLogStore;
+  }
+
+  private rememberDispatchFailure(method: string, payload: unknown, error: unknown): void {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
+    const raw = error instanceof Error ? error.message : "The workbench request failed.";
+    const message = redactPublicReason(sanitizeLogText(raw)) || "The workbench request failed.";
+    const event = dispatchEventName(method, payload);
+    const signature = `${event}\n${code}\n${message}`;
+    if (signature === this.lastDispatchLog) return;
+    try {
+      this.workbenchLog().append({
+        level: "error",
+        area: "http",
+        event,
+        message,
+        ...(/^(?:workbench|spaces)\/[a-z0-9-]+$|^LLM_[A-Z0-9_]+$/.test(code) ? { code } : {}),
+      });
+      this.lastDispatchLog = signature;
+    } catch {
+      if (!this.reasons.includes("The workbench log could not be written.")) {
+        this.reasons.push("The workbench log could not be written.");
+      }
+    }
   }
 
   private createMaintenance(): WorkbenchMaintenance | null {
@@ -1228,14 +1278,19 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const create = this.options.createMaintenance ?? ((next) => new WorkbenchMaintenanceService(next, {
       packageSource: () => this.readHomeSettings().packageSource,
       log: (operation, error) => {
-        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error ?? "")).slice(0, 4000);
+        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error ?? ""));
         try {
-          appendFileSync(join(this.controlDir, "maintenance-errors.jsonl"), `${JSON.stringify({
-            at: this.now().toISOString(), operation, detail,
-          })}\n`, { encoding: "utf8", mode: 0o600 });
+          this.workbenchLog().append({
+            level: "error",
+            area: "maintenance",
+            event: operation.replace(/[^A-Za-z0-9._:-]/g, "-").replace(/^-+/, "").slice(0, 80) || "maintenance",
+            message: detail || "The maintenance operation failed.",
+          });
         } catch {
           this.maintenanceBlocked = true;
-          this.reasons.push("Maintenance diagnostics could not be saved. Further changes are blocked.");
+          if (!this.reasons.includes("Maintenance diagnostics could not be saved. Further changes are blocked.")) {
+            this.reasons.push("Maintenance diagnostics could not be saved. Further changes are blocked.");
+          }
         }
       },
     }));
@@ -1548,7 +1603,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
       this.consumeLifecyclePlan(planId);
       if (stored.request.kind === "service.shutdown") {
+        if (!this.activeJobId) throw new WorkbenchPublicError("workbench/invalid-input", "Shutdown requires an active job.");
         this.relinquishKind = stored.request.kind;
+        this.relinquishJobId = this.activeJobId;
       }
       return this.executeLocal(stored, ctx);
     }
@@ -1603,6 +1660,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         } catch (error) {
           this.sealing = false;
           this.relinquishKind = null;
+          this.relinquishJobId = null;
           this.maintenanceBlocked = true;
           throw error;
         }
@@ -1627,11 +1685,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const kind = this.relinquishKind;
     if (!kind) return;
     this.relinquishKind = null;
+    this.relinquishJobId = null;
     this.dropWritable();
     if (kind === "service.shutdown") {
       this.sealing = true;
       this.closed = true;
       await this.httpClose?.();
+      await this.options.onNormalExit?.();
     }
   }
 
@@ -1650,7 +1710,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
       return;
     }
-    if (this.relinquishKind) await this.finishRelinquish();
+    if (this.relinquishKind && this.relinquishJobId === jobId) {
+      if (!this.jobPersistedSuccess(jobId)) {
+        this.relinquishKind = null;
+        this.relinquishJobId = null;
+        this.maintenanceBlocked = true;
+        this.blocked = true;
+        this.reasons.push("Shutdown completion could not be saved. Run rights were kept.");
+        return;
+      }
+      await this.finishRelinquish();
+    }
   }
 
   /**
@@ -1750,6 +1820,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!toolsRoot) {
       throw new WorkbenchPublicError("workbench/unavailable", "A tools root outside Home is required for handoff.");
     }
+    const targetDiagnosticFile = beginLaunchDiagnostics(this.home, resolve(toolsRoot));
     const port = Number(new URL(this.origin).port);
     if (!Number.isInteger(port) || port < 1) {
       throw new WorkbenchPublicError("workbench/invalid-input", "Handoff requires the preserved nonzero management port.");
@@ -1832,6 +1903,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         entry: newEntry,
         argv,
         cwd: dirname(newEntry),
+        env: { ...process.env, DSH_SPACES_SUPERVISOR_DIAGNOSTICS: targetDiagnosticFile },
       },
       ...(this.options.allowRealHome ? { allowRealHome: true } : {}),
     };
@@ -1953,14 +2025,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private dropWritable(): void {
     if (!this.transferredOwner) {
-      try {
-        this.handle?.release();
-      } catch {
-        /* already released */
-      }
+      this.handle?.release(() => this.removeEndpointFile());
     }
     this.handle = undefined;
-    this.removeEndpointFile();
     this.jobs = undefined;
     this.processes = undefined;
     this.spaces = undefined;
@@ -2014,6 +2081,34 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.assertWritable();
     if (!this.processes) throw new WorkbenchPublicError("workbench/read-only");
     if (this.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
+    if (spaceId === "web") throw new WorkbenchPublicError("workbench/protected");
+    const cliBlock = this.cli ? unmetDshPeers(this.cli.version, dshPeerRangesFromProfile(join(this.home, "profiles", spaceId))) : [];
+    if (cliBlock.length && this.cli) {
+      throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(this.cli.version, cliBlock));
+    }
+    if (this.options.componentPayloadRoot) {
+      if (!["stopped", "crashed"].includes(this.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
+      await this.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({
+        home: this.home, profileId: spaceId, payloadRoot: this.options.componentPayloadRoot!,
+        install: async (bridge) => {
+          const artifact = bridge === "view-bridge" ? this.options.viewBridgeArtifact : this.options.llmBridgeArtifact;
+          if (!artifact) throw new Error(`The selected ${bridge} archive is unavailable.`);
+          const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
+          await this.installArtifact(spaceId, artifact, `dsh-spaces-${bridge}-${digest}`);
+        },
+        dump: async () => {
+          const dump = await this.readDump(spaceId);
+          if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");
+          return dump;
+        },
+      }));
+    } else if (existsSync(join(this.home, "hub", spaceId, "settings.yaml"))) {
+      await this.lock.run("space.settings-migrate", async () => {
+        const dump = await this.readDump(spaceId);
+        if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");
+        migrateLegacyProfileSettings(this.home, spaceId, dump);
+      });
+    }
     await this.processes.start(spaceId);
   }
 
@@ -2270,6 +2365,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       resolveModule: (options, input) => resolveBlueprintModule(options, input),
       llmCatalogObservation: () => this.llmCatalogObservation(),
       diagnostics: (spaceId) => this.productDiagnostics(spaceId),
+      workbenchLog: () => this.workbenchLog(),
       withWrite: (label, action) => this.lock.run(label, action),
       settingsChanged: (settings) => {
         this.homeSettings = {
@@ -2529,8 +2625,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private removeEndpointFile(): void {
     try {
       unlinkSync(join(this.controlDir, ENDPOINT_FILE));
-    } catch {
-      /* gone */
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
 

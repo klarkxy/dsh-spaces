@@ -3,6 +3,7 @@ import {
 } from "../../../packages/plugin/src/host/supervisor-attach";
 import {
   bootstrapSupervisor,
+  readLastSupervisorDiagnostics,
   type SupervisorBootstrapOptions,
   type SupervisorBootstrapResult,
 } from "../../../packages/plugin/src/host/supervisor-bootstrap";
@@ -220,7 +221,10 @@ export class DesktopServiceClient {
         return this.publicState();
       }
       if (kind === "blocked") {
-        this.becomeUnavailable(generation, reasonsOf(attached, ATTACH_FAILED));
+        this.becomeUnavailable(generation, [
+          ...reasonsOf(attached, ATTACH_FAILED),
+          ...(this.toolsRoot ? readLastSupervisorDiagnostics(this.home, this.toolsRoot) : []),
+        ]);
         return this.publicState();
       }
 
