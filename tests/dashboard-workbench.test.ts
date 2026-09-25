@@ -79,3 +79,24 @@ test('native plan schema stays closed and does not widen instance selection', ()
     assert.equal(workbenchPlanRequestSchema.safeParse({ ...valid, ...patch }).success, false);
   }
 });
+
+import { mountStaticClientStyle } from '../packages/dashboard/src/client-style.ts';
+
+test('native static stylesheet ownership and cleanup never replace another plugin sheet', () => {
+  const nodes: any[] = [];
+  const fake = { createElement: (name: string) => {
+    assert.equal(name, 'style');
+    const node = { dataset: {} as Record<string, string>, textContent: '', remove: () => {
+      const at = nodes.indexOf(node); if (at >= 0) nodes.splice(at, 1);
+    } }; return node;
+  }, head: { appendChild: (node: unknown) => nodes.push(node) } } as unknown as Document;
+  const foreign = { foreign: true }; nodes.push(foreign);
+  const remove = mountStaticClientStyle(fake, '@dsh-spaces/plugin', 'workbench.css', '.dsh-workbench{display:flex}');
+  const second = mountStaticClientStyle(fake, '@dsh-spaces/dashboard', 'dashboard.css', '.dsh-dashboard{display:block}');
+  assert.equal(nodes.length, 3);
+  assert.equal(nodes[1].dataset.plugin, '@dsh-spaces/plugin');
+  assert.equal(nodes[1].dataset.pluginCss, '@dsh-spaces/plugin/workbench.css');
+  assert.equal(nodes[1].textContent, '.dsh-workbench{display:flex}');
+  remove(); remove(); assert.equal(nodes.length, 2); assert.strictEqual(nodes[0], foreign);
+  second(); assert.deepEqual(nodes, [foreign]);
+});

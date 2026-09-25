@@ -98,6 +98,20 @@ export default {name,inject,apply};\n`);
   await page.goto(supervisor.origin);
   const app = page.frameLocator('#manager-frame');
   await app.getByRole('heading', { name: '工作首页', exact: true }).waitFor();
+  const appearance = await app.locator('.dsh-workbench').evaluate(root => ({
+    display: getComputedStyle(root).display,
+    overflow: getComputedStyle(root).overflow,
+    railWidth: root.querySelector('.dsh-wb-rail').getBoundingClientRect().width,
+    grid: getComputedStyle(root.querySelector('.dd-grid')).display,
+    ownedSheets: [...document.querySelectorAll('style[data-plugin="@dsh-spaces/plugin"]')].map(tag => ({
+      name: tag.getAttribute('data-plugin-css'), active: !!tag.sheet && tag.sheet.cssRules.length > 0,
+    })),
+  }));
+  assert.equal(appearance.display, 'flex', 'Actual native workbench stylesheet must apply');
+  assert.equal(appearance.overflow, 'hidden');
+  assert.ok(appearance.railWidth > 40 && appearance.railWidth < 200);
+  assert.equal(appearance.grid, 'grid');
+  assert.equal(appearance.ownedSheets.length, 3); assert.ok(appearance.ownedSheets.every(sheet => sheet.active));
   assert.equal(await app.locator('[data-home-view]').count(), 0, 'Default Home is the dashboard, not a hidden auto-created chat');
   assert.equal((await query({ kind: 'board', boardId: 'home' })).board, null, 'Opening the homepage does not create layout');
   pass('Actual manager-origin workbench opens the Home dashboard using authenticated Supervisor CORS, without creating chat or layout');
