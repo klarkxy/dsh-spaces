@@ -7,6 +7,7 @@ on:
       - 'packages/dashboard/**'
       - 'scripts/*dashboard*'
       - 'tests/*dashboard*'
+      - 'tests/fixtures/dashboard-home*'
       - 'docs/dashboard/**'
       - '.github/workflows/dashboard-home.yml'
       - 'tsconfig.dashboard*.json'
@@ -23,15 +24,33 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Existing dashboard core baseline
-        run: node scripts/test-dashboard-core.mjs
-      - name: Preserve reproducible source and compiler fixture (no Home or credentials)
-        run: |
-          mkdir -p .sandbox/dashboard-home-evidence
-          git archive --format=tar HEAD > .sandbox/dashboard-home-evidence/source.tar
-          tar -czf .sandbox/dashboard-home-evidence/tooling.tar.gz node_modules/typescript node_modules/tsx node_modules/esbuild node_modules/@esbuild node_modules/@types node_modules/undici-types node_modules/react node_modules/react-dom node_modules/scheduler node_modules/zod node_modules/@deepseek-ai
-      - uses: actions/upload-artifact@v4
+      - run: node scripts/test-dashboard-core.mjs
+      - run: npx --no-install tsc -p tsconfig.dashboard-home.json
+      - run: npx --no-install tsc -p tsconfig.dashboard-ui.json
+      - name: Local regression and authenticated HTTP
+        run: node --import tsx --test tests/dashboard-local.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-view.test.tsx tests/dashboard-http.test.ts
+      - name: Home policies, disk, gateway and independent background publishers
+        run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home-gateway.test.ts
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: dashboard-home-source-fixture
-          path: .sandbox/dashboard-home-evidence
-          retention-days: 1
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+      - run: node scripts/build-dashboard-plugin.mjs
+      - name: Two native DSH Hosts publishing into the isolated Home owner fixture
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node --import tsx scripts/test-dashboard-home-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-home-native-evidence
+          path: .sandbox/dashboard-home-native-evidence
+          if-no-files-found: ignore
+          retention-days: 7
