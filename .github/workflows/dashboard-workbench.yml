@@ -9,21 +9,99 @@ on:
       - 'src/shared/workbench*'
       - 'scripts/*dashboard*'
       - 'tests/*dashboard*'
+      - 'tsconfig.web.json'
+      - '.github/dashboard-workbench-edits.json'
       - '.github/workflows/dashboard-workbench.yml'
 permissions:
   contents: read
 jobs:
-  baseline:
+  prepare-git-objects:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      - name: Export reviewed source only for isolated implementation
-        run: git archive --format=tar HEAD > source.tar
-      - uses: actions/upload-artifact@v4
+      - &stage
+        name: Stage exact reviewed edits with before and after blob checks
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          allowed={'packages/dashboard/src/http-client.ts','packages/dashboard/src/view.tsx','packages/plugin/src/workbench/app.tsx','packages/plugin/src/workbench/components.tsx','src/adapters/node/dashboard/gateway.ts','src/adapters/node/dashboard/supervisor.ts','src/adapters/node/workbench-supervisor.ts','tests/workbench-ui-dom.test.ts','tsconfig.web.json'}
+          changes=json.loads(pathlib.Path('.github/dashboard-workbench-edits.json').read_text())
+          assert {r['path'] for r in changes}==allowed and len(changes)==len(allowed)
+          def blob(data): return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          for row in changes:
+              path=pathlib.Path(row['path']); original=path.read_bytes()
+              assert blob(original)==row['before'], row['path']+' baseline'
+              text=original.decode('utf-8')
+              for start,end,insert in reversed(row['edits']):
+                  assert 0<=start<=end<=len(text)
+                  text=text[:start]+insert+text[end:]
+              content=text.encode('utf-8')
+              assert blob(content)==row['after'], row['path']+' result'
+              path.write_bytes(content)
+          PY
+      - name: Upload unreferenced source blobs only; no dependency installation or branch write
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,tempfile
+          changes=json.loads(pathlib.Path('.github/dashboard-workbench-edits.json').read_text())
+          results=[]
+          for row in changes:
+              with tempfile.NamedTemporaryFile(mode='w') as file:
+                  json.dump({'content':base64.b64encode(pathlib.Path(row['path']).read_bytes()).decode(),'encoding':'base64'},file);file.flush()
+                  value=json.loads(subprocess.check_output(['gh','api','--method','POST','repos/'+os.environ['REPOSITORY']+'/git/blobs','--input',file.name]))
+              assert value['sha']==row['after']
+              results.append({'path':row['path'],'sha':value['sha'],'mode':'100644','type':'blob'})
+          print('PREPARED_GIT_BLOBS='+json.dumps(results))
+          PY
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - *stage
+      - uses: actions/setup-node@v4
         with:
-          name: dashboard-workbench-source
-          path: source.tar
-          retention-days: 1
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsc --noEmit -p tsconfig.node.json && npx --no-install tsc --noEmit -p tsconfig.web.json
+      - run: node scripts/test-dashboard-core.mjs
+      - run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home-gateway.test.ts tests/dashboard-supervisor.test.ts tests/dashboard-local.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-view.test.tsx tests/dashboard-http.test.ts tests/dashboard-workbench.test.ts tests/dashboard-workbench-cors.test.ts tests/workbench-ui.test.tsx tests/workbench-plugin.test.ts
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Existing workbench navigation, settings and draft preservation
+        run: node --import tsx --test tests/workbench-ui-dom.test.ts
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - *stage
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+      - run: node scripts/build-spaces.mjs && node scripts/build-dashboard-plugin.mjs
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Actual Home homepage, publishing forms and two managed native Hosts
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node --import tsx scripts/test-dashboard-workbench-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-workbench-evidence
+          path: .sandbox/dashboard-workbench-evidence
+          if-no-files-found: ignore
+          retention-days: 7
