@@ -54,8 +54,23 @@ try {
   const stopped = (await page.evaluate(() => window.dashboardTest.state())).reads;
   await page.waitForTimeout(2500);
   assert.equal((await page.evaluate(() => window.dashboardTest.state())).reads, stopped, 'A failed read session does not poll again');
+
+  // A new page is a new explicit user session, not automatic failure recovery.
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.getByRole('heading', { name: '首页还没有固定组件' }).waitFor();
+  await page.getByRole('button', { name: '固定 写作进度', exact: true }).click();
+  await page.locator('.dd-card progress').waitFor();
+  await page.evaluate(() => window.dashboardTest.denyWrites());
+  const writesBefore = (await page.evaluate(() => window.dashboardTest.state())).writes;
+  await page.getByRole('button', { name: '固定 今日笔记', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '看板读取已停止' }).waitFor();
+  assert.equal(await page.locator('.dd-card').count(), 0, 'A mutation authorization failure also clears source content immediately');
+  const mutationDenied = (await page.evaluate(() => window.dashboardTest.state())).reads;
+  await page.waitForTimeout(2500);
+  assert.equal((await page.evaluate(() => window.dashboardTest.state())).reads, mutationDenied, 'Authorization failure on mutation terminates the read session');
+  assert.equal((await page.evaluate(() => window.dashboardTest.state())).writes, writesBefore, 'Denied mutation was not sent again');
   assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
-  console.log('PASS Chromium shared-view flow: empty read, pin, live update, checklist/notes, safe rendering, layout save, narrow viewport, unpin, authorization loss and terminal polling.');
+  console.log('PASS Chromium shared-view flow: empty read, pin, live update, checklist/notes, safe rendering, layout save, narrow viewport, unpin, read/write authorization loss and terminal polling.');
 } finally {
   if (browser) await browser.close();
   server.closeAllConnections();

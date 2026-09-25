@@ -55,15 +55,18 @@ test('real Cordis optional lookup leaves an unrelated business plugin usable', a
   } });
   assert.equal(ran, true);
 });
-test('official domain open plus readonly dashboard does not materialize files', async () => {
+test('official domain initialization creates its directory, but readonly queries write no records', async () => {
   const f = await fixture();
   try {
     const store = await openDashboardDomainStore(f.facility);
+    // The SDK's explicit open initializes an empty storage directory. Establish
+    // that boundary before measuring the dashboard's readonly query itself.
+    assert.deepEqual(await readdir(f.directory), []);
     const service = makeService(store);
     const response = await service.client(() => ({ subjectId: 'user', layoutWrite: true })).query({ kind: 'overview' });
     assert.equal(response.data.kind, 'overview');
     await assert.rejects(readFile(f.file), { code: 'ENOENT' });
-    assert.deepEqual(await readdir(f.root), []);
+    assert.deepEqual(await readdir(f.directory), []);
     await service.close();
   } finally { await f.close(); }
 });
@@ -103,7 +106,7 @@ test('malformed official storage file stays unchanged and is not treated as empt
   const f = await fixture();
   try {
     await mkdir(f.directory, { recursive: true }); await writeFile(f.file, '{broken evidence');
-    await assert.rejects(openDashboardDomainStore(f.facility));
+    await assert.rejects(openDashboardDomainStore(f.facility), { code: 'malformed-medium' });
     assert.equal(await readFile(f.file, 'utf8'), '{broken evidence');
     assert.deepEqual(await readdir(f.directory), [`${DASHBOARD_DOMAIN_NAME}.json`]);
   } finally { await f.close(); }
