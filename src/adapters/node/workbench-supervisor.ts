@@ -675,7 +675,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       (request.method === "mapImported" ||
         (request.method === "updateSpacePolicy" && request.shared?.mode && request.shared.mode !== "none"))
     ) {
-      await this.installLlmBridgeIfExplicit(request.spaceId);
+      await this.ensureLlmBridge(request.spaceId);
     }
   }
 
@@ -1489,15 +1489,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         await this.ensureViewBridge(name);
       }
     });
-    if (input.useSharedLlm === true) {
+    // Spaces inherit shared connections by default; only an explicit choice is persisted.
+    // Blueprint/template callers omit the flag so their own policy write keeps revision 0.
+    if (input.useSharedLlm !== undefined) {
       ctx.phase("llm-policy");
       await this.llmHost.dispatch({
         method: "updateSpacePolicy",
         spaceId: name,
-        shared: { mode: "all" },
+        shared: input.useSharedLlm ? { mode: "all" } : { mode: "none" },
         expectedRevision: 0,
       });
-      await this.installLlmBridgeIfExplicit(name);
+      if (input.useSharedLlm) await this.ensureLlmBridge(name);
     }
     return { spaceId: name };
   }
@@ -1536,6 +1538,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       return { spaceId: id, view: await this.view(id) };
     }
     if (id !== this.managerId) await this.ensureViewBridge(id);
+    await this.ensureLlmBridge(id);
     const gen = (this.generations.get(id) ?? 0) + 1;
     this.generations.set(id, gen);
     const channel = randomBytes(8).toString("hex");
@@ -2637,7 +2640,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
   }
 
-  private async installLlmBridgeIfExplicit(profileId: string): Promise<void> {
+  private async ensureLlmBridge(profileId: string): Promise<void> {
     if (!this.options.llmBridgeArtifact) return;
     if (profileId === "web" || profileId === this.managerId) return;
     if (profileHasLlmBridge(this.home, profileId)) return;
