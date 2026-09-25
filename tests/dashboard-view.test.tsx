@@ -24,14 +24,17 @@ async function fixture(count = 1) {
 test('all four renderers are inert and have no HTML, image or link injection', () => {
   const values: WidgetContent[] = [
     { kind: 'progress', value: 3, max: 10, unit: '<img src=x>', status: 'running' },
-    { kind: 'metric', value: 5, unit: '<script>bad()</script>' },
+    { kind: 'metric', value: 5, unit: '<script>bad()</script>', },
     { kind: 'list', items: [{ id: 'a', label: '<iframe src=x></iframe>', state: 'blocked' }] },
     { kind: 'markdown', text: '# Heading\n[link](javascript:evil())\n![remote](https://example.test/track)\n<script>evil()</script>' },
   ];
   for (const content of values) {
     const html = renderToStaticMarkup(<WidgetContentView content={content} />);
     assert.ok(!/<(?:img|script|iframe|a)(?:\s|>)/i.test(html));
-    assert.ok(!/\s(?:href|src|onerror)=/i.test(html));
+    // Inspect real opening tags, not harmless text such as &lt;img src=x&gt;.
+    const tags = html.match(/<[A-Za-z][^>]*>/g) ?? [];
+    assert.ok(tags.every(tag => !/\s(?:href|src|onerror)\s*=/i.test(tag)));
+    assert.match(html, /&lt;(?:img|script|iframe)/);
   }
 });
 test('reading a frame does not create an empty board or write settings', async () => {
