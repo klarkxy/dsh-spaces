@@ -48,6 +48,8 @@ export interface WorkbenchInitializeResult {
 }
 
 export interface WorkbenchGuideApi {
+  /** Explicit audience-bound presentation entry; no management operations. Optional for older adapters. */
+  portalTarget?(audience: import("../../../src/shared/space-host").SpaceHostAudience): Promise<WorkbenchReturnTarget>;
   role(): Promise<WorkbenchGuideRole>;
   bootstrap(): Promise<WorkbenchBootstrapResult>;
   returnTarget(): Promise<WorkbenchReturnTarget>;

@@ -1,3 +1,13 @@
+# 2026-09-25 宿主内空间栏与展示/管理权限分离
+
+用户授权按新的插件定位更新并提交 PR，未授权合并或发布。本批依赖 PR #16，保留看板和发布授权工作。合同：[宿主嵌入](../docs/host/embedding.md)；实际执行及未验边界：[实施记录](../docs/host/implementation.md)。
+
+- [x] 普通顶层宿主 additive 空间栏，保留原应用；展示角色独立于 manager 权限。
+- [x] audience-bound 单次入口与受限导航桥，保留 manager/child 来源链，抑制重复空间栏；蓝图 v1 不变。
+- [x] 专项单元、既有权限回归、本地组件构建；同步实际安装验收脚本与隔离 CI。
+- [ ] CI 浏览器、原生插件与完整仓库门槛以对应结果为准；本机浏览器受管理策略阻断，未计通过。
+- [ ] 官方 Desktop 自定义协议、远程/第三方原生适配、完整外部空间注册；未完成前明确拒绝不支持条件，不假装跨端认证。
+
 # 2026-09-25 Home 默认首页与发布授权界面
 
 用户授权继续施工，本批 PR #16（依赖 #15），运行代码 `b54131a856116b6e97fa91597819613cf974cbee`。详见 [首页与授权界面记录](../docs/dashboard/workbench-implementation.md)。未合并 main、发布、迁移真实 Home 或完成空间默认预装。
@@ -64,6 +74,16 @@
 - [x] Linux Node 22.16.0 / TypeScript 5.8.3 下 strict 编译和 52 项核心测试通过，0 失败/跳过；包含 DTO 同步与 500 组确定性 JSON 对照检查。新增 Node 24 双平台核心 CI，实际 Actions 结果另查，不在这里预先认定通过。
 - [ ] P0 真实 SDK/命名 profile/认证/存储/共享 React/凭据与 Windows ACL：依赖获取探针 DNS EAI_AGAIN，尚未通过。不能以核心测试代替。
 - [ ] P1–P5：local 插件完整闭环、Home 聚合与授权、真正首页、两类真实业务 provider、安装与组件过渡及 D01–D22 集成验收。当前没有替换首页、安装新 provider 或新增可调用网络端点。
+# 2026-09-25 参考官方 desktop 优化启动流程
+
+参考官方 DSH desktop 启动流程（六阶段百分比进度、`Startup completed in X ms` 总耗时、port 0 + stdout 读回）优化本地启动。已提交 `7319d48` 并推送 main；未打版本、未发布。
+
+- [x] 桌面启动分阶段进度（attach 8% → prepare 24% → launch 56% → connect 82% → load-workbench 92% → ready 100%）：共享阶段类型与百分比映射、`DesktopServiceClient.onStage`、main 阶段状态机（`src/main/desktop-startup-progress.ts`，单调前进、防回退、失败不打印完成日志）、overlay 阶段文案与进度条（中英双语）。
+- [x] 启动总耗时日志：`Startup completed in X ms (cold start|attached to existing service)`，时钟覆盖 open 延续的冷启动，仅成功就绪打印。
+- [x] 冷启动去重：首次 attach 判决经 `priorDiscovery` 透传跳过 bootstrap 入口的重复全量探测（锁内 TOCTOU 复查保留）；`pollEndpoint` 复用 HomeController/锁对象；`bootstrapManager` 的 dump 结果复用给 `syncLoader`（同 profile 一次 `--dump-config`）；payload 校验合并为一次 manifest/digest 计算（时效比对校验保留）。
+- [x] `presentWorkbench` 与托盘空间刷新并行（finally 汇合，刷新失败不阻塞呈现）。
+- [ ] 评估后放弃：空间端口改 `port 0` + stdout 读回（改变端口稳定性语义，现有 reservePort + 端口一致性校验已满足安全要求）；`packLocalArtifacts` 锁前并行（输出到 per-Home 共享 toolsRoot，破坏单写者约束）。
+- [x] 类型检查、完整构建、desktop-startup 全链及 workbench/主套件回归；新增 desktop-startup-progress、阶段序、priorDiscovery、dump/payload 复用等定向测试。workbench-package-upgrade 9 项、sample-plugins 1 项、supervisor-handoff 2 项失败经干净 main 对照确认为本机既有问题，与本轮无关。
 
 # 2026-09-22 官方 alpha 全面迁移
 

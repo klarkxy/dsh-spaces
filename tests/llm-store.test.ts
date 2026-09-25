@@ -14,6 +14,7 @@ import {
   compileManagedRecordKey,
   compileManagedRouteId,
   createConnectionId,
+  defaultPolicyFor,
   emptyCatalog,
   emptyPolicy,
   nextCredentialRecordId,
@@ -85,7 +86,7 @@ class MemoryCatalogStore implements LlmCatalogStore {
 class MemoryPolicyStore implements LlmPolicyStore {
   private readonly files = new Map<string, SpaceLlmPolicy>();
   async read(spaceId: string): Promise<SpaceLlmPolicy> {
-    return this.files.get(spaceId) ?? emptyPolicy();
+    return this.files.get(spaceId) ?? defaultPolicyFor(spaceId);
   }
   async write(spaceId: string, next: SpaceLlmPolicy, expectedRevision: number): Promise<SpaceLlmPolicy> {
     const current = await this.read(spaceId);
@@ -262,9 +263,11 @@ test("mode all is a live reference and blocks delete even for a later connection
     },
     1,
   );
-  assert.deepEqual(preview.affectedSpaceIds, ["alpha"]);
+  assert.deepEqual(preview.affectedSpaceIds, ["alpha", "beta"]);
   await assert.rejects(() => service.deleteConnection(firstId, 1), { code: LLM_ERROR.CONNECTION_IN_USE });
   await service.updateSpacePolicy("alpha", { mode: "none" }, 1);
+  await assert.rejects(() => service.deleteConnection(firstId, 1), { code: LLM_ERROR.CONNECTION_IN_USE });
+  await service.updateSpacePolicy("beta", { mode: "none" }, 0);
   const deleted = await service.deleteConnection(firstId, 1);
   assert.equal(deleted.connections[firstId], undefined);
   assert.deepEqual(deleted.retiredConnectionIds, [firstId]);
@@ -297,7 +300,7 @@ test("selected policy still blocks delete of a disabled connection", async () =>
   const id = Object.keys(saved.connections)[0];
   await service.updateSpacePolicy("beta", { mode: "selected", connectionIds: [id] }, 0);
   const preview = await service.previewDelete(id);
-  assert.equal(preview.references[0]?.mode, "selected");
+  assert.equal(preview.references.find((row) => row.spaceId === "beta")?.mode, "selected");
   await assert.rejects(() => service.deleteConnection(id, 1), { code: LLM_ERROR.CONNECTION_IN_USE });
 });
 

@@ -357,7 +357,7 @@ const en = {
   "jobs.product": "Result",
   "create.useSharedLlm": "Use global connections",
   "create.useSharedLlmHint":
-    "This space will see every current and later shared connection after the next start. It is part of this create request, not a later auto-join.",
+    "On by default: this space uses the shared connections and the global default model after the next start. Uncheck to keep this space fully local.",
   "llm.scope": "Connection settings are shared by Spaces. Other settings in the current space are not synced with web.",
   "llm.savedPending": "Saved. {count} running spaces still use the old configuration. They take effect after restart.",
   "llm.sharedReadonly":
@@ -790,7 +790,7 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "jobs.product": "结果",
   "create.useSharedLlm": "使用全局连接",
   "create.useSharedLlmHint":
-    "该空间下次启动后可以看到当前以及之后新建的共享连接。这是本次创建提交的一部分，不是事后自动收编。",
+    "默认开启：下次启动后此空间使用共享连接和全局默认模型。取消勾选则保持完全本地。",
   "llm.scope": "连接配置由 Spaces 共享，当前空间的其他设置不会与 web 同步。",
   "llm.savedPending": "已保存。{count} 个运行中空间仍使用旧配置，重启后生效。",
   "llm.sharedReadonly": "这是全局共享连接。当前空间可以选择模型，连接信息需在全局设置修改。",
