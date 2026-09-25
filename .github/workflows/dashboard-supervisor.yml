@@ -1,0 +1,34 @@
+name: Dashboard Supervisor
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'packages/dashboard/**'
+      - 'tests/*dashboard*'
+      - 'scripts/*dashboard*'
+      - '.github/workflows/dashboard-supervisor.yml'
+permissions:
+  contents: read
+jobs:
+  supervisor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Existing Home contract baseline
+        run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-gateway.test.ts
+      - name: Preserve isolated source and locked test dependencies
+        run: |
+          mkdir -p .sandbox/dashboard-supervisor-tools
+          git archive --format=tar HEAD > .sandbox/dashboard-supervisor-tools/source.tar
+          tar -czf .sandbox/dashboard-supervisor-tools/dependencies.tar.gz node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-supervisor-source-tools
+          path: .sandbox/dashboard-supervisor-tools
+          retention-days: 1
