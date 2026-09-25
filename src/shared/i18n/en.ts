@@ -150,6 +150,12 @@ export const en = {
   "shell.startIntro":
     "The runtime is ready. Start the workbench to open your spaces.",
   "shell.connecting": "Connecting to the workbench service…",
+  "shell.stage.attach": "Connecting to an existing service",
+  "shell.stage.prepare": "Preparing runtime components",
+  "shell.stage.launch": "Starting the management service",
+  "shell.stage.connect": "Establishing the session",
+  "shell.stage.load-workbench": "Loading the workbench",
+  "shell.stage.ready": "Ready",
   "shell.unavailable": "The workbench service is not available.",
   "shell.workbenchError": "The workbench page stopped.",
   "shell.blocked": "This Home cannot start a workbench service from the leftover evidence.",
@@ -162,7 +168,7 @@ export const en = {
   "settings.tabRuntime": "Versions",
   "create.useSharedLlm": "Use global connections",
   "create.useSharedLlmHint":
-    "This space will see current and later shared connections after the next start. Existing spaces stay unchanged unless you join them.",
+    "On by default: this space uses the shared connections and the global default model after the next start. Uncheck to keep this space fully local.",
   "plugins.title": "Plugins",
   "plugins.tabManage": "Manage",
   "plugins.tabMarket": "Market",

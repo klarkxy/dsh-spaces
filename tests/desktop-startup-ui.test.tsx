@@ -40,6 +40,34 @@ for (const locale of ["en", "zh"] as const) {
     assert.doesNotMatch(html, /btn-primary|text-red-500|Node|pnpm/);
   });
 
+  test(`${locale}: a connecting workbench shows the current startup stage and percent`, () => {
+    applyAppLocale(locale);
+    const html = renderStatus(state("connecting", {
+      serviceStatus: "connecting",
+      canStart: false,
+      startupStage: "launch",
+    }));
+    assert.ok(html.includes(t("shell.stage.launch")));
+    assert.ok(html.includes("56%"));
+    assert.match(html, /role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="56"/);
+    assert.ok(!html.includes(t("shell.connecting")));
+  });
+
+  test(`${locale}: stage residue never shows outside the connecting phase`, () => {
+    applyAppLocale(locale);
+    const failed = renderStatus(state("unavailable", {
+      serviceStatus: "unavailable",
+      reasons: ["The supervisor protocol is not supported."],
+      startupStage: "launch",
+    }));
+    assert.ok(!failed.includes(t("shell.stage.launch")));
+    assert.ok(!failed.includes("56%"));
+    assert.doesNotMatch(failed, /role="progressbar"/);
+    const stopped = renderStatus(state("tools-ready", { startupStage: "ready" }));
+    assert.doesNotMatch(stopped, /role="progressbar"/);
+    assert.ok(!stopped.includes("100%"));
+  });
+
   for (const phase of ["unavailable", "blocked", "workbench-error"] as const) {
     test(`${locale}: ${phase} shows the actual error, not an installation hint or recovery action`, () => {
       applyAppLocale(locale);

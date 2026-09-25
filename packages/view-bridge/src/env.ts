@@ -12,13 +12,7 @@ export const VIEW_HINT_GLOBAL = "__DSH_SPACES_VIEW__";
 
 const SERVICE_EPOCH_RE = /^[a-f0-9]{64}$/;
 
-export interface ViewHandshakeConfig {
-  parentOrigin: string;
-  spaceId: string;
-  generation: number;
-  channel: string;
-  serviceEpoch: string;
-}
+export type ViewHandshakeConfig = import("../../../src/shared/space-host").SpaceSurfaceView;
 
 export function parseLoopbackOrigin(raw: string): string | null {
   if (typeof raw !== "string" || raw !== raw.trim() || !raw) return null;

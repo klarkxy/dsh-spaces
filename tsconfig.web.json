@@ -2,7 +2,11 @@
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -14,9 +18,15 @@
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/renderer/src/*"],
-      "@shared/*": ["src/shared/*"],
-      "@workbench/*": ["packages/plugin/src/workbench/*"]
+      "@/*": [
+        "src/renderer/src/*"
+      ],
+      "@shared/*": [
+        "src/shared/*"
+      ],
+      "@workbench/*": [
+        "packages/plugin/src/workbench/*"
+      ]
     }
   },
   "include": [
@@ -26,6 +36,10 @@
     "src/core/domain/llm-share.ts",
     "src/core/domain/llm-resolution.ts",
     "src/core/domain/blueprint.ts",
-    "packages/plugin/src/workbench/**/*"
+    "packages/plugin/src/workbench/**/*",
+    "src/core/domain/dashboard/**/*.ts",
+    "packages/dashboard/src/view.tsx",
+    "packages/dashboard/src/model.ts",
+    "packages/dashboard/src/http-client.ts"
   ]
 }

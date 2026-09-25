@@ -15,7 +15,7 @@ import {
   type WorkbenchHttpFetch,
 } from "../../../packages/plugin/src/host/workbench-http";
 import type { WorkbenchApi } from "../../shared/workbench";
-import type { DesktopServicePublicStatus } from "../../shared/desktop-shell";
+import type { DesktopServicePublicStatus, DesktopStartupStage } from "../../shared/desktop-shell";
 
 const ATTACH_FAILED = "The supervisor endpoint could not be attached.";
 const START_FAILED = "The supervisor process could not be started.";
@@ -76,6 +76,7 @@ export interface DesktopServiceClientOptions {
   attach?: DesktopAttachFn;
   bootstrap?: DesktopBootstrapFn;
   handoff?: DesktopHandoffFn;
+  onStage?: (stage: DesktopStartupStage) => void;
 }
 
 export class DesktopServiceClientError extends Error {
@@ -96,6 +97,7 @@ export class DesktopServiceClient {
   private readonly attachFn: DesktopAttachFn;
   private readonly bootstrapFn: DesktopBootstrapFn;
   private readonly handoffFn: DesktopHandoffFn;
+  private readonly onStage?: (stage: DesktopStartupStage) => void;
 
   private generation = 0;
   private disposed = false;
@@ -120,6 +122,7 @@ export class DesktopServiceClient {
     this.attachFn = options.attach ?? attachExistingSupervisor;
     this.bootstrapFn = options.bootstrap ?? bootstrapSupervisor;
     this.handoffFn = options.handoff ?? mintSupervisorHandoff;
+    this.onStage = options.onStage;
   }
 
   publicState(): DesktopServicePublicState {
@@ -208,6 +211,8 @@ export class DesktopServiceClient {
 
   private async run(generation: number): Promise<DesktopServicePublicState> {
     try {
+      if (!this.live(generation)) return this.publicState();
+      this.onStage?.("attach");
       const attached = await this.attachFn({
         home: this.home,
         allowRealHome: this.allowRealHome,
@@ -218,6 +223,7 @@ export class DesktopServiceClient {
       const kind = classifyAttach(attached);
       if (kind === "endpoint" && "endpoint" in attached) {
         this.becomeConnected(generation, attached.endpoint);
+        if (this.live(generation)) this.onStage?.("connect");
         return this.publicState();
       }
       if (kind === "blocked") {
@@ -235,6 +241,7 @@ export class DesktopServiceClient {
         return this.publicState();
       }
 
+      if (this.live(generation)) this.onStage?.("prepare");
       const bootstrapped = await this.bootstrapFn({
         home: this.home,
         argv: [startArgs.nodeExe, startArgs.cliBin],
@@ -245,6 +252,10 @@ export class DesktopServiceClient {
         allowRealHome: this.allowRealHome,
         allowColdStart: true,
         fetch: this.fetch,
+        priorDiscovery: kind === "missing" ? attached : undefined,
+        progress: (stage) => {
+          if (this.live(generation)) this.onStage?.(stage);
+        },
       });
       if (!this.live(generation)) return this.publicState();
       if (!bootstrapped.connected) {
@@ -252,6 +263,7 @@ export class DesktopServiceClient {
         return this.publicState();
       }
       this.becomeConnected(generation, bootstrapped.endpoint);
+      if (this.live(generation)) this.onStage?.("connect");
       return this.publicState();
     } catch (error) {
       if (!this.live(generation)) return this.publicState();

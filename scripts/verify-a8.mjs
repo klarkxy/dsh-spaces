@@ -19,6 +19,12 @@ if (resolve(HOME).toLowerCase() === resolve(REAL).toLowerCase()) {
 }
 
 function dshBin() {
+  const explicit = process.env.DSH_TEST_BIN || process.env.DSH_TEST_CLI_BIN;
+  if (explicit) {
+    const bin = resolve(explicit);
+    if (!existsSync(bin)) throw new Error("Explicit DSH test CLI is missing");
+    return bin;
+  }
   const win = process.env.APPDATA
     ? join(process.env.APPDATA, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")
     : "";

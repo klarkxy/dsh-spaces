@@ -4,6 +4,7 @@ import { atomicWrite } from "./atomic";
 import {
   LLM_ERROR,
   LlmConfigError,
+  defaultPolicyFor,
   emptyPolicy,
   parsePolicy,
   type SpaceLlmPolicy,
@@ -39,6 +40,7 @@ export class FileLlmPolicyStore implements LlmPolicyStore {
   constructor(private readonly home: string) {}
 
   async read(spaceId: string): Promise<SpaceLlmPolicy> {
+    if (!existsSync(llmPolicyPath(this.home, spaceId))) return defaultPolicyFor(spaceId);
     return readPolicyFile(llmPolicyPath(this.home, spaceId));
   }
 

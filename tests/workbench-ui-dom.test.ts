@@ -32,11 +32,12 @@ function routeView(
 }
 
 async function launchChromium(chromium: {
-  launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{
+  launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{
     close: () => Promise<void>;
     newPage: () => Promise<unknown>;
   }>;
 }) {
+  if (process.env.DSH_TEST_CHROMIUM) return chromium.launch({ headless: true, executablePath: process.env.DSH_TEST_CHROMIUM });
   try {
     return await chromium.launch({ headless: true, channel: "chrome" });
   } catch {
@@ -59,7 +60,7 @@ function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): P
       resolve({
         url: `http://127.0.0.1:${address.port}`,
         close: () =>
-          new Promise((done, fail) => server.close((error) => (error ? fail(error) : done()))),
+          new Promise((done, fail) => { server.closeAllConnections(); server.close((error) => (error ? fail(error) : done())); }),
       });
     });
   });
@@ -110,7 +111,7 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
 
   const require = createRequire(join(playwrightRoot, "index.js"));
   const { chromium } = require("playwright") as {
-    chromium: { launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
+    chromium: { launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
   };
   type Page = {
     goto: (url: string, opts?: { waitUntil?: string }) => Promise<unknown>;
@@ -128,6 +129,8 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
   const browserPage = page as unknown as import("playwright").Page;
   await browserPage.setViewportSize({ width: 1280, height: 800 });
+  // Home now opens the dashboard; chat is a separate, lazy and persistent view.
+  await browserPage.getByRole('button', { name: '聊天', exact: true }).click();
   const home = browserPage.frameLocator('[data-home-view]');
   await home.locator('textarea').fill('home draft');
   assert.equal(await browserPage.getByRole('tab').count(), 0, 'management is absent from the home');
@@ -229,7 +232,7 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
 
   const require = createRequire(join(playwrightRoot, "index.js"));
   const { chromium } = require("playwright") as {
-    chromium: { launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
+    chromium: { launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
   };
   type Locator = {
     click: () => Promise<void>;
