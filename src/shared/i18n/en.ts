@@ -162,7 +162,7 @@ export const en = {
   "settings.tabRuntime": "Versions",
   "create.useSharedLlm": "Use global connections",
   "create.useSharedLlmHint":
-    "This space will see current and later shared connections after the next start. Existing spaces stay unchanged unless you join them.",
+    "On by default: this space uses the shared connections and the global default model after the next start. Uncheck to keep this space fully local.",
   "plugins.title": "Plugins",
   "plugins.tabManage": "Manage",
   "plugins.tabMarket": "Market",
