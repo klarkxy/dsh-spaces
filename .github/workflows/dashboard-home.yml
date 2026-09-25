@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p .sandbox/dashboard-home-evidence
           git archive --format=tar HEAD > .sandbox/dashboard-home-evidence/source.tar
-          tar -czf .sandbox/dashboard-home-evidence/tooling.tar.gz node_modules/typescript node_modules/tsx node_modules/esbuild node_modules/@esbuild node_modules/@types node_modules/undici-types node_modules/get-tsconfig node_modules/resolve-pkg-maps node_modules/react node_modules/react-dom node_modules/scheduler node_modules/zod
+          tar -czf .sandbox/dashboard-home-evidence/tooling.tar.gz node_modules/typescript node_modules/tsx node_modules/esbuild node_modules/@esbuild node_modules/@types node_modules/undici-types node_modules/react node_modules/react-dom node_modules/scheduler node_modules/zod node_modules/@deepseek-ai
       - uses: actions/upload-artifact@v4
         with:
           name: dashboard-home-source-fixture
