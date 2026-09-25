@@ -25,5 +25,13 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Inspect the actually installed SDK (not acceptance)
+      - name: Compile core and retain all previous regression checks
+        run: node scripts/test-dashboard-core.mjs
+      - name: Local backend behavior
+        run: node --import tsx --test tests/dashboard-local.test.ts
+      - name: Install pinned official CLI in an isolated SDK fixture
+        run: npm install --prefix .sandbox/dashboard-sdk --no-audit --no-fund --ignore-scripts --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1
+      - name: Inspect the installed CLI SDK (not acceptance)
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
         run: node scripts/probe-dashboard-sdk.mjs
