@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
-import { rpc, waitForApi } from "../scripts/validate-isolation.mjs";
+import { requireProfiles, rpc, waitForApi } from "../scripts/validate-isolation.mjs";
+
+test("isolation gate accepts a virtual web profile but requires both managed profiles", () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-isolation-profiles-"));
+  try {
+    mkdirSync(join(home, "profiles", "coding"), { recursive: true });
+    mkdirSync(join(home, "profiles", "writing"), { recursive: true });
+    assert.doesNotThrow(() => requireProfiles(home));
+    rmSync(join(home, "profiles", "writing"), { recursive: true });
+    assert.throws(() => requireProfiles(home), /missing profile writing/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("isolation gate exchanges one launch token and reuses its session cookie", async () => {
   const secret = randomUUID();
