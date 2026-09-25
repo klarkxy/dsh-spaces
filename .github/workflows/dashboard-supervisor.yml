@@ -5,30 +5,84 @@ on:
       - 'src/**'
       - 'packages/dashboard/**'
       - 'tests/*dashboard*'
+      - 'tests/fixtures/dashboard-supervisor*'
       - 'scripts/*dashboard*'
+      - '.github/dashboard-supervisor.patch'
       - '.github/workflows/dashboard-supervisor.yml'
 permissions:
   contents: read
 jobs:
+  prepare-git-objects:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/dashboard-supervisor-20260925'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Apply the three reviewed source edits without running repository code
+        run: git apply --check --index .github/dashboard-supervisor.patch && git apply --index .github/dashboard-supervisor.patch
+      - name: Upload unreferenced Git blobs only (no branch updates)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,tempfile
+          allowed={'src/adapters/node/workbench-http.ts','src/adapters/node/workbench-supervisor.ts','src/shared/workbench.ts'}
+          paths=subprocess.check_output(['git','diff','--cached','--name-only']).decode().splitlines()
+          assert set(paths)==allowed
+          entries=[]
+          for path in paths:
+              body={'content':base64.b64encode(pathlib.Path(path).read_bytes()).decode(),'encoding':'base64'}
+              with tempfile.NamedTemporaryFile(mode='w') as payload:
+                  json.dump(body,payload);payload.flush()
+                  result=json.loads(subprocess.check_output(['gh','api','--method','POST',f'repos/{os.environ["REPOSITORY"]}/git/blobs','--input',payload.name]))
+              expected=subprocess.check_output(['git','hash-object',path]).decode().strip()
+              assert result['sha']==expected
+              entries.append({'path':path,'sha':expected,'mode':'100644','type':'blob'})
+          print('PREPARED_GIT_BLOBS='+json.dumps(entries))
+          PY
   supervisor:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - run: git apply --check .github/dashboard-supervisor.patch && git apply .github/dashboard-supervisor.patch
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Existing Home contract baseline
-        run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-gateway.test.ts
-      - name: Preserve isolated source and locked test dependencies
-        run: |
-          mkdir -p .sandbox/dashboard-supervisor-tools
-          git archive --format=tar HEAD > .sandbox/dashboard-supervisor-tools/source.tar
-          tar -czf .sandbox/dashboard-supervisor-tools/dependencies.tar.gz node_modules
-      - uses: actions/upload-artifact@v4
+      - run: npx --no-install tsc --noEmit -p tsconfig.node.json
+      - run: npx --no-install tsc --noEmit -p tsconfig.web.json
+      - run: npx --no-install tsc -p tsconfig.dashboard-ui.json
+      - run: node scripts/test-dashboard-core.mjs
+      - run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home-gateway.test.ts tests/dashboard-local.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-view.test.tsx tests/dashboard-http.test.ts
+      - run: node --import tsx --test tests/dashboard-supervisor.test.ts
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: git apply --check .github/dashboard-supervisor.patch && git apply .github/dashboard-supervisor.patch
+      - uses: actions/setup-node@v4
         with:
-          name: dashboard-supervisor-source-tools
-          path: .sandbox/dashboard-supervisor-tools
-          retention-days: 1
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+      - run: node scripts/build-spaces.mjs && node scripts/build-dashboard-plugin.mjs
+      - name: Real Supervisor plans, run ownership and two installed DSH Hosts
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node --import tsx scripts/test-dashboard-supervisor-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-supervisor-native-evidence
+          path: .sandbox/dashboard-supervisor-evidence
+          if-no-files-found: ignore
+          retention-days: 7
