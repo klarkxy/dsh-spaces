@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as nodeRequest } from 'node:http';
 import { dashboardHttpHandler, QUERY_PATH, COMMAND_PATH } from '../packages/dashboard/src/host/http.ts';
 import { createDashboardHttpBackend } from '../packages/dashboard/src/http-client.ts';
 import { LocalDashboard, type LocalDashboardDocument } from '../src/core/domain/dashboard/local-backend.ts';
@@ -20,9 +20,20 @@ async function fixture() {
   server.on('request', (req, res) => { void (req.url === COMMAND_PATH ? commands : query)(req, res); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${ports.port()}`;
-  async function post(body: string | Uint8Array = '{"kind":"overview"}', overrides: Record<string, string> = {}, path = QUERY_PATH) {
-    const payload = typeof body === 'string' ? body : new Uint8Array(body).buffer;
-    return fetch(origin + path, { method: 'POST', headers: { Origin: origin, Cookie: 'fixture=session', 'X-DSH-Dashboard': '1', 'Content-Type': 'application/json', ...overrides }, body: payload });
+  async function post(body: string | Uint8Array = '{"kind":"overview"}', overrides: Record<string, string> = {}, path = QUERY_PATH): Promise<Response> {
+    // node:http deliberately preserves the hostile Host override. Fetch may
+    // normalize forbidden request headers and would not exercise this fence.
+    return new Promise((resolve, reject) => {
+      const request = nodeRequest(origin + path, { method: 'POST', headers: { Origin: origin, Cookie: 'fixture=session', 'X-DSH-Dashboard': '1', 'Content-Type': 'application/json', ...overrides } }, response => {
+        const parts: Buffer[] = [];
+        response.on('data', chunk => parts.push(chunk)); response.on('error', reject);
+        response.on('end', () => {
+          const headers = new Headers(); for (const [key, value] of Object.entries(response.headers)) if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(',') : value);
+          resolve(new Response(Buffer.concat(parts).toString(), { status: response.statusCode, headers }));
+        });
+      });
+      request.on('error', reject); request.end(body);
+    });
   }
   return { origin, post, local, get writes() { return writes; }, revoke: () => { authenticated = false; }, stop: () => { active = false; }, async close() {
     await local.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
@@ -31,19 +42,19 @@ async function fixture() {
 test('authenticated HTTP query returns a noncached local overview without writes', async () => {
   const f = await fixture(); try { const response = await f.post(); assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); assert.equal(response.headers.get('access-control-allow-origin'), null); assert.equal((await response.json()).data.mode, 'local'); assert.equal(f.writes, 0); } finally { await f.close(); }
 });
-test('authentication, origin, custom header and host checks reject without writing', async () => {
+test('authentication, origin, custom header and actual hostile Host reject without writing', async () => {
   const f = await fixture(); try {
     for (const [headers, status] of [[{ Cookie: 'wrong' }, 401], [{ Origin: 'http://evil.invalid' }, 403], [{ 'X-DSH-Dashboard': '0' }, 403], [{ Host: 'evil.invalid' }, 403]] as const) {
-      const response = await f.post(undefined, headers); assert.equal(response.status, status); assert.equal(f.writes, 0); await response.text();
+      const response = await f.post(undefined, headers); assert.equal(response.status, status, JSON.stringify(headers)); assert.equal(f.writes, 0);
     }
   } finally { await f.close(); }
 });
 test('strict JSON and size validation happen at the real HTTP boundary', async () => {
   const f = await fixture(); try {
     for (const body of ['{"kind":"overview","kind":"board"}', '{"kind":"overview","spaceId":"other"}', Uint8Array.of(255)]) {
-      const response = await f.post(body); assert.equal(response.status, 400); await response.text();
+      const response = await f.post(body); assert.equal(response.status, 400);
     }
-    const response = await f.post(' '.repeat(1024 * 1024 + 1)); assert.equal(response.status, 413); await response.text(); assert.equal(f.writes, 0);
+    const response = await f.post(' '.repeat(1024 * 1024 + 1)); assert.equal(response.status, 413); assert.equal(f.writes, 0);
   } finally { await f.close(); }
 });
 test('layout command persists once and repeated request returns the original receipt', async () => {
@@ -51,15 +62,15 @@ test('layout command persists once and repeated request returns the original rec
     const request = JSON.stringify({ requestId: 'one', backendEpoch: 'epoch', issuedAt: new Date().toISOString(), command: { kind: 'board.create', boardId: 'home', title: 'Home', placements: [] } });
     const response = await f.post(request, {}, COMMAND_PATH); assert.equal(response.status, 200); const receipt = await response.json();
     assert.deepEqual(await (await f.post(request, {}, COMMAND_PATH)).json(), receipt); assert.equal(f.writes, 1);
-    f.revoke(); const denied = await f.post(); assert.equal(denied.status, 401); await denied.text();
+    f.revoke(); assert.equal((await f.post()).status, 401);
   } finally { await f.close(); }
 });
 test('unsupported routes and body encodings cannot become alternate entrypoints', async () => {
   const f = await fixture(); try {
     for (const [headers, path, status] of [[{ 'Content-Type': 'text/plain' }, QUERY_PATH, 400], [{ 'Content-Encoding': 'gzip' }, QUERY_PATH, 400], [{}, QUERY_PATH + '?extra=1', 501]] as const) {
-      const response = await f.post(undefined, headers, path); assert.equal(response.status, status); await response.text();
+      assert.equal((await f.post(undefined, headers, path)).status, status);
     }
-    f.stop(); const response = await f.post(); assert.equal(response.status, 503); await response.text();
+    f.stop(); assert.equal((await f.post()).status, 503);
   } finally { await f.close(); }
 });
 test('HTTP client uses same-origin cookies, no redirects and explicit abort without retry', async () => {
