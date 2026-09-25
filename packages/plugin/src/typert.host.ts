@@ -1,5 +1,6 @@
 /* Host FaceModel descriptors for guide, manager, and compatibility-read Remotes. */
 import { z } from "zod";
+import { parseSpaceHostAudience } from "../../../src/shared/space-host";
 import {
   backupsResultSchema,
   jobIdSchema,
@@ -110,6 +111,7 @@ export const TYPERT = {
     invocation("workbenchGuide", "role", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchGuideRole", workbenchGuideRoleSchema)),
     invocation("workbenchGuide", "bootstrap", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("workbenchGuide", "returnTarget", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
+    invocation("workbenchGuide", "portalTarget", guideFile, [param("audience", z.object({ parentOrigin: z.string().max(128), channel: z.string().regex(/^[a-f0-9]{32}$/) }).strict().refine(value => parseSpaceHostAudience(value) !== null), "@dsh-spaces/plugin#SpaceHostAudience")], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
     invocation("workbenchGuide", "initialize", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchInitializeResult", workbenchInitializeResultSchema)),
     invocation("spaces", "overview", spacesFile, [], result("@dsh-spaces/plugin/types#SpacesOverview", overviewSchema)),
     invocation(
@@ -222,7 +224,7 @@ export const TYPERT = {
   },
 };
 
-export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget", "initialize"] as const;
+export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget", "portalTarget", "initialize"] as const;
 export const MANAGER_METHODS = [
   "state",
   "detail",

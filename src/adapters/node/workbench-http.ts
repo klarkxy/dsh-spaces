@@ -1,4 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "./workbench-portal";
+import { CONTAINED_MANAGEMENT_PARAM } from "../../shared/space-host";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { redactPublicReason } from "../../shared/public-reason";
 import { sanitizeLogText } from "./diagnostics";
@@ -73,6 +75,15 @@ export interface WorkbenchHttpRuntime {
     epoch?: string | null,
   ): Promise<ViewBootstrap | { status: number; message: string }>;
   mintHandoff(): string;
+  /** Optional additive Dashboard v1 routes on the same authenticated listener. */
+  handleDashboardRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
+}
+
+const portalGrants = new WeakMap<WorkbenchHttpRuntime, WorkbenchPortalGrants>();
+function portals(host: WorkbenchHttpRuntime): WorkbenchPortalGrants {
+  let store = portalGrants.get(host);
+  if (!store) { store = new WorkbenchPortalGrants(); portalGrants.set(host, store); }
+  return store;
 }
 
 export interface WorkbenchHttpServer {
@@ -190,6 +201,7 @@ async function handleRequest(
       deny(res, 403, "workbench/forbidden", "Host is not the supervisor loopback entry.");
       return;
     }
+    if (await host.handleDashboardRequest?.(req, res)) return;
     if (req.method === "OPTIONS") {
       if (!originAllowed(req, host, { allowMissing: false })) {
         deny(res, 403, "workbench/forbidden", "Origin is not allowed.");
@@ -218,6 +230,40 @@ async function handleRequest(
       }
       exchangeBootstrap(host, req, res, url.searchParams.get("token") ?? "");
       return;
+    }
+
+    if (url.pathname === "/internal/portal" && req.method === "POST") {
+      if (!hostBearerOk(host, req) || headerOrigin(req) !== host.supervisorOrigin()) {
+        deny(res, 403, "workbench/forbidden", "Only the owning Host can issue a presentation entry."); return;
+      }
+      try {
+        const body = await readJsonBody(req, 1024);
+        json(res, 200, { path: "/portal-bootstrap/" + portals(host).mint(body.payload) });
+      } catch (error) {
+        deny(res, error instanceof BodyLimitError ? 413 : 400, "workbench/invalid-input", "Invalid, duplicate or unavailable presentation entry.");
+      }
+      return;
+    }
+    if (url.pathname.startsWith("/portal-bootstrap/") && req.method === "GET") {
+      if (req.headers["sec-fetch-site"] === "cross-site" ||
+          headerOrigin(req) && headerOrigin(req) !== host.supervisorOrigin()) {
+        deny(res, 403, "workbench/forbidden", "This host requires a same-site view transport."); return;
+      }
+      const audience = portals(host).consume(url.pathname.slice("/portal-bootstrap/".length));
+      if (!audience) { deny(res, 401, "workbench/unauthorized", "Presentation entry expired or already used."); return; }
+      res.writeHead(303, { location: "/portal/" + audience.channel, "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "set-cookie": `${host.cookieName()}=${host.sessionCookie()}; Path=/; HttpOnly; SameSite=Strict` });
+      res.end(); return;
+    }
+    if (url.pathname.startsWith("/portal/") && req.method === "GET") {
+      const audience = portals(host).page(url.pathname.slice("/portal/".length));
+      if (!sessionOk(host, req) || !audience) { deny(res, 401, "workbench/unauthorized", "Presentation entry is unavailable."); return; }
+      const manager = host.managerOrigin();
+      if (!manager) { deny(res, 503, "workbench/unavailable", "The manager is not running."); return; }
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+        "referrer-policy": "no-referrer", "content-security-policy": portalCsp(audience, manager) });
+      res.end(renderPortalPage(audience, manager)); return;
     }
 
     if (url.pathname === "/internal/bootstrap" && req.method === "POST") {
@@ -359,7 +405,12 @@ async function handleView(
     deny(res, result.status, "workbench/forbidden", result.message);
     return;
   }
-  sendChildBootstrap(res, result);
+  // Presentation only: only the actual manager can use the contained management layout.
+  if (url.searchParams.get(CONTAINED_MANAGEMENT_PARAM) === "1" && new URL(result.location).origin === host.managerOrigin()) {
+    const destination = new URL(result.location);
+    destination.searchParams.set(CONTAINED_MANAGEMENT_PARAM, "1");
+    sendChildBootstrap(res, { ...result, location: destination.href });
+  } else sendChildBootstrap(res, result);
 }
 
 function handleInternalBootstrap(

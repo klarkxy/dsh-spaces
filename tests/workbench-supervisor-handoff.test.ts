@@ -35,9 +35,10 @@ import {
   parseSupervisorArgs,
   preflightSupervisorComponentPayload,
   supervisorCliArgs,
+  validateSupervisorComponentPayload,
+  WorkbenchSupervisorRuntime,
   type WorkbenchMaintenance,
   type WorkbenchSupervisorHandle,
-  type WorkbenchSupervisorRuntime,
 } from "../src/adapters/node/workbench-supervisor.ts";
 import { expectedAuthCookieName } from "../src/adapters/node/workbench-http.ts";
 import type { WorkbenchPlan, WorkbenchPlanRequest } from "../src/shared/workbench.ts";
@@ -306,6 +307,84 @@ test("token-accept preflight validates artifacts before HomeController.accept", 
   });
   assert.equal(ready.pluginArtifact, packed.pluginArtifact);
   assert.equal(new HomeController(home).inspect().held, false);
+});
+
+test("threaded payload stages reuse the launch validation conclusion", async () => {
+  const home = tempDir("dsh-spaces-handoff-home-");
+  const bin = writeFakeCli(home);
+  const payload = dummyPayloadLib();
+  const packed = packGroupArtifacts(payload, home);
+
+  // Validate once, then remove the manifest: every stage below can only pass
+  // by reusing that conclusion instead of re-reading and re-hashing the group.
+  const selected = validateSupervisorComponentPayload(payload.payloadRootLib);
+  rmSync(join(payload.packageRoot, ...COMPONENT_PAYLOAD_MANIFEST_REL.split("/")));
+
+  const bound = bindSupervisorComponentPayload({
+    home,
+    bin,
+    componentPayloadRoot: payload.payloadRootLib,
+    ...packed,
+  }, selected);
+  assert.equal(bound.componentPayloadRoot, selected.payloadRootLib);
+  const matched = assertHandoffTokenMatchesSelectedPayload(
+    { artifactDigest: payload.digest },
+    bound.componentPayloadRoot,
+    undefined,
+    selected,
+  );
+  assert.equal(matched.digest, payload.digest);
+  const runtime = new WorkbenchSupervisorRuntime({
+    home,
+    bin,
+    componentPayloadRoot: bound.componentPayloadRoot,
+    ...packed,
+  }, selected);
+  await runtime.close();
+});
+
+test("a threaded launch boots with the reused payload conclusion", async () => {
+  const home = tempDir("dsh-spaces-handoff-home-");
+  const bin = writeFakeCli(home);
+  const payload = dummyPayloadLib();
+  const packed = packGroupArtifacts(payload, home);
+  const selected = validateSupervisorComponentPayload(payload.payloadRootLib);
+
+  // Artifact tuple and tar digest checks still run against the reused payload.
+  const mixedView = dummyPayloadLib({ viewBody: "export const view = 'tampered';\n" });
+  const viewMix = packGroupArtifacts(mixedView, tempDir("dsh-spaces-handoff-thread-mix-"));
+  await assert.rejects(
+    () => preflightSupervisorComponentPayload({
+      home,
+      bin,
+      componentPayloadRoot: payload.payloadRootLib,
+      pluginArtifact: packed.pluginArtifact,
+      viewBridgeArtifact: viewMix.viewBridgeArtifact,
+      llmBridgeArtifact: packed.llmBridgeArtifact,
+    }, selected),
+    /view-bridge|artifact|match|digest|version/i,
+  );
+
+  const handle = await startSupervisor(home, bin, {
+    componentPayloadRoot: payload.payloadRootLib,
+    ...packed,
+  }, selected);
+  const state = await handle.runtime.state();
+  assert.ok(state.managerId);
+  assert.notEqual(state.availability, "unavailable");
+
+  // Without a threaded validation the same tampered group still fails closed.
+  const fresh = dummyPayloadLib();
+  rmSync(join(fresh.packageRoot, ...COMPONENT_PAYLOAD_MANIFEST_REL.split("/")));
+  await assert.rejects(
+    () => createWorkbenchSupervisor({
+      home,
+      bin,
+      componentPayloadRoot: fresh.payloadRootLib,
+      createMaintenance: () => fakeMaintenance(),
+    }),
+    /manifest|missing|invalid/i,
+  );
 });
 
 test("CLI round-trips --accept-handoff only with an explicit nonzero port", () => {
@@ -589,13 +668,28 @@ test("library supervisor without CLI exit capability refuses upgrade before stop
   assert.equal(new HomeController(home).inspect().held, true);
 });
 
-test("failed stop does not transfer; failed persist does not transfer; durable success finalizes", async () => {
+test("failed stop does not transfer; failed persist does not transfer; durable success finalizes", async (t) => {
   const home = tempDir("dsh-spaces-handoff-home-");
   const bin = writeFakeCli(home);
   const payload = dummyPayloadLib();
   const tools = tempDir("dsh-spaces-handoff-tools-");
+  const originalNpmCache = process.env.npm_config_cache;
+  process.env.npm_config_cache = join(tools, "npm-cache");
+  t.after(() => {
+    if (originalNpmCache === undefined) delete process.env.npm_config_cache;
+    else process.env.npm_config_cache = originalNpmCache;
+  });
   const packed = packGroupArtifacts(payload, home);
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeProfile(home, "alpha", {
+    name: "alpha",
+    dependencies: { "@dsh-spaces/view-bridge": "3.0.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/view-bridge"] } },
+  });
+  cpSync(
+    join(payload.packageRoot, "lib", "view-bridge"),
+    join(home, "profiles", "alpha", "node_modules", "@dsh-spaces", "view-bridge"),
+    { recursive: true },
+  );
 
   const stub = writeStubLauncher(home);
   const stamp = join(home, "commit-stamp.json");
@@ -605,6 +699,7 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
     componentPayloadRoot: payload.payloadRootLib,
     controlToolRoot: tools,
     ...packed,
+    dumpConfig: async (profile) => `${dumpText(profile)}- id: settings\n  disabled: true\n- id: dsh-spaces-settings\n  name: '@dsh-spaces/view-bridge/settings'\n`,
     onNormalExit: () => {
       exited = true;
     },
@@ -643,7 +738,8 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
     { serviceEpoch: started.serviceEpoch, expectedRevision: started.revision },
   );
   await waitJob(handle, "start-alpha");
-  assert.equal((await handle.runtime.job("start-alpha")).status, "succeeded");
+  const startedJob = await handle.runtime.job("start-alpha");
+  assert.equal(startedJob.status, "succeeded", JSON.stringify(startedJob));
   const running = await handle.runtime.state();
   assert.equal(running.spaces.find((space) => space.id === "alpha")?.status, "running");
   const blocked = await handle.runtime.submit(
@@ -741,7 +837,7 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
   );
   await waitJob(handle, "ok-upgrade");
   const okJob = await handle.runtime.job("ok-upgrade");
-  assert.equal(okJob.status, "succeeded");
+  assert.equal(okJob.status, "succeeded", JSON.stringify({ okJob, lastHandoffError: (runtime as WorkbenchSupervisorRuntime & { lastHandoffError?: string }).lastHandoffError }));
   assert.equal(okJob.phase, "handoff-pending");
   await waitUntil(() => exited || existsSync(stamp) && readFileSync(stamp, "utf8").trim().length > 0, "handoff commit");
   assert.equal(okJob.phase, "handoff-pending");
@@ -959,6 +1055,7 @@ async function startSupervisor(
   home: string,
   bin: string,
   extra: Partial<Parameters<typeof createWorkbenchSupervisor>[0]> = {},
+  validated?: ValidatedComponentPayload,
 ): Promise<WorkbenchSupervisorHandle> {
   const handle = await createWorkbenchSupervisor({
     home,
@@ -971,21 +1068,15 @@ async function startSupervisor(
     processRuntime: extra.processRuntime ?? {
       spawn: spawnFixture(),
       prepareHome: async () => undefined,
-      gracefulWaitMs: 40,
+      gracefulWaitMs: 5_000,
       forceWaitMs: 20,
       readyTimeoutMs: 8_000,
       fetchTimeoutMs: 2_000,
       pollMs: 40,
       kill: async (pid, kind) => {
         if (kind === "kill") return;
-        await new Promise<void>((resolveKill) => {
-          const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-            stdio: "ignore",
-            windowsHide: true,
-          });
-          killer.once("exit", () => resolveKill());
-          killer.once("error", () => resolveKill());
-        });
+        const child = live.find((item) => item.pid === pid);
+        if (!child || !child.kill("SIGTERM")) throw new Error("fixture child could not be stopped");
       },
     },
     runCli: extra.runCli ?? (async (args) => {
@@ -1010,7 +1101,7 @@ async function startSupervisor(
     dumpConfig: extra.dumpConfig ?? (async (profile) => dumpText(profile)),
     createMaintenance: extra.createMaintenance ?? (() => fakeMaintenance()),
     ...extra,
-  });
+  }, validated);
   handles.push(handle);
   return handle;
 }
@@ -1045,7 +1136,8 @@ async function stopAllOwned(handle: WorkbenchSupervisorHandle): Promise<void> {
       },
     );
     await waitJob(handle, requestId);
-    assert.equal((await handle.runtime.job(requestId)).status, "succeeded");
+    const stoppedJob = await handle.runtime.job(requestId);
+    assert.equal(stoppedJob.status, "succeeded", JSON.stringify(stoppedJob));
   }
 }
 

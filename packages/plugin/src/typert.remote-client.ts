@@ -1,3 +1,4 @@
+import type { SpaceHostAudience } from "../../../src/shared/space-host";
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { SpaceDetail, SpacesOverview } from "../../../src/shared/spaces-control";
 import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../src/shared/llm-api";
@@ -30,6 +31,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     role: () => Promise<RemoteResult<WorkbenchGuideRole>>;
     bootstrap: () => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     returnTarget: () => Promise<RemoteResult<WorkbenchReturnTarget>>;
+    portalTarget: (audience: SpaceHostAudience) => Promise<RemoteResult<WorkbenchReturnTarget>>;
     initialize: () => Promise<RemoteResult<WorkbenchInitializeResult>>;
   }
   interface TypertRemoteNamespace$spaces {
@@ -58,6 +60,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "workbenchGuide/role": () => Promise<RemoteResult<WorkbenchGuideRole>>;
     "workbenchGuide/bootstrap": () => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     "workbenchGuide/returnTarget": () => Promise<RemoteResult<WorkbenchReturnTarget>>;
+    "workbenchGuide/portalTarget": (audience: SpaceHostAudience) => Promise<RemoteResult<WorkbenchReturnTarget>>;
     "workbenchGuide/initialize": () => Promise<RemoteResult<WorkbenchInitializeResult>>;
     "spaces/overview": () => Promise<RemoteResult<SpacesOverview>>;
     "spaces/detail": (id: string) => Promise<RemoteResult<SpaceDetail>>;

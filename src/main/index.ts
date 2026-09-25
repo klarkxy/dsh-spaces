@@ -34,6 +34,7 @@ import {
   sameTrustedUrl,
   type DesktopShellPhase,
   type DesktopShellPublicState,
+  type DesktopStartupStage,
 } from "../shared/desktop-shell";
 import type { WorkbenchState } from "../shared/workbench";
 import { applyAppLocale, t } from "../shared/i18n";
@@ -50,6 +51,7 @@ import {
 } from "../adapters/node/dsh-cli";
 import { resolveDshHome } from "./dsh-home";
 import { createDesktopStartup } from "./desktop-startup";
+import { createStartupProgress } from "./desktop-startup-progress";
 import { authorizeProductHome } from "../adapters/node/home-guard";
 import { applyNativeTheme, currentColorScheme } from "./native-theme";
 import {
@@ -165,12 +167,19 @@ function startMain(startupNotice?: string): void {
       : "";
   const snapshotRoot = recordedSnapshotRoot || join(userData, DESKTOP_SNAPSHOTS_DIRNAME);
 
+  const progress = createStartupProgress({
+    onAdvance: () => broadcastState(),
+    onLog: (line) => console.log(line),
+  });
   const clientOptions = {
     home: dshHome,
     payloadRoot,
     toolsRoot,
     snapshotRoot,
     allowRealHome: app.isPackaged === true || Boolean(process.env.DSH_SPACES_ALLOW_REAL_HOME),
+    onStage: (stage: DesktopStartupStage) => {
+      progress.stage(stage);
+    },
   };
   let client = new DesktopServiceClient(clientOptions);
 
@@ -278,6 +287,7 @@ function startMain(startupNotice?: string): void {
       seq: stateSeq,
       phase,
       serviceStatus: lastService.status,
+      startupStage: phase === "connecting" ? progress.current() : null,
       reasons: publicReasons(workbenchError ? [workbenchError] : []),
       workbenchError,
       runtime: runtimeFlags(),
@@ -345,29 +355,42 @@ function startMain(startupNotice?: string): void {
   async function presentWorkbench(): Promise<void> {
     const generation = ++viewGeneration;
     if (!views) return;
-    const entryUrl = await client.entryUrl();
-    if (generation !== viewGeneration) return;
-    const origin = parseLoopbackOrigin(new URL(entryUrl).origin);
-    if (!origin) throw new Error("The workbench entry origin is not a trusted loopback address.");
-    if (generation !== viewGeneration || !views) return;
-    workbenchError = null;
-    views.presentWorkbench({
-      entryUrl,
-      managerOrigin: origin,
-      onError: (message) => {
-        workbenchError = message;
-        broadcastState();
-      },
-    });
-    await refreshTraySpaces();
+    // Tray refresh only depends on the connected status; start it concurrently
+    // with the handoff mint and join before this presentation returns.
+    const trayRefresh = refreshTraySpaces();
+    try {
+      progress.stage("load-workbench");
+      const entryUrl = await client.entryUrl();
+      if (generation !== viewGeneration) return;
+      const origin = parseLoopbackOrigin(new URL(entryUrl).origin);
+      if (!origin) throw new Error("The workbench entry origin is not a trusted loopback address.");
+      if (generation !== viewGeneration || !views) return;
+      workbenchError = null;
+      views.presentWorkbench({
+        entryUrl,
+        managerOrigin: origin,
+        onError: (message) => {
+          workbenchError = message;
+          broadcastState();
+        },
+      });
+      progress.succeed();
+    } finally {
+      await trayRefresh.catch(() => {
+        /* The tray keeps its last list; a refresh failure never blocks presentation. */
+      });
+    }
   }
 
   async function connectOnce(): Promise<void> {
+    progress.beginConnect();
     lastService = { status: "connecting", reasons: [] };
     broadcastState();
     lastService = await client.connect();
     if (lastService.status === "connected") {
       await presentWorkbench();
+    } else if (lastService.status === "unavailable") {
+      progress.fail();
     }
     broadcastState();
   }
@@ -397,6 +420,7 @@ function startMain(startupNotice?: string): void {
   async function startService(): Promise<DesktopShellPublicState> {
     if (lastService.status === "connected") return snapshotAndEmit();
     return coalesceInflight(startInflight, async () => {
+      progress.beginStart();
       const runtime = resolveStartRuntime();
       starting = true;
       workbenchError = null;
@@ -405,7 +429,9 @@ function startMain(startupNotice?: string): void {
         ensureDesktopSnapshotRoot(dshHome, snapshotRoot, { createIfMissing: !recordedSnapshotRoot });
         lastService = await client.start(runtime);
         if (lastService.status === "connected") await presentWorkbench();
+        else progress.fail();
       } catch (error) {
+        progress.fail();
         starting = false;
         workbenchError = redactDesktopShellText(error instanceof Error ? error.message : String(error), secrets());
         broadcastState();
@@ -500,6 +526,7 @@ function startMain(startupNotice?: string): void {
       views = mainWindow ? new ViewManager(mainWindow, requireWorkbenchSession()) : null;
       client.dispose();
       client = new DesktopServiceClient(clientOptions);
+      progress.reset();
       lastService = client.publicState();
       traySpaces = [];
       tray?.refresh();
@@ -704,6 +731,7 @@ function startMain(startupNotice?: string): void {
     try {
       await startup.open();
     } catch (error) {
+      progress.fail();
       lastService = client.publicState();
       if (lastService.status !== "unavailable") {
         lastService = {
