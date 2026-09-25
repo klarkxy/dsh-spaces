@@ -1,0 +1,41 @@
+name: Portable host spaces
+on:
+  pull_request:
+    paths:
+      - 'packages/plugin/**'
+      - 'packages/view-bridge/**'
+      - 'src/adapters/node/workbench*'
+      - 'src/shared/space-host.ts'
+      - 'tests/portable-host*'
+      - 'tests/fixtures/portable-host/**'
+      - 'tests/workbench-plugin.test.ts'
+      - 'scripts/verify-plugin-standard-install.mjs'
+      - '.github/workflows/portable-host.yml'
+permissions:
+  contents: read
+jobs:
+  contracts-and-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck:spaces && npm run typecheck
+      - run: node --import tsx --test tests/portable-host.test.ts tests/workbench-plugin.test.ts tests/spaces-host.test.ts tests/workbench-ui.test.tsx tests/workbench-http-port.test.ts tests/dashboard-workbench.test.ts
+      - run: npm run build:spaces
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Actual browser DOM, origin-bound portal and preserved native application
+        run: node --import tsx --test tests/portable-host-dom.test.ts tests/workbench-ui-dom.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: portable-host-browser-evidence
+          path: .sandbox/portable-host-evidence
+          if-no-files-found: ignore
+          retention-days: 7

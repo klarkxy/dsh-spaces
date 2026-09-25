@@ -1,12 +1,14 @@
 # DSH Spaces
 
-**Spaces for DeepSeek Harness — switch your DSH workspaces like Discord servers.**
+**A multi-space plugin inside compatible DSH applications. Your own desktop is an optional distribution, not a required client.**
+
+Current positioning and supported adapters: [Host embedding contract](docs/host/embedding.md). This branch adds an in-place rail to ordinary loopback Web hosts; official Desktop custom-scheme and third-party native adapters remain unverified.
 
 **Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md), the first-level guide and format contract for sharing plugin compositions and configuration presets as JSON or copyable codes. Implementation and acceptance status: [blueprint work record](tasks/blueprint-implementation.md).
 
 Download desktop builds from [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases). Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
 
-Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. Default CLI version: official **`0.1.7-alpha.1`**, pinned for new installations. The local plugin is not on npm.
+Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. The original application stays in place; the same window displays the space rail and contained manager. Default CLI version: official **`0.1.7-alpha.1`**, pinned for new installations. The local plugin is not on npm.
 
 Opening the desktop connects to a healthy workbench or starts it once when no service exists and the runtime is ready. First-time environment installation continues into the workbench automatically. A stopped service is not an error; genuine startup failures and ownership conflicts remain visible, without automatic retry or lock takeover.
 
@@ -95,7 +97,9 @@ MIT. See `LICENSE`.
 
 # DSH Spaces (中文)
 
-**Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
+**安装在兼容 DSH 应用内的多空间插件：左侧切空间，右侧使用 WebUI，不要求打开专属客户端。**
+
+新定位及支持边界见 [宿主嵌入合同](docs/host/embedding.md)。本批支持普通 loopback Web 宿主内的空间栏；官方 Desktop 自定义协议与第三方原生适配仍待实现、验收。
 
 **使用或开发蓝图能力，请先阅读根目录 [BLUEPRINT.md](BLUEPRINT.md)。** 蓝图以 JSON 或分享码分发插件组合与配置预设。实现与验收状态见[蓝图实施记录](tasks/blueprint-implementation.md)。
 

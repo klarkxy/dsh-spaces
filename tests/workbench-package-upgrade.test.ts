@@ -1447,6 +1447,7 @@ function packPair(
     "cordis.patch.yml": "view: dummy\n",
     "lib/index.js": opts.bridgeBody ?? "bridge-index",
     "lib/client.js": "bridge-client",
+    "lib/settings.js": "bridge-settings",
   });
   const plugin = join(stagingRoot, "plugin.tgz");
   const bridge = join(stagingRoot, "bridge.tgz");
