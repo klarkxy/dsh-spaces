@@ -1,6 +1,6 @@
-/** Inspect only named installed SDK packages, never a DSH Home or user configuration. */
+/** Inspect named installed SDK identities only, never a DSH Home or user configuration. */
 import { createRequire } from 'node:module';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const base = process.env.DSH_DASHBOARD_SDK_ROOT;
@@ -19,17 +19,7 @@ for (const name of packages) {
   }
   const metadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   if (metadata.name !== name) throw new Error('Unexpected package identity');
-  console.log(JSON.stringify({ package: name, version: metadata.version, exports: metadata.exports, types: metadata.types }));
   const module = await import(pathToFileURL(entry).href);
-  console.log(JSON.stringify({ package: name, exportedNames: Object.keys(module), prototypes: Object.fromEntries(Object.entries(module).filter(([, value]) => typeof value === 'function' && value.prototype).map(([key, value]) => [key, Object.getOwnPropertyNames(value.prototype)])) }));
-  const dir = metadata.types ? dirname(join(root, metadata.types)) : dirname(entry);
-  const files = readdirSync(dir).filter(file => file.endsWith('.d.ts')).sort();
-  let budget = 18000;
-  for (const file of files) {
-    const text = readFileSync(join(dir, file), 'utf8');
-    const excerpt = text.slice(0, Math.min(text.length, budget));
-    if (excerpt) console.log(`DECLARATION ${name}/${file}\n${excerpt}`);
-    budget -= excerpt.length; if (budget <= 0) break;
-  }
+  console.log(JSON.stringify({ package: name, version: metadata.version, exportedNames: Object.keys(module) }));
 }
-console.log('SDK inspection only; this is not plugin installation or P0 acceptance.');
+console.log('Resolved package identities are evidence, not proof of full plugin installation, browser authentication or P0 acceptance.');
