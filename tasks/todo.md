@@ -1,3 +1,16 @@
+# 2026-09-25 本空间看板与共享界面施工
+
+用户连续授权继续施工。本批提交于 PR #12（依赖 #11），没有合并 main、发布、安装进用户 Home 或替换现有首页。实现及验证边界见 [第二批施工记录](../docs/dashboard/local-implementation.md)，源码装配入口见 [dashboard README](../packages/dashboard/README.md)。
+
+- [x] LocalDashboard：完整本空间查询、当前会话授权复查、串行持久提交、布局 CAS/回执、provider 快照、主体绑定分页、终态存储失败；不访问其它空间。
+- [x] 官方 storage-domain single 适配：固定合法域名、同一 global 保存布局/回执/快照；实际写入后重新打开、重复域拒绝、损坏和不兼容记录保留。
+- [x] 共享 React 视图与 frame 读取：四种安全组件、固定/移除、位置尺寸表单、已有看板选择、窄屏；读写授权失效清屏、旧轮询不覆盖新布局。
+- [x] Node 24 CI 验证代码 `2ee3160...`：52 核心 + 18 本地服务 + 2 生命周期 + 10 视图 + 9 实际 SDK，共 91 项通过；strict 编译、Chromium 多步骤流程通过，截图为合成数据 fixture，不是原生产品首页。
+- [x] 隔离 CI 已取得固定 CLI `0.1.7-alpha.1` 并读取实际依赖：Cordis 4.0.4、storage 系列 0.1.7-rc.2；项目锁文件未修改。下方 DNS 阻断记录是上批事实，不再阻断本组 SDK 验证。
+- [ ] P0/P1 剩余：原生 DSH 认证/代理、共享 React loader、插件身份绑定、真实命名 profile 的可安装插件和生命周期。当前目录是源码模块，不是已发布插件包。
+- [ ] P2–P5：Home 聚合与授权、真实多空间后台发布、默认预装与组件清单过渡、主首页替换、真实业务 provider、跨端与完整安装验收。
+- [ ] 仓库级合并门槛：核心基线主 CI 的 Windows workbench 有 10 项失败，主要为升级包读取和交接；不以本轮看板专项绿色冒充全量 CI 已通过。详情及 run 链接见第二批记录。
+
 # 2026-09-25 首页看板首批施工
 
 用户授权按 [DASHBOARD.md](../DASHBOARD.md) 开工并通过 PR 提交。本批以文档 PR #10 为依赖，仅新增核心代码、测试与 CI；不合并 main、不发布、不迁移或修改用户 Home。实现边界和本次证据见 [核心实现记录](../docs/dashboard/core-implementation.md)。
