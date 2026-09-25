@@ -1,3 +1,14 @@
+# 2026-09-25 原生 DSH 看板插件施工
+
+用户授权继续施工，本批位于 PR #13（依赖 #12）。验证代码为 `be2a97610e3508775d18189a9c94276d6cb2fad2`，具体证据与使用限制见 [原生接线记录](../docs/dashboard/native-implementation.md)。未合并 main、未发布、未安装到真实 Home、未替换全局默认首页。
+
+- [x] 独立插件 manifest/bundle、Host 入口、原生 sidebar/main 客户端和构建打包；不重复打包 React，不导入 Electron 或 Supervisor 管理代码。
+- [x] 原生 Connection 登录校验、Host/Origin/custom-header 与严格 JSON HTTP 边界；provider 只在 Host 内按 Cordis 调用者 fiber 绑定，不开放网页发布入口。
+- [x] Node 24 strict、7 项新增 HTTP socket 测试、原生 SDK 调用者探针、构建/pack 通过；上批 91 项检查和共享视图回归继续通过。
+- [x] 实际官方 CLI 安装 tarball、原生登录与后台发布、首次引导后打开侧栏看板并固定组件、正常重启保留布局、卸载与根目录指纹检查通过。截图和结果 JSON 已读回；业务数据是实际 Host 中的合成测试插件，无模型调用。
+- [ ] 原生默认聊天工作目录初始化仍有提示，截图已记录，不包装为全应用无错误。当前仅支持已隔离命名 profile 和 loopback；反向代理、Windows ACL、Electron 包、完整卸载/多实例矩阵与界面完善未验。
+- [ ] P2–P5：Home 聚合及授权、多空间后台发布、默认预装、组件清单过渡、真正默认首页与真实业务 provider 的跨端验收。仓库级 CI 与桌面回归另行核验，不以看板专项替代。
+
 # 2026-09-25 本空间看板与共享界面施工
 
 用户连续授权继续施工。本批提交于 PR #12（依赖 #11），没有合并 main、发布、安装进用户 Home 或替换现有首页。实现及验证边界见 [第二批施工记录](../docs/dashboard/local-implementation.md)，源码装配入口见 [dashboard README](../packages/dashboard/README.md)。
