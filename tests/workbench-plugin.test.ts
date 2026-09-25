@@ -355,7 +355,7 @@ test("ordinary and corrupt profiles register only the guide Remote", () => {
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.equal(plugin.manager, null);
   assert.equal(plugin.spaces, null);
-  assert.deepEqual(methodsOf(plugin.guide), ["role", "bootstrap", "returnTarget", "initialize"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["role", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
   assert.equal(plugin.guide.typertRemote.namespace, "workbenchGuide");
 });
 
@@ -376,7 +376,7 @@ test("manager profile registers manager WorkbenchApi and compatibility reads, no
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.ok(plugin.manager);
   assert.ok(plugin.spaces);
-  assert.deepEqual(methodsOf(plugin.guide), ["role", "bootstrap", "returnTarget", "initialize"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["role", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
   assert.ok(methodsOf(plugin.manager!).includes("state"));
   assert.ok(methodsOf(plugin.manager!).includes("submit"));
   assert.ok(methodsOf(plugin.manager!).includes("product"));
@@ -768,7 +768,7 @@ test("client remotes sanitize unknown errors and refuse non-loopback return URLs
   assert.match(html, /__DSH_SPACES_HOST__/);
 });
 
-test("client apply registers root only for manager hints and a return entry otherwise", () => {
+test("client apply keeps root ownership and adds a portable overlay for non-manager hosts", () => {
   const registrations: Array<{ name: string; id?: string; key?: string }> = [];
   const ctx = {
     get: () => ({ rpc: { call: async () => ({ ok: true, value: {} }) } }),
@@ -784,6 +784,7 @@ test("client apply registers root only for manager hints and a return entry othe
   };
   applyClient(ctx as never);
   assert.equal(registrations.some((row) => row.name === "root"), false);
+  assert.ok(registrations.some((row) => row.name === "shell.overlay" && row.id === "dsh-spaces-host-shell"));
   assert.ok(registrations.some((row) => row.name === "sidebar.panellist" && row.id === "dsh-spaces"));
   assert.ok(registrations.some((row) => row.name === "main" && row.key === "dsh-spaces"));
   assert.equal(typeof ReturnToWorkbenchPanel, "function");

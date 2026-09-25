@@ -13,7 +13,7 @@ import type {
   WorkbenchReturnTarget,
 } from "../types";
 import { resolveHostIdentity, type HostIdentity, type HostIdentityInput } from "./identity";
-import { createWorkbenchHttpClient, mintSupervisorHandoff, type WorkbenchHttpClientOptions } from "./workbench-http";
+import { createWorkbenchHttpClient, mintSupervisorHandoff, mintSupervisorPortal, type WorkbenchHttpClientOptions } from "./workbench-http";
 import { attachExistingSupervisor, pingSupervisorState } from "./supervisor-attach";
 import {
   bootstrapSupervisor,
@@ -22,6 +22,8 @@ import {
   type SupervisorBootstrapOptions,
   type SupervisorEndpoint,
 } from "./supervisor-bootstrap";
+
+import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/shared/space-host";
 
 const inflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
@@ -121,6 +123,16 @@ export class WorkbenchHostRuntime {
     });
     inflight.set(key, pending);
     return pending;
+  }
+
+  async portalTarget(audience: SpaceHostAudience): Promise<WorkbenchReturnTarget> {
+    // Check transport before attaching or starting anything. No application-name detection.
+    const valid = parseSpaceHostAudience(audience);
+    if (!valid) throw new Error("workbench/unsupported");
+    const boot = await this.bootstrap();
+    if (!boot.connected || !this.endpoint) return { available: false, origin: null, path: null, unavailable: boot.unavailable, reasons: boot.reasons };
+    const path = await mintSupervisorPortal(this.options.fetch ?? fetch, this.endpoint, valid);
+    return { available: true, origin: this.endpoint.origin, path, unavailable: false, reasons: [] };
   }
 
   async returnTarget(): Promise<WorkbenchReturnTarget> {
