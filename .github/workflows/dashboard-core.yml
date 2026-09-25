@@ -1,0 +1,38 @@
+name: Dashboard core
+
+on:
+  pull_request:
+    paths:
+      - 'src/core/domain/dashboard/**'
+      - 'src/shared/dashboard.ts'
+      - 'docs/dashboard/contracts.ts'
+      - 'tests/dashboard-core.test.cjs'
+      - 'scripts/test-dashboard-core.mjs'
+      - 'tsconfig.dashboard.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/dashboard-core.yml'
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies without application bootstrap
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile and test dashboard core (not DSH integration)
+        run: node scripts/test-dashboard-core.mjs
