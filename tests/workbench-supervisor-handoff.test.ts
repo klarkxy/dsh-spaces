@@ -35,9 +35,10 @@ import {
   parseSupervisorArgs,
   preflightSupervisorComponentPayload,
   supervisorCliArgs,
+  validateSupervisorComponentPayload,
+  WorkbenchSupervisorRuntime,
   type WorkbenchMaintenance,
   type WorkbenchSupervisorHandle,
-  type WorkbenchSupervisorRuntime,
 } from "../src/adapters/node/workbench-supervisor.ts";
 import { expectedAuthCookieName } from "../src/adapters/node/workbench-http.ts";
 import type { WorkbenchPlan, WorkbenchPlanRequest } from "../src/shared/workbench.ts";
@@ -306,6 +307,84 @@ test("token-accept preflight validates artifacts before HomeController.accept", 
   });
   assert.equal(ready.pluginArtifact, packed.pluginArtifact);
   assert.equal(new HomeController(home).inspect().held, false);
+});
+
+test("threaded payload stages reuse the launch validation conclusion", async () => {
+  const home = tempDir("dsh-spaces-handoff-home-");
+  const bin = writeFakeCli(home);
+  const payload = dummyPayloadLib();
+  const packed = packGroupArtifacts(payload, home);
+
+  // Validate once, then remove the manifest: every stage below can only pass
+  // by reusing that conclusion instead of re-reading and re-hashing the group.
+  const selected = validateSupervisorComponentPayload(payload.payloadRootLib);
+  rmSync(join(payload.packageRoot, ...COMPONENT_PAYLOAD_MANIFEST_REL.split("/")));
+
+  const bound = bindSupervisorComponentPayload({
+    home,
+    bin,
+    componentPayloadRoot: payload.payloadRootLib,
+    ...packed,
+  }, selected);
+  assert.equal(bound.componentPayloadRoot, selected.payloadRootLib);
+  const matched = assertHandoffTokenMatchesSelectedPayload(
+    { artifactDigest: payload.digest },
+    bound.componentPayloadRoot,
+    undefined,
+    selected,
+  );
+  assert.equal(matched.digest, payload.digest);
+  const runtime = new WorkbenchSupervisorRuntime({
+    home,
+    bin,
+    componentPayloadRoot: bound.componentPayloadRoot,
+    ...packed,
+  }, selected);
+  await runtime.close();
+});
+
+test("a threaded launch boots with the reused payload conclusion", async () => {
+  const home = tempDir("dsh-spaces-handoff-home-");
+  const bin = writeFakeCli(home);
+  const payload = dummyPayloadLib();
+  const packed = packGroupArtifacts(payload, home);
+  const selected = validateSupervisorComponentPayload(payload.payloadRootLib);
+
+  // Artifact tuple and tar digest checks still run against the reused payload.
+  const mixedView = dummyPayloadLib({ viewBody: "export const view = 'tampered';\n" });
+  const viewMix = packGroupArtifacts(mixedView, tempDir("dsh-spaces-handoff-thread-mix-"));
+  await assert.rejects(
+    () => preflightSupervisorComponentPayload({
+      home,
+      bin,
+      componentPayloadRoot: payload.payloadRootLib,
+      pluginArtifact: packed.pluginArtifact,
+      viewBridgeArtifact: viewMix.viewBridgeArtifact,
+      llmBridgeArtifact: packed.llmBridgeArtifact,
+    }, selected),
+    /view-bridge|artifact|match|digest|version/i,
+  );
+
+  const handle = await startSupervisor(home, bin, {
+    componentPayloadRoot: payload.payloadRootLib,
+    ...packed,
+  }, selected);
+  const state = await handle.runtime.state();
+  assert.ok(state.managerId);
+  assert.notEqual(state.availability, "unavailable");
+
+  // Without a threaded validation the same tampered group still fails closed.
+  const fresh = dummyPayloadLib();
+  rmSync(join(fresh.packageRoot, ...COMPONENT_PAYLOAD_MANIFEST_REL.split("/")));
+  await assert.rejects(
+    () => createWorkbenchSupervisor({
+      home,
+      bin,
+      componentPayloadRoot: fresh.payloadRootLib,
+      createMaintenance: () => fakeMaintenance(),
+    }),
+    /manifest|missing|invalid/i,
+  );
 });
 
 test("CLI round-trips --accept-handoff only with an explicit nonzero port", () => {
@@ -959,6 +1038,7 @@ async function startSupervisor(
   home: string,
   bin: string,
   extra: Partial<Parameters<typeof createWorkbenchSupervisor>[0]> = {},
+  validated?: ValidatedComponentPayload,
 ): Promise<WorkbenchSupervisorHandle> {
   const handle = await createWorkbenchSupervisor({
     home,
@@ -1010,7 +1090,7 @@ async function startSupervisor(
     dumpConfig: extra.dumpConfig ?? (async (profile) => dumpText(profile)),
     createMaintenance: extra.createMaintenance ?? (() => fakeMaintenance()),
     ...extra,
-  });
+  }, validated);
   handles.push(handle);
   return handle;
 }

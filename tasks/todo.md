@@ -1,3 +1,14 @@
+# 2026-09-25 参考官方 desktop 优化启动流程
+
+参考官方 DSH desktop 启动流程（六阶段百分比进度、`Startup completed in X ms` 总耗时、port 0 + stdout 读回）优化本地启动。仅本地修改与验收，不提交、推送或发布。
+
+- [x] 桌面启动分阶段进度（attach 8% → prepare 24% → launch 56% → connect 82% → load-workbench 92% → ready 100%）：共享阶段类型与百分比映射、`DesktopServiceClient.onStage`、main 阶段状态机（`src/main/desktop-startup-progress.ts`，单调前进、防回退、失败不打印完成日志）、overlay 阶段文案与进度条（中英双语）。
+- [x] 启动总耗时日志：`Startup completed in X ms (cold start|attached to existing service)`，时钟覆盖 open 延续的冷启动，仅成功就绪打印。
+- [x] 冷启动去重：首次 attach 判决经 `priorDiscovery` 透传跳过 bootstrap 入口的重复全量探测（锁内 TOCTOU 复查保留）；`pollEndpoint` 复用 HomeController/锁对象；`bootstrapManager` 的 dump 结果复用给 `syncLoader`（同 profile 一次 `--dump-config`）；payload 校验合并为一次 manifest/digest 计算（时效比对校验保留）。
+- [x] `presentWorkbench` 与托盘空间刷新并行（finally 汇合，刷新失败不阻塞呈现）。
+- [ ] 评估后放弃：空间端口改 `port 0` + stdout 读回（改变端口稳定性语义，现有 reservePort + 端口一致性校验已满足安全要求）；`packLocalArtifacts` 锁前并行（输出到 per-Home 共享 toolsRoot，破坏单写者约束）。
+- [x] 类型检查、完整构建、desktop-startup 全链及 workbench/主套件回归；新增 desktop-startup-progress、阶段序、priorDiscovery、dump/payload 复用等定向测试。workbench-package-upgrade 9 项、sample-plugins 1 项、supervisor-handoff 2 项失败经干净 main 对照确认为本机既有问题，与本轮无关。
+
 # 2026-09-22 官方 alpha 全面迁移
 
 - [x] 默认 CLI、开发下载入口、CI 与 SDK / peer / 锁文件统一到 `0.1.7-alpha.1`；移除旧 settings-file 合同。

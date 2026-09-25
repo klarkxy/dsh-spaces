@@ -21,12 +21,12 @@ import {
 } from "../../../../src/adapters/node/component-payload";
 import { bindDshCli } from "../../../../src/adapters/node/spaces-control";
 import { authorizeProductHome } from "../../../../src/adapters/node/home-guard";
-import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner } from "../../../../src/adapters/node/home-controller";
+import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeController } from "../../../../src/adapters/node/home-controller";
 import { HomeOperationLock, HomeLockBusyError } from "../../../../src/adapters/node/home-operation-lock";
 import { retirePreviousSupervisor, beginLaunchDiagnostics, readLaunchMarker, readLastSupervisorDiagnostics } from "../../../../src/adapters/node/supervisor-launch";
 import { readSupervisorDiagnostics, reportSupervisorLaunchFailure, reportSupervisorExit } from "../../../../src/adapters/node/supervisor-diagnostics";
 import { packLocalArtifacts, validateSnapshotRoot, type PackOneRequest } from "./supervisor-pack";
-import { attachExistingSupervisor } from "./supervisor-attach";
+import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
 import {
   diagnoseEndpointResidue,
   readEndpointFile,
@@ -104,6 +104,13 @@ export interface SupervisorBootstrapOptions {
   pack?: (request: PackOneRequest) => Promise<string>;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Fine-grained startup stages emitted while this caller launches the supervisor. */
+  progress?: (stage: "prepare" | "launch") => void;
+  /**
+   * Attach verdict the caller just obtained for this Home. A missing-class
+   * verdict is reused instead of probing again; anything else is re-derived.
+   */
+  priorDiscovery?: SupervisorAttachResult;
 }
 
 /**
@@ -137,11 +144,17 @@ export async function bootstrapSupervisor(
     markerError = reasonOf(error);
   }
 
-  const attached = await attachExistingSupervisor({
-    home,
-    allowRealHome: options.allowRealHome === true,
-    fetch: options.fetch,
-  });
+  // The launcher already probed this Home right before requesting a cold start.
+  // A missing-class verdict from that probe is reused as-is; any other shape is
+  // re-derived below so blocked/stale semantics stay untouched.
+  const attached: SupervisorAttachResult =
+    options.priorDiscovery && "missing" in options.priorDiscovery
+      ? options.priorDiscovery
+      : await attachExistingSupervisor({
+          home,
+          allowRealHome: options.allowRealHome === true,
+          fetch: options.fetch,
+        });
   if ("endpoint" in attached) {
     return {
       connected: true,
@@ -227,6 +240,7 @@ export async function bootstrapSupervisor(
       if (readLaunchMarker(home, toolsRoot) !== initialLaunch) {
         return fail(["Another startup finished before this request obtained ownership. No second startup was attempted.", ...readLastSupervisorDiagnostics(home, toolsRoot)]);
       }
+      options.progress?.("prepare");
       diagnosticFile = beginLaunchDiagnostics(home, toolsRoot);
       retirePreviousSupervisor(home, "missing" in attached ? attached.previousOwner : undefined, access.allowRealHome);
       try {
@@ -323,6 +337,7 @@ export async function bootstrapSupervisor(
         });
       }
       if (spawned) spawned.unref();
+      options.progress?.("launch");
       return await pollEndpoint(home, selected.payloadRootLib, toolsRoot, options, [], observation);
     });
     if (!result.connected && diagnosticFile) reportSupervisorLaunchFailure(diagnosticFile, result.reasons.join("\n"));
@@ -361,12 +376,24 @@ async function pollEndpoint(
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)));
   const deadline = now() + timeoutMs;
   const reasons = [...extraReasons];
+  // Reusable discovery handles: construction is idempotent and every inspect()
+  // re-reads on-disk state, so per-round semantics are unchanged. When the
+  // controller cannot be constructed up front, fall back to per-call discovery
+  // (which reports HOME_UNAVAILABLE as a blocked verdict, as before).
+  let polledController: HomeController | undefined;
+  try {
+    polledController = new HomeController(home, { allowRealHome: options.allowRealHome === true });
+  } catch {
+    polledController = undefined;
+  }
+  const preparation = new HomeOperationLock(toolsDir);
   while (now() < deadline) {
     if (observation?.failure) return fail([observation.failure, ...readSupervisorDiagnostics(observation.diagnosticFile)]);
-    const attached = await attachExistingSupervisor({
+    const attached: SupervisorAttachResult = await attachExistingSupervisor({
       home,
       allowRealHome: options.allowRealHome === true,
       fetch: options.fetch,
+      ...(polledController ? { controller: polledController } : {}),
     });
     if ("endpoint" in attached) {
       return {
@@ -377,7 +404,7 @@ async function pollEndpoint(
         toolsDir,
       };
     }
-    if (!observation && !new HomeOperationLock(toolsDir).inspect().held) {
+    if (!observation && !preparation.inspect().held) {
       return fail(["The other startup ended without a ready supervisor. No second startup was attempted.",
         ...("reasons" in attached ? attached.reasons : []), ...readLastSupervisorDiagnostics(home, toolsDir)]);
     }
