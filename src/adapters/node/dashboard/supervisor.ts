@@ -15,6 +15,7 @@ export interface SupervisorDashboardPorts {
   home: string;
   epoch: string;
   origin(): string;
+  managerOrigin?(): string | null;
   now(): Date;
   spaces(): WorkbenchSpace[];
   /** Check the current on-disk HomeController identity, not just a cached handle. */
@@ -51,7 +52,7 @@ export class SupervisorDashboard {
       },
     });
     this.gateway = new HomeDashboardGateway(this.hub, {
-      origin: ports.origin,
+      origin: ports.origin, managerOrigin: ports.managerOrigin,
       authorize: req => {
         // Publisher bearer and a child DSH cookie never become Home operator credentials.
         const value = cookieValue(req.headers.cookie, ports.cookieName());

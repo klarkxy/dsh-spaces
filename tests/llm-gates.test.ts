@@ -41,7 +41,7 @@ test("A08 missing adapter is reported and supervisor never installs llm-pi-ai", 
   assert.throws(() => requireOfficialLlmAdapter(null), { code: LLM_ERROR.ADAPTER_MISSING });
   assert.throws(() => requireOfficialLlmAdapter({}), { code: LLM_ERROR.ADAPTER_MISSING });
   const supervisor = readFileSync(join(repo, "src/adapters/node/workbench-supervisor.ts"), "utf8");
-  assert.match(supervisor, /installLlmBridgeIfExplicit/);
+  assert.match(supervisor, /ensureLlmBridge/);
   assert.doesNotMatch(supervisor, /installArtifact\([^)]*llm-pi-ai/);
   assert.doesNotMatch(supervisor, /@deepseek-ai\/dsh-llm-pi-ai/);
   const plugin = readFileSync(join(repo, "packages/llm-bridge/src/plugin.ts"), "utf8");

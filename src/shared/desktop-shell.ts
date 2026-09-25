@@ -48,6 +48,24 @@ export type DesktopShellPhase =
 
 export type DesktopServicePublicStatus = "idle" | "connecting" | "connected" | "stopped" | "unavailable";
 
+export type DesktopStartupStage =
+  | "attach"
+  | "prepare"
+  | "launch"
+  | "connect"
+  | "load-workbench"
+  | "ready";
+
+/** Progress percentages aligned with the official DSH desktop startup phases. */
+export const DESKTOP_STARTUP_STAGE_PROGRESS: Record<DesktopStartupStage, number> = {
+  attach: 8,
+  prepare: 24,
+  launch: 56,
+  connect: 82,
+  "load-workbench": 92,
+  ready: 100,
+};
+
 export interface DesktopShellRuntimeFlags {
   node: boolean;
   pnpm: boolean;
@@ -58,6 +76,7 @@ export interface DesktopShellPublicState {
   seq: number;
   phase: DesktopShellPhase;
   serviceStatus: DesktopServicePublicStatus;
+  startupStage?: DesktopStartupStage | null;
   reasons: string[];
   workbenchError: string | null;
   runtime: DesktopShellRuntimeFlags;
