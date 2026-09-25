@@ -7,50 +7,15 @@ on:
       - 'tests/*dashboard*'
       - 'tests/fixtures/dashboard-supervisor*'
       - 'scripts/*dashboard*'
-      - '.github/dashboard-supervisor.patch'
       - '.github/workflows/dashboard-supervisor.yml'
 permissions:
   contents: read
 jobs:
-  prepare-git-objects:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/dashboard-supervisor-20260925'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - name: Apply the three reviewed source edits without running repository code
-        run: git apply --check --index .github/dashboard-supervisor.patch && git apply --index .github/dashboard-supervisor.patch
-      - name: Upload unreferenced Git blobs only (no branch updates)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          python3 - <<'PY'
-          import base64,json,os,pathlib,subprocess,tempfile
-          allowed={'src/adapters/node/workbench-http.ts','src/adapters/node/workbench-supervisor.ts','src/shared/workbench.ts'}
-          paths=subprocess.check_output(['git','diff','--cached','--name-only']).decode().splitlines()
-          assert set(paths)==allowed
-          entries=[]
-          for path in paths:
-              body={'content':base64.b64encode(pathlib.Path(path).read_bytes()).decode(),'encoding':'base64'}
-              with tempfile.NamedTemporaryFile(mode='w') as payload:
-                  json.dump(body,payload);payload.flush()
-                  result=json.loads(subprocess.check_output(['gh','api','--method','POST',f'repos/{os.environ["REPOSITORY"]}/git/blobs','--input',payload.name]))
-              expected=subprocess.check_output(['git','hash-object',path]).decode().strip()
-              assert result['sha']==expected
-              entries.append({'path':path,'sha':expected,'mode':'100644','type':'blob'})
-          print('PREPARED_GIT_BLOBS='+json.dumps(entries))
-          PY
   supervisor:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: git apply --check .github/dashboard-supervisor.patch && git apply .github/dashboard-supervisor.patch
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -67,7 +32,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: git apply --check .github/dashboard-supervisor.patch && git apply .github/dashboard-supervisor.patch
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

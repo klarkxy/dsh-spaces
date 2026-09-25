@@ -73,6 +73,8 @@ export interface WorkbenchHttpRuntime {
     epoch?: string | null,
   ): Promise<ViewBootstrap | { status: number; message: string }>;
   mintHandoff(): string;
+  /** Optional additive Dashboard v1 routes on the same authenticated listener. */
+  handleDashboardRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
 }
 
 export interface WorkbenchHttpServer {
@@ -190,6 +192,7 @@ async function handleRequest(
       deny(res, 403, "workbench/forbidden", "Host is not the supervisor loopback entry.");
       return;
     }
+    if (await host.handleDashboardRequest?.(req, res)) return;
     if (req.method === "OPTIONS") {
       if (!originAllowed(req, host, { allowMissing: false })) {
         deny(res, 403, "workbench/forbidden", "Origin is not allowed.");
