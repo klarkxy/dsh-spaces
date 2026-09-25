@@ -5,6 +5,10 @@ import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import { WorkbenchApp } from "../workbench";
+import { WORKBENCH_CSS } from "../workbench/styles";
+import { HOME_CSS } from "../workbench/dashboard-home";
+import { DASHBOARD_CSS } from "../../../dashboard/src/view";
+import { mountStaticClientStyle } from "../../../dashboard/src/client-style";
 import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
 import { SpacesPanelIcon } from "./icon";
@@ -38,6 +42,13 @@ export function apply(ctx: Context): void {
     // The embedded home uses this profile's unmodified DSH root. Do not
     // recursively mount Spaces inside it or change the profile on disk.
     if (typeof window !== "undefined" && window.location && isHomeView(window.location.href)) return;
+    // Native plugin styles have an explicit owner and lifetime. Do not depend
+    // on resource tags rendered inside the replaceable root slot.
+    if (typeof document !== "undefined") {
+      for (const [name, css] of [["workbench.css", WORKBENCH_CSS], ["home.css", HOME_CSS], ["dashboard.css", DASHBOARD_CSS]] as const) {
+        ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", name, css));
+      }
+    }
     const api = createWorkbenchRemote(connection);
     const homeUrl = typeof window !== "undefined" && window.location ? homeViewUrl(window.location.href) : undefined;
     ctx.slots.inject("root", () =>
