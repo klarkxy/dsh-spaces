@@ -97,3 +97,4 @@ export function dashboardHttpHandler(path: typeof QUERY_PATH | typeof COMMAND_PA
       send(res, statusOf(fault.code), { protocolVersion: 1, error: fault });
     } finally { if (admitted) inFlight--; }
   };
+}
