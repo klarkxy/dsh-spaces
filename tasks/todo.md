@@ -1,3 +1,14 @@
+# 2026-09-25 Home 聚合与多空间后台发布
+
+用户授权继续施工，本批位于 PR #14（依赖 #13），代码为 `d04e2437dd28b1bc12983d72a034852db544a478`。完整证据和接线义务见 [Home 施工记录](../docs/dashboard/home-implementation.md)。未合并 main、发布或更改真实 Home，默认首页未替换。
+
+- [x] Home 聚合服务、分离的授权/布局/投影持久化、每 run 固定 grant、来源序列与布局 CAS、撤销后旧缓存/游标/回执/导航过滤。
+- [x] 私有 bootstrap、Node bearer 入口、公开路由权限隔离和原生插件可选发布端；有界首次发送调度、失败不重连/补传，不依赖 iframe 或 Electron。
+- [x] Node 24 Home 专项共 128 项测试通过（新增 39）；严格类型检查、既有 local/native/core 工作流通过。本地 Node 22.16.0 对同一代码的 128 项检查也通过；全树哈希与上传一致。
+- [x] 两个实际安装 tarball 的原生 DSH Host 无浏览器发布到同一 Home；同一布局引用两空间、停止 A 后 B 可用、撤销 A 后隐藏、根数据指纹不变。已下载读回 passed 结果；Home 拥有者为隔离测试装配，不是生产 Supervisor。
+- [ ] P2 生产接线：现有 Supervisor 的真实拥有权、会话、preview/plan.execute 和子进程代次/退出钩子仍待挂载，不能把测试回调复制为生产权限。
+- [ ] P3–P5：授权界面、默认预装、组件清单过渡、真正默认首页和实际业务插件/双端验收；Windows Home 凭据与存储 ACL 适配尚不支持。仓库级 CI/桌面回归另核，专项绿色不等于全仓库绿色。
+
 # 2026-09-25 原生 DSH 看板插件施工
 
 用户授权继续施工，本批位于 PR #13（依赖 #12）。验证代码为 `be2a97610e3508775d18189a9c94276d6cb2fad2`，具体证据与使用限制见 [原生接线记录](../docs/dashboard/native-implementation.md)。未合并 main、未发布、未安装到真实 Home、未替换全局默认首页。

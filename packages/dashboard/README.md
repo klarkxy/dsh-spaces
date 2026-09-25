@@ -2,7 +2,7 @@
 
 实验性原生 DSH Web 看板插件。**已完成独立 tarball 构建和隔离命名 profile 的原生安装验证，尚未发布 npm 或正式版本。** 不依赖 Electron，不启动 Supervisor，不自动替换 Spaces 的默认首页。
 
-本轮精确验证见 [native-implementation.md](../../docs/dashboard/native-implementation.md)，前一阶段证据保留在 [local-implementation.md](../../docs/dashboard/local-implementation.md)。总合同：[DASHBOARD.md](../../DASHBOARD.md)。
+原生安装验证见 [native-implementation.md](../../docs/dashboard/native-implementation.md)，前一阶段证据保留在 [local-implementation.md](../../docs/dashboard/local-implementation.md)。总合同：[DASHBOARD.md](../../DASHBOARD.md)。
 
 ## 当前安装边界
 
@@ -49,4 +49,8 @@ HTTP 仅暴露 `POST /api/dashboard/v1/query` 和 `POST /api/dashboard/v1/comman
 
 原生入口当前没有接入来源导航按钮；逻辑 navigation 查询保留在后端，后续实际跳转必须复查目标，不能把 ID 当成路径。
 
-**本包现在只管本空间。** Home 聚合、空间发布授权、默认预装、组件清单过渡、多空间首页路由和 Electron 产品验收均未完成。独立包安装通过不代表整个首页方案已经交付。
+**默认仍是本空间模式。** 已新增 Home 聚合模块及可选后台发布端，见 [Home 施工记录](../../docs/dashboard/home-implementation.md)。可信启动器显式提供 `DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE` 时，Host 才读取本次私有凭据并发送获准组件；没有该变量就不寻找全局服务，非法配置明确报错。
+
+两个原生 DSH Host 的后台发布已经过隔离验收，但现有生产 Supervisor 的授权管理和生命周期尚未挂载；不能自行填写全局 token 或把测试固定角色当作生产认证。当前 Home 私有文件只支持已验证的 POSIX 权限模式，Windows ACL 尚未实现并明确拒绝。
+
+默认预装、组件清单过渡、Home 默认页面、授权界面和 Electron 产品验收仍未完成。独立包安装或双 Host 测试通过，不代表整个首页方案已经交付。
