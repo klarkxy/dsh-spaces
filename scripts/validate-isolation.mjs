@@ -326,14 +326,21 @@ export async function rpc(port, method, payload = {}, cookie) {
 
 async function stopProcess(handle) {
   if (!handle?.pid) return;
+  if (handle.child.exitCode !== null || handle.child.signalCode !== null) return;
   if (process.platform === "win32") {
-    await new Promise((resolveKill) => {
+    await new Promise((resolveKill, rejectKill) => {
+      let output = "";
       const killer = spawn("taskkill", ["/PID", String(handle.pid), "/T", "/F"], {
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
-      killer.on("exit", () => resolveKill());
-      killer.on("error", () => resolveKill());
+      for (const stream of [killer.stdout, killer.stderr]) {
+        stream.on("data", (chunk) => { output = (output + chunk).slice(-2_000); });
+      }
+      killer.once("error", rejectKill);
+      killer.once("close", (code) => code === 0
+        ? resolveKill()
+        : rejectKill(new Error(`taskkill ${handle.pid} failed (${code}): ${output.trim()}`)));
     });
     return;
   }
@@ -404,8 +411,10 @@ function workspaceSessionIds(storageDir) {
   return [...ids];
 }
 
-function requireProfiles(home) {
+export function requireProfiles(home) {
   for (const profile of PROFILES) {
+    // The official CLI supplies `web` without a physical profiles/web directory.
+    if (profile.kind === "root") continue;
     const dir = join(home, "profiles", profile.name);
     if (!existsSync(dir)) {
       throw new Error(`missing profile ${profile.name} at ${dir}`);
@@ -432,9 +441,15 @@ async function main() {
   let failed = false;
 
   const shutdown = async () => {
+    const errors = [];
     for (const handle of handles.reverse()) {
-      await stopProcess(handle);
+      try {
+        await stopProcess(handle);
+      } catch (error) {
+        errors.push(`${handle.pid}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
+    if (errors.length) throw new Error(`Could not stop isolated profiles: ${errors.join("; ")}`);
   };
 
   process.on("SIGINT", () => {
@@ -626,7 +641,12 @@ async function main() {
     fail(err.stack || String(err));
     failed = true;
   } finally {
-    await shutdown();
+    try {
+      await shutdown();
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+      failed = true;
+    }
   }
 
   if (failed) {

@@ -267,3 +267,33 @@ test("a late attach cannot auto-start partially installed files after installati
   await opening;
   assert.deepEqual(h.counts(), { connects: 1, starts: 0 });
 });
+
+test("Electron main wires startup stages, elapsed logging, and parallel tray refresh", () => {
+  const main = readFileSync(new URL("../src/main/index.ts", import.meta.url), "utf8");
+  // Stage machine drives the client callback and the public state field.
+  assert.match(main, /import \{ createStartupProgress \} from "\.\/desktop-startup-progress"/);
+  assert.match(main, /onStage: \(stage: DesktopStartupStage\) => \{\s*progress\.stage\(stage\);\s*\}/);
+  assert.match(main, /startupStage: phase === "connecting" \? progress\.current\(\) : null/);
+  // A new open/start flow resets the stage; failures and stops never log a completion.
+  assert.match(main, /async function connectOnce\(\): Promise<void> \{\s*progress\.beginConnect\(\);/);
+  assert.match(main, /return coalesceInflight\(startInflight, async \(\) => \{\s*progress\.beginStart\(\);/);
+  const startService = main.slice(main.indexOf("async function startService"), main.indexOf("async function refreshTraySpaces"));
+  assert.match(startService, /catch \(error\) \{\s*progress\.fail\(\);/);
+  assert.match(startService, /else progress\.fail\(\);/);
+  const launch = main.slice(main.indexOf("await startup.open();"), main.indexOf("app.on(\"window-all-closed\""));
+  assert.match(launch, /catch \(error\) \{\s*progress\.fail\(\);/);
+  // The workbench presentation owns the final two stages and the one-line log.
+  const present = main.slice(
+    main.indexOf("async function presentWorkbench"),
+    main.indexOf("async function connectOnce"),
+  );
+  assert.match(present, /const trayRefresh = refreshTraySpaces\(\);/);
+  assert.ok(present.indexOf("const trayRefresh = refreshTraySpaces();") < present.indexOf("await client.entryUrl()"));
+  assert.ok(present.indexOf('progress.stage("load-workbench");') < present.indexOf("await client.entryUrl()"));
+  assert.ok(present.indexOf("views.presentWorkbench({") < present.indexOf("progress.succeed();"));
+  assert.match(present, /finally \{\s*await trayRefresh\.catch/);
+  assert.doesNotMatch(present, /await refreshTraySpaces\(\);\s*\}\s*$/);
+  // The completion log line matches the official desktop format.
+  const machine = readFileSync(new URL("../src/main/desktop-startup-progress.ts", import.meta.url), "utf8");
+  assert.match(machine, /Startup completed in \$\{elapsed\} ms \(\$\{mode\}\)\./);
+});
