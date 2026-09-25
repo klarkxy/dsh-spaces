@@ -19,10 +19,12 @@ import {
   preflightSupervisorComponentPayload,
   parseSupervisorArgs,
   supervisorCliArgs,
+  validateSupervisorComponentPayload,
   WorkbenchPublicError,
   type SupervisorCliOptions,
   type WorkbenchSupervisorHandle,
 } from "../../../src/adapters/node/workbench-supervisor.ts";
+import type { ValidatedComponentPayload } from "../../../src/adapters/node/component-payload.ts";
 
 export {
   assertHandoffTokenMatchesSelectedPayload,
@@ -31,6 +33,7 @@ export {
   preflightSupervisorComponentPayload,
   parseSupervisorArgs,
   supervisorCliArgs,
+  validateSupervisorComponentPayload,
 };
 export type { SupervisorCliOptions };
 
@@ -44,18 +47,30 @@ export async function main(
   diagnostics?: SupervisorDiagnosticsReporter,
 ): Promise<number> {
   const options = parseSupervisorArgs(argv);
+  // Validate the selected component payload once per launch and thread the
+  // conclusion through bind/preflight/runtime construction. Every non-hash
+  // check still runs in each stage; only the manifest read and file hashing
+  // are computed a single time. Evaluating lazily keeps the failure at the
+  // same stage ordering as before (first payload use fails the launch).
+  let cachedPayload: ValidatedComponentPayload | undefined;
+  const selectedPayload = (): ValidatedComponentPayload | undefined => {
+    if (!cachedPayload && options.componentPayloadRoot !== undefined) {
+      cachedPayload = validateSupervisorComponentPayload(options.componentPayloadRoot);
+    }
+    return cachedPayload;
+  };
   let acceptSession: ReturnType<typeof beginAcceptHandoffChild> | undefined;
   let acceptedHandle: HomeControlHandle | undefined;
   if (options.acceptHandoff) {
     acceptSession = beginAcceptHandoffChild();
     try {
-      bindSupervisorComponentPayload(options);
+      bindSupervisorComponentPayload(options, selectedPayload());
       const token = await acceptSession.token;
       if (!options.componentPayloadRoot) {
         throw new WorkbenchPublicError("workbench/invalid-input", "Handoff accept requires --component-payload.");
       }
-      assertHandoffTokenMatchesSelectedPayload(token, options.componentPayloadRoot, process.argv[1]);
-      await preflightSupervisorComponentPayload(options);
+      assertHandoffTokenMatchesSelectedPayload(token, options.componentPayloadRoot, process.argv[1], selectedPayload());
+      await preflightSupervisorComponentPayload(options, selectedPayload());
       const endpoint = parseControlEndpoint(`http://127.0.0.1:${options.port}`);
       acceptedHandle = await new HomeController(options.home, {
         allowRealHome: options.allowRealHome,
@@ -69,7 +84,7 @@ export async function main(
       throw error;
     }
   } else {
-    bindSupervisorComponentPayload(options);
+    bindSupervisorComponentPayload(options, selectedPayload());
   }
   if (!options.snapshotWorkerFile) {
     const packed = join(dirname(fileURLToPath(import.meta.url)), "../lib/snapshot-worker.mjs");
@@ -84,7 +99,7 @@ export async function main(
         recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: 0 }));
         process.exit(0);
       },
-    });
+    }, selectedPayload());
     acceptSession?.reportAccepted();
   } catch (error) {
     try {

@@ -1,0 +1,56 @@
+name: Dashboard workbench
+on:
+  pull_request:
+    paths:
+      - 'packages/dashboard/**'
+      - 'packages/plugin/src/**'
+      - 'src/**/dashboard/**'
+      - 'src/adapters/node/workbench*'
+      - 'src/shared/workbench*'
+      - 'scripts/*dashboard*'
+      - 'tests/*dashboard*'
+      - 'tsconfig.web.json'
+      - '.github/workflows/dashboard-workbench.yml'
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsc --noEmit -p tsconfig.node.json && npx --no-install tsc --noEmit -p tsconfig.web.json
+      - run: node scripts/test-dashboard-core.mjs
+      - run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home-gateway.test.ts tests/dashboard-supervisor.test.ts tests/dashboard-local.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-view.test.tsx tests/dashboard-http.test.ts tests/dashboard-workbench.test.ts tests/dashboard-workbench-cors.test.ts tests/workbench-ui.test.tsx tests/workbench-plugin.test.ts
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Existing workbench navigation, settings and draft preservation
+        run: node --import tsx --test tests/workbench-ui-dom.test.ts
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+      - run: node scripts/build-spaces.mjs && node scripts/build-dashboard-plugin.mjs
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Actual Home homepage, publishing forms and two managed native Hosts
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node --import tsx scripts/test-dashboard-workbench-native.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-workbench-evidence
+          path: .sandbox/dashboard-workbench-evidence
+          if-no-files-found: ignore
+          retention-days: 7

@@ -8,6 +8,8 @@ import { identifier, object } from '../../../src/core/domain/dashboard/validatio
 import { openDashboardDomainStore, type DashboardDomainFacility } from './host/domain-store.js';
 import { authorizeDashboardRequest, dashboardHttpHandler, QUERY_PATH, COMMAND_PATH, type DashboardHttpPorts } from './host/http.js';
 
+import { DASHBOARD_BOOTSTRAP_ENV, DashboardHomePublisher } from './host/home-publisher.js';
+
 export const name = 'dsh-dashboard';
 export const inject = ['storageDomain', 'connection', 'webServer'];
 interface NativeWebServer {
@@ -67,8 +69,11 @@ export async function apply(ctx: Context, config: unknown = {}): Promise<void> {
   if (server?.host !== '127.0.0.1' || typeof server.register !== 'function' || typeof connection?.requestRejection !== 'function' || typeof domain?.open !== 'function') {
     throw new DashboardFault('dashboard/unsupported-operation');
   }
-  const store = await openDashboardDomainStore(domain);
-  const dashboard = new LocalDashboard({ spaceId, title: spaceId, backendEpoch: randomUUID(), newId: randomUUID, now: Date.now, store });
+  const bootstrapPath = process.env[DASHBOARD_BOOTSTRAP_ENV];
+  const home = bootstrapPath === undefined ? null : await DashboardHomePublisher.open(bootstrapPath);
+  let store;
+  try { store = await openDashboardDomainStore(domain); } catch (error) { home?.close(); throw error; }
+  const dashboard = new LocalDashboard({ spaceId, title: spaceId, backendEpoch: randomUUID(), newId: randomUUID, now: Date.now, store, ...(home ? { homePublisherFor: (id: string) => home.forProvider(id) } : {}) });
   let active = true;
   let provider: DashboardProvider | null = null;
   const routes: Array<() => void> = [];
@@ -78,6 +83,7 @@ export async function apply(ctx: Context, config: unknown = {}): Promise<void> {
     for (const dispose of routes.splice(0)) dispose();
     let failed: unknown;
     try { await provider?.closeProviders(); } catch (error) { failed = error; }
+    home?.close();
     try { await dashboard.close(); } catch (error) { failed ??= error; }
     if (failed) throw failed;
   })();

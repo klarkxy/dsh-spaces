@@ -130,7 +130,15 @@ test("mode none keeps the space off the shared catalog", () => {
   const catalog = emptyCatalog();
   const shared = connection();
   catalog.connections[shared.id] = shared as never;
-  assert.deepEqual(selectSharedConnections(catalog, emptyPolicy()), []);
+  const none = { schemaVersion: 1, revision: 1, shared: { mode: "none" as const } };
+  assert.deepEqual(selectSharedConnections(catalog, none), []);
+});
+
+test("a space without an explicit policy inherits every shared connection", () => {
+  const catalog = emptyCatalog();
+  const shared = connection();
+  catalog.connections[shared.id] = shared as never;
+  assert.deepEqual(selectSharedConnections(catalog, emptyPolicy()).map((item) => item.id), [shared.id]);
 });
 
 test("mode all binds every current connection including disabled ones", () => {
