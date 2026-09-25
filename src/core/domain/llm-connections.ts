@@ -230,12 +230,19 @@ export function emptyCatalog(): GlobalLlmCatalog {
   };
 }
 
+/** No policy file means the space inherits every shared connection; opt out by writing an explicit `none`. */
 export function emptyPolicy(): SpaceLlmPolicy {
   return {
     schemaVersion: LLM_POLICY_SCHEMA_VERSION,
     revision: 0,
-    shared: { mode: "none" },
+    shared: { mode: "all" },
   };
+}
+
+/** web owns the global catalog and never joins it; every other space inherits by default. */
+export function defaultPolicyFor(spaceId: string): SpaceLlmPolicy {
+  if (spaceId === "web") return { ...emptyPolicy(), shared: { mode: "none" } };
+  return emptyPolicy();
 }
 
 export function parseCatalog(value: unknown): GlobalLlmCatalog {
