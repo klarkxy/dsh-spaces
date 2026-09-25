@@ -17,7 +17,8 @@ mkdirSync('.sandbox', { recursive: true });
 const fixture = mkdtempSync(resolve('.sandbox/dashboard-native-'));
 const home = join(fixture, 'home');
 const artifacts = join(fixture, 'packages');
-mkdirSync(home); mkdirSync(artifacts);
+const evidence = resolve('.sandbox/dashboard-native-evidence');
+mkdirSync(home); mkdirSync(artifacts); mkdirSync(evidence, { recursive: true });
 const env = { ...process.env, DSH_HOME: home, CI: '1', npm_config_registry: 'https://registry.npmjs.org', npm_config_fetch_retries: '0',
   PATH: resolve(sdk, 'node_modules/.bin') + delimiter + process.env.PATH };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -45,7 +46,7 @@ function fingerprint(path) {
   } }
   walk(path); return hash.digest('hex');
 }
-let current, browser;
+let current, browser, page;
 async function stop() {
   const child = current; current = null;
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
@@ -126,21 +127,23 @@ export default {name,inject,apply};\n`);
   const context = await browser.newContext();
   const equals = host.cookie.indexOf('=');
   await context.addCookies([{ name: host.cookie.slice(0, equals), value: host.cookie.slice(equals + 1), url: host.origin, httpOnly: true, sameSite: 'Lax' }]);
-  const page = await context.newPage(); page.setDefaultTimeout(20000);
+  page = await context.newPage(); page.setDefaultTimeout(20000);
   const errors = []; page.on('pageerror', error => errors.push(redact(error.message)));
   await page.goto(host.origin);
+  // This is a fresh native profile. Wait for each real first-use control;
+  // an immediate isVisible() before hydration would incorrectly skip the modal.
   for (const label of [/^(Continue|继续)$/, /稍后配置|set up later|configure later/i]) {
-    const button = page.getByRole('button', { name: label });
-    if (await button.isVisible()) await button.click();
+    const button = page.getByRole('button', { name: label }).first();
+    await button.waitFor({ state: 'visible', timeout: 20000 });
+    await button.click();
   }
   await page.getByRole('button', { name: '工作首页', exact: true }).click();
   await page.getByRole('button', { name: '固定 Native test progress', exact: true }).click();
   await page.locator('.dsh-dashboard .dd-card progress').waitFor();
   assert.equal(await page.locator('.dsh-dashboard .dd-card progress').getAttribute('value'), '3');
   assert.deepEqual(errors, []);
-  mkdirSync('.sandbox/dashboard-native-evidence', { recursive: true });
-  await page.screenshot({ path: '.sandbox/dashboard-native-evidence/native.png', fullPage: true });
-  await browser.close(); browser = null;
+  await page.screenshot({ path: join(evidence, 'native.png'), fullPage: true });
+  await browser.close(); browser = null; page = null;
   const board = (await (await host.query({ kind: 'board', boardId: 'home' })).json()).data.board;
   assert.equal(board.placements.length, 1);
   pass('Packed client loads through native DSH shared React and pins a real Host component');
@@ -154,9 +157,18 @@ export default {name,inject,apply};\n`);
   const afterRemove = cli(['--profile', profile, '--dump-config'], 'Inspect uninstall'); assert.doesNotMatch(afterRemove, /@dsh-spaces\/dashboard/);
   assert.deepEqual(protectedPaths.map(path => fingerprint(join(home, path))), before);
   pass('Uninstall removes native activation and protected root web/session/storage trees are unchanged');
-  writeFileSync('.sandbox/dashboard-native-evidence/result.json', JSON.stringify({ status: 'passed', node: process.version, proved, businessData: 'synthetic Host plugin', modelsCalled: false }, null, 2));
+  writeFileSync(join(evidence, 'result.json'), JSON.stringify({ status: 'passed', node: process.version, proved, businessData: 'synthetic Host plugin', modelsCalled: false }, null, 2));
 } catch (error) {
   console.error(redact(error?.stack ?? error)); process.exitCode = 1;
+  writeFileSync(join(evidence, 'result.json'), JSON.stringify({ status: 'failed', node: process.version, proved, error: redact(error?.message ?? error) }, null, 2));
+  if (page && !page.isClosed()) {
+    try {
+      await page.screenshot({ path: join(evidence, 'failure.png'), fullPage: true, timeout: 5000 });
+      const text = redact((await page.locator('body').innerText({ timeout: 5000 })).slice(0, 12000));
+      writeFileSync(join(evidence, 'failure-page.txt'), text);
+      console.error('NATIVE FIXTURE PAGE', text);
+    } catch (captureError) { console.error('Evidence capture failed:', redact(captureError?.message ?? captureError)); }
+  }
 } finally {
   if (browser) await browser.close();
   try { await stop(); } catch (error) { console.error(redact(error)); process.exitCode = 1; }
