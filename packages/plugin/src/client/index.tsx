@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useState, type CSSProperties, type ReactElement } from "react";
+import { createElement, type CSSProperties, type ReactElement } from "react";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
 import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
@@ -9,6 +9,10 @@ import { WORKBENCH_CSS } from "../workbench/styles";
 import { HOME_CSS } from "../workbench/dashboard-home";
 import { DASHBOARD_CSS } from "../../../dashboard/src/view";
 import { mountStaticClientStyle } from "../../../dashboard/src/client-style";
+import { readViewHint } from "../../../view-bridge/src/env";
+import { CONTAINED_MANAGEMENT_PARAM } from "../../../../src/shared/space-host";
+import { HostShellController } from "./host-shell-state";
+import { PortableHostShell, HostShellPanel, HOST_SHELL_CSS } from "./host-shell";
 import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
 import { SpacesPanelIcon } from "./icon";
@@ -16,11 +20,9 @@ import { registerSpacesBranding } from "./branding";
 import {
   createWorkbenchGuideRemote,
   createWorkbenchRemote,
-  displayWorkbenchMessage,
-  isTrustedLoopbackHref,
   readHostHint,
 } from "./workbench-remote";
-import type { WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
+import type { WorkbenchGuideRole } from "../types";
 
 /** Panel identity shared by the sidebar entry and the main panel key. */
 export const SPACES_PANEL_ID = "dsh-spaces";
@@ -30,14 +32,18 @@ export const SPACES_PANEL_LABEL = "Workbench";
 export const inject = ["slots", "connection"];
 
 /**
- * Manager profiles mount Spaces around a persistent native DSH home.
- * Ordinary / uninitialized / identity-blocked profiles only add a guide panel
- * (initialize or enter). No second rail, no management write UI.
+ * The actual manager owns the management application. Other compatible top-level
+ * clients add an in-place rail without replacing their root or gaining manager Remotes.
+ * Embedded workspace children retain only their lightweight view bridge.
  */
 export function apply(ctx: Context): void {
   const connection: ConnectionHandle = ctx.get("connection");
   const hint = readHostHint();
-  if (hint && !hint.unavailable) registerSpacesBranding(ctx);
+  // Presentation markers do not grant rights. Manager identity still comes from the Host.
+  const embedded = typeof window !== "undefined" && window.parent !== window;
+  if (hint?.role === "manager" && !hint.unavailable) registerSpacesBranding(ctx);
+  if (typeof window !== "undefined" && isHomeView(window.location.href)) return;
+  if (hint?.role !== "manager" && embedded && readViewHint()) return;
   if (hint?.role === "manager" && !hint.unavailable) {
     // The embedded home uses this profile's unmodified DSH root. Do not
     // recursively mount Spaces inside it or change the profile on disk.
@@ -52,12 +58,20 @@ export function apply(ctx: Context): void {
     const api = createWorkbenchRemote(connection);
     const homeUrl = typeof window !== "undefined" && window.location ? homeViewUrl(window.location.href) : undefined;
     ctx.slots.inject("root", () =>
-      ctx.slots.register({ name: "root", priority: -1 }, () => createElement(WorkbenchApp, { api, homeUrl })),
+      ctx.slots.register({ name: "root", priority: -1 }, () => createElement(WorkbenchApp, { api, homeUrl, surfaceView: readViewHint() ?? undefined,
+        contained: embedded && new URL(window.location.href).searchParams.get(CONTAINED_MANAGEMENT_PARAM) === "1" && !!readViewHint(),
+      })),
     );
     return;
   }
 
   const guide = createWorkbenchGuideRemote(connection);
+  const host = new HostShellController(guide);
+  if (typeof document !== "undefined") ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS));
+  // The host keeps its own root, branding, native chrome and live conversation.
+  ctx.slots.inject("shell.overlay", () => ctx.slots.register(
+    { name: "shell.overlay", id: "dsh-spaces-host-shell" }, () => createElement(PortableHostShell, { controller: host }),
+  ));
   ctx.slots.inject("sidebar.panellist", () =>
     ctx.slots.register(
       {
@@ -71,7 +85,7 @@ export function apply(ctx: Context): void {
   );
   ctx.slots.inject("main", () =>
     ctx.slots.register({ name: "main", key: SPACES_PANEL_ID }, () =>
-      createElement(ReturnToWorkbenchPanel, { guide }),
+      createElement(ReturnToWorkbenchPanel, { host }),
     ),
   );
 }
@@ -191,110 +205,9 @@ export function GuidePanelView({
   );
 }
 
-export function ReturnToWorkbenchPanel({ guide }: { guide: WorkbenchGuideApi }): ReactElement {
-  const locale = inferSpacesLocale();
-  const [role, setRole] = useState<WorkbenchGuideRole | null>(null);
-  const [busy, setBusy] = useState<"role" | "enter" | "initialize" | null>("role");
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-
-  const loadRole = useCallback(async () => {
-    setBusy("role");
-    setError(null);
-    setStatus(null);
-    try {
-      const next = await guide.role();
-      setRole(next);
-      if (next.unavailable) setError(next.reasons[0] || guideText(locale, "blockedBody"));
-    } catch (caught) {
-      setError(displayWorkbenchMessage(caught));
-    } finally {
-      setBusy(null);
-    }
-  }, [guide, locale]);
-
-  useEffect(() => {
-    void loadRole();
-  }, [loadRole]);
-
-  const navigateTo = useCallback(
-    (origin: string | null, path: string | null, reasons: string[]): boolean => {
-      if (!origin || !path) {
-        setError(reasons[0] || guideText(locale, "unavailable"));
-        return false;
-      }
-      const href = isTrustedLoopbackHref(origin, path);
-      if (!href) {
-        setError(guideText(locale, "untrusted"));
-        return false;
-      }
-      if (typeof window !== "undefined") window.location.assign(href);
-      return true;
-    },
-    [locale],
-  );
-
-  const onEnter = useCallback(() => {
-    if (busy) return;
-    setBusy("enter");
-    setError(null);
-    setStatus(guideText(locale, "enterProgress"));
-    void (async () => {
-      try {
-        const boot = await guide.bootstrap();
-        if (boot.unavailable) {
-          setError(boot.reasons[0] || guideText(locale, "blockedBody"));
-          return;
-        }
-        const target = await guide.returnTarget();
-        navigateTo(target.origin, target.path, target.reasons);
-      } catch (caught) {
-        setError(displayWorkbenchMessage(caught));
-      } finally {
-        setBusy(null);
-        setStatus(null);
-      }
-    })();
-  }, [busy, guide, locale, navigateTo]);
-
-  const onInitialize = useCallback(() => {
-    if (busy) return;
-    setBusy("initialize");
-    setError(null);
-    setStatus(guideText(locale, "initProgress"));
-    void (async () => {
-      try {
-        const result = await guide.initialize();
-        if (result.unavailable) {
-          setError(result.reasons[0] || guideText(locale, "blockedBody"));
-          return;
-        }
-        if (result.managerId && role) {
-          setRole({ ...role, managerId: result.managerId });
-        }
-        if (!result.ok) {
-          setError(result.reasons[0] || guideText(locale, "unavailable"));
-        } else {
-          navigateTo(result.origin, result.path, result.reasons);
-        }
-      } catch (caught) {
-        setError(displayWorkbenchMessage(caught));
-      } finally {
-        setBusy(null);
-        setStatus(null);
-      }
-    })();
-  }, [busy, guide, locale, navigateTo, role]);
-
-  return createElement(GuidePanelView, {
-    locale,
-    mode: guideMode(role, busy, error),
-    error,
-    status,
-    busy,
-    onEnter,
-    onInitialize,
-  });
+/** In-place panel sharing the rail's presentation client; never navigates the outer document. */
+export function ReturnToWorkbenchPanel({ host }: { host: HostShellController }): ReactElement {
+  return createElement(HostShellPanel, { controller: host });
 }
 
 export function guideMode(

@@ -39,14 +39,19 @@ export interface WorkbenchViewProps {
   homeUrl?: string;
   homeContent?: ReactNode;
   chatActive?: boolean;
+  contained?: boolean;
 }
 
-export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive = false }: WorkbenchViewProps): ReactElement {
+export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive = false, contained = false }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   return (
-    <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme}>
+    <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme} data-contained={contained ? "true" : undefined}>
       <style>{WORKBENCH_CSS}</style>
-      <Rail ui={ui} controller={controller} />
+      {contained ? <nav className="dsh-wb-contained-tools" aria-label={t(locale, "app.title")}>
+        <button type="button" className="dsh-wb-btn" onClick={controller.selectHome}>{t(locale, "app.home")}</button>
+        <button type="button" className="dsh-wb-btn" onClick={controller.openCreate} disabled={!controller.canMutate()}>{t(locale, "app.newSpace")}</button>
+        <button type="button" className="dsh-wb-btn" onClick={controller.openSettings}>{t(locale, "app.settings")}</button>
+      </nav> : <Rail ui={ui} controller={controller} />}
       <div className="dsh-wb-main" inert={ui.overlay?.type === "settings" || undefined}>
         {homeUrl && <iframe className="dsh-wb-frame dsh-wb-home-frame" title="DSH" src={homeUrl} data-home-view="true" allow="clipboard-write" hidden={ui.selected !== "home" || (homeContent != null && !chatActive)} style={homeContent != null ? { top: 52, height: "calc(100% - 52px)" } : undefined} referrerPolicy="no-referrer" />}
         {homeContent != null && <div className="dsh-wb-home-surface" hidden={ui.selected !== "home"}>{homeContent}</div>}
