@@ -143,6 +143,7 @@ export class LocalDashboard {
     this.document = checked;
   }
   private authorize(authorizer: LocalDashboardAuthorizer, expectedSubject?: string): LocalDashboardAccess {
+    if (this.closing) throw new DashboardFault('dashboard/unavailable');
     const access = authorizer();
     if (!access) throw new DashboardFault('dashboard/unauthenticated');
     identifier(access.subjectId, 'subjectId');
@@ -158,15 +159,15 @@ export class LocalDashboard {
       ref: { spaceId: this.options.spaceId, providerId: provider.providerId, instanceId: instance.instanceId },
       typeId: instance.typeId, typeVersion: instance.typeVersion,
       kind: instance.content.kind, title: instance.title,
-      sourceState: this.bindings.get(provider.providerId)?.state === 'active' ? 'running' as const : 'unknown' as const,
+      sourceState: provider.runId === this.options.backendEpoch && this.bindings.get(provider.providerId)?.state === 'active' ? 'running' as const : 'unknown' as const,
     }))).sort((left, right) => {
       const a = refKey(left.ref), b = refKey(right.ref);
       return a < b ? -1 : a > b ? 1 : 0;
     });
   }
-  private changedMetadata(before: string): void {
+  private changedMetadata(before: string, nextRevision: string): void {
     if (before !== canonicalJson(this.metadata())) {
-      this.catalogRevision = this.id();
+      this.catalogRevision = nextRevision;
       this.cursors.clear();
     }
   }
@@ -283,8 +284,9 @@ export class LocalDashboard {
     if (this.bindings.has(providerId)) throw new DashboardFault('dashboard/request-conflict');
     limit(this.bindings.size + 1, DASHBOARD_LIMITS.maxProvidersPerSpace, 'providers');
     const binding: Binding = { state: 'active' };
+    const catalogRevision = this.id();
     this.bindings.set(providerId, binding);
-    this.catalogRevision = this.id(); this.cursors.clear();
+    this.catalogRevision = catalogRevision; this.cursors.clear();
     const registry = createBoundProviderRegistry({
       commit: (snapshot) => this.run(async () => {
         if (binding.state !== 'active') throw new DashboardFault('dashboard/unavailable');
@@ -295,13 +297,17 @@ export class LocalDashboard {
         if (!Number.isSafeInteger(sequence)) throw new DashboardFault('dashboard/limit-exceeded');
         const record: LocalProviderSnapshot = { providerId, runId: this.options.backendEpoch, sequence, receivedAt: new Date(this.clock()).toISOString(), ...checked };
         const candidate = { ...this.document!, providers: [...this.document!.providers.filter(value => value.providerId !== providerId), record] };
-        await this.commit(candidate); this.changedMetadata(before);
-        return `${this.options.backendEpoch}:${sequence}`;
+        // A legal 128-character epoch cannot be concatenated with a sequence
+        // to form another ID. Allocate and validate both IDs BEFORE commit.
+        const localRevision = this.id(), nextCatalogRevision = this.id();
+        await this.commit(candidate); this.changedMetadata(before, nextCatalogRevision);
+        return localRevision;
       }),
       remove: () => this.run(async () => {
         const before = canonicalJson(this.metadata());
+        const nextCatalogRevision = this.id();
         await this.commit({ ...this.document!, providers: this.document!.providers.filter(value => value.providerId !== providerId) });
-        binding.state = 'disposed'; this.changedMetadata(before);
+        binding.state = 'disposed'; this.changedMetadata(before, nextCatalogRevision);
       }),
     });
     return {
