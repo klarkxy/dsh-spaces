@@ -2,10 +2,11 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { DashboardApp } from '../../packages/dashboard/src/view';
+import { DashboardFault } from '../../src/core/domain/dashboard/errors';
 import { LocalDashboard, type LocalDashboardDocument } from '../../src/core/domain/dashboard/local-backend';
 import type { WidgetInstance } from '../../src/shared/dashboard';
 let documentValue: LocalDashboardDocument | null = null;
-let reads = 0, writes = 0, next = 0, allowed = true, chapters = 3;
+let reads = 0, writes = 0, next = 0, allowed = true, chapters = 3, denyWrites = false;
 const service = new LocalDashboard({ spaceId: 'writing', title: '写作空间', backendEpoch: 'browser-fixture', now: Date.now, newId: () => `id-${++next}`,
   store: { read: async () => documentValue, write: async value => { writes++; documentValue = structuredClone(value); }, close: async () => {} } });
 const client = service.client(() => allowed ? { subjectId: 'fixture-user', layoutWrite: true } : null);
@@ -17,10 +18,14 @@ const provider = service.bindProvider('writing-tools').register({
     { instanceId: 'notes', typeId: 'notes', typeVersion: 1, title: '今日笔记', content: { kind: 'markdown', text: '# 下一章\n主角收到一封没有署名的信。\n[静态文字，不会请求网络](https://example.test/track)' }, sourceTarget: null, updatedAt: new Date().toISOString(), staleAfterSeconds: null },
   ],
 });
-const backend = { query: (request: Parameters<typeof client.query>[0]) => { reads++; return client.query(request); }, mutate: client.mutate };
+const backend = {
+  query: (request: Parameters<typeof client.query>[0]) => { reads++; return client.query(request); },
+  mutate: (request: Parameters<typeof client.mutate>[0]) => denyWrites ? Promise.reject(new DashboardFault('dashboard/forbidden')) : client.mutate(request),
+};
 Object.assign(window, { dashboardTest: {
   state: () => ({ reads, writes, boards: structuredClone(documentValue?.layout.boards ?? []), providerInstances: documentValue?.providers[0]?.instances.length ?? 0 }),
   update: async () => { chapters = 7; await provider.publish(); },
   revoke: () => { allowed = false; },
+  denyWrites: () => { denyWrites = true; },
 } });
 void provider.publish().then(() => createRoot(document.getElementById('root')!).render(<DashboardApp backend={backend} />));
