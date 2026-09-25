@@ -59,6 +59,9 @@ test("DOM: in-place rail keeps native DOM/drafts and the authenticated manager o
   });t.after(()=>parent.close());
   const browser=await chromium.launch({headless:true,...process.env.DSH_TEST_CHROMIUM?{executablePath:process.env.DSH_TEST_CHROMIUM}:{}});t.after(()=>browser.close());
   const page=await browser.newPage({viewport:{width:1280,height:850}});const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+  const browserConsole: string[] = [];
+  page.on("console", message => { if (message.type() === "error" && browserConsole.length < 20) browserConsole.push(message.text().slice(0, 1000).replace(/portal-bootstrap\/[A-Za-z0-9_-]+/g, "portal-bootstrap/[redacted]")); });
+  try {
   await page.goto(parent.origin);
   await page.getByRole("button",{name:"Alpha",exact:true}).waitFor();
   await page.getByRole("textbox",{name:"Original draft"}).fill("original draft is retained");
@@ -90,4 +93,16 @@ test("DOM: in-place rail keeps native DOM/drafts and the authenticated manager o
   assert.equal(calls.filter(v=>v==="guide:portal").length,1);
   assert.equal(calls.some(v=>/submit|initialize|shutdown|start|preview/.test(v)),false);
   assert.deepEqual(errors,[]);
+  } catch (error) {
+    const snapshot = await page.evaluate(() => {
+      const ui = (window as any).__portableController?.getSnapshot();
+      return { phase: ui?.phase, error: ui?.error, visible: ui?.visible,
+        inventory: ui?.inventory, frameCount: document.querySelectorAll("iframe").length,
+        bodyText: document.body.innerText.slice(0, 2000) };
+    }).catch(() => null);
+    console.error("portable-host browser failure", JSON.stringify({ snapshot, errors, browserConsole, calls }));
+    mkdirSync(".sandbox/portable-host-evidence", { recursive: true });
+    await page.screenshot({ path: ".sandbox/portable-host-evidence/failed.png" }).catch(() => undefined);
+    throw error;
+  }
 });
