@@ -49,6 +49,8 @@ export const WORKBENCH_CSS = `
   font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
   overflow: hidden;
 }
+.dsh-workbench[data-contained="true"] { flex-direction:column; }
+.dsh-wb-contained-tools { display:flex; gap:8px; padding:6px 12px; flex:none; border-bottom:1px solid var(--wb-border); }
 .dsh-workbench *, .dsh-workbench *::before, .dsh-workbench *::after { box-sizing: inherit; }
 .dsh-workbench button, .dsh-workbench input, .dsh-workbench select, .dsh-workbench textarea {
   font: inherit;

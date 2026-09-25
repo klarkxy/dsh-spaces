@@ -5,7 +5,7 @@ import {
   LLM_ERROR,
   LlmConfigError,
   emptyCatalog,
-  emptyPolicy,
+  defaultPolicyFor,
   isRecord,
   parseCatalog,
   parsePolicy,
@@ -69,6 +69,6 @@ function readCatalogSync(home: string) {
 
 function readPolicySync(home: string, spaceId: string) {
   const path = llmPolicyPath(home, spaceId);
-  if (!existsSync(path)) return emptyPolicy();
+  if (!existsSync(path)) return defaultPolicyFor(spaceId);
   return parsePolicy(JSON.parse(readFileSync(path, "utf8")) as unknown);
 }

@@ -3,7 +3,8 @@ import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client';
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client';
-import { DashboardApp } from './view.js';
+import { DashboardApp, DASHBOARD_CSS } from './view.js';
+import { mountStaticClientStyle } from './client-style.js';
 import { createDashboardHttpBackend } from './http-client.js';
 
 export const name = 'dsh-dashboard-client';
@@ -18,6 +19,7 @@ function DashboardIcon(): ReactElement {
 }
 /** Native sidebar/main contributions only: never claims root or bundles its own React. */
 export function apply(ctx: Context): void {
+  ctx.effect(() => mountStaticClientStyle(document, '@dsh-spaces/dashboard', 'dashboard.css', DASHBOARD_CSS));
   const backend = createDashboardHttpBackend(window.location.origin);
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist', id: DASHBOARD_PANEL_ID, order: 90, label: () => '工作首页',

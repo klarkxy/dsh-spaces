@@ -197,14 +197,21 @@ async function assertTestPortsClosed() {
 async function stop(handle) {
   const pid = handle?.pid ?? handle?.child?.pid;
   if (!pid) return;
+  if (handle.child.exitCode !== null || handle.child.signalCode !== null) return;
   if (process.platform === "win32") {
-    await new Promise((resolveKill) => {
+    await new Promise((resolveKill, rejectKill) => {
+      let output = "";
       const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
-      killer.on("exit", () => resolveKill());
-      killer.on("error", () => resolveKill());
+      for (const stream of [killer.stdout, killer.stderr]) {
+        stream.on("data", (chunk) => { output = (output + chunk).slice(-2_000); });
+      }
+      killer.once("error", rejectKill);
+      killer.once("close", (code) => code === 0
+        ? resolveKill()
+        : rejectKill(new Error(`taskkill ${pid} failed (${code}): ${output.trim()}`)));
     });
     return;
   }
@@ -330,7 +337,15 @@ async function main() {
     await rpc(3221, "session.list", {}, cookies.get(3221));
     pass("A9: coding came back after restart");
   } finally {
-    for (const handle of children.values()) await stop(handle);
+    const stopErrors = [];
+    for (const handle of children.values()) {
+      try {
+        await stop(handle);
+      } catch (error) {
+        stopErrors.push(`${handle.pid}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (stopErrors.length) fail(`Could not stop isolated profiles: ${stopErrors.join("; ")}`);
     for (const p of PROFILES) {
       try {
         await waitPortClosed(p.port);
