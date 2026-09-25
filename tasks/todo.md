@@ -1,6 +1,6 @@
 # 2026-09-25 参考官方 desktop 优化启动流程
 
-参考官方 DSH desktop 启动流程（六阶段百分比进度、`Startup completed in X ms` 总耗时、port 0 + stdout 读回）优化本地启动。仅本地修改与验收，不提交、推送或发布。
+参考官方 DSH desktop 启动流程（六阶段百分比进度、`Startup completed in X ms` 总耗时、port 0 + stdout 读回）优化本地启动。已提交 `7319d48` 并推送 main；未打版本、未发布。
 
 - [x] 桌面启动分阶段进度（attach 8% → prepare 24% → launch 56% → connect 82% → load-workbench 92% → ready 100%）：共享阶段类型与百分比映射、`DesktopServiceClient.onStage`、main 阶段状态机（`src/main/desktop-startup-progress.ts`，单调前进、防回退、失败不打印完成日志）、overlay 阶段文案与进度条（中英双语）。
 - [x] 启动总耗时日志：`Startup completed in X ms (cold start|attached to existing service)`，时钟覆盖 open 延续的冷启动，仅成功就绪打印。
