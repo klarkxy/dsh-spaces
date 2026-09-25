@@ -668,13 +668,28 @@ test("library supervisor without CLI exit capability refuses upgrade before stop
   assert.equal(new HomeController(home).inspect().held, true);
 });
 
-test("failed stop does not transfer; failed persist does not transfer; durable success finalizes", async () => {
+test("failed stop does not transfer; failed persist does not transfer; durable success finalizes", async (t) => {
   const home = tempDir("dsh-spaces-handoff-home-");
   const bin = writeFakeCli(home);
   const payload = dummyPayloadLib();
   const tools = tempDir("dsh-spaces-handoff-tools-");
+  const originalNpmCache = process.env.npm_config_cache;
+  process.env.npm_config_cache = join(tools, "npm-cache");
+  t.after(() => {
+    if (originalNpmCache === undefined) delete process.env.npm_config_cache;
+    else process.env.npm_config_cache = originalNpmCache;
+  });
   const packed = packGroupArtifacts(payload, home);
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeProfile(home, "alpha", {
+    name: "alpha",
+    dependencies: { "@dsh-spaces/view-bridge": "3.0.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/view-bridge"] } },
+  });
+  cpSync(
+    join(payload.packageRoot, "lib", "view-bridge"),
+    join(home, "profiles", "alpha", "node_modules", "@dsh-spaces", "view-bridge"),
+    { recursive: true },
+  );
 
   const stub = writeStubLauncher(home);
   const stamp = join(home, "commit-stamp.json");
@@ -684,6 +699,7 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
     componentPayloadRoot: payload.payloadRootLib,
     controlToolRoot: tools,
     ...packed,
+    dumpConfig: async (profile) => `${dumpText(profile)}- id: settings\n  disabled: true\n- id: dsh-spaces-settings\n  name: '@dsh-spaces/view-bridge/settings'\n`,
     onNormalExit: () => {
       exited = true;
     },
@@ -722,7 +738,8 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
     { serviceEpoch: started.serviceEpoch, expectedRevision: started.revision },
   );
   await waitJob(handle, "start-alpha");
-  assert.equal((await handle.runtime.job("start-alpha")).status, "succeeded");
+  const startedJob = await handle.runtime.job("start-alpha");
+  assert.equal(startedJob.status, "succeeded", JSON.stringify(startedJob));
   const running = await handle.runtime.state();
   assert.equal(running.spaces.find((space) => space.id === "alpha")?.status, "running");
   const blocked = await handle.runtime.submit(
@@ -820,7 +837,7 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
   );
   await waitJob(handle, "ok-upgrade");
   const okJob = await handle.runtime.job("ok-upgrade");
-  assert.equal(okJob.status, "succeeded");
+  assert.equal(okJob.status, "succeeded", JSON.stringify({ okJob, lastHandoffError: (runtime as WorkbenchSupervisorRuntime & { lastHandoffError?: string }).lastHandoffError }));
   assert.equal(okJob.phase, "handoff-pending");
   await waitUntil(() => exited || existsSync(stamp) && readFileSync(stamp, "utf8").trim().length > 0, "handoff commit");
   assert.equal(okJob.phase, "handoff-pending");
@@ -1051,21 +1068,15 @@ async function startSupervisor(
     processRuntime: extra.processRuntime ?? {
       spawn: spawnFixture(),
       prepareHome: async () => undefined,
-      gracefulWaitMs: 40,
+      gracefulWaitMs: 5_000,
       forceWaitMs: 20,
       readyTimeoutMs: 8_000,
       fetchTimeoutMs: 2_000,
       pollMs: 40,
       kill: async (pid, kind) => {
         if (kind === "kill") return;
-        await new Promise<void>((resolveKill) => {
-          const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-            stdio: "ignore",
-            windowsHide: true,
-          });
-          killer.once("exit", () => resolveKill());
-          killer.once("error", () => resolveKill());
-        });
+        const child = live.find((item) => item.pid === pid);
+        if (!child || !child.kill("SIGTERM")) throw new Error("fixture child could not be stopped");
       },
     },
     runCli: extra.runCli ?? (async (args) => {
@@ -1125,7 +1136,8 @@ async function stopAllOwned(handle: WorkbenchSupervisorHandle): Promise<void> {
       },
     );
     await waitJob(handle, requestId);
-    assert.equal((await handle.runtime.job(requestId)).status, "succeeded");
+    const stoppedJob = await handle.runtime.job(requestId);
+    assert.equal(stoppedJob.status, "succeeded", JSON.stringify(stoppedJob));
   }
 }
 
