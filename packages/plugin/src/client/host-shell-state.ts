@@ -21,7 +21,8 @@ export interface HostShellEnvironment {
 const browserEnv: HostShellEnvironment = {
   origin: () => window.location.origin,
   channel: () => Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, "0")).join(""),
-  setTimeout, clearTimeout,
+  setTimeout: (handler, ms) => setTimeout(handler, ms),
+  clearTimeout: timer => clearTimeout(timer),
 };
 
 /** Presentation client only. It cannot submit a management command, stop a Host or change its profile. */
