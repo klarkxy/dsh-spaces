@@ -21,7 +21,8 @@ async function fixture() {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${ports.port()}`;
   async function post(body: string | Uint8Array = '{"kind":"overview"}', overrides: Record<string, string> = {}, path = QUERY_PATH) {
-    return fetch(origin + path, { method: 'POST', headers: { Origin: origin, Cookie: 'fixture=session', 'X-DSH-Dashboard': '1', 'Content-Type': 'application/json', ...overrides }, body });
+    const payload = typeof body === 'string' ? body : new Uint8Array(body).buffer;
+    return fetch(origin + path, { method: 'POST', headers: { Origin: origin, Cookie: 'fixture=session', 'X-DSH-Dashboard': '1', 'Content-Type': 'application/json', ...overrides }, body: payload });
   }
   return { origin, post, local, get writes() { return writes; }, revoke: () => { authenticated = false; }, stop: () => { active = false; }, async close() {
     await local.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));

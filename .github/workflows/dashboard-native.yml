@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 jobs:
-  native:
+  http:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -22,6 +22,16 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx --no-install tsc -p tsconfig.dashboard-ui.json
       - run: node --import tsx --test tests/dashboard-http.test.ts
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Install explicit official SDK fixture
         run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1
       - name: Inspect native connection and caller binding
