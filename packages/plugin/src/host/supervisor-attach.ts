@@ -19,6 +19,20 @@ import {
 
 export type LeaseVerdict = "ok" | "free" | "foreign" | "ambiguous" | "dead" | "unbound" | "mismatch";
 
+export type SupervisorAttachResult =
+  | { endpoint: SupervisorEndpoint }
+  | { missing: true; previousOwner?: HomeControlOwner }
+  | { blocked: true; reasons: string[] }
+  | { stale: true; reasons: string[] };
+
+export interface SupervisorAttachOptions {
+  home: string;
+  allowRealHome: boolean;
+  fetch?: WorkbenchHttpFetch;
+  /** Reusable discovery handle; inspect() always re-reads on-disk state. */
+  controller?: HomeController;
+}
+
 const HELD_NO_ENDPOINT = "A controller holds the Home lease but no supervisor endpoint was found.";
 const ENDPOINT_WITHOUT_LEASE =
   "A supervisor endpoint is recorded but no controller holds the Home lease. The lease was not cleared.";
@@ -69,21 +83,18 @@ export function inspectLease(
   return verdictOf(controller.inspect(), origin, identity);
 }
 
-export async function attachExistingSupervisor(options: {
-  home: string;
-  allowRealHome: boolean;
-  fetch?: WorkbenchHttpFetch;
-}): Promise<
-  | { endpoint: SupervisorEndpoint }
-  | { missing: true; previousOwner?: HomeControlOwner }
-  | { blocked: true; reasons: string[] }
-  | { stale: true; reasons: string[] }
-> {
+export async function attachExistingSupervisor(
+  options: SupervisorAttachOptions,
+): Promise<SupervisorAttachResult> {
   let controller: HomeController;
-  try {
-    controller = new HomeController(options.home, { allowRealHome: options.allowRealHome });
-  } catch {
-    return blocked([HOME_UNAVAILABLE]);
+  if (options.controller) {
+    controller = options.controller;
+  } else {
+    try {
+      controller = new HomeController(options.home, { allowRealHome: options.allowRealHome });
+    } catch {
+      return blocked([HOME_UNAVAILABLE]);
+    }
   }
 
   const homeId = endpointHomeId(controller.home, { allowRealHome: options.allowRealHome });

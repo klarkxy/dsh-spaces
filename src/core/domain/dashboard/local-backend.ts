@@ -6,7 +6,7 @@ import type {
 import { emptyLayout, parseLayoutDocument, prepareLayout, readReceipt, type LayoutDocument } from './boards.js';
 import { DashboardFault, invalid, limit } from './errors.js';
 import { DASHBOARD_LIMITS } from './limits.js';
-import { createBoundProviderRegistry } from './provider.js';
+import { createBoundProviderRegistry, type HomePublisher } from './provider.js';
 import { byteLength, canonicalJson, copyJson, identifier, object, parseQuery, parseSnapshot, parseStrictJson, refKey, timestampMillis } from './validation.js';
 
 export interface LocalProviderSnapshot {
@@ -36,6 +36,8 @@ export interface LocalDashboardOptions {
   newId(): string;
   now(): number;
   store: LocalDashboardStore;
+  /** Optional pre-authorized Home run; absence is local-only, not discovery. */
+  homePublisherFor?(providerId: string): HomePublisher;
   /** Must check actual target existence and access. No URL or filesystem resolution here. */
   targetExists?(target: SourceTarget): Promise<boolean>;
 }
@@ -309,7 +311,7 @@ export class LocalDashboard {
         await this.commit({ ...this.document!, providers: this.document!.providers.filter(value => value.providerId !== providerId) });
         binding.state = 'disposed'; this.changedMetadata(before, nextCatalogRevision);
       }),
-    });
+    }, this.options.homePublisherFor?.(providerId) ?? null);
     return {
       register: (registration: ProviderRegistration) => {
         const handle = registry.register(registration);

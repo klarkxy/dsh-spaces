@@ -13,7 +13,7 @@ import type {
   WorkbenchReturnTarget,
 } from "../types";
 import { resolveHostIdentity, type HostIdentity, type HostIdentityInput } from "./identity";
-import { createWorkbenchHttpClient, mintSupervisorHandoff, type WorkbenchHttpClientOptions } from "./workbench-http";
+import { createWorkbenchHttpClient, mintSupervisorHandoff, mintSupervisorPortal, type WorkbenchHttpClientOptions } from "./workbench-http";
 import { attachExistingSupervisor, pingSupervisorState } from "./supervisor-attach";
 import {
   bootstrapSupervisor,
@@ -22,6 +22,8 @@ import {
   type SupervisorBootstrapOptions,
   type SupervisorEndpoint,
 } from "./supervisor-bootstrap";
+
+import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/shared/space-host";
 
 const inflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
@@ -123,6 +125,20 @@ export class WorkbenchHostRuntime {
     return pending;
   }
 
+  async portalTarget(audience: SpaceHostAudience): Promise<WorkbenchReturnTarget> {
+    // Check transport before attaching or starting anything. No application-name detection.
+    const valid = parseSpaceHostAudience(audience);
+    if (!valid) throw new Error("workbench/unsupported");
+    const boot = await this.bootstrap();
+    if (!boot.connected || !this.endpoint) return { available: false, origin: null, path: null, unavailable: boot.unavailable, reasons: boot.reasons };
+    // The listener is published before the manager has finished its initial launch.
+    // Observe that launch before issuing a one-use browser entry; never replay it.
+    const waiting = await this.waitForManager();
+    if (waiting) return { available: false, origin: null, path: null, unavailable: waiting.unavailable, reasons: waiting.reasons };
+    const path = await mintSupervisorPortal(this.options.fetch ?? fetch, this.endpoint, valid);
+    return { available: true, origin: this.endpoint.origin, path, unavailable: false, reasons: [] };
+  }
+
   async returnTarget(): Promise<WorkbenchReturnTarget> {
     const boot = await this.bootstrap();
     if (!boot.connected || !boot.origin || !this.endpoint) {
@@ -172,15 +188,18 @@ export class WorkbenchHostRuntime {
 
   private async waitForManager(): Promise<WorkbenchInitializeResult | null> {
     const deadline = Date.now() + (this.options.supervisorTimeoutMs ?? 240_000);
-    let reasons = ["The manager is still starting. Retry initialization to reconnect."];
+    let reasons = ["The manager did not become ready before the startup deadline."];
     while (Date.now() < deadline) {
       try {
         const state = await this.api!.state();
-        if (state.role === "manager" && state.availability !== "unavailable" &&
-            state.spaces.some(space => space.id === state.managerId && space.status === "running")) return null;
         if (state.reasons.length) reasons = state.reasons;
+        const manager = state.spaces.find(space => space.id === state.managerId);
+        if (state.availability === "unavailable" || state.serviceEpoch !== this.endpoint?.serviceEpoch || manager?.status === "crashed") {
+          return this.initializeFailure(state.reasons.length ? reasons : ["The manager launch or its owning service is unavailable."]);
+        }
+        if (state.role === "manager" && manager?.status === "running") return null;
       } catch {
-        reasons = [ENTRY_UNAVAILABLE];
+        return this.initializeFailure([ENTRY_UNAVAILABLE]);
       }
       await delay(250);
     }

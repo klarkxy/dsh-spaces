@@ -1,3 +1,56 @@
+# 2026-09-25 宿主内空间栏与展示/管理权限分离
+
+用户授权按新的插件定位更新并提交 PR，未授权合并或发布。本批依赖 PR #16，保留看板和发布授权工作。合同：[宿主嵌入](../docs/host/embedding.md)；实际执行及未验边界：[实施记录](../docs/host/implementation.md)。
+
+- [x] 普通顶层宿主 additive 空间栏，保留原应用；展示角色独立于 manager 权限。
+- [x] audience-bound 单次入口与受限导航桥，保留 manager/child 来源链，抑制重复空间栏；蓝图 v1 不变。
+- [x] 专项单元、既有权限回归、本地组件构建；同步实际安装验收脚本与隔离 CI。
+- [ ] CI 浏览器、原生插件与完整仓库门槛以对应结果为准；本机浏览器受管理策略阻断，未计通过。
+- [ ] 官方 Desktop 自定义协议、远程/第三方原生适配、完整外部空间注册；未完成前明确拒绝不支持条件，不假装跨端认证。
+
+# 2026-09-25 Home 默认首页与发布授权界面
+
+用户授权继续施工，本批 PR #16（依赖 #15），运行代码 `b54131a856116b6e97fa91597819613cf974cbee`。详见 [首页与授权界面记录](../docs/dashboard/workbench-implementation.md)。未合并 main、发布、迁移真实 Home 或完成空间默认预装。
+
+- [x] 共享工作台 Home 默认进入可组合看板；聊天显式加载并保留 iframe/草稿，空间和设置入口保留，不在打开首页时启动空间或创建布局。
+- [x] 发布授权表单接入真实 preview/plan.execute；停用/指定/全部范围、旧 revision 草稿保护，以及原生 Remote 请求/响应严格校验。
+- [x] 当前拥有的管理 Host 精确 Origin 接入 Supervisor，Cookie 仍是必要认证；预检不授权，普通/旧来源与内部 bearer 入口没有放宽。
+- [x] 原生静态样式按插件生命周期注册；52 核心 + 187 组合检查 + 2 既有浏览器 DOM 检查通过，本批新增 14 项边界测试。原生双空间默认首页、授权预览/取消/确认、固定卡片、450px 窄屏、聊天保留和撤权流程通过，截图/结果 JSON 已读回。
+- [ ] 默认预装、组件清单过渡、Windows ACL/Electron 产品流程、真实业务插件、完整双语/拖拽/分页仍待施工；全仓库 Windows workbench 失败不能以专项绿色抵消。
+
+# 2026-09-25 Supervisor 看板管理与生命周期接线
+
+用户授权继续施工，本批位于 PR #15（依赖 #14），运行代码 `559cd0641a92443d088f25bb0e56837bcfe4ac32`。详见 [Supervisor 施工记录](../docs/dashboard/supervisor-implementation.md)。未合并 main、发布或改动真实 Home；默认首页尚未替换。
+
+- [x] Home 看板挂入实际 WorkbenchSupervisor 的运行权、既有监听器与 operator 会话；没有新增管理服务，发布 bearer 不能代替浏览器登录。
+- [x] 发布授权接入现有 preview/plan.execute，检查 epoch/revision/generation、grant CAS、维护与单写者；授权本身不安装或启动空间。
+- [x] 正常启动只向已安装且获准空间签发独有凭据；停止、退出、失败启动及关闭时撤销；删除空间先撤销其全部发布授权。无授权子进程显式屏蔽父环境旧凭据路径。
+- [x] Node 24 专项 141 项检查通过（新增 13），严格类型和构建通过；真实 Supervisor 管理两个原生 DSH Host 的授权、发布、停止、撤销、删除与关闭链路通过。结果 JSON 已读回，业务数据为合成插件，无模型调用。
+- [ ] 剩余：授权 UI、默认首页路由、默认预装与组件清单过渡、真实业务插件/双端产品验收、Windows ACL。现有五组件清单和根依赖未变。
+- [ ] 仓库全量 CI 与升级回归另行核验；专项通过不替代此前 Windows 工作台失败的合并门槛。历史阶段记录保留，最新进度以本段和对应实现记录为准。
+
+# 2026-09-25 Home 聚合与多空间后台发布
+
+用户授权继续施工，本批位于 PR #14（依赖 #13），代码为 `d04e2437dd28b1bc12983d72a034852db544a478`。完整证据和接线义务见 [Home 施工记录](../docs/dashboard/home-implementation.md)。未合并 main、发布或更改真实 Home，默认首页未替换。
+
+- [x] Home 聚合服务、分离的授权/布局/投影持久化、每 run 固定 grant、来源序列与布局 CAS、撤销后旧缓存/游标/回执/导航过滤。
+- [x] 私有 bootstrap、Node bearer 入口、公开路由权限隔离和原生插件可选发布端；有界首次发送调度、失败不重连/补传，不依赖 iframe 或 Electron。
+- [x] Node 24 Home 专项共 128 项测试通过（新增 39）；严格类型检查、既有 local/native/core 工作流通过。本地 Node 22.16.0 对同一代码的 128 项检查也通过；全树哈希与上传一致。
+- [x] 两个实际安装 tarball 的原生 DSH Host 无浏览器发布到同一 Home；同一布局引用两空间、停止 A 后 B 可用、撤销 A 后隐藏、根数据指纹不变。已下载读回 passed 结果；Home 拥有者为隔离测试装配，不是生产 Supervisor。
+- [ ] P2 生产接线：现有 Supervisor 的真实拥有权、会话、preview/plan.execute 和子进程代次/退出钩子仍待挂载，不能把测试回调复制为生产权限。
+- [ ] P3–P5：授权界面、默认预装、组件清单过渡、真正默认首页和实际业务插件/双端验收；Windows Home 凭据与存储 ACL 适配尚不支持。仓库级 CI/桌面回归另核，专项绿色不等于全仓库绿色。
+
+# 2026-09-25 原生 DSH 看板插件施工
+
+用户授权继续施工，本批位于 PR #13（依赖 #12）。验证代码为 `be2a97610e3508775d18189a9c94276d6cb2fad2`，具体证据与使用限制见 [原生接线记录](../docs/dashboard/native-implementation.md)。未合并 main、未发布、未安装到真实 Home、未替换全局默认首页。
+
+- [x] 独立插件 manifest/bundle、Host 入口、原生 sidebar/main 客户端和构建打包；不重复打包 React，不导入 Electron 或 Supervisor 管理代码。
+- [x] 原生 Connection 登录校验、Host/Origin/custom-header 与严格 JSON HTTP 边界；provider 只在 Host 内按 Cordis 调用者 fiber 绑定，不开放网页发布入口。
+- [x] Node 24 strict、7 项新增 HTTP socket 测试、原生 SDK 调用者探针、构建/pack 通过；上批 91 项检查和共享视图回归继续通过。
+- [x] 实际官方 CLI 安装 tarball、原生登录与后台发布、首次引导后打开侧栏看板并固定组件、正常重启保留布局、卸载与根目录指纹检查通过。截图和结果 JSON 已读回；业务数据是实际 Host 中的合成测试插件，无模型调用。
+- [ ] 原生默认聊天工作目录初始化仍有提示，截图已记录，不包装为全应用无错误。当前仅支持已隔离命名 profile 和 loopback；反向代理、Windows ACL、Electron 包、完整卸载/多实例矩阵与界面完善未验。
+- [ ] P2–P5：Home 聚合及授权、多空间后台发布、默认预装、组件清单过渡、真正默认首页与真实业务 provider 的跨端验收。仓库级 CI 与桌面回归另行核验，不以看板专项替代。
+
 # 2026-09-25 本空间看板与共享界面施工
 
 用户连续授权继续施工。本批提交于 PR #12（依赖 #11），没有合并 main、发布、安装进用户 Home 或替换现有首页。实现及验证边界见 [第二批施工记录](../docs/dashboard/local-implementation.md)，源码装配入口见 [dashboard README](../packages/dashboard/README.md)。
@@ -21,6 +74,16 @@
 - [x] Linux Node 22.16.0 / TypeScript 5.8.3 下 strict 编译和 52 项核心测试通过，0 失败/跳过；包含 DTO 同步与 500 组确定性 JSON 对照检查。新增 Node 24 双平台核心 CI，实际 Actions 结果另查，不在这里预先认定通过。
 - [ ] P0 真实 SDK/命名 profile/认证/存储/共享 React/凭据与 Windows ACL：依赖获取探针 DNS EAI_AGAIN，尚未通过。不能以核心测试代替。
 - [ ] P1–P5：local 插件完整闭环、Home 聚合与授权、真正首页、两类真实业务 provider、安装与组件过渡及 D01–D22 集成验收。当前没有替换首页、安装新 provider 或新增可调用网络端点。
+# 2026-09-25 参考官方 desktop 优化启动流程
+
+参考官方 DSH desktop 启动流程（六阶段百分比进度、`Startup completed in X ms` 总耗时、port 0 + stdout 读回）优化本地启动。已提交 `7319d48` 并推送 main；未打版本、未发布。
+
+- [x] 桌面启动分阶段进度（attach 8% → prepare 24% → launch 56% → connect 82% → load-workbench 92% → ready 100%）：共享阶段类型与百分比映射、`DesktopServiceClient.onStage`、main 阶段状态机（`src/main/desktop-startup-progress.ts`，单调前进、防回退、失败不打印完成日志）、overlay 阶段文案与进度条（中英双语）。
+- [x] 启动总耗时日志：`Startup completed in X ms (cold start|attached to existing service)`，时钟覆盖 open 延续的冷启动，仅成功就绪打印。
+- [x] 冷启动去重：首次 attach 判决经 `priorDiscovery` 透传跳过 bootstrap 入口的重复全量探测（锁内 TOCTOU 复查保留）；`pollEndpoint` 复用 HomeController/锁对象；`bootstrapManager` 的 dump 结果复用给 `syncLoader`（同 profile 一次 `--dump-config`）；payload 校验合并为一次 manifest/digest 计算（时效比对校验保留）。
+- [x] `presentWorkbench` 与托盘空间刷新并行（finally 汇合，刷新失败不阻塞呈现）。
+- [ ] 评估后放弃：空间端口改 `port 0` + stdout 读回（改变端口稳定性语义，现有 reservePort + 端口一致性校验已满足安全要求）；`packLocalArtifacts` 锁前并行（输出到 per-Home 共享 toolsRoot，破坏单写者约束）。
+- [x] 类型检查、完整构建、desktop-startup 全链及 workbench/主套件回归；新增 desktop-startup-progress、阶段序、priorDiscovery、dump/payload 复用等定向测试。workbench-package-upgrade 9 项、sample-plugins 1 项、supervisor-handoff 2 项失败经干净 main 对照确认为本机既有问题，与本轮无关。
 
 # 2026-09-22 官方 alpha 全面迁移
 
@@ -130,7 +193,7 @@
 
 产品路径已按 [docs/let-it-crash.md](../docs/let-it-crash.md) 实施。未在本机跑完的 CLI/浏览器项见 [q-coverage.md](q-coverage.md)。不推送、不发版本，除非用户另说。
 
-插件功能计划：[plugin-management/plan.md](plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](plugin-management/task-01-write-scope.md)，不作为恢复产品已交付。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
+插件功能计划：[plugin-management/plan.md](plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](plugin-management/task-01-write-scope.md)，不作为恢复模块建设前置，也不默认以后继续做恢复。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
 
 ## D：文档与任务修订（本轮直接范围）
 
