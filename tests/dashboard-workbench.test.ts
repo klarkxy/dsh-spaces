@@ -56,3 +56,26 @@ test('empty, duplicate and excessive selected IDs cannot turn into all-instance 
   }
   assert.throws(() => publicationInput('coding', '', 'absent', 'all', ''));
 });
+
+// Validate both native FaceModel directions. The Supervisor's HTTP parser alone
+// cannot prove that the manager Remote admits a newly added plan kind.
+import { workbenchPlanRequestSchema, workbenchPlanSchema } from '../packages/plugin/src/host/workbench-schemas.ts';
+
+test('native FaceModel admits publication plans in both request and response directions', () => {
+  for (const selection of [null, { kind: 'all' }, { kind: 'selected', instanceIds: ['one', 'two'] }]) {
+    const request = { kind: 'dashboard.publication.set', spaceId: 'coding', providerId: 'tasks', expectedGrantRevision: 'absent', selection };
+    assert.deepEqual(workbenchPlanRequestSchema.parse(request), request);
+  }
+  const result = { id: 'plan-1', kind: 'dashboard.publication.set', title: 'Publishing permission',
+    scope: 'space', affectedSpaceIds: ['coding'], runningSpaceIds: [], changes: ['Permit one source'],
+    destructive: false, expiresAt: '2026-09-25T08:00:00Z', serviceEpoch: epoch, stateRevision: epoch };
+  assert.deepEqual(workbenchPlanSchema.parse(result), result);
+});
+test('native plan schema stays closed and does not widen instance selection', () => {
+  const valid = { kind: 'dashboard.publication.set', spaceId: 'coding', providerId: 'tasks', expectedGrantRevision: 'absent', selection: null };
+  for (const patch of [{ token: 'forged' }, { providerId: '' }, { expectedGrantRevision: ' ' },
+    { selection: { kind: 'selected', instanceIds: [] } }, { selection: { kind: 'selected', instanceIds: ['one', 'one'] } },
+    { selection: { kind: 'all', instanceIds: ['one'] } }, { selection: { kind: 'other' } }]) {
+    assert.equal(workbenchPlanRequestSchema.safeParse({ ...valid, ...patch }).success, false);
+  }
+});
