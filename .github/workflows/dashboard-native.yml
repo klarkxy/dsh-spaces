@@ -1,0 +1,28 @@
+name: Dashboard native
+on:
+  pull_request:
+    paths:
+      - 'packages/dashboard/**'
+      - 'scripts/*dashboard*'
+      - 'tests/*dashboard*'
+      - '.github/workflows/dashboard-native.yml'
+      - 'tsconfig.dashboard*.json'
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install explicit official SDK fixture
+        run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1
+      - name: Inspect native connection and caller binding
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node scripts/probe-dashboard-native.mjs
