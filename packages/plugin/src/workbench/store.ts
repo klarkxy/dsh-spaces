@@ -483,6 +483,14 @@ export class WorkbenchController {
     this.beginSpace(space, { startIfStopped: true, force: false });
   };
 
+  /** Presentation-only navigation: a stopped or foreign entry never becomes an implicit start. */
+  selectRunningSpace = (spaceId: string): boolean => {
+    const space = this.space(spaceId);
+    if (!space || space.status !== "running" || !space.hasWebApp || this.isManagerId(spaceId)) return false;
+    this.beginSpace(space, { startIfStopped: false, force: false });
+    return true;
+  };
+
   enterCreated = (): void => {
     const spaceId = this.ui.createdNotice?.spaceId;
     if (!spaceId) return;

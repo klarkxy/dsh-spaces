@@ -1,0 +1,58 @@
+name: Dashboard native
+on:
+  pull_request:
+    paths:
+      - 'packages/dashboard/**'
+      - 'scripts/*dashboard*'
+      - 'tests/*dashboard*'
+      - '.github/workflows/dashboard-native.yml'
+      - 'tsconfig.dashboard*.json'
+permissions:
+  contents: read
+jobs:
+  http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsc -p tsconfig.dashboard-ui.json
+      - run: node --import tsx --test tests/dashboard-http.test.ts
+      - name: Build independent native package without a second React
+        run: node scripts/build-dashboard-plugin.mjs
+      - name: Pack unpublished plugin
+        run: mkdir -p .sandbox/dashboard-artifacts && npm pack ./packages/dashboard --ignore-scripts --pack-destination .sandbox/dashboard-artifacts
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install explicit official SDK and package manager fixture
+        run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+      - name: Inspect native connection and caller binding
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node scripts/probe-dashboard-native.mjs
+      - run: node scripts/build-dashboard-plugin.mjs
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Install packed dashboard and exercise native authenticated Web
+        env:
+          DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk
+        run: node --import tsx scripts/test-dashboard-native.mjs
+      - name: Preserve native test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-native-evidence
+          path: .sandbox/dashboard-native-evidence
+          if-no-files-found: ignore
+          retention-days: 7

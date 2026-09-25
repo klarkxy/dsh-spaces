@@ -539,3 +539,98 @@ test("a returned bootstrap failure is retained, not converted to stopped or retr
   assert.deepEqual(service.publicState(), { status: "unavailable", reasons: [failure] });
   assert.equal(boots, 1);
 });
+
+test("cold start reports startup stages in attach-prepare-launch-connect order", async () => {
+  const stages: string[] = [];
+  const missing = { missing: true as const };
+  let seenPrior: SupervisorBootstrapOptions["priorDiscovery"];
+  let seenProgress: SupervisorBootstrapOptions["progress"];
+  const service = new DesktopServiceClient({
+    home: HOME,
+    payloadRoot: PAYLOAD,
+    allowRealHome: false,
+    attach: async () => missing,
+    bootstrap: async (options) => {
+      seenPrior = options.priorDiscovery;
+      seenProgress = options.progress;
+      options.progress?.("launch");
+      return connectedBoot();
+    },
+    onStage: (stage) => stages.push(stage),
+  });
+  const state = await service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN });
+  assert.equal(state.status, "connected");
+  assert.deepEqual(stages, ["attach", "prepare", "launch", "connect"]);
+  assert.equal(seenPrior, missing);
+  assert.equal(typeof seenProgress, "function");
+});
+
+test("attaching an existing service reports attach then connect only", async () => {
+  const stages: string[] = [];
+  const service = new DesktopServiceClient({
+    home: HOME,
+    payloadRoot: PAYLOAD,
+    allowRealHome: false,
+    attach: async () => ({ endpoint: endpoint() }),
+    bootstrap: async () => {
+      throw new Error("bootstrap must not run for a healthy attach");
+    },
+    onStage: (stage) => stages.push(stage),
+  });
+  const state = await service.connect();
+  assert.equal(state.status, "connected");
+  assert.deepEqual(stages, ["attach", "connect"]);
+});
+
+test("blocked attach and verified-absence connects report no bootstrap stages", async () => {
+  const blockedStages: string[] = [];
+  const blocked = new DesktopServiceClient({
+    home: HOME,
+    payloadRoot: PAYLOAD,
+    allowRealHome: false,
+    attach: async () => ({ blocked: true, reasons: ["A different controller already holds the workbench endpoint."] }),
+    onStage: (stage) => blockedStages.push(stage),
+  });
+  const blockedState = await blocked.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN });
+  assert.equal(blockedState.status, "unavailable");
+  assert.deepEqual(blockedStages, ["attach"]);
+
+  const stoppedStages: string[] = [];
+  const stopped = new DesktopServiceClient({
+    home: HOME,
+    payloadRoot: PAYLOAD,
+    allowRealHome: false,
+    attach: async () => ({ missing: true }),
+    onStage: (stage) => stoppedStages.push(stage),
+  });
+  const stoppedState = await stopped.connect();
+  assert.equal(stoppedState.status, "stopped");
+  assert.deepEqual(stoppedStages, ["attach"]);
+});
+
+test("stages reported after dispose or a superseded generation are suppressed", async () => {
+  const stages: string[] = [];
+  const boot = deferred<SupervisorBootstrapResult>();
+  const entered = deferred<void>();
+  const service = new DesktopServiceClient({
+    home: HOME,
+    payloadRoot: PAYLOAD,
+    allowRealHome: false,
+    attach: async () => ({ missing: true }),
+    bootstrap: async (options) => {
+      entered.resolve();
+      options.progress?.("launch");
+      return boot.promise;
+    },
+    onStage: (stage) => stages.push(stage),
+  });
+  const pending = service.start({ nodeExe: NODE_EXE, cliBin: CLI_BIN });
+  await entered.promise;
+  service.dispose();
+  boot.resolve(connectedBoot());
+  const state = await pending;
+  assert.equal(state.status, "idle");
+  assert.deepEqual(stages, ["attach", "prepare", "launch"]);
+  assert.equal(stages.includes("connect"), false);
+});
+

@@ -1,4 +1,5 @@
 /** Browser-safe workbench contracts. Jobs and durable records never carry file paths, cookies or child launch tokens. Transient blueprint product responses may include receiver-local input values. */
+import type { PublicationPlanInput } from './dashboard';
 import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest, LlmSpaceObservation } from './llm-api';
 import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './spaces-control';
 import type {
@@ -155,6 +156,7 @@ export type WorkbenchCommand =
   | WorkbenchProductCommand;
 
 export type WorkbenchPlanRequest =
+  | PublicationPlanInput
   | { kind: 'space.stop' | 'space.restart'; spaceId: string }
   | { kind: 'space.delete'; spaceId: string; removeData: boolean }
   | { kind: 'plugin.install'; spaceIds: string[]; catalogId: string; version: string }
