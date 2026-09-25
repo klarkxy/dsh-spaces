@@ -190,3 +190,23 @@ test('foreign Home mutation lock and maintenance evidence refuse authorization w
     assert.equal(existsSync(join(f.home, '.spaces-dashboard', 'v1', 'policies.json')), false);
   } finally { await f.close(); }
 });
+
+
+test('parent bootstrap paths cannot leak into manager or unapproved space launches', async () => {
+  const key = 'DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE';
+  const previous = process.env[key];
+  process.env[key] = resolve('.sandbox/unowned-parent-bootstrap-must-not-be-read.json');
+  let f: Awaited<ReturnType<typeof setup>> | undefined;
+  try {
+    f = await setup();
+    const state = await f.handle.runtime.state();
+    assert.equal(state.writable, true, JSON.stringify(state));
+    assert.equal(f.paths.get(state.managerId!), undefined);
+    assert.equal((await f.command({ kind: 'space.start', spaceId: 'plain' })).status, 'succeeded');
+    assert.equal(f.paths.get('plain'), undefined);
+    assert.equal(existsSync(join(f.home, '.spaces-dashboard', 'private')), false);
+  } finally {
+    if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
+    await f?.close();
+  }
+});
