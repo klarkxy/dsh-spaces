@@ -58,7 +58,7 @@ test("DOM: in-place rail keeps native DOM/drafts and the authenticated manager o
     res.writeHead(200,{"content-type":"text/html"});res.end(html("parent"));
   });t.after(()=>parent.close());
   const browser=await chromium.launch({headless:true,...process.env.DSH_TEST_CHROMIUM?{executablePath:process.env.DSH_TEST_CHROMIUM}:{}});t.after(()=>browser.close());
-  const page=await browser.newPage({viewport:{width:1280,height:850}});const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+  const page=await browser.newPage({viewport:{width:1280,height:850},locale:"en-US"});const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
   const browserConsole: string[] = [];
   page.on("console", message => { if (message.type() === "error" && browserConsole.length < 20) browserConsole.push(message.text().slice(0, 1000).replace(/portal-bootstrap\/[A-Za-z0-9_-]+/g, "portal-bootstrap/[redacted]")); });
   try {

@@ -713,12 +713,24 @@ async function managerFrameOf(page, api) {
 
 async function waitHandoff(page, webPort) {
   let origin = null;
+  let requestedHome = false;
   await until(async () => {
+    const phase = await page.locator("[data-spaces-host-dock]").getAttribute("data-spaces-host-phase");
+    const error = await page.locator("[data-spaces-host-dock]").getAttribute("data-spaces-host-error");
+    if (phase === "failed" || error) {
+      throw new Error(`Host presentation failed: ${error}`);
+    }
     const alert = await guideAlert(page);
     if (alert) throw new Error(`initialize UI error: ${redact(alert)}`);
     const current = new URL(page.url());
     assert.equal(Number(current.port), webPort, "Spaces must not navigate away from the installed host");
     const frame = page.locator(MANAGER_FRAME);
+    // Native bundle reload can leave the original application selected after init.
+    // Exercise its normal Home navigation once; a failed lifetime above is terminal.
+    if (phase === "ready" && !requestedHome && !(await frame.isVisible())) {
+      requestedHome = true;
+      await page.locator("[data-spaces-host-dock]").getByRole("button", { name: /^(Spaces Home|Spaces 首页)$/ }).click();
+    }
     if (!(await frame.count()) || !(await frame.isVisible())) return false;
     const src = await frame.getAttribute("src");
     if (!src) return false;
@@ -1228,6 +1240,12 @@ async function main() {
   page.on("console", (message) => {
     if (message.type() === "error") report.consoleErrors.push(redact(message.text()));
   });
+  page.on("response", response => {
+    if (response.status() < 400) return;
+    const url = new URL(response.url());
+    const route = url.pathname.startsWith("/portal") ? "portal" : url.pathname.startsWith("/api/workbench/") ? "workbench" : "host";
+    report.rpcErrors.push({ route, status: response.status() });
+  });
   let web = null;
   let api;
   let supervisorOrigin = null;
@@ -1275,7 +1293,9 @@ async function main() {
     assert.ok(codingPkg.dependencies?.["@dsh-spaces/view-bridge"]);
     pass("created and started an ordinary space with view-bridge only");
     const managerView = await managerFrameOf(page, api);
-    await page.getByRole("button", { name: "编程", exact: true }).click();
+    const codingButton = page.getByRole("button", { name: "编程", exact: true });
+    await until(() => codingButton.getAttribute("data-space-status").then(status => status === "running"), "running space in host inventory", 15000);
+    await codingButton.click();
     const live = await api("state");
     assertV2State(live, "coding view");
     const codingView = await api("view", { spaceId: "coding" });
@@ -1327,6 +1347,11 @@ async function main() {
     );
   } catch (error) {
     report.initAlert = redact(await guideAlert(page).catch(() => ""));
+    report.presentation = await page.locator("[data-spaces-host-guide], iframe[data-spaces-host-surface]").evaluateAll(elements => elements.map(element => ({
+      kind: element.tagName, phase: element.getAttribute("data-spaces-host-guide"), hidden: element.hasAttribute("hidden"),
+      error: element.querySelector("[role=alert]")?.textContent ?? null,
+    }))).catch(() => []);
+    writeJson(join(out, "failure-details.json"), { presentation: report.presentation, rpcErrors: report.rpcErrors, pageErrors: report.pageErrors });
     await screenshot(page, out, "failure.png");
     throw error;
   } finally {

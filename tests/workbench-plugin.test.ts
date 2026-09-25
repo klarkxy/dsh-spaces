@@ -1232,6 +1232,78 @@ test("returnTarget mints a one-time /bootstrap path and cookie exchange 303s to 
   }
 });
 
+test("portal entry waits for the already-running startup before minting a one-use ticket", async () => {
+  const home = tempDir("dsh-wb-portal-starting-");
+  writeProfile(home, "notes");
+  const bearer = "P".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const handle = leaseWeb(home, fixture.origin);
+  epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+  writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE),
+    v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+  let reads = 0, minted = 0;
+  try {
+    const runtime = new WorkbenchHostRuntime({
+      ...identityInput(home, "notes"), supervisorTimeoutMs: 5000,
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/api/workbench/state") {
+          const state = v2State(epochRef.value);
+          if (++reads < 4) state.spaces[0].status = "starting";
+          return new Response(JSON.stringify({ ok: true, value: state }), { status: 200 });
+        }
+        if (path === "/internal/portal") {
+          assert.ok(reads >= 4, "do not consume an entry while the manager is starting");
+          minted++;
+          return new Response(JSON.stringify({ path: "/portal-bootstrap/" + "t".repeat(32) }), { status: 200 });
+        }
+        throw new Error("unexpected startup mutation: " + path);
+      },
+    });
+    const target = await runtime.portalTarget({ parentOrigin: "http://127.0.0.1:3090", channel: "ab".repeat(16) });
+    assert.equal(target.available, true);
+    assert.equal(minted, 1);
+  } finally { await fixture.close(); }
+});
+
+for (const failure of ["transport", "unavailable", "epoch", "crashed"] as const) {
+  test(`portal startup observation stops after ${failure} failure without mint or replay`, async () => {
+    const home = tempDir("dsh-wb-portal-failed-");
+    writeProfile(home, "notes");
+    const bearer = "Q".repeat(32), epochRef = { value: HEX64_A };
+    const fixture = await startFixture({ bearer, epochRef });
+    const handle = leaseWeb(home, fixture.origin);
+    epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+    writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+    let observed = 0, minted = 0;
+    try {
+      const runtime = new WorkbenchHostRuntime({
+        ...identityInput(home, "notes"), supervisorTimeoutMs: 5000,
+        fetch: async (input, init) => {
+          if (String(input).includes("/internal/portal")) minted++;
+          return fetch(input, init);
+        },
+        connect: () => ({ state: async () => {
+          observed++;
+          if (failure === "transport") throw new Error("fixture disconnected");
+          const state = v2State(epochRef.value);
+          return { ...state, reasons: ["fixture launch failed"],
+            availability: failure === "unavailable" ? "unavailable" : state.availability,
+            serviceEpoch: failure === "epoch" ? HEX64_B : state.serviceEpoch,
+            spaces: state.spaces.map(row => ({ ...row, status: failure === "crashed" ? "crashed" : row.status })),
+          };
+        } }) as never,
+      });
+      const result = await runtime.portalTarget({ parentOrigin: "http://127.0.0.1:3090", channel: "ab".repeat(16) });
+      assert.equal(result.available, false);
+      assert.equal(observed, 1);
+      assert.equal(minted, 0);
+      if (failure !== "transport") assert.deepEqual(result.reasons, ["fixture launch failed"]);
+    } finally { await fixture.close(); }
+  });
+}
+
 test("snapshotRoot inside replaced Home entries is rejected", () => {
   const home = tempDir("dsh-wb-snap-");
   mkdirSync(join(home, "profiles"), { recursive: true });

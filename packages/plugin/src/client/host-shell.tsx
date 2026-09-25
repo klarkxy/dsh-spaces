@@ -54,7 +54,7 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
     return () => { window.removeEventListener("message", listen); controller.stop(); };
   }, [controller, layoutError]);
   const spaces = ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== ui.role?.profileId) ?? [];
-  return <div ref={anchor} className="dsh-host-dock" data-spaces-host-dock="true">
+  return <div ref={anchor} className="dsh-host-dock" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined}>
     <nav className="dsh-host-rail" aria-label={t.title}>
       <button type="button" title={t.current} aria-label={t.current} aria-current={ui.visible === "current" ? "true" : undefined} onClick={controller.showCurrent}>DSH</button>
       <button type="button" title={t.home} aria-label={t.home} aria-current={ui.visible === "portal" && ui.selected === null ? "true" : undefined} onClick={() => controller.select(null)}>⌂</button>
