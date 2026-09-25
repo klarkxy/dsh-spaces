@@ -53,4 +53,6 @@ HTTP 仅暴露 `POST /api/dashboard/v1/query` 和 `POST /api/dashboard/v1/comman
 
 现有 Supervisor 的认证、发布授权计划与空间生命周期已接线，见 [Supervisor 施工记录](../../docs/dashboard/supervisor-implementation.md)。授权走现有 preview/plan.execute；正常启动只向已安装且已获准的空间签发独有交接文件，停止和退出时立即撤销，不自动补装或重启空间。当前 Home 私有文件只支持已验证的 POSIX 权限模式，Windows ACL 尚未实现并明确拒绝。
 
-默认预装、组件清单过渡、Home 默认页面、授权界面和 Electron 产品验收仍未完成。独立包安装或双 Host 测试通过，不代表整个首页方案已经交付。
+共享工作台已默认显示 Home 看板，并提供发布授权页面，见 [首页与授权界面记录](../../docs/dashboard/workbench-implementation.md)。这属于 Spaces 管理器的组合界面，独立 dashboard 插件仍是当前空间的侧栏面板，不接管其它宿主的默认首页。聊天保留为显式加载且可保持草稿的独立视图。管理界面跨端口访问 Supervisor 仅允许当前受拥有的管理 Host 精确 Origin，仍使用 Supervisor 登录 Cookie，未向浏览器提供 bearer。
+
+默认预装、组件清单过渡、Windows ACL、完整双语和 Electron 产品验收仍未完成。当前分支页面通过不等于已发布或用户已安装版本已更新。
