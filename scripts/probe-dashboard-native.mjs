@@ -1,24 +1,26 @@
-/** Inspect the explicitly installed SDK fixture. No user Home or credentials are read. */
+/** Inspect only source files in the explicitly installed SDK fixture. */
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const root = process.env.DSH_DASHBOARD_SDK_ROOT;
 if (!root) throw new Error('An explicit SDK fixture is required');
 const require = createRequire(join(resolve(root), 'package.json'));
-for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-client-connection', '@deepseek-ai/dsh-cmdline', '@deepseek-ai/dsh-storage-domain', '@deepseek-ai/dsh-client-modules']) {
+for (const [name, files] of [
+  ['@deepseek-ai/cordis', ['src/context.ts', 'src/scope.ts']],
+  ['@deepseek-ai/dsh-client-connection', ['src/rpc.ts', 'src/rpc-host.ts']],
+  ['@deepseek-ai/dsh-cmdline', ['src/index.ts']],
+  ['@deepseek-ai/dsh-storage-domain', []],
+  ['@deepseek-ai/dsh-client-modules', ['package.json']],
+]) {
   const entry = require.resolve(name);
   let directory = dirname(entry);
   while (!existsSync(join(directory, 'package.json'))) directory = dirname(directory);
   const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
   if (pkg.name !== name) throw new Error('Wrong SDK identity');
-  console.log('PACKAGE', name, pkg.version);
-  const files = readdirSync(dirname(entry)).filter(file => /(?:rpc|index|context|scope|service|cmdline).*\.d\.ts$/.test(file));
-  let budget = 20000;
+  console.log('PACKAGE', name, pkg.version, JSON.stringify(pkg.exports));
   for (const file of files) {
-    const text = readFileSync(join(dirname(entry), file), 'utf8').slice(0, budget);
-    console.log('DECLARATION', name, file, text); budget -= text.length;
-    if (budget <= 0) break;
+    if (existsSync(join(directory, file))) console.log('SOURCE', name, file, readFileSync(join(directory, file), 'utf8').slice(0, 22000));
   }
 }
 const { Context, Service } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')).href);
@@ -32,5 +34,5 @@ class BoundProbe extends Service {
   }
 }
 await ctx.plugin(BoundProbe);
-await ctx.plugin({ name: 'dashboard-probe-consumer', apply(plugin) { plugin.boundProbe.inspect(); } });
+await ctx.plugin({ name: 'dashboard-probe-consumer', inject: ['boundProbe'], apply(plugin) { plugin.boundProbe.inspect(); } });
 console.log('Native seam inspection only, not installed-plugin acceptance.');
