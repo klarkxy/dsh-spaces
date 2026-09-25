@@ -110,7 +110,9 @@ export class SupervisorDashboard {
   /** Return only the owning launch's file path, never its bearer or another space's environment. */
   environment(spaceId: string, generation: number): NodeJS.ProcessEnv {
     const launch = this.launches.get(spaceId);
-    if (!launch) return {};
+    // toolchainEnv merges process.env later. An own undefined property must
+    // shadow the parent handoff; deleting the property here would re-inherit it.
+    if (!launch) return { [DASHBOARD_LAUNCH_ENV]: undefined };
     this.ports.assertSource(spaceId, generation);
     if (launch.binding.generation !== generation || !launch.file) throw new DashboardFault('dashboard/stale-run');
     return { [DASHBOARD_LAUNCH_ENV]: launch.file.path };
