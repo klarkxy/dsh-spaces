@@ -22,6 +22,10 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npx --no-install tsc -p tsconfig.dashboard-ui.json
       - run: node --import tsx --test tests/dashboard-http.test.ts
+      - name: Build independent native package without a second React
+        run: node scripts/build-dashboard-plugin.mjs
+      - name: Pack unpublished plugin
+        run: mkdir -p .sandbox/dashboard-artifacts && npm pack ./packages/dashboard --ignore-scripts --pack-destination .sandbox/dashboard-artifacts
   native:
     runs-on: ubuntu-latest
     timeout-minutes: 15
