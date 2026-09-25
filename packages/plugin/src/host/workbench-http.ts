@@ -1,3 +1,4 @@
+import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/shared/space-host";
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../../src/shared/space-icon";
@@ -351,5 +352,21 @@ export async function mintSupervisorHandoff(
   if (typeof url !== "string") throw publicError("workbench/unavailable", "The workbench response was not a completed result.");
   const path = parseSupervisorHandoffPath(url, origin);
   if (!path) throw publicError("workbench/unavailable", "The supervisor handoff path was not accepted.");
+  return path;
+}
+
+/** Issue a single-use, audience-bound iframe entry through the Node-only management connection. */
+export async function mintSupervisorPortal(doFetch: WorkbenchHttpFetch, endpoint: SupervisorEndpoint, audience: SpaceHostAudience): Promise<string> {
+  const valid = parseSpaceHostAudience(audience);
+  if (!valid) throw publicError("workbench/unsupported", "This host needs a compatible presentation adapter.");
+  const origin = originOf(endpoint.origin);
+  const response = await doFetch(`${origin}/internal/portal`, {
+    method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${endpoint.bearer}`, origin },
+    body: JSON.stringify(valid), redirect: "error", signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw publicError("workbench/unavailable");
+  const result: unknown = JSON.parse(await readLimitedText(response, 1024));
+  const path = result && typeof result === "object" ? (result as { path?: unknown }).path : undefined;
+  if (typeof path !== "string" || !/^\/portal-bootstrap\/[A-Za-z0-9_-]{32}$/.test(path)) throw publicError("workbench/unavailable");
   return path;
 }

@@ -152,6 +152,7 @@ export function createWorkbenchGuideRemote(connection: WorkbenchConnection): Wor
     role: () => callRemote<WorkbenchGuideRole>(connection, "workbenchGuide/role", {}),
     bootstrap: () => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/bootstrap", {}),
     returnTarget: () => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/returnTarget", {}),
+    portalTarget: audience => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/portalTarget", { audience }),
     initialize: () => callRemote<WorkbenchInitializeResult>(connection, "workbenchGuide/initialize", {}),
   };
 }

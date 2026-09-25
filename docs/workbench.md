@@ -1,5 +1,7 @@
 # DSH Spaces workbench
 
+**Presentation update:** [Host embedding](host/embedding.md) supersedes the old ordinary-host redirect restriction. Compatible top-level hosts now keep their application and mount an in-place rail; manager-only management RPC and embedded view-bridge ownership remain unchanged. The shipped iframe transport is same-site HTTP loopback only.
+
 > **This branch is still under construction and acceptance.** It is not a release.
 
 Fault policy: [let it crash](let-it-crash.md). Current protocol contract: [tasks/merge-contract-v2.md](../tasks/merge-contract-v2.md) and [tasks/workbench-contract.md](../tasks/workbench-contract.md). Historical recovery text: [tasks/history-recovery.md](../tasks/history-recovery.md) — not the current gate.
