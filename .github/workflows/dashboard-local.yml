@@ -6,6 +6,7 @@ on:
       - 'src/shared/dashboard.ts'
       - 'packages/dashboard/**'
       - 'tests/dashboard-*.test.*'
+      - 'tests/fixtures/dashboard-browser.tsx'
       - 'scripts/probe-dashboard-sdk.mjs'
       - 'scripts/test-dashboard-*.mjs'
       - 'tsconfig.dashboard*.json'
@@ -30,7 +31,19 @@ jobs:
       - name: Typecheck local backend and shared view
         run: npx --no-install tsc -p tsconfig.dashboard-ui.json
       - name: Local backend and shared renderer behavior
-        run: node --import tsx --test tests/dashboard-local.test.ts tests/dashboard-view.test.tsx
+        run: node --import tsx --test tests/dashboard-local.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-view.test.tsx
+      - name: Install Chromium for the shared view fixture
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Chromium shared-view interaction (not native DSH installation)
+        run: node scripts/test-dashboard-browser.mjs
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-browser-evidence
+          path: .sandbox/dashboard-evidence/*.png
+          if-no-files-found: ignore
+          retention-days: 7
   sdk:
     runs-on: ubuntu-latest
     timeout-minutes: 15

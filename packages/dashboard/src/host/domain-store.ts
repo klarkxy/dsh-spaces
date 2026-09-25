@@ -4,7 +4,9 @@ import { DashboardFault } from '../../../../src/core/domain/dashboard/errors.js'
 import { parseLocalDashboardDocument, type LocalDashboardDocument, type LocalDashboardStore } from '../../../../src/core/domain/dashboard/local-backend.js';
 import { copyJson } from '../../../../src/core/domain/dashboard/validation.js';
 
-export const DASHBOARD_DOMAIN_NAME = 'dsh-dashboard-local';
+// Official storage unit names accept lowercase letters, digits and underscores.
+// This is a private storage identifier, not the package or wire protocol name.
+export const DASHBOARD_DOMAIN_NAME = 'dsh_dashboard_local';
 
 /** The owning Host must already hold its profile's single-writer rights. */
 export function dashboardDomainSpec() {

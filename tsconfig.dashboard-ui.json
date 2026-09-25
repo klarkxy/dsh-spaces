@@ -12,5 +12,5 @@
     "lib": ["ES2022", "DOM"],
     "types": ["node", "react", "react-dom"]
   },
-  "include": ["src/shared/dashboard.ts", "src/core/domain/dashboard/**/*.ts", "packages/dashboard/src/**/*.ts", "packages/dashboard/src/**/*.tsx", "tests/dashboard-local.test.ts", "tests/dashboard-view.test.tsx"]
+  "include": ["src/shared/dashboard.ts", "src/core/domain/dashboard/**/*.ts", "packages/dashboard/src/**/*.ts", "packages/dashboard/src/**/*.tsx", "tests/dashboard-*.test.ts", "tests/dashboard-view.test.tsx", "tests/fixtures/dashboard-browser.tsx"]
 }
