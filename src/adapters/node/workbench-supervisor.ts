@@ -13,7 +13,9 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Server } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { SupervisorDashboard, DASHBOARD_LAUNCH_ENV } from "./dashboard/supervisor";
+import { parsePublicationPlan } from "../../core/domain/dashboard/validation";
 import { atomicWrite } from "./atomic";
 import { CooperativeChildren } from "./cooperative-children";
 import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
@@ -178,6 +180,7 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.restart",
   "space.delete",
   "service.shutdown",
+  "dashboard.publication.set",
 ]);
 const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume"]);
 const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore"]);
@@ -342,6 +345,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private spaces: NodeSpacesControl | undefined;
   private maintenance: WorkbenchMaintenance | null = null;
   private products: WorkbenchProductService | null = null;
+  private dashboard: SupervisorDashboard | null = null;
   private diagnostics: DiagnosticsService | undefined;
   private homeSettings: WorkbenchHomeSettings | undefined;
   private cli: BoundCli | null = null;
@@ -449,6 +453,64 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.bootstrap.set(randomBytes(24).toString("base64url"), this.now().getTime() + 600_000);
   }
 
+  async handleDashboardRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    if (!req.url?.startsWith("/api/dashboard/") && !req.url?.startsWith("/internal/dashboard/")) return false;
+    if (this.dashboard) return this.dashboard.handle(req, res);
+    const code = process.platform === "win32" ? "dashboard/unsupported-operation" : "dashboard/unavailable";
+    res.writeHead(process.platform === "win32" ? 501 : 503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ protocolVersion: 1, error: { code, message: code } }));
+    return true;
+  }
+
+  private assertDashboardOwner(): void {
+    const current = this.controller.inspect();
+    const expected = this.handle?.owner;
+    if (!expected || this.closed || this.transferredOwner || !current.held || !("owner" in current) ||
+      current.handoff || current.liveness !== "alive" || current.owner.nonce !== expected.nonce ||
+      current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt) {
+      throw new WorkbenchPublicError("workbench/read-only", "The current Home owner is required.");
+    }
+  }
+
+  private dashboardManagementAllowed(): boolean {
+    return Boolean(this.handle) && !this.closed && !this.sealing && !this.blocked &&
+      !this.maintenanceFlag && !this.maintenanceBlocked && !this.hasMaintenanceEvidence();
+  }
+
+  private requireDashboard(): SupervisorDashboard {
+    this.assertDashboardOwner();
+    if (!this.dashboard) throw new WorkbenchPublicError("workbench/unsupported", "Home dashboard is not supported on this platform.");
+    if (!this.dashboardManagementAllowed()) throw new WorkbenchPublicError("workbench/maintenance");
+    return this.dashboard;
+  }
+
+  private initDashboard(): void {
+    if (process.platform === "win32") return; // no POSIX chmod substitute for Windows ACL
+    this.dashboard = new SupervisorDashboard({
+      home: this.home, epoch: this.requireServiceEpoch(), origin: () => this.origin, now: this.now,
+      managerOrigin: () => this.managerOrigin(),
+      spaces: () => this.listSpaces(), assertOwner: () => this.assertDashboardOwner(),
+      canManage: () => this.dashboardManagementAllowed() && !this.lock.inspect().held, cookieName: () => this.cookieName(),
+      sessionEquals: value => this.sessionEquals(value),
+      assertSource: (id, generation) => {
+        this.assertDashboardOwner();
+        const space = this.listSpaces().find(s => s.id === id && !s.isHost && s.managed);
+        if (!space || this.unmanaged.has(id) || this.generations.get(id) !== generation) {
+          throw new WorkbenchPublicError("workbench/conflict", "The source generation is no longer owned.");
+        }
+      },
+    });
+  }
+
+  private retireDashboardRun(id: string, generation?: number): Error | undefined {
+    try { this.dashboard?.retire(id, generation); }
+    catch {
+      const message = "Dashboard publishing was revoked but private handoff cleanup failed.";
+      if (!this.reasons.includes(message)) this.reasons.push(message);
+      return new WorkbenchPublicError("workbench/failed", message);
+    }
+  }
+
   bootstrapUrl(): string {
     const token = [...this.bootstrap.keys()][0];
     if (!token) throw new Error("bootstrap token was already consumed");
@@ -521,6 +583,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       if (this.jobs) await this.jobs.whenIdle();
       await this.stopOwnedAll();
+      await this.dashboard?.close();
     } catch (error) {
       this.maintenanceBlocked = true;
       this.blocked = true;
@@ -882,6 +945,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw new WorkbenchPublicError("workbench/unsupported");
     }
     const parsed = parsePlanRequest(request);
+    if (parsed.kind === "dashboard.publication.set") {
+      return this.lock.run("dashboard.publication.preview", async () => {
+        const dashboard = this.requireDashboard();
+        this.assertLiveContext(parsedContext);
+        this.protectSpecial(this.requireManaged(parsed.spaceId), { allowManager: false });
+        if (this.unmanaged.has(parsed.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
+        await dashboard.validatePreview(parsed);
+        this.assertLiveContext(parsedContext);
+        return this.previewLocal(parsed);
+      });
+    }
     if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) return this.previewLocal(parsed);
     if (!this.maintenance) throw new WorkbenchPublicError("workbench/maintenance");
     return this.maintenance.preview(parsed);
@@ -921,6 +995,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
     this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
     this.processes = this.createProcessManager();
+    this.initDashboard();
     this.bindProductService();
     this.reconcileInstanceRecords();
     if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size) {
@@ -1160,12 +1235,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ...injected,
       spawn: (args, options) => {
         const profile = args[args.indexOf("--profile") + 1] ?? "";
-        const env = {
+        const env: NodeJS.ProcessEnv = {
           ...(options.env as NodeJS.ProcessEnv | undefined),
           DSH_HOME: this.home,
           ...this.childViewEnv(profile),
           ...writeSpaceLlmLaunchSnapshot(this.home, profile),
         };
+        delete env[DASHBOARD_LAUNCH_ENV]; // never inherit another Host's private handoff
+        Object.assign(env, this.dashboard?.environment(profile, this.generations.get(profile) ?? 0));
+        const dashboardGeneration = this.generations.get(profile) ?? 0;
         const spawnFn = injected.spawn ?? children.spawn;
         const port = Number(args[args.indexOf("--port") + 1]);
         mkdirSync(this.instancesDir(), { recursive: true });
@@ -1185,11 +1263,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           child.once("exit", () => {
             const recorded = this.spawned.get(profile);
             if (recorded?.pid === child.pid) {
+              this.retireDashboardRun(profile, dashboardGeneration);
               this.spawned.delete(profile);
               this.removeInstanceRecord(profile);
             }
           });
-        } else child.once("error", () => this.removeInstanceRecord(profile));
+        } else child.once("error", () => {
+          this.retireDashboardRun(profile, dashboardGeneration);
+          this.removeInstanceRecord(profile);
+        });
         return child;
       },
       ensureCli: injected.ensureCli ?? (async () => this.cli?.bin ?? this.options.bin),
@@ -1567,7 +1649,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       serviceEpoch: epoch,
       issued: false,
     });
-    await this.startOwned(id);
+    try {
+      if (id !== this.managerId && this.dashboard) {
+        const pkg = JSON.parse(readFileSync(join(this.home, "profiles", id, "package.json"), "utf8"));
+        const installed = typeof pkg.dependencies?.["@dsh-spaces/dashboard"] === "string" &&
+          Array.isArray(pkg.dsh?.profile?.bundles) && pkg.dsh.profile.bundles.includes("@dsh-spaces/dashboard");
+        await this.dashboard.prepare(id, gen, installed);
+      }
+      await this.startOwned(id);
+    } catch (error) {
+      this.retireDashboardRun(id, gen);
+      throw error;
+    }
     if (this.maintenanceBlocked) throw new WorkbenchPublicError("workbench/unavailable");
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/failed");
@@ -1635,6 +1728,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async executeLocal(stored: StoredPlan, ctx: WorkbenchJobContext): Promise<void> {
     const request = stored.request;
     switch (request.kind) {
+      case "dashboard.publication.set": {
+        ctx.phase("dashboard-publication");
+        ctx.cancellable(false);
+        await this.lock.run("dashboard.publication.set", async () => {
+          const dashboard = this.requireDashboard();
+          const assertPlan = () => {
+            this.requireDashboard();
+            this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
+            if (this.fingerprint(request) !== stored.fingerprint) throw new WorkbenchPublicError("workbench/conflict");
+            this.protectSpecial(this.requireManaged(request.spaceId), { allowManager: false });
+            if (this.unmanaged.has(request.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
+          };
+          await dashboard.apply(request, assertPlan);
+        });
+        return;
+      }
       case "space.stop": {
         ctx.phase("stop");
         const id = this.requireManaged(request.spaceId);
@@ -1653,6 +1762,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const id = this.requireManaged(request.spaceId);
         this.protectSpecial(id, { allowManager: false });
         await this.lock.run("space.delete", async () => {
+          await this.dashboard?.revokeSpace(id, () => {
+            this.requireDashboard();
+            this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
+          });
           await this.stopOwned(id);
           const profileDir = join(this.home, "profiles", id);
           const profileStat = lstatSync(profileDir);
@@ -1705,6 +1818,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!kind) return;
     this.relinquishKind = null;
     this.relinquishJobId = null;
+    await this.dashboard?.close();
     this.dropWritable();
     if (kind === "service.shutdown") {
       this.sealing = true;
@@ -1868,6 +1982,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw error;
     }
 
+    await this.dashboard?.close();
     let token;
     try {
       token = await this.controller.transferToLauncher({
@@ -2052,6 +2167,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.spaces = undefined;
     this.maintenance = null;
     this.products = null;
+    this.dashboard = null;
     this.packageUpgrade = undefined;
   }
 
@@ -2073,7 +2189,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       runningSpaceIds: request.kind === "service.shutdown"
         ? this.ownedSpaceIds().filter((name) => this.statusOf(name) === "running")
         : running,
-      changes: request.kind === "space.delete" ? [
+      changes: request.kind === "dashboard.publication.set" ? [
+        `Publish provider ${request.providerId} from ${request.spaceId} to this Home only.`,
+        request.selection === null ? "Revoke publication and hide the cached projection immediately." :
+          request.selection.kind === "all" ? "Allow all instances of this provider on the next normal start." :
+            `Allow ${request.selection.instanceIds.length} selected instance(s) on the next normal start.`,
+        "No plugin installation, process restart or business task is performed by this plan.",
+      ] : request.kind === "space.delete" ? [
         "Remove this space's profile and installed plugins.",
         request.removeData ? "Delete this space's isolated sessions and storage." : "Keep this space's isolated sessions and storage on disk.",
       ] : [request.kind],
@@ -2091,7 +2213,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private fingerprint(request: WorkbenchPlanRequest): string {
     const spaces =
       "spaceId" in request
-        ? [{ id: request.spaceId, status: this.statusOf(request.spaceId) }]
+        ? [{ id: request.spaceId, status: this.statusOf(request.spaceId), generation: this.generations.get(request.spaceId) ?? 0 }]
         : this.ownedSpaceIds().map((id) => ({ id, status: this.statusOf(id) }));
     return JSON.stringify({ request, spaces, owner: Boolean(this.handle) });
   }
@@ -2134,11 +2256,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async stopOwned(spaceId: string): Promise<void> {
     if (!this.processes) return;
     if (this.unmanaged.has(spaceId)) return;
+    const dashboardError = this.retireDashboardRun(spaceId);
     await this.processes.stop(spaceId);
     const gen = (this.generations.get(spaceId) ?? 0) + 1;
     this.generations.set(spaceId, gen);
     this.views.delete(spaceId);
     this.removeInstanceRecord(spaceId);
+    if (dashboardError) throw dashboardError;
   }
 
   private async stopOwnedAll(): Promise<void> {
@@ -3239,6 +3363,8 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
   const kind = body.kind;
   if (typeof kind !== "string") throw new WorkbenchPublicError("workbench/invalid-input");
   switch (kind) {
+    case "dashboard.publication.set":
+      return parsePublicationPlan(input);
     case "space.stop":
     case "space.restart":
       expectKeys(body, ["kind", "spaceId"]);
