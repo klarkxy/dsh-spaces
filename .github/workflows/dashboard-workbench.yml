@@ -1,0 +1,29 @@
+name: Dashboard workbench
+on:
+  pull_request:
+    paths:
+      - 'packages/dashboard/**'
+      - 'packages/plugin/src/**'
+      - 'src/**/dashboard/**'
+      - 'src/adapters/node/workbench*'
+      - 'src/shared/workbench*'
+      - 'scripts/*dashboard*'
+      - 'tests/*dashboard*'
+      - '.github/workflows/dashboard-workbench.yml'
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Export reviewed source only for isolated implementation
+        run: git archive --format=tar HEAD > source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-workbench-source
+          path: source.tar
+          retention-days: 1
