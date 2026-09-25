@@ -383,7 +383,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private packageUpgrade: WorkbenchPackageUpgrade | undefined;
   readonly llmHost: GlobalLlmHost;
 
-  constructor(options: WorkbenchSupervisorOptions) {
+  constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
     this.options = { ...options };
     this.home = canonicalHome(options.home, { allowRealHome: options.allowRealHome });
     if (options.allowRealHome) authorizeProductHome(this.home);
@@ -401,7 +401,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.pidAlive = options.pidAlive ?? defaultPidAlive;
     if (options.componentPayloadRoot) {
-      this.selectedPayload = validateComponentPayload(options.componentPayloadRoot);
+      // Reuse the launch validation when provided; it must belong to this root.
+      this.selectedPayload = selectedPayload ?? validateComponentPayload(options.componentPayloadRoot);
     }
     this.llmHost = createHomeLlmHost(this.home, {
       listSpaceIds: async () => this.homeProfileNames(),
@@ -738,7 +739,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       (request.method === "mapImported" ||
         (request.method === "updateSpacePolicy" && request.shared?.mode && request.shared.mode !== "none"))
     ) {
-      await this.installLlmBridgeIfExplicit(request.spaceId);
+      await this.ensureLlmBridge(request.spaceId);
     }
   }
 
@@ -1019,6 +1020,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.refreshAvailability();
       return;
     }
+    let managerDump: string | undefined;
     if (this.managerInstall === "missing" || bootstrapPending) {
       if (!this.cli) {
         this.blocked = true;
@@ -1027,7 +1029,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return;
       }
       try {
-        await this.observeChildWork(() => this.bootstrapManager(identity.profileId));
+        managerDump = await this.observeChildWork(() => this.bootstrapManager(identity.profileId));
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
         this.blocked = true;
@@ -1038,7 +1040,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         })}\n`);
       }
     }
-    const loader = this.managerId ? await this.syncLoader(this.managerId) : undefined;
+    const loader = this.managerId
+      ? await this.syncLoader(this.managerId, this.managerId === identity.profileId ? managerDump : undefined)
+      : undefined;
     this.spaces = this.createSpacesControlWithLoader(loader);
     try {
       this.maintenance = this.createMaintenance();
@@ -1145,8 +1149,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
-  private async bootstrapManager(profileId: string, lockHeld = false): Promise<void> {
-    const initialize = async () => this.observeChildWork(async () => {
+  /**
+   * Bootstraps the reserved manager profile and returns the config dump read
+   * during this run, so an immediate loader sync for the same profile can
+   * reuse it instead of spawning a second `--dump-config`. Returns undefined
+   * when no dump was read (already installed, or the CLI produced none);
+   * callers must treat undefined as "read fresh".
+   */
+  private async bootstrapManager(profileId: string, lockHeld = false): Promise<string | undefined> {
+    const initialize = async () => this.observeChildWork(async (): Promise<string | undefined> => {
       const existing = inspectManagerInstall(this.home, profileId);
       const pending = this.ownsBootstrap(profileId);
       if ((existing === "ordinary" && !pending) || existing === "damaged") {
@@ -1155,7 +1166,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
         );
       }
-      if (existing === "manager" && !pending) return;
+      if (existing === "manager" && !pending) return undefined;
       const marker = join(this.controlDir, "manager-bootstrap.json");
       if (!pending) atomicWrite(marker, `${JSON.stringify({ version: 1, profileId })}\n`);
       // Clone the shipped preset directly into the dedicated manager. Reading
@@ -1192,9 +1203,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
       this.registry.updateMeta(profileId, { displayName: "Spaces", order: 0 });
       unlinkSync(marker);
+      return dump;
     });
-    if (lockHeld) await initialize();
-    else await this.lock.run("bootstrap-manager", initialize);
+    if (lockHeld) return await initialize();
+    return await this.lock.run("bootstrap-manager", initialize);
   }
 
   private ownsBootstrap(profileId: string): boolean {
@@ -1422,8 +1434,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     };
   }
 
-  private async syncLoader(profileId: string): Promise<SpacesLoaderView | undefined> {
-    const dump = await this.readDump(profileId);
+  private async syncLoader(profileId: string, bootstrapDump?: string): Promise<SpacesLoaderView | undefined> {
+    // `bootstrapDump` may only be the dump bootstrapManager just read for this
+    // same profile in this same run; otherwise (other profile, no bootstrap
+    // dump, later re-sync) the dump is read fresh.
+    const dump = bootstrapDump ?? await this.readDump(profileId);
     if (!dump) return undefined;
     try {
       const session = extractRoot(dump, SESSION_ROW_ID);
@@ -1488,15 +1503,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         dshVersion: this.cli.version, boundAt: this.now().toISOString() }, null, 2)}\n`);
     }
     setSelectedDshResolver(() => this.cli?.bin);
+    let managerDump: string | undefined;
     if (this.managerId) {
       this.managerInstall = inspectManagerInstall(this.home, this.managerId);
       if (this.managerInstall === "missing") {
-        await this.bootstrapManager(this.managerId, true);
+        managerDump = await this.bootstrapManager(this.managerId, true);
         this.managerInstall = inspectManagerInstall(this.home, this.managerId);
       }
       if (this.managerInstall !== "manager") throw new WorkbenchPublicError("workbench/unavailable");
     }
-    const loader = this.managerId ? await this.syncLoader(this.managerId) : undefined;
+    const loader = this.managerId ? await this.syncLoader(this.managerId, managerDump) : undefined;
     this.spaces = this.createSpacesControlWithLoader(loader);
     if (this.holdManagerStart) return;
     if (this.managerId && this.managerInstall === "manager" && !this.unmanaged.has(this.managerId)) {
@@ -1571,15 +1587,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         await this.ensureViewBridge(name);
       }
     });
-    if (input.useSharedLlm === true) {
+    // Spaces inherit shared connections by default; only an explicit choice is persisted.
+    // Blueprint/template callers omit the flag so their own policy write keeps revision 0.
+    if (input.useSharedLlm !== undefined) {
       ctx.phase("llm-policy");
       await this.llmHost.dispatch({
         method: "updateSpacePolicy",
         spaceId: name,
-        shared: { mode: "all" },
+        shared: input.useSharedLlm ? { mode: "all" } : { mode: "none" },
         expectedRevision: 0,
       });
-      await this.installLlmBridgeIfExplicit(name);
+      if (input.useSharedLlm) await this.ensureLlmBridge(name);
     }
     return { spaceId: name };
   }
@@ -1618,6 +1636,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       return { spaceId: id, view: await this.view(id) };
     }
     if (id !== this.managerId) await this.ensureViewBridge(id);
+    await this.ensureLlmBridge(id);
     const gen = (this.generations.get(id) ?? 0) + 1;
     this.generations.set(id, gen);
     const channel = randomBytes(8).toString("hex");
@@ -2761,11 +2780,28 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
   }
 
-  private async installLlmBridgeIfExplicit(profileId: string): Promise<void> {
+  private async ensureLlmBridge(profileId: string): Promise<void> {
     if (!this.options.llmBridgeArtifact) return;
     if (profileId === "web" || profileId === this.managerId) return;
     if (profileHasLlmBridge(this.home, profileId)) return;
     await this.installArtifact(profileId, this.options.llmBridgeArtifact, "dsh-spaces-llm-bridge");
+  }
+}
+
+/**
+ * Fail-closed v2 payload validation with the binding error shape. Launch code
+ * calls this once per start and threads the result through bind, preflight,
+ * and runtime construction, so the manifest and every declared file are read
+ * and hashed a single time; all non-hash checks still run on each call.
+ */
+export function validateSupervisorComponentPayload(payloadRootLib: string): ValidatedComponentPayload {
+  try {
+    return validateComponentPayload(payloadRootLib);
+  } catch (error) {
+    const detail = error instanceof ComponentPayloadError || error instanceof Error
+      ? error.message
+      : "Component payload is invalid.";
+    throw new WorkbenchPublicError("workbench/invalid-input", detail);
   }
 }
 
@@ -2775,21 +2811,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
  * and supervisor assets come from that group, and packed view/llm artifacts
  * must be real files already supplied by bootstrap.
  */
-export function bindSupervisorComponentPayload(options: WorkbenchSupervisorOptions): WorkbenchSupervisorOptions {
+export function bindSupervisorComponentPayload(
+  options: WorkbenchSupervisorOptions,
+  validated?: ValidatedComponentPayload,
+): WorkbenchSupervisorOptions {
   const root = options.componentPayloadRoot;
   if (root === undefined) return options;
   if (typeof root !== "string" || !root.trim()) {
     throw new WorkbenchPublicError("workbench/invalid-input", "--component-payload must be a filesystem path.");
   }
-  let selected: ValidatedComponentPayload;
-  try {
-    selected = validateComponentPayload(root);
-  } catch (error) {
-    const detail = error instanceof ComponentPayloadError || error instanceof Error
-      ? error.message
-      : "Component payload is invalid.";
-    throw new WorkbenchPublicError("workbench/invalid-input", detail);
-  }
+  // `validated` must be the validation of this same payload root; every check
+  // below still runs, only the manifest read and file hashing are reused.
+  const selected = validated ?? validateSupervisorComponentPayload(root);
   options.componentPayloadRoot = selected.payloadRootLib;
   const worker = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
   const supervisorDir = payloadRel(selected.packageRoot, "lib/supervisor");
@@ -2834,8 +2867,9 @@ export function assertHandoffTokenMatchesSelectedPayload(
   token: { artifactDigest: string },
   payloadRoot: string,
   runningEntry?: string,
+  validated?: ValidatedComponentPayload,
 ): ValidatedComponentPayload {
-  const selected = validateComponentPayload(payloadRoot);
+  const selected = validated ?? validateComponentPayload(payloadRoot);
   if (token.artifactDigest !== selected.digest) {
     throw new WorkbenchPublicError(
       "workbench/invalid-input",
@@ -2857,13 +2891,16 @@ export function assertHandoffTokenMatchesSelectedPayload(
 /**
  * Async group preflight: bind the v2 payload, require the plugin/view/llm
  * artifact tuple, and validate tar bytes against the selected manifest.
- * Call before runtime construction, HTTP, or Home writers.
+ * Call before runtime construction, HTTP, or Home writers. When `validated`
+ * is the launch validation of the same payload root, its manifest/digest
+ * conclusion is reused instead of re-reading and re-hashing the group.
  */
 export async function preflightSupervisorComponentPayload(
   options: WorkbenchSupervisorOptions,
+  validated?: ValidatedComponentPayload,
 ): Promise<WorkbenchSupervisorOptions> {
   const resolved: WorkbenchSupervisorOptions = { ...options };
-  bindSupervisorComponentPayload(resolved);
+  bindSupervisorComponentPayload(resolved, validated);
   if (resolved.componentPayloadRoot === undefined) return resolved;
   const pluginArtifact = resolved.pluginArtifact;
   const viewBridgeArtifact = resolved.viewBridgeArtifact;
@@ -2874,7 +2911,9 @@ export async function preflightSupervisorComponentPayload(
       "A component payload requires plugin, view-bridge, and llm-bridge artifacts from the same group.",
     );
   }
-  const payload = validateComponentPayload(resolved.componentPayloadRoot);
+  const payload = validated && validated.payloadRootLib === resolved.componentPayloadRoot
+    ? validated
+    : validateComponentPayload(resolved.componentPayloadRoot);
   try {
     await validateComponentPayloadArtifacts(payload, {
       pluginArtifact,
@@ -2890,9 +2929,10 @@ export async function preflightSupervisorComponentPayload(
 
 export async function createWorkbenchSupervisor(
   options: WorkbenchSupervisorOptions,
+  validated?: ValidatedComponentPayload,
 ): Promise<WorkbenchSupervisorHandle> {
-  const resolved = await preflightSupervisorComponentPayload(options);
-  const runtime = new WorkbenchSupervisorRuntime(resolved);
+  const resolved = await preflightSupervisorComponentPayload(options, validated);
+  const runtime = new WorkbenchSupervisorRuntime(resolved, validated);
   let port = resolved.port;
   if (resolved.acceptedHandle) {
     if (!Number.isInteger(port) || port! < 1 || port! > 65535) {

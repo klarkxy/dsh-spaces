@@ -543,6 +543,161 @@ test("an opener that overlaps preparation does not start again after that prepar
   assert.equal(packs, 0);
 });
 
+test("a waiting opener reports the other startup ending without a ready supervisor", async () => {
+  const home = tempDir("dsh-wb-waiter-");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-waiter-payload-"));
+  const toolsRoot = tempDir("dsh-wb-waiter-tools-");
+  let ready!: () => void;
+  let finish!: () => void;
+  const entered = new Promise<void>((resolve) => { ready = resolve; });
+  const hold = new HomeOperationLock(toolsRoot).run(coldStartLockLabel(home), async () => {
+    ready();
+    await new Promise<void>((resolve) => { finish = resolve; });
+  });
+  await entered;
+  const pending = bootstrapSupervisor({
+    home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+    allowRealHome: false, timeoutMs: 5_000, pollMs: 10,
+    pack: stubPack,
+    spawn: () => {
+      throw new Error("a waiter must never start a second supervisor");
+    },
+  });
+  finish();
+  await hold;
+  const result = await pending;
+  assert.equal(result.connected, false);
+  assert.ok(result.reasons.some((row) => /ended without a ready supervisor/i.test(row)));
+});
+
+test("bootstrap reuses a missing priorDiscovery instead of probing the entry attach again", async () => {
+  const home = tempDir("dsh-wb-prior-");
+  writeProfile(home, "web");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-prior-payload-"));
+  const toolsRoot = tempDir("dsh-wb-prior-tools-");
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  try {
+    // A healthy service exists by the time bootstrap runs; only the
+    // lock-internal verification may ping it when the entry probe is skipped.
+    const handle = leaseWeb(home, fixture.origin);
+    epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+    writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+    let pings = 0;
+    const trackFetch = async (input: string, init: RequestInit) => {
+      if (String(input).includes("/api/workbench/state")) pings += 1;
+      return fetch(input, init);
+    };
+    const result = await bootstrapSupervisor({
+      home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+      allowRealHome: false, timeoutMs: 3_000, pollMs: 20,
+      fetch: trackFetch,
+      pack: stubPack,
+      priorDiscovery: { missing: true },
+      spawn: () => {
+        throw new Error("a discovered service must not be cold-started");
+      },
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+    assert.equal(pings, 1);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("bootstrap probes the entry attach when no priorDiscovery is provided", async () => {
+  const home = tempDir("dsh-wb-noprior-");
+  writeProfile(home, "web");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-noprior-payload-"));
+  const toolsRoot = tempDir("dsh-wb-noprior-tools-");
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  try {
+    const handle = leaseWeb(home, fixture.origin);
+    epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+    writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+    let pings = 0;
+    const trackFetch = async (input: string, init: RequestInit) => {
+      if (String(input).includes("/api/workbench/state")) pings += 1;
+      return fetch(input, init);
+    };
+    const result = await bootstrapSupervisor({
+      home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+      allowRealHome: false, timeoutMs: 3_000, pollMs: 20,
+      fetch: trackFetch,
+      pack: stubPack,
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+    assert.equal(pings, 1);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("bootstrap re-probes the entry attach when priorDiscovery is not a missing verdict", async () => {
+  const home = tempDir("dsh-wb-prior-blocked-");
+  writeProfile(home, "web");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-prior-blocked-payload-"));
+  const toolsRoot = tempDir("dsh-wb-prior-blocked-tools-");
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  try {
+    const handle = leaseWeb(home, fixture.origin);
+    epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+    writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+    const result = await bootstrapSupervisor({
+      home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+      allowRealHome: false, timeoutMs: 3_000, pollMs: 20,
+      fetch: (input, init) => fetch(input, init),
+      pack: stubPack,
+      priorDiscovery: { blocked: true, reasons: ["stale claim from an earlier probe"] },
+      spawn: () => {
+        throw new Error("a discovered service must not be cold-started");
+      },
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("bootstrap reports prepare and launch stages around a real cold start", async () => {
+  const home = tempDir("dsh-wb-progress-");
+  writeProfile(home, "web");
+  const bin = writeCli(home);
+  const payloadRoot = writePayload(tempDir("dsh-wb-progress-payload-"));
+  const toolsRoot = tempDir("dsh-wb-progress-tools-");
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const stages: string[] = [];
+  try {
+    const result = await bootstrapSupervisor({
+      home, argv: [process.execPath, bin], execPath: process.execPath, payloadRoot, toolsRoot,
+      allowRealHome: false, allowColdStart: true, timeoutMs: 3_000, pollMs: 20,
+      fetch: (input, init) => fetch(input, init),
+      pack: stubPack,
+      progress: (stage) => stages.push(stage),
+      spawn: () => {
+        const handle = leaseWeb(home, fixture.origin);
+        epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+        writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+      },
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+    assert.deepEqual(stages, ["prepare", "launch"]);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("missing supervisor payload diagnoses instead of mocking a connection", async () => {
   const home = tempDir("dsh-wb-missing-sup-");
   writeProfile(home, "web");
