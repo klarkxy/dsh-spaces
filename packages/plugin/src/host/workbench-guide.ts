@@ -1,3 +1,4 @@
+import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/shared/space-host";
 import type { Context } from "@deepseek-ai/cordis";
 import { Remote, RemoteError, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import type {
@@ -50,6 +51,13 @@ export class WorkbenchGuideHost extends TypertRemoteService {
         {},
       );
     }
+  }
+
+  @Remote("portalTarget")
+  async portalTarget(audience: SpaceHostAudience): Promise<WorkbenchReturnTarget> {
+    if (!parseSpaceHostAudience(audience)) throw new RemoteError("workbench/unsupported", "This host needs a compatible presentation adapter.", {});
+    try { return await this.runtime.portalTarget(audience); }
+    catch { throw new RemoteError("workbench/unavailable", "The in-app workbench entry could not be opened.", {}); }
   }
 
   @Remote("initialize")

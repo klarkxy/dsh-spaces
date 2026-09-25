@@ -1441,6 +1441,36 @@ test("first startup clones the shipped preset into the manager without materiali
   );
 });
 
+test("manager bootstrap reads the manager dump-config once and reuses it for the loader sync", async () => {
+  const home = tempHome();
+  let dumpReads = 0;
+  const handle = await startSupervisor(home, {
+    dumpConfig: async (profile) => {
+      dumpReads += 1;
+      return dumpText(profile);
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.ok(state.managerId);
+  assert.equal(dumpReads, 1);
+});
+
+test("a later launch without bootstrap still reads dump-config fresh for the loader", async () => {
+  const home = tempHome();
+  let dumpReads = 0;
+  const countingDump = async (profile: string) => {
+    dumpReads += 1;
+    return dumpText(profile);
+  };
+  const first = await startSupervisor(home, { dumpConfig: countingDump });
+  await first.close();
+  dumpReads = 0;
+  const second = await startSupervisor(home, { dumpConfig: countingDump });
+  const state = await second.runtime.state();
+  assert.ok(state.managerId);
+  assert.equal(dumpReads, 1);
+});
+
 test("ROOT: initialization starts the real manager lifecycle before normal entry", async () => {
   const handle = await startSupervisor(tempHome());
   const state = await handle.runtime.state();

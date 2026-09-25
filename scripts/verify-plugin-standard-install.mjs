@@ -69,13 +69,13 @@ const CANONICAL_NAME = "@dsh-spaces/plugin";
 const WEB_PROFILE = "web";
 const EXACT_CLI = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;
 const HEX64 = /^[a-f0-9]{64}$/;
-const GUIDE_ROOT = "[data-dsh-spaces-guide]";
+const GUIDE_ROOT = "[data-dsh-spaces-guide]:visible";
 const GUIDE_INIT = '[data-dsh-spaces-action="initialize"]';
 const GUIDE_ENTER = '[data-dsh-spaces-action="enter"]';
-const GUIDE_ALERT = "[data-dsh-spaces-error] [role='alert']";
+const GUIDE_ALERT = "[data-dsh-spaces-error][role='alert']:visible, [data-dsh-spaces-error] [role='alert']:visible";
 const SIDEBAR_TAB = /^(工作台|Workbench)$/;
 const ONBOARDING = [/^(Continue|继续)$/, /稍后配置|set up later|configure later/i];
-const MANAGER_FRAME = "iframe#manager-frame";
+const MANAGER_FRAME = "iframe[data-spaces-host-surface]";
 const WORKBENCH_ROOT = ".dsh-workbench";
 const CONTROL_DIR = ".dsh-spaces-control";
 const JOBS_DIR = "jobs";
@@ -696,12 +696,14 @@ async function managerFrameOf(page, api) {
     throw new Error(`workbench state is not manager: ${redact(JSON.stringify(state))}`);
   }
   await page.locator(MANAGER_FRAME).waitFor({ state: "attached", timeout: 60000 });
-  const workbench = page.frameLocator(MANAGER_FRAME);
+  const portal = page.frameLocator(MANAGER_FRAME);
+  const workbench = portal.frameLocator("iframe");
   await workbench.locator(WORKBENCH_ROOT).waitFor({ state: "visible", timeout: 60000 });
-  await workbench.locator(".dsh-wb-rail").waitFor({ state: "visible", timeout: 60000 });
+  await workbench.locator(".dsh-wb-contained-tools").waitFor({ state: "visible", timeout: 60000 });
+  assert.equal(await workbench.locator(".dsh-wb-rail").count(), 0, "no nested rail");
   const view = await api("view", { spaceId: state.managerId });
   assertV2View(view, state.managerId, state.serviceEpoch, "manager view");
-  const src = await page.locator(MANAGER_FRAME).getAttribute("src");
+  const src = await portal.locator("iframe").getAttribute("src");
   const epochQuery = `epoch=${encodeURIComponent(view.serviceEpoch)}`;
   if (!src || !src.includes(epochQuery)) {
     throw new Error(`manager-frame src missing v2 epoch query: ${redact(src || "")}`);
@@ -710,16 +712,34 @@ async function managerFrameOf(page, api) {
 }
 
 async function waitHandoff(page, webPort) {
-  return until(async () => {
+  let origin = null;
+  let requestedHome = false;
+  await until(async () => {
+    const phase = await page.locator("[data-spaces-host-dock]").getAttribute("data-spaces-host-phase");
+    const error = await page.locator("[data-spaces-host-dock]").getAttribute("data-spaces-host-error");
+    if (phase === "failed" || error) {
+      throw new Error(`Host presentation failed: ${error}`);
+    }
     const alert = await guideAlert(page);
     if (alert) throw new Error(`initialize UI error: ${redact(alert)}`);
-    try {
-      const url = new URL(page.url());
-      return url.hostname === HOST && Number(url.port) !== webPort && url.protocol === "http:";
-    } catch {
-      return false;
+    const current = new URL(page.url());
+    assert.equal(Number(current.port), webPort, "Spaces must not navigate away from the installed host");
+    const frame = page.locator(MANAGER_FRAME);
+    // Native bundle reload can leave the original application selected after init.
+    // Exercise its normal Home navigation once; a failed lifetime above is terminal.
+    if (phase === "ready" && !requestedHome && !(await frame.isVisible())) {
+      requestedHome = true;
+      await page.locator("[data-spaces-host-dock]").getByRole("button", { name: /^(Spaces Home|Spaces 首页)$/ }).click();
     }
-  }, "handoff to supervisor origin", 240000);
+    if (!(await frame.count()) || !(await frame.isVisible())) return false;
+    const src = await frame.getAttribute("src");
+    if (!src) return false;
+    const url = new URL(src);
+    if (url.hostname !== HOST || url.protocol !== "http:" || !url.pathname.startsWith("/portal-bootstrap/")) return false;
+    origin = url.origin;
+    return true;
+  }, "in-place supervisor presentation", 240000);
+  return origin;
 }
 
 async function screenshot(page, out, name) {
@@ -916,7 +936,7 @@ function assertVerifierV2Contract() {
   if (!text.includes("data-dsh-spaces-action") || !text.includes("data-dsh-spaces-guide")) {
     throw new Error("verifier does not use v2 guide selectors");
   }
-  if (!text.includes("iframe#manager-frame") || !text.includes(".dsh-workbench")) {
+  if (!text.includes("iframe[data-spaces-host-surface]") || !text.includes(".dsh-workbench")) {
     throw new Error("verifier does not use v2 workbench iframe selectors");
   }
   if (!text.includes("protocolVersion")) {
@@ -1123,7 +1143,7 @@ async function preflight({ syntaxOnly = false } = {}) {
   report.cli.resolved = cli;
   report.scope =
     "static/mocks only: manifests, nested-tgz detector, pack dry-run contents, Home/path guards, v2 API/selectors. Did not boot DSH web, supervisor, or Playwright.";
-  pass("serial run contract: Playwright clicks data-dsh-spaces-action=initialize with no path args; workbench is iframe#manager-frame .dsh-workbench; service.shutdown must succeed as a public job");
+  pass("serial run contract: Playwright clicks data-dsh-spaces-action=initialize with no path args; workbench is a contained manager inside iframe[data-spaces-host-surface]; service.shutdown must succeed as a public job");
   return report;
 }
 
@@ -1220,6 +1240,12 @@ async function main() {
   page.on("console", (message) => {
     if (message.type() === "error") report.consoleErrors.push(redact(message.text()));
   });
+  page.on("response", response => {
+    if (response.status() < 400) return;
+    const url = new URL(response.url());
+    const route = url.pathname.startsWith("/portal") ? "portal" : url.pathname.startsWith("/api/workbench/") ? "workbench" : "host";
+    report.rpcErrors.push({ route, status: response.status() });
+  });
   let web = null;
   let api;
   let supervisorOrigin = null;
@@ -1245,12 +1271,11 @@ async function main() {
     }
     pass("initialization-protection baseline captured after ordinary web auth/onboarding; manager still absent");
     await clickInitialize(page);
-    await waitHandoff(page, web.port);
-    supervisorOrigin = new URL(page.url()).origin;
+    supervisorOrigin = await waitHandoff(page, web.port);
     api = workbenchApi(context, supervisorOrigin);
     await managerFrameOf(page, api);
     await screenshot(page, out, "initialized.png");
-    pass("Playwright clicked data-dsh-spaces-action=initialize; iframe#manager-frame shows .dsh-workbench");
+    pass("Playwright clicked data-dsh-spaces-action=initialize; iframe[data-spaces-host-surface] shows .dsh-workbench");
 
     const first = assertSingleManager(home, "after initialize");
     assertWebPathsProtected(home, webBefore, "after initialize");
@@ -1268,7 +1293,9 @@ async function main() {
     assert.ok(codingPkg.dependencies?.["@dsh-spaces/view-bridge"]);
     pass("created and started an ordinary space with view-bridge only");
     const managerView = await managerFrameOf(page, api);
-    await managerView.frame.getByRole("button", { name: "编程", exact: true }).click();
+    const codingButton = page.getByRole("button", { name: "编程", exact: true });
+    await until(() => codingButton.getAttribute("data-space-status").then(status => status === "running"), "running space in host inventory", 15000);
+    await codingButton.click();
     const live = await api("state");
     assertV2State(live, "coding view");
     const codingView = await api("view", { spaceId: "coding" });
@@ -1287,8 +1314,8 @@ async function main() {
     await dismissOnboarding(page);
     const again = await enterOrInitialize(page);
     assert.equal(again, "enter");
-    await waitHandoff(page, web.port);
-    await managerFrameOf(page, workbenchApi(context, new URL(page.url()).origin));
+    supervisorOrigin = await waitHandoff(page, web.port);
+    await managerFrameOf(page, workbenchApi(context, supervisorOrigin));
     const second = assertSingleManager(home, "repeat initialize");
     assert.deepEqual(second.hubs, first.hubs);
     assertWebPathsProtected(home, webBefore, "repeat enter");
@@ -1302,8 +1329,7 @@ async function main() {
     await openAuthorizedWeb(page, web.launchUrl);
     await dismissOnboarding(page);
     assert.equal(await enterOrInitialize(page), "enter");
-    await waitHandoff(page, web.port);
-    supervisorOrigin = new URL(page.url()).origin;
+    supervisorOrigin = await waitHandoff(page, web.port);
     api = workbenchApi(context, supervisorOrigin);
     await managerFrameOf(page, api);
     const third = assertSingleManager(home, "after web restart");
@@ -1321,6 +1347,11 @@ async function main() {
     );
   } catch (error) {
     report.initAlert = redact(await guideAlert(page).catch(() => ""));
+    report.presentation = await page.locator("[data-spaces-host-guide], iframe[data-spaces-host-surface]").evaluateAll(elements => elements.map(element => ({
+      kind: element.tagName, phase: element.getAttribute("data-spaces-host-guide"), hidden: element.hasAttribute("hidden"),
+      error: element.querySelector("[role=alert]")?.textContent ?? null,
+    }))).catch(() => []);
+    writeJson(join(out, "failure-details.json"), { presentation: report.presentation, rpcErrors: report.rpcErrors, pageErrors: report.pageErrors });
     await screenshot(page, out, "failure.png");
     throw error;
   } finally {

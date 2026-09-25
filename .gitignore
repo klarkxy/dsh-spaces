@@ -31,6 +31,10 @@ packages/*/*.tgz
 # TypeScript build info
 *.tsbuildinfo
 
+# Local tooling
+.playwright-mcp/
+.pnpm-store/
+
 # Dependencies
 node_modules/
 dist/
