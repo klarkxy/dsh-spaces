@@ -1,3 +1,14 @@
+# 2026-09-25 Supervisor 看板管理与生命周期接线
+
+用户授权继续施工，本批位于 PR #15（依赖 #14），运行代码 `559cd0641a92443d088f25bb0e56837bcfe4ac32`。详见 [Supervisor 施工记录](../docs/dashboard/supervisor-implementation.md)。未合并 main、发布或改动真实 Home；默认首页尚未替换。
+
+- [x] Home 看板挂入实际 WorkbenchSupervisor 的运行权、既有监听器与 operator 会话；没有新增管理服务，发布 bearer 不能代替浏览器登录。
+- [x] 发布授权接入现有 preview/plan.execute，检查 epoch/revision/generation、grant CAS、维护与单写者；授权本身不安装或启动空间。
+- [x] 正常启动只向已安装且获准空间签发独有凭据；停止、退出、失败启动及关闭时撤销；删除空间先撤销其全部发布授权。无授权子进程显式屏蔽父环境旧凭据路径。
+- [x] Node 24 专项 141 项检查通过（新增 13），严格类型和构建通过；真实 Supervisor 管理两个原生 DSH Host 的授权、发布、停止、撤销、删除与关闭链路通过。结果 JSON 已读回，业务数据为合成插件，无模型调用。
+- [ ] 剩余：授权 UI、默认首页路由、默认预装与组件清单过渡、真实业务插件/双端产品验收、Windows ACL。现有五组件清单和根依赖未变。
+- [ ] 仓库全量 CI 与升级回归另行核验；专项通过不替代此前 Windows 工作台失败的合并门槛。历史阶段记录保留，最新进度以本段和对应实现记录为准。
+
 # 2026-09-25 Home 聚合与多空间后台发布
 
 用户授权继续施工，本批位于 PR #14（依赖 #13），代码为 `d04e2437dd28b1bc12983d72a034852db544a478`。完整证据和接线义务见 [Home 施工记录](../docs/dashboard/home-implementation.md)。未合并 main、发布或更改真实 Home，默认首页未替换。
@@ -152,7 +163,7 @@
 
 产品路径已按 [docs/let-it-crash.md](../docs/let-it-crash.md) 实施。未在本机跑完的 CLI/浏览器项见 [q-coverage.md](q-coverage.md)。不推送、不发版本，除非用户另说。
 
-插件功能计划：[plugin-management/plan.md](plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](plugin-management/task-01-write-scope.md)，不作为恢复产品已交付。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
+插件功能计划：[plugin-management/plan.md](plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](plugin-management/task-01-write-scope.md)，不作为恢复模块建设前置，也不默认以后继续做恢复。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
 
 ## D：文档与任务修订（本轮直接范围）
 

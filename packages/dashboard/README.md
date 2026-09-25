@@ -51,6 +51,6 @@ HTTP 仅暴露 `POST /api/dashboard/v1/query` 和 `POST /api/dashboard/v1/comman
 
 **默认仍是本空间模式。** 已新增 Home 聚合模块及可选后台发布端，见 [Home 施工记录](../../docs/dashboard/home-implementation.md)。可信启动器显式提供 `DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE` 时，Host 才读取本次私有凭据并发送获准组件；没有该变量就不寻找全局服务，非法配置明确报错。
 
-两个原生 DSH Host 的后台发布已经过隔离验收，但现有生产 Supervisor 的授权管理和生命周期尚未挂载；不能自行填写全局 token 或把测试固定角色当作生产认证。当前 Home 私有文件只支持已验证的 POSIX 权限模式，Windows ACL 尚未实现并明确拒绝。
+现有 Supervisor 的认证、发布授权计划与空间生命周期已接线，见 [Supervisor 施工记录](../../docs/dashboard/supervisor-implementation.md)。授权走现有 preview/plan.execute；正常启动只向已安装且已获准的空间签发独有交接文件，停止和退出时立即撤销，不自动补装或重启空间。当前 Home 私有文件只支持已验证的 POSIX 权限模式，Windows ACL 尚未实现并明确拒绝。
 
 默认预装、组件清单过渡、Home 默认页面、授权界面和 Electron 产品验收仍未完成。独立包安装或双 Host 测试通过，不代表整个首页方案已经交付。
