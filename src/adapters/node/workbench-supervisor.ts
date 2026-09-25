@@ -487,6 +487,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (process.platform === "win32") return; // no POSIX chmod substitute for Windows ACL
     this.dashboard = new SupervisorDashboard({
       home: this.home, epoch: this.requireServiceEpoch(), origin: () => this.origin, now: this.now,
+      managerOrigin: () => this.managerOrigin(),
       spaces: () => this.listSpaces(), assertOwner: () => this.assertDashboardOwner(),
       canManage: () => this.dashboardManagementAllowed() && !this.lock.inspect().held, cookieName: () => this.cookieName(),
       sessionEquals: value => this.sessionEquals(value),

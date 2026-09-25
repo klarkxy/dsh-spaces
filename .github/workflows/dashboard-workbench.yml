@@ -10,65 +10,15 @@ on:
       - 'scripts/*dashboard*'
       - 'tests/*dashboard*'
       - 'tsconfig.web.json'
-      - '.github/dashboard-workbench-edits.json'
       - '.github/workflows/dashboard-workbench.yml'
 permissions:
   contents: read
 jobs:
-  prepare-git-objects:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - &stage
-        name: Stage exact reviewed edits with before and after blob checks
-        run: |
-          python3 - <<'PY'
-          import hashlib,json,pathlib
-          allowed={'packages/dashboard/src/http-client.ts','packages/dashboard/src/view.tsx','packages/plugin/src/workbench/app.tsx','packages/plugin/src/workbench/components.tsx','src/adapters/node/dashboard/gateway.ts','src/adapters/node/dashboard/supervisor.ts','src/adapters/node/workbench-supervisor.ts','tests/workbench-ui-dom.test.ts','tsconfig.web.json'}
-          changes=json.loads(pathlib.Path('.github/dashboard-workbench-edits.json').read_text())
-          assert {r['path'] for r in changes}==allowed and len(changes)==len(allowed)
-          def blob(data): return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
-          for row in changes:
-              path=pathlib.Path(row['path']); original=path.read_bytes()
-              assert blob(original)==row['before'], row['path']+' baseline'
-              text=original.decode('utf-8')
-              for start,end,insert in reversed(row['edits']):
-                  assert 0<=start<=end<=len(text)
-                  text=text[:start]+insert+text[end:]
-              content=text.encode('utf-8')
-              assert blob(content)==row['after'], row['path']+' result'
-              path.write_bytes(content)
-          PY
-      - name: Upload unreferenced source blobs only; no dependency installation or branch write
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          python3 - <<'PY'
-          import base64,json,os,pathlib,subprocess,tempfile
-          changes=json.loads(pathlib.Path('.github/dashboard-workbench-edits.json').read_text())
-          results=[]
-          for row in changes:
-              with tempfile.NamedTemporaryFile(mode='w') as file:
-                  json.dump({'content':base64.b64encode(pathlib.Path(row['path']).read_bytes()).decode(),'encoding':'base64'},file);file.flush()
-                  value=json.loads(subprocess.check_output(['gh','api','--method','POST','repos/'+os.environ['REPOSITORY']+'/git/blobs','--input',file.name]))
-              assert value['sha']==row['after']
-              results.append({'path':row['path'],'sha':value['sha'],'mode':'100644','type':'blob'})
-          print('PREPARED_GIT_BLOBS='+json.dumps(results))
-          PY
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - *stage
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -85,7 +35,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - *stage
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
