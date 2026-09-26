@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, symlinkSync, writeFileSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, symlinkSync, writeFileSync, statSync, closeSync, linkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createServer, request as httpRequest } from 'node:http';
 import { fork, type ChildProcess } from 'node:child_process';
@@ -11,6 +11,7 @@ import { HomeDashboardInternalHttp, INTERNAL_PREFIX } from '../src/adapters/node
 import { writeDashboardBootstrap } from '../src/adapters/node/dashboard/bootstrap.ts';
 import { DashboardHomePublisher, readPublisherBootstrap } from '../packages/dashboard/src/host/home-publisher.ts';
 import { DashboardFault } from '../src/core/domain/dashboard/errors.ts';
+import { createPrivateFile } from '../src/shared/node/private-files.ts';
 import type { SourceSummary } from '../src/shared/dashboard.ts';
 
 function directory() { mkdirSync('.sandbox', { recursive: true }); return mkdtempSync(resolve('.sandbox/dashboard-home-node-')); }
@@ -73,24 +74,33 @@ test('real file reopen retains approved projection and marks old run stale', asy
 });
 test('malformed policy file is kept byte-for-byte, not repaired on read', async () => {
   const path = directory(); try {
-    const root = join(path, 'store'); mkdirSync(root, { mode: 0o700 }); writeFileSync(join(root, 'policies.json'), '{broken', { mode: 0o600 });
+    const root = join(path, 'store'); const created = createPrivateFile(root, join(root, 'policies.json'));
+    writeFileSync(created.fd, '{broken'); closeSync(created.fd);
     const store = new HomeDashboardFileStore(root, () => {}); await assert.rejects(store.readPolicies()); assert.equal(readFileSync(join(root, 'policies.json'), 'utf8'), '{broken'); await store.close();
   } finally { rmSync(path, { recursive: true, force: true }); }
 });
-test('symlink root, ancestor and leaf are rejected without touching target', async () => {
+test('linked root, ancestor and leaf are rejected without touching target', async () => {
   const path = directory(); try {
     const target = join(path, 'target'); mkdirSync(target, { mode: 0o700 }); writeFileSync(join(target, 'sentinel'), 'keep');
-    symlinkSync(target, join(path, 'link')); assert.throws(() => new HomeDashboardFileStore(join(path, 'link', 'child'), () => {}));
-    const root = join(path, 'store'); mkdirSync(root, { mode: 0o700 }); symlinkSync(join(target, 'sentinel'), join(root, 'policies.json'));
+    symlinkSync(target, join(path, 'link'), process.platform === 'win32' ? 'junction' : 'dir'); assert.throws(() => new HomeDashboardFileStore(join(path, 'link', 'child'), () => {}));
+    const root = join(path, 'store'); const created = createPrivateFile(root, join(root, 'sentinel')); closeSync(created.fd);
+    if (process.platform === 'win32') linkSync(join(target, 'sentinel'), join(root, 'policies.json'));
+    else symlinkSync(join(target, 'sentinel'), join(root, 'policies.json'));
     const store = new HomeDashboardFileStore(root, () => {}); await assert.rejects(store.readPolicies()); await assert.rejects(store.writePolicies({ schemaVersion: 1, policies: [] }));
     assert.equal(readFileSync(join(target, 'sentinel'), 'utf8'), 'keep'); await store.close();
   } finally { rmSync(path, { recursive: true, force: true }); }
 });
-test('bootstrap uses owner-only permissions and refuses broadened access or symlinks', async () => {
+test('bootstrap uses private storage and refuses linked files', async () => {
   const f = fixture(); await f.start(); try {
-    const issued = await f.grant(); assert.equal(statSync(issued.file.path).mode & 0o777, 0o600); assert.equal(readPublisherBootstrap(issued.file.path).runId, issued.bootstrap.runId);
-    const link = join(f.path, 'private', 'link'); symlinkSync(issued.file.path, link); assert.throws(() => readPublisherBootstrap(link));
-    chmodSync(issued.file.path, 0o644); assert.throws(() => readPublisherBootstrap(issued.file.path)); chmodSync(issued.file.path, 0o600);
+    const issued = await f.grant();
+    if (process.platform !== 'win32') assert.equal(statSync(issued.file.path).mode & 0o777, 0o600);
+    assert.equal(readPublisherBootstrap(issued.file.path).runId, issued.bootstrap.runId);
+    const link = join(f.path, 'private', 'link');
+    if (process.platform === 'win32') linkSync(issued.file.path, link); else symlinkSync(issued.file.path, link);
+    assert.throws(() => readPublisherBootstrap(link)); rmSync(link);
+    if (process.platform !== 'win32') {
+      chmodSync(issued.file.path, 0o644); assert.throws(() => readPublisherBootstrap(issued.file.path)); chmodSync(issued.file.path, 0o600);
+    }
     issued.file.dispose(); issued.file.dispose();
   } finally { await f.close(); }
 });
