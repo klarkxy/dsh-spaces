@@ -288,12 +288,12 @@ async function doEnsureRuntime(source?: PackageSource): Promise<string> {
   }
 }
 
-/** Prefer the managed Node; fall back to Electron-as-Node only inside Electron. */
+/** An explicitly bound Host runtime wins, including Electron's ASAR-capable Node. */
 export function spawnNode(args: string[], options: SpawnOptions = {}): ChildProcess {
-  const managed = nodeExecutable() ?? managedNodeOverride;
+  const managed = managedNodeOverride ?? nodeExecutable();
   const exe = managed ?? process.execPath;
   const env = toolchainEnv({ ...(options.env as Record<string, string | undefined> | undefined) });
-  if (!managed && isElectronProcess()) env.ELECTRON_RUN_AS_NODE = "1";
+  if (exe === process.execPath && isElectronProcess()) env.ELECTRON_RUN_AS_NODE = "1";
   else delete env.ELECTRON_RUN_AS_NODE;
   return spawnObserved(exe, args, {
     ...options,

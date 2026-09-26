@@ -236,7 +236,8 @@ test("create dialog shrinks a chosen image before it can be saved", { timeout: 6
   assert.ok(length > 0 && length <= MAX_ICON_DATA_URL_CHARS);
   assert.equal(preview?.length, length);
   assert.equal(await page.locator("#create").isDisabled(), false);
-  assert.equal(await page.locator('[aria-label="Spaces"]').getAttribute("aria-pressed"), "false");
+  assert.equal(await page.locator(".dsh-wb-avatars button").count(), 20);
+  assert.equal(await page.locator('.dsh-wb-avatars button[aria-pressed="true"]').count(), 0);
 
   await page.evaluate(() => {
     const input = document.querySelector('input[type="file"]');
@@ -254,6 +255,7 @@ test("create dialog shrinks a chosen image before it can be saved", { timeout: 6
   await page.waitForFunction(() => document.getElementById("length")?.textContent === "0");
   assert.equal(await page.locator("#create").isDisabled(), false);
   assert.equal(await page.locator(".dsh-wb-icon-preview").count(), 0);
+  assert.equal(await page.locator('.dsh-wb-avatars button[aria-pressed="true"]').count(), 1);
 });
 
 type PickerPage = {

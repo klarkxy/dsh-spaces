@@ -9,8 +9,10 @@ import type {
   WorkbenchState,
 } from "../../../../src/shared/workbench";
 import { readLocalIcon } from "./fit-icon";
-import { glyphPath, isDataImageIcon, KNOWN_GLYPHS } from "./icons";
-import { BRAND_IMAGE_URL } from "../../../../src/shared/brand-artwork";
+import { isDataImageIcon, KNOWN_GLYPHS } from "./icons";
+import { SPACE_AVATARS, defaultSpaceAvatar } from "../../../../src/shared/space-avatars";
+import { SpaceGlyph } from "./space-glyph";
+export { SpaceGlyph } from "./space-glyph";
 import { t, type WorkbenchLocale } from "./i18n";
 import { LlmModelCenter } from "./llm/center";
 import {
@@ -40,14 +42,16 @@ export interface WorkbenchViewProps {
   homeContent?: ReactNode;
   chatActive?: boolean;
   contained?: boolean;
+  nativeSurface?: boolean;
+  systemPage?: "dashboard" | "settings" | null;
 }
 
-export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive = false, contained = false }: WorkbenchViewProps): ReactElement {
+export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive = false, contained = false, nativeSurface = false, systemPage }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   return (
-    <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme} data-contained={contained ? "true" : undefined}>
+    <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme} data-contained={contained ? "true" : undefined} data-native-surface={nativeSurface ? "true" : undefined}>
       <style>{WORKBENCH_CSS}</style>
-      {contained ? <nav className="dsh-wb-contained-tools" aria-label={t(locale, "app.title")}>
+      {nativeSurface ? null : contained ? <nav className="dsh-wb-contained-tools" aria-label={t(locale, "app.title")}>
         <button type="button" className="dsh-wb-btn" onClick={controller.selectHome}>{t(locale, "app.home")}</button>
         <button type="button" className="dsh-wb-btn" onClick={controller.openCreate} disabled={!controller.canMutate()}>{t(locale, "app.newSpace")}</button>
         <button type="button" className="dsh-wb-btn" onClick={controller.openSettings}>{t(locale, "app.settings")}</button>
@@ -85,7 +89,7 @@ export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive
         <WorkspaceChrome ui={ui} controller={controller} />
         {ui.overlay?.type !== "settings" && <div className="dsh-wb-global-status"><StatusBanners ui={ui} /></div>}
       </div>
-      <Overlays ui={ui} controller={controller} />
+      <Overlays ui={ui} controller={controller} systemPage={systemPage} />
     </div>
   );
 }
@@ -111,6 +115,7 @@ function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
             pending={ui.pendingId === space.id}
             status={space.status}
             icon={space.icon}
+            spaceId={space.id}
             onClick={() => controller.selectSpace(space.id)}
             onMenu={(x, y) => controller.openMenu(space.id, x, y)}
             onMoveUp={writable ? () => controller.moveSpace(space.id, -1) : undefined}
@@ -138,6 +143,7 @@ function RailButton({
   pending,
   status,
   icon,
+  spaceId,
   onClick,
   onMenu,
   onMoveUp,
@@ -153,6 +159,7 @@ function RailButton({
   pending?: boolean;
   status?: WorkbenchSpace["status"];
   icon?: string;
+  spaceId?: string;
   onClick: () => void;
   onMenu?: (x: number, y: number) => void;
   onMoveUp?: () => void;
@@ -195,31 +202,15 @@ function RailButton({
       }}
     >
       {current ? <span className="dsh-wb-rail-indicator" /> : null}
-      {glyph === "home" ? <HomeGlyph /> : glyph === "plus" ? <PlusGlyph /> : glyph === "gear" ? <GearGlyph /> : <SpaceGlyph icon={icon} />}
+      {glyph === "home" ? <HomeGlyph /> : glyph === "plus" ? <PlusGlyph /> : glyph === "gear" ? <GearGlyph /> : <SpaceGlyph icon={icon} spaceId={spaceId} />}
       {status ? <span className="dsh-wb-status" data-status={status} /> : null}
       <span className="dsh-wb-sr">{label}</span>
     </button>
   );
 }
 
-export function SpaceGlyph({ icon }: { icon?: string }): ReactElement {
-  if (!icon || icon === "whale") {
-    return <img className="dsh-wb-glyph-img" src={BRAND_IMAGE_URL} alt="" draggable={false} />;
-  }
-  if (isDataImageIcon(icon)) {
-    return <img className="dsh-wb-glyph-img" src={icon} alt="" draggable={false} />;
-  }
-  const d = glyphPath(icon) ?? "";
-  const viewBox = "0 0 40 40";
-  return (
-    <svg className="dsh-wb-glyph" viewBox={viewBox} aria-hidden>
-      <path d={d} fillRule="nonzero" />
-    </svg>
-  );
-}
-
 function HomeGlyph(): ReactElement {
-  return <SpaceGlyph />;
+  return <svg className="dsh-wb-glyph" viewBox="0 0 24 24" aria-hidden><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z" /></svg>;
 }
 
 function PlusGlyph(): ReactElement {
@@ -393,7 +384,7 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
       {spaces.length === 0 ? <p className="dsh-wb-muted">{t(locale, "home.spacesEmpty")}</p> : null}
       {spaces.map((space, index) => (
         <div key={space.id} className="dsh-wb-space-row">
-          <SpaceGlyph icon={space.icon} />
+          <SpaceGlyph icon={space.icon} spaceId={space.id} />
           <span>
             {space.displayName}{" "}
             <small>
@@ -942,7 +933,7 @@ function IdleCard({
   );
 }
 
-function Overlays({ ui, controller }: WorkbenchViewProps): ReactElement | null {
+function Overlays({ ui, controller, systemPage }: WorkbenchViewProps): ReactElement | null {
   return (
     <>
       {ui.overlay?.type === "create" && <CreateDialog locale={ui.locale} controller={controller} />}
@@ -952,7 +943,7 @@ function Overlays({ ui, controller }: WorkbenchViewProps): ReactElement | null {
       {ui.overlay?.type === "icon" && (
         <IconDialog locale={ui.locale} space={controller.space(ui.overlay.spaceId)} controller={controller} />
       )}
-      {ui.overlay?.type === "settings" && <SettingsDialog ui={ui} controller={controller} />}
+      {(systemPage === "settings" || ui.overlay?.type === "settings") && <SettingsDialog ui={ui} controller={controller} systemPage={systemPage} />}
       {ui.overlay?.type === "import" && ui.importPreview && (
         <ImportPreviewDialog
           locale={ui.locale}
@@ -1035,7 +1026,7 @@ function PlanDialog({
 function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; controller: WorkbenchController }): ReactElement {
   const nameRef = useRef<HTMLInputElement>(null);
   const displayRef = useRef<HTMLInputElement>(null);
-  const iconRef = useRef<string>("");
+  const iconRef = useRef<string>(SPACE_AVATARS[0].image);
   const sharedRef = useRef<HTMLInputElement>(null);
   const iconState = useRef<IconPickState>("idle");
   const [iconBlocked, setIconBlocked] = useState(false);
@@ -1071,7 +1062,7 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
           {t(locale, "create.useSharedLlm")}
         </label>
         <p className="dsh-wb-muted">{t(locale, "create.useSharedLlmHint")}</p>
-        <IconPicker locale={locale} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
+        <IconPicker locale={locale} value={iconRef.current} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
         <div className="dsh-wb-actions">
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
             {t(locale, "app.cancel")}
@@ -1142,7 +1133,7 @@ function IconDialog({
     <div className="dsh-wb-overlay">
       <div className="dsh-wb-dialog">
         <h2 className="dsh-wb-title">{t(locale, "icon.title")}</h2>
-        <IconPicker locale={locale} value={space.icon} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
+        <IconPicker locale={locale} value={space.icon} spaceId={space.id} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
         <div className="dsh-wb-actions">
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
             {t(locale, "app.cancel")}
@@ -1169,11 +1160,13 @@ type IconPickState = "idle" | "pending" | "failed";
 export function IconPicker({
   locale,
   value,
+  spaceId = "",
   onChange,
   onState,
 }: {
   locale: WorkbenchLocale;
   value?: string;
+  spaceId?: string;
   onChange: (icon: string) => void;
   onState?: (state: IconPickState) => void;
 }): ReactElement {
@@ -1220,16 +1213,23 @@ export function IconPicker({
 
   return (
     <div>
+      <p>{t(locale, "create.avatars")}</p>
+      <div className="dsh-wb-glyphs dsh-wb-avatars" role="group" aria-label={t(locale, "create.avatars")}>
+        {SPACE_AVATARS.map(avatar => <button key={avatar.id} type="button" className="dsh-wb-rail-btn"
+          title={avatar[locale]} aria-label={avatar[locale]}
+          aria-pressed={(preview && preview !== "whale" ? preview : defaultSpaceAvatar(spaceId).image) === avatar.image}
+          onClick={() => publish(avatar.image)}><SpaceGlyph icon={avatar.image} /></button>)}
+      </div>
       <p>{t(locale, "create.glyph")}</p>
       <div className="dsh-wb-glyphs" role="group" aria-label={t(locale, "create.icon")}>
-        {KNOWN_GLYPHS.map((glyph) => (
+        {KNOWN_GLYPHS.filter(glyph => glyph !== "whale").map((glyph) => (
           <button
             key={glyph}
             type="button"
             className="dsh-wb-rail-btn"
             aria-pressed={!isDataImageIcon(preview) && (preview || "whale") === glyph}
             aria-label={t(locale, `icon.${glyph}` as const)}
-            onClick={() => publish(glyph === "whale" ? "" : glyph)}
+            onClick={() => publish(glyph)}
           >
             <SpaceGlyph icon={glyph} />
           </button>
@@ -1262,14 +1262,15 @@ export function IconPicker({
   );
 }
 
-function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
+function SettingsDialog({ ui, controller, systemPage }: WorkbenchViewProps): ReactElement {
+  const asPage = systemPage === "settings";
   const locale = ui.locale;
   const writable = controller.canMutate();
   const busy = controller.isBusy();
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement;
-    dialog.current?.querySelector<HTMLButtonElement>("[data-settings-close]")?.focus();
+    dialog.current?.querySelector<HTMLButtonElement>(asPage ? '[role="tab"][aria-selected="true"]' : "[data-settings-close]")?.focus();
     return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
   }, []);
   const tabs: Array<[WorkbenchUiState["settingsTab"], Parameters<typeof t>[1]]> = [
@@ -1279,10 +1280,11 @@ function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
     ["runtime", "home.runtime"], ["overview", "settings.tabStatus"], ["advanced", "settings.tabAdvanced"],
   ];
   return (
-    <div className="dsh-wb-overlay" onClick={(event) => {
-      if (event.target === event.currentTarget && !ui.pendingPlan) controller.closeOverlay();
+    <div className={asPage ? "dsh-wb-settings-page" : "dsh-wb-overlay"} onClick={(event) => {
+      if (!asPage && event.target === event.currentTarget && !ui.pendingPlan) controller.closeOverlay();
     }}>
-      <div ref={dialog} className="dsh-wb-dialog dsh-wb-settings" role="dialog" aria-modal="true" aria-labelledby="dsh-wb-settings-title" data-settings-dialog="true" onKeyDown={(event) => {
+      <div ref={dialog} className="dsh-wb-dialog dsh-wb-settings" role={asPage ? "region" : "dialog"} aria-modal={asPage ? undefined : true} aria-labelledby="dsh-wb-settings-title" data-settings-dialog="true" onKeyDown={(event) => {
+        if (asPage) return;
         if (ui.pendingPlan) return;
         if (event.key === "Escape") { event.preventDefault(); controller.closeOverlay(); }
         if (event.key === "Tab") {
@@ -1294,9 +1296,9 @@ function SettingsDialog({ ui, controller }: WorkbenchViewProps): ReactElement {
       }}>
         <header className="dsh-wb-settings-header">
           <h2 id="dsh-wb-settings-title" className="dsh-wb-title">{t(locale, "settings.title")}</h2>
-          <button type="button" className="dsh-wb-btn dsh-wb-settings-close" data-settings-close="true" onClick={controller.closeOverlay}>
+          {!asPage && <button type="button" className="dsh-wb-btn dsh-wb-settings-close" data-settings-close="true" onClick={controller.closeOverlay}>
             <span aria-hidden="true">×</span> {t(locale, "app.close")}
-          </button>
+          </button>}
         </header>
         <div className="dsh-wb-settings-body">
           <div className="dsh-wb-settings-nav" role="tablist" aria-label={t(locale, "settings.title")} aria-orientation="vertical">

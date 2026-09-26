@@ -74,3 +74,20 @@ test("validateNewName rejects reserved and existing", () => {
   });
   registry.validateNewName("notes");
 });
+
+test("official desktop profile is reserved, hidden and cannot be deleted", () => {
+  const home = fakeHome();
+  writeProfile(home, "desktop", ["@deepseek-ai/dsh-web-app"]);
+  const hub = join(home, "hub", "desktop");
+  mkdirSync(hub, { recursive: true });
+  writeFileSync(join(hub, "marker"), "keep");
+  const registry = new ProfileRegistry(home);
+  const before = readFileSync(join(home, "profiles", "desktop", "package.json"), "utf8");
+  assert.deepEqual(registry.scan(), []);
+  assert.equal(registry.scanOnboarding().profiles[0]?.action, "hide");
+  assert.throws(() => registry.validateNewName("desktop"));
+  assert.throws(() => registry.removeOfficialProfile("desktop"));
+  assert.throws(() => registry.removeHubData("desktop"));
+  assert.equal(readFileSync(join(home, "profiles", "desktop", "package.json"), "utf8"), before);
+  assert.equal(readFileSync(join(hub, "marker"), "utf8"), "keep");
+});

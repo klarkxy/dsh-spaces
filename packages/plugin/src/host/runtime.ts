@@ -23,7 +23,7 @@ import {
   type SupervisorEndpoint,
 } from "./supervisor-bootstrap";
 
-import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/shared/space-host";
+import { parseSpaceHostAudience, parsePortalSnapshot, type PortalSnapshot, type SpaceHostAudience } from "../../../../src/shared/space-host";
 
 const inflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
@@ -84,6 +84,22 @@ export class WorkbenchHostRuntime {
       unavailable: this.identity.recoveryRequired,
       reasons: [...this.identity.reasons],
     };
+  }
+
+  /** Attach and read only. Never bootstrap, initialize or retire an owner during discovery. */
+  async presentationSnapshot(): Promise<PortalSnapshot> {
+    const identity = this.identity;
+    if (!identity.confirmed || identity.recoveryRequired || !identity.home) throw new Error(ENTRY_UNAVAILABLE);
+    if (!this.api || !this.endpoint) {
+      const attached = await attachExistingSupervisor({ home: identity.home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch });
+      if (!("endpoint" in attached)) throw new Error(ENTRY_UNAVAILABLE);
+      this.remember(attached.endpoint);
+    }
+    const state = await this.api!.state();
+    const snapshot = parsePortalSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
+      spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) });
+    if (!snapshot) throw new Error(ENTRY_UNAVAILABLE);
+    return snapshot;
   }
 
   async bootstrap(): Promise<WorkbenchBootstrapResult> {

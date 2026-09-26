@@ -12,6 +12,7 @@ import { mountStaticClientStyle } from "../../../dashboard/src/client-style";
 import { readViewHint } from "../../../view-bridge/src/env";
 import { CONTAINED_MANAGEMENT_PARAM } from "../../../../src/shared/space-host";
 import { HostShellController } from "./host-shell-state";
+import { desktopBrowserBridge, NativeHostController, NativeHostShell, NATIVE_HOST_CSS } from "./native-host";
 import { PortableHostShell, HostShellPanel, HOST_SHELL_CSS } from "./host-shell";
 import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
@@ -60,12 +61,22 @@ export function apply(ctx: Context): void {
     ctx.slots.inject("root", () =>
       ctx.slots.register({ name: "root", priority: -1 }, () => createElement(WorkbenchApp, { api, homeUrl, surfaceView: readViewHint() ?? undefined,
         contained: embedded && new URL(window.location.href).searchParams.get(CONTAINED_MANAGEMENT_PARAM) === "1" && !!readViewHint(),
+        nativeSurface: embedded && new URL(window.location.href).searchParams.get("dsh-spaces-native") === "1" && !!readViewHint(),
       })),
     );
     return;
   }
 
   const guide = createWorkbenchGuideRemote(connection);
+  const nativeBridge = desktopBrowserBridge();
+  if (nativeBridge) {
+    const native = new NativeHostController(guide, nativeBridge);
+    ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS));
+    ctx.slots.inject("shell.overlay", () => ctx.slots.register(
+      { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () => createElement(NativeHostShell, { controller: native }),
+    ));
+    return;
+  }
   const host = new HostShellController(guide);
   if (typeof document !== "undefined") ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS));
   // The host keeps its own root, branding, native chrome and live conversation.

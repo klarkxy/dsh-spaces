@@ -191,7 +191,7 @@ export interface RuntimeStatus {
   packageSource: PackageSource;
 }
 
-export const RESERVED_PROFILE_NAMES = ["web", "hub", "headless", "node_modules"] as const;
+export const RESERVED_PROFILE_NAMES = ["web", "desktop", "hub", "headless", "node_modules"] as const;
 
 export const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 

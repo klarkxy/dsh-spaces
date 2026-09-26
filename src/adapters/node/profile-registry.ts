@@ -124,6 +124,7 @@ export class ProfileRegistry {
   }
 
   removeHubData(name: string): void {
+    if (name === "desktop") throw new Error(t("errors.nameReserved", { name }));
     if (name === "web") {
       throw new Error(t("errors.refuseDeleteWebHub"));
     }
@@ -134,6 +135,7 @@ export class ProfileRegistry {
   }
 
   removeOfficialProfile(name: string): void {
+    if (name === "desktop") throw new Error(t("errors.nameReserved", { name }));
     if (name === "web") {
       throw new Error(t("errors.refuseDeleteWebProfile"));
     }

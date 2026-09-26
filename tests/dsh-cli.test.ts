@@ -131,3 +131,13 @@ writeFileSync(process.argv[2], JSON.stringify({ ok: true, argv2: process.argv[2]
   assert.equal(parsed.ok, true);
   assert.equal(parsed.argv2, stamp);
 });
+
+test("explicit Host runtime is not replaced by a downloaded toolchain executable", async () => {
+  const root = fakeDir(); mkdirSync(join(root, "node"));
+  writeFileSync(join(root, "node", "node.exe"), "not the bound runtime");
+  setToolchainRoot(root); setManagedNodeExecutable(process.execPath);
+  const stamp = join(root, "runtime.json");
+  const child = spawnNode(["-e", "require('node:fs').writeFileSync(process.argv[1],JSON.stringify({exe:process.execPath}))", stamp], { windowsHide: true });
+  await waitClosed(child);
+  assert.equal(JSON.parse(readFileSync(stamp, "utf8")).exe, process.execPath);
+});

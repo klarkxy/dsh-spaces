@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalSto
 import { HostShellController } from "./host-shell-state";
 import { attachHostLayout } from "./host-layout";
 import { inferSpacesLocale } from "./i18n";
+import { SpaceGlyph } from "../workbench/space-glyph";
 export const HOST_SHELL_CSS = `
 [data-spaces-host-rail] > [data-spaces-host-covered] { visibility: hidden !important; pointer-events: none !important; }
 .dsh-host-dock { position:absolute; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--dsw-alias-label-primary,#202127); }
@@ -11,6 +12,9 @@ export const HOST_SHELL_CSS = `
 .dsh-host-rail button:hover { background:color-mix(in srgb,currentColor 10%,transparent); }
 .dsh-host-rail button[aria-current=true] { border-color:currentColor; background:color-mix(in srgb,currentColor 12%,transparent); }
 .dsh-host-rail button:focus-visible { outline:2px solid currentColor; outline-offset:1px; }
+.dsh-host-rail button:has(.dsh-wb-glyph-img) { padding:0; }
+.dsh-host-rail .dsh-wb-glyph-img { display:block; width:100% !important; height:100% !important; max-width:100%; max-height:100%; object-fit:cover; }
+.dsh-host-rail .dsh-wb-glyph { width:32px; height:32px; fill:currentColor; }
 .dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:72px; right:0; pointer-events:auto; background:var(--dsw-alias-app-bg,#fff); }
 iframe.dsh-host-surface { width:calc(100% - 72px); height:calc(100% - var(--dsh-frame-top-clearance,0px)); border:0; }
 .dsh-host-surface[hidden] { display:none !important; }
@@ -56,11 +60,11 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
   const spaces = ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== ui.role?.profileId) ?? [];
   return <div ref={anchor} className="dsh-host-dock" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined}>
     <nav className="dsh-host-rail" aria-label={t.title}>
-      <button type="button" title={t.current} aria-label={t.current} aria-current={ui.visible === "current" ? "true" : undefined} onClick={controller.showCurrent}>DSH</button>
+      <button type="button" title={t.current} aria-label={t.current} data-pinned="true" aria-current={ui.visible === "current" ? "true" : undefined} onClick={controller.showCurrent}><SpaceGlyph spaceId={ui.role?.profileId ?? ""} icon={ui.inventory?.spaces.find(space => space.id === ui.role?.profileId)?.icon} /></button>
       <button type="button" title={t.home} aria-label={t.home} aria-current={ui.visible === "portal" && ui.selected === null ? "true" : undefined} onClick={() => controller.select(null)}>⌂</button>
       <div className="dsh-host-rail-list">{spaces.map(space => <button key={space.id} type="button" title={space.displayName} aria-label={space.displayName}
         data-space-status={space.status} aria-current={ui.visible === "portal" && ui.selected === space.id ? "true" : undefined}
-        onClick={() => controller.select(space.id)}>{Array.from(space.displayName || space.id).slice(0,2).join("")}</button>)}</div>
+        onClick={() => controller.select(space.id)}><SpaceGlyph spaceId={space.id} icon={space.icon} /></button>)}</div>
       <button type="button" title={t.manage} aria-label={t.manage} onClick={controller.showGuide}>⋯</button>
     </nav>
     {ui.portal && <iframe className="dsh-host-surface" title="Spaces surface" data-spaces-host-surface="true" src={ui.portal.src}

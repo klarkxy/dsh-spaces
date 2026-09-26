@@ -1011,6 +1011,14 @@ export function parseSpaceId(id: string): string {
 }
 
 export function invocationProfile(argv: readonly string[]): string | null {
+  const desktop = desktopHostRuntime(argv[1] ?? "");
+  if (desktop) {
+    try {
+      if (argv.length < 4 || realpathSync(argv[2]) !== desktop.root ||
+          !/[/\\]profiles[/\\]desktop$/.test(resolve(argv[3]))) return null;
+      return "desktop";
+    } catch { return null; }
+  }
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === "--profile") {
@@ -1024,6 +1032,11 @@ export function invocationProfile(argv: readonly string[]): string | null {
 }
 
 export function bindDshCli(argv1: string): BoundRuntime | null {
+  const desktop = desktopHostRuntime(argv1);
+  if (desktop) {
+    const cli = bindDshCli(join(desktop.root, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
+    return cli?.version === desktop.version ? cli : null;
+  }
   try {
     const bin = resolve(argv1);
     const realBin = realpathSync(bin);
@@ -1039,6 +1052,20 @@ export function bindDshCli(argv1: string): BoundRuntime | null {
   } catch {
     return null;
   }
+}
+
+/** Official Desktop's own argv entry and bundled runtime, never a renderer brand flag. */
+function desktopHostRuntime(entry: string): { root: string; version: string } | null {
+  try {
+    const bin = realpathSync(resolve(entry));
+    if (!bin.endsWith(join("dsh-desktop-host", "lib", "index.js")) || !lstatSync(bin).isFile()) return null;
+    const manifest = join(dirname(bin), "..", "package.json");
+    if (lstatSync(manifest).isSymbolicLink()) return null;
+    const pkg = JSON.parse(readFileSync(manifest, "utf8"));
+    if (pkg.name !== "@deepseek-ai/dsh-desktop-host" || !isExactRuntimeVersion(pkg.version)) return null;
+    const root = realpathSync(resolve(dirname(bin), "../../../.."));
+    return { root, version: pkg.version };
+  } catch { return null; }
 }
 
 export function spawnBoundCli(

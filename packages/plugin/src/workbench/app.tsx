@@ -11,6 +11,7 @@ export interface WorkbenchAppProps {
   env?: Partial<WorkbenchEnv>;
   homeUrl?: string;
   contained?: boolean;
+  nativeSurface?: boolean;
   surfaceView?: SpaceSurfaceView;
 }
 
@@ -18,10 +19,11 @@ export interface WorkbenchAppProps {
  * Production workbench root. Hosts inject a real WorkbenchApi.
  * Closing a tab does not call shutdown; that is an explicit settings action.
  */
-export function WorkbenchApp({ api, env, homeUrl, contained = false, surfaceView }: WorkbenchAppProps): ReactElement {
+export function WorkbenchApp({ api, env, homeUrl, contained = false, nativeSurface = false, surfaceView }: WorkbenchAppProps): ReactElement {
   const controller = useMemo(() => new WorkbenchController(api, env), [api, env]);
   const [chatOpened, setChatOpened] = useState(false);
   const [chatActive, setChatActive] = useState(false);
+  const [systemPage, setSystemPage] = useState<"dashboard" | "settings" | null>(null);
   const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   useEffect(() => {
     controller.start();
@@ -34,10 +36,10 @@ export function WorkbenchApp({ api, env, homeUrl, contained = false, surfaceView
     return attachSurfaceBridge(controller, view, window.parent, listener => {
       window.addEventListener("message", listener);
       return () => window.removeEventListener("message", listener);
-    });
-  }, [controller, contained, surfaceView]);
-  return <WorkbenchView contained={contained} ui={ui} controller={controller}
+    }, nativeSurface ? setSystemPage : undefined);
+  }, [controller, contained, surfaceView, nativeSurface]);
+  return <WorkbenchView contained={contained} nativeSurface={nativeSurface} systemPage={systemPage} ui={ui} controller={controller}
     homeUrl={chatOpened ? homeUrl : undefined} chatActive={chatActive}
-    homeContent={<WorkbenchHome api={api} ui={ui} controller={controller} chatAvailable={!!homeUrl}
+    homeContent={<WorkbenchHome api={api} ui={ui} controller={controller} chatAvailable={!nativeSurface && !!homeUrl}
       onChat={active => { setChatActive(active); if (active) setChatOpened(true); }} />} />;
 }
