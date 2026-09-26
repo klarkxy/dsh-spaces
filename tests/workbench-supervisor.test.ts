@@ -1574,3 +1574,29 @@ test("same request id with a different command is rejected even after revision m
   assert.equal(conflict.body.ok, false);
   assert.equal(conflict.body.error?.code, "workbench/conflict");
 });
+
+test("official desktop stays outside management and rejects start, verify, delete and plugin changes", async () => {
+  const home = tempHome();
+  writeProfile(home, "desktop", { name: "official-desktop" });
+  const path = join(home, "profiles", "desktop", "package.json");
+  const before = readFileSync(path, "utf8");
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  assert.equal((await handle.runtime.state()).spaces.some(space => space.id === "desktop"), false);
+  for (const kind of ["space.start", "space.verify"] as const) {
+    const requestId = `reserved-${kind}`;
+    const result = await mutate(handle.origin, cookie, "submit", { command: { kind, spaceId: "desktop" }, requestId });
+    if (result.body.ok) await waitJob(handle.origin, cookie, requestId, "failed");
+    else assert.ok(result.body.error?.code);
+  }
+  for (const request of [
+    { kind: "space.delete", spaceId: "desktop", removeData: true },
+    { kind: "plugin.install", spaceIds: ["desktop"], catalogId: "p", version: "1.0.0" },
+    { kind: "plugin.remove", spaceId: "desktop", packageName: "p" },
+    { kind: "plugin.toggle", spaceId: "desktop", pluginId: "p", enabled: false },
+  ]) {
+    const result = await mutate(handle.origin, cookie, "preview", { request });
+    assert.equal(result.body.ok, false, JSON.stringify(result.body));
+  }
+  assert.equal(readFileSync(path, "utf8"), before);
+});

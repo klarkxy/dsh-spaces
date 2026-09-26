@@ -15,6 +15,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath } from "node:url";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { SupervisorDashboard, DASHBOARD_LAUNCH_ENV } from "./dashboard/supervisor";
+import { handleDashboardUnavailable } from "./dashboard/gateway";
+import { cookieValue } from "./workbench-http";
 import { parsePublicationPlan } from "../../core/domain/dashboard/validation";
 import { atomicWrite } from "./atomic";
 import { CooperativeChildren } from "./cooperative-children";
@@ -456,10 +458,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   async handleDashboardRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     if (!req.url?.startsWith("/api/dashboard/") && !req.url?.startsWith("/internal/dashboard/")) return false;
     if (this.dashboard) return this.dashboard.handle(req, res);
-    const code = process.platform === "win32" ? "dashboard/unsupported-operation" : "dashboard/unavailable";
-    res.writeHead(process.platform === "win32" ? 501 : 503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(JSON.stringify({ protocolVersion: 1, error: { code, message: code } }));
-    return true;
+    return handleDashboardUnavailable(req, res, {
+      origin: () => this.origin, managerOrigin: () => this.managerOrigin(),
+      authorize: request => {
+        const value = cookieValue(request.headers.cookie, this.cookieName());
+        return !this.closed && value && this.sessionEquals(value)
+          ? { subjectId: "supervisor-local-operator", layoutWrite: false, publicationsManage: false } : null;
+      },
+    });
   }
 
   private assertDashboardOwner(): void {
@@ -479,13 +485,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private requireDashboard(): SupervisorDashboard {
     this.assertDashboardOwner();
-    if (!this.dashboard) throw new WorkbenchPublicError("workbench/unsupported", "Home dashboard is not supported on this platform.");
+    if (!this.dashboard) throw new WorkbenchPublicError("workbench/unavailable", "Home dashboard is unavailable.");
     if (!this.dashboardManagementAllowed()) throw new WorkbenchPublicError("workbench/maintenance");
     return this.dashboard;
   }
 
   private initDashboard(): void {
-    if (process.platform === "win32") return; // no POSIX chmod substitute for Windows ACL
     this.dashboard = new SupervisorDashboard({
       home: this.home, epoch: this.requireServiceEpoch(), origin: () => this.origin, now: this.now,
       managerOrigin: () => this.managerOrigin(),
@@ -945,6 +950,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw new WorkbenchPublicError("workbench/unsupported");
     }
     const parsed = parsePlanRequest(request);
+    if (("spaceId" in parsed && parsed.spaceId === "desktop") ||
+      ("spaceIds" in parsed && parsed.spaceIds.includes("desktop"))) {
+      throw new WorkbenchPublicError("workbench/protected");
+    }
     if (parsed.kind === "dashboard.publication.set") {
       return this.lock.run("dashboard.publication.preview", async () => {
         const dashboard = this.requireDashboard();
@@ -1629,7 +1638,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     ctx.phase("start");
     ctx.cancellable(true);
     const id = this.requireSpace(spaceId);
-    if (id === "web") throw new WorkbenchPublicError("workbench/protected");
+    if (id === "web" || id === "desktop") throw new WorkbenchPublicError("workbench/protected");
     if (this.unmanaged.has(id)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (this.statusOf(id) === "running") {
       if (!this.views.has(id)) throw new WorkbenchPublicError("workbench/unavailable");
@@ -2355,7 +2364,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private protectSpecial(id: string, options: { allowManager: boolean }): void {
-    if (id === "web") throw new WorkbenchPublicError("workbench/protected");
+    if (id === "web" || id === "desktop") throw new WorkbenchPublicError("workbench/protected");
     if (!options.allowManager && id === this.managerId) throw new WorkbenchPublicError("workbench/protected");
   }
 

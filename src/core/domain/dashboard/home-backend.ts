@@ -18,12 +18,13 @@ export interface HomePolicyBook { schemaVersion: 1; policies: StoredPublicationP
 /** All mutations are performed by the already owning Supervisor, never by a child. */
 export interface HomeDashboardStore {
   readPolicies(): Promise<unknown | null>;
-  writePolicies(value: HomePolicyBook): Promise<void>;
+  /** Invoke assertCommit after asynchronous preparation, immediately before publishing the mutation. */
+  writePolicies(value: HomePolicyBook, assertCommit: () => void): Promise<void>;
   readLayout(): Promise<unknown | null>;
-  writeLayout(value: LayoutDocument): Promise<void>;
+  writeLayout(value: LayoutDocument, assertCommit: () => void): Promise<void>;
   readProjection(spaceId: string, providerId: string): Promise<unknown | null>;
-  writeProjection(value: Projection): Promise<void>;
-  deleteProjection(spaceId: string, providerId: string): Promise<void>;
+  writeProjection(value: Projection, assertCommit: () => void): Promise<void>;
+  deleteProjection(spaceId: string, providerId: string, assertCommit: () => void): Promise<void>;
   close(): Promise<void>;
 }
 export interface HomeReader { subjectId: string; layoutWrite: boolean; publicationsManage: boolean }
@@ -114,6 +115,21 @@ export class HomeDashboard {
     if (this.broken) throw new DashboardFault('dashboard/storage-failed');
     this.options.assertOwner();
   }
+  private async persist(write: (assertCommit: () => void) => Promise<void>, verify: () => void, breakOnStorageFailure = false): Promise<void> {
+    let rejected = false, rejection: unknown;
+    const assertCommit = () => {
+      try { this.usable(); verify(); }
+      catch (error) { rejected = true; rejection = error; throw error; }
+    };
+    assertCommit();
+    try { await write(assertCommit); }
+    catch {
+      // A capability lost during asynchronous disk preparation is not corrupt storage.
+      if (rejected) throw rejection;
+      if (breakOnStorageFailure) this.broken = true;
+      throw new DashboardFault('dashboard/storage-failed');
+    }
+  }
   private run<T>(work: () => Promise<T>): Promise<T> {
     try { this.usable(); } catch (error) { return Promise.reject(error); }
     if (this.queued >= 64) return Promise.reject(new DashboardFault('dashboard/rate-limited'));
@@ -192,13 +208,11 @@ export class HomeDashboard {
       const next = { spaceId: request.spaceId, providerId: request.providerId, revision, selection: request.selection };
       const candidate = parseHomePolicyBook({ schemaVersion: 1, policies: [...this.book!.policies.filter(p => key(p.spaceId, p.providerId) !== key(next.spaceId, next.providerId)), next] });
       this.usable(); assertPlanExecution();
-      try { await this.options.store.writePolicies(candidate); }
-      catch { this.broken = true; throw new DashboardFault('dashboard/storage-failed'); }
+      await this.persist(check => this.options.store.writePolicies(candidate, check), assertPlanExecution, true);
       // From this point the old grant is unusable, even if deleting its file fails.
       this.book = candidate; this.cache.delete(key(next.spaceId, next.providerId)); this.cursors.clear(); this.metadata = '';
       const run = this.runs.get(next.spaceId); run?.failedProviders.add(next.providerId); run?.providerActivity.delete(next.providerId);
-      try { await this.options.store.deleteProjection(next.spaceId, next.providerId); }
-      catch { throw new DashboardFault('dashboard/storage-failed'); }
+      await this.persist(check => this.options.store.deleteProjection(next.spaceId, next.providerId, check), assertPlanExecution);
       this.usable();
       return { ...copyJson(next), pendingStart: next.selection !== null };
     });
@@ -257,8 +271,10 @@ export class HomeDashboard {
           }
           limit(count, DASHBOARD_LIMITS.maxHomeInstances, 'homeInstances'); limit(bytes, DASHBOARD_LIMITS.maxHomeProjectionBytes, 'homeProjectionBytes');
           this.checkRun(run);
-          try { await this.options.store.writeProjection(prepared.projection); }
-          catch { throw new DashboardFault('dashboard/storage-failed'); }
+          await this.persist(check => this.options.store.writeProjection(prepared.projection, check), () => {
+            this.checkRun(run);
+            if (this.policy(run.binding.spaceId, provider)?.revision !== policy.revision) throw new DashboardFault('dashboard/stale-grant');
+          });
           this.cache.set(key(policy.spaceId, provider), copyJson(prepared.projection));
           run.lastActivity = this.now(); run.providerActivity.set(provider, this.now());
         }
@@ -391,8 +407,9 @@ export class HomeDashboard {
       const prepared = prepareLayout(layout, input, { backendEpoch: this.options.backendEpoch, subjectId: reader.subjectId, now: this.now(), newRevision: this.id(), canRead: ref => readable.has(refKey(ref)) });
       this.authorize(auth, reader.subjectId);
       if (prepared.changed) {
-        try { await this.options.store.writeLayout(prepared.document); }
-        catch { this.broken = true; throw new DashboardFault('dashboard/storage-failed'); }
+        await this.persist(check => this.options.store.writeLayout(prepared.document, check), () => {
+          if (!this.authorize(auth, reader.subjectId).layoutWrite) throw new DashboardFault('dashboard/forbidden');
+        }, true);
         this.layout = prepared.document;
       }
       this.authorize(auth, reader.subjectId); const response = copyJson(prepared.receipt); deliver?.(response); return response;

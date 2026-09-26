@@ -1,6 +1,6 @@
 # 发布权限与安全边界
 
-状态：设计合同，待实现。授权接口见 [api.md](api.md)。本文约束不取代 [现有故障政策](../let-it-crash.md) 和 Home 单写者边界。
+状态：安全合同；Windows 私有文件实现与验证进度见 [Windows 修复验收](../../tasks/windows-dashboard-fix-2026-09-26.md)。授权接口见 [api.md](api.md)。本文约束不取代 [现有故障政策](../let-it-crash.md) 和 Home 单写者边界。
 
 ## 1. 主体与最小权限
 
@@ -26,9 +26,17 @@ Supervisor 不导入业务插件代码，只执行本产品的固定验证、存
 
 ## 3. 凭据交付
 
-拟用 `DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE` 向受管理 Host 传递私有 bootstrap 文件的位置，而不是在命令行、URL、HTML 或前端全局变量中携带 token。文件由 Supervisor 在正常启动空间前创建，只包含当前 run 的 loopback endpoint、runId 和最小发布凭据；路径和 bearer 不进入任何浏览器 DTO。
+使用 `DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE` 向受管理 Host 传递私有 bootstrap 文件的位置，而不是在命令行、URL、HTML 或前端全局变量中携带 token。文件由 Supervisor 在正常启动空间前创建，只包含当前 run 的 loopback endpoint、runId 和最小发布凭据；路径和 bearer 不进入任何浏览器 DTO。
 
 POSIX 文件权限仅所有者读写；Windows 必须实现并验证仅预期用户/服务身份访问的 ACL，不能拿 chmod 数字当 Windows ACL 的证明。打开时检查普通文件、符号链接/reparse point、归属和规范路径。无法建立约束就拒绝启用该发布通道，不降级为命令行明文 token。
+
+Windows 实现固定使用系统 Windows PowerShell/.NET：新目录和文件在创建时带当前用户 SID 的私有安全描述符；读取时核对所有者、DACL 和所有允许访问的 SID。既有宽权限或无法证明安全的对象直接拒绝，不修改权限。路径上的 reparse point、叶子硬链接、UNC/设备路径和 NTFS 备用数据流被拒绝；打开前后使用 bigint 文件身份核对路径和描述符。此约束不改变第 1 节对同用户恶意进程和机器管理员的边界。
+
+看板存储只在第一次操作时启动一个归属于该存储的权限校验子进程，通过有界、带请求号的本地管道异步校验；不监听网络、不注册服务，也不缓存 ACL。启动失败、意外退出、协议损坏和超时均终止该次 helper 生命周期，后续操作失败，不重新启动或重放请求。存储关闭时等待其子进程退出；EOF 也会结束子进程。管道只传路径和操作字段，不传发布正文或凭据。单个发布进程首次读取 bootstrap 使用同一校验逻辑的一次性调用。
+
+文件内容仍在临时文件中写入并 fsync，再原子改名；每次异步权限检查后重验运行权，提交前再次核对文件身份。存储提交回调在写入临时内容及最终改名/删除之前检查当前 run/grant、布局写权限或管理计划权限；异步等待期间停止空间、降为只读或失去计划权限不能导致旧请求继续提交。提交前权限拒绝不标记存储损坏；已经落盘的撤权不会因后续清理失败而恢复。
+
+Windows 的 Node 接口不支持目录 fsync，因此不承诺断电后的目录元数据持久性；POSIX 继续刷新目录。失败后不恢复旧文件。helper 创建临时文件但回执丢失时保留未确认现场，不扫描清理未知文件。
 
 凭据绑定 Home、空间实例代次与 runId；服务更换或空间正常停止时失效。发布端只接受 bootstrap 中经过校验的 loopback origin，HTTP 禁止自动跟随重定向，超时 5 秒、无自动重试。不存在 bootstrap 配置时不扫描 Home 寻找凭据。
 

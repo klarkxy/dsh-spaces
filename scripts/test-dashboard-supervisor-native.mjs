@@ -4,21 +4,31 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join, delimiter } from 'node:path';
+import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createWorkbenchSupervisor } from '../src/adapters/node/workbench-supervisor.ts';
 import { applyIsolationPatch } from '../src/core/domain/isolation.ts';
 import { HomeController } from '../src/adapters/node/home-controller.ts';
+import { resolveNpmCli } from './pack-spaces-plugin.mjs';
+import { isolatedEnv, resolvePnpmCjs, writePnpmShim } from './verify-spaces-distribution.mjs';
 
 const sdk = process.env.DSH_DASHBOARD_SDK_ROOT;
 if (!sdk) throw new Error('An explicitly installed official SDK is required');
 const bin = resolve(sdk, 'node_modules/@deepseek-ai/dsh/lib/bin.js');
 mkdirSync('.sandbox', { recursive: true });
 const root = mkdtempSync(resolve('.sandbox/dashboard-supervisor-native-'));
-const home = join(root, 'home'), artifacts = join(root, 'packages'), evidence = resolve('.sandbox/dashboard-supervisor-evidence');
-mkdirSync(home); mkdirSync(artifacts); mkdirSync(evidence, { recursive: true });
+const home = join(root, 'home'), artifacts = mkdtempSync(join(tmpdir(), 'dsh-dashboard-native-pack-')), evidence = resolve(process.env.DSH_DASHBOARD_EVIDENCE || join(root, 'evidence'));
+mkdirSync(home); mkdirSync(evidence, { recursive: true });
+const tooling = Object.fromEntries(['shim', 'pnpmHome', 'store', 'cache'].map(key => [key, join(root, key)]));
+Object.values(tooling).forEach(path => mkdirSync(path, { recursive: true }));
+writePnpmShim(tooling.shim, process.execPath, resolvePnpmCjs());
 process.env.PATH = resolve(sdk, 'node_modules/.bin') + delimiter + process.env.PATH;
-const env = { ...process.env, DSH_HOME: home, CI: '1', npm_config_fetch_retries: '0' };
+const env = { ...isolatedEnv(home, process.execPath, tooling), CI: '1', npm_config_fetch_retries: '0' };
 delete env.ELECTRON_RUN_AS_NODE; delete env.DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE;
+// CLI preparation and the production Supervisor must use the same isolated
+// package-manager store for profiles installed before Supervisor startup.
+Object.assign(process.env, env);
+delete process.env.ELECTRON_RUN_AS_NODE; delete process.env.DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE;
 const redacted = value => String(value).replace(/([?&]token=)[^&\s\x1b"']+/g, '$1[redacted]').replace(/[a-f0-9]{64}/g, '[redacted-identifier]');
 const proved = [];
 function pass(value) { proved.push(value); console.log('PASS', value); }
@@ -28,7 +38,7 @@ function run(executable, args, label) {
   return r.stdout;
 }
 const cli = (args, label) => run(process.execPath, [bin, ...args], label);
-const pack = path => join(artifacts, JSON.parse(run('npm', ['pack', resolve(path), '--ignore-scripts', '--json', '--pack-destination', artifacts], 'pack'))[0].filename);
+const pack = path => join(artifacts, JSON.parse(run(process.execPath, [resolveNpmCli(process.execPath), 'pack', resolve(path), '--ignore-scripts', '--json', '--pack-destination', artifacts], 'pack'))[0].filename);
 function fingerprint(path) {
   if (!existsSync(path)) return 'absent';
   const hash = createHash('sha256');
@@ -36,7 +46,28 @@ function fingerprint(path) {
     assert.equal(e.isSymbolicLink(), false); const p = join(dir,e.name); hash.update(p.slice(path.length)); e.isDirectory() ? walk(p) : hash.update(readFileSync(p));
   } }; walk(path); return hash.digest('hex');
 }
-let supervisor;
+let supervisor, browser, page, managerFrame;
+const browserErrors = [];
+async function openBrowser(cookie) {
+  const { chromium } = await import('playwright');
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addCookies(cookie.split('; ').map(value => { const at = value.indexOf('='); return { name: value.slice(0, at), value: value.slice(at + 1), url: supervisor.origin, httpOnly: true, sameSite: 'Strict' }; }));
+  page = await context.newPage();
+  page.on('pageerror', error => browserErrors.push(redacted(error.message)));
+  await page.goto(supervisor.origin, { waitUntil: 'domcontentloaded' });
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    for (const frame of page.frames()) {
+      if (frame !== page.mainFrame() && await frame.locator('.dsh-wb-home-page').count()) { managerFrame = frame; break; }
+    }
+    if (managerFrame) break;
+    await delay(100);
+  }
+  assert.ok(managerFrame, 'real manager browser frame');
+  await managerFrame.locator('.dsh-wb-home-page .dd-body').waitFor({ state: 'visible', timeout: 30000 });
+  assert.equal(await managerFrame.locator('.dsh-wb-home-page [role="alert"]').count(), 0);
+}
 try {
   const dashboard = pack('packages/dashboard'), manager = pack('packages/plugin'), bridge = pack('packages/view-bridge');
   const source = join(root, 'source'); mkdirSync(source);
@@ -53,12 +84,13 @@ export default {name,inject,apply};\n`);
     cli(['plugin', '--profile', id, 'add', sourcePackage], 'install test source');
   }
   const protectedPaths = ['profiles/web', 'sessions', 'storages']; const before = protectedPaths.map(p => fingerprint(join(home, p)));
-  supervisor = await createWorkbenchSupervisor({
+  const supervisorOptions = {
     home, bin, port: 0, portStart: 42000, portEnd: 42999, pluginArtifact: manager, viewBridgeArtifact: bridge,
     controlToolRoot: join(root, 'tools'), nodeExe: process.execPath,
-  });
+  };
+  supervisor = await createWorkbenchSupervisor(supervisorOptions);
   const login = await fetch(supervisor.bootstrapUrl, { redirect: 'manual', signal: AbortSignal.timeout(10000) });
-  assert.equal(login.status, 303); const cookie = login.headers.getSetCookie().map(v => v.split(';')[0]).join('; '); await login.body?.cancel();
+  assert.equal(login.status, 303); let cookie = login.headers.getSetCookie().map(v => v.split(';')[0]).join('; '); await login.body?.cancel();
   const post = async (path, body, authorized = true, headers = {}) => {
     const response = await fetch(supervisor.origin + path, { method: 'POST', headers: { Origin: supervisor.origin, 'Content-Type': 'application/json', 'X-DSH-Dashboard': '1', ...(authorized ? { Cookie: cookie } : {}), ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
     return { status: response.status, data: await response.json() };
@@ -87,6 +119,11 @@ export default {name,inject,apply};\n`);
   assert.equal((await post('/api/dashboard/v1/query', { kind: 'overview' }, false)).status, 401);
   assert.equal((await post('/api/dashboard/v1/query', { kind: 'overview' }, true, { Origin: 'http://untrusted.invalid' })).status, 403);
   pass('Actual Supervisor owns the Home and authenticates dashboard routes on its existing port');
+  if (process.env.DSH_DASHBOARD_BROWSER === '1') {
+    await openBrowser(cookie);
+    await page.screenshot({ path: join(evidence, 'empty-dashboard.png'), fullPage: true });
+    pass('Real browser opens an empty Home dashboard without CORS or unavailable errors');
+  }
   for (const id of ids) {
     await plan({ kind: 'dashboard.publication.set', spaceId: id, providerId: 'dashboard-supervisor-native-source', expectedGrantRevision: 'absent', selection: { kind: 'all' } });
     assert.equal((await api('state')).spaces.find(s => s.id === id).status, 'stopped');
@@ -102,6 +139,24 @@ export default {name,inject,apply};\n`);
     command: { kind: 'board.create', boardId: 'home', title: 'Managed Home', placements: refs.map((ref, i) => ({ id: `p${i}`, ref, x: i*6, y: 0, w: 6, h: 2 })) } });
   assert.equal(saved.status, 200); assert.equal(saved.data.result.board.placements.length, 2);
   pass('Two native DSH Hosts started by the real Supervisor publish into one persisted Home board');
+  if (page) {
+    await managerFrame.locator('.dsh-dashboard .dd-header select').selectOption('home');
+    await managerFrame.locator('.dd-card').nth(1).waitFor({ state: 'visible', timeout: 30000 });
+    await page.screenshot({ path: join(evidence, 'two-published-cards.png'), fullPage: true });
+    await page.setViewportSize({ width: 800, height: 700 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: join(evidence, 'dashboard-800.png'), fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Existing keyboard button activates the same durable unpin/pin command as a click.
+    await managerFrame.getByRole('button', { name: '移除固定组件', exact: true }).first().focus();
+    await page.keyboard.press('Enter');
+    await managerFrame.locator('.dd-card').nth(1).waitFor({ state: 'detached', timeout: 30000 });
+    const pin = managerFrame.getByRole('button', { name: '固定 Native managed result', exact: true }).first();
+    await pin.click();
+    await managerFrame.locator('.dd-card').nth(1).waitFor({ state: 'visible', timeout: 30000 });
+    assert.equal((await query({ kind: 'board', boardId: 'home' })).board.placements.length, 2);
+    pass('Browser displays both publications, keyboard unpins and button pins with persisted readback at 800px and desktop widths');
+  }
   const privateDir = join(home, '.spaces-dashboard', 'private');
   const issued = [];
   for (const name of readdirSync(privateDir)) {
@@ -122,15 +177,33 @@ export default {name,inject,apply};\n`);
   await plan({ kind: 'space.delete', spaceId: ids[0], removeData: false });
   assert.equal(existsSync(join(home, 'profiles', ids[0])), false);
   pass('Actual authorization and deletion plans remove source visibility without a management bypass');
+  if (page) {
+    await managerFrame.locator('.dd-card').nth(1).waitFor({ state: 'detached', timeout: 30000 });
+    assert.equal(await managerFrame.locator('.dsh-wb-home-page [role="alert"]').count(), 0);
+    await page.screenshot({ path: join(evidence, 'revoked-source-hidden.png'), fullPage: true });
+    await browser.close(); browser = undefined; page = undefined; managerFrame = undefined;
+  }
   await supervisor.close(); supervisor = null;
   assert.equal(new HomeController(home).inspect().held, false); assert.equal(readdirSync(privateDir).length, 0);
   assert.deepEqual(protectedPaths.map(p => fingerprint(join(home,p))), before);
   pass('Normal Supervisor shutdown revokes all handoffs, releases run ownership and preserves root data');
-  writeFileSync(join(evidence, 'result.json'), JSON.stringify({ status: 'passed', node: process.version, proved, supervisor: 'production WorkbenchSupervisorRuntime', sources: 'two installed native DSH Hosts, synthetic business plugin', modelCalls: false }, null, 2));
+  supervisor = await createWorkbenchSupervisor(supervisorOptions);
+  const reopened = await fetch(supervisor.bootstrapUrl, { redirect: 'manual' }); assert.equal(reopened.status, 303);
+  cookie = reopened.headers.getSetCookie().map(v => v.split(';')[0]).join('; '); await reopened.body?.cancel();
+  const retained = (await query({ kind: 'board', boardId: 'home' })).board;
+  assert.equal(retained.placements.length, 1); assert.equal(retained.placements[0].ref.spaceId, ids[1]);
+  await supervisor.close(); supervisor = null;
+  assert.equal(new HomeController(home).inspect().held, false);
+  assert.deepEqual(protectedPaths.map(p => fingerprint(join(home, p))), before);
+  assert.deepEqual(browserErrors, []);
+  pass('A new user launch reads the persisted board with revoked source still hidden');
+  writeFileSync(join(evidence, 'result.json'), JSON.stringify({ status: 'passed', node: process.version, root, home, proved, browserErrors, supervisor: 'production WorkbenchSupervisorRuntime', sources: 'two installed native DSH Hosts, synthetic business plugin', modelCalls: false }, null, 2));
 } catch (error) {
   process.exitCode = 1; console.error(redacted(error.stack ?? error));
   if (supervisor) console.error('PUBLIC SUPERVISOR STATE', redacted(JSON.stringify(await supervisor.runtime.state())));
   writeFileSync(join(evidence, 'result.json'), JSON.stringify({ status: 'failed', proved, error: redacted(error.message ?? error) }, null, 2));
 } finally {
+  if (page) await page.screenshot({ path: join(evidence, 'failure.png'), fullPage: true }).catch(() => {});
+  if (browser) await browser.close();
   if (supervisor) try { await supervisor.close(); } catch (error) { console.error(redacted(error)); process.exitCode = 1; }
 }

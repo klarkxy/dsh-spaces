@@ -4,9 +4,11 @@ on:
     paths:
       - 'src/**/dashboard/**'
       - 'src/shared/dashboard*'
+      - 'src/shared/node/private-files*'
       - 'packages/dashboard/**'
       - 'scripts/*dashboard*'
       - 'tests/*dashboard*'
+      - 'tests/private-files*.test.ts'
       - 'tests/fixtures/dashboard-home*'
       - 'docs/dashboard/**'
       - '.github/workflows/dashboard-home.yml'

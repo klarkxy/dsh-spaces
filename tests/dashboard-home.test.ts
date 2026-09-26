@@ -15,11 +15,11 @@ function memory() {
   let failRemove = false, failPolicy = false, failLayout = false, barrier: (() => Promise<void>) | null = null;
   const key = (space: string, provider: string) => JSON.stringify([space, provider]);
   const store: HomeDashboardStore = {
-    readPolicies: async () => clone(policies), writePolicies: async value => { counts.policy++; if (failPolicy) throw new Error('private'); policies = clone(value); },
-    readLayout: async () => clone(layout), writeLayout: async value => { counts.layout++; if (failLayout) throw new Error('private'); layout = clone(value); },
+    readPolicies: async () => clone(policies), writePolicies: async (value, check) => { counts.policy++; if (failPolicy) throw new Error('private'); check(); policies = clone(value); },
+    readLayout: async () => clone(layout), writeLayout: async (value, check) => { counts.layout++; if (failLayout) throw new Error('private'); check(); layout = clone(value); },
     readProjection: async (space, provider) => { counts.read++; return clone(projections.get(key(space, provider)) ?? null); },
-    writeProjection: async value => { counts.projection++; await barrier?.(); projections.set(key(value.spaceId, value.request.providerId), clone(value)); },
-    deleteProjection: async (space, provider) => { counts.remove++; if (failRemove) throw new Error('unlink failed'); projections.delete(key(space, provider)); },
+    writeProjection: async (value, check) => { counts.projection++; await barrier?.(); check(); projections.set(key(value.spaceId, value.request.providerId), clone(value)); },
+    deleteProjection: async (space, provider, check) => { counts.remove++; if (failRemove) throw new Error('unlink failed'); check(); projections.delete(key(space, provider)); },
     close: async () => {},
   };
   return { store, counts, projections, corrupt: (value: unknown) => { policies = value; },

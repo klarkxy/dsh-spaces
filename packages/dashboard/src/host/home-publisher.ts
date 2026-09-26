@@ -1,5 +1,5 @@
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { PrivateFileError, readPrivateFile } from '../../../../src/shared/node/private-files.js';
 import type { PublishRequest, PublisherGrant } from '../../../../src/shared/dashboard.js';
 import { HomePublisher, PublicationChannel } from '../../../../src/core/domain/dashboard/provider.js';
 import { DashboardFault, publicError } from '../../../../src/core/domain/dashboard/errors.js';
@@ -8,27 +8,20 @@ import { canonicalJson, identifier, object, parsePublishAck, parseSelection, par
 export const DASHBOARD_BOOTSTRAP_ENV = 'DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE';
 export interface PublisherBootstrap { protocolVersion: 1; origin: string; runId: string; bearer: string }
 export function readPublisherBootstrap(path: string): PublisherBootstrap {
-  if (process.platform === 'win32') throw new DashboardFault('dashboard/unsupported-operation');
   if (!isAbsolute(path)) throw new DashboardFault('dashboard/invalid-input');
-  let parent = dirname(resolve(path));
-  for (;;) {
-    const s = lstatSync(parent); if (!s.isDirectory() || s.isSymbolicLink()) throw new DashboardFault('dashboard/forbidden');
-    const next = dirname(parent); if (next === parent) break; parent = next;
-  }
-  const directory = lstatSync(dirname(path));
-  if (directory.uid !== process.getuid!() || (directory.mode & 0o077) !== 0) throw new DashboardFault('dashboard/forbidden');
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  path = resolve(path);
   try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0 || stat.size > 8192) throw new DashboardFault('dashboard/forbidden');
-    const bytes = Buffer.alloc(8193); let total = 0;
-    for (;;) { const n = readSync(fd, bytes, total, bytes.length - total, null); if (!n) break; total += n; if (total > 8192) throw new DashboardFault('dashboard/limit-exceeded'); }
-    const row = object(parseStrictJson(bytes.subarray(0, total), 8192), ['protocolVersion', 'origin', 'runId', 'bearer']);
+    const bytes = readPrivateFile(dirname(path), path, 8192);
+    if (bytes === null) throw new DashboardFault('dashboard/forbidden');
+    const row = object(parseStrictJson(bytes, 8192), ['protocolVersion', 'origin', 'runId', 'bearer']);
     const origin = new URL(String(row.origin));
     if (row.protocolVersion !== 1 || origin.protocol !== 'http:' || origin.hostname !== '127.0.0.1' || !origin.port || origin.origin !== row.origin || origin.username || origin.password || !/^\d+$/.test(origin.port)) throw new DashboardFault('dashboard/forbidden');
     identifier(row.runId); if (typeof row.bearer !== 'string' || !/^[a-f0-9]{64}$/.test(row.bearer)) throw new DashboardFault('dashboard/invalid-input');
     return row as unknown as PublisherBootstrap;
-  } finally { closeSync(fd); }
+  } catch (error) {
+    if (error instanceof PrivateFileError) throw new DashboardFault(error.reason === 'limit-exceeded' ? 'dashboard/limit-exceeded' : 'dashboard/forbidden');
+    throw error;
+  }
 }
 interface Pending { provider: string | null; work(): Promise<unknown>; resolve(value: unknown): void; reject(error: unknown): void }
 const providerErrors = new Set(['invalid-input', 'stale-grant', 'stale-sequence', 'sequence-conflict', 'limit-exceeded', 'forbidden'].map(code => 'dashboard/' + code));
