@@ -484,11 +484,21 @@ export class WorkbenchController {
   };
 
   /** Presentation-only navigation: a stopped or foreign entry never becomes an implicit start. */
-  selectRunningSpace = (spaceId: string): boolean => {
-    const space = this.space(spaceId);
-    if (!space || space.status !== "running" || !space.hasWebApp || this.isManagerId(spaceId)) return false;
-    this.beginSpace(space, { startIfStopped: false, force: false });
-    return true;
+  selectRunningSpace = async (spaceId: string, isCurrent: () => boolean = () => true): Promise<boolean> => {
+    const cycle = this.cycle, selectionToken = this.views.selectToken;
+    try {
+      // The outer host has its own inventory. A normal selection reads current
+      // authority once instead of rejecting from this iframe's older poll.
+      const state = await this.api.state();
+      if (!this.stillOpen(cycle) || !isCurrent() || !this.views.isCurrentToken(selectionToken) || state.serviceEpoch !== this.ui.state?.serviceEpoch) return false;
+      const space = state.spaces.find(item => item.id === spaceId);
+      if (!space || space.status !== "running" || !space.hasWebApp || space.isHost || state.managerId === spaceId || state.availability === "unavailable") return false;
+      ++this.stateGeneration; // older in-flight polls cannot overwrite this selection's state
+      this.applyState(state);
+      if (!isCurrent() || !this.views.isCurrentToken(selectionToken)) return false;
+      this.beginSpace(space, { startIfStopped: false, force: false });
+      return true;
+    } catch { return false; }
   };
 
   enterCreated = (): void => {

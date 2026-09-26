@@ -49,6 +49,7 @@ export function defaultSpaceMeta(name: string): SpaceMeta {
 
 export function classifyProfile(name: string, hasWebApp: boolean): ProfileKind {
   if (name === "web") return "root";
+  if (name === "desktop") return "hidden";
   if (!hasWebApp) return "hidden";
   return "workbench";
 }

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
-import { WorkbenchPortalGrants, portalCsp } from "../src/adapters/node/workbench-portal.ts";
+import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
+import { Script } from "node:vm";
 import { parseSpaceHostAudience, parsePortalSnapshot, portalMessage } from "../src/shared/space-host.ts";
 import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
 import { HostShellController, type HostShellEnvironment } from "../packages/plugin/src/client/host-shell-state.ts";
@@ -99,6 +100,14 @@ test("live HTTP portal mint requires Node credentials and exact origin; grants n
   assert.equal(html.includes("test-host-bearer"), false);
   assert.equal(html.includes("test-session"), false);
   assert.match(html, /event\.source !== parent/);
+  const nativeUrl = origin + "/native/" + channel;
+  assert.equal((await fetch(nativeUrl)).status, 403);
+  assert.equal((await fetch(nativeUrl, { headers: { cookie: "operator=test-session", origin: parentOrigin } })).status, 403);
+  assert.equal((await fetch(nativeUrl, { headers: { cookie: "operator=test-session", "sec-fetch-site": "cross-site" } })).status, 403);
+  const native = await fetch(nativeUrl, { headers: { cookie: "operator=test-session" } });
+  assert.equal(native.status, 200);
+  assert.match(native.headers.get("content-security-policy")!, /frame-ancestors 'none'$/);
+  assert.match(await native.text(), /const native = true/);
   assert.equal((await fetch(origin + "/api/workbench/state", { method: "POST", headers: { cookie: "operator=test-session", origin: parentOrigin }, body: "{}" })).status, 403);
 });
 
@@ -119,6 +128,25 @@ function fixture(origin = parentOrigin, hasManager = true) {
   const event = (data: object) => ({ source: frame, origin: "http://127.0.0.1:3088", data: { source: "dsh-spaces-portal", channel, ...data } });
   return { controller, guide, calls, timers, messages, frame, event };
 }
+
+test("real Web portal selection failure is accepted immediately by the strict host envelope", async () => {
+  const f = fixture(); f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
+  f.controller.handleMessage(f.event({ type: 'state', snapshot: inventory })); f.controller.select('alpha');
+  const requestId = f.controller.getSnapshot().pending;
+  const sent: any[] = [];
+  const source = renderPortalPage(audience, 'http://127.0.0.1:3103').match(/<script>([\s\S]*)<\/script>/)![1];
+  new Script(source + `\nrejected(${requestId}, "alpha");`).runInNewContext({
+    parent: { postMessage: (value: unknown) => sent.push(value) }, window: { addEventListener() {} },
+    location: { origin: 'http://127.0.0.1:3088' }, document: {}, AbortController, AbortSignal,
+    fetch: () => new Promise(() => {}), setInterval: () => 1, clearInterval() {}, setTimeout: () => 1, clearTimeout() {},
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(Object.keys(sent[0]).sort().join(','), 'channel,requestId,source,type');
+  f.controller.handleMessage({ source: f.frame, origin: 'http://127.0.0.1:3088', data: sent[0] });
+  assert.equal(f.controller.getSnapshot().pending, null);
+  assert.equal(f.controller.getSnapshot().error, 'entry');
+  f.controller.stop();
+});
 
 test("presentation attaches once without management or top-level handoff; source/origin checks are exact", async () => {
   const f = fixture(); f.controller.start(); await tick();
@@ -184,7 +212,7 @@ test("explicit initialize discards the legacy navigation handoff and late respon
   assert.equal(g.controller.getSnapshot().portal, null); assert.deepEqual(g.calls, []);
 });
 
-test("manager surface validates existing parent generation and cannot navigate through a stopped entry", () => {
+test("manager surface validates existing parent generation and cannot navigate through a stopped entry", async () => {
   const replies: unknown[] = []; const parent = { postMessage: (data: unknown) => replies.push(data) };
   const view = { parentOrigin, spaceId: "spaces-hub", generation: 1, serviceEpoch: epoch, channel: "manager-channel" };
   let listener: ((e: MessageEvent) => void) | null = null; let sub = () => {};
@@ -203,8 +231,10 @@ test("manager surface validates existing parent generation and cannot navigate t
   assert.equal(parseSurfaceSelection({ ...event("alpha", 1), source: {} }, parent, view), null);
   assert.equal(parseSurfaceSelection({ ...event("alpha", 1), origin: "http://127.0.0.1:1" }, parent, view), null);
   listener!(event("beta", 1) as never);
+  await tick();
   assert.equal((replies[0] as { type: string }).type, "selection-failed");
   listener!(event("alpha", 2) as never);
+  await tick();
   assert.deepEqual(navigations, ["alpha"]);
   assert.equal((replies[1] as { type: string }).type, "selected");
   listener!(event(null, 1) as never); assert.equal(replies.length, 2);

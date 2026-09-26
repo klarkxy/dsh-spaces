@@ -256,6 +256,18 @@ async function handleRequest(
         "set-cookie": `${host.cookieName()}=${host.sessionCookie()}; Path=/; HttpOnly; SameSite=Strict` });
       res.end(); return;
     }
+    if (/^\/native\/[a-f0-9]{32}$/.test(url.pathname) && req.method === "GET") {
+      if (!sessionOk(host, req) || req.headers["sec-fetch-site"] === "cross-site" ||
+          headerOrigin(req) && headerOrigin(req) !== host.supervisorOrigin()) {
+        deny(res, 403, "workbench/forbidden", "An authenticated native presentation is required."); return;
+      }
+      const manager = host.managerOrigin();
+      if (!manager) { deny(res, 503, "workbench/unavailable", "The manager is not running."); return; }
+      const audience = { parentOrigin: host.supervisorOrigin(), channel: url.pathname.slice("/native/".length) };
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer",
+        "content-security-policy": portalCsp(audience, manager).replace(/frame-ancestors .+$/, "frame-ancestors 'none'") });
+      res.end(renderPortalPage(audience, manager, true)); return;
+    }
     if (url.pathname.startsWith("/portal/") && req.method === "GET") {
       const audience = portals(host).page(url.pathname.slice("/portal/".length));
       if (!sessionOk(host, req) || !audience) { deny(res, 401, "workbench/unauthorized", "Presentation entry is unavailable."); return; }
@@ -409,6 +421,7 @@ async function handleView(
   if (url.searchParams.get(CONTAINED_MANAGEMENT_PARAM) === "1" && new URL(result.location).origin === host.managerOrigin()) {
     const destination = new URL(result.location);
     destination.searchParams.set(CONTAINED_MANAGEMENT_PARAM, "1");
+    if (url.searchParams.get("dsh-spaces-native") === "1") destination.searchParams.set("dsh-spaces-native", "1");
     sendChildBootstrap(res, { ...result, location: destination.href });
   } else sendChildBootstrap(res, result);
 }

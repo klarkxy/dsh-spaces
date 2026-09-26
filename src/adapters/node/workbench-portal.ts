@@ -52,18 +52,27 @@ export function portalCsp(audience: SpaceHostAudience, managerOrigin: string): s
  * Keep the actual manager and its children in their existing origin chain. A parent selection
  * only opens an already-running view; management remains an explicit action inside the manager.
  */
-export function renderPortalPage(audience: SpaceHostAudience, managerOrigin: string): string {
+export function renderPortalPage(audience: SpaceHostAudience, managerOrigin: string, native = false): string {
   portalCsp(audience, managerOrigin);
   const config = JSON.stringify({ ...audience, managerOrigin }).replaceAll("<", "\\u003c");
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Spaces presentation</title>
 <style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}#status{font:14px system-ui;padding:20px}</style></head><body><div id="status" role="status">Spaces</div><script>
 "use strict";
 const audience = ${config};
+const native = ${JSON.stringify(native)};
+let lastNativeRequest = 0;
 let stopped = false, reading = false, preparing = false, timer, selectionTimer, readyTimer;
 let snapshot = null, managerView = null, frame = null, managerReady = false, viewReady = false, surfaceReady = false, pending = null;
 const lifetime = new AbortController();
 const send = (type, extra = {}) => {
-  if (!stopped) parent.postMessage({ source: "dsh-spaces-portal", channel: audience.channel, type, ...extra }, audience.parentOrigin);
+  if (stopped) return;
+  if (native) {
+    if (type === "failed") location.replace("#failed");
+    else if (type === "selected" || type === "selection-failed") {
+      const target = extra.spaceId ?? pending?.spaceId;
+      if (target && location.hash === "#select/" + extra.requestId + "/" + target) location.replace("#" + (type === "selected" ? "selected" : "rejected") + "/" + extra.requestId + "/" + target);
+    }
+  } else parent.postMessage({ source: "dsh-spaces-portal", channel: audience.channel, type, ...extra }, audience.parentOrigin);
 };
 const fail = () => { send("failed"); stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove(); };
 async function api(method, payload) {
@@ -100,11 +109,12 @@ async function refresh() {
     if (snapshot && snapshot.serviceEpoch !== state.serviceEpoch) throw new Error("Service changed");
     if (managerView && !state.spaces.some(row => row.id === managerView.spaceId && row.generation === managerView.generation && row.status === "running")) throw new Error("Manager stopped");
     snapshot = { serviceEpoch: state.serviceEpoch, managerId: state.managerId,
-      spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation })) };
+      spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) };
     send("state", { snapshot });
+    if (native) nativeSelection();
   } catch { fail(); } finally { reading = false; }
 }
-const rejected = requestId => send("selection-failed", { requestId });
+const rejected = (requestId, spaceId = pending?.spaceId) => send("selection-failed", { requestId, ...(native ? { spaceId } : {}) });
 function forwardSelection() {
   if (!managerReady || !frame || !pending || stopped) return;
   const request = pending;
@@ -112,7 +122,7 @@ function forwardSelection() {
     serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
     channel: managerView.channel, target: request.spaceId }, audience.managerOrigin);
   clearTimeout(selectionTimer);
-  selectionTimer = setTimeout(() => { if (pending === request) { pending = null; rejected(request.requestId); } }, 35000);
+  selectionTimer = setTimeout(() => { if (pending === request) { pending = null; rejected(request.requestId, request.spaceId); } }, 35000);
 }
 async function ensureManager() {
   if (frame || preparing || stopped) return;
@@ -131,7 +141,7 @@ async function ensureManager() {
     frame.title = "Spaces workbench";
     frame.referrerPolicy = "no-referrer";
     frame.allow = "clipboard-write";
-    frame.src = view.entryOrigin + view.entryPath + "?epoch=" + encodeURIComponent(view.serviceEpoch) + "&dsh-spaces-contained=1";
+    frame.src = view.entryOrigin + view.entryPath + "?epoch=" + encodeURIComponent(view.serviceEpoch) + "&dsh-spaces-contained=1" + (native ? "&dsh-spaces-native=1" : "");
     frame.addEventListener("load", () => {
       if (stopped) return;
       frame.contentWindow.postMessage({ source: "dsh-spaces-view-parent", type: "ping", serviceEpoch: view.serviceEpoch,
@@ -161,7 +171,7 @@ window.addEventListener("message", event => {
     }
     return;
   }
-  if (event.source !== parent || event.origin !== audience.parentOrigin ||
+  if (native || event.source !== parent || event.origin !== audience.parentOrigin ||
       Object.keys(message).sort().join(",") !== "channel,requestId,source,spaceId,type" ||
       message.source !== "dsh-spaces-portal-parent" || message.channel !== audience.channel || message.type !== "select" ||
       !Number.isSafeInteger(message.requestId) || message.requestId < 1 ||
@@ -171,6 +181,18 @@ window.addEventListener("message", event => {
   pending = { requestId: message.requestId, spaceId: message.spaceId };
   if (managerReady) forwardSelection(); else void ensureManager();
 });
+function nativeSelection() {
+  if (!native || stopped || !snapshot) return;
+  const match = location.hash.split("/");
+  if (match.length !== 3 || match[0] !== "#select" || !/^[1-9][0-9]{0,9}$/.test(match[1]) ||
+      !/^(@dashboard|@settings|[a-z0-9][a-z0-9-]{0,38})$/.test(match[2]) || Number(match[1]) <= lastNativeRequest) return;
+  const requestId = Number(match[1]), target = match[2]; lastNativeRequest = requestId;
+  const allowed = target === "@dashboard" || target === "@settings" || snapshot.spaces.some(row => row.id === target && row.id !== snapshot.managerId && row.status === "running");
+  if (!allowed) { send("selection-failed", {requestId, spaceId: target}); return; }
+  pending = {requestId, spaceId: target};
+  if (managerReady) forwardSelection(); else void ensureManager();
+}
+if (native) window.addEventListener("hashchange", nativeSelection);
 window.addEventListener("pagehide", () => { stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
 void refresh();
 timer = setInterval(() => { void refresh(); }, 1500);

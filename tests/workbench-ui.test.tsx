@@ -489,6 +489,17 @@ function ready(ctrl: WorkbenchController): string {
   return renderToStaticMarkup(React.createElement(WorkbenchView, { ui: ctrl.getSnapshot(), controller: ctrl }));
 }
 
+test("native settings stays a page while creating a space and after cancelling the dialog", async () => {
+  const ctrl = controller(); ctrl.start(); await flush(); ctrl.openSettings();
+  const renderPage = () => renderToStaticMarkup(React.createElement(WorkbenchView, {
+    ui: ctrl.getSnapshot(), controller: ctrl, contained: true, nativeSurface: true, systemPage: "settings",
+  }));
+  assert.match(renderPage(), /class="dsh-wb-settings-page"/);
+  ctrl.openCreate(); assert.match(renderPage(), /class="dsh-wb-settings-page"/);
+  ctrl.closeOverlay(); assert.match(renderPage(), /class="dsh-wb-settings-page"/);
+  assert.doesNotMatch(renderPage(), /data-settings-close/);
+});
+
 test("authorized view src is origin+entryPath and rejects remote or token-like paths", () => {
   const view = viewOf("alpha");
   assert.equal(authorizedViewSrc(view), viewSrc("alpha"));
@@ -1017,6 +1028,47 @@ test("create validates name and does not submit reserved ids", async () => {
   });
   assert.equal(ctrl.getSnapshot().selected, "home");
   assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "created");
+});
+
+test("host selection reads current authority once when its local inventory is stale", async () => {
+  let current = state({ spaces: [manager] }), reads = 0;
+  const api = fakeApi({ state: async () => { reads++; return current; } });
+  const ctrl = controller(api); await ctrl.poll();
+  current = state({ spaces: [manager, alpha] });
+  assert.equal(await ctrl.selectRunningSpace('alpha'), true); await flush();
+  assert.equal(reads, 2);
+  assert.equal(ctrl.getSnapshot().pendingId, 'alpha');
+  assert.equal(api.calls.filter(call => call.method === 'submit').length, 0);
+  assert.equal(api.calls.filter(call => call.method === 'view').length, 1);
+});
+
+test("host selection of a now-stopped space never starts it or loads a view", async () => {
+  let current = state({ spaces: [manager, alpha] });
+  const api = fakeApi({ state: async () => current }); const ctrl = controller(api); await ctrl.poll();
+  current = state({ spaces: [manager, space({ id: 'alpha', status: 'stopped' })] });
+  assert.equal(await ctrl.selectRunningSpace('alpha'), false); await flush();
+  assert.equal(api.calls.some(call => call.method === 'submit' || call.method === 'view'), false);
+  assert.equal(ctrl.getSnapshot().pendingId, null);
+});
+
+test("late host selection state cannot navigate after a newer choice", async () => {
+  const pending = deferred<WorkbenchState>(); const api = fakeApi(); const ctrl = controller(api); await ctrl.poll();
+  api.state = () => pending.promise; let current = true;
+  const selection = ctrl.selectRunningSpace('alpha', () => current);
+  current = false; ctrl.selectHome(); pending.resolve(state());
+  assert.equal(await selection, false); await flush();
+  assert.equal(ctrl.getSnapshot().selected, 'home');
+  assert.equal(api.calls.some(call => call.method === 'view' || call.method === 'submit'), false);
+});
+
+test("local Home choice invalidates a pending host selection even when its outer request is current", async () => {
+  const pending = deferred<WorkbenchState>(); const api = fakeApi(); const ctrl = controller(api); await ctrl.poll();
+  api.state = () => pending.promise;
+  const selection = ctrl.selectRunningSpace('alpha', () => true);
+  ctrl.selectHome(); pending.resolve(state());
+  assert.equal(await selection, false); await flush();
+  assert.equal(ctrl.getSnapshot().selected, 'home'); assert.equal(ctrl.getSnapshot().pendingId, null);
+  assert.equal(api.calls.some(call => call.method === 'view' || call.method === 'submit'), false);
 });
 
 test("unmanaged spaces cannot be started", async () => {

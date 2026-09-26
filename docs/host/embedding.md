@@ -1,12 +1,12 @@
 # Spaces 宿主嵌入合同 / Host embedding contract
 
-状态：2026-09-25 新定位的首批实现。基于 Home 看板 PR #16；不是已发布版本或全宿主兼容认证。验收及剩余范围见 [实施记录](implementation.md)。本页取代旧文档中“普通宿主只能跳转到管理工作台”的展示限制，不改变管理权限和故障政策。
+状态：2026-09-26 增加官方 Desktop 隔离实验，见 [原生实验记录](../../tasks/native-desktop-acceptance-2026-09-26.md)。2026-09-25 的 Web 首批实现继续保留。基于 Home 看板 PR #16；不是已发布版本或全宿主兼容认证。验收及剩余范围见 [实施记录](implementation.md)。本页取代旧文档中“普通宿主只能跳转到管理工作台”的展示限制，不改变管理权限和故障政策。
 
 ## 产品边界
 
 DSH Spaces 是兼容宿主内的多空间插件。安装在官方 Web、官方 Desktop、第三方或自有应用中的产品目标相同：左侧空间栏、右侧选定 WebUI、随时回到当前应用。自有 Electron 客户端是预装插件和运行环境的发行方式，不是核心能力的唯一入口。
 
-宿主必须提供实际可用的布局和认证嵌入能力。“不依赖品牌”不表示任意应用无需适配，也不意味着模拟官方 Desktop 标记可获得权限。首批内置适配器限于 `http://127.0.0.1` 同站 iframe；`dsh-app://app`、远程 HTTPS、localhost 别名和独立 Electron 原生视图需要单独适配与验收。缺失条件明确显示，初始化前拒绝，不关闭浏览器安全机制。
+宿主必须提供实际可用的布局和认证嵌入能力。“不依赖品牌”不表示任意应用无需适配，也不意味着模拟官方 Desktop 标记可获得权限。Web 适配器限于 `http://127.0.0.1` 同站 iframe。官方 Desktop 实验使用其 `dsh-app://app` 和实际 browser lease 桥，增加受认证的 native 展示页；具体已验版本与限制见原生实验记录。远程 HTTPS、localhost 别名和其它原生宿主仍需要单独适配与验收。缺失条件明确显示，初始化前拒绝，不关闭浏览器安全机制。
 
 | 对象 | 责任 | 非责任 |
 | --- | --- | --- |
@@ -26,6 +26,8 @@ DSH Spaces 是兼容宿主内的多空间插件。安装在官方 Web、官方 D
 
 Home 聚合看板仍由管理工作台提供，保留 PR #16 的默认首页、发布授权和显式聊天入口。外层宿主默认显示当前应用；初始化成功在当前界面生命周期内进入 Home。原生宿主若在安装期间重载插件，会回到当前应用，服务就绪后由用户点击「Spaces 首页」打开工作台；不持久化或重放初始化请求。已存在的服务只连接，不在安装入口的页面加载中创建管理服务。
 
+官方 Desktop 实验的外层默认显示当前应用，首次显式初始化后进入设置系统空间。看板和设置固定在可滚动的普通空间列表之外，看板不再占用官方应用的默认主页；两者共用既有管理服务，不是可删除、可启停的普通 profile。Web 首批实现的默认 Home 行为不由本实验改变。
+
 Supervisor 的监听器可能先于管理器就绪。Guide 只读观察该次启动完成后才领取一次性入口；状态读取失败、运行代次变化、服务不可用或管理器崩溃立即结束，不重试、不重启。
 
 ## 认证与视图来源链
@@ -43,7 +45,7 @@ Supervisor 签发有界、单次、60 秒 entry ticket，绑定父来源和随�
             -> 普通空间来源的 WebUI
 ```
 
-这条链保留既有 view-bridge 的精确 parentOrigin，避免把受保护的子页面直接搬到任意父来源。展示页仅向外发送裁剪的空间目录、切换结果和错误状态。外层只可选择目录中运行中的空间或 Home；没有 submit、preview、start、stop、安装、任意 URL 或脚本转发。
+这条链保留既有 view-bridge 的精确 parentOrigin，避免把受保护的子页面直接搬到任意父来源。展示页仅向外发送裁剪的空间目录、切换结果和错误状态。外层只可选择目录中运行中的空间或 Home（官方 Desktop 实验另有固定的看板/设置系统目标）；没有 submit、preview、start、stop、安装、任意 URL 或脚本转发。
 
 用户需要启动尚未运行的空间时，进入真正的空间管理界面执行正常操作。所有写入仍由 manager 经现有 epoch/revision、计划、单写者规则处理。按钮可见不等于管理权限。
 
@@ -57,7 +59,7 @@ Display role and management authority are independent. Only the actual manager e
 
 A contained manager preserves the existing origin chain to its children and suppresses a duplicate space rail. The Home dashboard and blueprint editor remain the same implementation. A blueprint neither installs the outer shell nor selects iframe versus a native view.
 
-The bundled transport currently requires same-site HTTP loopback cookies. Official Desktop custom schemes, remote deployments and arbitrary third-party layouts are not certified by this change. A new adapter must prove authentication, embedding policies, layout cleanup, exact-source messaging and runtime ownership without broadening the core management API. Lack of an adapter must be visible before initialization writes.
+The Web transport requires same-site HTTP loopback cookies. The official Desktop experiment uses its authenticated native guest carrier and two fixed system destinations; its tested version and limits are recorded separately. Remote deployments and arbitrary third-party layouts remain uncertified. A new adapter must prove authentication, embedding policies, layout cleanup, exact-source messaging and runtime ownership without broadening the core management API. Lack of an adapter must be visible before initialization writes.
 
 ## 验收门槛
 

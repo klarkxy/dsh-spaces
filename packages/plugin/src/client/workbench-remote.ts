@@ -149,6 +149,7 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
 
 export function createWorkbenchGuideRemote(connection: WorkbenchConnection): WorkbenchGuideApi {
   return {
+    presentationSnapshot: () => callRemote<import("../../../../src/shared/space-host").PortalSnapshot>(connection, "workbenchGuide/presentationSnapshot", {}),
     role: () => callRemote<WorkbenchGuideRole>(connection, "workbenchGuide/role", {}),
     bootstrap: () => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/bootstrap", {}),
     returnTarget: () => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/returnTarget", {}),

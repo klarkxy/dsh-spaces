@@ -4,8 +4,19 @@ export const PORTAL_PARENT_SOURCE = "dsh-spaces-portal-parent";
 export const CONTAINED_MANAGEMENT_PARAM = "dsh-spaces-contained";
 export const PORTAL_CHANNEL_RE = /^[a-f0-9]{32}$/;
 export const PORTAL_SPACE_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
+export type NativeSpaceTarget = "@dashboard" | "@settings" | string;
+export function isNativeSpaceTarget(value: unknown): value is NativeSpaceTarget {
+  return value === "@dashboard" || value === "@settings" || typeof value === "string" && PORTAL_SPACE_RE.test(value);
+}
+export interface NativeSpaceNavigation { kind: "select" | "selected" | "rejected"; requestId: number; target: NativeSpaceTarget }
+/** A fragment carries presentation only. The document still needs its operator session. */
+export function parseNativeSpaceHash(hash: string): NativeSpaceNavigation | null {
+  const match = /^#(select|selected|rejected)\/([1-9][0-9]{0,9})\/(@dashboard|@settings|[a-z0-9][a-z0-9-]{0,38})$/.exec(hash);
+  if (!match) return null;
+  return { kind: match[1] as NativeSpaceNavigation["kind"], requestId: Number(match[2]), target: match[3] };
+}
 export interface SpaceHostAudience { parentOrigin: string; channel: string }
-export interface PortalSpace { id: string; displayName: string; status: string; generation: number }
+export interface PortalSpace { id: string; displayName: string; status: string; generation: number; icon?: string }
 export interface PortalSnapshot { serviceEpoch: string; managerId: string | null; spaces: PortalSpace[] }
 
 /** The bundled iframe transport requires same-site loopback cookies. Native/remote transports need an adapter. */
@@ -35,13 +46,16 @@ export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
   for (const item of row.spaces) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const space = item as Record<string, unknown>;
-    if (Object.keys(space).sort().join(",") !== "displayName,generation,id,status" ||
+    if (!["displayName,generation,id,status", "displayName,generation,icon,id,status"].includes(Object.keys(space).sort().join(",")) ||
+        (space.icon !== undefined && (typeof space.icon !== "string" || space.icon.length > 240_000 ||
+          !/^(?:|whale|hash|code|chat|lab|book|data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2})$/.test(space.icon))) ||
         typeof space.id !== "string" || !PORTAL_SPACE_RE.test(space.id) || ids.has(space.id) ||
         typeof space.displayName !== "string" || space.displayName.length > 200 ||
         typeof space.status !== "string" || !["running", "starting", "stopping", "stopped", "crashed", "unknown"].includes(space.status) ||
         !Number.isSafeInteger(space.generation) || (space.generation as number) < 0) return null;
     ids.add(space.id);
-    spaces.push({ id: space.id, displayName: space.displayName, status: space.status, generation: space.generation as number });
+    spaces.push({ id: space.id, displayName: space.displayName, status: space.status, generation: space.generation as number,
+      ...(space.icon === undefined ? {} : { icon: space.icon as string }) });
   }
   return { serviceEpoch: row.serviceEpoch, managerId: row.managerId as string | null, spaces };
 }

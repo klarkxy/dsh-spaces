@@ -25,6 +25,12 @@ export class WorkbenchGuideHost extends TypertRemoteService {
     return this.runtime.guideRole();
   }
 
+  @Remote("presentationSnapshot")
+  async presentationSnapshot(): Promise<import("../../../../src/shared/space-host").PortalSnapshot> {
+    try { return await this.runtime.presentationSnapshot(); }
+    catch { throw new RemoteError("workbench/unavailable", "The space directory is unavailable.", {}); }
+  }
+
   @Remote("bootstrap")
   async bootstrap(): Promise<WorkbenchBootstrapResult> {
     try {

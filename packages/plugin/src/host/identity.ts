@@ -55,6 +55,10 @@ export function resolveHostIdentity(input: HostIdentityInput = {}): HostIdentity
   if (!sameContainedPath(expected, fromBase, home)) {
     return unconfirmed(home, IDENTITY_UNCONFIRMED);
   }
+  // Native Desktop supplies its actual profile directory as argv[3]. Both
+  // the loader root and that invocation must agree with the selected Home.
+  if (invoked === "desktop" && argv[1]?.includes("dsh-desktop-host") &&
+      !sameContainedPath(expected, argv[3] ?? "", home)) return unconfirmed(home, IDENTITY_UNCONFIRMED);
 
   let controller: HomeController;
   try {

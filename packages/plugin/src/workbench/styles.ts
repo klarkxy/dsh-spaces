@@ -1,6 +1,8 @@
 /** Self-contained workbench styles. No desktop Tailwind. */
 
 export const WORKBENCH_CSS = `
+.dsh-wb-settings-page{position:absolute;inset:0;z-index:4;background:var(--wb-panel);display:flex;min-width:0;min-height:0}
+.dsh-wb-settings-page>.dsh-wb-settings{width:100%;height:100%;max-width:none;max-height:none;border:0;border-radius:0;box-shadow:none}
 .dsh-workbench[data-theme="light"] {
   --wb-rail: #eceef2;
   --wb-rail-border: rgba(0,0,0,0.08);
@@ -361,6 +363,8 @@ export const WORKBENCH_CSS = `
 .dsh-wb-job[data-status="succeeded"] { border-color: var(--wb-ok); }
 .dsh-wb-job[data-status="succeeded"][data-phase="handoff-pending"] { border-color: var(--wb-warn); }
 .dsh-wb-glyphs { display: flex; flex-wrap: wrap; gap: 8px; }
+.dsh-wb-avatars { display: grid; grid-template-columns: repeat(auto-fit, 48px); gap: 10px; max-width: 280px; }
+
 .dsh-wb-glyphs button[aria-pressed="true"] { outline: 2px solid var(--wb-accent); }
 .dsh-wb-icon-preview {
   width: 48px;
