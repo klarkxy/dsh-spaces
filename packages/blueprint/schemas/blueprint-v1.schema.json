@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dsh-blueprint-v1",
+  "title": "DSH Spaces blueprint v1",
+  "type": "object",
+  "additionalProperties": false,
+  "$comment": "This schema describes root fields and JSON shapes only. Duplicate keys, UTF-8/BOM/surrogates, binary64/safe-integer/-0 rules, nesting limits, RFC 6901 pointer existence, official Cordis patch semantics, input binding, SemVer ranges, and relation diagnosis require the runtime parser. A document that matches this schema is not execution-safe and is not authorization to install or run plugins.",
+  "required": ["kind", "formatVersion", "metadata", "packages", "profile"],
+  "properties": {
+    "kind": { "const": "dsh-blueprint" },
+    "formatVersion": { "const": 1 },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "requirements": { "$ref": "#/$defs/requirements" },
+    "packages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/package" }
+    },
+    "profile": { "$ref": "#/$defs/profile" },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/input" }
+    },
+    "bindings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/binding" }
+    },
+    "relations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relation" }
+    },
+    "testedWith": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/testedWith" }
+    },
+    "extensions": {
+      "type": "object",
+      "$comment": "Ignored for install/execute/permission/write. Re-save must preserve JSON values. Not a capability channel."
+    }
+  },
+  "$defs": {
+    "json": true,
+    "semver": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Exact npm SemVer; runtime uses the npm semver parser, not this pattern alone."
+    },
+    "semverRange": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "npm SemVer range; prereleases follow default npm rules. Runtime validates with npm semver."
+    },
+    "npmPackageName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 214
+    },
+    "httpsUrl": {
+      "type": "string",
+      "minLength": 8
+    },
+    "rfc3339": {
+      "type": "string",
+      "minLength": 20,
+      "$comment": "RFC 3339 with timezone. Runtime parses strictly."
+    },
+    "os": { "enum": ["win32", "darwin", "linux"] },
+    "arch": { "enum": ["x64", "arm64"] },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "$ref": "#/$defs/semver" },
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "author": { "type": "string", "minLength": 1 },
+        "homepage": { "$ref": "#/$defs/httpsUrl" },
+        "license": { "type": "string", "minLength": 1 }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dsh": { "$ref": "#/$defs/semverRange" },
+        "spaces": { "$ref": "#/$defs/semverRange" },
+        "node": { "$ref": "#/$defs/semverRange" },
+        "os": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/os" }
+        },
+        "arch": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/arch" }
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "source"],
+      "properties": {
+        "name": { "$ref": "#/$defs/npmPackageName" },
+        "version": { "$ref": "#/$defs/semver" },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type"],
+              "properties": { "type": { "const": "npm" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "repository", "commit"],
+              "properties": {
+                "type": { "const": "github" },
+                "repository": { "type": "string", "minLength": 3 },
+                "commit": { "type": "string", "minLength": 40, "maxLength": 40 }
+              }
+            }
+          ]
+        },
+        "integrity": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "sha512-<standard Base64> of the npm tarball only. GitHub sources must omit this. Runtime checks decoded length 64."
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "bundles"],
+      "properties": {
+        "base": { "const": "web" },
+        "bundles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/npmPackageName" }
+        },
+        "patch": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/patchItem" },
+          "$comment": "JSON subset of official applyEntryPatches. Overlay id, root insert, and targeted group insert {id,insert} are valid. Repeated overlay ids are ordered operations. Schema cannot execute !!js, resolve inherited group identity, or prove apply success."
+        },
+        "settings": {
+          "type": "object",
+          "$comment": "Namespace -> JSON value. llm-pi-ai and agent-default-model are forbidden at runtime."
+        }
+      }
+    },
+    "patchItem": {
+      "oneOf": [
+        { "$ref": "#/$defs/patchOverlay" },
+        { "$ref": "#/$defs/patchInsert" }
+      ]
+    },
+    "patchInsert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["insert"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "insert": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/patchNewEntry" }
+        }
+      },
+      "$comment": "Closed keys id/insert. Omit id for root insert. id names an existing group for targeted insert; runtime composition must resolve inherited groups."
+    },
+    "patchOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "config": { "$ref": "#/$defs/json" },
+        "group": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] },
+        "disabled": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] },
+        "inject": { "$ref": "#/$defs/inject" },
+        "intercept": { "oneOf": [{ "type": "object" }, { "type": "null" }] },
+        "isolate": { "oneOf": [{ "type": "object" }, { "type": "null" }] }
+      },
+      "$comment": "name is a match guard, not a module replacement. config is whole replacement; group config arrays are child entries at runtime, not arbitrary JSON."
+    },
+    "patchNewEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "config": { "$ref": "#/$defs/json" },
+        "group": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] },
+        "disabled": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] },
+        "inject": { "$ref": "#/$defs/inject" },
+        "intercept": { "oneOf": [{ "type": "object" }, { "type": "null" }] },
+        "isolate": { "oneOf": [{ "type": "object" }, { "type": "null" }] }
+      }
+    },
+    "inject": {
+      "oneOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "object" },
+        { "type": "null" }
+      ]
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "required"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "type": { "enum": ["string", "number", "boolean", "directory", "model"] },
+        "label": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "description": { "type": "string", "minLength": 1 },
+        "default": {
+          "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "boolean" }],
+          "$comment": "directory and model must omit default. Runtime checks type match."
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "target"],
+      "properties": {
+        "input": { "type": "string", "minLength": 1 },
+        "target": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "pointer"],
+              "properties": {
+                "kind": { "const": "value" },
+                "pointer": { "type": "string", "minLength": 1 }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind"],
+              "properties": { "kind": { "const": "default-model" } }
+            }
+          ]
+        }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "from", "to", "reason"],
+      "properties": {
+        "type": { "enum": ["requires", "conflicts", "integrates", "after"] },
+        "from": { "$ref": "#/$defs/npmPackageName" },
+        "to": { "$ref": "#/$defs/npmPackageName" },
+        "reason": { "type": "string", "minLength": 1 },
+        "fromVersion": { "$ref": "#/$defs/semverRange" },
+        "toVersion": { "$ref": "#/$defs/semverRange" }
+      }
+    },
+    "testedWith": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dsh", "spaces", "node", "os", "arch", "checkedAt", "checks"],
+      "properties": {
+        "dsh": { "$ref": "#/$defs/semver" },
+        "spaces": { "$ref": "#/$defs/semver" },
+        "node": { "$ref": "#/$defs/semver" },
+        "os": { "$ref": "#/$defs/os" },
+        "arch": { "$ref": "#/$defs/arch" },
+        "checkedAt": { "$ref": "#/$defs/rfc3339" },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["install", "compose", "start", "interaction"] }
+        },
+        "evidence": { "$ref": "#/$defs/httpsUrl" }
+      }
+    }
+  }
+}

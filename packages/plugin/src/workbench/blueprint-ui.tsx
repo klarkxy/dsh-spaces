@@ -1,11 +1,10 @@
 import React, { Fragment, type ChangeEvent, type ReactElement } from "react";
 import type {
-  Blueprint,
   BlueprintDiagnostic,
   BlueprintInput,
   BlueprintInputType,
-  BlueprintPackage,
 } from "../../../../src/shared/blueprint";
+import { blueprintRecipe, type BlueprintRecipe } from "@klarkxy/dsh-blueprint/document";
 import type {
   BlueprintPreviewInput,
   WorkbenchBlueprintApplyOutcome,
@@ -77,15 +76,11 @@ function UseBlueprintPanel({
 }): ReactElement {
   const session = controller.blueprint;
   const writable = controller.canMutate();
-  const blueprint = ui.inspect?.blueprint ?? null;
+  const blueprint = ui.inspect ? blueprintRecipe(ui.inspect.blueprint) : null;
   const applying = ui.applyStatus === "submitting" || ui.applyStatus === "running";
   const submittedCurrent = previewPlanMatchesApply(ui);
   const hideCreate = submittedCurrent && (ui.applyStatus === "succeeded" || ui.applyStatus === "failed");
-  const showApplyChrome =
-    applying ||
-    submittedCurrent ||
-    (!ui.preview &&
-      (ui.applyStatus === "succeeded" || ui.applyStatus === "failed" || Boolean(ui.applyOutcome || ui.applyError)));
+  const showApplyChrome = applying || submittedCurrent;
   return (
     <div className="dsh-wb-form wide">
       <label className="dsh-wb-field">
@@ -257,11 +252,20 @@ function GenerateBlueprintPanel({
       ) : null}
       {source ? (
         <>
+          <label className="dsh-wb-field">
+            {t(locale, "blueprints.exportContents")}
+            <select value={ui.formatVersion} aria-label={t(locale, "blueprints.exportContents")} onChange={(event) => session.setFormatVersion(event.target.value === "1" ? 1 : 2)}>
+              <option value="2">{t(locale, "blueprints.pluginCombination")}</option>
+              <option value="1">{t(locale, "blueprints.withPresets")}</option>
+            </select>
+          </label>
+          <p className="dsh-wb-muted">{t(locale, ui.formatVersion === 2 ? "blueprints.combinationHint" : "blueprints.presetsHint")}</p>
           <p className="dsh-wb-muted">{t(locale, "blueprints.selectionNote")}</p>
-          <p className="dsh-wb-muted">{t(locale, "blueprints.provenance")}</p>
+          {ui.formatVersion === 1 ? <p className="dsh-wb-muted">{t(locale, "blueprints.provenance")}</p> : null}
           <h3 className="dsh-wb-title">{t(locale, "blueprints.packages")}</h3>
           {source.packages.map((item) => {
-            const disabled = !item.eligibility.available;
+            const builtinInV1 = ui.formatVersion === 1 && item.source === "builtin";
+            const disabled = !item.eligibility.available || builtinInV1;
             return (
               <label key={item.name} className="dsh-wb-check">
                 <input
@@ -276,7 +280,7 @@ function GenerateBlueprintPanel({
                   {item.lifecycleScripts.length > 0
                     ? ` · ${t(locale, "blueprints.lifecycle")}: ${item.lifecycleScripts.join(", ")}`
                     : ""}
-                  {disabled ? ` · ${item.eligibility.reason ?? t(locale, "blueprints.eligibleNo")}` : ""}
+                  {disabled ? ` · ${builtinInV1 ? t(locale, "blueprints.builtinV2Only") : item.eligibility.reason ?? t(locale, "blueprints.eligibleNo")}` : ""}
                 </span>
               </label>
             );
@@ -290,6 +294,7 @@ function GenerateBlueprintPanel({
               </li>
             ))}
           </ol>
+          {ui.formatVersion === 1 ? <>
           <h3 className="dsh-wb-title">{t(locale, "blueprints.patch")}</h3>
           <label className="dsh-wb-check">
             <input
@@ -344,14 +349,15 @@ function GenerateBlueprintPanel({
             <summary>{t(locale, "blueprints.advancedPointer")}</summary>
             <BindingEditor locale={locale} row={ui.advanced} onChange={session.setAdvanced} advanced />
           </details>
+          </> : null}
           <label className="dsh-wb-field">
             {t(locale, "create.name")}
             <input value={ui.metaName} onChange={(event) => session.setMetaName(event.target.value)} />
           </label>
-          <label className="dsh-wb-field">
+          {ui.formatVersion === 1 ? <label className="dsh-wb-field">
             {t(locale, "blueprints.version")}
             <input value={ui.metaVersion} onChange={(event) => session.setMetaVersion(event.target.value)} />
-          </label>
+          </label> : null}
           <label className="dsh-wb-field">
             {t(locale, "blueprints.description")}
             <textarea rows={3} value={ui.metaDescription} onChange={(event) => session.setMetaDescription(event.target.value)} />
@@ -396,7 +402,9 @@ function GeneratedOutput({
       <h3 className="dsh-wb-title">{t(locale, "blueprints.output")}</h3>
       <DiagnosticList locale={locale} diagnostics={generate.diagnostics} />
       <pre className="dsh-wb-pre">{generate.json}</pre>
-      <p className="dsh-wb-muted">{generate.shareCode}</p>
+      <p className="dsh-wb-muted" data-blueprint-share-code="true" style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap", minWidth: 0 }}>
+        {generate.shareCode}
+      </p>
       <div className="dsh-wb-actions">
         <button type="button" className="dsh-wb-btn" onClick={() => session.copyShareCode()}>
           {t(locale, "blueprints.copyShare")}
@@ -511,7 +519,7 @@ function InspectedBlueprint({
   diagnostics,
 }: {
   locale: WorkbenchLocale;
-  blueprint: Blueprint;
+  blueprint: BlueprintRecipe;
   diagnostics: BlueprintDiagnostic[];
 }): ReactElement {
   const bundled = new Set(blueprint.profile.bundles);
@@ -521,8 +529,12 @@ function InspectedBlueprint({
       <dl className="dsh-wb-dl">
         <dt>{t(locale, "create.name")}</dt>
         <dd>{blueprint.metadata.name}</dd>
-        <dt>{t(locale, "blueprints.version")}</dt>
-        <dd>{blueprint.metadata.version}</dd>
+        <dt>{t(locale, "blueprints.exportContents")}</dt>
+        <dd>{t(locale, blueprint.formatVersion === 2 ? "blueprints.pluginCombination" : "blueprints.withPresets")}</dd>
+        {blueprint.metadata.version ? <>
+          <dt>{t(locale, "blueprints.version")}</dt>
+          <dd>{blueprint.metadata.version}</dd>
+        </> : null}
         {blueprint.metadata.description ? (
           <>
             <dt>{t(locale, "blueprints.description")}</dt>
@@ -565,13 +577,13 @@ function InspectedBlueprint({
           ))}
         </ol>
       )}
-      <details>
+      {blueprint.formatVersion === 1 ? <details>
         <summary>
           {t(locale, "blueprints.presets")} ({blueprint.profile.patch.length}) / {t(locale, "blueprints.settings")} (
           {Object.keys(blueprint.profile.settings).length})
         </summary>
         <pre className="dsh-wb-pre">{JSON.stringify({ patch: blueprint.profile.patch, settings: blueprint.profile.settings }, null, 2)}</pre>
-      </details>
+      </details> : null}
       {blueprint.requirements ? (
         <>
           <h3 className="dsh-wb-title">{t(locale, "blueprints.requirements")}</h3>
@@ -630,7 +642,7 @@ function PackageList({
   bundled,
 }: {
   locale: WorkbenchLocale;
-  packages: BlueprintPackage[];
+  packages: BlueprintRecipe["packages"];
   bundled: Set<string>;
 }): ReactElement {
   if (packages.length === 0) return <p className="dsh-wb-muted">{t(locale, "plan.none")}</p>;
@@ -640,7 +652,7 @@ function PackageList({
         <li key={item.name}>
           {item.name} {item.version} · {item.source.type}
           {item.source.type === "github" ? ` ${item.source.repository}@${item.source.commit}` : ""}
-          {item.integrity ? "" : ` · ${t(locale, "blueprints.integrityMissing")}`} · {t(locale, "blueprints.selected")}
+          {item.integrity || item.source.type === "builtin" ? "" : ` · ${t(locale, "blueprints.integrityMissing")}`} · {t(locale, "blueprints.selected")}
           {bundled.has(item.name) ? ` · ${t(locale, "blueprints.bundled")}` : ""}
         </li>
       ))}
@@ -658,7 +670,7 @@ function LocalInputs({
   onUnset,
 }: {
   locale: WorkbenchLocale;
-  blueprint: Blueprint;
+  blueprint: BlueprintRecipe;
   ui: BlueprintUiState;
   onString: (id: string, text: string) => void;
   onBoolean: (id: string, value: boolean) => void;
@@ -993,7 +1005,7 @@ export function BlueprintApplyResult({
         <>
           <dt>{t(locale, "blueprints.metadata")}</dt>
           <dd>
-            {outcome.source.name} {outcome.source.version}
+            {outcome.source.name}{outcome.source.version ? ` ${outcome.source.version}` : ""}
           </dd>
         </>
       ) : null}

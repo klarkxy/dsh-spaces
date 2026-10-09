@@ -380,6 +380,9 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
         <button type="button" className="dsh-wb-btn primary" disabled={!writable} onClick={controller.openCreate}>
           {t(locale, "app.newSpace")}
         </button>
+        <button type="button" className="dsh-wb-btn" disabled={!writable} onClick={controller.openBlueprintUse}>
+          {t(locale, "blueprints.createFrom")}
+        </button>
       </div>
       {spaces.length === 0 ? <p className="dsh-wb-muted">{t(locale, "home.spacesEmpty")}</p> : null}
       {spaces.map((space, index) => (
@@ -1049,6 +1052,9 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
       <form className="dsh-wb-dialog" onSubmit={submit} aria-label={t(locale, "create.title")}>
         <h2 className="dsh-wb-title">{t(locale, "create.title")}</h2>
         <p className="dsh-wb-muted">{t(locale, "create.hint")}</p>
+        <button type="button" className="dsh-wb-btn" onClick={controller.openBlueprintUse}>
+          {t(locale, "blueprints.createFrom")}
+        </button>
         <label className="dsh-wb-field">
           {t(locale, "create.name")}
           <input ref={nameRef} name="name" required autoComplete="off" />

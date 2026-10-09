@@ -17,7 +17,7 @@ import {
 import type { Blueprint, BlueprintInputValues } from "../src/shared/blueprint.ts";
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "../docs/examples/blueprints");
-const schemaPath = join(dirname(fileURLToPath(import.meta.url)), "../schemas/blueprint-v1.schema.json");
+const schemaPath = join(dirname(fileURLToPath(import.meta.url)), "../packages/blueprint/schemas/blueprint-v1.schema.json");
 
 function readExample(name: string): string {
   return readFileSync(join(examples, name), "utf8");

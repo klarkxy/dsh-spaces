@@ -20,6 +20,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - run: npm run build:blueprint
       - run: npx --no-install tsc -p tsconfig.dashboard-ui.json
       - run: node --import tsx --test tests/dashboard-http.test.ts
       - name: Build independent native package without a second React
@@ -36,8 +38,10 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - run: npm run build:blueprint
       - name: Install explicit official SDK and package manager fixture
-        run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+        run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.2.0-rc.2 pnpm@10.15.0
       - name: Inspect native connection and caller binding
         env:
           DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk

@@ -25,7 +25,12 @@
   },
   "type": "module",
   "main": "./lib/index.js",
-  "files": ["lib", "README.md", "LICENSE", "cordis.patch.yml"],
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE",
+    "cordis.patch.yml"
+  ],
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
@@ -35,17 +40,39 @@
   },
   "dsh": {
     "client": {
-      "inject": ["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-renderer"],
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ],
       "platform": "web"
     },
-    "bundle": {"patch": "./cordis.patch.yml"}
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.3",
-    "@deepseek-ai/dsh-app-boot": "^0.1.7-alpha.1",
-    "@deepseek-ai/dsh-settings": "^0.1.7-alpha.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.7-alpha.1",
-    "@deepseek-ai/dsh-client-connection": "^0.1.7-alpha.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-alpha.1"
+    "@deepseek-ai/dsh-app-boot": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-connection": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.2.0-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-renderer": {
+      "optional": true
+    }
   }
 }

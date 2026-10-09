@@ -32,7 +32,7 @@ export type PreparedBlueprintPackage = {
   version: string;
   integrity: string;
   hasBundle: boolean;
-  bundlePatch?: string;
+  bundlePatch?: string | string[];
   lifecycleScripts: string[];
 };
 
@@ -93,6 +93,11 @@ const ERROR_MESSAGE: Record<BlueprintPackageErrorCode, string> = {
   "bundle-patch-invalid": "Blueprint package bundle patch is invalid.",
   "download-failed": "Blueprint package download failed.",
 };
+
+/** Public diagnostics come from fixed codes, never raw installer or archive text. */
+export function blueprintPackageErrorMessage(error: BlueprintPackageError): string {
+  return Object.hasOwn(ERROR_MESSAGE, error.code) ? ERROR_MESSAGE[error.code] : "Blueprint package validation failed.";
+}
 
 export async function prepareBlueprintPackage(
   home: string,
@@ -459,7 +464,7 @@ function requireRegularMember(
 function readBundlePatch(
   manifest: Record<string, unknown>,
   entries: TarIndex,
-): { hasBundle: boolean; bundlePatch?: string } {
+): { hasBundle: boolean; bundlePatch?: string | string[] } {
   if (!isPlainObject(manifest.dsh) || !Object.prototype.hasOwnProperty.call(manifest.dsh, "bundle")) {
     return { hasBundle: false };
   }
@@ -468,11 +473,17 @@ function readBundlePatch(
   if (!Object.prototype.hasOwnProperty.call(bundle, "patch") || bundle.patch === undefined) {
     throw packageError("bundle-patch-missing");
   }
-  if (typeof bundle.patch !== "string") throw packageError("bundle-patch-invalid");
-  const rel = normalizePackageRelative(bundle.patch);
-  const member = requireRegularMember(entries, `package/${rel}`, "bundle-patch-missing", "bundle-patch-invalid");
-  if (member.size > MAX_PATCH_BYTES) throw packageError("bundle-patch-invalid");
-  return { hasBundle: true, bundlePatch: rel };
+  const declared = typeof bundle.patch === "string" ? [bundle.patch] : bundle.patch;
+  if (!Array.isArray(declared) || declared.some((path) => typeof path !== "string")) {
+    throw packageError("bundle-patch-invalid");
+  }
+  const patches = declared.map((path: string) => {
+    const rel = normalizePackageRelative(path);
+    const member = requireRegularMember(entries, `package/${rel}`, "bundle-patch-missing", "bundle-patch-invalid");
+    if (member.size > MAX_PATCH_BYTES) throw packageError("bundle-patch-invalid");
+    return rel;
+  });
+  return { hasBundle: true, bundlePatch: typeof bundle.patch === "string" ? patches[0] : patches };
 }
 
 function normalizePackageRelative(value: string): string {

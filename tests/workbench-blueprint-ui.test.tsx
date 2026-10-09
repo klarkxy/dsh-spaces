@@ -347,6 +347,8 @@ test("create mode lists packages separately from bundle order and convert contro
   await ctrl.poll();
   ctrl.openBlueprintGenerate("alpha");
   await flush();
+  ctrl.blueprint.setFormatVersion(1);
+  ctrl.blueprint.setFormatVersion(1);
   const page = html(ctrl);
   assert.equal(ctrl.getSnapshot().homeTab, "blueprints");
   assert.ok(page.includes("data-blueprint-mode=\"generate\""));
@@ -385,6 +387,8 @@ test("managed observations stay out of convert drafts while directory and dynami
   await ctrl.poll();
   ctrl.openBlueprintGenerate("alpha");
   await flush();
+  ctrl.blueprint.setFormatVersion(1);
+  ctrl.blueprint.setFormatVersion(1);
   const page = html(ctrl);
   const bindings = ctrl.blueprint.getSnapshot().bindings;
   assert.equal(bindings.length, 1);
@@ -423,6 +427,8 @@ test("managed-only source hides isolation noise and keeps the closed pointer edi
   await ctrl.poll();
   ctrl.openBlueprintGenerate("alpha");
   await flush();
+  ctrl.blueprint.setFormatVersion(1);
+  ctrl.blueprint.setFormatVersion(1);
   const page = html(ctrl);
   assert.deepEqual(ctrl.blueprint.getSnapshot().bindings, []);
   assert.equal(page.includes("Owned isolation fields were omitted."), false);

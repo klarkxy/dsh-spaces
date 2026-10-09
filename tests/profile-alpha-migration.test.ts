@@ -20,10 +20,12 @@ function fixture(legacy = true, llmActive = true) {
   for (const bridge of ["view-bridge", "llm-bridge"]) {
     const target = join(payloadRoot, bridge); mkdirSync(join(target,"lib"), { recursive: true });
     const peer = bridge === "view-bridge" ? "@deepseek-ai/dsh-client-connection" : "@deepseek-ai/dsh-settings";
-    writeFileSync(join(target,"package.json"), JSON.stringify({name:`@dsh-spaces/${bridge}`,peerDependencies:{[peer]:"^0.1.7-alpha.1"}}));
-    for (const path of ["cordis.patch.yml", "lib/index.js", "lib/client.js", "lib/settings.js"]) writeFileSync(join(target,path), "alpha");
+    const pkg = {name:`@dsh-spaces/${bridge}`,version:"0.4.0",dsh:{bundle:{patch:"./cordis.patch.yml"}},peerDependencies:{[peer]:">=0.2.0-rc.2"}};
+    writeFileSync(join(target,"package.json"), JSON.stringify(pkg));
+    for (const path of ["lib/index.js", "lib/client.js", "lib/settings.js"]) writeFileSync(join(target,path), "target");
+    writeFileSync(join(target,"cordis.patch.yml"),`- insert:\n    - id: dsh-spaces-${bridge}\n      name: '@dsh-spaces/${bridge}'\n` + (bridge === "view-bridge" ? "- id: settings\n  disabled: true\n- insert:\n    - id: dsh-spaces-settings\n      name: '@dsh-spaces/view-bridge/settings'\n" : ""));
     cpSync(target, installed(bridge), {recursive:true});
-    if (legacy) writeFileSync(join(installed(bridge),"package.json"),JSON.stringify({name:`@dsh-spaces/${bridge}`,peerDependencies:{[peer]:"^0.1.5-rc.2"}}));
+    if (legacy) writeFileSync(join(installed(bridge),"package.json"),JSON.stringify({...pkg,peerDependencies:{[peer]:"^0.1.5-rc.2"}}));
   }
   const calls: string[] = [];
   const input = {home, profileId:"writing",payloadRoot,
@@ -51,6 +53,7 @@ test("dependency-only disabled LLM bridge is not activated or replaced",async()=
 });
 test("patch-disabled legacy LLM bundle keeps its local-provider behavior",async()=>{
   const f=fixture(); const dump=f.input.dump;
+  writeFileSync(f.patch, readFileSync(f.patch,"utf8") + "- id: dsh-spaces-llm-bridge\n  disabled: true\n");
   f.input.dump=async()=> (await dump()).replace("- id: dsh-spaces-llm-bridge\n", "- id: dsh-spaces-llm-bridge\n  disabled: true\n");
   await migrateProfileToAlpha(f.input);
   assert.deepEqual(f.calls,["view-bridge"]);

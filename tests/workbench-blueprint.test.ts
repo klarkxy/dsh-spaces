@@ -33,6 +33,7 @@ import { stringifyBlueprint } from "../src/adapters/node/blueprint-codec.ts";
 import { parseBlueprint } from "../src/core/domain/blueprint.ts";
 import type { Blueprint } from "../src/shared/blueprint.ts";
 import { GlobalLlmHost } from "../src/core/application/global-llm-host.ts";
+import { BlueprintPackageError } from "../src/adapters/node/blueprint-package.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import {
   LLM_ERROR,
@@ -630,6 +631,26 @@ test("unresolved composition is failed and A/B/C package results are retained wi
   assert.equal(results.find((row) => row.name === "gamma")?.status, "not-run");
   assert.equal(JSON.stringify(last).includes("D:/private"), false);
   assert.equal(last.product?.stages?.packages?.error, "Package installation failed.");
+});
+
+test("package validation reports a fixed cause without raw archive details or an install attempt", async () => {
+  const dshHome = home();
+  let installs = 0;
+  const wb = new BlueprintWorkbench(portsOf(dshHome, [], {
+    prepareBlueprintPackage: async () => { throw new BlueprintPackageError("manifest-missing", "private D:/secret canary-token"); },
+    installPlugin: async () => { installs += 1; },
+  }));
+  const blueprint = parseBlueprint(baseBlueprint({ packages: [{ name: "fixture", version: "1.0.0", source: { type: "npm" } }] }));
+  const preview = await wb.preview({ content: stringifyBlueprint(blueprint), name: "invalid-archive", values: {} });
+  assert.ok(preview.planId);
+  const { ctx, recorded } = jobCtx();
+  await assert.rejects(() => wb.apply(preview.planId!, ctx), /Blueprint package manifest is missing/);
+  assert.equal(installs, 0);
+  const last = recorded.at(-1) as { product: { stages: Record<string, { status: string; error?: string }> } };
+  assert.equal(last.product.stages.packages.error, "Blueprint package manifest is missing.");
+  assert.equal(last.product.stages["space-create"].status, "succeeded");
+  assert.equal(last.product.stages.presets.status, "not-run");
+  assert.doesNotMatch(JSON.stringify(last), /private|secret|canary/);
 });
 
 test("durable source names that look like paths are omitted", async () => {
@@ -1455,15 +1476,15 @@ test("preview still stages when runtime inspection is not configured", async () 
 
 function officialRc2Bin(): string | null {
   const appData = process.env.APPDATA;
-  if (!appData) return null;
-  const bin = join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
+  const bin = process.env.DSH_TEST_CLI_BIN ?? (appData && join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
+  if (!bin) return null;
   if (!existsSync(bin)) return null;
   try {
     const pkg = JSON.parse(readFileSync(join(bin, "..", "..", "package.json"), "utf8")) as {
       name?: unknown;
       version?: unknown;
     };
-    if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.1.5-rc.2") return bin;
+    if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.2.0-rc.2") return bin;
   } catch {
     return null;
   }
@@ -1981,7 +2002,7 @@ test("profile-relative hub plugin file spec is npm when library and identity mat
 test("official runtime rejects managed Home settings overlay, config-only not-found, and accepts host agent overlay", async (t) => {
   const bin = officialRc2Bin();
   if (!bin) {
-    t.skip("official DSH 0.1.5-rc.2 bin is not installed");
+    t.skip("official DSH 0.2.0-rc.2 bin is not installed");
     return;
   }
   const hostBundles = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"];
@@ -2096,6 +2117,6 @@ test("official runtime rejects managed Home settings overlay, config-only not-fo
   assert.equal(pinLast.product?.stages?.presets?.status, "not-run");
   assert.equal(pinLast.product?.installed?.[0]?.version, selectedVersion);
   const resolved = await resolveBlueprintModule({ home: pinHome, bin }, { spaceId: "target", specifier: packageName });
-  assert.equal(resolved.packageVersion, "0.1.5-rc.2");
+  assert.equal(resolved.packageVersion, "0.2.0-rc.2");
   assert.notEqual(resolved.packageVersion, selectedVersion);
 });

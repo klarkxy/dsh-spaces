@@ -1,25 +1,122 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap } from "yaml";
 import { extractConfigField, isExpectedIsolationPath } from "../../core/domain/isolation";
+import { isBareNpmPackageName } from "../../shared/plugin";
 import { atomicWrite } from "./atomic";
-import { payloadBridgeFiles } from "./component-cli";
+import { cliLoadError, payloadBridgeFiles } from "./component-cli";
 import { assertOwnedProfilePath, migrateLegacyProfileSettings, profileSettingsPath } from "./profile-settings";
 
 type Bridge = "view-bridge" | "llm-bridge";
+type Entry = { id?: unknown; name?: unknown; disabled?: unknown; group?: unknown; config?: unknown };
+type ObservedEntry = Entry & { inheritedDisabled: boolean; dynamicAncestry: boolean };
+type AppBoot = {
+  resolveBundleDir: (bin: string, name: string, anchor: string, profile: string) => string;
+  loadOverlayPatches: (bin: string, path: string) => unknown[];
+  loadOptionalPatches: (bin: string, path: string) => unknown[] | undefined;
+  composeEntries: (layers: unknown[][]) => Entry[];
+  evaluatePluginCompatibility: (manifest: unknown, exemptions: Record<string, string[]>, runtimeVersion: string) => { peers: Record<string, string> } | undefined;
+};
+
+function entryRows(entries: Entry[], ancestry: "enabled" | "disabled" | "dynamic" = "enabled"): ObservedEntry[] {
+  return entries.flatMap(row => {
+    const observed = { ...row, inheritedDisabled: ancestry === "disabled", dynamicAncestry: ancestry === "dynamic" };
+    const children = ancestry === "disabled" || row.disabled === true ? "disabled"
+      : ancestry === "dynamic" || row.disabled !== undefined && typeof row.disabled !== "boolean" ? "dynamic" : "enabled";
+    return [observed, ...(row.group === true && Array.isArray(row.config) ? entryRows(row.config, children) : [])];
+  });
+}
+
+function disabled(row: ObservedEntry): boolean {
+  if (row.inheritedDisabled) return true;
+  if (row.dynamicAncestry) throw new Error("Dynamic managed bridge ancestry cannot be migrated safely.");
+  if (row.disabled === undefined) return false;
+  if (typeof row.disabled !== "boolean") throw new Error("Dynamic bridge or plugin enablement cannot be migrated safely.");
+  return row.disabled;
+}
+
+/** Inspect declared layers without the host's compatibility filtering or executing plugins. */
+async function declaredProfile(home: string, profile: string, bundles: string[], bin?: string) {
+  const require = bin ? createRequire(bin) : createRequire(import.meta.url);
+  const appBoot = await import(pathToFileURL(require.resolve("@deepseek-ai/dsh-app-boot")).href) as AppBoot;
+  let anchor = join(profile, "package.json");
+  if (bin) {
+    let dir = dirname(bin);
+    for (;;) {
+      const path = join(dir, "package.json");
+      if (existsSync(path) && JSON.parse(readFileSync(path, "utf8")).name === "@deepseek-ai/dsh") { anchor = path; break; }
+      if (dirname(dir) === dir) throw new Error("The bound CLI installation manifest is missing.");
+      dir = dirname(dir);
+    }
+  }
+  const layers = bundles.map(name => {
+    const root = appBoot.resolveBundleDir("dsh", name, anchor, profile);
+    const manifestPath = join(root, "package.json");
+    const pkg = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const declared = pkg.dsh?.bundle?.patch;
+    const paths = typeof declared === "string" ? [declared] : declared;
+    if (pkg.name !== name || !Array.isArray(paths) || !paths.length) throw new Error(`Invalid declared profile bundle: ${name}.`);
+    const patches = paths.flatMap(file => {
+      if (typeof file !== "string" || isAbsolute(file)) throw new Error(`Invalid bundle patch: ${name}.`);
+      const path = join(root, file);
+      const lexical = relative(root, path);
+      const rel = relative(realpathSync(root), realpathSync(path));
+      if (!lexical || lexical.startsWith("..") || isAbsolute(lexical) || !rel || rel.startsWith("..") || isAbsolute(rel) || lstatSync(path).isSymbolicLink()) throw new Error(`Bundle patch escapes its package: ${name}.`);
+      return appBoot.loadOverlayPatches("dsh", path);
+    });
+    return { name, manifestPath, patches };
+  });
+  const entries = appBoot.composeEntries([
+    ...layers.map(layer => layer.patches),
+    appBoot.loadOverlayPatches("dsh", join(profile, "cordis.patch.yml")),
+    appBoot.loadOptionalPatches("dsh", join(home, "cordis.patch.yml")) ?? [],
+  ]);
+  const rows = entryRows(entries);
+  const manifestFor = (specifier: string): string => {
+    if (specifier.startsWith("file:")) {
+      let dir = dirname(fileURLToPath(specifier));
+      for (;;) {
+        const path = join(dir, "package.json");
+        if (existsSync(path)) return path;
+        if (dirname(dir) === dir) throw new Error(`Cannot inspect plugin manifest: ${specifier}.`);
+        dir = dirname(dir);
+      }
+    }
+    const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0]!;
+    return join(appBoot.resolveBundleDir("dsh", name, anchor, profile), "package.json");
+  };
+  return { rows, layers, manifestFor, appBoot };
+}
 
 function dumpEntries(dump: string): YAMLMap[] {
   const doc: Document = parseDocument(dump, { customTags: [{ tag: "tag:yaml.org,2002:js", resolve: (value: string) => value }] });
   if (doc.errors.length || !isSeq(doc.contents)) throw new Error("Could not inspect composed alpha profile entries.");
   const rows: YAMLMap[] = [];
-  const collect = (seq: unknown) => {
+  const collect = (seq: unknown, inherited?: unknown) => {
     if (!isSeq(seq)) return;
     for (const row of seq.items) if (isMap(row)) {
-      rows.push(row);
-      if (row.get("group") === true) collect(row.get("config", true));
+      const own = row.get("disabled", true);
+      // A literal true settles inactivity without evaluating any ancestor.
+      const ownTrue = isScalar(own) && !own.tag && own.value === true;
+      const inheritedTrue = isScalar(inherited) && !inherited.tag && inherited.value === true;
+      const parent = ownTrue ? own : inheritedTrue ? inherited : inherited ?? own;
+      const observed = row.clone() as YAMLMap;
+      if (parent !== undefined) observed.set("disabled", parent);
+      rows.push(observed);
+      const children = isScalar(parent) && !parent.tag && parent.value === false ? undefined : parent;
+      if (row.get("group") === true) collect(row.get("config", true), children);
     }
   };
   collect(doc.contents); return rows;
+}
+
+function bridgeEntry(rows: ObservedEntry[], bridge: Bridge): ObservedEntry {
+  const id = `dsh-spaces-${bridge}`;
+  const found = rows.filter(row => row.id === id);
+  if (found.length !== 1 || found[0]!.name !== `@dsh-spaces/${bridge}`) throw new Error(`The installed ${bridge} entry is missing or ambiguous.`);
+  return found[0]!;
 }
 
 function bridgeDisabled(dump: string): boolean {
@@ -45,6 +142,7 @@ export function assertAlphaSettingsIsolation(dump: string): void {
 /** Caller holds the Home writer guard and has proved this managed profile is stopped. */
 export async function migrateProfileToAlpha(input: {
   home: string; profileId: string; payloadRoot: string;
+  bin?: string; cliVersion?: string;
   install: (bridge: Bridge) => Promise<void>;
   dump: () => Promise<string>;
 }): Promise<void> {
@@ -57,22 +155,31 @@ export async function migrateProfileToAlpha(input: {
   }
   const marker = join(profile, ".dsh-spaces-alpha-migration.json");
   if (existsSync(marker)) throw new Error("Interrupted alpha profile migration; evidence was preserved and will not be replayed.");
-  const manifest = JSON.parse(readFileSync(join(profile, "package.json"), "utf8"));
-  const bundles: unknown[] = manifest.dsh?.profile?.bundles ?? [];
+  const manifestBefore = readFileSync(join(profile, "package.json"), "utf8");
+  const manifest = JSON.parse(manifestBefore);
+  const bundles: string[] = manifest.dsh?.profile?.bundles ?? [];
+  if (!Array.isArray(bundles) || bundles.some(name => typeof name !== "string" || !isBareNpmPackageName(name)) || new Set(bundles).size !== bundles.length) throw new Error("Invalid managed profile bundle membership.");
+  const before = readFileSync(patch, "utf8");
+  const homePatch = join(home, "cordis.patch.yml");
+  const homeBefore = existsSync(homePatch) ? readFileSync(homePatch, "utf8") : undefined;
+  const declared = await declaredProfile(home, profile, bundles, input.bin);
   const active = (["view-bridge", "llm-bridge"] as Bridge[])
     .filter(bridge => bundles.includes(`@dsh-spaces/${bridge}`));
   if (!active.includes("view-bridge")) throw new Error("The managed profile has no active canonical view bridge.");
+  if (disabled(bridgeEntry(declared.rows, "view-bridge"))) throw new Error("The managed profile has no active canonical view bridge.");
+  const llmDisabled = active.includes("llm-bridge") && disabled(bridgeEntry(declared.rows, "llm-bridge"));
+  if (llmDisabled) active.splice(active.indexOf("llm-bridge"), 1);
   const initialDump = await input.dump();
-  if (active.includes("llm-bridge") && bridgeDisabled(initialDump)) active.splice(active.indexOf("llm-bridge"), 1);
-  const initialEntries = dumpEntries(initialDump);
-  if (initialEntries.some(row => (row.get("id") === "settings" && row.get("disabled") === false)
-    || (row.get("id") === "dsh-spaces-settings" && row.has("disabled") && row.get("disabled") !== false))) {
+  if (declared.rows.some(row => (row.id === "settings" && row.disabled === false)
+    || (row.id === "dsh-spaces-settings" && disabled(row)))) {
     throw new Error("The profile explicitly overrides scoped alpha settings isolation.");
   }
   const pending: Bridge[] = [];
   const installedRoot = (bridge: Bridge): string => {
     const modules = join(profile, "node_modules");
-    const root = realpathSync(join(modules, "@dsh-spaces", bridge));
+    const path = join(modules, "@dsh-spaces", bridge);
+    assertOwnedProfilePath(home, path);
+    const root = realpathSync(path);
     const rel = relative(realpathSync(modules), root);
     if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("The bridge resolves outside its profile modules.");
     return root;
@@ -83,6 +190,7 @@ export async function migrateProfileToAlpha(input: {
     return expected.every((file) => {
       const installed = join(root, file);
       const selected = join(payloadRoot, bridge, file);
+      assertOwnedProfilePath(home, installed);
       return existsSync(installed) && existsSync(selected)
         && !lstatSync(installed).isSymbolicLink()
         && readFileSync(installed).equals(readFileSync(selected));
@@ -96,30 +204,81 @@ export async function migrateProfileToAlpha(input: {
       ? "@deepseek-ai/dsh-client-connection" : "@deepseek-ai/dsh-settings"];
     // Only the known previous contract is a migration input. Unknown/current
     // mismatches are damage or custom builds, never an invitation to repair.
-    if (pkg.name !== `@dsh-spaces/${bridge}` || sdk !== "^0.1.5-rc.2"
+    const prior = sdk === "^0.1.5-rc.2" || sdk === "^0.1.7-alpha.1";
+    for (const file of ["package.json", "lib/index.js", "cordis.patch.yml"]) assertOwnedProfilePath(home, join(root, file));
+    if (pkg.name !== `@dsh-spaces/${bridge}` || !prior
+      || Object.entries(pkg.peerDependencies ?? {}).some(([name, range]) => (name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-")) && range !== sdk)
       || !existsSync(join(root, "lib/index.js")) || !existsSync(join(root, "cordis.patch.yml"))) {
       throw new Error(`Installed ${bridge} does not match the selected alpha component or the supported legacy contract.`);
     }
     pending.push(bridge);
   }
-  const before = readFileSync(patch, "utf8");
+  const cliVersion = input.cliVersion ?? "0.2.0-rc.2";
+  const compatible = (appBoot: AppBoot, pkg: { name?: string }, exempt = false): void => {
+    // Validate the same complete manifest contract the bound host evaluates,
+    // including bare dsh peers, workspace tokens, and malformed peer fields.
+    const issue = appBoot.evaluatePluginCompatibility(pkg, {}, cliVersion);
+    if (!issue || exempt) return;
+    const unmet = Object.entries(issue.peers).map(([name, range]) => `${name}@${range}`);
+    throw new Error(`${pkg.name}: ${cliLoadError(cliVersion, unmet)}`);
+  };
+  const admission = (inspection: Awaited<ReturnType<typeof declaredProfile>>, transitioning: Bridge[]): void => {
+    const exempt = new Set(transitioning.map(bridge => `@dsh-spaces/${bridge}`));
+    const manifests = new Set<string>();
+    // Ordinary expression-controlled rows may be active. Inspect their peers
+    // conservatively without executing expressions or changing disabled state.
+    const enabled = inspection.rows.filter(row => !row.inheritedDisabled && row.disabled !== true);
+    for (const layer of inspection.layers) {
+      // A bundle with disabled entries does not become active merely because its
+      // package remains installed. Empty bundle layers still declare a contract.
+      const nameUsed = (row: Entry) => typeof row.name === "string" && (row.name === layer.name || row.name.startsWith(`${layer.name}/`));
+      if (enabled.some(nameUsed) || !inspection.rows.some(nameUsed)) manifests.add(layer.manifestPath);
+    }
+    for (const row of enabled) {
+      if (typeof row.name !== "string" || row.name.startsWith("cordis:")) continue;
+      manifests.add(inspection.manifestFor(row.name));
+    }
+    for (const path of manifests) {
+      const pkg = JSON.parse(readFileSync(path, "utf8"));
+      compatible(inspection.appBoot, pkg, exempt.has(pkg.name));
+    }
+  };
+  // Known, byte-checked transitions are the only temporary peer exemption.
+  // Unknown active plugins fail before the marker or any installation writes.
+  admission(declared, pending);
+  for (const bridge of pending) {
+    compatible(declared.appBoot, JSON.parse(readFileSync(join(payloadRoot, bridge, "package.json"), "utf8")));
+  }
   const oldPath = extractConfigField(before, "settings", "path");
   if (oldPath && !isExpectedIsolationPath(oldPath, profileId, "settings.yaml")) {
     throw new Error("Legacy settings path is not owned by this profile.");
   }
   const legacy = existsSync(join(home, "hub", profileId, "settings.yaml"));
-  if (!pending.length && !oldPath && !legacy) { assertAlphaSettingsIsolation(initialDump); return; }
-  writeFileSync(marker, JSON.stringify({ version: 1, profileId, target: "0.1.7-alpha.1", bridges: pending }), { flag: "wx" });
+  const assertUnchanged = () => {
+    if (readFileSync(patch, "utf8") !== before
+      || (existsSync(homePatch) ? readFileSync(homePatch, "utf8") : undefined) !== homeBefore) throw new Error("Profile patch changed during alpha migration.");
+    const afterManifest = JSON.parse(readFileSync(join(profile, "package.json"), "utf8"));
+    if (JSON.stringify(afterManifest.dsh?.profile?.bundles ?? []) !== JSON.stringify(bundles)) throw new Error("Profile bundle membership changed during alpha migration.");
+  };
+  if (readFileSync(join(profile, "package.json"), "utf8") !== manifestBefore) throw new Error("Profile manifest changed before component migration.");
+  assertUnchanged();
+  const verifyHost = (dump: string) => {
+    assertAlphaSettingsIsolation(dump);
+    if (active.includes("llm-bridge") && bridgeDisabled(dump)) throw new Error("The migrated LLM bridge was denied by the target host.");
+  };
+  if (!pending.length && !oldPath && !legacy) { verifyHost(initialDump); return; }
+  writeFileSync(marker, JSON.stringify({ version: 1, profileId, target: cliVersion, bridges: pending }), { flag: "wx" });
   // Leave marker and partial results on every failure. Never restore or retry.
   for (const bridge of pending) {
     await input.install(bridge);
     if (!matches(bridge, installedRoot(bridge))) throw new Error(`Alpha ${bridge} installation did not match the selected component.`);
   }
-  assertAlphaSettingsIsolation(await input.dump());
-  const afterManifest = JSON.parse(readFileSync(join(profile, "package.json"), "utf8"));
-  if (JSON.stringify(afterManifest.dsh?.profile?.bundles ?? []) !== JSON.stringify(bundles)) {
-    throw new Error("Profile bundle membership changed during alpha migration.");
-  }
+  assertUnchanged();
+  const afterDeclared = await declaredProfile(home, profile, bundles, input.bin);
+  admission(afterDeclared, []);
+  if (bundles.includes("@dsh-spaces/llm-bridge") && disabled(bridgeEntry(afterDeclared.rows, "llm-bridge")) !== llmDisabled) throw new Error("LLM bridge enablement changed during component migration.");
+  const composed = await input.dump();
+  verifyHost(composed);
   if (oldPath) {
     if (readFileSync(patch, "utf8") !== before) throw new Error("Profile patch changed during alpha migration.");
     // Remove only the obsolete field, retaining unrelated roots and credentials.
@@ -132,6 +291,6 @@ export async function migrateProfileToAlpha(input: {
     atomicWrite(patch, doc.toString({ lineWidth: 0 }));
   }
   if (legacy) migrateLegacyProfileSettings(home, profileId, await input.dump());
-  assertAlphaSettingsIsolation(await input.dump());
+  verifyHost(await input.dump());
   unlinkSync(marker);
 }

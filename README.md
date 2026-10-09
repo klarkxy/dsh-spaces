@@ -4,11 +4,11 @@
 
 Current positioning and supported adapters: [Host embedding contract](docs/host/embedding.md). This branch adds an in-place rail to ordinary loopback Web hosts; official Desktop custom-scheme and third-party native adapters remain unverified.
 
-**Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md), the first-level guide and format contract for sharing plugin compositions and configuration presets as JSON or copyable codes. Implementation and acceptance status: [blueprint work record](tasks/blueprint-implementation.md).
+**Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md). The independently installable [`@klarkxy/dsh-blueprint`](packages/blueprint/README.md) lives in this repository; Spaces consumes its protocol for creating and sharing spaces. DSHBP2 shares plugin compositions; DSHBP1 retains configuration presets. Current migration and DSH 0.2 acceptance: [migration record](tasks/blueprint-migration-0.2.md).
 
 Download desktop builds from [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases). Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
 
-Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. The original application stays in place; the same window displays the space rail and contained manager. Default CLI version: official **`0.1.7-alpha.1`**, pinned for new installations. The local plugin is not on npm.
+Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. The original application stays in place; the same window displays the space rail and contained manager. Default CLI version: official **`0.2.0-rc.2`**, pinned for new installations. The local plugin is not on npm.
 
 Opening the desktop connects to a healthy workbench or starts it once when no service exists and the runtime is ready. First-time environment installation continues into the workbench automatically. A stopped service is not an error; genuine startup failures and ownership conflicts remain visible, without automatic retry or lock takeover.
 
@@ -57,8 +57,8 @@ After a user-confirmed component upgrade, the old service stages the candidate, 
 
 - Node 24 for contributing; first desktop launch can install managed Node, pnpm, and DSH CLI
 - Package source: China (npmmirror) or official (npmjs / nodejs.org)
-- First install uses `@deepseek-ai/dsh@0.1.7-alpha.1`; existing selected runtimes are upgraded explicitly
-- Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. Plugin peers on SDK `0.1.7-alpha.1` for this repo's build; that is not a CLI allowlist
+- First install uses `@deepseek-ai/dsh@0.2.0-rc.2`; existing selected runtimes are upgraded explicitly
+- Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. Plugin peers on SDK `0.2.0-rc.2` for this repo's build; that is not a CLI allowlist
 
 ## Develop
 
@@ -101,7 +101,7 @@ MIT. See `LICENSE`.
 
 新定位及支持边界见 [宿主嵌入合同](docs/host/embedding.md)。本批支持普通 loopback Web 宿主内的空间栏；官方 Desktop 自定义协议与第三方原生适配仍待实现、验收。
 
-**使用或开发蓝图能力，请先阅读根目录 [BLUEPRINT.md](BLUEPRINT.md)。** 蓝图以 JSON 或分享码分发插件组合与配置预设。实现与验收状态见[蓝图实施记录](tasks/blueprint-implementation.md)。
+**使用或开发蓝图能力，请先阅读 [BLUEPRINT.md](BLUEPRINT.md)。** 独立蓝图插件在本仓库维护，Spaces 依赖其协议创建和分享空间；插件本身无需安装 Spaces。新版分享插件组合，旧格式保留配置预设。迁移及 DSH 0.2 验收见[迁移记录](tasks/blueprint-migration-0.2.md)。
 
 桌面安装包见 [GitHub Releases](https://github.com/klarkxy/dsh-spaces/releases)。现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。本次合并验证见 [验收记录](tasks/merge-execution.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
 

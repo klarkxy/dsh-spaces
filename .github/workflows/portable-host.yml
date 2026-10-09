@@ -26,6 +26,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - run: npm run build:blueprint
       - run: npm run typecheck:spaces && npm run typecheck
       - run: node --import tsx --test tests/portable-host.test.ts tests/workbench-plugin.test.ts tests/spaces-host.test.ts tests/workbench-ui.test.tsx tests/workbench-http-port.test.ts tests/dashboard-workbench.test.ts
       - run: npm run build:spaces

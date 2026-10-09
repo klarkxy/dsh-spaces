@@ -650,6 +650,8 @@ test("generate sends the selected settings namespaces exactly", async () => {
   await ready(ctrl);
   ctrl.openBlueprintGenerate("alpha");
   await flush();
+  ctrl.blueprint.setFormatVersion(1);
+  ctrl.blueprint.setFormatVersion(1);
   ctrl.blueprint.setNamespaceSelected("skip-b", false);
   ctrl.blueprint.setMetaName("写作工作台");
   ctrl.blueprint.setMetaVersion("1.0.0");
@@ -757,6 +759,8 @@ test("enabling a detected directory observation sends bindingOverrides", async (
   await ready(ctrl);
   ctrl.openBlueprintGenerate("alpha");
   await flush();
+  ctrl.blueprint.setFormatVersion(1);
+  ctrl.blueprint.setFormatVersion(1);
   ctrl.blueprint.setBinding(0, { enabled: true });
   ctrl.blueprint.setMetaName("writing-lab");
   ctrl.blueprint.setMetaVersion("1.0.0");

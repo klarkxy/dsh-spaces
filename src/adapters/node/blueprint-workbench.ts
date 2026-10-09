@@ -9,10 +9,17 @@ import {
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument, stringify as stringifyYaml, isMap, isScalar, isSeq, Scalar, YAMLMap } from "yaml";
 import {
-  bindBlueprintInputs,
-  diagnoseBlueprint,
   parseBlueprint,
 } from "../../core/domain/blueprint";
+import {
+  bindDocumentInputs,
+  blueprintRecipe,
+  diagnoseDocument,
+  parseBlueprintDocument,
+  type BlueprintRecipe as Blueprint,
+} from "@klarkxy/dsh-blueprint/document";
+import { decodeBlueprintDocument, encodeBlueprintDocument, stringifyBlueprintDocument } from "@klarkxy/dsh-blueprint/document-codec";
+import { generateBlueprintV2 } from "./blueprint-v2";
 import {
   applyIsolationPatch,
   CREDENTIALS_ROW_ID,
@@ -34,7 +41,6 @@ import {
   BLUEPRINT_OS,
   BLUEPRINT_SPACES_CONTROL_PACKAGES,
   BlueprintError,
-  type Blueprint,
   type BlueprintArch,
   type BlueprintBinding,
   type BlueprintDiagnostic,
@@ -50,7 +56,7 @@ import {
   type BlueprintPatchInsert,
   type BlueprintSettings,
 } from "../../shared/blueprint";
-import { isGitSpec } from "../../shared/plugin";
+import { isBareNpmPackageName, isGitSpec } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
 import { scanShareEntries } from "../../core/domain/llm-share";
@@ -88,10 +94,10 @@ import {
   type WorkbenchBlueprintSourcePayload,
 } from "../../shared/workbench-blueprint";
 import { atomicWrite } from "./atomic";
-import { decodeBlueprint, encodeBlueprint, stringifyBlueprint } from "./blueprint-codec";
 import {
   prepareBlueprintPackage,
   BlueprintPackageError,
+  blueprintPackageErrorMessage,
   type PreparedBlueprintPackage,
 } from "./blueprint-package";
 import { sanitizeLogText } from "./diagnostics";
@@ -117,11 +123,13 @@ const INSPECT_RUNTIME_FAILED = "The bound runtime could not be inspected.";
 
 export type BlueprintCreateInput = { name: string; displayName?: string; icon?: string };
 
-export type BlueprintRuntimeOptions = { home: string; bin: string };
+export type BlueprintRuntimeOptions = { home: string; bin: string; builtinPackages?: string[] };
 
 export type BlueprintRuntimeInspect = {
   versions: { dsh: string | null; base: string | null; webApp: string | null };
   baseLayers: Array<{ name: string; version: string; packageDir: string; patchPath: string; patches: unknown[] }>;
+  builtinLayers?: Array<{ name: string; version: string; packageDir: string; patchPath: string; patches: unknown[] }>;
+  builtinCatalog?: string[];
   baseEntries: unknown[];
   homePatches: unknown[];
   fingerprint: string;
@@ -206,6 +214,8 @@ type StagedPlan = {
   observation: PlanObservation;
 };
 
+type OriginRecipe = Omit<BlueprintOriginRecord, "blueprint"> & { blueprint: Blueprint };
+
 const jsTag = {
   tag: JS_TAG,
   identify: () => false,
@@ -229,7 +239,7 @@ export class BlueprintWorkbench {
     const id = this.requireMutableSpace(spaceId, { mustExist: true });
     const manifest = readProfileManifest(this.ports.home, id);
     const library = readPluginLibrary(this.ports.home);
-    const packages = sourcePackages(this.ports.home, id, manifest, library);
+    const packages = withBuiltinSources(sourcePackages(this.ports.home, id, manifest, library), manifest, await this.inspectRuntimeSnapshot());
     const bundles = sourceBundles(manifest.bundles, packages);
     const patchInfo = describePatch(this.ports.home, id);
     const settingsNamespaces = describeSettings(this.ports.home, id);
@@ -250,14 +260,43 @@ export class BlueprintWorkbench {
   }
 
   async generate(input: {
+    formatVersion?: 1 | 2;
     spaceId: string;
     selection: BlueprintGenerateSelection;
-    metadata: { name: string; version: string; description?: string };
+    metadata: { name: string; version?: string; description?: string };
     bindingOverrides?: BlueprintGenerateBindingOverride[];
   }): Promise<WorkbenchBlueprintGeneratePayload> {
     const id = this.requireMutableSpace(input.spaceId, { mustExist: true });
+    if (input.formatVersion === 2) {
+      const before = sourceFingerprint(this.ports.home, id);
+      const inspected = await this.inspectRuntimeSnapshot();
+      const manifest = readProfileManifest(this.ports.home, id);
+      const available = withBuiltinSources(sourcePackages(this.ports.home, id, manifest, readPluginLibrary(this.ports.home)), manifest, inspected);
+      let blueprint;
+      try {
+        blueprint = generateBlueprintV2(input, available, manifest.bundles);
+      } catch (error) {
+        throw publicError(sanitizePublicMessage(error instanceof Error ? error.message : "Blueprint generation failed."));
+      }
+      const rechecked = await this.inspectRuntimeSnapshot();
+      if (before !== sourceFingerprint(this.ports.home, id) || inspected?.fingerprint !== rechecked?.fingerprint) {
+        throw publicError("The space changed while the blueprint was being generated.");
+      }
+      return {
+        method: "blueprint.generate", blueprint,
+        fileName: blueprintFileName(blueprint.metadata.name),
+        json: stringifyBlueprintDocument(blueprint), shareCode: encodeBlueprintDocument(blueprint),
+        diagnostics: diagnoseDocument(blueprint, environmentFromHost(await this.hostVersions(id))),
+      };
+    }
+    if (!input.metadata.version) throw publicError("Blueprint v1 requires a metadata version.");
+    const runtime = await this.inspectRuntimeSnapshot();
+    const builtinNames = runtime?.builtinCatalog ?? runtime?.builtinLayers?.map((layer) => layer.name) ?? [];
+    if (builtinNames.some((name) => input.selection.packages.includes(name))) {
+      throw publicError("Builtin identities require Blueprint format version 2.");
+    }
     const before = sourceFingerprint(this.ports.home, id);
-    const built = buildGeneratedBlueprint(this.ports.home, id, input);
+    const built = buildGeneratedBlueprint(this.ports.home, id, { ...input, metadata: { ...input.metadata, version: input.metadata.version } });
     const after = sourceFingerprint(this.ports.home, id);
     if (before !== after) {
       throw publicError("The space changed while the blueprint was being generated.");
@@ -270,13 +309,13 @@ export class BlueprintWorkbench {
     if (leftover) {
       throw publicError("A local value must be declared as an input.", leftover);
     }
-    const blueprint = parseBlueprint(built);
-    const diagnostics = diagnoseBlueprint(blueprint, environmentFromHost(await this.hostVersions(id)));
-    const json = stringifyBlueprint(blueprint);
-    const shareCode = encodeBlueprint(blueprint, "shortest");
+    const blueprint = built.document;
+    const diagnostics = diagnoseDocument(blueprint, environmentFromHost(await this.hostVersions(id)));
+    const json = stringifyBlueprintDocument(blueprint);
+    const shareCode = encodeBlueprintDocument(blueprint, "shortest");
     return {
       method: "blueprint.generate",
-      fileName: blueprintFileName(blueprint.metadata.name, blueprint.metadata.version),
+      fileName: blueprintFileName(blueprint.metadata.name, built.metadata.version),
       json,
       shareCode,
       blueprint,
@@ -286,8 +325,8 @@ export class BlueprintWorkbench {
 
   async inspect(content: string): Promise<WorkbenchBlueprintInspectPayload> {
     const blueprint = decodeContent(content);
-    const diagnostics = diagnoseBlueprint(blueprint, environmentFromHost(await this.hostVersions()));
-    return { method: "blueprint.inspect", blueprint, diagnostics };
+    const diagnostics = diagnoseDocument(blueprint.document, environmentFromHost(await this.hostVersions()));
+    return { method: "blueprint.inspect", blueprint: blueprint.document, diagnostics };
   }
 
   async preview(input: {
@@ -311,15 +350,15 @@ export class BlueprintWorkbench {
       .map((row) => row.id);
     try {
       const host = await this.hostVersions();
-      const diagnostics = diagnoseBlueprint(
-        blueprint,
+      const diagnostics = diagnoseDocument(
+        blueprint.document,
         environmentFromHost(host, evidenceFromBlueprint(blueprint)),
       );
       const gate = await this.previewGate(blueprint, name, input.values, diagnostics);
       if (!gate.ok || missingInputs.length > 0) {
         return {
           method: "blueprint.preview",
-          blueprint,
+          blueprint: blueprint.document,
           packages,
           inputs,
           host,
@@ -337,7 +376,7 @@ export class BlueprintWorkbench {
       if (this.totalPlanBytes + bytes > BLUEPRINT_PLAN_MAX_TOTAL_BYTES) {
         throw publicError("Pending blueprint previews exceed the size limit.");
       }
-      const observation = await this.captureObservation();
+      const observation = await this.captureObservation(blueprint);
       const id = randomUUID();
       const expiresAt = now + BLUEPRINT_PLAN_TTL_MS;
       this.plans.set(id, {
@@ -355,7 +394,7 @@ export class BlueprintWorkbench {
       this.totalPlanBytes += bytes;
       return {
         method: "blueprint.preview",
-        blueprint,
+        blueprint: blueprint.document,
         packages,
         inputs,
         host,
@@ -368,7 +407,7 @@ export class BlueprintWorkbench {
       if (!isInspectRuntimeFailure(error)) throw error;
       return {
         method: "blueprint.preview",
-        blueprint,
+        blueprint: blueprint.document,
         packages,
         inputs,
         host: this.portHostVersions(),
@@ -397,9 +436,9 @@ export class BlueprintWorkbench {
         path: secret,
       });
     }
-    let bound: ReturnType<typeof bindBlueprintInputs> | undefined;
+    let bound: ReturnType<typeof bindDocumentInputs> | undefined;
     try {
-      bound = bindBlueprintInputs(blueprint, values);
+      bound = bindDocumentInputs(blueprint.document, values);
     } catch (error) {
       if (error instanceof BlueprintError && error.code === BLUEPRINT_CODE.INPUT_REQUIRED) {
         return { ok: false };
@@ -447,6 +486,8 @@ export class BlueprintWorkbench {
     if (homePatchError) {
       diagnostics.push({ code: "blueprint.home-patch", message: homePatchError, severity: "error" });
     }
+    const builtinError = await this.builtinIdentityError(blueprint);
+    if (builtinError) diagnostics.push({ code: "blueprint.builtin", message: builtinError, severity: "error" });
     const ok =
       blocking.errors.length === 0 &&
       !secret &&
@@ -454,7 +495,7 @@ export class BlueprintWorkbench {
       !directoryError &&
       !modelError &&
       !compositionError &&
-      !homePatchError;
+      !homePatchError && !builtinError;
     return { ok };
   }
 
@@ -481,7 +522,7 @@ export class BlueprintWorkbench {
     let staged: StagedPlan;
     try {
       outcome.host = hostOutcome(await this.hostVersions());
-      const live = await this.captureObservation();
+      const live = await this.captureObservation(this.plans.get(planId)?.blueprint);
       staged = this.consumePlan(planId, live);
     } catch (error) {
       if ((error as { outcome?: WorkbenchBlueprintApplyOutcome }).outcome) throw error;
@@ -502,9 +543,9 @@ export class BlueprintWorkbench {
     const secret = secretFindingsOfBlueprint(staged.blueprint);
     if (secret) failCreate("The blueprint contains a secret and cannot be applied.");
 
-    let bound: ReturnType<typeof bindBlueprintInputs>;
+    let bound: ReturnType<typeof bindDocumentInputs>;
     try {
-      bound = bindBlueprintInputs(staged.blueprint, staged.values);
+      bound = bindDocumentInputs(staged.blueprint.document, staged.values);
     } catch {
       failCreate("A blueprint input is missing or has the wrong type.");
     }
@@ -525,6 +566,16 @@ export class BlueprintWorkbench {
       );
     }
     if (homePatchError) failCreate(homePatchError);
+    try {
+      const builtinError = await this.builtinIdentityError(staged.blueprint);
+      if (builtinError) failCreate(builtinError);
+      if (!observationsMatch(staged.observation, await this.captureObservation(staged.blueprint))) {
+        failCreate("The target changed. Request a new preview.");
+      }
+    } catch (error) {
+      if ((error as { outcome?: WorkbenchBlueprintApplyOutcome }).outcome) throw error;
+      failCreate(isInspectRuntimeFailure(error) ? INSPECT_RUNTIME_FAILED : durableFailureReason(error, "space-create"));
+    }
 
     ctx.phase("space-create");
     try {
@@ -553,10 +604,20 @@ export class BlueprintWorkbench {
     try {
       for (const [index, pkg] of staged.blueprint.packages.entries()) {
         throwIfAborted(ctx.signal);
+        await this.assertBuiltinRuntimeUnchanged(staged);
+        if (pkg.source.type === "builtin") {
+          installed.push({ name: pkg.name, version: pkg.version });
+          outcome.packageResults[index] = { name: pkg.name, version: pkg.version, status: "succeeded" };
+          outcome.installed = [...installed];
+          publish(outcome);
+          continue;
+        }
         if (pkg.source.type !== "npm") {
           throw publicError(GITHUB_APPLY_MESSAGE);
         }
-        const prepared = await this.preparePackage(pkg, ctx.signal);
+        const prepared = await this.preparePackage({ ...pkg, source: pkg.source }, ctx.signal);
+        await this.assertBuiltinRuntimeUnchanged(staged);
+        throwIfAborted(ctx.signal);
         try {
           await this.ports.installPlugin(staged.name, prepared.archivePath);
         } catch (error) {
@@ -576,6 +637,7 @@ export class BlueprintWorkbench {
         outcome.installed = [...installed];
         publish(outcome);
       }
+      await this.assertBuiltinRuntimeUnchanged(staged);
       composeBundles(this.ports.home, staged.name, staged.blueprint.profile.bundles, { includeLlmBridge: false });
       const compositionError = await this.compositionError(staged.name, staged.blueprint, bound.patch);
       if (compositionError) throw publicError(compositionError);
@@ -614,6 +676,7 @@ export class BlueprintWorkbench {
     let currentWrite: BlueprintWriteKind | undefined;
     try {
       throwIfAborted(ctx.signal);
+      await this.assertBuiltinRuntimeUnchanged(staged);
       currentWrite = "patch";
       this.writeBoundPatch(staged.name, bound.patch);
       writes[0] = { kind: "patch", status: "succeeded" };
@@ -642,6 +705,7 @@ export class BlueprintWorkbench {
         if (lateError) throw publicError(lateError);
       }
       currentWrite = "provenance";
+      await this.assertBuiltinRuntimeUnchanged(staged);
       writeProvenance(this.ports.home, staged.name, staged.blueprint, staged.values);
       writes[3] = { kind: "provenance", status: "succeeded" };
       currentWrite = undefined;
@@ -701,11 +765,11 @@ export class BlueprintWorkbench {
     }
   }
 
-  private async captureObservation(): Promise<PlanObservation> {
+  private async captureObservation(blueprint?: Blueprint): Promise<PlanObservation> {
     const observation = this.ports.observation();
     const host = await this.hostVersions();
     const catalog = this.ports.llmCatalogObservation?.() ?? { revision: 0, digest: sha256Hex("") };
-    const inspected = await this.inspectRuntimeSnapshot();
+    const inspected = await this.inspectRuntimeSnapshot(blueprint);
     return {
       serviceEpoch: observation.serviceEpoch,
       stateRevision: observation.expectedRevision,
@@ -749,13 +813,44 @@ export class BlueprintWorkbench {
     return { home: this.ports.home, bin };
   }
 
-  private async inspectRuntimeSnapshot(): Promise<BlueprintRuntimeInspect | null> {
+  private async inspectRuntimeSnapshot(blueprint?: Blueprint): Promise<BlueprintRuntimeInspect | null> {
     const options = this.runtimeOptions();
     if (!options || !this.ports.inspectRuntime) return null;
+    if (blueprint) options.builtinPackages = blueprint.packages.filter((pkg) => pkg.source.type === "builtin").map((pkg) => pkg.name);
     try {
       return await this.ports.inspectRuntime(options);
     } catch {
       throw publicError(INSPECT_RUNTIME_FAILED);
+    }
+  }
+
+  private async builtinIdentityError(blueprint: Blueprint): Promise<string | undefined> {
+    const packages = blueprint.packages.filter((pkg) => pkg.source.type === "builtin");
+    if (!blueprint.packages.length) return undefined;
+    let inspected: BlueprintRuntimeInspect | null;
+    try {
+      inspected = await this.inspectRuntimeSnapshot(blueprint);
+    } catch {
+      return "A selected builtin is unavailable in the bound runtime.";
+    }
+    const catalog = inspected?.builtinCatalog ?? inspected?.builtinLayers?.map((layer) => layer.name) ?? [];
+    if (blueprint.packages.some((pkg) => pkg.source.type === "npm" && catalog.includes(pkg.name))) {
+      return "A shipped builtin cannot be installed from an npm source.";
+    }
+    for (const pkg of packages) {
+      const layer = inspected?.builtinLayers?.find((item) => item.name === pkg.name);
+      if (!layer || layer.version !== pkg.version) return "A selected builtin does not match its exact bound runtime identity.";
+    }
+    return undefined;
+  }
+
+  private async assertBuiltinRuntimeUnchanged(staged: StagedPlan): Promise<void> {
+    if (!staged.blueprint.packages.some((pkg) => pkg.source.type === "builtin")) return;
+    const error = await this.builtinIdentityError(staged.blueprint);
+    if (error) throw publicError(error);
+    const inspected = await this.inspectRuntimeSnapshot(staged.blueprint);
+    if (inspected?.fingerprint !== staged.observation.runtimeFingerprint) {
+      throw publicError("The bound runtime changed after preview.");
     }
   }
 
@@ -950,7 +1045,7 @@ export class BlueprintWorkbench {
 
 function decodeContent(content: string): Blueprint {
   try {
-    return decodeBlueprint(content);
+    return blueprintRecipe(decodeBlueprintDocument(content));
   } catch (error) {
     throw publicError(sanitizeBlueprintError(error));
   }
@@ -1065,11 +1160,11 @@ function buildGeneratedBlueprint(
     );
   }
   if (origin?.blueprint.extensions) object.extensions = origin.blueprint.extensions;
-  return parseBlueprint(object);
+  return blueprintRecipe(parseBlueprint(object));
 }
 
 function restoreProvenanceOnCurrent(
-  origin: BlueprintOriginRecord,
+  origin: OriginRecipe,
   patch: BlueprintPatch,
   settings: BlueprintSettings,
   includePatch: boolean,
@@ -1247,7 +1342,7 @@ function sourcePackages(
     const version = readInstalledVersion(home, spaceId, name);
     const installed = readInstalledManifest(home, spaceId, name);
     const origin = resolveNpmOrigin(name, requestedSpec, version, library, home, spaceId);
-    const eligibility = packageEligibility(origin, version, installed);
+    const eligibility = packageEligibility(origin, version, installed, name);
     const row: BlueprintSourcePackage = {
       name,
       version,
@@ -1260,6 +1355,39 @@ function sourcePackages(
     if (origin.publicSpec) row.requestedSpec = origin.publicSpec;
     if (origin.integrity) row.integrity = origin.integrity;
     rows.push(row);
+  }
+  return rows;
+}
+
+function withBuiltinSources(
+  packages: BlueprintSourcePackage[],
+  manifest: ProfileManifest,
+  inspected: BlueprintRuntimeInspect | null,
+): BlueprintSourcePackage[] {
+  const rows = [...packages];
+  for (const layer of inspected?.builtinLayers ?? []) {
+    if (HOST_PACKAGE_SET.has(layer.name) || CONTROL_PACKAGE_SET.has(layer.name) || isOwnedBridgeName(layer.name)) continue;
+    const row: BlueprintSourcePackage = {
+      name: layer.name, version: layer.version, source: "builtin",
+      inBundles: manifest.bundles.includes(layer.name), hasBundlePatch: true,
+      eligibility: isExactRuntimeVersion(layer.version)
+        ? { available: true } : { available: false, reason: "The installed version is unknown." },
+      lifecycleScripts: [],
+    };
+    const index = rows.findIndex((item) => item.name === layer.name);
+    if (index >= 0) rows[index] = row;
+    else rows.push(row);
+  }
+  for (const name of inspected?.builtinCatalog ?? []) {
+    if (inspected?.builtinLayers?.some((layer) => layer.name === name)) continue;
+    if (HOST_PACKAGE_SET.has(name) || CONTROL_PACKAGE_SET.has(name) || isOwnedBridgeName(name)) continue;
+    const row: BlueprintSourcePackage = {
+      name, version: null, source: "builtin", inBundles: manifest.bundles.includes(name), hasBundlePatch: false,
+      eligibility: { available: false, reason: "This builtin is unavailable in the bound runtime." }, lifecycleScripts: [],
+    };
+    const index = rows.findIndex((item) => item.name === name);
+    if (index >= 0) rows[index] = row;
+    else rows.push(row);
   }
   return rows;
 }
@@ -1385,6 +1513,7 @@ function packageEligibility(
   origin: { source: BlueprintSourcePackage["source"] },
   version: string | null,
   installed: InstalledManifest | null,
+  name: string,
 ): BlueprintEligibility {
   if (origin.source !== "npm") {
     return { available: false, reason: "Only packages with an npm origin can be included." };
@@ -1394,6 +1523,9 @@ function packageEligibility(
   }
   if (!installed) {
     return { available: false, reason: "The installed package manifest could not be read." };
+  }
+  if (installed.name !== name) {
+    return { available: false, reason: "The installed package identity does not match its dependency name." };
   }
   return { available: true };
 }
@@ -1778,7 +1910,7 @@ function writeProvenance(home: string, spaceId: string, blueprint: Blueprint, va
   mkdirSync(root, { recursive: true });
   const origin: BlueprintOriginRecord = {
     schemaVersion: BLUEPRINT_ORIGIN_SCHEMA_VERSION,
-    blueprint,
+    blueprint: blueprint.document,
     bindings: blueprint.bindings.map((binding) => {
       if (binding.target.kind === "default-model") return { input: binding.input, kind: "default-model" as const };
       const entryId = patchEntryId(blueprint.profile.patch, binding.target.pointer);
@@ -1812,14 +1944,14 @@ function writeProvenance(home: string, spaceId: string, blueprint: Blueprint, va
   }
 }
 
-function readOrigin(home: string, spaceId: string): BlueprintOriginRecord | null {
+function readOrigin(home: string, spaceId: string): OriginRecipe | null {
   const path = join(spaceDataRoot(home, spaceId), BLUEPRINT_ORIGIN_FILE);
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as BlueprintOriginRecord;
     if (parsed.schemaVersion !== BLUEPRINT_ORIGIN_SCHEMA_VERSION) return null;
-    parseBlueprint(parsed.blueprint);
-    return parsed;
+    const blueprint = blueprintRecipe(parseBlueprintDocument(parsed.blueprint));
+    return { ...parsed, blueprint };
   } catch {
     return null;
   }
@@ -1852,12 +1984,12 @@ function composeBundles(
 ): void {
   const manifest = readProfileManifest(home, spaceId);
   const known = [...manifest.bundles, ...Object.keys(manifest.dependencies)];
-  const hostLayers = manifest.bundles.filter((name) => HOST_PACKAGE_SET.has(name));
+  const hostLayers = manifest.bundles.filter((name) => HOST_PACKAGE_SET.has(name) || CONTROL_PACKAGE_SET.has(name) || isOwnedBridgeName(name));
   const view = known.find((name) => name === "@dsh-spaces/view-bridge" || name === "dsh-spaces-view-bridge");
   const llm = known.find((name) => name === "@dsh-spaces/llm-bridge" || name === "dsh-spaces-llm-bridge");
   const final: string[] = [...hostLayers];
   if (view && !final.includes(view)) final.push(view);
-  if (options.includeLlmBridge && llm && !final.includes(llm)) final.push(llm);
+  if (llm && (options.includeLlmBridge || manifest.bundles.includes(llm)) && !final.includes(llm)) final.push(llm);
   for (const name of blueprintBundles) {
     if (!final.includes(name)) final.push(name);
   }
@@ -1946,6 +2078,11 @@ function blockingApplyDiagnostics(
   };
   if (blueprint.packages.some((pkg) => pkg.source.type === "github")) {
     push(GITHUB_APPLY_MESSAGE);
+  }
+  for (const pkg of blueprint.packages) {
+    if (HOST_PACKAGE_SET.has(pkg.name) || CONTROL_PACKAGE_SET.has(pkg.name) || isOwnedBridgeName(pkg.name) || pkg.name === "@klarkxy/dsh-blueprint") {
+      push("Owned host or control components cannot be supplied by a blueprint.");
+    }
   }
   for (const namespace of Object.keys(blueprint.profile.settings)) {
     if (FORBIDDEN_SETTINGS.has(namespace)) {
@@ -2088,7 +2225,7 @@ function defeatsIsolation(text: string, spaceId: string): boolean {
 function maybeModelInput(
   home: string,
   spaceId: string,
-  origin: BlueprintOriginRecord | null,
+  origin: OriginRecipe | null,
 ): { input: BlueprintInput; binding: BlueprintBinding } | null {
   if (origin?.blueprint.bindings.some((binding) => binding.target.kind === "default-model")) {
     const binding = origin.blueprint.bindings.find((item) => item.target.kind === "default-model")!;
@@ -2337,7 +2474,8 @@ function readInstalledManifest(home: string, spaceId: string, name: string): Ins
     };
     const pkgName = typeof parsed.name === "string" ? parsed.name : name;
     const version = typeof parsed.version === "string" ? parsed.version : "";
-    const hasBundle = Boolean(parsed.dsh && parsed.dsh.bundle && typeof parsed.dsh.bundle.patch === "string");
+    const patch = parsed.dsh?.bundle?.patch;
+    const hasBundle = typeof patch === "string" || (Array.isArray(patch) && patch.every((file) => typeof file === "string"));
     const lifecycleScripts = LIFECYCLE_SCRIPTS.filter((script) => parsed.scripts && Object.prototype.hasOwnProperty.call(parsed.scripts, script));
     const dependencies = parsed.dependencies && isPlainObject(parsed.dependencies) ? Object.keys(parsed.dependencies) : [];
     return { name: pkgName, version, hasBundle, lifecycleScripts, dependencies };
@@ -2358,6 +2496,7 @@ function readInstalledVersion(home: string, spaceId: string, name: string): stri
 }
 
 function installedManifestPath(home: string, spaceId: string, name: string): string {
+  if (!isBareNpmPackageName(name)) throw publicError("A dependency package name is invalid.");
   return join(home, "profiles", spaceId, "node_modules", ...name.split("/"), "package.json");
 }
 
@@ -2373,12 +2512,14 @@ function tarballIntegrity(home: string, rel: string): string | undefined {
 }
 
 function sourceFingerprint(home: string, spaceId: string): string {
+  const manifest = readProfileManifest(home, spaceId);
   return sha256Hex(
     [
       fileDigest(join(home, "profiles", spaceId, "package.json")),
       fileDigest(join(home, "profiles", spaceId, "cordis.patch.yml")),
       fileDigest(spaceSettingsPath(home, spaceId)),
       fileDigest(join(spaceDataRoot(home, spaceId), BLUEPRINT_ORIGIN_FILE)),
+      ...Object.keys(manifest.dependencies).sort().map((name) => `${name}:${fileDigest(installedManifestPath(home, spaceId, name))}`),
     ].join("|"),
   );
 }
@@ -2420,10 +2561,10 @@ function metadataOf(metadata: { name: string; version: string; description?: str
     : { name: metadata.name, version: metadata.version };
 }
 
-function blueprintFileName(name: string, version: string): string {
+function blueprintFileName(name: string, version?: string): string {
   const slug = name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   const base = slug && /^[A-Za-z0-9]/.test(slug) ? slug : "blueprint";
-  return `${base}-${version}.dsh-blueprint.json`;
+  return `${base}${version ? `-${version}` : ""}.dsh-blueprint.json`;
 }
 
 function emptyOutcome(host: BlueprintHostVersions, packages: BlueprintPackageResult[] = []): WorkbenchBlueprintApplyOutcome {
@@ -2481,6 +2622,7 @@ function durableText(message: string): string {
 function durableFailureReason(error: unknown, stage: "space-create" | "packages" | "presets"): string {
   if (isAbortError(error)) return "The blueprint apply was cancelled.";
   if (error instanceof BlueprintPackageError && error.code === "github-unsupported") return GITHUB_APPLY_MESSAGE;
+  if (error instanceof BlueprintPackageError) return blueprintPackageErrorMessage(error);
   if (isPublicError(error) && isSafeKnownReason(error.message)) return error.message;
   if (stage === "packages") return "Package installation failed.";
   if (stage === "presets") return "Blueprint presets could not be written.";

@@ -1,0 +1,3 @@
+- insert:
+    - id: klarkxy-blueprint
+      name: '@klarkxy/dsh-blueprint'

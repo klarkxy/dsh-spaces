@@ -5,7 +5,7 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ["@klarkxy/dsh-blueprint"] })],
     build: {
       rollupOptions: {
         input: { index: resolve("src/main/index.ts") },

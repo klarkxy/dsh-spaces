@@ -10,6 +10,10 @@ const at = path => resolve(root, path);
 const common = { bundle: true, format: 'esm', target: 'es2022', logLevel: 'info', absWorkingDir: root };
 const nodeRequire = 'import { createRequire as __spacesCreateRequire } from "node:module"; const require = __spacesCreateRequire(import.meta.url);';
 
+// Spaces consumes the independently packaged Blueprint protocol, including v1.
+const blueprintBuild = spawnSync(process.execPath, [at('packages/blueprint/scripts/build.mjs')], { cwd: root, stdio: 'inherit', windowsHide: true });
+if (blueprintBuild.status !== 0) throw new Error('Blueprint build failed', { cause: blueprintBuild.error });
+
 async function buildNodeCli(entryPoint, outfile) {
   const source = await readFile(at(entryPoint), 'utf8');
   const banner = source.startsWith('#!') ? nodeRequire : `#!/usr/bin/env node\n${nodeRequire}`;
