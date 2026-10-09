@@ -2232,14 +2232,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.processes) throw new WorkbenchPublicError("workbench/read-only");
     if (this.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (spaceId === "web") throw new WorkbenchPublicError("workbench/protected");
-    const cliBlock = this.cli ? unmetDshPeers(this.cli.version, dshPeerRangesFromProfile(join(this.home, "profiles", spaceId))) : [];
-    if (cliBlock.length && this.cli) {
-      throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(this.cli.version, cliBlock));
-    }
     if (this.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
       await this.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({
         home: this.home, profileId: spaceId, payloadRoot: this.options.componentPayloadRoot!,
+        bin: this.cli?.bin, cliVersion: this.cli?.version,
         install: async (bridge) => {
           const artifact = bridge === "view-bridge" ? this.options.viewBridgeArtifact : this.options.llmBridgeArtifact;
           if (!artifact) throw new Error(`The selected ${bridge} archive is unavailable.`);
@@ -2252,12 +2249,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           return dump;
         },
       }));
-    } else if (existsSync(join(this.home, "hub", spaceId, "settings.yaml"))) {
-      await this.lock.run("space.settings-migrate", async () => {
-        const dump = await this.readDump(spaceId);
-        if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");
-        migrateLegacyProfileSettings(this.home, spaceId, dump);
-      });
+    } else {
+      const cliBlock = this.cli ? unmetDshPeers(this.cli.version, dshPeerRangesFromProfile(join(this.home, "profiles", spaceId))) : [];
+      if (cliBlock.length && this.cli) {
+        throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(this.cli.version, cliBlock));
+      }
+      if (existsSync(join(this.home, "hub", spaceId, "settings.yaml"))) {
+        await this.lock.run("space.settings-migrate", async () => {
+          const dump = await this.readDump(spaceId);
+          if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");
+          migrateLegacyProfileSettings(this.home, spaceId, dump);
+        });
+      }
     }
     await this.processes.start(spaceId);
   }

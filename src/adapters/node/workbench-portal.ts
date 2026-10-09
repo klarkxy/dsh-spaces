@@ -140,7 +140,9 @@ async function ensureManager() {
     frame = document.createElement("iframe");
     frame.title = "Spaces workbench";
     frame.referrerPolicy = "no-referrer";
-    frame.allow = "clipboard-write";
+    // /view starts on the Supervisor and navigates to the verified manager.
+    // A bare directive defaults to the initial src origin, which excludes it.
+    frame.allow = "clipboard-write " + view.origin;
     frame.src = view.entryOrigin + view.entryPath + "?epoch=" + encodeURIComponent(view.serviceEpoch) + "&dsh-spaces-contained=1" + (native ? "&dsh-spaces-native=1" : "");
     frame.addEventListener("load", () => {
       if (stopped) return;

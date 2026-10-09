@@ -2,7 +2,6 @@
 import {
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
-  type Blueprint,
   type BlueprintDiagnostic,
   type BlueprintInput,
   type BlueprintInputType,
@@ -10,6 +9,7 @@ import {
   type BlueprintInputValues,
   type BlueprintJson,
 } from "./blueprint";
+import type { BlueprintDocument as Blueprint } from "@klarkxy/dsh-blueprint/document";
 
 export const BLUEPRINT_PLAN_TTL_MS = 5 * 60_000;
 export const BLUEPRINT_PLAN_MAX_COUNT = 16;
@@ -39,7 +39,7 @@ export const BLUEPRINT_APPLY_STAGES = ["space-create", "packages", "presets", "s
 export type BlueprintApplyStageName = (typeof BLUEPRINT_APPLY_STAGES)[number];
 export type BlueprintStageStatus = "succeeded" | "failed" | "not-run";
 
-export type BlueprintPackageSourceKind = "npm" | "local" | "unknown";
+export type BlueprintPackageSourceKind = "npm" | "builtin" | "local" | "unknown";
 
 export type BlueprintEligibility =
   | { available: true; reason?: string }
@@ -124,9 +124,10 @@ export type BlueprintGenerateBindingOverride = {
 
 export type WorkbenchBlueprintGenerateRequest = {
   method: "blueprint.generate";
+  formatVersion?: 1 | 2;
   spaceId: string;
   selection: BlueprintGenerateSelection;
-  metadata: { name: string; version: string; description?: string };
+  metadata: { name: string; version?: string; description?: string };
   bindingOverrides?: BlueprintGenerateBindingOverride[];
 };
 
@@ -162,7 +163,7 @@ export type BlueprintPreviewInput = {
 export type BlueprintPreviewPackage = {
   name: string;
   version: string;
-  source: "npm" | "github";
+  source: "npm" | "github" | "builtin";
   bundled: boolean;
   order?: number;
 };
@@ -234,7 +235,7 @@ export type WorkbenchBlueprintApplyOutcome = {
   packageResults: BlueprintPackageResult[];
   writes: BlueprintWriteResult[];
   host: { dsh: string | null; spaces: string | null; base: string | null; webApp: string | null };
-  source?: { name: string; version: string };
+  source?: { name: string; version?: string };
 };
 
 export type WorkbenchBlueprintProductRequest =

@@ -1,12 +1,11 @@
 /** Strict product DTO validators. Shape/format/limits only. Durable fields reject local paths and URL credentials; transient blueprint input values may include receiver-local directories. */
 import { z } from "zod";
-import { parseBlueprint } from "../core/domain/blueprint";
+import { parseBlueprintDocument as parseBlueprint, type BlueprintDocument as Blueprint } from "@klarkxy/dsh-blueprint/document";
 import { LLM_SHARE_NOTE } from "../core/domain/llm-share";
 import {
   BLUEPRINT_INPUT_ID_RE,
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
-  type Blueprint,
 } from "./blueprint";
 import { isExactRuntimeVersion } from "./runtime";
 import { WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT } from "./workbench-blueprint";
@@ -398,6 +397,7 @@ const blueprintSourceRequestSchema = z
 const blueprintGenerateRequestSchema = z
   .object({
     method: z.literal("blueprint.generate"),
+    formatVersion: z.union([z.literal(1), z.literal(2)]).optional(),
     spaceId: spaceIdSchema,
     selection: z
       .object({
@@ -409,7 +409,7 @@ const blueprintGenerateRequestSchema = z
     metadata: z
       .object({
         name: z.string().min(1).max(80),
-        version: exactVersionSchema,
+        version: exactVersionSchema.optional(),
         description: z.string().min(1).max(500).optional(),
       })
       .strict(),
@@ -425,7 +425,11 @@ const blueprintGenerateRequestSchema = z
       .max(BLUEPRINT_DOCUMENT_ITEM_MAX)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.formatVersion === 2 || typeof value.metadata.version === "string", {
+    message: "Blueprint v1 requires a version",
+    path: ["metadata", "version"],
+  });
 const blueprintInspectRequestSchema = z
   .object({
     method: z.literal("blueprint.inspect"),
@@ -457,7 +461,7 @@ const blueprintSourceResultSchema = z
               .max(214)
               .refine((value) => !containsLocalPath(value) && !containsCredentialUrl(value), "requested spec")
               .optional(),
-            source: z.enum(["npm", "local", "unknown"]),
+            source: z.enum(["npm", "builtin", "local", "unknown"]),
             integrity: z.string().max(200).optional(),
             inBundles: z.boolean(),
             hasBundlePatch: z.boolean(),
@@ -547,7 +551,7 @@ const blueprintPreviewResultSchema = z
           .object({
             name: packageNameSchema,
             version: exactVersionSchema,
-            source: z.enum(["npm", "github"]),
+            source: z.enum(["npm", "github", "builtin"]),
             bundled: z.boolean(),
             order: z.number().int().nonnegative().max(BLUEPRINT_DOCUMENT_ITEM_MAX).optional(),
           })
@@ -651,7 +655,7 @@ const blueprintApplyOutcomeSchema = z
           .min(1)
           .max(80)
           .refine((value) => !containsLocalPath(value) && !containsCredentialUrl(value), "source name"),
-        version: exactVersionSchema,
+        version: exactVersionSchema.optional(),
       })
       .strict()
       .optional(),

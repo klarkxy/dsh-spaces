@@ -501,6 +501,12 @@ export class WorkbenchController {
     } catch { return false; }
   };
 
+  openBlueprintUse = (): void => {
+    this.selectHome();
+    this.setHomeTab("blueprints");
+    this.blueprint.setMode("use");
+  };
+
   enterCreated = (): void => {
     const spaceId = this.ui.createdNotice?.spaceId;
     if (!spaceId) return;
@@ -1478,6 +1484,7 @@ export class WorkbenchController {
     const requestId = this.intentRequestIds.get(key) ?? this.env.uuid();
     this.intentRequestIds.set(key, requestId);
     this.intentInflight.add(key);
+    this.blueprint.trackApplyRequest(planId, requestId);
     const cycle = this.cycle;
     try {
       const job = await this.api.submit(command, requestId, observation);

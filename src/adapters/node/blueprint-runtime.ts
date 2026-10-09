@@ -12,7 +12,7 @@ import { assertNotRealHome, isInsideRealHome } from "./home-guard";
 import { isBareNpmPackageName } from "../../shared/plugin";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
 
-export type BlueprintRuntimeOptions = { home: string; bin: string };
+export type BlueprintRuntimeOptions = { home: string; bin: string; builtinPackages?: string[] };
 
 export type BlueprintRuntimeVersions = {
   dsh: string | null;
@@ -31,6 +31,8 @@ export type BlueprintRuntimeLayer = {
 export type BlueprintRuntimeInspect = {
   versions: BlueprintRuntimeVersions;
   baseLayers: BlueprintRuntimeLayer[];
+  builtinLayers?: BlueprintRuntimeLayer[];
+  builtinCatalog?: string[];
   baseEntries: unknown[];
   homePatches: unknown[];
   fingerprint: string;
@@ -120,6 +122,7 @@ type AppBootModule = {
   composeEntries: (layers: unknown[][], warn?: (message: string) => void) => unknown[];
   mountRootInclude: unknown;
   PROFILE_TEMPLATES: { web?: { bundles?: unknown } };
+  OPTIONAL_BUNDLES?: unknown;
   PROFILE_PATCH_FILENAME: string;
   PROFILES_DIR: string;
 };
@@ -165,7 +168,8 @@ class Observation {
       .map(([logical, path]) => {
         const row = this.files.get(path);
         if (!row) return `${logical}:ABSENT`;
-        return row.status === "absent" ? `${logical}:ABSENT` : `${logical}:PRESENT:${row.hash}`;
+        const identity = sha256Hex(Buffer.from(canon(path), "utf8"));
+        return row.status === "absent" ? `${logical}:${identity}:ABSENT` : `${logical}:${identity}:PRESENT:${row.hash}`;
       });
     return sha256Hex(Buffer.from(lines.join("\n"), "utf8"));
   }
@@ -220,6 +224,22 @@ export async function inspectBlueprintRuntime(
   for (const [index, packageName] of bundles.entries()) {
     baseLayers.push(readBundleLayer(bound, observation, profileDir, packageName, index));
   }
+  const requested = requireBundleNames(options.builtinPackages ?? []);
+  const catalog = optionalBundleNames(bound.appBoot);
+  if (requested.some((name) => !catalog.includes(name))) throw runtimeError("builtin-unsupported");
+  const builtinLayers: BlueprintRuntimeLayer[] = [];
+  // Both resolution anchors belong to the installation. A profile-local copy
+  // must never count as a shipped builtin.
+  const installationDir = dirname(bound.installAnchor);
+  for (const [index, name] of catalog.entries()) {
+    try {
+      builtinLayers.push(readBundleLayer(bound, observation, installationDir, name, bundles.length + index));
+    } catch (error) {
+      if (!(error instanceof BlueprintRuntimeError) || error.code !== "bundle-unresolved" || requested.includes(name)) throw error;
+      // Optional catalog members may not be installed in this distribution.
+      // Requested members fail above; discovery offers only available ones.
+    }
+  }
   const homePatches = readHomePatches(bound, observation);
   const entries = bound.appBoot.composeEntries(
     baseLayers.map((layer) => layer.patches),
@@ -229,6 +249,8 @@ export async function inspectBlueprintRuntime(
   return {
     versions: mergeLayerVersions(versions, baseLayers),
     baseLayers,
+    builtinLayers,
+    builtinCatalog: catalog,
     baseEntries: entries,
     homePatches,
     fingerprint: observation.fingerprint(),
@@ -402,6 +424,15 @@ function webTemplateBundles(appBoot: AppBootModule): string[] {
   return bundles;
 }
 
+function optionalBundleNames(appBoot: AppBootModule): string[] {
+  if (appBoot.OPTIONAL_BUNDLES === undefined) return [];
+  try {
+    return [...new Set(requireBundleNames(appBoot.OPTIONAL_BUNDLES))];
+  } catch {
+    throw runtimeError("runtime-unsupported");
+  }
+}
+
 function observeRuntimeFiles(observation: Observation, bound: BoundRuntime): void {
   observation.observe("bin", bound.bin, false, "invalid-bin");
   observation.observe("app-boot", bound.appBootPath, false, "runtime-unsupported");
@@ -476,32 +507,25 @@ function readBundleLayer(
   const manifest = parseManifest(manifestBytes);
   const name = typeof manifest.name === "string" ? manifest.name : "";
   const version = typeof manifest.version === "string" ? manifest.version : "";
-  if (!name || !version) throw runtimeError("manifest-invalid");
-  const declared = readDeclaredPatch(manifest);
-  const patchPath = declaredPatchPath(packageDir, declared);
-  assertRegularContainedFile(
-    packageDir,
-    patchPath,
-    "bundle-patch-escape",
-    "bundle-patch-invalid",
-    "bundle-patch-missing",
-  );
-  const patchBytes = observation.observe(
-    `layer/${index}/${packageName}/patch`,
-    patchPath,
-    false,
-    "bundle-patch-missing",
-  );
-  if (!patchBytes) throw runtimeError("bundle-patch-missing");
-  decodeUtf8(patchBytes, "utf8-invalid");
-  let patches: unknown[];
-  try {
-    patches = bound.appBoot.loadOverlayPatches(BIN_NAME, patchPath);
-  } catch {
-    throw runtimeError("bundle-patch-invalid");
+  if (name !== packageName || !version) throw runtimeError("manifest-invalid");
+  const declared = readDeclaredPatches(manifest);
+  const patches: unknown[] = [];
+  const patchPaths = declared.map((file) => declaredPatchPath(packageDir, file));
+  for (const [patchIndex, patchPath] of patchPaths.entries()) {
+    assertRegularContainedFile(packageDir, patchPath, "bundle-patch-escape", "bundle-patch-invalid", "bundle-patch-missing");
+    const patchBytes = observation.observe(`layer/${index}/${packageName}/patch/${patchIndex}`, patchPath, false, "bundle-patch-missing");
+    if (!patchBytes) throw runtimeError("bundle-patch-missing");
+    decodeUtf8(patchBytes, "utf8-invalid");
+    let loaded: unknown[];
+    try {
+      loaded = bound.appBoot.loadOverlayPatches(BIN_NAME, patchPath);
+    } catch {
+      throw runtimeError("bundle-patch-invalid");
+    }
+    if (!Array.isArray(loaded)) throw runtimeError("bundle-patch-invalid");
+    patches.push(...loaded);
   }
-  if (!Array.isArray(patches)) throw runtimeError("bundle-patch-invalid");
-  return { name, version, packageDir, patchPath, patches };
+  return { name, version, packageDir, patchPath: patchPaths[0] ?? manifestPath, patches };
 }
 
 function readHomePatches(bound: BoundRuntime, observation: Observation): unknown[] {
@@ -655,12 +679,14 @@ function resolvePackageDir(
   return packageDir;
 }
 
-function readDeclaredPatch(manifest: Record<string, unknown>): string {
+function readDeclaredPatches(manifest: Record<string, unknown>): string[] {
   const dsh = manifest.dsh;
   if (!isPlainObject(dsh)) throw runtimeError("bundle-patch-missing");
   const bundle = dsh.bundle;
-  if (!isPlainObject(bundle) || typeof bundle.patch !== "string") throw runtimeError("bundle-patch-missing");
-  return bundle.patch;
+  if (!isPlainObject(bundle)) throw runtimeError("bundle-patch-missing");
+  if (typeof bundle.patch === "string") return [bundle.patch];
+  if (!Array.isArray(bundle.patch) || bundle.patch.some((file) => typeof file !== "string")) throw runtimeError("bundle-patch-missing");
+  return bundle.patch as string[];
 }
 
 function declaredPatchPath(packageDir: string, declared: string): string {

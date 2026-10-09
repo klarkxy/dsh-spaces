@@ -883,8 +883,8 @@ function dummyPayloadLib(opts: { viewBody?: string; llmBody?: string } = {}): Va
     ["lib/supervisor/launcher.mjs", "export const launcher = 1;\n"],
     ["lib/supervisor/LICENSE", "x\n"],
     ["lib/supervisor/snapshot-worker.mjs", "export const worker = 1;\n"],
-    ["lib/view-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["view-bridge"], version: "3.0.0" })}\n`],
-    ["lib/view-bridge/cordis.patch.yml", "view: dummy\n"],
+    ["lib/view-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["view-bridge"], version: "3.0.0", dsh: { bundle: { patch: "./cordis.patch.yml" } } })}\n`],
+    ["lib/view-bridge/cordis.patch.yml", "- insert:\n    - id: dsh-spaces-view-bridge\n      name: '@dsh-spaces/view-bridge'\n- id: settings\n  disabled: true\n- insert:\n    - id: dsh-spaces-settings\n      name: '@dsh-spaces/view-bridge/settings'\n"],
     ["lib/view-bridge/LICENSE", "x\n"],
     ["lib/view-bridge/lib/index.js", opts.viewBody ?? "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
@@ -935,6 +935,11 @@ function writeFakeCli(home: string, version = "0.1.5-rc.1"): string {
   mkdirSync(join(root, "lib"), { recursive: true });
   writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version })}\n`);
   writeFileSync(join(root, "lib", "bin.js"), "console.log('fake-dsh');\n");
+  // The transition inspects actual declared layers before starting the fake
+  // process. Give this lifecycle fixture a real, read-only composition surface.
+  const web = join(root, "node_modules", "@deepseek-ai", "dsh-web-app");
+  writeRel(web, "package.json", `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version, dsh: { bundle: { patch: "./cordis.patch.yml" } } })}\n`);
+  writeRel(web, "cordis.patch.yml", "- insert:\n    - id: settings\n      name: '@deepseek-ai/dsh-web-app'\n");
   return join(root, "lib", "bin.js");
 }
 

@@ -1,0 +1,128 @@
+{
+  "name": "@klarkxy/dsh-blueprint",
+  "version": "0.2.0-alpha.1",
+  "description": "Blueprint: share plugin sets, exact versions, and install order as blueprint codes.",
+  "icon": "./icon.svg",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./core": {
+      "types": "./core.d.mts",
+      "default": "./core.mjs"
+    },
+    "./codec": {
+      "types": "./codec.d.mts",
+      "default": "./codec.mjs"
+    },
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./v1": {
+      "types": "./lib/v1/domain.d.ts",
+      "default": "./lib/v1/domain.js"
+    },
+    "./v1/types": {
+      "types": "./lib/v1/types.d.ts",
+      "default": "./lib/v1/types.js"
+    },
+    "./v1/codec": {
+      "types": "./lib/v1/codec.d.ts",
+      "default": "./lib/v1/codec.js"
+    },
+    "./document": {
+      "types": "./document.d.mts",
+      "default": "./document.mjs"
+    },
+    "./document-codec": {
+      "types": "./document-codec.d.mts",
+      "default": "./document-codec.mjs"
+    },
+    "./schemas/blueprint-v1.schema.json": "./schemas/blueprint-v1.schema.json"
+  },
+  "files": [
+    "icon.svg",
+    "*.mjs",
+    "client.js",
+    "cordis.patch.yml",
+    "skills/**/*.md",
+    "locale/*.json",
+    "README*.md",
+    "PROTOCOL.md",
+    "examples/*.json",
+    "examples/*.txt",
+    "NOTICE.md",
+    "LICENSE",
+    "ACCEPTANCE.md",
+    "*.d.mts",
+    "lib",
+    "src",
+    "scripts",
+    "tsconfig.json",
+    "schemas"
+  ],
+  "scripts": {
+    "build": "node --check index.mjs && node --check host-rpc.mjs && node --check client.js && node --check official.mjs && node --check core.mjs && node --check tools.mjs && node --check order.mjs && node --check blueprint.mjs && node --check codec.mjs && node --check creator-guidance.mjs && node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "prepare": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.0-rc.2"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0",
+    "semver": "^7.7.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-atomic-write": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-plugin-manager": ">=0.2.0-rc.2",
+    "@deepseek-ai/dsh-sandbox": ">=0.2.0-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-atomic-write": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-plugin-manager": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-sandbox": {
+      "optional": true
+    }
+  },
+  "license": "MIT",
+  "author": "klarkxy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klarkxy/dsh-spaces.git",
+    "directory": "packages/blueprint"
+  },
+  "homepage": "https://github.com/klarkxy/dsh-spaces/tree/main/packages/blueprint",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
+    "@types/node": "^24.3.0",
+    "@types/semver": "^7.7.0",
+    "typescript": "^5.9.2"
+  }
+}

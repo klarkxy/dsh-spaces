@@ -9,6 +9,7 @@ import {
   startWorkbenchHttp,
   type WorkbenchHttpRuntime,
 } from "../src/adapters/node/workbench-http.ts";
+import { renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
 
 const HOST = "127.0.0.1";
 const EPOCH = "aa".repeat(32);
@@ -60,12 +61,23 @@ type Locator = {
   click: () => Promise<void>;
   waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
   textContent: () => Promise<string | null>;
+  getAttribute: (name: string) => Promise<string | null>;
+  evaluate: <T>(fn: (element: HTMLElement) => T) => Promise<T>;
+};
+
+type FrameLocator = { locator: (sel: string) => Locator; frameLocator: (sel: string) => FrameLocator };
+
+type RouteResponse = { text: () => Promise<string> };
+type Route = {
+  fetch: () => Promise<RouteResponse>;
+  fulfill: (options: { response: RouteResponse; body: string }) => Promise<void>;
 };
 
 type Page = {
   goto: (url: string, opts?: { waitUntil?: string }) => Promise<unknown>;
   locator: (sel: string) => Locator;
-  frameLocator: (sel: string) => { locator: (sel: string) => Locator };
+  frameLocator: (sel: string) => FrameLocator;
+  route: (pattern: string, handler: (route: Route) => Promise<void>) => Promise<void>;
   evaluate: (fn: () => unknown) => Promise<unknown>;
   bringToFront: () => Promise<void>;
   close: () => Promise<void>;
@@ -91,6 +103,7 @@ function liveState() {
         displayName: "Hub",
         status: "running",
         generation: 1,
+        hasWebApp: true,
       },
     ],
     jobs: [],
@@ -254,4 +267,122 @@ test("granting ephemeral clipboard permission does not replace iframe clipboard-
   await page.bringToFront();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   assert.notEqual(copied, SHARE);
+});
+
+const PORTAL_CHANNEL = "cc".repeat(16);
+const MANAGER_CHANNEL = "manager-clipboard-view";
+
+async function withPortalClipboardFixture(
+  t: { after: (fn: () => Promise<void>) => void },
+  options: { legacyInner?: boolean; missingOuterAllow?: boolean } = {},
+) {
+  const require = createRequire(join(playwrightRoot, "index.js"));
+  const { chromium } = require("playwright") as { chromium: Chromium };
+  const manager = await listen((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(MANAGER_PAGE);
+  });
+  t.after(() => manager.close());
+  let origin = `http://${HOST}:9`, portalPath = "";
+  const parent = await listen((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><html><body>
+<iframe id="portal-frame" title="Spaces surface" src="${origin}${portalPath}" ${options.missingOuterAllow ? "" : 'allow="clipboard-write"'} style="width:800px;height:600px;border:0"></iframe>
+<script>
+let selected = false;
+window.addEventListener('message', event => {
+ const frame = document.getElementById('portal-frame');
+ if (selected || event.source !== frame.contentWindow || event.origin !== ${JSON.stringify(origin)} ||
+     event.data?.source !== 'dsh-spaces-portal' || event.data?.channel !== ${JSON.stringify(PORTAL_CHANNEL)} || event.data?.type !== 'state') return;
+ selected = true;
+ frame.contentWindow.postMessage({source:'dsh-spaces-portal-parent',channel:${JSON.stringify(PORTAL_CHANNEL)},type:'select',requestId:1,spaceId:null}, ${JSON.stringify(origin)});
+});
+</script></body></html>`);
+  });
+  t.after(() => parent.close());
+  const host = runtime({ originOf: () => origin, managerUrl: () => manager.url, page: entryHtml });
+  host.dispatch = async method => {
+    if (method === "state") return liveState();
+    if (method === "view") return { spaceId: "spaces-hub", generation: 1, serviceEpoch: EPOCH,
+      entryOrigin: origin, entryPath: "/view/spaces-hub/1", origin: manager.url, channel: MANAGER_CHANNEL };
+    throw new Error(method);
+  };
+  const http = await startWorkbenchHttp(host, 0); origin = http.origin;
+  t.after(() => http.close());
+  const minted = await fetch(`${origin}/internal/portal`, { method: "POST",
+    headers: { "content-type": "application/json", origin, authorization: "Bearer test-bearer" },
+    body: JSON.stringify({ parentOrigin: parent.url, channel: PORTAL_CHANNEL }),
+  });
+  assert.equal(minted.status, 200);
+  portalPath = (await minted.json() as { path: string }).path;
+  const bootstrap = await fetch(`${origin}/view/spaces-hub/1?epoch=${EPOCH}`, { headers: { cookie: `${COOKIE}=${SESSION}` } });
+  assert.equal(bootstrap.headers.get("permissions-policy"), null);
+  assert.match(await bootstrap.text(), /http-equiv="refresh"/);
+  const browser = await launchChromium(chromium); t.after(() => browser.close());
+  const context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  if (options.legacyInner) {
+    // route() intercepts the initial request, not each hop of a redirect chain.
+    await page.route(`${origin}/portal-bootstrap/*`, async route => {
+      const response = await route.fetch(); const body = await response.text();
+      const old = body.replace('frame.allow = "clipboard-write " + view.origin;', 'frame.allow = "clipboard-write";');
+      assert.notEqual(old, body, "regression fixture must remove the exact-origin delegation");
+      await route.fulfill({ response, body: old });
+    });
+  }
+  await page.goto(parent.url, { waitUntil: "load" });
+  const portal = page.frameLocator("#portal-frame");
+  const innerFrame = portal.locator('iframe[title="Spaces workbench"]');
+  await innerFrame.waitFor({ state: "visible", timeout: 15_000 });
+  const managerFrame = portal.frameLocator('iframe[title="Spaces workbench"]');
+  const copy = managerFrame.locator("#copy"); await copy.waitFor({ state: "visible", timeout: 15_000 });
+  const status = managerFrame.locator("#status");
+  return { page, origin, managerOrigin: manager.url, innerFrame, status, copy };
+}
+
+function clipboardPolicy() {
+  const policy = (document as Document & { featurePolicy?: { allowsFeature(feature: string): boolean } }).featurePolicy;
+  return { origin: location.origin, write: policy?.allowsFeature("clipboard-write"), read: policy?.allowsFeature("clipboard-read") };
+}
+
+async function clickPortalCopy(fixture: Awaited<ReturnType<typeof withPortalClipboardFixture>>) {
+  await fixture.copy.click();
+  for (let i = 0; i < 40; i++) {
+    const status = await fixture.status.textContent();
+    if (status !== "idle") return status;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return fixture.status.textContent();
+}
+
+test("portal scopes clipboard-write to its validated final manager origin", () => {
+  const html = renderPortalPage({ parentOrigin: "http://127.0.0.1:19786", channel: PORTAL_CHANNEL }, "http://127.0.0.1:3101");
+  assert.match(html, /view\.origin !== audience\.managerOrigin/);
+  assert.match(html, /frame\.allow = "clipboard-write " \+ view\.origin/);
+  assert.doesNotMatch(html, /clipboard-write \*/);
+  assert.doesNotMatch(html, /clipboard-read/);
+});
+
+test("three-origin portal delegates write across Supervisor bootstrap navigation and denies clipboard-read", { timeout: 120_000 }, async t => {
+  const fixture = await withPortalClipboardFixture(t);
+  assert.equal(await fixture.innerFrame.getAttribute("allow"), `clipboard-write ${fixture.managerOrigin}`);
+  assert.match(await fixture.innerFrame.getAttribute("src") ?? "", new RegExp(`^${fixture.origin}/view/`));
+  const policy = await fixture.status.evaluate(clipboardPolicy);
+  assert.deepEqual(policy, { origin: fixture.managerOrigin, write: true, read: false });
+  assert.equal(await clickPortalCopy(fixture), "wrote");
+  await fixture.page.bringToFront();
+  assert.equal(await fixture.page.evaluate(() => navigator.clipboard.readText()), SHARE);
+});
+
+test("three-origin portal reproduces the bare-src delegation failure after manager navigation", { timeout: 120_000 }, async t => {
+  const fixture = await withPortalClipboardFixture(t, { legacyInner: true });
+  assert.equal(await fixture.innerFrame.getAttribute("allow"), "clipboard-write");
+  assert.equal((await fixture.status.evaluate(clipboardPolicy)).write, false);
+  assert.match(await clickPortalCopy(fixture) ?? "", /^fail:/);
+});
+
+test("three-origin portal cannot grant clipboard-write when its parent omits delegation", { timeout: 120_000 }, async t => {
+  const fixture = await withPortalClipboardFixture(t, { missingOuterAllow: true });
+  assert.equal((await fixture.status.evaluate(clipboardPolicy)).write, false);
+  assert.match(await clickPortalCopy(fixture) ?? "", /^fail:/);
 });

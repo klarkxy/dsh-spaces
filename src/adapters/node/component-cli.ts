@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { satisfies } from "semver";
 
-const DSH_PEER = /^@deepseek-ai\/dsh-/;
+const DSH_PEER = /^@deepseek-ai\/dsh(?:-|$)/;
 
 /** Peer ranges the current component build expects the host CLI release to satisfy. */
 export function dshPeerRangesFromPackages(packageJsonPaths: readonly string[]): Record<string, string> {
@@ -20,7 +20,8 @@ export function dshPeerRangesFromPackages(packageJsonPaths: readonly string[]): 
       : undefined;
     if (!peers || typeof peers !== "object") continue;
     for (const [name, range] of Object.entries(peers as Record<string, unknown>)) {
-      if (!DSH_PEER.test(name) || typeof range !== "string" || !range.trim()) continue;
+      if (!DSH_PEER.test(name)) continue;
+      if (typeof range !== "string") throw new Error(`Invalid DSH peer range for ${name}.`);
       ranges[name] = range;
     }
   }
@@ -50,7 +51,8 @@ export function unmetDshPeers(version: string, ranges: Record<string, string>): 
   for (const [name, range] of Object.entries(ranges)) {
     let ok = false;
     try {
-      ok = satisfies(version, range, { includePrerelease: true });
+      const requirement = ["workspace:^", "workspace:~", "workspace:*"].includes(range) ? version : range;
+      ok = requirement.trim() !== "" && satisfies(version, requirement, { includePrerelease: true });
     } catch {
       ok = false;
     }

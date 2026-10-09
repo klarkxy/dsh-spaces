@@ -3,11 +3,11 @@ import {
   BLUEPRINT_INPUT_ID_RE,
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
-  type Blueprint,
   type BlueprintInput,
   type BlueprintInputType,
   type BlueprintInputValues,
 } from "../../../../src/shared/blueprint";
+import { blueprintRecipe, type BlueprintDocument, type BlueprintRecipe } from "@klarkxy/dsh-blueprint/document";
 import type { LlmDescribeResult } from "../../../../src/shared/llm-api";
 import type { WorkbenchJob } from "../../../../src/shared/workbench";
 import type {
@@ -35,7 +35,7 @@ export const BLUEPRINT_RESERVED_SPACE_NAMES = new Set([
   "spaces-hub",
 ]);
 
-const SHARE_PREFIX = "DSHBP1:";
+const SHARE_PREFIXES = ["DSHBP1:", "DSHBP2:"];
 const TRIM_EDGE = /^(?:[ \t\n\r])+|(?:[ \t\n\r])+$/g;
 const WS_BYTES = new Set([0x09, 0x0a, 0x0d, 0x20]);
 
@@ -102,6 +102,7 @@ export interface BlueprintUiState {
   sourceObservation: WorkbenchProductObservation | null;
   sourceError: string | null;
   selectedPackages: string[];
+  formatVersion: 1 | 2;
   includePatch: boolean;
   selectedNamespaces: string[];
   bindings: BlueprintBindingDraft[];
@@ -183,6 +184,7 @@ export function createBlueprintUiState(): BlueprintUiState {
     sourceObservation: null,
     sourceError: null,
     selectedPackages: [],
+    formatVersion: 2,
     includePatch: false,
     selectedNamespaces: [],
     bindings: [],
@@ -247,7 +249,7 @@ function startsWithAscii(bytes: Uint8Array, start: number, ascii: string): boole
 
 function looksLikeShareBytes(bytes: Uint8Array): boolean {
   const start = skipAsciiWs(bytes, hasUtf8Bom(bytes) ? 3 : 0);
-  return startsWithAscii(bytes, start, SHARE_PREFIX);
+  return SHARE_PREFIXES.some((prefix) => startsWithAscii(bytes, start, prefix));
 }
 
 export function decodeBlueprintFileBytes(bytes: Uint8Array): BlueprintDecodeResult {
@@ -275,8 +277,8 @@ export function limitDecodedText(text: string): BlueprintDecodeResult {
   if (text.charCodeAt(0) === 0xfeff) return { ok: false, code: "bom", text };
   const trimmed = text.replace(TRIM_EDGE, "");
   if (trimmed.length === 0) return { ok: false, code: "empty", text };
-  if (trimmed.startsWith(SHARE_PREFIX)) {
-    if (trimmed.length > BLUEPRINT_SHARE_MAX_BYTES) return { ok: false, code: "too-large-share", text };
+  if (SHARE_PREFIXES.some((prefix) => trimmed.startsWith(prefix))) {
+    if (new TextEncoder().encode(text).length > BLUEPRINT_SHARE_MAX_BYTES) return { ok: false, code: "too-large-share", text };
     return { ok: true, text, kind: "share" };
   }
   if (new TextEncoder().encode(text).length > BLUEPRINT_JSON_MAX_BYTES) {
@@ -319,12 +321,12 @@ export function parseFiniteNumber(text: string): number | null {
 }
 
 export function collectBlueprintValues(
-  blueprint: Blueprint | null,
+  blueprint: BlueprintDocument | null,
   drafts: { [id: string]: BlueprintInputDraft },
 ): { values: BlueprintInputValues; invalidNumber: string | null } {
   const values: BlueprintInputValues = {};
   if (!blueprint) return { values, invalidNumber: null };
-  for (const input of blueprint.inputs) {
+  for (const input of blueprintRecipe(blueprint).inputs) {
     const draft = drafts[input.id];
     if (!draft || !draft.present) continue;
     if (input.type === "number") {
@@ -360,7 +362,7 @@ export function isBlueprintApplyOutcome(
   return value?.kind === "blueprint.apply";
 }
 
-export function blueprintHasGithub(blueprint: Blueprint | null): boolean {
+export function blueprintHasGithub(blueprint: BlueprintRecipe | null): boolean {
   return Boolean(blueprint?.packages.some((item) => item.source.type === "github"));
 }
 
@@ -414,11 +416,11 @@ function conversionDraftsFromObservations(items: BlueprintLocalObservation[]): B
 }
 
 function draftsForBlueprint(
-  blueprint: Blueprint,
+  blueprint: BlueprintDocument,
   previous: { [id: string]: BlueprintInputDraft },
 ): { [id: string]: BlueprintInputDraft } {
   const next: { [id: string]: BlueprintInputDraft } = {};
-  for (const input of blueprint.inputs) {
+  for (const input of blueprintRecipe(blueprint).inputs) {
     next[input.id] = previous[input.id] ?? emptyInputDraft();
   }
   return next;
@@ -426,6 +428,7 @@ function draftsForBlueprint(
 
 export class BlueprintSession {
   private snapshot: BlueprintUiState = createBlueprintUiState();
+  private applyRequestId: string | null = null;
   private readonly seq: Record<RequestKind, number> = {
     inspect: 0,
     preview: 0,
@@ -579,7 +582,7 @@ export class BlueprintSession {
         previewStatus: "idle",
         previewInvalid: true,
       });
-      if (result.blueprint.inputs.some((input) => input.type === "model")) void this.loadModels();
+      if (blueprintRecipe(result.blueprint).inputs.some((input) => input.type === "model")) void this.loadModels();
     });
   };
 
@@ -670,6 +673,7 @@ export class BlueprintSession {
       return;
     }
     const planId = preview.planId;
+    this.applyRequestId = null;
     this.patch({
       applyStatus: "submitting",
       applyPlanId: planId,
@@ -684,6 +688,9 @@ export class BlueprintSession {
       },
       (error: unknown) => {
         if (this.snapshot.applyPlanId !== planId) return;
+        // An observed job is authoritative even if its submit response was lost.
+        if (this.snapshot.applyJobId) return;
+        if (this.snapshot.applyStatus !== "submitting" && this.snapshot.applyStatus !== "running") return;
         this.patch({
           applyStatus: "failed",
           applyError: error instanceof Error ? error.message : this.msg("app.genericError"),
@@ -692,11 +699,20 @@ export class BlueprintSession {
     );
   };
 
+  trackApplyRequest = (planId: string, requestId: string): void => {
+    if (this.snapshot.applyPlanId !== planId || this.snapshot.applyStatus !== "submitting") return;
+    this.applyRequestId = requestId;
+  };
+
   onApplyJob = (job: WorkbenchJob): void => {
     if (job.kind !== "blueprint.apply") return;
+    // Poll snapshots include historical jobs. Bind the request before submit awaits,
+    // rather than letting the first polled blueprint job claim the current apply.
+    if (!this.applyRequestId || job.requestId !== this.applyRequestId) return;
     if (this.snapshot.applyJobId && this.snapshot.applyJobId !== job.id) return;
     if (!this.snapshot.applyPlanId && this.snapshot.applyStatus === "idle") return;
     const active = job.status === "queued" || job.status === "running";
+    if (active && this.snapshot.applyJobId && (this.snapshot.applyStatus === "succeeded" || this.snapshot.applyStatus === "failed")) return;
     const product = job.result?.product;
     const outcome = isBlueprintApplyOutcome(product) ? product : this.snapshot.applyOutcome;
     if (active) {
@@ -704,6 +720,7 @@ export class BlueprintSession {
         applyStatus: "running",
         applyJobId: job.id,
         applyOutcome: outcome,
+        applyError: null,
       });
       return;
     }
@@ -725,6 +742,7 @@ export class BlueprintSession {
   };
 
   cancelStaged = (): void => {
+    if (this.snapshot.applyStatus !== "running" && this.snapshot.applyStatus !== "submitting") this.applyRequestId = null;
     this.begin("preview");
     this.patch({
       previewStatus: "idle",
@@ -783,11 +801,23 @@ export class BlueprintSession {
   };
 
   setPackageSelected = (name: string, selected: boolean): void => {
+    const item = this.snapshot.source?.packages.find((entry) => entry.name === name);
+    if (selected && (!item?.eligibility.available || (this.snapshot.formatVersion === 1 && item.source === "builtin"))) return;
     const selectedPackages = selected
       ? [...new Set([...this.snapshot.selectedPackages, name])]
       : this.snapshot.selectedPackages.filter((item) => item !== name);
     this.invalidateGenerate();
     this.patch({ selectedPackages });
+  };
+
+  setFormatVersion = (formatVersion: 1 | 2): void => {
+    if (this.snapshot.formatVersion === formatVersion) return;
+    this.invalidateGenerate();
+    // Configuration drafts remain available when the user returns to presets.
+    const selectedPackages = this.snapshot.selectedPackages.filter((name) =>
+      formatVersion === 2 || this.snapshot.source?.packages.find((item) => item.name === name)?.source !== "builtin",
+    );
+    this.patch({ formatVersion, selectedPackages, generateStatus: "idle" });
   };
 
   setIncludePatch = (includePatch: boolean): void => {
@@ -857,7 +887,7 @@ export class BlueprintSession {
       }
       const bindings = conversionDraftsFromObservations(result.localObservations);
       const selectedPackages = result.packages
-        .filter((item) => item.eligibility.available)
+        .filter((item) => item.eligibility.available && (this.snapshot.formatVersion === 2 || item.source !== "builtin"))
         .map((item) => item.name);
       const selectedNamespaces = result.settingsNamespaces
         .filter((item) => item.eligible && item.shareable)
@@ -886,17 +916,18 @@ export class BlueprintSession {
       return;
     }
     const name = this.snapshot.metaName.trim();
+    const formatVersion = this.snapshot.formatVersion;
     const version = this.snapshot.metaVersion.trim();
-    if (!name || !version) {
+    if (!name || (formatVersion === 1 && !version)) {
       this.patch({ generateError: this.msg("blueprints.needMeta") });
       return;
     }
     const description = this.snapshot.metaDescription.trim();
-    const bindingOverrides = this.collectBindingOverrides();
+    const bindingOverrides = formatVersion === 1 ? this.collectBindingOverrides() : [];
     const selection = {
       packages: [...this.snapshot.selectedPackages],
-      includePatch: this.snapshot.includePatch,
-      settingsNamespaces: [...this.snapshot.selectedNamespaces],
+      includePatch: formatVersion === 1 && this.snapshot.includePatch,
+      settingsNamespaces: formatVersion === 1 ? [...this.snapshot.selectedNamespaces] : [],
     };
     const { token, signal } = this.begin("generate");
     const epoch = this.host.serviceEpoch();
@@ -904,11 +935,12 @@ export class BlueprintSession {
     void this.run("generate", token, signal, async () => {
       const result = await this.host.product({
         method: "blueprint.generate",
+        formatVersion,
         spaceId,
         selection,
         metadata: {
           name,
-          version,
+          ...(formatVersion === 1 ? { version } : {}),
           ...(description ? { description } : {}),
         },
         ...(bindingOverrides.length > 0 ? { bindingOverrides } : {}),
@@ -916,10 +948,11 @@ export class BlueprintSession {
       if (this.stale("generate", token, signal)) return;
       if (this.snapshot.mode !== "generate") return;
       if (this.snapshot.sourceSpaceId !== spaceId) return;
-      if (this.snapshot.metaName.trim() !== name || this.snapshot.metaVersion.trim() !== version) return;
+      if (this.snapshot.formatVersion !== formatVersion) return;
+      if (this.snapshot.metaName.trim() !== name || (formatVersion === 1 && this.snapshot.metaVersion.trim() !== version)) return;
       if (JSON.stringify(this.snapshot.selectedPackages) !== JSON.stringify(selection.packages)) return;
-      if (this.snapshot.includePatch !== selection.includePatch) return;
-      if (JSON.stringify(this.snapshot.selectedNamespaces) !== JSON.stringify(selection.settingsNamespaces)) return;
+      if (formatVersion === 1 && this.snapshot.includePatch !== selection.includePatch) return;
+      if (formatVersion === 1 && JSON.stringify(this.snapshot.selectedNamespaces) !== JSON.stringify(selection.settingsNamespaces)) return;
       if (epoch && this.host.serviceEpoch() && epoch !== this.host.serviceEpoch()) return;
       if (result.method !== "blueprint.generate") {
         this.patch({ generateStatus: "error", generate: null, generateError: this.mismatch("blueprint.generate", result.method) });

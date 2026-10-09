@@ -1,4 +1,19 @@
-# DSH Spaces 蓝图规范 v1
+# DSH Blueprint 与 Spaces
+
+蓝图由本仓库的独立包 [`@klarkxy/dsh-blueprint`](packages/blueprint/README.zh-CN.md) 维护。它可单独安装在 DSH 0.2 中；Spaces 依赖蓝图的协议模块，负责把蓝图创建为隔离的新空间。蓝图插件不依赖 Spaces。
+
+| 导出内容 | 格式 | 接收方式 |
+| --- | --- | --- |
+| 插件精确版本、来源与顺序 | DSHBP2 / JSON v2 | 独立插件的 Creator 合并，或 Spaces 创建新空间 |
+| 配置预设、设置、本机输入和插件组合 | DSHBP1 / JSON v1 | Spaces 原有预览与新空间创建流程 |
+
+在 Spaces 的空间列表选择“从蓝图创建空间”，可以粘贴上述任一种分享码或打开 JSON。空间的“生成蓝图”默认导出插件组合；需要预设时选择“含配置预设”。预览后创建，结果保持未启动。归档文件的数据导入导出是另一项操作，不改变为蓝图格式。
+
+DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。`builtin` 表示接收端宿主提供的精确包身份，不会被改成 npm 安装。接收端缺少该包或版本不符时，在写入空间前报告失败。
+
+协议接口、独立使用与 v2 格式见[包说明](packages/blueprint/README.md)和[v2 协议](packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](tasks/blueprint-migration-0.2.md)。下文保留完整 v1 合同。
+
+## DSH Spaces 蓝图规范 v1
 
 状态：v1 规范与使用指南。蓝图功能已随 [0.4.0](https://github.com/klarkxy/dsh-spaces/releases/tag/v0.4.0) 发布。验证结果与限制见[蓝图实施记录](tasks/blueprint-implementation.md)及[发布验收记录](tasks/release-0.4.0.md)。
 

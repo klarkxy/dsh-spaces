@@ -21,7 +21,7 @@ import {
 
 const temps: string[] = [];
 const opened: OpenedNativeSpace[] = [];
-const PINNED = "0.1.7-alpha.1";
+const PINNED = "0.2.0-rc.2";
 
 afterEach(async () => {
   for (const space of opened.splice(0)) await space.dispose();

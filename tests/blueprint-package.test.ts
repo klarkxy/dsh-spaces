@@ -213,6 +213,32 @@ test("ordinary library without bundle declaration is valid", async () => {
   assert.equal(prepared.bundlePatch, undefined);
 });
 
+test("DSH 0.2 ordered patch arrays validate every member and preserve declared order", async () => {
+  const home = tempHome();
+  const tarball = packFixture({
+    name: "dsh-blueprint-layers", version: "1.0.0",
+    dsh: { bundle: { patch: ["./first.yml", "./second.yml"] } },
+  }, { "first.yml": "[]\n", "second.yml": "[]\n" });
+  const prepared = await prepareBlueprintPackage(home, npmPkg("dsh-blueprint-layers", "1.0.0"), {
+    fetchImpl: fixtureFetch("dsh-blueprint-layers", "1.0.0", tarball),
+  });
+  assert.equal(prepared.hasBundle, true);
+  assert.deepEqual(prepared.bundlePatch, ["first.yml", "second.yml"]);
+});
+
+for (const [last, code] of [["missing.yml", "bundle-patch-missing"], ["../escape.yml", "bundle-patch-invalid"]] as const) {
+  test(`DSH 0.2 patch array rejects unsafe later member: ${last}`, async () => {
+    const home = tempHome();
+    const tarball = packFixture({
+      name: "dsh-blueprint-layers", version: "1.0.0",
+      dsh: { bundle: { patch: ["./first.yml", last] } },
+    }, { "first.yml": "[]\n" });
+    await assertRejects(prepareBlueprintPackage(home, npmPkg("dsh-blueprint-layers", "1.0.0"), {
+      fetchImpl: fixtureFetch("dsh-blueprint-layers", "1.0.0", tarball),
+    }), code);
+  });
+}
+
 test("declared bundle patch missing from the archive is a real error", async () => {
   const home = tempHome();
   const tarball = packFixture({

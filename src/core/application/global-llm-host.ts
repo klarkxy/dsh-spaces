@@ -44,7 +44,7 @@ import {
 
 export const LLM_CAPABILITIES = {
   adapter: "llm-pi-ai",
-  adapterVersion: "0.1.7-alpha.1",
+  adapterVersion: "0.2.0-rc.2",
   protocols: PINNED_LLM_PI_AI_PROTOCOLS,
   keyless: false,
 } as const;

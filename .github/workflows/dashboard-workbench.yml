@@ -24,6 +24,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - run: npm run build:blueprint
       - run: npx --no-install tsc --noEmit -p tsconfig.node.json && npx --no-install tsc --noEmit -p tsconfig.web.json
       - run: node scripts/test-dashboard-core.mjs
       - run: node --import tsx --test tests/dashboard-home.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home-gateway.test.ts tests/dashboard-supervisor.test.ts tests/dashboard-local.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-view.test.tsx tests/dashboard-http.test.ts tests/dashboard-workbench.test.ts tests/dashboard-workbench-cors.test.ts tests/workbench-ui.test.tsx tests/workbench-plugin.test.ts
@@ -40,7 +42,9 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.1.7-alpha.1 pnpm@10.15.0
+
+      - run: npm run build:blueprint
+      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.2.0-rc.2 pnpm@10.15.0
       - run: node scripts/build-spaces.mjs && node scripts/build-dashboard-plugin.mjs
       - run: npx --no-install playwright install --with-deps chromium
       - name: Actual Home homepage, publishing forms and two managed native Hosts

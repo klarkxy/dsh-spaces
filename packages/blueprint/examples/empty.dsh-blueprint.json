@@ -1,0 +1,9 @@
+{
+  "kind": "dsh-blueprint",
+  "formatVersion": 2,
+  "metadata": {
+    "name": "空组合"
+  },
+  "packages": [],
+  "bundles": []
+}

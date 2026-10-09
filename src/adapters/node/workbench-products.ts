@@ -189,6 +189,7 @@ export class WorkbenchProductService {
         return {
           ...await this.blueprints.generate({
             spaceId: request.spaceId,
+            formatVersion: request.formatVersion,
             selection: request.selection,
             metadata: request.metadata,
             bindingOverrides: request.bindingOverrides,

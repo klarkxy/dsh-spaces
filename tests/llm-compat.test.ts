@@ -18,7 +18,7 @@ function pkg(name: string): { name: string; version: string } {
   };
 }
 
-test("P0 pins the published 0.1.7-alpha.1 settings, credentials, and llm-pi-ai packages", () => {
+test("P0 pins the published 0.2.0-rc.2 settings, credentials, and llm-pi-ai packages", () => {
   const names = [
     "@deepseek-ai/dsh-settings",
     "@deepseek-ai/dsh-config-editor",
@@ -38,7 +38,7 @@ test("P0 pins the published 0.1.7-alpha.1 settings, credentials, and llm-pi-ai p
   assert.equal(repo.devDependencies["@deepseek-ai/dsh-settings"], PINNED_DSH_PACKAGE_VERSION);
 });
 
-test("0.1.7-alpha.1 SettingsForms and LocalCredentialProvider expose the native composition seams", async () => {
+test("0.2.0-rc.2 SettingsForms and LocalCredentialProvider expose the native composition seams", async () => {
   const settings = await import("@deepseek-ai/dsh-settings");
   const credentialsLocal = await import("@deepseek-ai/dsh-credentials-local");
   const credentials = await import("@deepseek-ai/dsh-credentials");
@@ -65,7 +65,7 @@ test("0.1.7-alpha.1 SettingsForms and LocalCredentialProvider expose the native 
   assert.equal(resolvedCreds.filename, credentialsPath);
 });
 
-test("0.1.7-alpha.1 llm-pi-ai supportedProtocols matches the pinned shared-connection matrix", async () => {
+test("0.2.0-rc.2 llm-pi-ai supportedProtocols matches the pinned shared-connection matrix", async () => {
   const { supportedProtocols, Config } = await import("@deepseek-ai/dsh-llm-pi-ai");
   assert.deepEqual([...supportedProtocols()], [...PINNED_LLM_PI_AI_PROTOCOLS]);
   assert.ok(Config);
