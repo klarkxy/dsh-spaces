@@ -1,3 +1,5 @@
+import { SpaceMessageBus } from "./message-bus";
+import { SpaceMessages } from "./message-service";
 import type { Context } from "@deepseek-ai/cordis";
 import { injectViewHintScript, parseViewEnv, VIEW_HINT_GLOBAL, type ViewHandshakeConfig } from "./env";
 
@@ -13,6 +15,11 @@ export const inject = ["webServer"];
 export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = process.env): ViewHandshakeConfig | null {
   const view = parseViewEnv(env);
   if (!view) return null;
+  if (process.connected && typeof process.send === "function") {
+    const bus = new SpaceMessageBus();
+    ctx.effect(() => bus.close);
+    new SpaceMessages(ctx, bus);
+  }
   const on = (ctx as { on?(event: string, listener: (...args: unknown[]) => void): () => void }).on;
   if (typeof on === "function") {
     on.call(ctx, "webserver/index-inject", (table: unknown) => {
@@ -52,3 +59,6 @@ export {
 } from "./handshake";
 
 export default { name, inject, apply };
+
+export { SpaceMessages } from "./message-service";
+export { SpaceMessageBus, SpaceMessageError, type SpaceOperation, type JsonValue } from "./message-bus";

@@ -10,6 +10,7 @@ import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor
 import { DesktopServiceClient } from "../src/adapters/desktop/service-client.ts";
 import { createDesktopStartup } from "../src/main/desktop-startup.ts";
 import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
+import { SpaceMessageRouter } from "../src/adapters/node/message-bus/router.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
 
 const homes: string[] = [];
@@ -211,6 +212,7 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     // ports replaced. The earlier callback sees the same shared idle queue.
     const runtime = Object.assign(Object.create(WorkbenchSupervisorRuntime.prototype), {
       home, controlDir: controller.controlDir, jobs, handle: lease, reasons: [],
+      messageBus: new SpaceMessageRouter(),
       relinquishKind: null, relinquishJobId: null, pendingHandoff: undefined,
       options: { onNormalExit: () => { exited = true; } }, httpClose: async () => {},
     });
