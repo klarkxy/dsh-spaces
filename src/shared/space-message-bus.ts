@@ -3,6 +3,27 @@ export const BUS_CHANNEL = 'dsh-spaces:bus:1';
 export const BUS_MAX_BYTES = 64 * 1024;
 export const BUS_MAX_PENDING = 128;
 export const BUS_MAX_TIMEOUT = 60_000;
+export const BUS_MAX_OPERATIONS = 128;
+export const BUS_CAPABILITIES_OPERATION = 'spaces.capabilities';
+export interface SpaceCapabilityDeclaration { description: string }
+export interface SpaceCapability extends SpaceCapabilityDeclaration { operation: string }
+export function capabilityDescription(value: unknown): string {
+  const row = busJson(value);
+  if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).length !== 1 ||
+    typeof row.description !== 'string' || new TextEncoder().encode(JSON.stringify(row.description)).length > 256) throw new SpaceMessageError('invalid-input');
+  return row.description;
+}
+export function parseSpaceCapabilities(value: unknown): SpaceCapability[] {
+  const rows = busJson(value);
+  if (!Array.isArray(rows) || rows.length > BUS_MAX_OPERATIONS) throw new SpaceMessageError('invalid-input');
+  const names = new Set<string>();
+  return rows.map(row => {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).length !== 2 ||
+      !busIdentifier(row.operation) || row.operation === BUS_CAPABILITIES_OPERATION || names.has(row.operation)) throw new SpaceMessageError('invalid-input');
+    names.add(row.operation);
+    return { operation: row.operation, description: capabilityDescription({ description: row.description }) };
+  });
+}
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type BusErrorCode = 'invalid-input' | 'target-unavailable' | 'operation-not-found' | 'unauthorized' | 'timeout' | 'disconnected' | 'overloaded' | 'operation-failed';
 const codes = new Set<BusErrorCode>(['invalid-input', 'target-unavailable', 'operation-not-found', 'unauthorized', 'timeout', 'disconnected', 'overloaded', 'operation-failed']);
