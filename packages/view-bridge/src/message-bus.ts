@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { BUS_CHANNEL, BUS_MAX_PENDING, BUS_MAX_TIMEOUT, SpaceMessageError, busFailure, busIdentifier, busJson, parseBusMessage,
-  type BusMessage, type JsonValue } from '../../../src/shared/space-message-bus.ts';
+import { BUS_CHANNEL, BUS_MAX_PENDING, BUS_MAX_TIMEOUT, BUS_MAX_OPERATIONS, BUS_CAPABILITIES_OPERATION, capabilityDescription, parseSpaceCapabilities, SpaceMessageError, busFailure, busIdentifier, busJson, parseBusMessage,
+  type BusMessage, type JsonValue, type SpaceCapabilityDeclaration, type SpaceCapability } from '../../../src/shared/space-message-bus.ts';
 
 export interface SpaceMessageTransport {
   readonly connected: boolean;
@@ -9,8 +9,8 @@ export interface SpaceMessageTransport {
   off(event: string, listener: (...args: any[]) => void): unknown;
 }
 export type SpaceOperation = (params: JsonValue, caller: Readonly<{ spaceId: string }>) => JsonValue | Promise<JsonValue>;
-type Operation = { allowed: ReadonlySet<string>; handler: SpaceOperation };
-/** Host-only API. No eval, browser exposure, operation discovery, retry or reconnect. */
+type Operation = { description: string; allowed: ReadonlySet<string>; handler: SpaceOperation };
+/** Host-only API with permission-filtered static declarations. No eval, retry or reconnect. */
 export class SpaceMessageBus {
   private closed = false;
   private executing = 0;
@@ -25,12 +25,18 @@ export class SpaceMessageBus {
   get pendingCount(): number { return this.pending.size; }
   get activeCount(): number { return this.active.size; }
   /** Each operation is opt-in for exact source spaces, denied by default. */
-  handle(operation: string, allowedSpaces: readonly string[], handler: SpaceOperation): () => void {
+  handle(operation: string, allowedSpaces: readonly string[], handler: SpaceOperation, declaration: SpaceCapabilityDeclaration = { description: '' }): () => void {
     if (this.closed) throw new SpaceMessageError('disconnected');
     if (!busIdentifier(operation) || !Array.isArray(allowedSpaces) || allowedSpaces.length > 128 || allowedSpaces.some(id => !busIdentifier(id)) || typeof handler !== 'function' || this.operations.has(operation)) throw new SpaceMessageError('invalid-input');
-    const entry = { allowed: new Set(allowedSpaces), handler };
+    if (operation === BUS_CAPABILITIES_OPERATION) throw new SpaceMessageError('invalid-input');
+    if (this.operations.size >= BUS_MAX_OPERATIONS) throw new SpaceMessageError('overloaded');
+    const entry = { allowed: new Set(allowedSpaces), handler, description: capabilityDescription(declaration) };
     this.operations.set(operation, entry);
     return () => { if (this.operations.get(operation) === entry) this.operations.delete(operation); };
+  }
+  /** Query this target only; it discloses operations authorized for this source session. */
+  async capabilities(target: string, timeoutMs?: number): Promise<SpaceCapability[]> {
+    return parseSpaceCapabilities(await this.request(target, BUS_CAPABILITIES_OPERATION, null, timeoutMs));
   }
   async request(target: string, operation: string, params: JsonValue, timeoutMs = 10_000): Promise<JsonValue> {
     if (this.closed || !this.transport.connected) throw new SpaceMessageError('disconnected');
@@ -67,6 +73,15 @@ export class SpaceMessageBus {
     }
     if (message.kind !== 'invoke') return;
     const { requestId } = message;
+    if (message.operation === BUS_CAPABILITIES_OPERATION) {
+      if (message.params !== null) { this.send(busFailure(requestId, 'invalid-input')); return; }
+      const value = [...this.operations.entries()].filter(([, op]) => op.allowed.has(message.source))
+        .map(([operation, op]) => ({ operation, description: op.description }))
+        .sort((a, b) => a.operation.localeCompare(b.operation));
+      // Bounded static declarations fit in one ordinary response. No registry or broadcast.
+      this.send({ channel: BUS_CHANNEL, kind: 'response', requestId, ok: true, value });
+      return;
+    }
     const operation = this.operations.get(message.operation);
     if (!operation) { this.send(busFailure(requestId, 'operation-not-found')); return; }
     if (!operation.allowed.has(message.source)) { this.send(busFailure(requestId, 'unauthorized')); return; }
@@ -95,4 +110,4 @@ export class SpaceMessageBus {
     this.active.clear(); this.operations.clear();
   };
 }
-export { SpaceMessageError, type JsonValue } from '../../../src/shared/space-message-bus.ts';
+export { SpaceMessageError, type JsonValue, type SpaceCapability, type SpaceCapabilityDeclaration } from '../../../src/shared/space-message-bus.ts';

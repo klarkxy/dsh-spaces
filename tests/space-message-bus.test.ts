@@ -179,3 +179,49 @@ test('hung handlers remain admission-bounded even after their response timers ex
     assert.equal(transport.sent.at(-1).error, 'overloaded');
   } finally { bus.close(); }
 });
+
+test('static capabilities disclose only callable operations and stale discovery never grants access', async () => {
+  const s = await setup();
+  try {
+    const allowed = await command(s.alpha, { test: 'capabilities', target: 'beta' });
+    assert.equal(allowed.ok, true);
+    assert.deepEqual(allowed.value.map((v: any) => v.operation), ['bad-result', 'echo', 'failure', 'hang']);
+    assert.equal(allowed.value.find((v: any) => v.operation === 'echo').description, 'Echo a value and the trusted caller.');
+    const limited = await command(s.beta, { test: 'capabilities', target: 'alpha' });
+    assert.deepEqual(limited.value, [{ operation: 'echo', description: 'Echo a value and the trusted caller.' }]);
+    assert.equal((await request(s.alpha, 'private')).error, 'unauthorized');
+    assert.equal((await command(s.alpha, { test: 'capabilities', target: 'missing' })).error, 'target-unavailable');
+    assert.equal((await request(s.alpha, 'spaces.capabilities', { source: 'admin' })).error, 'invalid-input');
+    await command(s.beta, { test: 'dispose-echo' });
+    assert.equal((await request(s.alpha, 'echo')).error, 'operation-not-found');
+    assert.equal((await command(s.alpha, { test: 'capabilities', target: 'beta' })).value.some((v: any) => v.operation === 'echo'), false);
+  } finally { await s.close(); }
+});
+
+test('static declarations are detached, reserved names rejected, and the maximal catalog fits one envelope', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { SpaceMessageBus } = await import('../packages/view-bridge/src/message-bus.ts');
+  const { BUS_MAX_OPERATIONS, parseSpaceCapabilities } = await import('../src/shared/space-message-bus.ts');
+  class Transport extends EventEmitter {
+    connected = true;
+    sent: any[] = [];
+    send(message: unknown, cb: (error: Error | null) => void) { this.sent.push(message); cb(null); return true; }
+  }
+  const transport = new Transport(), bus = new SpaceMessageBus(transport);
+  try {
+    assert.throws(() => bus.handle('spaces.capabilities', ['alpha'], () => null), { code: 'invalid-input' });
+    assert.throws(() => bus.handle('bad', ['alpha'], () => null, { description: '\u0000'.repeat(50) }), { code: 'invalid-input' });
+    assert.throws(() => bus.handle('bad', ['alpha'], () => null, { description: 'good', secret: true } as never), { code: 'invalid-input' });
+    const declaration = { description: 'Initial description' }, allowed = ['alpha'];
+    const dispose = bus.handle('first', allowed, () => null, declaration);
+    declaration.description = 'Mutated'; allowed[0] = 'intruder';
+    transport.emit('message', { channel: BUS_CHANNEL, kind: 'invoke', requestId: 'first-query', source: 'alpha', operation: 'spaces.capabilities', params: null, timeoutMs: 1000 });
+    assert.deepEqual(transport.sent.pop().value, [{ operation: 'first', description: 'Initial description' }]);
+    dispose();
+    for (let i = 0; i < BUS_MAX_OPERATIONS; i++) bus.handle(`${String(i).padStart(3, '0')}${'a'.repeat(125)}`, ['alpha'], () => null, { description: 'x'.repeat(254) });
+    assert.throws(() => bus.handle('overflow', [], () => null), { code: 'overloaded' });
+    transport.emit('message', { channel: BUS_CHANNEL, kind: 'invoke', requestId: 'max-query', source: 'alpha', operation: 'spaces.capabilities', params: null, timeoutMs: 1000 });
+    const response = transport.sent.pop(); assert.ok(parseBusMessage(response)); assert.equal(parseSpaceCapabilities(response.value).length, BUS_MAX_OPERATIONS);
+    for (const invalid of [[{ operation: 'spaces.capabilities', description: '' }], [{ operation: 'echo', description: '', secret: true }], [{ operation: 'echo', description: '' }, { operation: 'echo', description: '' }]]) assert.throws(() => parseSpaceCapabilities(invalid));
+  } finally { bus.close(); }
+});

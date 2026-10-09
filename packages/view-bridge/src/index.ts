@@ -61,4 +61,4 @@ export {
 export default { name, inject, apply };
 
 export { SpaceMessages } from "./message-service";
-export { SpaceMessageBus, SpaceMessageError, type SpaceOperation, type JsonValue } from "./message-bus";
+export { SpaceMessageBus, SpaceMessageError, type SpaceOperation, type JsonValue, type SpaceCapability, type SpaceCapabilityDeclaration } from "./message-bus";
