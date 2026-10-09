@@ -1,0 +1,118 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { BrowserTabs, parseBrowserUrl } from '../packages/browser/src/tabs';
+import { Context, Service } from '@deepseek-ai/cordis';
+import { apply as applyBrowser } from '../packages/browser/src/index';
+import type { SpaceOperation } from '../packages/view-bridge/src/message-bus';
+import { busJson } from '../src/shared/space-message-bus';
+import { mergeTabSnapshots } from '../packages/browser/src/client';
+import { apply as applyBrowserClient } from '../packages/browser/src/client';
+import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+test('official DSH root slot elects Browser-only UI ahead of the Web layout', () => {
+  const slots = new SlotCore();
+  slots.register({ name: 'root' }, () => createElement('div', { 'data-dsh-layout': true }));
+  applyBrowserClient({
+    get: () => ({ rpc: { call: async () => ({ ok: true, value: [] }) } }),
+    slots: { inject: (_name: string, register: () => void) => register(), register: slots.register.bind(slots) },
+  } as never);
+  const winner = slots.entriesOfSlot('root')[0];
+  assert.equal(winner?.options.priority, -2);
+  const html = renderToStaticMarkup(createElement(winner!.component as never, {}));
+  assert.match(html, /data-spaces-browser-root="true"/);
+  assert.doesNotMatch(html, /data-dsh-layout/);
+});
+
+test('a delayed pre-open UI snapshot cannot remove the newly opened tab', () => {
+  const tabs = new BrowserTabs();
+  const oldSnapshot = tabs.listTabs();
+  const opened = tabs.openURL('https://example.com/');
+  const merged = mergeTabSnapshots([...oldSnapshot, opened], oldSnapshot);
+  assert.deepEqual(merged.map(tab => tab.id), [oldSnapshot[0]!.id, opened.id]);
+  assert.equal(merged[1]?.requestedUrl, 'https://example.com/');
+});
+
+test('Browser starts with one blank home and opens separate tabs', () => {
+  const tabs = new BrowserTabs();
+  const home = tabs.listTabs();
+  assert.equal(home.length, 1);
+  assert.equal(home[0]?.url, null);
+  const opened = tabs.openURL('example.com/path');
+  assert.equal(opened.url, 'https://example.com/path');
+  assert.equal(opened.requestedUrl, opened.url);
+  assert.notEqual(opened.id, home[0]?.id);
+  assert.deepEqual(tabs.listTabs().map(tab => tab.url), [null, 'https://example.com/path']);
+  home[0] = { id: 'forged', url: 'https://evil.example/' };
+  assert.notEqual(tabs.listTabs()[0]?.id, 'forged');
+});
+
+test('native observations update live URL/title without mutating the requested load address', () => {
+  const tabs = new BrowserTabs(new Set(['4100']));
+  const one = tabs.openURL('https://example.com/');
+  const two = tabs.openURL('https://example.org/');
+  const observed = tabs.observe([{ tabId: one.id, url: 'https://example.com/redirected', title: 'Redirected' }]);
+  assert.equal(observed[1]?.requestedUrl, 'https://example.com/');
+  assert.equal(observed[1]?.url, 'https://example.com/redirected');
+  assert.equal(observed[1]?.title, 'Redirected');
+  for (const bad of [
+    [{ tabId: two.id, url: 'file:///etc/passwd', title: 'bad' }],
+    [{ tabId: two.id, url: 'http://127.0.0.1:4100/', title: 'bad' }],
+    [{ tabId: 'unknown', url: 'https://example.com/', title: 'bad' }],
+    [{ tabId: two.id, url: 'https://example.com/', title: 'x'.repeat(129) }],
+  ]) assert.throws(() => tabs.observe(bad));
+  assert.equal(tabs.listTabs()[2]?.url, 'https://example.org/');
+});
+
+test('Browser URL policy rejects non-web schemes, credentials and application origins', () => {
+  const blocked = new Set(['3080', '4567']);
+  for (const value of [
+    '', ' https://example.com', 'http://user:pass@example.com', 'file:///etc/passwd',
+    'javascript:alert(1)', 'data:text/html,hi', 'http://127.0.0.1:3080/',
+    'https://localhost:4567/', 'http://[::1]:3080/', '\u0000https://example.com',
+  ]) assert.throws(() => parseBrowserUrl(value, blocked));
+  assert.equal(parseBrowserUrl('http://127.0.0.1:8080/', blocked), 'http://127.0.0.1:8080/');
+  assert.equal(parseBrowserUrl('https://example.com/a', blocked), 'https://example.com/a');
+});
+
+test('Browser bounds tab count', () => {
+  const tabs = new BrowserTabs();
+  for (let i = 1; i < 16; i++) tabs.openURL(`https://example.com/${i}`);
+  assert.equal(tabs.listTabs().length, 16);
+  assert.throws(() => tabs.openURL('https://example.com/overflow'));
+});
+
+test('maximal Browser tabs and native observations fit one private bus response', () => {
+  const tabs = new BrowserTabs();
+  const prefix = 'https://example.com/';
+  const url = prefix + 'a'.repeat(2048 - prefix.length);
+  const opened = Array.from({ length: 15 }, () => tabs.openURL(url));
+  tabs.observe(opened.map(tab => ({ tabId: tab.id, url, title: 'T'.repeat(126) })));
+  assert.equal(tabs.listTabs().length, 16);
+  assert.doesNotThrow(() => busJson(tabs.listTabs().map(tab => ({ id: tab.id, requestedUrl: tab.requestedUrl, url: tab.url, title: tab.title }))));
+});
+
+test('Browser Host registers only exact-source operations and denies all by default', async () => {
+  class Messages extends Service {
+    readonly operations = new Map<string, { allowed: readonly string[]; handler: SpaceOperation; description: string }>();
+    constructor(ctx: Context) { super(ctx, 'spaceMessages'); }
+    handle(operation: string, allowed: readonly string[], handler: SpaceOperation, declaration: { description: string }): () => void {
+      this.operations.set(operation, { allowed, handler, description: declaration.description });
+      return () => { this.operations.delete(operation); };
+    }
+  }
+  const ctx = new Context();
+  await ctx.plugin({ name: 'server-fixture', apply: plugin => { class Server extends Service { port = 3200; constructor() { super(plugin, 'webServer'); } } new Server(); } });
+  await ctx.plugin({ name: 'messages-fixture', apply: plugin => { new Messages(plugin); } });
+  try {
+    const empty = ctx.spaceMessages as unknown as Messages;
+    await ctx.plugin({ name: 'browser-empty-fixture', inject: ['spaceMessages'], apply: plugin => { applyBrowser(plugin); } });
+    assert.deepEqual(empty.operations.get('browser.openURL')?.allowed, []);
+    assert.deepEqual(empty.operations.get('browser.listTabs')?.allowed, []);
+    const opened = empty.operations.get('browser.openURL')!.handler({ url: 'https://example.com' }, { spaceId: 'coding' });
+    assert.equal((opened as { url: string }).url, 'https://example.com/');
+    assert.equal((empty.operations.get('browser.listTabs')!.handler(null, { spaceId: 'coding' }) as unknown[]).length, 2);
+    assert.throws(() => empty.operations.get('browser.openURL')!.handler({ url: 'file:///etc/passwd' }, { spaceId: 'coding' }));
+  } finally { await ctx.fiber.dispose(); }
+});

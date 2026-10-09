@@ -72,6 +72,12 @@ function dummyTree(options: { skip?: string[] } = {}): { root: string; lib: stri
     ["lib/view-bridge/lib/index.js", "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
     ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
+    ["lib/browser/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.browser, "3.0.0")],
+    ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
+    ["lib/browser/LICENSE", "browser-license\n"],
+    ["lib/browser/lib/index.js", "export const browser = 1;\n"],
+    ["lib/browser/lib/client.js", "export const browserClient = 1;\n"],
+    ["lib/browser/lib/typert.host.js", "export const browserHost = 1;\n"],
     ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], "4.0.0")],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
@@ -94,7 +100,7 @@ function writeManifest(root: string, manifest: unknown): void {
   writeRel(root, COMPONENT_PAYLOAD_MANIFEST_REL, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-test("write and validate a complete five-component dummy payload", () => {
+test("write and validate a complete six-component dummy payload", () => {
   const { root, lib } = dummyTree();
   const written = writeComponentPayloadManifest(lib);
   assert.equal(written.manifest.schemaVersion, COMPONENT_PAYLOAD_SCHEMA_VERSION);
@@ -105,7 +111,7 @@ test("write and validate a complete five-component dummy payload", () => {
   assert.equal(written.packageRoot, root);
   assert.deepEqual(
     COMPONENT_PAYLOAD_NAMES.map((name) => written.manifest.components[name].version),
-    ["2.0.0", "1.0.0", "3.0.0", "4.0.0", "2.0.0"],
+    ["2.0.0", "1.0.0", "3.0.0", "3.0.0", "4.0.0", "2.0.0"],
   );
   for (const name of COMPONENT_PAYLOAD_NAMES) {
     const row = written.manifest.components[name];
@@ -174,6 +180,19 @@ test("validate rejects a missing llm-bridge component and a tampered file", () =
   writeManifest(root, valid);
   writeRel(root, "lib/index.js", "export const plugin = 2;\n");
   assert.throws(() => validateComponentPayload(lib), /sha256 does not match/);
+});
+
+test("an older five-component manifest is rejected without touching Home data", () => {
+  const { root, lib } = dummyTree();
+  const home = tempDir("dsh-existing-home-");
+  const sentinel = join(home, "profiles", "notes", "cordis.patch.yml");
+  mkdirSync(join(sentinel, ".."), { recursive: true });
+  writeFileSync(sentinel, "user configuration stays unchanged\n");
+  const valid = writeComponentPayloadManifest(lib).manifest;
+  const { browser: _browser, ...olderComponents } = valid.components;
+  writeManifest(root, { ...valid, components: olderComponents } as ComponentPayloadManifest);
+  assert.throws(() => validateComponentPayload(lib), /missing component browser/i);
+  assert.equal(readFileSync(sentinel, "utf8"), "user configuration stays unchanged\n");
 });
 
 test("validate rejects traversal, NUL, absolute paths, and listing the manifest", () => {

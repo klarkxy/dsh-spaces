@@ -1,0 +1,3 @@
+- insert:
+    - id: browser-caller-fixture
+      name: '@dsh-spaces/browser-caller-fixture'

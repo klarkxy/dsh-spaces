@@ -1,4 +1,18 @@
-# 2026-10-09 跨 Space 消息总线第一阶段（本地待评审）
+# 2026-10-09 精简 MVP：消息总线、能力查询、Browser Space
+
+当前工作分支包含最小跨 Space 总线、权限过滤的静态能力查询，以及可作为第六组件安装的独立 Browser Space。云端验收边界见 [Workbench Browser Web 验收](../docs/workbench.md#browser-web-acceptance-in-an-isolated-home)，可复现脚本为 `scripts/accept-browser-web.ts`。未做 PR、合并或部署。
+
+- [x] 官方 DSH 0.2.0-rc.2 Web 双 profile 在隔离临时 Home 内真实创建、安装插件、启动两个 Host，认证 RPC、默认拒绝、过滤能力查询、跨 Space openURL/listTabs 通过。
+- [x] Browser-only root 经官方 SlotCore 选举和服务器端渲染验证；六组件构建/打包及专项测试通过。
+- [x] 最终三套类型检查与完整构建通过；workbench 539 项中 534 通过、5 失败，5 项在原始基线对应文件同样重现；spaces 139 通过、3 跳过。运行使用 `node --import tsx --test` 执行脚本同一文件列表（云端 tsx CLI 管道受限）。
+- [ ] 基线测试债务：额外 frontend-recovery/dsh-cli/plugin-library 64 项中 61 通过、3 失败，与原始基线一致；完整默认 test 在 Linux 的 Windows taskkill fixture 失败后挂住，已中止，不计为全套通过。本轮只更新旧“禁止任何 preload”断言为专用窄桥和真实 sender/frame 约束，没有改动这些基线失败。
+- [ ] 用户本机验收 Web GUI：地址栏、iframe 可嵌入站点、A/B/A 切页保持、目标站点拒绝嵌入时的提示。云端 Chromium 因 socket EPERM 未完成可视浏览器验收。
+- [ ] 用户本机或后续测试完整 Supervisor Browser 预设创建 → 实际安装 → 首次启动同一条生产 E2E；云端官方双 Host 脚本直接创建/安装 profile，预设 UI→job 为 fixture 验证。
+- [ ] 用户本机验收自有 Desktop 候选及官方 Desktop 0.2/Windows 路径。当前约 2.5 秒隐藏 lease 到期可销毁 guest/临时 session，长时间切 Space 后页面/登录状态不保证保留。
+- [ ] 旧五组件安装不能直接热升级到六组件包；本轮只提供新隔离安装路径，没有自动迁移。用户本机若有旧 Home，先按此限制选择新 Home，不覆盖原有数据。
+- [ ] Terminal Space 尚未实施，另行设计与授权。
+
+# 2026-10-09 跨 Space 消息总线第一阶段（历史阶段记录）
 
 按用户授权在云端实现最小请求／响应总线，不推送、不 PR、不合并、不部署。接口与验收见 [第一阶段说明](../docs/message-bus/phase-one.md)。基线 `c8e831e970f5b9ac64c8a7be527bdd42cd69ed53`。
 

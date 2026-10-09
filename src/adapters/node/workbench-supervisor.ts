@@ -239,6 +239,7 @@ export interface WorkbenchSupervisorOptions {
   supervisorAssetRoot?: string;
   pluginArtifact?: string;
   viewBridgeArtifact?: string;
+  browserArtifact?: string;
   llmBridgeArtifact?: string;
   snapshotWorkerFile?: string;
   snapshotRoot?: string;
@@ -304,6 +305,7 @@ type PendingComponentHandoff = {
   payload: ValidatedComponentPayload;
   pluginArtifact?: string;
   viewBridgeArtifact?: string;
+  browserArtifact?: string;
   llmBridgeArtifact?: string;
 };
 
@@ -1580,13 +1582,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async createSpace(
-    input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean },
+    input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; browser?: boolean },
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchJob["result"]> {
     ctx.phase("create");
     ctx.cancellable(false);
     const name = parseSpaceName(input.name);
     this.protectSpecial(name, { allowManager: false });
+    if (input.browser && (!this.options.browserArtifact || !this.options.viewBridgeArtifact)) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The bundled Browser or its view bridge is unavailable.");
+    }
     await this.lock.run("space.create", async () => {
       if (this.spaces) {
         await this.spaces.create({ name, displayName: input.displayName });
@@ -1598,6 +1603,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
       if (this.options.viewBridgeArtifact) {
         await this.ensureViewBridge(name);
+      }
+      if (input.browser) {
+        await this.installArtifact(name, this.options.browserArtifact!, "dsh-spaces-browser");
       }
     });
     // Spaces inherit shared connections by default; only an explicit choice is persisted.
@@ -2034,6 +2042,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       snapshotRoot: this.options.snapshotRoot,
       pluginArtifact: pending.pluginArtifact,
       viewBridgeArtifact: pending.viewBridgeArtifact,
+      browserArtifact: pending.browserArtifact,
       llmBridgeArtifact: pending.llmBridgeArtifact,
       snapshotWorkerFile: newWorker,
       componentPayloadRoot: pending.payload.payloadRootLib,
@@ -2070,7 +2079,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private async artifactsForPayload(
     payload: ValidatedComponentPayload,
-  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact?: string }> {
+  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; browserArtifact?: string; llmBridgeArtifact?: string }> {
     const live = validateComponentPayload(payload.payloadRootLib);
     const toolsRoot = this.options.controlToolRoot;
     if (typeof toolsRoot !== "string" || !toolsRoot.trim() || pathInsideHome(this.home, resolve(toolsRoot))) {
@@ -2082,6 +2091,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const packed = await packLocalArtifacts({
       pluginPackageRoot: live.packageRoot,
       viewBridgeRoot: join(live.payloadRootLib, "view-bridge"),
+      browserRoot: join(live.payloadRootLib, "browser"),
       llmBridgeRoot: join(live.payloadRootLib, "llm-bridge"),
       artifactDir: join(resolve(toolsRoot), "artifacts"),
       home: this.home,
@@ -2093,12 +2103,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         packed.reasons[0] ?? "Selected component artifacts could not be packed.",
       );
     }
-    if (!packed.pluginArtifact || !packed.viewBridgeArtifact) {
+    if (!packed.pluginArtifact || !packed.viewBridgeArtifact || !packed.browserArtifact) {
       throw new WorkbenchPublicError("workbench/unavailable", "Selected component artifacts could not be packed.");
     }
     return {
       pluginArtifact: packed.pluginArtifact,
       viewBridgeArtifact: packed.viewBridgeArtifact,
+      browserArtifact: packed.browserArtifact,
       ...(packed.llmBridgeArtifact ? { llmBridgeArtifact: packed.llmBridgeArtifact } : {}),
     };
   }
@@ -2846,12 +2857,14 @@ export function bindSupervisorComponentPayload(
   const supervisorDir = payloadRel(selected.packageRoot, "lib/supervisor");
   const viewEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["view-bridge"]);
   const llmEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["llm-bridge"]);
+  const browserEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.browser);
   const launcher = payloadRel(selected.packageRoot, "lib/supervisor/launcher.mjs");
   assertRealFile(worker, "Selected snapshot worker");
   assertRealDirectory(supervisorDir, "Selected supervisor assets");
   assertRealFile(launcher, "Selected launcher");
   assertRealFile(viewEntry, "Selected view-bridge");
   assertRealFile(llmEntry, "Selected llm-bridge");
+  assertRealFile(browserEntry, "Selected browser");
 
   if (options.snapshotWorkerFile !== undefined && !sameRealPath(options.snapshotWorkerFile, worker)) {
     throw new WorkbenchPublicError(
@@ -2874,6 +2887,9 @@ export function bindSupervisorComponentPayload(
   }
   if (options.llmBridgeArtifact !== undefined) {
     assertRealFile(options.llmBridgeArtifact, "llm-bridge-artifact");
+  }
+  if (options.browserArtifact !== undefined) {
+    assertRealFile(options.browserArtifact, "browser-artifact");
   }
   if (options.pluginArtifact !== undefined) {
     assertRealFile(options.pluginArtifact, "plugin-artifact");
@@ -2923,10 +2939,11 @@ export async function preflightSupervisorComponentPayload(
   const pluginArtifact = resolved.pluginArtifact;
   const viewBridgeArtifact = resolved.viewBridgeArtifact;
   const llmBridgeArtifact = resolved.llmBridgeArtifact;
-  if (!pluginArtifact || !viewBridgeArtifact || !llmBridgeArtifact) {
+  const browserArtifact = resolved.browserArtifact;
+  if (!pluginArtifact || !viewBridgeArtifact || !browserArtifact || !llmBridgeArtifact) {
     throw new WorkbenchPublicError(
       "workbench/invalid-input",
-      "A component payload requires plugin, view-bridge, and llm-bridge artifacts from the same group.",
+      "A component payload requires plugin, view-bridge, browser, and llm-bridge artifacts from the same group.",
     );
   }
   const payload = validated && validated.payloadRootLib === resolved.componentPayloadRoot
@@ -2936,6 +2953,7 @@ export async function preflightSupervisorComponentPayload(
     await validateComponentPayloadArtifacts(payload, {
       pluginArtifact,
       viewBridgeArtifact,
+      browserArtifact,
       llmBridgeArtifact,
     });
   } catch (error) {
@@ -3050,6 +3068,9 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   if (flags["llm-bridge-artifact"]) {
     options.llmBridgeArtifact = requirePath(flags["llm-bridge-artifact"], "--llm-bridge-artifact");
   }
+  if (flags["browser-artifact"]) {
+    options.browserArtifact = requirePath(flags["browser-artifact"], "--browser-artifact");
+  }
   if (flags["snapshot-worker"]) options.snapshotWorkerFile = requirePath(flags["snapshot-worker"], "--snapshot-worker");
   if (flags["snapshot-root"]) options.snapshotRoot = requirePath(flags["snapshot-root"], "--snapshot-root");
   if (flags["component-payload"]) {
@@ -3068,6 +3089,7 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.pluginArtifact) args.push("--plugin-artifact", options.pluginArtifact);
   if (options.viewBridgeArtifact) args.push("--view-bridge-artifact", options.viewBridgeArtifact);
   if (options.llmBridgeArtifact) args.push("--llm-bridge-artifact", options.llmBridgeArtifact);
+  if (options.browserArtifact) args.push("--browser-artifact", options.browserArtifact);
   if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
   if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
   if (options.componentPayloadRoot) args.push("--component-payload", options.componentPayloadRoot);
@@ -3087,6 +3109,7 @@ function flagName(token: string): string | undefined {
     "--plugin-artifact": "plugin-artifact",
     "--view-bridge-artifact": "view-bridge-artifact",
     "--llm-bridge-artifact": "llm-bridge-artifact",
+    "--browser-artifact": "browser-artifact",
     "--snapshot-worker": "snapshot-worker",
     "--snapshot-root": "snapshot-root",
     "--component-payload": "component-payload",

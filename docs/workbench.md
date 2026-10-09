@@ -32,13 +32,19 @@ Default DSH channel is official **`latest`**, resolved to an exact version and p
 
 Browser callers never submit filesystem paths, CLI commands, or launch tokens.
 
+### Browser Web acceptance in an isolated Home
+
+After `npm run build:spaces`, pack the current group with `DSH_PACK_DEST=<absolute-output-dir> node scripts/pack-spaces-plugin.mjs`. Set `DSH_WEB_CLI` to an installed official `@deepseek-ai/dsh@0.2.0-rc.2` `lib/bin.js` and `DSH_WEB_ARTIFACT_DIR` to that output directory, then run `node --import tsx scripts/accept-browser-web.ts`. The script creates and removes a disposable DSH Home, creates two official Web profiles, installs the bundled view bridge and Browser plus a test-only caller plugin through official `dsh plugin add`, and launches two actual DSH Hosts with the private Space IPC router. It checks default denial, permission-filtered capabilities, cross-Space open/list, and authenticated Browser HTTP RPC. It prints no launch token.
+
+The Browser create preset's command validation has fixture coverage, and the Supervisor's create path orders view-bridge installation before Browser installation. The acceptance script currently installs into its disposable profiles directly; it does not demonstrate a single production Supervisor create → cold-start path. `tests/browser-space.test.ts` verifies official slot election and server-rendered Browser-only root. Cloud Chromium GUI could not be exercised, so visual iframe rendering and site-specific embed behavior remain for local Web testing. Desktop GUI remains for local acceptance as well.
+
 Shared LLM connections are a Home-level catalog. Management uses `POST /api/workbench/llm` and `POST /api/workbench/llmCredential`. See [the global LLM plan](plans/global-llm-connections.md).
 
 ## Build, pack, start (from this repo)
 
 From the repository root after `npm install`. `npm run build:spaces` writes `packages/*/lib` including the v2 component manifest at `packages/plugin/lib/supervisor/manifest.json`. Pack **outside** the package trees.
 
-The manifest names five components: Supervisor, manager plugin, view-bridge, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install and desktop payload consume that group. Missing components fail closed.
+The manifest names six components: Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install and desktop payload consume that group. Missing components fail closed. An older installed five-component Supervisor cannot hot-upgrade to this six-component group; the component-set mismatch is rejected. Start with a new isolated installation for this branch rather than overwriting an existing Home. There is no automatic migration.
 
 PowerShell (directories **without spaces**; every path absolute):
 
@@ -54,22 +60,24 @@ New-Item -ItemType Directory -Force -Path $spacesHome, $tools, $artifacts, $snap
 npm run build:spaces
 npm pack ./packages/plugin --ignore-scripts --pack-destination $artifacts
 npm pack ./packages/view-bridge --ignore-scripts --pack-destination $artifacts
+npm pack ./packages/browser --ignore-scripts --pack-destination $artifacts
 npm pack ./packages/llm-bridge --ignore-scripts --pack-destination $artifacts
 
 node packages/plugin/lib/supervisor/index.js `
   --home $spacesHome `
   --bin C:\path\to\@deepseek-ai\dsh\lib\bin.js `
   --node "$env:ProgramFiles\nodejs\node.exe" `
-  --plugin-artifact $artifacts\dsh-spaces-plugin-0.3.0.tgz `
-  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.3.0.tgz `
-  --llm-bridge-artifact $artifacts\dsh-spaces-llm-bridge-0.3.0.tgz `
+  --plugin-artifact $artifacts\dsh-spaces-plugin-0.4.0.tgz `
+  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.4.0.tgz `
+  --browser-artifact $artifacts\dsh-spaces-browser-0.4.0.tgz `
+  --llm-bridge-artifact $artifacts\dsh-spaces-llm-bridge-0.4.0.tgz `
   --control-tool-root $tools `
   --component-payload "$(Resolve-Path packages\plugin\lib)" `
   --snapshot-worker "$(Resolve-Path packages\plugin\lib\supervisor\snapshot-worker.mjs)" `
   --snapshot-root $snapshots
 ```
 
-Current Node entry is that argv: `--component-payload` plus **three archives** (plugin, view-bridge, llm-bridge) and the **same group's** `--snapshot-worker`. Product bootstrap from an installed plugin copies the immutable group outside Home and passes the same flags. Do not mix tarballs from different builds. There is no automatic repair, retry, restore, or lock reclaim.
+Current Node entry is that argv: `--component-payload` plus **four archives** (plugin, view-bridge, Browser, llm-bridge) and the **same group's** `--snapshot-worker`. Product bootstrap from an installed plugin copies the immutable group outside Home and passes the same flags. Do not mix tarballs from different builds. There is no automatic repair, retry, restore, or lock reclaim.
 
 | Flag | Role |
 |---|---|
@@ -78,7 +86,8 @@ Current Node entry is that argv: `--component-payload` plus **three archives** (
 | `--node` | Node used to spawn DSH. Pass it explicitly. |
 | `--plugin-artifact` | Packed `@dsh-spaces/plugin`. |
 | `--view-bridge-artifact` | Packed `@dsh-spaces/view-bridge`. |
-| `--llm-bridge-artifact` | Packed `@dsh-spaces/llm-bridge`. Same build group. Third of the three archives. |
+| `--browser-artifact` | Packed `@dsh-spaces/browser` from the same build group. |
+| `--llm-bridge-artifact` | Packed `@dsh-spaces/llm-bridge` from the same build group. |
 | `--control-tool-root` | Tools **outside** `profiles` / `hub` / `sessions` / `storages`. Default sibling `{parent}/.dsh-spaces-tools`. |
 | `--snapshot-worker` | Same-group `packages/plugin/lib/supervisor/snapshot-worker.mjs` after `build:spaces`. Required for **normal snapshot create/delete** and remaining tree copy/rename/retarget IO. Runtime install lives in `runtime-installation.ts`; the worker only forwards. This is not restore. |
 | `--component-payload` | Immutable selected `lib` directory (product bootstrap sets this). Required. |
