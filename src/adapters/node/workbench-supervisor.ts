@@ -19,6 +19,7 @@ import { handleDashboardUnavailable } from "./dashboard/gateway";
 import { cookieValue } from "./workbench-http";
 import { parsePublicationPlan } from "../../core/domain/dashboard/validation";
 import { atomicWrite } from "./atomic";
+import { SpaceMessageRouter } from "./message-bus/router";
 import { CooperativeChildren } from "./cooperative-children";
 import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
 import { inspectHomeToolchain } from "./control-residue";
@@ -360,6 +361,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private blocked = false;
   private reasons: string[] = [];
   private derivedRecoveryReasons = new Set<string>();
+  private readonly messageBus = new SpaceMessageRouter();
   private readonly generations = new Map<string, number>();
   private readonly views = new Map<string, ChildView>();
   private readonly workspaceOrigins = new Set<string>();
@@ -588,6 +590,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       if (this.jobs) await this.jobs.whenIdle();
       await this.stopOwnedAll();
+      this.messageBus.close();
       await this.dashboard?.close();
     } catch (error) {
       this.maintenanceBlocked = true;
@@ -1263,6 +1266,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         try { child = spawnFn(args, { ...options, env }); }
         catch (error) { this.removeInstanceRecord(profile); throw error; }
         if (child.pid) {
+          if (profile !== this.managerId) this.messageBus.attach(profile, child);
           this.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
           try { this.writeInstanceRecord(profile, port, this.generations.get(profile) ?? 0); }
           catch {
@@ -1827,6 +1831,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!kind) return;
     this.relinquishKind = null;
     this.relinquishJobId = null;
+    this.messageBus.close();
     await this.dashboard?.close();
     this.dropWritable();
     if (kind === "service.shutdown") {
@@ -1991,6 +1996,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw error;
     }
 
+    this.messageBus.close();
     await this.dashboard?.close();
     let token;
     try {
