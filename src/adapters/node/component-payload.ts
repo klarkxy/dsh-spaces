@@ -31,6 +31,7 @@ export const COMPONENT_PAYLOAD_NAMES = [
   "supervisor",
   "manager-plugin",
   "view-bridge",
+  "browser",
   "llm-bridge",
   "installation-worker",
 ] as const;
@@ -41,6 +42,7 @@ export const COMPONENT_PAYLOAD_PACKAGES: Record<ComponentPayloadName, string> = 
   supervisor: "@dsh-spaces/supervisor",
   "manager-plugin": "@dsh-spaces/plugin",
   "view-bridge": "@dsh-spaces/view-bridge",
+  browser: "@dsh-spaces/browser",
   "llm-bridge": "@dsh-spaces/llm-bridge",
   "installation-worker": "@dsh-spaces/supervisor",
 };
@@ -49,6 +51,7 @@ export const COMPONENT_PAYLOAD_ENTRIES: Record<ComponentPayloadName, string> = {
   supervisor: "lib/supervisor/index.js",
   "manager-plugin": "lib/index.js",
   "view-bridge": "lib/view-bridge/lib/index.js",
+  browser: "lib/browser/lib/index.js",
   "llm-bridge": "lib/llm-bridge/lib/index.js",
   "installation-worker": "lib/supervisor/snapshot-worker.mjs",
 };
@@ -70,6 +73,10 @@ export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, read
     "lib/view-bridge/lib/client.js",
     "lib/view-bridge/lib/settings.js",
   ],
+  browser: [
+    "lib/browser/package.json", "lib/browser/cordis.patch.yml", "lib/browser/lib/index.js",
+    "lib/browser/lib/client.js", "lib/browser/lib/typert.host.js",
+  ],
   "llm-bridge": ["lib/llm-bridge/package.json", "lib/llm-bridge/cordis.patch.yml", "lib/llm-bridge/lib/index.js"],
   "installation-worker": ["lib/supervisor/snapshot-worker.mjs"],
 };
@@ -78,6 +85,7 @@ export const COMPONENT_PAYLOAD_OPTIONAL_FILES: Record<ComponentPayloadName, read
   supervisor: ["lib/supervisor/LICENSE"],
   "manager-plugin": ["LICENSE"],
   "view-bridge": ["lib/view-bridge/LICENSE"],
+  browser: ["lib/browser/LICENSE"],
   "llm-bridge": ["lib/llm-bridge/LICENSE"],
   "installation-worker": [],
 };
@@ -86,6 +94,7 @@ const IDENTITY_JSON: Record<ComponentPayloadName, string> = {
   supervisor: "lib/supervisor/package.json",
   "manager-plugin": "package.json",
   "view-bridge": "lib/view-bridge/package.json",
+  browser: "lib/browser/package.json",
   "llm-bridge": "lib/llm-bridge/package.json",
   "installation-worker": "lib/supervisor/package.json",
 };
@@ -282,6 +291,9 @@ export function parseComponentPayloadManifest(value: unknown): ComponentPayloadM
   if (!isPlainObject(value.components)) throw fail("Component payload components must be an object.");
   for (const name of COMPONENT_PAYLOAD_NAMES) {
     if (!Object.prototype.hasOwnProperty.call(value.components, name)) {
+      if (name === "browser" && Object.keys(value.components).length === 5) {
+        throw fail("Component payload is missing component browser. An older five-component installation cannot hot-upgrade to this six-component build; start with a new isolated Home.");
+      }
       throw fail(`Component payload is missing component ${name}.`);
     }
   }

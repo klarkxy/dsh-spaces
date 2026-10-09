@@ -9,6 +9,7 @@ export const PACK_TIMEOUT_MS = 240_000;
 export interface PackedArtifacts {
   pluginArtifact: string;
   viewBridgeArtifact: string;
+  browserArtifact?: string;
   llmBridgeArtifact?: string;
 }
 
@@ -24,6 +25,7 @@ export interface PackOneRequest {
 export interface PackArtifactsOptions {
   pluginPackageRoot: string;
   viewBridgeRoot: string;
+  browserRoot?: string;
   llmBridgeRoot?: string;
   artifactDir: string;
   home: string;
@@ -43,6 +45,7 @@ export async function packLocalArtifacts(options: PackArtifactsOptions): Promise
   const home = realDirectory(options.home);
   const pluginRoot = realDirectory(options.pluginPackageRoot);
   const viewRoot = realDirectory(options.viewBridgeRoot);
+  const browserRoot = options.browserRoot === undefined ? undefined : realDirectory(options.browserRoot);
   const llmRoot = options.llmBridgeRoot === undefined ? undefined : realDirectory(options.llmBridgeRoot);
   if (!home || !pluginRoot || !viewRoot) {
     return { reasons: ["Plugin or view-bridge package directory is missing."] };
@@ -50,13 +53,19 @@ export async function packLocalArtifacts(options: PackArtifactsOptions): Promise
   if (options.llmBridgeRoot !== undefined && !llmRoot) {
     return { reasons: ["llm-bridge package directory is missing."] };
   }
+  if (options.browserRoot !== undefined && !browserRoot) {
+    return { reasons: ["browser package directory is missing."] };
+  }
   if (!packageNameIs(pluginRoot, "@dsh-spaces/plugin") || !packageNameIs(viewRoot, "@dsh-spaces/view-bridge")) {
     return { reasons: ["Artifact sources are not the installed Spaces plugin and view-bridge packages."] };
   }
   if (llmRoot && !packageNameIs(llmRoot, "@dsh-spaces/llm-bridge")) {
     return { reasons: ["Artifact sources are not the installed Spaces llm-bridge package."] };
   }
-  if (containsTarball(join(pluginRoot, "lib")) || containsTarball(viewRoot) || (llmRoot && containsTarball(llmRoot))) {
+  if (browserRoot && !packageNameIs(browserRoot, "@dsh-spaces/browser")) {
+    return { reasons: ["Artifact sources are not the installed Spaces browser package."] };
+  }
+  if (containsTarball(join(pluginRoot, "lib")) || containsTarball(viewRoot) || (browserRoot && containsTarball(browserRoot)) || (llmRoot && containsTarball(llmRoot))) {
     return { reasons: ["Refusing to pack a package that already contains a tarball."] };
   }
   const artifactDir = resolve(options.artifactDir);
@@ -64,6 +73,7 @@ export async function packLocalArtifacts(options: PackArtifactsOptions): Promise
     inside(home, artifactDir) ||
     inside(pluginRoot, artifactDir) ||
     inside(viewRoot, artifactDir) ||
+    (browserRoot && inside(browserRoot, artifactDir)) ||
     (llmRoot && inside(llmRoot, artifactDir))
   ) {
     return { reasons: ["Artifact directory must be outside Home and outside the plugin packages."] };
@@ -111,6 +121,14 @@ export async function packLocalArtifacts(options: PackArtifactsOptions): Promise
       timeoutMs,
       env: options.env,
     });
+    const browserArtifact = browserRoot ? await pack({
+      packageRoot: browserRoot,
+      destination: dest,
+      npmCli: npm,
+      execPath: options.execPath,
+      timeoutMs,
+      env: options.env,
+    }) : undefined;
     const llmBridgeArtifact = llmRoot
       ? await pack({
           packageRoot: llmRoot,
@@ -121,22 +139,27 @@ export async function packLocalArtifacts(options: PackArtifactsOptions): Promise
           env: options.env,
         })
       : undefined;
-    if (!isRealFile(pluginArtifact) || !isRealFile(viewBridgeArtifact) || (llmRoot && !llmBridgeArtifact)) {
+    if (!isRealFile(pluginArtifact) || !isRealFile(viewBridgeArtifact) || (browserRoot && !browserArtifact) || (llmRoot && !llmBridgeArtifact)) {
       return { reasons: ["npm pack did not produce tarballs."] };
     }
     if (llmRoot && llmBridgeArtifact && !isRealFile(llmBridgeArtifact)) {
       return { reasons: ["npm pack did not produce tarballs."] };
     }
+    if (browserRoot && browserArtifact && !isRealFile(browserArtifact)) {
+      return { reasons: ["npm pack did not produce tarballs."] };
+    }
     if (
       inside(pluginRoot, pluginArtifact) ||
       inside(viewRoot, viewBridgeArtifact) ||
+      (browserRoot && browserArtifact && inside(browserRoot, browserArtifact)) ||
       (llmRoot && llmBridgeArtifact && inside(llmRoot, llmBridgeArtifact))
     ) {
       return { reasons: ["Pack wrote a tarball back into the plugin directory."] };
     }
-    return llmBridgeArtifact
-      ? { pluginArtifact, viewBridgeArtifact, llmBridgeArtifact }
-      : { pluginArtifact, viewBridgeArtifact };
+    return { pluginArtifact, viewBridgeArtifact,
+      ...(browserArtifact ? { browserArtifact } : {}),
+      ...(llmBridgeArtifact ? { llmBridgeArtifact } : {}),
+    };
   } catch (error) {
     return { reasons: [error instanceof Error ? error.message : "npm pack failed."] };
   }

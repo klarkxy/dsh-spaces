@@ -520,6 +520,11 @@ export class WorkbenchController {
     else this.iframeWindows.delete(key);
   };
 
+  isRegisteredViewSource = (event: ViewMessageEvent, frame: ViewFrameState): boolean => {
+    return Boolean(frame.view && event.origin === frame.view.origin &&
+      event.source === this.iframeWindows.get(`${frame.spaceId}:${frame.generation}`));
+  };
+
   handleMessage = (event: ViewMessageEvent): void => {
     for (const frame of this.views.list()) {
       const iframeWindow = this.iframeWindows.get(`${frame.spaceId}:${frame.generation}`);
@@ -614,7 +619,7 @@ export class WorkbenchController {
     this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
   };
 
-  createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean }): void => {
+  createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; browser?: boolean }): void => {
     const name = input.name.trim().toLowerCase();
     if (!NAME_RE.test(name)) {
       this.patch({ commandError: this.msg("app.nameInvalid") });
@@ -636,6 +641,7 @@ export class WorkbenchController {
         displayName: input.displayName?.trim() || undefined,
         icon: icon.icon || undefined,
         ...(input.useSharedLlm === undefined ? {} : { useSharedLlm: input.useSharedLlm }),
+        ...(input.browser ? { browser: true } : {}),
       },
     });
     this.patch({ overlay: null });

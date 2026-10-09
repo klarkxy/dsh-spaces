@@ -96,6 +96,19 @@ test("same request id concurrent submit runs the handler once", async () => {
   assert.equal(store.job("req-1").status, "succeeded");
 });
 
+test("Browser create preset survives the actual job command validator", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  const command: WorkbenchCommand = { kind: "space.create", input: { name: "browser", browser: true, useSharedLlm: false } };
+  await store.submit(command, "browser-create", noop());
+  await store.whenIdle();
+  const record = JSON.parse(readFileSync(jobFile(home, "browser-create"), "utf8")) as { command: WorkbenchCommand };
+  assert.deepEqual(record.command, command);
+  assert.equal(store.job("browser-create").status, "succeeded");
+  await assert.rejects(() => store.submit({ kind: "space.create", input: { name: "other", browser: "yes" } } as never,
+    "browser-invalid", noop()), { code: "workbench/invalid-input" });
+});
+
 test("handler failure is a failed job and does not block later work", async () => {
   const store = new WorkbenchJobStore({ home: tempHome() });
   await store.submit(startCmd(), "uncertain", async () => {

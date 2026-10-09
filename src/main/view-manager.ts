@@ -1,10 +1,14 @@
-import { BrowserWindow, WebContentsView, shell, type Session } from "electron";
+import { BrowserWindow, WebContentsView, shell, type Session, type IpcMainInvokeEvent } from "electron";
 import {
   consumeBootstrapIfNeeded,
   decideWindowOpen,
   decideWorkbenchNavigation,
   redactDesktopShellText,
 } from "../shared/desktop-shell";
+import { BrowserGuests } from './browser-guest';
+import { authorizeBrowserGuest } from './browser-guest-policy';
+import { BROWSER_RESULT, parseBrowserRelay } from '../shared/browser-guest';
+import type { WorkbenchApi } from '../shared/workbench';
 import { TITLEBAR_HEIGHT } from "../shared/layout";
 
 export { TITLEBAR_HEIGHT };
@@ -17,6 +21,8 @@ export interface WorkbenchViewPresent {
 
 export class ViewManager {
   private view: WebContentsView | null = null;
+  private readonly browserGuests: BrowserGuests;
+  private browserVersion = 0;
   private overlayOpen = false;
   private managerOrigin: string | null = null;
   private bootstrapUrl: string | null = null;
@@ -28,8 +34,10 @@ export class ViewManager {
   constructor(
     private readonly window: BrowserWindow,
     workbenchSession: Session,
+    private readonly browserOptions?: { preloadPath: string; api(): WorkbenchApi },
   ) {
     this.workbenchSession = workbenchSession;
+    this.browserGuests = new BrowserGuests(window);
     hardenSession(this.workbenchSession);
     this.window.on("resize", () => this.layout());
     this.window.on("show", () => this.layout());
@@ -49,6 +57,7 @@ export class ViewManager {
     const view = new WebContentsView({
       webPreferences: {
         session: this.workbenchSession,
+        ...(this.browserOptions ? { preload: this.browserOptions.preloadPath } : {}),
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
@@ -64,8 +73,37 @@ export class ViewManager {
     void view.webContents.loadURL(input.entryUrl);
   }
 
+  async browserRequest(event: IpcMainInvokeEvent, input: unknown): Promise<unknown> {
+    const raw = input as { managerOrigin?: unknown; relay?: unknown } | null;
+    const request = parseBrowserRelay(raw?.relay);
+    const failure = (error: 'unavailable' | 'unauthorized' | 'invalid-input') => ({ source: BROWSER_RESULT, requestId: request?.requestId ?? '', ok: false, error });
+    const view = this.view, frame = event.senderFrame;
+    if (!request || typeof raw?.managerOrigin !== 'string') return failure('invalid-input');
+    if (!view || !this.browserOptions || event.sender !== view.webContents || frame !== view.webContents.mainFrame ||
+      !frame || this.closed || this.overlayOpen || new URL(frame.url).origin !== this.managerOrigin) return failure('unauthorized');
+    const version = ++this.browserVersion;
+    // Hiding grants nothing: retire the matching lease immediately, before any
+    // asynchronous authority reads, so a manager overlay cannot wait behind IO.
+    if (request.kind === 'hide') {
+      this.browserGuests.hide(request.identity);
+      return { source: BROWSER_RESULT, requestId: request.requestId, ok: true, tabId: '', mode: 'native', observations: [] };
+    }
+    try {
+      if (!await authorizeBrowserGuest(this.browserOptions.api(), raw.managerOrigin, request.identity)) {
+        if (version === this.browserVersion) this.browserGuests.clear();
+        return failure('unauthorized');
+      }
+      if (version !== this.browserVersion || this.view !== view || this.overlayOpen || this.closed) return failure('unavailable');
+      return this.browserGuests.present(request, [request.identity.origin, raw.managerOrigin, this.managerOrigin!]);
+    } catch {
+      if (version === this.browserVersion) this.browserGuests.clear();
+      return failure('unavailable');
+    }
+  }
+
   setOverlayOpen(open: boolean): void {
     this.overlayOpen = open;
+    if (open) { ++this.browserVersion; this.browserGuests.clear(); }
     this.layout();
   }
 
@@ -82,6 +120,7 @@ export class ViewManager {
   }
 
   private destroyView(): void {
+    ++this.browserVersion; this.browserGuests.clear();
     const view = this.view;
     this.view = null;
     this.managerOrigin = null;
@@ -134,6 +173,7 @@ export class ViewManager {
       if (!nested.allow) event.preventDefault();
     });
     contents.on("did-navigate", (_event, url) => {
+      ++this.browserVersion; this.browserGuests.clear();
       this.markConsumed(url);
     });
     contents.on("did-navigate-in-page", (_event, url) => {
@@ -144,6 +184,7 @@ export class ViewManager {
       this.reportError(errorDescription || `Load failed (${errorCode})`);
     });
     contents.on("render-process-gone", (_event, details) => {
+      ++this.browserVersion; this.browserGuests.clear();
       this.reportError(details.reason || "The workbench page stopped.");
     });
     contents.on("unresponsive", () => {
@@ -182,12 +223,14 @@ export class ViewManager {
   }
 
   private reportError(message: string): void {
+    ++this.browserVersion; this.browserGuests.clear();
     this.overlayOpen = true;
     this.layout();
     this.onError?.(redactDesktopShellText(message));
   }
 
   private layout(): void {
+    this.browserGuests.resize();
     if (!this.view || this.window.isDestroyed()) return;
     const bounds = this.window.getContentBounds();
     const visible = !this.overlayOpen;

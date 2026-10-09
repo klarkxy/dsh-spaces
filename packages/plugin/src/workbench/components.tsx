@@ -8,6 +8,7 @@ import type {
   WorkbenchSpace,
   WorkbenchState,
 } from "../../../../src/shared/workbench";
+import { installBrowserRelay } from "./browser-relay";
 import { readLocalIcon } from "./fit-icon";
 import { isDataImageIcon, KNOWN_GLYPHS } from "./icons";
 import { SPACE_AVATARS, defaultSpaceAvatar } from "../../../../src/shared/space-avatars";
@@ -47,6 +48,7 @@ export interface WorkbenchViewProps {
 }
 
 export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive = false, contained = false, nativeSurface = false, systemPage }: WorkbenchViewProps): ReactElement {
+  useEffect(() => installBrowserRelay(controller), [controller]);
   const locale = ui.locale;
   return (
     <div className="dsh-workbench" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme} data-contained={contained ? "true" : undefined} data-native-surface={nativeSurface ? "true" : undefined}>
@@ -1031,6 +1033,7 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
   const displayRef = useRef<HTMLInputElement>(null);
   const iconRef = useRef<string>(SPACE_AVATARS[0].image);
   const sharedRef = useRef<HTMLInputElement>(null);
+  const browserRef = useRef<HTMLInputElement>(null);
   const iconState = useRef<IconPickState>("idle");
   const [iconBlocked, setIconBlocked] = useState(false);
   const onIconState = (state: IconPickState): void => {
@@ -1044,7 +1047,8 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
       name: nameRef.current?.value ?? "",
       displayName: displayRef.current?.value,
       icon: iconRef.current,
-      useSharedLlm: sharedRef.current?.checked !== false,
+      useSharedLlm: browserRef.current?.checked ? false : sharedRef.current?.checked !== false,
+      browser: browserRef.current?.checked === true,
     });
   };
   return (
@@ -1068,6 +1072,11 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
           {t(locale, "create.useSharedLlm")}
         </label>
         <p className="dsh-wb-muted">{t(locale, "create.useSharedLlmHint")}</p>
+        <label className="dsh-wb-field">
+          <input ref={browserRef} type="checkbox" name="browser" />
+          {t(locale, "create.browser")}
+        </label>
+        <p className="dsh-wb-muted">{t(locale, "create.browserHint")}</p>
         <IconPicker locale={locale} value={iconRef.current} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
         <div className="dsh-wb-actions">
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>

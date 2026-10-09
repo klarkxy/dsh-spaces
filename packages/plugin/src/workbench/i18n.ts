@@ -364,6 +364,8 @@ const en = {
   "detail.noRecovery": "There is no restore action here.",
   "jobs.product": "Result",
   "create.useSharedLlm": "Use global connections",
+  "create.browser": "Browser space",
+  "create.browserHint": "Install the bundled Browser and open its own tabbed page. Cross-space access starts disabled.",
   "create.useSharedLlmHint":
     "On by default: this space uses the shared connections and the global default model after the next start. Uncheck to keep this space fully local.",
   "llm.scope": "Connection settings are shared by Spaces. Other settings in the current space are not synced with web.",
@@ -805,6 +807,8 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "detail.noRecovery": "这里没有恢复入口。",
   "jobs.product": "结果",
   "create.useSharedLlm": "使用全局连接",
+  "create.browser": "浏览器空间",
+  "create.browserHint": "安装内置浏览器，打开独立多标签页面。跨空间访问默认关闭。",
   "create.useSharedLlmHint":
     "默认开启：下次启动后此空间使用共享连接和全局默认模型。取消勾选则保持完全本地。",
   "llm.scope": "连接配置由 Spaces 共享，当前空间的其他设置不会与 web 同步。",

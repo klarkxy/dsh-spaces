@@ -41,6 +41,7 @@ export { readLastSupervisorDiagnostics } from "../../../../src/adapters/node/sup
 
 export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";
 export const VIEW_BRIDGE_PAYLOAD_DIRNAME = "view-bridge";
+export const BROWSER_PAYLOAD_DIRNAME = "browser";
 export const LLM_BRIDGE_PAYLOAD_DIRNAME = "llm-bridge";
 export const SNAPSHOT_WORKER_FILE = "snapshot-worker.mjs";
 
@@ -51,6 +52,7 @@ export const SUPERVISOR_CLI_FLAGS = {
   node: "--node",
   pluginArtifact: "--plugin-artifact",
   viewBridgeArtifact: "--view-bridge-artifact",
+  browserArtifact: "--browser-artifact",
   controlToolRoot: "--control-tool-root",
   snapshotWorker: "--snapshot-worker",
   snapshotRoot: "--snapshot-root",
@@ -269,13 +271,15 @@ export async function bootstrapSupervisor(
       }
 
       const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
+      const browserRoot = realDirectory(join(selected.payloadRootLib, BROWSER_PAYLOAD_DIRNAME));
       const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
-      if (!viewRoot || !llmRoot) {
-        return fail(["Installed plugin package, view-bridge, or llm-bridge payload is missing."]);
+      if (!viewRoot || !browserRoot || !llmRoot) {
+        return fail(["Installed plugin package, view-bridge, browser, or llm-bridge payload is missing."]);
       }
       const packedArtifacts = await packLocalArtifacts({
         pluginPackageRoot: selected.packageRoot,
         viewBridgeRoot: viewRoot,
+        browserRoot,
         llmBridgeRoot: llmRoot,
         artifactDir: join(toolsRoot, "artifacts"),
         home,
@@ -287,6 +291,9 @@ export async function bootstrapSupervisor(
       if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
       if (!packedArtifacts.llmBridgeArtifact) {
         return fail(["llm-bridge artifact was not packed from the selected payload."]);
+      }
+      if (!packedArtifacts.browserArtifact) {
+        return fail(["browser artifact was not packed from the selected payload."]);
       }
 
       const childArgv = [
@@ -301,6 +308,8 @@ export async function bootstrapSupervisor(
         packedArtifacts.pluginArtifact,
         SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
         packedArtifacts.viewBridgeArtifact,
+        SUPERVISOR_CLI_FLAGS.browserArtifact,
+        packedArtifacts.browserArtifact,
         SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
         packedArtifacts.llmBridgeArtifact,
         SUPERVISOR_CLI_FLAGS.controlToolRoot,

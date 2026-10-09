@@ -215,7 +215,7 @@ test("missing artifact tuple is rejected before HTTP or owner writes", async () 
       componentPayloadRoot: payload.payloadRootLib,
       createMaintenance: () => fakeMaintenance(),
     }),
-    /plugin, view-bridge, and llm-bridge artifacts/i,
+    /plugin, view-bridge, browser, and llm-bridge artifacts/i,
   );
   await assert.rejects(
     () => createWorkbenchSupervisor({
@@ -226,7 +226,7 @@ test("missing artifact tuple is rejected before HTTP or owner writes", async () 
       viewBridgeArtifact: packed.viewBridgeArtifact,
       createMaintenance: () => fakeMaintenance(),
     }),
-    /plugin, view-bridge, and llm-bridge artifacts/i,
+    /plugin, view-bridge, browser, and llm-bridge artifacts/i,
   );
   assert.equal(new HomeController(home).inspect().held, false);
   assert.equal(existsSync(join(home, ".dsh-spaces-control", "endpoint.json")), false);
@@ -889,6 +889,11 @@ function dummyPayloadLib(opts: { viewBody?: string; llmBody?: string } = {}): Va
     ["lib/view-bridge/lib/index.js", opts.viewBody ?? "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
     ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
+    ["lib/browser/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES.browser, version: "3.0.0" })}\n`],
+    ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
+    ["lib/browser/lib/index.js", "export const browser = 1;\n"],
+    ["lib/browser/lib/client.js", "export const browserClient = 1;\n"],
+    ["lib/browser/lib/typert.host.js", "export const browserHost = 1;\n"],
     ["lib/llm-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], version: "4.0.0" })}\n`],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "x\n"],
@@ -921,11 +926,12 @@ function packNpmTar(sourceDir: string, destTgz: string): string {
 function packGroupArtifacts(
   payload: ValidatedComponentPayload,
   destDir: string,
-): { pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string } {
+): { pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string; llmBridgeArtifact: string } {
   mkdirSync(destDir, { recursive: true });
   return {
     pluginArtifact: packNpmTar(payload.packageRoot, join(destDir, "plugin.tgz")),
     viewBridgeArtifact: packNpmTar(join(payload.packageRoot, "lib", "view-bridge"), join(destDir, "view.tgz")),
+    browserArtifact: packNpmTar(join(payload.packageRoot, "lib", "browser"), join(destDir, "browser.tgz")),
     llmBridgeArtifact: packNpmTar(join(payload.packageRoot, "lib", "llm-bridge"), join(destDir, "llm.tgz")),
   };
 }

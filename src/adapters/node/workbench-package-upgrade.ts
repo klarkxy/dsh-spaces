@@ -57,6 +57,7 @@ export const WORKBENCH_UPGRADE_SNAPSHOT_REASON = "workbench-upgrade";
 export const SPACES_PLUGIN_PACKAGE = "@dsh-spaces/plugin";
 export const VIEW_BRIDGE_PACKAGE = "@dsh-spaces/view-bridge";
 export const LLM_BRIDGE_PACKAGE = "@dsh-spaces/llm-bridge";
+export const BROWSER_PACKAGE = "@dsh-spaces/browser";
 
 const SCHEMA_VERSION = 1;
 const MARKER_KIND = "workbench.upgrade";
@@ -66,6 +67,7 @@ const MAX_TAR_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_TAR_LIST_BYTES = 256 * 1024;
 const PLUGIN_ARCHIVE_PREFIX = "dsh-spaces-plugin";
 const VIEW_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-view-bridge";
+const BROWSER_ARCHIVE_PREFIX = "dsh-spaces-browser";
 const VIEW_BRIDGE_FILES = ["package.json", "lib/index.js", "lib/client.js"] as const;
 const LLM_BRIDGE_FILES = ["package.json", "lib/index.js"] as const;
 const LLM_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-llm-bridge";
@@ -74,6 +76,7 @@ const IDENTITY_JSON: Record<ComponentPayloadName, string> = {
   supervisor: "lib/supervisor/package.json",
   "manager-plugin": "package.json",
   "view-bridge": "lib/view-bridge/package.json",
+  browser: "lib/browser/package.json",
   "llm-bridge": "lib/llm-bridge/package.json",
   "installation-worker": "lib/supervisor/package.json",
 };
@@ -189,6 +192,7 @@ interface CandidateInspection {
 }
 
 interface PreparedCandidate extends CandidateInspection {
+  browser: ArtifactInspection;
   llmBridge: ArtifactInspection;
   payload: ValidatedComponentPayload;
 }
@@ -706,7 +710,7 @@ export class WorkbenchPackageUpgrade {
     assertPayloadMatchesExpectedVersion(payload, expectedVersion);
     this.throwIfAborted(ctx);
     ctx.phase("pack");
-    ctx.message("Packing the staged workbench plugin, view-bridge, and llm-bridge.");
+    ctx.message("Packing the staged workbench plugin, view-bridge, browser, and llm-bridge.");
     const packed = await this.packStagedGroup(payload, toolsRoot);
     const inspected = await this.inspectPackedGroup(packed, payload);
     assertPackedMatchesPayload(inspected, payload);
@@ -714,6 +718,7 @@ export class WorkbenchPackageUpgrade {
     const digest = preparedCandidateDigest(
       inspected.plugin,
       inspected.viewBridge,
+      inspected.browser,
       inspected.llmBridge,
       payload.digest,
     );
@@ -722,6 +727,7 @@ export class WorkbenchPackageUpgrade {
       digest,
       plugin: inspected.plugin,
       viewBridge: inspected.viewBridge,
+      browser: inspected.browser,
       llmBridge: inspected.llmBridge,
       payload,
     };
@@ -773,7 +779,7 @@ export class WorkbenchPackageUpgrade {
   private async packStagedGroup(
     payload: ValidatedComponentPayload,
     toolsRoot: string,
-  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string }> {
+  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string; llmBridgeArtifact: string }> {
     const artifactDir = mkdirOutsideHome(
       this.home,
       join(toolsRoot, PREPARE_SCRATCH_DIR, payload.digest, "artifacts"),
@@ -783,13 +789,14 @@ export class WorkbenchPackageUpgrade {
       home: this.home,
       pluginPackageRoot: payload.packageRoot,
       viewBridgeRoot: join(payload.packageRoot, "lib", "view-bridge"),
+      browserRoot: join(payload.packageRoot, "lib", "browser"),
       llmBridgeRoot: join(payload.packageRoot, "lib", "llm-bridge"),
       artifactDir,
       execPath: this.options.execPath ?? process.execPath,
       pack: this.options.pack,
     });
-    if ("reasons" in packed || !packed.llmBridgeArtifact) {
-      const detail = "reasons" in packed ? packed.reasons[0] : "llm-bridge pack is missing.";
+    if ("reasons" in packed || !packed.browserArtifact || !packed.llmBridgeArtifact) {
+      const detail = "reasons" in packed ? packed.reasons[0] : "Browser or llm-bridge pack is missing.";
       throw new WorkbenchPackageUpgradeError(
         "failed",
         detail || "The staged workbench group could not be packed.",
@@ -798,15 +805,16 @@ export class WorkbenchPackageUpgrade {
     return {
       pluginArtifact: packed.pluginArtifact,
       viewBridgeArtifact: packed.viewBridgeArtifact,
+      browserArtifact: packed.browserArtifact,
       llmBridgeArtifact: packed.llmBridgeArtifact,
     };
   }
 
   private async inspectPackedGroup(
-    packed: { pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string },
+    packed: { pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string; llmBridgeArtifact: string },
     payload: ValidatedComponentPayload,
-  ): Promise<{ plugin: ArtifactInspection; viewBridge: ArtifactInspection; llmBridge: ArtifactInspection }> {
-    if (!isRealFile(packed.pluginArtifact) || !isRealFile(packed.viewBridgeArtifact) || !isRealFile(packed.llmBridgeArtifact)) {
+  ): Promise<{ plugin: ArtifactInspection; viewBridge: ArtifactInspection; browser: ArtifactInspection; llmBridge: ArtifactInspection }> {
+    if (!isRealFile(packed.pluginArtifact) || !isRealFile(packed.viewBridgeArtifact) || !isRealFile(packed.browserArtifact) || !isRealFile(packed.llmBridgeArtifact)) {
       throw new WorkbenchPackageUpgradeError("failed", "Packed workbench artifacts are missing.");
     }
     try {
@@ -820,6 +828,7 @@ export class WorkbenchPackageUpgrade {
     if (
       !isRealFile(candidate.plugin.artifact) ||
       !isRealFile(candidate.viewBridge.artifact) ||
+      !isRealFile(candidate.browser.artifact) ||
       !isRealFile(candidate.llmBridge.artifact)
     ) {
       throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench artifacts are missing.");
@@ -827,6 +836,7 @@ export class WorkbenchPackageUpgrade {
     if (
       sha256File(candidate.plugin.artifact) !== candidate.plugin.fileDigest ||
       sha256File(candidate.viewBridge.artifact) !== candidate.viewBridge.fileDigest ||
+      sha256File(candidate.browser.artifact) !== candidate.browser.fileDigest ||
       sha256File(candidate.llmBridge.artifact) !== candidate.llmBridge.fileDigest
     ) {
       throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench artifacts changed after prepare.");
@@ -834,12 +844,14 @@ export class WorkbenchPackageUpgrade {
     const inspected = await this.inspectPackedGroup({
       pluginArtifact: candidate.plugin.artifact,
       viewBridgeArtifact: candidate.viewBridge.artifact,
+      browserArtifact: candidate.browser.artifact,
       llmBridgeArtifact: candidate.llmBridge.artifact,
     }, candidate.payload);
     assertPackedMatchesPayload(inspected, candidate.payload);
     if (
       inspected.plugin.fileDigest !== candidate.plugin.fileDigest ||
       inspected.viewBridge.fileDigest !== candidate.viewBridge.fileDigest ||
+      inspected.browser.fileDigest !== candidate.browser.fileDigest ||
       inspected.llmBridge.fileDigest !== candidate.llmBridge.fileDigest
     ) {
       throw new WorkbenchPackageUpgradeError("invalid-input", "The prepared workbench artifacts changed after prepare.");
@@ -848,6 +860,7 @@ export class WorkbenchPackageUpgrade {
     const digest = preparedCandidateDigest(
       inspected.plugin,
       inspected.viewBridge,
+      inspected.browser,
       inspected.llmBridge,
       payload.digest,
     );
@@ -859,6 +872,7 @@ export class WorkbenchPackageUpgrade {
       digest,
       plugin: inspected.plugin,
       viewBridge: inspected.viewBridge,
+      browser: inspected.browser,
       llmBridge: inspected.llmBridge,
       payload,
     };
@@ -1124,11 +1138,12 @@ function boundArtifactDigest(plugin: ArtifactInspection, viewBridge: ArtifactIns
 function preparedCandidateDigest(
   plugin: ArtifactInspection,
   viewBridge: ArtifactInspection,
+  browser: ArtifactInspection,
   llmBridge: ArtifactInspection,
   payloadDigest: string,
 ): string {
   return sha256Text(
-    `${plugin.packageName}:${plugin.fileDigest}\n${viewBridge.packageName}:${viewBridge.fileDigest}\n${llmBridge.packageName}:${llmBridge.fileDigest}\n${payloadDigest}\n`,
+    `${plugin.packageName}:${plugin.fileDigest}\n${viewBridge.packageName}:${viewBridge.fileDigest}\n${browser.packageName}:${browser.fileDigest}\n${llmBridge.packageName}:${llmBridge.fileDigest}\n${payloadDigest}\n`,
   );
 }
 
@@ -1150,7 +1165,7 @@ function assertPayloadMatchesExpectedVersion(payload: ValidatedComponentPayload,
   }
 }
 
-type ComponentArtifactPaths = { pluginArtifact: string; viewBridgeArtifact: string; llmBridgeArtifact: string };
+type ComponentArtifactPaths = { pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string; llmBridgeArtifact: string };
 
 /** Verify CLI install archives against the selected component group's actual bytes. */
 export async function validateComponentPayloadArtifacts(
@@ -1164,7 +1179,7 @@ export async function validateComponentPayloadArtifacts(
   assertPackedMatchesPayload(await inspectComponentPayloadArtifacts(current, artifacts), current);
 }
 
-function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "llm-bridge"): string[] {
+function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "browser" | "llm-bridge"): string[] {
   const prefix = `lib/${name}/`;
   return payload.manifest.components[name].files.map((file) => {
     if (!file.path.startsWith(prefix)) {
@@ -1174,7 +1189,7 @@ function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "
   });
 }
 
-function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "view-bridge" | "llm-bridge", artifact: ArtifactInspection): void {
+function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "view-bridge" | "browser" | "llm-bridge", artifact: ArtifactInspection): void {
   const component = payload.manifest.components[name];
   const prefix = `lib/${name}/`;
   if (artifact.version !== component.version || artifact.packageName !== component.packageName) {
@@ -1188,22 +1203,23 @@ function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "v
 }
 
 async function inspectComponentPayloadArtifacts(payload: ValidatedComponentPayload, artifacts: ComponentArtifactPaths) {
-  const [plugin, viewBridge, llmBridge] = await Promise.all([
+  const [plugin, viewBridge, browser, llmBridge] = await Promise.all([
     inspectPluginArchive(artifacts.pluginArtifact),
     inspectArtifact(artifacts.viewBridgeArtifact, VIEW_BRIDGE_PACKAGE, bridgeFiles(payload, "view-bridge"), VIEW_BRIDGE_ARCHIVE_PREFIX),
+    inspectArtifact(artifacts.browserArtifact, BROWSER_PACKAGE, bridgeFiles(payload, "browser"), BROWSER_ARCHIVE_PREFIX),
     inspectArtifact(artifacts.llmBridgeArtifact, LLM_BRIDGE_PACKAGE, bridgeFiles(payload, "llm-bridge"), LLM_BRIDGE_ARCHIVE_PREFIX),
   ]);
-  return { plugin, viewBridge, llmBridge };
+  return { plugin, viewBridge, browser, llmBridge };
 }
 
 function assertPackedMatchesPayload(
-  packed: { plugin: ArtifactInspection; viewBridge: ArtifactInspection; llmBridge: ArtifactInspection },
+  packed: { plugin: ArtifactInspection; viewBridge: ArtifactInspection; browser: ArtifactInspection; llmBridge: ArtifactInspection },
   payload: ValidatedComponentPayload,
 ): void {
   if (packed.plugin.packageName !== SPACES_PLUGIN_PACKAGE) {
     throw new WorkbenchPackageUpgradeError("failed", "Packed plugin is not the official Spaces plugin.");
   }
-  if (packed.viewBridge.packageName !== VIEW_BRIDGE_PACKAGE || packed.llmBridge.packageName !== LLM_BRIDGE_PACKAGE) {
+  if (packed.viewBridge.packageName !== VIEW_BRIDGE_PACKAGE || packed.browser.packageName !== BROWSER_PACKAGE || packed.llmBridge.packageName !== LLM_BRIDGE_PACKAGE) {
     throw new WorkbenchPackageUpgradeError("failed", "Packed workbench artifacts are not official packages.");
   }
   if (packed.plugin.version !== payload.manifest.components["manager-plugin"].version) {
@@ -1215,7 +1231,10 @@ function assertPackedMatchesPayload(
   if (packed.llmBridge.version !== payload.manifest.components["llm-bridge"].version) {
     throw new WorkbenchPackageUpgradeError("failed", "Packed llm-bridge version does not match the staged llm-bridge.");
   }
-  for (const [name, artifact] of [["view-bridge", packed.viewBridge], ["llm-bridge", packed.llmBridge]] as const) {
+  if (packed.browser.version !== payload.manifest.components.browser.version) {
+    throw new WorkbenchPackageUpgradeError("failed", "Packed browser version does not match the staged browser.");
+  }
+  for (const [name, artifact] of [["view-bridge", packed.viewBridge], ["browser", packed.browser], ["llm-bridge", packed.llmBridge]] as const) {
     assertBridgeMatchesPayload(payload, name, artifact);
   }
   for (const file of payload.files) {

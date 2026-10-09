@@ -1,0 +1,5 @@
+- insert:
+    - id: dsh-spaces-browser
+      name: '@dsh-spaces/browser'
+      config:
+        allowedSpaces: []

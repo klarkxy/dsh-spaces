@@ -220,6 +220,7 @@ const createInputSchema = z
     displayName: displayNameSchema.optional(),
     icon: iconSchema.optional(),
     useSharedLlm: z.boolean().optional(),
+    browser: z.boolean().optional(),
   })
   .strict();
 

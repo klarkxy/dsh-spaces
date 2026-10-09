@@ -191,7 +191,13 @@ test("workbench view stays sandboxed and does not inject a bearer", () => {
   assert.match(source, /contextIsolation:\s*true/);
   assert.match(source, /nodeIntegration:\s*false/);
   assert.equal(/extraHeaders|Authorization/.test(source), false);
-  assert.equal(/preload:/.test(source), false);
+  assert.match(source, /preload: this\.browserOptions\.preloadPath/);
+  assert.match(source, /event\.sender !== view\.webContents/);
+  assert.match(source, /frame !== view\.webContents\.mainFrame/);
+  const guestPreload = readFileSync(new URL("../src/preload/browser-guest.ts", import.meta.url), "utf8");
+  assert.equal(/contextBridge|exposeInMainWorld/.test(guestPreload), false);
+  assert.match(guestPreload, /event\.source !== frame\.contentWindow/);
+  assert.match(guestPreload, /ipcRenderer\.invoke\(BROWSER_GUEST_IPC,/);
   assert.equal(/fromPartition/.test(source), false);
 });
 

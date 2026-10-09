@@ -47,7 +47,9 @@ Protocol **2**. Management state carries `protocolVersion`, `serviceEpoch`, `rev
 
 Shared Node modules for supervisor, jobs, products, and upgrade live under `src/adapters/node` (moved from `src/main`). Electron-only code stays in the desktop shell.
 
-Build lists five immutable components in `lib/supervisor/manifest.json` (schemaVersion 2): Supervisor, manager plugin, view-bridge, llm-bridge, installation worker. Cold start and pack consume that group. Bootstrap passes `--component-payload` and the same group's plugin / view-bridge / llm-bridge artifacts plus `--snapshot-worker`.
+Build lists six immutable components in `lib/supervisor/manifest.json` (schemaVersion 2): Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker. Cold start and pack consume that group. Bootstrap passes `--component-payload` and the same group's plugin / view-bridge / Browser / llm-bridge artifacts plus `--snapshot-worker`. An installed Supervisor with the older five-component payload cannot hot-upgrade to this group: the component-set mismatch is rejected. Use a new isolated installation for this branch; no automatic migration or rewrite of an existing Home is provided.
+
+The create dialog offers a Browser preset. It creates an ordinary Space, installs the bundled Browser plugin and view bridge, selects its independent Browser root, and leaves cross-Space callers denied until the Browser Space's `allowedSpaces` is edited explicitly. Browser Host and client use official DSH Web profile services (Cordis, authenticated Connection RPC and slots); the small standalone Browser root and tab state belong to this repository. Web pages appear in iframes, so sites may refuse embedding and cross-origin navigation cannot update the displayed address. See [Browser plugin notes](packages/browser/README.md).
 
 `--snapshot-worker` remains required for **normal Home snapshots** and remaining installation IO. Runtime-installation has been extracted; the worker is not a restore product.
 

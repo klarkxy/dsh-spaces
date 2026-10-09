@@ -1,5 +1,7 @@
 # Cross-Space request/response: phase one
 
+> Historical phase-one acceptance record. The current branch also includes [static capabilities](./static-capabilities.md) and Browser Space; current status and remaining local acceptance are in [the task checklist](../../tasks/todo.md). Phase-one stop/publishing notes below describe that earlier checkpoint.
+
 ## Scope
 
 A Host plugin in a Supervisor-owned ordinary Space can asynchronously call one

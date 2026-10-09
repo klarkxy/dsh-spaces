@@ -59,6 +59,13 @@ if (!process.argv.includes('--core-only')) {
   await copyFile(at('LICENSE'), at('packages/view-bridge/LICENSE'));
 
   await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
+    entryPoints: ['packages/browser/src/index.ts'], outfile: 'packages/browser/lib/index.js' });
+  await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
+    entryPoints: ['packages/browser/src/typert.host.ts'], outfile: 'packages/browser/lib/typert.host.js' });
+  await buildClient('@dsh-spaces/browser', 'packages/browser/src/client.tsx', 'packages/browser/lib/client.js');
+  await copyFile(at('LICENSE'), at('packages/browser/LICENSE'));
+
+  await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
     entryPoints: ['packages/llm-bridge/src/index.ts'], outfile: 'packages/llm-bridge/lib/index.js' });
   await copyFile(at('LICENSE'), at('packages/llm-bridge/LICENSE'));
   await mkdir(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true });
@@ -80,6 +87,10 @@ if (!process.argv.includes('--core-only')) {
   await cp(at('packages/view-bridge/lib'), at('packages/plugin/lib/view-bridge/lib'), { recursive: true });
   for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
     await copyFile(at(`packages/view-bridge/${file}`), at(`packages/plugin/lib/view-bridge/${file}`));
+  }
+  await cp(at('packages/browser/lib'), at('packages/plugin/lib/browser/lib'), { recursive: true });
+  for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
+    await copyFile(at(`packages/browser/${file}`), at(`packages/plugin/lib/browser/${file}`));
   }
   await writeSpacesComponentPayload();
   await copyFile(at('packages/plugin/lib/supervisor/manifest.json'), at('packages/supervisor/lib/manifest.json'));

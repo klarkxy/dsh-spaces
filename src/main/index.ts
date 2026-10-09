@@ -87,6 +87,7 @@ import {
   type TraySpace,
 } from "./tray";
 import { startAutoUpdate } from "./updater";
+import { BROWSER_GUEST_IPC } from '../shared/browser-guest';
 import { ViewManager } from "./view-manager";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -523,7 +524,7 @@ function startMain(startupNotice?: string): void {
         return;
       }
       views?.destroy();
-      views = mainWindow ? new ViewManager(mainWindow, requireWorkbenchSession()) : null;
+      views = mainWindow ? new ViewManager(mainWindow, requireWorkbenchSession(), browserGuestOptions()) : null;
       client.dispose();
       client = new DesktopServiceClient(clientOptions);
       progress.reset();
@@ -610,7 +611,7 @@ function startMain(startupNotice?: string): void {
     if (!app.isReady() || !initialized) return;
     if (!mainWindow || mainWindow.isDestroyed()) {
       mainWindow = createWindow();
-      views = new ViewManager(mainWindow, requireWorkbenchSession());
+      views = new ViewManager(mainWindow, requireWorkbenchSession(), browserGuestOptions());
     }
     revealWindowFromTray(mainWindow);
   }
@@ -631,7 +632,12 @@ function startMain(startupNotice?: string): void {
     }
   }
 
+  function browserGuestOptions() {
+    return { preloadPath: join(dirname(preloadPath()), 'browser-guest.cjs'), api: () => client.getApi() };
+  }
+
   function registerIpc(): void {
+    ipcMain.handle(BROWSER_GUEST_IPC, (event, input) => views?.browserRequest(event, input));
     const handle = (
       channel: string,
       listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
@@ -710,7 +716,7 @@ function startMain(startupNotice?: string): void {
     workbenchSession = readySession;
     initialized = true;
     mainWindow = createWindow();
-    views = new ViewManager(mainWindow, readySession);
+    views = new ViewManager(mainWindow, readySession, browserGuestOptions());
     tray = createAppTray({ Tray, Menu, nativeImage } as unknown as TrayElectron, {
       getSpaces: () => traySpaces,
       onShow: () => showMainWindow(),
