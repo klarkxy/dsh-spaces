@@ -6,9 +6,11 @@
 - [x] Browser-only root 经官方 SlotCore 选举和服务器端渲染验证；六组件构建/打包及专项测试通过。
 - [x] 最终三套类型检查与完整构建通过；workbench 539 项中 534 通过、5 失败，5 项在原始基线对应文件同样重现；spaces 139 通过、3 跳过。运行使用 `node --import tsx --test` 执行脚本同一文件列表（云端 tsx CLI 管道受限）。
 - [ ] 基线测试债务：额外 frontend-recovery/dsh-cli/plugin-library 64 项中 61 通过、3 失败，与原始基线一致；完整默认 test 在 Linux 的 Windows taskkill fixture 失败后挂住，已中止，不计为全套通过。本轮只更新旧“禁止任何 preload”断言为专用窄桥和真实 sender/frame 约束，没有改动这些基线失败。
-- [ ] 用户本机验收 Web GUI：地址栏、iframe 可嵌入站点、A/B/A 切页保持、目标站点拒绝嵌入时的提示。云端 Chromium 因 socket EPERM 未完成可视浏览器验收。
-- [ ] 用户本机或后续测试完整 Supervisor Browser 预设创建 → 实际安装 → 首次启动同一条生产 E2E；云端官方双 Host 脚本直接创建/安装 profile，预设 UI→job 为 fixture 验证。
-- [ ] 用户本机验收自有 Desktop 候选及官方 Desktop 0.2/Windows 路径。当前约 2.5 秒隐藏 lease 到期可销毁 guest/临时 session，长时间切 Space 后页面/登录状态不保证保留。
+- [x] 本机 Web 地址栏、可嵌入页面、A/B/A 状态保留、首页切回和 800px 布局通过；见 [本机验收](browser-local-acceptance-2026-10-10.md)。
+- [ ] Web 拒绝嵌入提示不完整：实际截图主要为浏览器破损图标，只有通用 Web preview 文案与外部打开入口，未完成产品层面的清楚说明。
+- [x] 本机真实工作台完成 Browser 预设创建 → 实际安装 → 首次启动生产链；官方 Desktop 隔离宿主也完成 UI 安装、初始化、创建及显式启动，持久化作业均 succeeded。详见本机验收记录。
+- [x] 自有 Desktop 当前构建连接隔离服务后，原生网页、A/B/A 保留、页内导航同步及 guest 接口隔离通过。已实测隐藏超过 2.5 秒后 guest 销毁、返回原始地址；不保证长期离开后的页面/登录状态。
+- [ ] 官方 Desktop 0.2.0-rc.2/Windows 原生 Browser 呈现失败：有效地址创建标签后显示 `Native Browser is unavailable.`，无网页 guest；深色宿主标签文字对比度也不足。原始官方代码隔离实测，不代表原安装 EXE 完整引导/登录验收。
 - [ ] 旧五组件安装不能直接热升级到六组件包；本轮只提供新隔离安装路径，没有自动迁移。用户本机若有旧 Home，先按此限制选择新 Home，不覆盖原有数据。
 - [ ] Terminal Space 尚未实施，另行设计与授权。
 
