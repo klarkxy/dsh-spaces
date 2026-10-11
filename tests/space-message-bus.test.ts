@@ -20,7 +20,7 @@ async function setup() {
   const router = new SpaceMessageRouter();
   const children: ChildProcess[] = [];
   async function launch(id: string) {
-    const child = fork(fixture, [], { execArgv: ['--experimental-transform-types', '--disable-warning=ExperimentalWarning'], stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    const child = fork(fixture, [], { execArgv: ['--import', 'tsx'], stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     child.setMaxListeners(64); // Test commands intentionally wait concurrently on this fixture.
     children.push(child); router.attach(id, child);
     let errors = ''; child.stderr!.on('data', b => { errors += b; });

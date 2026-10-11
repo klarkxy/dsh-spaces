@@ -122,16 +122,16 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
     <form style={addressStyle} onSubmit={event => { event.preventDefault(); void open(draft); }}>
       <input aria-label="Address" value={draft} onChange={event => setDraft(event.currentTarget.value)}
         placeholder={active?.url ?? 'Enter a website address'} style={inputStyle} />
-      <button type="submit">Open new tab</button>
-      {active?.url && <a href={active.url} target="_blank" rel="noopener noreferrer">Open externally</a>}
-      {!nativeDesktop && active?.requestedUrl && <span style={hintStyle}>Web preview: this address may not track links or redirects.</span>}
+      <button type="submit" style={buttonStyle}>Open new tab</button>
+      {active?.url && <a href={active.url} target="_blank" rel="noopener noreferrer" style={linkStyle}>Open externally</a>}
     </form>
+    {!nativeDesktop && active?.requestedUrl && <p role="note" style={hintStyle}>Web preview: some sites do not allow embedded pages. If the page is blank or shows a refusal, use Open externally. The Browser cannot determine the cause or track links and redirects inside a cross-origin page.</p>}
     {error && <p role="alert" style={errorStyle}>{error}</p>}
     <main ref={pageRef} style={pageStyle}>
       {!nativeDesktop && tabs.map(tab => tab.requestedUrl && <iframe key={tab.id} title={tab.title || tab.url || tab.requestedUrl} src={tab.requestedUrl}
         hidden={tab.id !== selected} style={frameStyle} referrerPolicy="no-referrer"
         sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox" />)}
-      {nativeDesktop && active?.requestedUrl && <div style={homeStyle}>Opening native Browser page…</div>}
+      {nativeDesktop && active?.requestedUrl && !error && <div style={homeStyle}>Opening native Browser page…</div>}
       {!active?.requestedUrl && <div style={homeStyle}>Enter an address to open a Browser tab.</div>}
     </main>
   </div>;
@@ -187,11 +187,13 @@ async function observe(connection: BrowserConnection, observations: unknown): Pr
 
 const appStyle: CSSProperties = { display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', background: '#f6f7f9', color: '#20242a', font: '14px system-ui,sans-serif' };
 const tabsStyle: CSSProperties = { display: 'flex', gap: 4, padding: '8px 10px 0', overflowX: 'auto', flexShrink: 0 };
-const tabStyle = (active: boolean): CSSProperties => ({ border: '1px solid #d9dce2', background: active ? '#fff' : '#e9ebef', borderBottom: 0, borderRadius: '8px 8px 0 0', padding: '8px 12px', whiteSpace: 'nowrap', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' });
-const addressStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#fff', borderBottom: '1px solid #d9dce2', flexShrink: 0 };
-const inputStyle: CSSProperties = { flex: 1, minWidth: 0, padding: '8px 10px' };
+const tabStyle = (active: boolean): CSSProperties => ({ border: '1px solid #d9dce2', background: active ? '#fff' : '#e9ebef', color: '#20242a', font: 'inherit', borderBottom: 0, borderRadius: '8px 8px 0 0', padding: '8px 12px', whiteSpace: 'nowrap', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' });
+const addressStyle: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 10, background: '#fff', borderBottom: '1px solid #d9dce2', flexShrink: 0 };
+const buttonStyle: CSSProperties = { color: '#20242a', background: '#fff', border: '1px solid #d9dce2', padding: '8px 12px', font: 'inherit' };
+const linkStyle: CSSProperties = { color: '#2458a6' };
+const inputStyle: CSSProperties = { flex: 1, minWidth: 0, padding: '8px 10px', color: '#20242a', background: '#fff', border: '1px solid #d9dce2', font: 'inherit' };
 const errorStyle: CSSProperties = { color: '#a00', margin: '6px 10px' };
-const hintStyle: CSSProperties = { color: '#5f6874', fontSize: 12, maxWidth: 210 };
+const hintStyle: CSSProperties = { color: '#5f6874', fontSize: 12, margin: '6px 10px', lineHeight: 1.5, flexShrink: 0 };
 const pageStyle: CSSProperties = { position: 'relative', flex: 1, minHeight: 0 };
 const frameStyle: CSSProperties = { border: 0, width: '100%', height: '100%', background: '#fff' };
 const homeStyle: CSSProperties = { padding: 32, textAlign: 'center' };
