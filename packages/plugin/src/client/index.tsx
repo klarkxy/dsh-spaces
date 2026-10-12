@@ -154,10 +154,11 @@ export function GuidePanelView({
   const copy = (key: Parameters<typeof guideText>[1]) => guideText(locale, key);
   const detail = error ? publicGuideDetail(error) : null;
   const action =
-    mode === "init"
+    mode === "init" || mode === "enter-failed"
       ? {
           name: "initialize" as const,
-          label: busy === "initialize" ? copy("initBusy") : copy("initAction"),
+          label:
+            busy === "initialize" ? copy("initBusy") : mode === "enter-failed" ? copy("startAction") : copy("initAction"),
           onClick: onInitialize,
           busy: busy === "initialize",
         }
@@ -245,7 +246,8 @@ function guideTitle(locale: SpacesLocale, mode: GuidePanelMode): string {
 function guideBody(locale: SpacesLocale, mode: GuidePanelMode): string {
   if (mode === "blocked") return guideText(locale, "blockedBody");
   if (mode === "failed") return guideText(locale, "roleFailed");
-  if (mode === "init-failed" || mode === "enter-failed") return guideText(locale, "unavailable");
+  if (mode === "init-failed") return guideText(locale, "unavailable");
+  if (mode === "enter-failed") return guideText(locale, "enterBody");
   if (mode === "enter") return guideText(locale, "enterBody");
   if (mode === "loading") return guideText(locale, "loading");
   return guideText(locale, "initBody");

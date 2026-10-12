@@ -1074,7 +1074,12 @@ test("guide error cards are details-only; initialize is only first healthy start
 
   const enterFailed = render("enter-failed", "The workbench entry is not available yet.");
   assert.match(enterFailed, /data-dsh-spaces-guide="enter-failed"/);
-  noRecoveryActions(enterFailed);
+  assert.equal(enterFailed.includes(en.enterBody), true);
+  assert.equal(enterFailed.includes(en.startAction), true);
+  assert.equal(enterFailed.includes('data-dsh-spaces-action="initialize"'), true);
+  assert.equal(enterFailed.includes(en.retry), false);
+  assert.equal(enterFailed.includes('data-dsh-spaces-action="enter"'), false);
+  assert.equal(enterFailed.includes('data-dsh-spaces-copy="details"'), true);
 
   const firstInit = render("init");
   assert.match(firstInit, /data-dsh-spaces-guide="init"/);

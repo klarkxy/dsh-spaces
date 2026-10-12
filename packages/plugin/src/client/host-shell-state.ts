@@ -2,7 +2,7 @@ import type { WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
 import { parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalSnapshot } from "../../../../src/shared/space-host";
 
 export interface HostShellSnapshot {
-  phase: "loading" | "initialize" | "connecting" | "ready" | "failed";
+  phase: "loading" | "initialize" | "start" | "connecting" | "ready" | "failed";
   role: WorkbenchGuideRole | null;
   inventory: PortalSnapshot | null;
   portal: { src: string; origin: string; channel: string } | null;
@@ -79,6 +79,9 @@ export class HostShellController {
     if (!audience) throw new Error("unsupported-host-transport");
     const target = await this.guide.portalTarget!(audience);
     if (!this.running || epoch !== this.epoch) return;
+    if (!target.available && !target.unavailable && this.ui.role?.managerId) {
+      this.patch({ phase: "start", error: null }); return;
+    }
     if (!target.available || target.unavailable || typeof target.origin !== "string" ||
         !parseSpaceHostAudience({ parentOrigin: target.origin, channel }) ||
         typeof target.path !== "string" || !/^\/portal-bootstrap\/[A-Za-z0-9_-]{32}$/.test(target.path)) {
@@ -88,7 +91,7 @@ export class HostShellController {
     this.entryTimer = this.env.setTimeout(() => { this.fail("entry"); }, 30000);
   }
   initialize = async (): Promise<void> => {
-    if (!this.running || this.ui.phase !== "initialize") return;
+    if (!this.running || (this.ui.phase !== "initialize" && this.ui.phase !== "start")) return;
     // Check transport before a potentially mutating initialization, not afterwards.
     if (!this.supportsTransport()) { this.fail("unsupported"); return; }
     const epoch = this.epoch;

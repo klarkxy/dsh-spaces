@@ -199,6 +199,35 @@ test("unsupported native or remote transport is rejected before initialization w
   }
 });
 
+test("a stopped supervisor offers one explicit start that cold-starts only on click", async () => {
+  const f = fixture();
+  let portalCalls = 0;
+  f.guide.portalTarget = async () => {
+    f.calls.push("portalTarget"); portalCalls += 1;
+    if (portalCalls === 1) return { available: false, unavailable: false, origin: null, path: null, reasons: [] };
+    return { available: true, unavailable: false, origin: "http://127.0.0.1:3088", path: "/portal-bootstrap/" + "a".repeat(32), reasons: [] };
+  };
+  f.controller.start(); await tick();
+  assert.equal(f.controller.getSnapshot().phase, "start");
+  assert.deepEqual(f.calls, ["role", "portalTarget"]);
+  await f.controller.initialize();
+  assert.equal(f.calls.filter(name => name === "initialize").length, 1);
+  assert.deepEqual(f.calls, ["role", "portalTarget", "initialize", "portalTarget"]);
+  await f.controller.initialize();
+  assert.equal(f.calls.filter(name => name === "initialize").length, 1);
+  f.controller.stop();
+});
+
+test("a permanently unavailable supervisor still fails without a start affordance", async () => {
+  const f = fixture();
+  f.guide.portalTarget = async () => { f.calls.push("portalTarget"); return { available: false, unavailable: true, origin: null, path: null, reasons: ["blocked"] }; };
+  f.controller.start(); await tick();
+  assert.equal(f.controller.getSnapshot().phase, "failed");
+  assert.equal(f.controller.getSnapshot().error, "entry");
+  assert.deepEqual(f.calls, ["role", "portalTarget"]);
+  f.controller.stop();
+});
+
 test("explicit initialize discards the legacy navigation handoff and late responses after disposal", async () => {
   const f = fixture(parentOrigin, false); f.controller.start(); await tick();
   assert.equal(f.controller.getSnapshot().phase, "initialize");
