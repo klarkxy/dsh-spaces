@@ -10,7 +10,8 @@
 - [x] E：看板请求体超限时在 8 MiB 上限内读完再回 413，客户端不再因连接重置丢失 413；超过上限直接断开（`824e575`、`b931430`）。
 - [x] F：测试类型检查 187 → 0，新增 `typecheck:tests` 并接入 CI，只改测试代码（`d83d18e`）。
 - [x] 蓝图 `assertBundlePatches` / `provenanceMismatch` 不接回：应用时的真实模块解析（`blueprint-workbench.ts` 中 `resolvedIdentityAllowed`、"no bundle patch" 资格检查）和生成时的 `locateProvenancePointer` 已覆盖它们的用途。
-- [ ] `WorkbenchSupervisorRuntime` 仍约 2000 行，计划执行与生命周期管线未拆。
+- [x] G1–G4：Supervisor 小清理（`8ef220f`，含无 CLI 分支补调 `refreshAvailability`）、生命周期状态收进 `supervisor/lifecycle.ts`（`d52faa4`）、空间运行登记 `supervisor/space-runs.ts`（`1e4cb10`）、计划执行 `supervisor/plans.ts`（`a7fc599`）。主文件 2316 → 2042 行，子模块依赖回调明显减少。
+- [ ] 负载下的既有偶发失败（`e9e0099` 上同样出现）：`tests/dashboard-supervisor.test.ts` 任务偶尔以 failed 结束或被 `workbench/maintenance` 拒绝；`packages/blueprint` 的 `native.test.mjs` 端口获取竞态。
 
 # 2026-10-12 移除自有 Electron 桌面壳
 
