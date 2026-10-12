@@ -24,7 +24,7 @@ No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1` i
 
 - Standard `dsh.bundle.patch` and `cordis.patch.yml` let the official CLI maintain the profile's bundle list.
 - `dsh.client` and `./client` supply the Web client through DSH's module loader and shared React.
-- The tarball includes supervisor, snapshot worker, view-bridge, and llm-bridge payloads. Users do not need a second package or this source checkout at runtime. `llm-bridge` is installed only when a Space explicitly joins shared connections.
+- The tarball carries the component group: supervisor, manager plugin, view-bridge, browser, llm-bridge, and the installation worker (`snapshot-worker.mjs`). Users do not need a second package or this source checkout at runtime. `llm-bridge` is installed only when a Space explicitly joins shared connections.
 - The supervisor allocates the manager under the existing Home locks; ordinary profiles never gain manager write remotes.
 - Unknown CLI versions, damaged identity, and another controller's lease are refused before initialization writes. Concurrent callers share startup but receive separate one-time handoffs.
 
@@ -32,7 +32,7 @@ No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1` i
 
 Closing a browser tab does not stop the supervisor or spaces. Use the workbench's explicit shutdown action to stop them. Stopping the ordinary Web process also leaves the independent workbench running.
 
-`dsh plugin --profile web remove @dsh-spaces/plugin` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor. Workbench package maintenance is distinct from upgrading the supervisor itself; reinstalling this entry is not evidence that every component has upgraded.
+`dsh plugin --profile web remove @dsh-spaces/plugin` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor. Upgrading Spaces means adding a newer version of this plugin to the host profile, shutting the service down from the manager UI, and reopening Spaces — the Supervisor then selects the host plugin's component group and aligns the manager plugin at startup.
 
 安装时可能需要联网获取官方依赖。当前 alpha 的真实管理器、原生设置与新旧空间启动验收见 [迁移记录](../../tasks/archive/alpha-migration.md)；rc.1 / rc.2 的历史安装结果不替代 alpha 验证。故障政策见 [let it crash](../../docs/let-it-crash.md)。
 

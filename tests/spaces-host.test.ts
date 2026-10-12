@@ -458,7 +458,6 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
       "workbench/snapshots",
       "workbench/snapshot",
       "workbench/runtimes",
-      "workbench/workbenchPackage",
       "workbench/backups",
       "workbench/llm",
       "workbench/llmCredential",

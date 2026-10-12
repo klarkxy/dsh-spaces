@@ -68,6 +68,7 @@ if (!process.argv.includes('--core-only')) {
   await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
     entryPoints: ['packages/llm-bridge/src/index.ts'], outfile: 'packages/llm-bridge/lib/index.js' });
   await copyFile(at('LICENSE'), at('packages/llm-bridge/LICENSE'));
+  await rm(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true, force: true });
   await mkdir(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true });
   await copyFile(at('packages/llm-bridge/lib/index.js'), at('packages/plugin/lib/llm-bridge/lib/index.js'));
   for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
@@ -81,12 +82,15 @@ if (!process.argv.includes('--core-only')) {
 
   // These immutable program resources are copied out of profiles before launch.
   // A running executor is never replaced by a Home snapshot restore.
+  await rm(at('packages/plugin/lib/supervisor'), { recursive: true, force: true });
   await cp(at('packages/supervisor/lib'), at('packages/plugin/lib/supervisor'), { recursive: true });
   await copyFile(at('packages/supervisor/package.json'), at('packages/plugin/lib/supervisor/package.json'));
+  await rm(at('packages/plugin/lib/view-bridge/lib'), { recursive: true, force: true });
   await cp(at('packages/view-bridge/lib'), at('packages/plugin/lib/view-bridge/lib'), { recursive: true });
   for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
     await copyFile(at(`packages/view-bridge/${file}`), at(`packages/plugin/lib/view-bridge/${file}`));
   }
+  await rm(at('packages/plugin/lib/browser/lib'), { recursive: true, force: true });
   await cp(at('packages/browser/lib'), at('packages/plugin/lib/browser/lib'), { recursive: true });
   for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
     await copyFile(at(`packages/browser/${file}`), at(`packages/plugin/lib/browser/${file}`));
