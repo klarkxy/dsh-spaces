@@ -12,7 +12,7 @@ import {
   validateComponentPayload,
   type ValidatedComponentPayload,
 } from "../component-payload";
-import type { HomeControlHandle, HomeController, PidAliveFn } from "../home-controller";
+import type { HomeController, PidAliveFn } from "../home-controller";
 import type { SpaceMessageRouter } from "../message-bus/router";
 import type { SupervisorDashboard } from "../dashboard/supervisor";
 import { beginLaunchDiagnostics } from "../supervisor-launch";
@@ -28,6 +28,7 @@ import type {
 import { packLocalArtifacts } from "../../../../packages/plugin/src/host/supervisor-pack.ts";
 import { supervisorCliArgs } from "./cli-args";
 import { WorkbenchPublicError } from "./errors";
+import type { SupervisorLifecycle } from "./lifecycle";
 import { pathInsideHome, payloadRel, resolveLauncherEntry } from "./payload";
 import type { PendingComponentHandoff, WorkbenchSupervisorOptions } from "./types";
 
@@ -39,21 +40,12 @@ export interface SupervisorComponentHandoffHost {
   controller: HomeController;
   messageBus: SpaceMessageRouter;
   spawned: Map<string, { pid: number; startedAt: string }>;
-  reasons: () => string[];
+  lifecycle: SupervisorLifecycle;
   jobs: () => WorkbenchJobStore | undefined;
-  handle: () => HomeControlHandle | undefined;
-  clearHandle: () => void;
   origin: () => string;
   closeHttp: () => Promise<void>;
   removeEndpointFile: () => void;
   dashboard: () => SupervisorDashboard | null;
-  activeJobId: () => string | undefined;
-  pendingHandoff: () => PendingComponentHandoff | undefined;
-  setPendingHandoff: (value: PendingComponentHandoff | undefined) => void;
-  seal: () => void;
-  markTransferredOwner: () => void;
-  markClosed: () => void;
-  markBlocked: () => void;
   selectedPayload: () => ValidatedComponentPayload | undefined;
   ownedSpaceIds: () => string[];
   statusOf: (id: string) => ProfileStatus;
@@ -75,19 +67,19 @@ export class SupervisorComponentHandoff {
         "Owned processes are still running. The component handoff was not started.",
       );
     }
-    const jobId = this.host.activeJobId();
+    const jobId = this.host.lifecycle.activeJobId;
     if (!jobId) {
       throw new WorkbenchPublicError("workbench/unavailable", "Component handoff requires the running upgrade job.");
     }
     const artifacts = await this.artifactsForPayload(input.payload);
-    this.host.seal();
-    this.host.setPendingHandoff({
+    this.host.lifecycle.sealing = true;
+    this.host.lifecycle.pendingHandoff = {
       jobId,
       planId: input.planId,
       snapshotId: input.snapshotId,
       payload: input.payload,
       ...artifacts,
-    });
+    };
     ctx.phase("handoff-pending");
     ctx.message("Handoff preparation is complete. New service startup is unconfirmed.");
     ctx.result({ snapshotId: input.snapshotId });
@@ -146,14 +138,14 @@ export class SupervisorComponentHandoff {
   }
 
   async finalizeComponentHandoff(pending: PendingComponentHandoff): Promise<void> {
-    this.host.setPendingHandoff(undefined);
+    this.host.lifecycle.pendingHandoff = undefined;
     if (this.ownedChildStillRunning()) {
       throw new WorkbenchPublicError(
         "workbench/unavailable",
         "Owned processes are still running. The component handoff was not transferred.",
       );
     }
-    const owner = this.host.handle();
+    const owner = this.host.lifecycle.handle;
     if (!owner) {
       throw new WorkbenchPublicError("workbench/unavailable", "Run rights are not held for the component handoff.");
     }
@@ -213,7 +205,7 @@ export class SupervisorComponentHandoff {
       this.recordHandoffDiagnostic(error);
       throw error;
     }
-    this.host.markTransferredOwner();
+    this.host.lifecycle.transferredOwner = true;
 
     const newEntry = payloadRel(pending.payload.packageRoot, COMPONENT_PAYLOAD_ENTRIES.supervisor);
     const newWorker = payloadRel(pending.payload.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
@@ -257,8 +249,8 @@ export class SupervisorComponentHandoff {
       throw error;
     }
     launcher.disconnect();
-    this.host.markClosed();
-    this.host.clearHandle();
+    this.host.lifecycle.closed = true;
+    this.host.lifecycle.handle = undefined;
     if (this.host.options.onNormalExit) await this.host.options.onNormalExit();
   }
 
@@ -303,7 +295,7 @@ export class SupervisorComponentHandoff {
     const message = sanitizeLogText(
       error instanceof Error ? error.message : typeof error === "string" ? error : "Component handoff failed.",
     ).slice(0, 400);
-    if (!this.host.reasons().includes(message)) this.host.reasons().push(message);
-    this.host.markBlocked();
+    this.host.lifecycle.addReason(message);
+    this.host.lifecycle.blocked = true;
   }
 }

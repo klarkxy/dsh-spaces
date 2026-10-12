@@ -134,6 +134,7 @@ import {
   parseSpaceName,
 } from "./supervisor/input";
 import { SupervisorInstanceRecords } from "./supervisor/instance-records";
+import { SupervisorLifecycle } from "./supervisor/lifecycle";
 import { SupervisorLlm } from "./supervisor/llm";
 import {
   bindSelectedCli,
@@ -148,7 +149,6 @@ import {
 import type {
   BoundCli,
   ChildView,
-  PendingComponentHandoff,
   StoredPlan,
   WorkbenchMaintenance,
   WorkbenchSupervisorHandle,
@@ -225,7 +225,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly patchWriter: PatchWriter;
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
-  private handle: HomeControlHandle | undefined;
+  private readonly lifecycle = new SupervisorLifecycle();
   private jobs: WorkbenchJobStore | undefined;
   private processes: ProcessManager | undefined;
   private spaces: NodeSpacesControl | undefined;
@@ -237,32 +237,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private cli: BoundCli | null = null;
   private managerId: string | null = null;
   private managerInstall: "missing" | "manager" | "ordinary" | "damaged" = "missing";
-  private maintenanceFlag = false;
-  // Inventory is a display snapshot while maintenance swaps its backing tree.
-  // Admission still uses the live controller and transaction locks.
-  private maintenanceInventory: { mode: WorkbenchState["mode"]; spaces: WorkbenchSpace[] } | null = null;
-  private blocked = false;
-  private reasons: string[] = [];
-  private derivedReasons = new Set<string>();
   private readonly messageBus = new SpaceMessageRouter();
   private readonly generations = new Map<string, number>();
   private readonly views = new Map<string, ChildView>();
   private readonly workspaceOrigins = new Set<string>();
   private readonly plans = new Map<string, StoredPlan>();
   private httpClose: (() => Promise<void>) | undefined;
-  private relinquishKind: "service.shutdown" | null = null;
-  private relinquishJobId: string | null = null;
-  private closed = false;
-  private sealing = false;
-  private maintenanceBlocked = false;
   private runtimeStore: RuntimeStore | undefined;
   private readonly unmanaged = new Set<string>();
   private readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   private readonly pidAlive: PidAliveFn;
   private readonly llmApplied = new Map<string, number>();
-  private activeJobId: string | undefined;
-  private pendingHandoff: PendingComponentHandoff | undefined;
-  private transferredOwner = false;
   private selectedPayload: ValidatedComponentPayload | undefined;
   private packageUpgrade: WorkbenchPackageUpgrade | undefined;
   readonly llmHost: GlobalLlmHost;
@@ -282,21 +267,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       controller: this.controller,
       messageBus: this.messageBus,
       spawned: this.spawned,
-      reasons: () => this.reasons,
+      lifecycle: this.lifecycle,
       jobs: () => this.jobs,
-      handle: () => this.handle,
-      clearHandle: () => { this.handle = undefined; },
       origin: () => this.origin,
       closeHttp: async () => { await this.httpClose?.(); this.httpClose = undefined; },
       removeEndpointFile: () => this.removeEndpointFile(),
       dashboard: () => this.dashboard,
-      activeJobId: () => this.activeJobId,
-      pendingHandoff: () => this.pendingHandoff,
-      setPendingHandoff: (value) => { this.pendingHandoff = value; },
-      seal: () => { this.sealing = true; },
-      markTransferredOwner: () => { this.transferredOwner = true; },
-      markClosed: () => { this.closed = true; },
-      markBlocked: () => { this.blocked = true; },
       selectedPayload: () => this.selectedPayload,
       ownedSpaceIds: () => this.ownedSpaceIds(),
       statusOf: (id) => this.statusOf(id),
@@ -330,7 +306,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       controlDir: this.controlDir,
       spawned: this.spawned,
       unmanaged: this.unmanaged,
-      reasons: () => this.reasons,
+      lifecycle: this.lifecycle,
       pidAlive: this.pidAlive,
       plans: this.plans,
     });
@@ -338,16 +314,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       home: this.home,
       llmHost: () => this.llmHost,
       jobs: () => this.jobs,
-      handle: () => this.handle,
-      sealing: () => this.sealing,
-      relinquishKind: () => this.relinquishKind,
-      maintenanceBlocked: () => this.maintenanceBlocked,
+      lifecycle: this.lifecycle,
       managerId: () => this.managerId,
       llmBridgeArtifact: () => this.options.llmBridgeArtifact,
       unmanaged: this.unmanaged,
       generations: this.generations,
       llmApplied: this.llmApplied,
-      assertWritable: () => this.assertWritable(),
       observeChildWork: (action) => this.observeChildWork(action),
       requireManaged: (spaceId) => this.requireManaged(spaceId),
       stopOwned: (spaceId) => this.stopOwned(spaceId),
@@ -365,13 +337,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       origin: () => this.origin,
       dashboard: () => this.dashboard,
       setDashboard: (dashboard) => { this.dashboard = dashboard; },
-      handle: () => this.handle,
-      closed: () => this.closed,
-      sealing: () => this.sealing,
-      blocked: () => this.blocked,
-      maintenanceFlag: () => this.maintenanceFlag,
-      maintenanceBlocked: () => this.maintenanceBlocked,
-      transferredOwner: () => this.transferredOwner,
+      lifecycle: this.lifecycle,
       hasMaintenanceEvidence: () => this.hasMaintenanceEvidence(),
       requireServiceEpoch: () => this.requireServiceEpoch(),
       managerOrigin: () => this.managerOrigin(),
@@ -380,7 +346,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       generations: this.generations,
       cookieName: () => this.cookieName(),
       sessionEquals: (value) => this.sessionEquals(value),
-      reasons: () => this.reasons,
     });
     this.llmHost = createHomeLlmHost(this.home, {
       listSpaceIds: async () => this.homeProfileNames(),
@@ -455,18 +420,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   async tryOwn(): Promise<void> {
     const inspection = this.controller.inspect();
     if (inspection.held) {
-      this.reasons = this.heldReasons(inspection);
+      this.lifecycle.reasons = this.heldReasons(inspection);
       return;
     }
     try {
-      this.handle = this.controller.acquire("web", this.origin);
+      this.lifecycle.handle = this.controller.acquire("web", this.origin);
     } catch (error) {
       if (error instanceof HomeControlBusyError) {
-        this.reasons = this.heldReasons(error.inspection);
+        this.lifecycle.reasons = this.heldReasons(error.inspection);
         return;
       }
-      this.blocked = true;
-      this.reasons = [WRITABLE_STARTUP_FAILED_REASON];
+      this.lifecycle.blocked = true;
+      this.lifecycle.reasons = [WRITABLE_STARTUP_FAILED_REASON];
       return;
     }
     this.writeHostBearer();
@@ -474,9 +439,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       await this.initWritable();
     } catch {
-      this.blocked = true;
-      this.reasons = [
-        ...this.reasons,
+      this.lifecycle.blocked = true;
+      this.lifecycle.reasons = [
+        ...this.lifecycle.reasons,
         WRITABLE_STARTUP_FAILED_REASON,
       ];
     }
@@ -488,7 +453,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
    */
   async takeAcceptedOwner(handle: HomeControlHandle): Promise<void> {
     this.assertAcceptedHandle(handle);
-    this.handle = handle;
+    this.lifecycle.handle = handle;
     this.writeHostBearer();
     this.writeEndpointFile();
     await this.initWritable();
@@ -496,30 +461,28 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async close(): Promise<void> {
-    if (this.closed) return;
-    if (this.transferredOwner) {
-      this.closed = true;
-      this.sealing = true;
-      this.handle = undefined;
+    if (this.lifecycle.closed) return;
+    if (this.lifecycle.transferredOwner) {
+      this.lifecycle.closed = true;
+      this.lifecycle.sealing = true;
+      this.lifecycle.handle = undefined;
       await this.httpClose?.();
       return;
     }
-    this.sealing = true;
+    this.lifecycle.sealing = true;
     try {
       if (this.jobs) await this.jobs.whenIdle();
       await this.stopOwnedAll();
       this.messageBus.close();
       await this.dashboard?.close();
     } catch (error) {
-      this.maintenanceBlocked = true;
-      this.blocked = true;
-      if (!this.reasons.includes(STOP_KEPT_REASON)) {
-        this.reasons.push(STOP_KEPT_REASON);
-      }
+      this.lifecycle.maintenanceBlocked = true;
+      this.lifecycle.blocked = true;
+      this.lifecycle.addReason(STOP_KEPT_REASON);
       throw error instanceof Error ? error : new Error(STOP_NOT_FORCED);
     }
     this.dropWritable();
-    this.closed = true;
+    this.lifecycle.closed = true;
     await this.httpClose?.();
   }
 
@@ -604,9 +567,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return renderEntryPage({
       managerRunning: running,
       managerViewPath: viewPath,
-      maintenance: this.maintenanceFlag,
-      writable: Boolean(this.handle),
-      reasons: this.reasons,
+      maintenance: this.lifecycle.maintenanceFlag,
+      writable: Boolean(this.lifecycle.handle),
+      reasons: this.lifecycle.reasons,
       serviceEpoch: epoch,
     });
   }
@@ -659,15 +622,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   async state(): Promise<WorkbenchState> {
     this.refreshAvailability(false);
-    const owner = this.maintenanceFlag && this.handle
-      ? { kind: this.handle.owner.kind, since: this.handle.owner.startedAt }
+    const owner = this.lifecycle.maintenanceFlag && this.lifecycle.handle
+      ? { kind: this.lifecycle.handle.owner.kind, since: this.lifecycle.handle.owner.startedAt }
       : this.readOwner();
-    const inventory = this.maintenanceFlag ? this.maintenanceInventory : null;
+    const inventory = this.lifecycle.maintenanceFlag ? this.lifecycle.maintenanceInventory : null;
     const spaces = inventory ? inventory.spaces.map(row => ({
       ...row,
       status: this.unmanaged.has(row.id) ? "unknown" as const : this.publicStatus(row.id),
       generation: this.views.get(row.id)?.generation ?? this.generations.get(row.id) ?? row.generation,
-      managed: Boolean(this.handle) && !this.unmanaged.has(row.id),
+      managed: Boolean(this.lifecycle.handle) && !this.unmanaged.has(row.id),
     })) : this.listSpaces();
     return {
       protocolVersion: WORKBENCH_PROTOCOL_VERSION,
@@ -677,11 +640,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       role: this.role(),
       managerId: this.managerId,
       owner,
-      writable: Boolean(this.handle),
+      writable: Boolean(this.lifecycle.handle),
       mode: inventory?.mode ?? this.spaces?.capabilities().mode ?? "unknown-readonly",
       dshVersion: this.cli?.version ?? null,
-      maintenance: this.maintenanceFlag,
-      reasons: [...this.reasons],
+      maintenance: this.lifecycle.maintenanceFlag,
+      reasons: [...this.lifecycle.reasons],
       spaces,
       jobs: this.jobs?.list() ?? [],
     };
@@ -706,7 +669,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         version: publicPluginVersion(row.version),
       })),
       snapshots: [],
-      diagnostics: this.reasons.map((message) => ({ level: "warning" as const, code: "WORKBENCH", message })),
+      diagnostics: this.lifecycle.reasons.map((message) => ({ level: "warning" as const, code: "WORKBENCH", message })),
     };
   }
 
@@ -715,20 +678,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (REMOVED_COMMAND_KINDS.has((command as { kind?: string }).kind ?? "")) {
       throw new WorkbenchPublicError("workbench/unsupported");
     }
-    if (this.closed || this.sealing || this.relinquishKind) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
-    }
-    this.assertWritable();
+    this.lifecycle.admitSubmission();
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
     const parsedCommand = isWorkbenchProductCommand(command) ? parseWorkbenchProductCommand(command) : command;
     const job = await this.jobs.submit(parsedCommand, requestId, (ctx) => {
-      this.activeJobId = requestId;
+      this.lifecycle.activeJobId = requestId;
       return this.observeChildWork(async () => {
         try {
           this.assertLiveContext(parsedContext);
           return await this.runCommand(parsedCommand, ctx);
         } finally {
-          this.activeJobId = undefined;
+          this.lifecycle.activeJobId = undefined;
         }
       });
     });
@@ -745,7 +705,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async cancel(id: string): Promise<WorkbenchJob> {
-    this.assertWritable();
+    this.lifecycle.assertWritable();
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
     return this.jobs.cancel(id);
   }
@@ -785,7 +745,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   async preview(request: WorkbenchPlanRequest, context: WorkbenchMutationContext): Promise<WorkbenchPlan> {
     const parsedContext = parseMutationContext(context);
-    this.assertWritable();
+    this.lifecycle.assertWritable();
     this.assertLiveContext(parsedContext);
     if (REMOVED_PLAN_KINDS.has((request as { kind?: string }).kind ?? "")) {
       throw new WorkbenchPublicError("workbench/unsupported");
@@ -855,24 +815,24 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     const bootstrapPending = this.ownsBootstrap(identity.profileId);
     if (this.managerInstall === "ordinary" && !bootstrapPending) {
-      this.blocked = true;
-      this.reasons = [
+      this.lifecycle.blocked = true;
+      this.lifecycle.reasons = [
         "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
       ];
       this.refreshAvailability();
       return;
     }
     if (this.managerInstall === "damaged") {
-      this.blocked = true;
-      this.reasons = ["The manager profile record is damaged and was not rebuilt."];
+      this.lifecycle.blocked = true;
+      this.lifecycle.reasons = ["The manager profile record is damaged and was not rebuilt."];
       this.refreshAvailability();
       return;
     }
     let managerDump: string | undefined;
     if (this.managerInstall === "missing" || bootstrapPending) {
       if (!this.cli) {
-        this.blocked = true;
-        this.reasons = ["A compatible DSH CLI is required before the manager profile can be created."];
+        this.lifecycle.blocked = true;
+        this.lifecycle.reasons = ["A compatible DSH CLI is required before the manager profile can be created."];
         this.refreshAvailability();
         return;
       }
@@ -880,8 +840,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         managerDump = await this.observeChildWork(() => this.bootstrapManager(identity.profileId));
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
-        this.blocked = true;
-        this.reasons = ["Manager initialization did not complete. Its local diagnostic record is available."];
+        this.lifecycle.blocked = true;
+        this.lifecycle.reasons = ["Manager initialization did not complete. Its local diagnostic record is available."];
         atomicWrite(join(this.controlDir, "manager-bootstrap-error.json"), `${JSON.stringify({
           version: 1, at: this.now().toISOString(),
           detail: sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 4000),
@@ -895,19 +855,19 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       this.maintenance = this.createMaintenance();
     } catch {
-      this.reasons.push("Maintenance could not be composed.");
+      this.lifecycle.reasons.push("Maintenance could not be composed.");
     }
     this.refreshAvailability();
 
-    if (this.managerInstall === "manager" && this.cli && !this.blocked && !this.unmanaged.has(identity.profileId)) {
+    if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.unmanaged.has(identity.profileId)) {
       try {
         await this.startSpace(identity.profileId, silentJobContext());
       } catch (error) {
-        this.blocked = true;
+        this.lifecycle.blocked = true;
         const detail = (error instanceof Error && error.message
           ? error.message
           : "The manager process could not be started.").slice(0, 400);
-        this.reasons.push(`${detail} The stable entry is still available.`);
+        this.lifecycle.reasons.push(`${detail} The stable entry is still available.`);
       }
     }
   }
@@ -924,8 +884,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       } else this.cli = bindSelectedCli(this.options.bin);
     } catch (error) {
       this.cli = null;
-      this.blocked = true;
-      this.reasons = [
+      this.lifecycle.blocked = true;
+      this.lifecycle.reasons = [
         error instanceof WorkbenchPublicError ? error.message : WORKBENCH_ERROR["workbench/incompatible"],
       ];
       return;
@@ -975,7 +935,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } catch {
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor origin is not a valid loopback endpoint.");
     }
-    if (this.handle?.owner.endpoint && this.handle.owner.endpoint !== origin) {
+    if (this.lifecycle.handle?.owner.endpoint && this.lifecycle.handle.owner.endpoint !== origin) {
       throw new WorkbenchPublicError("workbench/unavailable", "The owner endpoint origin does not match this supervisor.");
     }
     const epoch = this.currentServiceEpoch();
@@ -1106,8 +1066,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           this.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
           try { this.instances.writeInstanceRecord(profile, port, this.generations.get(profile) ?? 0); }
           catch {
-            this.maintenanceBlocked = true;
-            this.reasons.push("The child identity record could not be saved. Run rights were kept.");
+            this.lifecycle.maintenanceBlocked = true;
+            this.lifecycle.reasons.push("The child identity record could not be saved. Run rights were kept.");
           }
           child.once("exit", () => {
             const recorded = this.spawned.get(profile);
@@ -1170,8 +1130,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       });
       this.lastDispatchLog = signature;
     } catch {
-      if (!this.reasons.includes("The workbench log could not be written.")) {
-        this.reasons.push("The workbench log could not be written.");
+      if (!this.lifecycle.reasons.includes("The workbench log could not be written.")) {
+        this.lifecycle.reasons.push("The workbench log could not be written.");
       }
     }
   }
@@ -1196,7 +1156,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const upgrades = new CoordinatedUpgrade({
       home: this.home,
       workerFile: worker,
-      observeChild: () => observeMaintenanceChild(this.home, () => { this.maintenanceBlocked = true; }),
+      observeChild: () => observeMaintenanceChild(this.home, () => { this.lifecycle.maintenanceBlocked = true; }),
       profiles: () => this.homeProfileNames(),
       stopAll: () => this.stopOwnedAll(),
       snapshots,
@@ -1230,9 +1190,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
             message: detail || "The maintenance operation failed.",
           });
         } catch {
-          this.maintenanceBlocked = true;
-          if (!this.reasons.includes("Maintenance diagnostics could not be saved. Further changes are blocked.")) {
-            this.reasons.push("Maintenance diagnostics could not be saved. Further changes are blocked.");
+          this.lifecycle.maintenanceBlocked = true;
+          if (!this.lifecycle.reasons.includes("Maintenance diagnostics could not be saved. Further changes are blocked.")) {
+            this.lifecycle.reasons.push("Maintenance diagnostics could not be saved. Further changes are blocked.");
           }
         }
       },
@@ -1255,7 +1215,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       upgrades,
       diagnostics,
       managerId: () => this.managerId,
-      assertWritable: () => this.assertWritable(),
+      assertWritable: () => this.lifecycle.assertWritable(),
       validateSpace: (spaceId, allowManager) => {
         this.validateSpace(spaceId, allowManager);
       },
@@ -1267,14 +1227,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       currentRuntime: () => this.currentRuntime(),
       reinitializeManager: () => this.reinitializeManager(),
       setMaintenance: (active) => {
-        if (active && !this.maintenanceFlag) {
-          this.maintenanceInventory = {
+        if (active && !this.lifecycle.maintenanceFlag) {
+          this.lifecycle.maintenanceInventory = {
             mode: this.spaces?.capabilities().mode ?? "unknown-readonly",
             spaces: this.listSpaces(),
           };
         }
-        this.maintenanceFlag = active;
-        if (!active) this.maintenanceInventory = null;
+        this.lifecycle.maintenanceFlag = active;
+        if (!active) this.lifecycle.maintenanceInventory = null;
       },
       hasUnfinishedPlan: planId => this.jobs?.hasUnfinishedPlan(planId) ?? false,
       unfinishedPlanIds: () => this.jobs?.unfinishedPlanIds() ?? [],
@@ -1390,7 +1350,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async runCommand(command: WorkbenchCommand, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
-    if (this.sealing) {
+    if (this.lifecycle.sealing) {
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     switch (command.kind) {
@@ -1515,7 +1475,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.dashboardHost.retireDashboardRun(id, gen);
       throw error;
     }
-    if (this.maintenanceBlocked) throw new WorkbenchPublicError("workbench/unavailable");
+    if (this.lifecycle.maintenanceBlocked) throw new WorkbenchPublicError("workbench/unavailable");
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/failed");
     const childOrigin = `http://127.0.0.1:${port}`;
@@ -1569,9 +1529,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
       this.instances.consumeLifecyclePlan(planId);
       if (stored.request.kind === "service.shutdown") {
-        if (!this.activeJobId) throw new WorkbenchPublicError("workbench/invalid-input", "Shutdown requires an active job.");
-        this.relinquishKind = stored.request.kind;
-        this.relinquishJobId = this.activeJobId;
+        if (!this.lifecycle.activeJobId) throw new WorkbenchPublicError("workbench/invalid-input", "Shutdown requires an active job.");
+        this.lifecycle.relinquishKind = stored.request.kind;
+        this.lifecycle.relinquishJobId = this.lifecycle.activeJobId;
       }
       return this.executeLocal(stored, ctx);
     }
@@ -1640,14 +1600,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
       case "service.shutdown": {
         ctx.phase("stopping-children");
-        this.sealing = true;
+        this.lifecycle.sealing = true;
         try {
           await this.stopOwnedAll();
         } catch (error) {
-          this.sealing = false;
-          this.relinquishKind = null;
-          this.relinquishJobId = null;
-          this.maintenanceBlocked = true;
+          this.lifecycle.sealing = false;
+          this.lifecycle.endRelinquish();
+          this.lifecycle.maintenanceBlocked = true;
           throw error;
         }
         ctx.phase("finalizing");
@@ -1659,23 +1618,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async finishRelinquish(): Promise<void> {
-    const kind = this.relinquishKind;
+    const kind = this.lifecycle.relinquishKind;
     if (!kind) return;
-    this.relinquishKind = null;
-    this.relinquishJobId = null;
+    this.lifecycle.endRelinquish();
     this.messageBus.close();
     await this.dashboard?.close();
     this.dropWritable();
     if (kind === "service.shutdown") {
-      this.sealing = true;
-      this.closed = true;
+      this.lifecycle.sealing = true;
+      this.lifecycle.closed = true;
       await this.httpClose?.();
       await this.options.onNormalExit?.();
     }
   }
 
   private async afterPlanJobSettled(jobId: string): Promise<void> {
-    const pending = this.pendingHandoff;
+    const pending = this.lifecycle.pendingHandoff;
     if (pending && pending.jobId === jobId) {
       if (this.componentHandoff.jobPersistedSuccess(jobId)) {
         try {
@@ -1685,17 +1643,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         }
         return;
       }
-      this.pendingHandoff = undefined;
+      this.lifecycle.pendingHandoff = undefined;
       this.componentHandoff.recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
       return;
     }
-    if (this.relinquishKind && this.relinquishJobId === jobId) {
+    if (this.lifecycle.relinquishKind && this.lifecycle.relinquishJobId === jobId) {
       if (!this.componentHandoff.jobPersistedSuccess(jobId)) {
-        this.relinquishKind = null;
-        this.relinquishJobId = null;
-        this.maintenanceBlocked = true;
-        this.blocked = true;
-        this.reasons.push("Shutdown completion could not be saved. Run rights were kept.");
+        this.lifecycle.endRelinquish();
+        this.lifecycle.maintenanceBlocked = true;
+        this.lifecycle.blocked = true;
+        this.lifecycle.reasons.push("Shutdown completion could not be saved. Run rights were kept.");
         return;
       }
       await this.finishRelinquish();
@@ -1712,7 +1669,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private assertAcceptedStartupReady(): void {
-    if (this.maintenanceBlocked) {
+    if (this.lifecycle.maintenanceBlocked) {
       throw new WorkbenchPublicError(
         "workbench/unavailable",
         "Accepted startup could not stop owned processes. Run rights were kept.",
@@ -1766,17 +1723,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private observeChildWork<T>(action: () => T): T {
     return withChildObservation(
       () => observeMaintenanceChild(this.home, () => {
-        this.maintenanceBlocked = true;
+        this.lifecycle.maintenanceBlocked = true;
       }),
       action,
     );
   }
 
   private dropWritable(): void {
-    if (!this.transferredOwner) {
-      this.handle?.release(() => this.removeEndpointFile());
+    if (!this.lifecycle.transferredOwner) {
+      this.lifecycle.handle?.release(() => this.removeEndpointFile());
     }
-    this.handle = undefined;
+    this.lifecycle.handle = undefined;
     this.jobs = undefined;
     this.processes = undefined;
     this.spaces = undefined;
@@ -1830,11 +1787,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       "spaceId" in request
         ? [{ id: request.spaceId, status: this.statusOf(request.spaceId), generation: this.generations.get(request.spaceId) ?? 0 }]
         : this.ownedSpaceIds().map((id) => ({ id, status: this.statusOf(id) }));
-    return JSON.stringify({ request, spaces, owner: Boolean(this.handle) });
+    return JSON.stringify({ request, spaces, owner: Boolean(this.lifecycle.handle) });
   }
 
   private async startOwned(spaceId: string): Promise<void> {
-    this.assertWritable();
+    this.lifecycle.assertWritable();
     if (!this.processes) throw new WorkbenchPublicError("workbench/read-only");
     if (this.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (spaceId === "web") throw new WorkbenchPublicError("workbench/protected");
@@ -1890,8 +1847,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       try {
         await this.stopOwned(name);
       } catch (error) {
-        if (!this.reasons.some((row) => row.includes("could not be stopped"))) {
-          this.reasons.push(STOP_KEPT_REASON);
+        if (!this.lifecycle.reasons.some((row) => row.includes("could not be stopped"))) {
+          this.lifecycle.reasons.push(STOP_KEPT_REASON);
         }
         throw error instanceof Error ? error : new Error(STOP_NOT_FORCED);
       }
@@ -1920,7 +1877,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           icon: row.meta.icon ?? "",
           status,
           generation: view?.generation ?? this.generations.get(row.name) ?? 0,
-          managed: Boolean(this.handle) && !leftover,
+          managed: Boolean(this.lifecycle.handle) && !leftover,
           needsIsolation: row.needsConversion,
         } satisfies WorkbenchSpace;
       });
@@ -1974,14 +1931,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!options.allowManager && id === this.managerId) throw new WorkbenchPublicError("workbench/protected");
   }
 
-  private assertWritable(): void {
-    if (!this.handle) throw new WorkbenchPublicError("workbench/read-only");
-    if (this.maintenanceBlocked) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
-    }
-    if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
-  }
-
   private role(): WorkbenchState["role"] {
     if (!this.managerId) return "uninitialized";
     if (this.managerInstall === "manager") return "manager";
@@ -1990,7 +1939,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private currentServiceEpoch(): string {
-    const nonce = this.handle?.owner.nonce ?? this.peekOwnerNonce();
+    const nonce = this.lifecycle.handle?.owner.nonce ?? this.peekOwnerNonce();
     if (!nonce) return "";
     return deriveServiceEpoch(nonce);
   }
@@ -2024,11 +1973,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private availability(): WorkbenchState["availability"] {
-    if (!this.handle || this.closed || this.sealing) return "unavailable";
-    if (this.blocked || this.maintenanceBlocked || this.unmanaged.size > 0 || !this.cli) return "limited";
-    if (this.managerId && this.managerInstall !== "manager") return "limited";
-    if (this.derivedReasons.size > 0) return "limited";
-    return "ready";
+    return this.lifecycle.availability({
+      cli: Boolean(this.cli),
+      managerUsable: !(this.managerId && this.managerInstall !== "manager"),
+      unmanaged: this.unmanaged.size,
+    });
   }
 
   private productObservation() {
@@ -2145,7 +2094,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private refreshAvailability(latchBlock = true): void {
     const extra: string[] = [];
     if (!this.jobs?.list().some(job => job.status === "running")) {
-      if (this.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance journal is present.");
+      if (this.lifecycle.maintenanceFlag || this.hasMaintenanceEvidence() || this.lock.inspect().held) extra.push("Unfinished Home maintenance journal is present.");
     }
 
     if (!this.cli) extra.push(WORKBENCH_ERROR["workbench/incompatible"]);
@@ -2153,13 +2102,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       extra.push("The manager profile cannot be used.");
     }
     if (this.unmanaged.size) extra.push("Leftover processes were not adopted.");
-    if (this.maintenanceBlocked) extra.push(STOP_KEPT_REASON);
-    this.reasons = [...new Set([
-      ...this.reasons.filter(reason => !this.derivedReasons.has(reason)),
-      ...extra,
-    ])];
-    this.derivedReasons = new Set(extra);
-    if (latchBlock && extra.length > 0) this.blocked = true;
+    if (this.lifecycle.maintenanceBlocked) extra.push(STOP_KEPT_REASON);
+    this.lifecycle.applyDerivedReasons(extra, latchBlock);
   }
 
   private hasMaintenanceEvidence(): boolean {

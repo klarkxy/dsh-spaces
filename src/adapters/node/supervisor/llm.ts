@@ -5,26 +5,22 @@ import { LLM_ERROR, LlmConfigError } from "../../../core/domain/llm-connections"
 import type { LlmInstanceRecord } from "../../../core/ports/llm-runtime";
 import { isLlmWriteMethod, type LlmApiResult } from "../../../shared/llm-api";
 import type { WorkbenchJob, WorkbenchSpace } from "../../../shared/workbench";
-import type { HomeControlHandle } from "../home-controller";
 import { llmCatalogPath } from "../llm-paths";
 import type { WorkbenchJobContext, WorkbenchJobStore } from "../workbench-jobs";
 import { WorkbenchPublicError } from "./errors";
+import type { SupervisorLifecycle } from "./lifecycle";
 import { profileHasLlmBridge } from "./profile-probe";
 
 export interface SupervisorLlmHost {
   home: string;
   llmHost: () => GlobalLlmHost;
   jobs: () => WorkbenchJobStore | undefined;
-  handle: () => HomeControlHandle | undefined;
-  sealing: () => boolean;
-  relinquishKind: () => "service.shutdown" | null;
-  maintenanceBlocked: () => boolean;
+  lifecycle: SupervisorLifecycle;
   managerId: () => string | null;
   llmBridgeArtifact: () => string | undefined;
   unmanaged: Set<string>;
   generations: Map<string, number>;
   llmApplied: Map<string, number>;
-  assertWritable: () => void;
   observeChildWork: <T>(action: () => T) => T;
   requireManaged: (spaceId: string) => string;
   stopOwned: (spaceId: string) => Promise<void>;
@@ -71,8 +67,8 @@ export class SupervisorLlm {
   }
 
   private assertLlmMutationAllowed(): void {
-    this.host.assertWritable();
-    if (this.host.sealing()) {
+    this.host.lifecycle.assertWritable();
+    if (this.host.lifecycle.sealing) {
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     if (!this.host.jobs()) throw new WorkbenchPublicError("workbench/read-only");
@@ -121,13 +117,13 @@ export class SupervisorLlm {
   }
 
   assertLlmWritable(): void {
-    if (!this.host.handle()) {
+    if (!this.host.lifecycle.handle) {
       throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");
     }
-    if (this.host.maintenanceBlocked()) {
+    if (this.host.lifecycle.maintenanceBlocked) {
       throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
     }
-    if (this.host.sealing() && !this.host.relinquishKind()) throw new WorkbenchPublicError("workbench/unavailable");
+    if (this.host.lifecycle.sealing && !this.host.lifecycle.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
   }
 
   async submitLlmApply(command: LlmApplyCommand, requestId: string): Promise<WorkbenchJob> {

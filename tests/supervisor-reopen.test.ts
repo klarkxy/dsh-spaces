@@ -10,6 +10,7 @@ import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor
 import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { SpaceMessageRouter } from "../src/adapters/node/message-bus/router.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
+import { SupervisorLifecycle } from "../src/adapters/node/supervisor/lifecycle.ts";
 
 const homes: string[] = [];
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -190,10 +191,11 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     let exited = false;
     // Real finalization methods and job queue, with only the HTTP/CLI exit
     // ports replaced. The earlier callback sees the same shared idle queue.
+    const lifecycle = new SupervisorLifecycle();
+    lifecycle.handle = lease;
     const runtime = Object.assign(Object.create(WorkbenchSupervisorRuntime.prototype), {
-      home, controlDir: controller.controlDir, jobs, handle: lease, reasons: [],
+      home, controlDir: controller.controlDir, jobs, lifecycle,
       messageBus: new SpaceMessageRouter(),
-      relinquishKind: null, relinquishJobId: null, pendingHandoff: undefined,
       options: { onNormalExit: () => { exited = true; } }, httpClose: async () => {},
     });
     let releaseFirst!: () => void;
@@ -201,8 +203,8 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     const firstSubmission = jobs.submit({ kind: "plan.execute", planId: "earlier-plan" }, "earlier-job", async () => { await firstGate; });
     const shutdownSubmission = jobs.submit({ kind: "plan.execute", planId: "shutdown-plan" }, "shutdown-job", async ctx => {
       ctx.phase("finalizing");
-      runtime.relinquishKind = "service.shutdown";
-      runtime.relinquishJobId = "shutdown-job";
+      runtime.lifecycle.relinquishKind = "service.shutdown";
+      runtime.lifecycle.relinquishJobId = "shutdown-job";
       failShutdownWrite = failPersistence;
     });
     await firstSubmission;

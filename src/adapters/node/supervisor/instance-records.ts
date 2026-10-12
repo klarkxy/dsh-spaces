@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { atomicWrite } from "../atomic";
 import type { PidAliveFn } from "../home-controller";
 import { parseSpaceName } from "./input";
+import type { SupervisorLifecycle } from "./lifecycle";
 import type { StoredPlan } from "./types";
 
 const INSTANCES_DIR_NAME = "instances";
@@ -12,7 +13,7 @@ export interface SupervisorInstanceRecordsHost {
   controlDir: string;
   spawned: Map<string, { pid: number; startedAt: string }>;
   unmanaged: Set<string>;
-  reasons: () => string[];
+  lifecycle: SupervisorLifecycle;
   pidAlive: PidAliveFn;
   plans: Map<string, StoredPlan>;
 }
@@ -92,7 +93,7 @@ export class SupervisorInstanceRecords {
         continue;
       }
       this.host.unmanaged.add(id);
-      this.host.reasons().push(`Leftover process for ${id} was not adopted.`);
+      this.host.lifecycle.reasons.push(`Leftover process for ${id} was not adopted.`);
     }
   }
 

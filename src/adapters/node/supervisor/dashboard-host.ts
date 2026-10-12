@@ -2,10 +2,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { SupervisorDashboard } from "../dashboard/supervisor";
 import { handleDashboardUnavailable } from "../dashboard/gateway";
 import { cookieValue } from "../workbench-http";
-import type { HomeControlHandle, HomeController } from "../home-controller";
+import type { HomeController } from "../home-controller";
 import type { HomeOperationLock } from "../home-operation-lock";
 import type { WorkbenchSpace } from "../../../shared/workbench";
 import { WorkbenchPublicError } from "./errors";
+import type { SupervisorLifecycle } from "./lifecycle";
 
 export interface SupervisorDashboardHostDeps {
   home: string;
@@ -15,13 +16,7 @@ export interface SupervisorDashboardHostDeps {
   origin: () => string;
   dashboard: () => SupervisorDashboard | null;
   setDashboard: (dashboard: SupervisorDashboard | null) => void;
-  handle: () => HomeControlHandle | undefined;
-  closed: () => boolean;
-  sealing: () => boolean;
-  blocked: () => boolean;
-  maintenanceFlag: () => boolean;
-  maintenanceBlocked: () => boolean;
-  transferredOwner: () => boolean;
+  lifecycle: SupervisorLifecycle;
   hasMaintenanceEvidence: () => boolean;
   requireServiceEpoch: () => string;
   managerOrigin: () => string | null;
@@ -30,7 +25,6 @@ export interface SupervisorDashboardHostDeps {
   generations: Map<string, number>;
   cookieName: () => string;
   sessionEquals: (value: string) => boolean;
-  reasons: () => string[];
 }
 
 export class SupervisorDashboardHost {
@@ -43,7 +37,7 @@ export class SupervisorDashboardHost {
       origin: () => this.host.origin(), managerOrigin: () => this.host.managerOrigin(),
       authorize: request => {
         const value = cookieValue(request.headers.cookie, this.host.cookieName());
-        return !this.host.closed() && value && this.host.sessionEquals(value)
+        return !this.host.lifecycle.closed && value && this.host.sessionEquals(value)
           ? { subjectId: "supervisor-local-operator", layoutWrite: false, publicationsManage: false } : null;
       },
     });
@@ -51,8 +45,8 @@ export class SupervisorDashboardHost {
 
   private assertOwner(): void {
     const current = this.host.controller.inspect();
-    const expected = this.host.handle()?.owner;
-    if (!expected || this.host.closed() || this.host.transferredOwner() || !current.held || !("owner" in current) ||
+    const expected = this.host.lifecycle.handle?.owner;
+    if (!expected || this.host.lifecycle.closed || this.host.lifecycle.transferredOwner || !current.held || !("owner" in current) ||
       current.handoff || current.liveness !== "alive" || current.owner.nonce !== expected.nonce ||
       current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt) {
       throw new WorkbenchPublicError("workbench/read-only", "The current Home owner is required.");
@@ -60,8 +54,8 @@ export class SupervisorDashboardHost {
   }
 
   private managementAllowed(): boolean {
-    return Boolean(this.host.handle()) && !this.host.closed() && !this.host.sealing() && !this.host.blocked() &&
-      !this.host.maintenanceFlag() && !this.host.maintenanceBlocked() && !this.host.hasMaintenanceEvidence();
+    return Boolean(this.host.lifecycle.handle) && !this.host.lifecycle.closed && !this.host.lifecycle.sealing && !this.host.lifecycle.blocked &&
+      !this.host.lifecycle.maintenanceFlag && !this.host.lifecycle.maintenanceBlocked && !this.host.hasMaintenanceEvidence();
   }
 
   requireDashboard(): SupervisorDashboard {
@@ -93,7 +87,7 @@ export class SupervisorDashboardHost {
     try { this.host.dashboard()?.retire(id, generation); }
     catch {
       const message = "Dashboard publishing was revoked but private handoff cleanup failed.";
-      if (!this.host.reasons().includes(message)) this.host.reasons().push(message);
+      this.host.lifecycle.addReason(message);
       return new WorkbenchPublicError("workbench/failed", message);
     }
   }
