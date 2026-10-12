@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -146,10 +146,10 @@ import {
   profileHasViewBridge,
   publicPluginVersion,
 } from "./supervisor/profile-probe";
+import { SupervisorPlans } from "./supervisor/plans";
 import { SpaceRunRegistry } from "./supervisor/space-runs";
 import type {
   BoundCli,
-  StoredPlan,
   WorkbenchMaintenance,
   WorkbenchSupervisorHandle,
   WorkbenchSupervisorOptions,
@@ -173,7 +173,6 @@ export {
 } from "./supervisor/payload";
 export { parseSupervisorArgs, supervisorCliArgs } from "./supervisor/cli-args";
 
-const PLAN_TTL_MS = 5 * 60_000;
 const STOP_NOT_FORCED = "Timed stop did not force-kill the process. The instance is still recorded.";
 const ENDPOINT_FILE = "endpoint.json";
 const HOST_BEARER_FILE = "host.bearer";
@@ -232,7 +231,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private managerInstall: "missing" | "manager" | "ordinary" | "damaged" = "missing";
   private readonly messageBus = new SpaceMessageRouter();
   private readonly runs = new SpaceRunRegistry();
-  private readonly plans = new Map<string, StoredPlan>();
+  private readonly supervisorPlans: SupervisorPlans;
   private httpClose: (() => Promise<void>) | undefined;
   private runtimeStore: RuntimeStore | undefined;
   private readonly pidAlive: PidAliveFn;
@@ -290,12 +289,41 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       // Reuse the launch validation when provided; it must belong to this root.
       this.selectedPayload = selectedPayload ?? validateComponentPayload(options.componentPayloadRoot);
     }
+    this.supervisorPlans = new SupervisorPlans({
+      home: this.home,
+      lifecycle: this.lifecycle,
+      runs: this.runs,
+      instances: () => this.instances,
+      lock: this.lock,
+      registry: this.registry,
+      now: this.now,
+      messageBus: this.messageBus,
+      options: this.options,
+      dashboard: () => this.dashboard,
+      dashboardHost: () => this.dashboardHost,
+      componentHandoff: () => this.componentHandoff,
+      maintenance: () => this.maintenance,
+      closeHttp: async () => { await this.httpClose?.(); },
+      dropWritable: () => this.dropWritable(),
+      requireSpace: (spaceId) => this.requireSpace(spaceId),
+      requireManaged: (spaceId) => this.requireManaged(spaceId),
+      protectSpecial: (id, options) => this.protectSpecial(id, options),
+      statusOf: (id) => this.statusOf(id),
+      ownedSpaceIds: () => this.ownedSpaceIds(),
+      stopOwned: (spaceId) => this.stopOwned(spaceId),
+      stopOwnedAll: () => this.stopOwnedAll(),
+      startSpace: (spaceId, ctx) => this.startSpace(spaceId, ctx),
+      currentServiceEpoch: () => this.currentServiceEpoch(),
+      stateRevision: () => this.stateRevision(),
+      productObservation: () => this.productObservation(),
+      assertLiveContext: (context) => this.assertLiveContext(context),
+    });
     this.instances = new SupervisorInstanceRecords({
       controlDir: this.controlDir,
       runs: this.runs,
       lifecycle: this.lifecycle,
       pidAlive: this.pidAlive,
-      plans: this.plans,
+      plans: this.supervisorPlans.plans,
     });
     this.llmOps = new SupervisorLlm({
       home: this.home,
@@ -678,7 +706,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     });
     if (parsedCommand.kind === "plan.execute") {
       const jobId = job.id;
-      void this.jobs.whenIdle().then(() => this.afterPlanJobSettled(jobId));
+      void this.jobs.whenIdle().then(() => this.supervisorPlans.afterPlanJobSettled(jobId));
     }
     return job;
   }
@@ -734,10 +762,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         if (this.runs.unmanaged.has(parsed.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
         await dashboard.validatePreview(parsed);
         this.assertLiveContext(parsedContext);
-        return this.previewLocal(parsed);
+        return this.supervisorPlans.previewLocal(parsed);
       });
     }
-    if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) return this.previewLocal(parsed);
+    if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) return this.supervisorPlans.previewLocal(parsed);
     if (!this.maintenance) throw new WorkbenchPublicError("workbench/maintenance");
     return this.maintenance.preview(parsed);
   }
@@ -1327,7 +1355,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "space.verify":
         return this.verifySpace(command.spaceId, ctx);
       case "plan.execute":
-        return this.executePlan(command.planId, ctx);
+        return this.supervisorPlans.executePlan(command.planId, ctx);
       case "llm.apply":
         return this.llmOps.runLlmApply(command, ctx);
       default:
@@ -1470,156 +1498,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     await this.spaces.verify(id);
   }
 
-  private async executePlan(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
-    const stored = this.plans.get(planId) ?? this.instances.readLifecyclePlan(planId);
-    if (stored) {
-      if (stored.consumed) throw new WorkbenchPublicError("workbench/not-found");
-      if (Date.parse(stored.plan.expiresAt) <= this.now().getTime()) {
-        this.instances.consumeLifecyclePlan(planId);
-        throw new WorkbenchPublicError("workbench/invalid-input", "The preview expired. Request a new preview.");
-      }
-      if (!stored.plan.serviceEpoch || stored.plan.serviceEpoch !== this.currentServiceEpoch()) {
-        throw new WorkbenchPublicError("workbench/conflict", "The preview belongs to another service epoch.");
-      }
-      if (!stored.plan.stateRevision || stored.plan.stateRevision !== this.stateRevision()) {
-        throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
-      }
-      const fingerprint = this.fingerprint(stored.request);
-      if (fingerprint !== stored.fingerprint) {
-        throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
-      }
-      this.instances.consumeLifecyclePlan(planId);
-      if (stored.request.kind === "service.shutdown") {
-        if (!this.lifecycle.activeJobId) throw new WorkbenchPublicError("workbench/invalid-input", "Shutdown requires an active job.");
-        this.lifecycle.relinquishKind = stored.request.kind;
-        this.lifecycle.relinquishJobId = this.lifecycle.activeJobId;
-      }
-      return this.executeLocal(stored, ctx);
-    }
-    if (!this.maintenance) throw new WorkbenchPublicError("workbench/maintenance");
-    return this.maintenance.execute(planId, ctx);
-  }
-
-  private async executeLocal(stored: StoredPlan, ctx: WorkbenchJobContext): Promise<void> {
-    const request = stored.request;
-    switch (request.kind) {
-      case "dashboard.publication.set": {
-        ctx.phase("dashboard-publication");
-        ctx.cancellable(false);
-        await this.lock.run("dashboard.publication.set", async () => {
-          const dashboard = this.dashboardHost.requireDashboard();
-          const assertPlan = () => {
-            this.dashboardHost.requireDashboard();
-            this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
-            if (this.fingerprint(request) !== stored.fingerprint) throw new WorkbenchPublicError("workbench/conflict");
-            this.protectSpecial(this.requireManaged(request.spaceId), { allowManager: false });
-            if (this.runs.unmanaged.has(request.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
-          };
-          await dashboard.apply(request, assertPlan);
-        });
-        return;
-      }
-      case "space.stop": {
-        ctx.phase("stop");
-        const id = this.requireManaged(request.spaceId);
-        await this.stopOwned(id);
-        return;
-      }
-      case "space.restart": {
-        ctx.phase("restart");
-        const id = this.requireManaged(request.spaceId);
-        await this.stopOwned(id);
-        await this.startSpace(id, ctx);
-        return;
-      }
-      case "space.delete": {
-        ctx.phase("delete");
-        const id = this.requireManaged(request.spaceId);
-        this.protectSpecial(id, { allowManager: false });
-        await this.lock.run("space.delete", async () => {
-          await this.dashboard?.revokeSpace(id, () => {
-            this.dashboardHost.requireDashboard();
-            this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
-          });
-          await this.stopOwned(id);
-          const profileDir = join(this.home, "profiles", id);
-          const profileStat = lstatSync(profileDir);
-          if (!profileStat.isDirectory() || profileStat.isSymbolicLink()) {
-            throw new WorkbenchPublicError("workbench/protected");
-          }
-          if (request.removeData && existsSync(this.registry.hubDataDir(id))) {
-            const dataStat = lstatSync(this.registry.hubDataDir(id));
-            if (!dataStat.isDirectory() || dataStat.isSymbolicLink()) {
-              throw new WorkbenchPublicError("workbench/protected");
-            }
-          }
-          this.registry.removeOfficialProfile(id);
-          if (request.removeData) this.registry.removeHubData(id);
-          this.registry.removeMeta(id);
-        });
-        return;
-      }
-      case "service.shutdown": {
-        ctx.phase("stopping-children");
-        this.lifecycle.sealing = true;
-        try {
-          await this.stopOwnedAll();
-        } catch (error) {
-          this.lifecycle.sealing = false;
-          this.lifecycle.endRelinquish();
-          this.lifecycle.maintenanceBlocked = true;
-          throw error;
-        }
-        ctx.phase("finalizing");
-        return;
-      }
-      default:
-        throw new WorkbenchPublicError("workbench/invalid-input");
-    }
-  }
-
-  private async finishRelinquish(): Promise<void> {
-    const kind = this.lifecycle.relinquishKind;
-    if (!kind) return;
-    this.lifecycle.endRelinquish();
-    this.messageBus.close();
-    await this.dashboard?.close();
-    this.dropWritable();
-    if (kind === "service.shutdown") {
-      this.lifecycle.sealing = true;
-      this.lifecycle.closed = true;
-      await this.httpClose?.();
-      await this.options.onNormalExit?.();
-    }
-  }
-
-  private async afterPlanJobSettled(jobId: string): Promise<void> {
-    const pending = this.lifecycle.pendingHandoff;
-    if (pending && pending.jobId === jobId) {
-      if (this.componentHandoff.jobPersistedSuccess(jobId)) {
-        try {
-          await this.componentHandoff.finalizeComponentHandoff(pending);
-        } catch (error) {
-          this.componentHandoff.recordHandoffDiagnostic(error);
-        }
-        return;
-      }
-      this.lifecycle.pendingHandoff = undefined;
-      this.componentHandoff.recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
-      return;
-    }
-    if (this.lifecycle.relinquishKind && this.lifecycle.relinquishJobId === jobId) {
-      if (!this.componentHandoff.jobPersistedSuccess(jobId)) {
-        this.lifecycle.endRelinquish();
-        this.lifecycle.maintenanceBlocked = true;
-        this.lifecycle.blocked = true;
-        this.lifecycle.reasons.push("Shutdown completion could not be saved. Run rights were kept.");
-        return;
-      }
-      await this.finishRelinquish();
-    }
-  }
-
   /**
    * Package-upgrade handoff port. Confirms owned children are stopped, seals
    * further mutations, and records an in-memory pending transfer. Does not wait
@@ -1702,53 +1580,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.products = null;
     this.dashboard = null;
     this.packageUpgrade = undefined;
-  }
-
-  private previewLocal(request: WorkbenchPlanRequest): WorkbenchPlan {
-    const id = "spaceId" in request ? this.requireSpace(request.spaceId) : "";
-    if (request.kind === "space.stop" || request.kind === "space.restart" || request.kind === "space.delete") {
-      this.requireManaged(id);
-      this.protectSpecial(id, { allowManager: request.kind !== "space.delete" });
-      if (request.kind === "space.delete") this.protectSpecial(id, { allowManager: false });
-    }
-    const running = id && this.statusOf(id) === "running" ? [id] : [];
-    const observed = this.productObservation();
-    const plan: WorkbenchPlan = {
-      id: randomUUID(),
-      kind: request.kind,
-      title: request.kind,
-      scope: request.kind === "service.shutdown" ? "controller" : "space",
-      affectedSpaceIds: id ? [id] : this.ownedSpaceIds(),
-      runningSpaceIds: request.kind === "service.shutdown"
-        ? this.ownedSpaceIds().filter((name) => this.statusOf(name) === "running")
-        : running,
-      changes: request.kind === "dashboard.publication.set" ? [
-        `Publish provider ${request.providerId} from ${request.spaceId} to this Home only.`,
-        request.selection === null ? "Revoke publication and hide the cached projection immediately." :
-          request.selection.kind === "all" ? "Allow all instances of this provider on the next normal start." :
-            `Allow ${request.selection.instanceIds.length} selected instance(s) on the next normal start.`,
-        "No plugin installation, process restart or business task is performed by this plan.",
-      ] : request.kind === "space.delete" ? [
-        "Remove this space's profile and installed plugins.",
-        request.removeData ? "Delete this space's isolated sessions and storage." : "Keep this space's isolated sessions and storage on disk.",
-      ] : [request.kind],
-      destructive: request.kind === "space.delete" || request.kind === "service.shutdown",
-      expiresAt: new Date(this.now().getTime() + PLAN_TTL_MS).toISOString(),
-      serviceEpoch: observed.serviceEpoch,
-      stateRevision: observed.expectedRevision,
-    };
-    const stored: StoredPlan = { plan, request, fingerprint: this.fingerprint(request) };
-    this.plans.set(plan.id, stored);
-    this.instances.writeLifecyclePlan(stored);
-    return plan;
-  }
-
-  private fingerprint(request: WorkbenchPlanRequest): string {
-    const spaces =
-      "spaceId" in request
-        ? [{ id: request.spaceId, status: this.statusOf(request.spaceId), generation: this.runs.generation(request.spaceId) }]
-        : this.ownedSpaceIds().map((id) => ({ id, status: this.statusOf(id) }));
-    return JSON.stringify({ request, spaces, owner: Boolean(this.lifecycle.handle) });
   }
 
   private async startOwned(spaceId: string): Promise<void> {

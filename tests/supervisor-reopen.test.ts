@@ -9,9 +9,12 @@ import { retirePreviousSupervisor } from "../src/adapters/node/supervisor-launch
 import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor-attach.ts";
 import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { SpaceMessageRouter } from "../src/adapters/node/message-bus/router.ts";
-import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
 import { SupervisorLifecycle } from "../src/adapters/node/supervisor/lifecycle.ts";
 import { SpaceRunRegistry } from "../src/adapters/node/supervisor/space-runs.ts";
+import { SupervisorComponentHandoff } from "../src/adapters/node/supervisor/component-handoff-host.ts";
+import { SupervisorPlans } from "../src/adapters/node/supervisor/plans.ts";
+import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
 
 const homes: string[] = [];
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -194,25 +197,51 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     // ports replaced. The earlier callback sees the same shared idle queue.
     const lifecycle = new SupervisorLifecycle();
     lifecycle.handle = lease;
-    const runtime = Object.assign(Object.create(WorkbenchSupervisorRuntime.prototype), {
-      home, controlDir: controller.controlDir, jobs, lifecycle,
-      runs: new SpaceRunRegistry(),
-      messageBus: new SpaceMessageRouter(),
-      options: { onNormalExit: () => { exited = true; } }, httpClose: async () => {},
+    const runs = new SpaceRunRegistry();
+    const messageBus = new SpaceMessageRouter();
+    const options = { home, bin: "", onNormalExit: () => { exited = true; } };
+    const componentHandoff = new SupervisorComponentHandoff({
+      home, controlDir: controller.controlDir, nodeExe: process.execPath, options,
+      controller, messageBus, spawned: runs.spawned, lifecycle,
+      jobs: () => jobs, origin: () => "", closeHttp: async () => {}, removeEndpointFile: () => {},
+      dashboard: () => null, selectedPayload: () => undefined, ownedSpaceIds: () => [],
+      statusOf: () => "stopped", pidAlive: () => "dead",
+    });
+    const supervisorPlans = new SupervisorPlans({
+      home, lifecycle, runs, messageBus, options,
+      instances: () => { throw new Error("not used"); },
+      lock: new HomeOperationLock(home), registry: new ProfileRegistry(home),
+      now: () => new Date(),
+      dashboard: () => null,
+      dashboardHost: () => { throw new Error("not used"); },
+      componentHandoff: () => componentHandoff,
+      maintenance: () => null,
+      closeHttp: async () => {},
+      dropWritable: () => {
+        if (!lifecycle.transferredOwner) lifecycle.handle?.release(() => {});
+        lifecycle.handle = undefined;
+      },
+      requireSpace: (spaceId) => spaceId, requireManaged: (spaceId) => spaceId,
+      protectSpecial: () => {}, statusOf: () => "stopped", ownedSpaceIds: () => [],
+      stopOwned: async () => {}, stopOwnedAll: async () => {},
+      startSpace: async () => undefined,
+      currentServiceEpoch: () => "", stateRevision: () => "",
+      productObservation: () => ({ serviceEpoch: "", expectedRevision: "" }),
+      assertLiveContext: () => {},
     });
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
     const firstSubmission = jobs.submit({ kind: "plan.execute", planId: "earlier-plan" }, "earlier-job", async () => { await firstGate; });
     const shutdownSubmission = jobs.submit({ kind: "plan.execute", planId: "shutdown-plan" }, "shutdown-job", async ctx => {
       ctx.phase("finalizing");
-      runtime.lifecycle.relinquishKind = "service.shutdown";
-      runtime.lifecycle.relinquishJobId = "shutdown-job";
+      lifecycle.relinquishKind = "service.shutdown";
+      lifecycle.relinquishJobId = "shutdown-job";
       failShutdownWrite = failPersistence;
     });
     await firstSubmission;
-    const earlierSettled = jobs.whenIdle().then(() => runtime.afterPlanJobSettled("earlier-job"));
+    const earlierSettled = jobs.whenIdle().then(() => supervisorPlans.afterPlanJobSettled("earlier-job"));
     await shutdownSubmission;
-    const shutdownSettled = jobs.whenIdle().then(() => runtime.afterPlanJobSettled("shutdown-job"));
+    const shutdownSettled = jobs.whenIdle().then(() => supervisorPlans.afterPlanJobSettled("shutdown-job"));
     releaseFirst();
     await Promise.all([earlierSettled, shutdownSettled]);
     assert.equal(exited, !failPersistence);

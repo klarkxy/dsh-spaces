@@ -332,9 +332,9 @@ test("Supervisor start admits the known transition under its writer lock before 
   const f = fixture(); const steps: string[] = [];
   const startOwned = (WorkbenchSupervisorRuntime.prototype as unknown as { startOwned(id: string): Promise<void> }).startOwned;
   const supervisor = {
-    home: f.home, cli: { bin: f.input.bin, version: f.input.cliVersion }, unmanaged: new Set<string>(),
+    home: f.home, cli: { bin: f.input.bin, version: f.input.cliVersion }, runs: { unmanaged: new Set<string>() },
     options: { componentPayloadRoot: f.input.payloadRoot, viewBridgeArtifact: join(f.home, "view.tgz"), llmBridgeArtifact: join(f.home, "llm.tgz") },
-    assertWritable: () => { steps.push("guard"); }, statusOf: () => "stopped",
+    lifecycle: { assertWritable: () => { steps.push("guard"); } }, statusOf: () => "stopped",
     processes: { start: async () => { steps.push("spawn"); } },
     lock: { run: async (_name: string, action: () => Promise<void>) => { steps.push("lock"); await action(); steps.push("unlock"); } },
     installArtifact: async (_id: string, artifact: string) => { steps.push("install"); await f.input.install(artifact.endsWith("view.tgz") ? "view-bridge" : "llm-bridge"); },
