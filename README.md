@@ -39,7 +39,7 @@ One Supervisor per Home. Browser tabs and host windows attach to that process wh
 
 See [docs/let-it-crash.md](docs/let-it-crash.md). Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management. Public restore APIs fail explicitly. Remaining unrun CLI/browser items: [tasks/q-coverage.md](tasks/q-coverage.md).
 
-Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Each space pins an exact DSH version: existing spaces are pinned to the version they run on first start, and new spaces use the host version. Switch a space's runtime from its details — no downgrade, no automatic snapshot; incompatible third-party plugins block the switch and official plugins follow the selected runtime. The manager follows the host CLI.
+Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Each space pins an exact DSH version: existing spaces are pinned to the version they run on first start, and new spaces use the host version. Switch a space's runtime from its details — no downgrade, no automatic snapshot; incompatible third-party plugins block the switch and official plugins are built into the selected runtime and change with it; Spaces never installs them into a profile. The manager follows the host CLI.
 
 ## Current architecture (this branch)
 
