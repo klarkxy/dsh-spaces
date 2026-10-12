@@ -103,7 +103,6 @@ test('oversized declared body is fully drained before the 413 response', async (
         res.on('end', () => { order.push('response'); resolve(new Response(Buffer.concat(parts).toString(), { status: res.statusCode })); });
       });
       request.on('error', reject); request.on('finish', () => order.push('finish'));
-      // The first chunk already crosses the limit, so an early reject would respond mid-upload.
       request.write(' '.repeat(oversized - 1));
       setTimeout(() => request.end(' '), 100);
     });
@@ -136,8 +135,6 @@ test('oversized streamed body without content-length is fully drained before the
 });
 test('bodies beyond the drain cap are rejected without waiting for the upload', async () => {
   const f = await fixture(); try {
-    // Declared over the cap: the request is rejected on its headers and the 413
-    // arrives before the client finishes uploading.
     const declared = await new Promise<Response>((resolve, reject) => {
       const request = nodeRequest(f.origin + QUERY_PATH, { method: 'POST', headers: {
         Origin: f.origin, Cookie: 'fixture=session', 'X-DSH-Dashboard': '1', 'Content-Type': 'application/json',
@@ -147,12 +144,11 @@ test('bodies beyond the drain cap are rejected without waiting for the upload', 
         res.on('data', chunk => parts.push(chunk)); res.on('error', reject);
         res.on('end', () => resolve(new Response(Buffer.concat(parts).toString(), { status: res.statusCode })));
       });
-      request.on('error', () => { /* the upload is aborted once the response arrives */ });
+      request.on('error', () => {});
       request.write(' '.repeat(4096));
       request.once('response', () => request.destroy());
     });
     assert.equal(declared.status, 413); assert.equal(f.writes, 0);
-    // No content-length: the socket dies at the drain cap instead of a 413.
     const outcome = await new Promise<string>((resolve) => {
       const request = nodeRequest(f.origin + QUERY_PATH, { method: 'POST', headers: {
         Origin: f.origin, Cookie: 'fixture=session', 'X-DSH-Dashboard': '1', 'Content-Type': 'application/json',

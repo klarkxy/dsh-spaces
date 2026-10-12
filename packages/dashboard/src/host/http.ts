@@ -46,9 +46,7 @@ function readBody(req: IncomingMessage): Promise<Uint8Array> {
   const length = req.headers['content-length'];
   const declared = length !== undefined && /^\d+$/.test(length) ? Number(length) : undefined;
   if (length !== undefined && declared === undefined) return Promise.reject(new DashboardFault('dashboard/limit-exceeded'));
-  // An oversized but drainable request is consumed before the 413 is written so
-  // the response is not lost to a reset on a socket that still has unread data.
-  if (declared !== undefined && declared > DASHBOARD_LIMITS.maxRequestBytes && declared > BODY_DRAIN_CAP) {
+  if (declared !== undefined && declared > BODY_DRAIN_CAP) {
     return Promise.reject(new DashboardFault('dashboard/limit-exceeded'));
   }
   return new Promise((resolve, reject) => {
