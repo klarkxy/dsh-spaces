@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,11 +11,12 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { Script } from "node:vm";
 import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { HomeController } from "../src/adapters/node/home-controller.ts";
 import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home-operation-lock.ts";
@@ -35,6 +37,7 @@ import {
 } from "../src/adapters/node/workbench-http.ts";
 import type { PatchWriter } from "../src/adapters/node/patch-writer.ts";
 import type { ProcessRuntime } from "../src/adapters/node/process-manager.ts";
+import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES, type ValidatedComponentPayload } from "../src/adapters/node/component-payload.ts";
 import type { WorkbenchPlan, WorkbenchPlanRequest } from "../src/shared/workbench.ts";
 
 const temps: string[] = [];
@@ -1580,4 +1583,216 @@ test("official desktop stays outside management and rejects start, verify, delet
     assert.equal(result.body.ok, false, JSON.stringify(result.body));
   }
   assert.equal(readFileSync(path, "utf8"), before);
+});
+
+const appBootPath = createRequire(import.meta.url).resolve("@deepseek-ai/dsh-app-boot");
+
+function writeFakeCliWithWebApp(home: string, version = "0.2.0-rc.2"): string {
+  const root = join(home, "cli-webapp");
+  mkdirSync(join(root, "lib"), { recursive: true });
+  writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version })}\n`);
+  writeFileSync(join(root, "lib", "bin.js"), "console.log('fake-dsh');\n");
+  const web = join(root, "node_modules", "@deepseek-ai", "dsh-web-app");
+  mkdirSync(web, { recursive: true });
+  writeFileSync(join(web, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version, dsh: { bundle: { patch: "./cordis.patch.yml" } } })}\n`);
+  writeFileSync(join(web, "cordis.patch.yml"), "- insert:\n    - id: settings\n      name: '@deepseek-ai/dsh-web-app'\n");
+  const bootFacade = join(root, "node_modules", "@deepseek-ai", "dsh-app-boot");
+  mkdirSync(bootFacade, { recursive: true });
+  writeFileSync(join(bootFacade, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-app-boot", type: "module", main: "index.js" })}\n`);
+  writeFileSync(join(bootFacade, "index.js"), `export * from ${JSON.stringify(pathToFileURL(appBootPath).href)};\n`);
+  return join(root, "lib", "bin.js");
+}
+
+function installManagerModules(home: string, payload: ValidatedComponentPayload, pluginRoot: string): void {
+  cpSync(pluginRoot, join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
+  cpSync(join(payload.payloadRootLib, "view-bridge"), join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "view-bridge"), { recursive: true });
+}
+
+function alphaDump(profile: string): string {
+  return `${dumpText(profile)}- id: settings\n  disabled: true\n- id: dsh-spaces-settings\n  name: '@dsh-spaces/view-bridge/settings'\n`;
+}
+
+function writeManagerRecord(home: string, profileId = "spaces-hub"): void {
+  mkdirSync(join(home, ".dsh-spaces-control"), { recursive: true });
+  writeFileSync(
+    join(home, ".dsh-spaces-control", "manager.json"),
+    `${JSON.stringify({ version: 1, profileId, createdAt: new Date().toISOString() })}
+`,
+  );
+}
+
+function writePayload(pluginRoot: string, marker = "payload"): ValidatedComponentPayload {
+  const pkg = (name: string, bundle = false) => `${JSON.stringify(bundle
+    ? { name, version: "0.2.0", dsh: { bundle: { patch: "./cordis.patch.yml" } } }
+    : { name, version: "0.2.0" })}\n`;
+  const files: Array<[string, string]> = [
+    ["package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["manager-plugin"], true)],
+    ["cordis.patch.yml", `- insert:\n    - id: dsh-spaces\n      name: '${COMPONENT_PAYLOAD_PACKAGES["manager-plugin"]}'\n      config: {}\n`],
+    ["lib/index.js", `export const marker = ${JSON.stringify(marker)};\n`],
+    ["lib/typert.host.js", "export {};\n"],
+    ["lib/typert.remote-client.js", "export {};\n"],
+    ["lib/client.js", "export {};\n"],
+    ["lib/supervisor/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.supervisor)],
+    ["lib/supervisor/index.js", "export {};\n"],
+    ["lib/supervisor/launcher.mjs", "export {};\n"],
+    ["lib/supervisor/snapshot-worker.mjs", "export {};\n"],
+    ["lib/view-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["view-bridge"], true)],
+    ["lib/view-bridge/cordis.patch.yml", `- insert:\n    - id: dsh-spaces-view-bridge\n      name: '${COMPONENT_PAYLOAD_PACKAGES["view-bridge"]}'\n      config: {}\n- id: settings\n  disabled: true\n- insert:\n    - id: dsh-spaces-settings\n      name: '${COMPONENT_PAYLOAD_PACKAGES["view-bridge"]}/settings'\n`],
+    ["lib/view-bridge/lib/index.js", "export {};\n"],
+    ["lib/view-bridge/lib/client.js", "export {};\n"],
+    ["lib/view-bridge/lib/settings.js", "export {};\n"],
+    ["lib/browser/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.browser)],
+    ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
+    ["lib/browser/lib/index.js", "export {};\n"],
+    ["lib/browser/lib/client.js", "export {};\n"],
+    ["lib/browser/lib/typert.host.js", "export {};\n"],
+    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], true)],
+    ["lib/llm-bridge/cordis.patch.yml", `- insert:\n    - id: dsh-spaces-llm-bridge\n      name: '${COMPONENT_PAYLOAD_PACKAGES["llm-bridge"]}'\n      config: {}\n`],
+    ["lib/llm-bridge/lib/index.js", "export {};\n"],
+  ];
+  for (const [rel, content] of files) {
+    const abs = join(pluginRoot, rel);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content);
+  }
+  return writeComponentPayloadManifest(join(pluginRoot, "lib"));
+}
+
+function packNpmTar(sourceDir: string, destTgz: string): string {
+  const staging = mkdtempSync(join(tmpdir(), "dsh-align-tar-"));
+  cpSync(sourceDir, join(staging, "package"), { recursive: true });
+  const tar = process.platform === "win32"
+    ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+    : "tar";
+  const packed = spawnSync(tar, ["-czf", destTgz, "-C", staging, "package"], { encoding: "utf8" });
+  if (packed.status !== 0) {
+    throw new Error(packed.stderr || packed.stdout || "tar pack failed");
+  }
+  return destTgz;
+}
+
+function packPayloadArtifacts(
+  payload: ValidatedComponentPayload,
+  destDir: string,
+): { pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string; llmBridgeArtifact: string } {
+  mkdirSync(destDir, { recursive: true });
+  return {
+    pluginArtifact: packNpmTar(payload.packageRoot, join(destDir, "plugin.tgz")),
+    viewBridgeArtifact: packNpmTar(join(payload.packageRoot, "lib", "view-bridge"), join(destDir, "view.tgz")),
+    browserArtifact: packNpmTar(join(payload.packageRoot, "lib", "browser"), join(destDir, "browser.tgz")),
+    llmBridgeArtifact: packNpmTar(join(payload.packageRoot, "lib", "llm-bridge"), join(destDir, "llm.tgz")),
+  };
+}
+
+function alignProcessRuntime(spawned: string[]): Partial<ProcessRuntime> {
+  return {
+    spawn: (args, options = {}) => {
+      spawned.push(args[args.indexOf("--profile") + 1] ?? "");
+      return spawnFixture("ok")(args, options);
+    },
+    prepareHome: async () => undefined,
+    gracefulWaitMs: 40,
+    forceWaitMs: 20,
+    readyTimeoutMs: 8_000,
+    fetchTimeoutMs: 2_000,
+    pollMs: 40,
+    kill: async (pid, kind) => {
+      if (kind === "kill") return;
+      await new Promise<void>((resolveKill) => {
+        const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        killer.once("exit", () => resolveKill());
+        killer.once("error", () => resolveKill());
+      });
+    },
+  };
+}
+
+test("startup aligns a mismatched manager plugin once before the manager starts", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-payload-")), "aligned");
+  const stale = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-stale-")), "stale");
+  installManagerModules(home, payload, stale.packageRoot);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  let installs = 0;
+  const spawned: string[] = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    processRuntime: alignProcessRuntime(spawned),
+    pluginAdd: async (addedHome, profile, spec) => {
+      if (!spec.includes("dsh-spaces-plugin")) return;
+      installs += 1;
+      cpSync(payload.packageRoot, join(addedHome, "profiles", profile, "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(state.role, "manager");
+  assert.equal(installs, 1);
+  assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));
+  assert.ok(state.managerId && spawned.includes(state.managerId));
+});
+
+test("startup skips the manager plugin align when the installed payload matches", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-same-")), "same");
+  installManagerModules(home, payload, payload.packageRoot);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  let installs = 0;
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    pluginAdd: async (_addedHome, _profile, spec) => {
+      if (spec.includes("dsh-spaces-plugin")) installs += 1;
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(installs, 0);
+  assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));
+});
+
+test("startup blocks and does not start the manager when the align cannot be verified", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-fail-")), "failing");
+  const stale = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-fail-stale-")), "stale");
+  installManagerModules(home, payload, stale.packageRoot);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  let installs = 0;
+  const spawned: string[] = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    processRuntime: alignProcessRuntime(spawned),
+    pluginAdd: async (_addedHome, _profile, spec) => {
+      if (spec.includes("dsh-spaces-plugin")) installs += 1;
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(installs, 1);
+  assert.ok(state.reasons.some((reason) => reason.includes("manager plugin could not be aligned")));
+  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+  assert.equal(state.managerId && spawned.includes(state.managerId), false);
 });

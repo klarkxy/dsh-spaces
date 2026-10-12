@@ -6,9 +6,10 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { SupervisorDashboard, DASHBOARD_LAUNCH_ENV } from "./dashboard/supervisor";
 import { atomicWrite } from "./atomic";
@@ -856,6 +857,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } catch {
       this.lifecycle.reasons.push("Maintenance could not be composed.");
     }
+    if (this.managerInstall === "manager" && this.selectedPayload && this.options.pluginArtifact) {
+      try {
+        await this.alignManagerPlugin(identity.profileId);
+      } catch (error) {
+        this.lifecycle.blocked = true;
+        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
+        this.lifecycle.reasons.push(`The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim());
+      }
+    }
     this.refreshAvailability();
 
     if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.runs.unmanaged.has(identity.profileId)) {
@@ -1014,6 +1024,48 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     });
     if (lockHeld) return await initialize();
     return await this.lock.run("bootstrap-manager", initialize);
+  }
+
+  private async alignManagerPlugin(profileId: string): Promise<void> {
+    const selected = this.selectedPayload!;
+    const installed = () => {
+      const lib = this.installedManagerPluginLib(profileId);
+      if (!lib) return undefined;
+      try {
+        return validateComponentPayload(lib);
+      } catch {
+        return undefined;
+      }
+    };
+    if (installed()?.digest === selected.digest) return;
+    await this.lock.run("manager.align", () => this.observeChildWork(async () => {
+      await this.installArtifact(profileId, this.options.pluginArtifact!, "dsh-spaces-plugin");
+      if (this.options.viewBridgeArtifact) {
+        await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
+      }
+      if (installed()?.digest !== selected.digest) {
+        throw new Error("The installed manager plugin payload does not match the selected component group.");
+      }
+    }));
+  }
+
+  private installedManagerPluginLib(profileId: string): string | undefined {
+    const target = join(this.home, "profiles", profileId, "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
+    let st;
+    try {
+      st = lstatSync(target);
+    } catch {
+      return undefined;
+    }
+    if (st.isSymbolicLink() || !st.isFile()) return undefined;
+    try {
+      const real = realpathSync(target);
+      const rel = relative(resolve(this.home), real);
+      if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return undefined;
+      return dirname(real);
+    } catch {
+      return undefined;
+    }
   }
 
   private ownsBootstrap(profileId: string): boolean {
