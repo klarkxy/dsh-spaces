@@ -10,6 +10,7 @@ import { cliLoadError, payloadBridgeFiles } from "./component-cli";
 import { assertOwnedProfilePath, migrateLegacyProfileSettings, profileSettingsPath } from "./profile-settings";
 
 type Bridge = "view-bridge" | "llm-bridge";
+type SpacesComponent = Bridge | "browser";
 type Entry = { id?: unknown; name?: unknown; disabled?: unknown; group?: unknown; config?: unknown };
 type ObservedEntry = Entry & { inheritedDisabled: boolean; dynamicAncestry: boolean };
 type AppBoot = {
@@ -128,6 +129,36 @@ function bridgeDisabled(dump: string): boolean {
   return value.value;
 }
 
+function ownedComponentRoot(home: string, profile: string, component: SpacesComponent): string {
+  const modules = join(profile, "node_modules");
+  const path = join(modules, "@dsh-spaces", component);
+  assertOwnedProfilePath(home, path);
+  const root = realpathSync(path);
+  const rel = relative(realpathSync(modules), root);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error(`The ${component} package resolves outside its profile modules.`);
+  return root;
+}
+
+function componentFilesMatch(home: string, payloadRoot: string, component: SpacesComponent, root: string): boolean {
+  const expected = payloadBridgeFiles(payloadRoot, component);
+  if (!expected.length) throw new Error(`The selected ${component} component has no comparable files.`);
+  return expected.every((file) => {
+    const installed = join(root, file);
+    const selected = join(payloadRoot, component, file);
+    assertOwnedProfilePath(home, installed);
+    return existsSync(installed) && existsSync(selected)
+      && !lstatSync(installed).isSymbolicLink()
+      && readFileSync(installed).equals(readFileSync(selected));
+  });
+}
+
+/** True when the profile's installed Spaces-owned component bytes match the selected payload. */
+export function installedComponentMatches(home: string, profileId: string, payloadRoot: string, component: SpacesComponent): boolean {
+  const profile = join(home, "profiles", profileId);
+  if (!existsSync(join(profile, "node_modules", "@dsh-spaces", component))) return false;
+  return componentFilesMatch(home, payloadRoot, component, ownedComponentRoot(home, profile, component));
+}
+
 export function assertAlphaSettingsIsolation(dump: string): void {
   const entries = dumpEntries(dump);
   const native = entries.filter(row => row.get("id") === "settings");
@@ -143,7 +174,7 @@ export function assertAlphaSettingsIsolation(dump: string): void {
 export async function migrateProfileToAlpha(input: {
   home: string; profileId: string; payloadRoot: string;
   bin?: string; cliVersion?: string;
-  install: (bridge: Bridge) => Promise<void>;
+  install: (component: SpacesComponent) => Promise<void>;
   dump: () => Promise<string>;
 }): Promise<void> {
   const { home, profileId, payloadRoot } = input;
@@ -174,45 +205,19 @@ export async function migrateProfileToAlpha(input: {
     || (row.id === "dsh-spaces-settings" && disabled(row)))) {
     throw new Error("The profile explicitly overrides scoped alpha settings isolation.");
   }
-  const pending: Bridge[] = [];
-  const installedRoot = (bridge: Bridge): string => {
-    const modules = join(profile, "node_modules");
-    const path = join(modules, "@dsh-spaces", bridge);
-    assertOwnedProfilePath(home, path);
-    const root = realpathSync(path);
-    const rel = relative(realpathSync(modules), root);
-    if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("The bridge resolves outside its profile modules.");
-    return root;
-  };
-  const matches = (bridge: Bridge, root: string): boolean => {
-    const expected = payloadBridgeFiles(payloadRoot, bridge);
-    if (!expected.length) throw new Error(`The selected ${bridge} component has no comparable files.`);
-    return expected.every((file) => {
-      const installed = join(root, file);
-      const selected = join(payloadRoot, bridge, file);
-      assertOwnedProfilePath(home, installed);
-      return existsSync(installed) && existsSync(selected)
-        && !lstatSync(installed).isSymbolicLink()
-        && readFileSync(installed).equals(readFileSync(selected));
-    });
-  };
-  for (const bridge of active) {
-    const root = installedRoot(bridge);
-    if (matches(bridge, root)) continue;
+  const pending: SpacesComponent[] = [];
+  const pendingCandidates = (component: SpacesComponent): void => {
+    const root = ownedComponentRoot(home, profile, component);
+    if (componentFilesMatch(home, payloadRoot, component, root)) return;
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-    const sdk = pkg.peerDependencies?.[bridge === "view-bridge"
-      ? "@deepseek-ai/dsh-client-connection" : "@deepseek-ai/dsh-settings"];
-    // Only the known previous contract is a migration input. Unknown/current
-    // mismatches are damage or custom builds, never an invitation to repair.
-    const prior = sdk === "^0.1.5-rc.2" || sdk === "^0.1.7-alpha.1";
     for (const file of ["package.json", "lib/index.js", "cordis.patch.yml"]) assertOwnedProfilePath(home, join(root, file));
-    if (pkg.name !== `@dsh-spaces/${bridge}` || !prior
-      || Object.entries(pkg.peerDependencies ?? {}).some(([name, range]) => (name === "@deepseek-ai/dsh" || name.startsWith("@deepseek-ai/dsh-")) && range !== sdk)
-      || !existsSync(join(root, "lib/index.js")) || !existsSync(join(root, "cordis.patch.yml"))) {
-      throw new Error(`Installed ${bridge} does not match the selected alpha component or the supported legacy contract.`);
+    if (pkg.name !== `@dsh-spaces/${component}`) {
+      throw new Error(`Installed ${component} does not match the selected alpha component or the supported legacy contract.`);
     }
-    pending.push(bridge);
-  }
+    pending.push(component);
+  };
+  for (const bridge of active) pendingCandidates(bridge);
+  if (existsSync(join(profile, "node_modules", "@dsh-spaces", "browser"))) pendingCandidates("browser");
   const cliVersion = input.cliVersion ?? "0.2.0-rc.2";
   const compatible = (appBoot: AppBoot, pkg: { name?: string }, exempt = false): void => {
     // Validate the same complete manifest contract the bound host evaluates,
@@ -222,7 +227,7 @@ export async function migrateProfileToAlpha(input: {
     const unmet = Object.entries(issue.peers).map(([name, range]) => `${name}@${range}`);
     throw new Error(`${pkg.name}: ${cliLoadError(cliVersion, unmet)}`);
   };
-  const admission = (inspection: Awaited<ReturnType<typeof declaredProfile>>, transitioning: Bridge[]): void => {
+  const admission = (inspection: Awaited<ReturnType<typeof declaredProfile>>, transitioning: SpacesComponent[]): void => {
     const exempt = new Set(transitioning.map(bridge => `@dsh-spaces/${bridge}`));
     const manifests = new Set<string>();
     // Ordinary expression-controlled rows may be active. Inspect their peers
@@ -269,9 +274,11 @@ export async function migrateProfileToAlpha(input: {
   if (!pending.length && !oldPath && !legacy) { verifyHost(initialDump); return; }
   writeFileSync(marker, JSON.stringify({ version: 1, profileId, target: cliVersion, bridges: pending }), { flag: "wx" });
   // Leave marker and partial results on every failure. Never restore or retry.
-  for (const bridge of pending) {
-    await input.install(bridge);
-    if (!matches(bridge, installedRoot(bridge))) throw new Error(`Alpha ${bridge} installation did not match the selected component.`);
+  for (const component of pending) {
+    await input.install(component);
+    if (!componentFilesMatch(home, payloadRoot, component, ownedComponentRoot(home, profile, component))) {
+      throw new Error(`Alpha ${component} installation did not match the selected component.`);
+    }
   }
   assertUnchanged();
   const afterDeclared = await declaredProfile(home, profile, bundles, input.bin);

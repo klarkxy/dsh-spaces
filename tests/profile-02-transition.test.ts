@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { assertAlphaSettingsIsolation, migrateProfileToAlpha } from "../src/adapters/node/profile-alpha-migration.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
 
-type Bridge = "view-bridge" | "llm-bridge";
+type Bridge = "view-bridge" | "llm-bridge" | "browser";
 type Row = { id?: string; name?: string; disabled?: unknown };
 type OfficialBoot = {
   loadProfileDirectory: (prefix: string, profile: string, anchor: string) => {
@@ -281,12 +281,14 @@ test("the old management plugin has no transition exemption", async () => {
   assert.deepEqual(f.calls, []); assert.equal(existsSync(f.marker), false);
 });
 
-test("current selected bytes with changed code are rejected without component installation", async () => {
+test("current selected bytes with changed code are reinstalled from the selected payload", async () => {
   const f = fixture();
   for (const bridge of ["view-bridge", "llm-bridge"] as Bridge[]) cpSync(join(f.input.payloadRoot, bridge), f.installed(`@dsh-spaces/${bridge}`), { recursive: true });
   writeFileSync(join(f.installed("@dsh-spaces/view-bridge"), "lib/index.js"), "changed current code");
-  await assert.rejects(migrateProfileToAlpha(f.input), /does not match/);
-  assert.deepEqual(f.calls, []); assert.equal(existsSync(f.marker), false);
+  await migrateProfileToAlpha(f.input);
+  assert.deepEqual(f.calls, ["view-bridge"]);
+  assert.equal(readFileSync(join(f.installed("@dsh-spaces/view-bridge"), "lib/index.js"), "utf8"), readFileSync(join(f.input.payloadRoot, "view-bridge", "lib/index.js"), "utf8"));
+  assert.equal(existsSync(f.marker), false);
 });
 
 test("a CLI that cannot load the selected target rejects before migration writes", async () => {
@@ -329,7 +331,7 @@ test("a patch changed during component installation keeps the mutation and marke
 });
 
 test("Supervisor start admits the known transition under its writer lock before spawning", async () => {
-  const f = fixture(); const steps: string[] = [];
+  const f = fixture(); const steps: string[] = []; const archiveIds: string[] = [];
   const startOwned = (WorkbenchSupervisorRuntime.prototype as unknown as { startOwned(id: string): Promise<void> }).startOwned;
   const supervisor = {
     home: f.home, cli: { bin: f.input.bin, version: f.input.cliVersion }, runs: { unmanaged: new Set<string>() },
@@ -339,12 +341,14 @@ test("Supervisor start admits the known transition under its writer lock before 
     resolveSpaceRuntime: () => ({ bin: f.input.bin, version: f.input.cliVersion }),
     processes: { start: async () => { steps.push("spawn"); } },
     lock: { run: async (_name: string, action: () => Promise<void>) => { steps.push("lock"); await action(); steps.push("unlock"); } },
-    installArtifact: async (_id: string, artifact: string) => { steps.push("install"); await f.input.install(artifact.endsWith("view.tgz") ? "view-bridge" : "llm-bridge"); },
+    installArtifact: async (_id: string, artifact: string, archiveId: string) => { steps.push("install"); archiveIds.push(archiveId); await f.input.install(artifact.endsWith("view.tgz") ? "view-bridge" : "llm-bridge"); },
     readDump: f.input.dump,
   };
   writeFileSync(supervisor.options.viewBridgeArtifact, "view archive"); writeFileSync(supervisor.options.llmBridgeArtifact, "llm archive");
   await startOwned.call(supervisor, "writing");
   assert.deepEqual(steps, ["guard", "lock", "install", "install", "unlock", "spawn"]);
+  assert.match(archiveIds[0]!, /^dsh-spaces-view-bridge-[0-9a-f]{20}$/);
+  assert.match(archiveIds[1]!, /^dsh-spaces-llm-bridge-[0-9a-f]{20}$/);
   f.add("third-party-old", "^0.1.7-alpha.1"); steps.length = 0;
   await assert.rejects(startOwned.call(supervisor, "writing"), /cannot load/);
   assert.deepEqual(steps, ["guard", "lock"]);

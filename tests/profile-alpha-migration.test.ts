@@ -29,7 +29,7 @@ function fixture(legacy = true, llmActive = true) {
   }
   const calls: string[] = [];
   const input = {home, profileId:"writing",payloadRoot,
-    install: async(bridge: "view-bridge"|"llm-bridge") => {calls.push(bridge); cpSync(join(payloadRoot,bridge),installed(bridge),{recursive:true});},
+    install: async(component: "view-bridge"|"llm-bridge"|"browser") => {calls.push(component); cpSync(join(payloadRoot,component),installed(component),{recursive:true});},
     dump: async()=>"- id: agent-default-model\n  config: {}\n- id: dsh-spaces-llm-bridge\n- id: settings\n  disabled: true\n- id: dsh-spaces-settings\n  name: '@dsh-spaces/view-bridge/settings'\n"};
   return {input,home,profile,patch,calls,installed, marker:join(profile,".dsh-spaces-alpha-migration.json")};
 }
@@ -73,8 +73,40 @@ test("failed installation retains marker and cannot be replayed on launch",async
   await assert.rejects(migrateProfileToAlpha(f.input),/Interrupted alpha/);
   assert.equal(calls,1);
 });
-test("same SDK version with mismatched component bytes is rejected without repair",async()=>{
+test("same SDK version with drifted view-bridge bytes is reinstalled from the selected payload",async()=>{
   const f=fixture(false);writeFileSync(join(f.installed("view-bridge"),"lib/index.js"),"changed");
+  await migrateProfileToAlpha(f.input);
+  assert.deepEqual(f.calls,["view-bridge"]);
+  assert.equal(readFileSync(join(f.installed("view-bridge"),"lib/index.js"),"utf8"),"target");
+  assert.equal(existsSync(f.marker),false);
+});
+test("same SDK version with drifted LLM bridge bytes is reinstalled from the selected payload",async()=>{
+  const f=fixture(false);writeFileSync(join(f.installed("llm-bridge"),"lib/index.js"),"changed");
+  await migrateProfileToAlpha(f.input);
+  assert.deepEqual(f.calls,["llm-bridge"]);
+  assert.equal(readFileSync(join(f.installed("llm-bridge"),"lib/index.js"),"utf8"),"target");
+  assert.equal(existsSync(f.marker),false);
+});
+test("an installed browser whose bytes drift is reinstalled from the selected payload",async()=>{
+  const f=fixture(false);
+  const target=join(f.input.payloadRoot,"browser");mkdirSync(join(target,"lib"),{recursive:true});
+  writeFileSync(join(target,"package.json"),JSON.stringify({name:"@dsh-spaces/browser",version:"0.4.0"}));
+  writeFileSync(join(target,"lib/index.js"),"target");writeFileSync(join(target,"cordis.patch.yml"),"browser: dummy\n");
+  cpSync(target,f.installed("browser"),{recursive:true});
+  writeFileSync(join(f.installed("browser"),"lib/index.js"),"changed");
+  await migrateProfileToAlpha(f.input);
+  assert.deepEqual(f.calls,["browser"]);
+  assert.equal(readFileSync(join(f.installed("browser"),"lib/index.js"),"utf8"),"target");
+  assert.equal(existsSync(f.marker),false);
+});
+test("a foreign package at the browser path is still rejected instead of replaced",async()=>{
+  const f=fixture(false);
+  const target=join(f.input.payloadRoot,"browser");mkdirSync(join(target,"lib"),{recursive:true});
+  writeFileSync(join(target,"package.json"),JSON.stringify({name:"@dsh-spaces/browser",version:"0.4.0"}));
+  writeFileSync(join(target,"lib/index.js"),"target");writeFileSync(join(target,"cordis.patch.yml"),"browser: dummy\n");
+  const dir=f.installed("browser");cpSync(target,dir,{recursive:true});
+  writeFileSync(join(dir,"package.json"),JSON.stringify({name:"squatter",version:"0.4.0"}));
+  writeFileSync(join(dir,"lib/index.js"),"changed");
   await assert.rejects(migrateProfileToAlpha(f.input),/does not match/);
   assert.equal(f.calls.length,0);assert.equal(existsSync(f.marker),false);
 });

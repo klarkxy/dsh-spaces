@@ -25,6 +25,7 @@ export interface SupervisorLlmHost {
   stopOwned: (spaceId: string) => Promise<void>;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
   installArtifact: (profileId: string, artifact: string, id: string) => Promise<void>;
+  artifactDigest: (artifact: string) => string;
   homeProfileNames: () => string[];
   publicStatus: (id: string) => WorkbenchSpace["status"];
   currentServiceEpoch: () => string;
@@ -166,6 +167,6 @@ export class SupervisorLlm {
     if (!artifact) return;
     if (profileId === "web" || profileId === this.host.managerId()) return;
     if (profileHasLlmBridge(this.host.home, profileId)) return;
-    await this.host.installArtifact(profileId, artifact, "dsh-spaces-llm-bridge");
+    await this.host.installArtifact(profileId, artifact, `dsh-spaces-llm-bridge-${this.host.artifactDigest(artifact)}`);
   }
 }

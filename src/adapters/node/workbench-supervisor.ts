@@ -31,7 +31,7 @@ import { ProfileRegistry } from "./profile-registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
 import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile-settings";
-import { migrateProfileToAlpha } from "./profile-alpha-migration";
+import { installedComponentMatches, migrateProfileToAlpha } from "./profile-alpha-migration";
 import { cliLoadError, dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
 import { SnapshotExecutor } from "./snapshot-executor";
 import { setPackageSource, setToolchainRoot } from "./toolchain";
@@ -305,6 +305,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       stopOwned: (spaceId) => this.stopOwned(spaceId),
       startSpace: (spaceId, ctx) => this.startSpace(spaceId, ctx),
       installArtifact: (profileId, artifact, id) => this.installArtifact(profileId, artifact, id),
+      artifactDigest: (artifact) => this.artifactDigest(artifact),
       homeProfileNames: () => this.homeProfileNames(),
       publicStatus: (id) => this.publicStatus(id),
       currentServiceEpoch: () => this.currentServiceEpoch(),
@@ -959,10 +960,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       const dump = await this.readDump(profileId);
       if (dump) extractRoot(dump, SESSION_ROW_ID);
       if (this.options.pluginArtifact) {
-        await this.installArtifact(profileId, this.options.pluginArtifact, "dsh-spaces-plugin");
+        await this.installArtifact(profileId, this.options.pluginArtifact, `dsh-spaces-plugin-${this.artifactDigest(this.options.pluginArtifact)}`);
       }
       if (this.options.viewBridgeArtifact) {
-        await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
+        await this.installArtifact(profileId, this.options.viewBridgeArtifact, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.options.viewBridgeArtifact)}`);
       }
       if (inspectManagerInstall(this.home, profileId) !== "manager") {
         throw new WorkbenchPublicError(
@@ -989,14 +990,23 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return undefined;
       }
     };
-    if (installed()?.digest === selected.digest) return;
+    const bridgeMatches = () =>
+      installedComponentMatches(this.home, profileId, selected.payloadRootLib, "view-bridge");
+    const pluginAligned = installed()?.digest === selected.digest;
+    const bridgeAligned = !this.options.viewBridgeArtifact || bridgeMatches();
+    if (pluginAligned && bridgeAligned) return;
     await this.lock.run("manager.align", () => this.observeChildWork(async () => {
-      await this.installArtifact(profileId, this.options.pluginArtifact!, `dsh-spaces-plugin-${this.artifactDigest(this.options.pluginArtifact!)}`);
-      if (this.options.viewBridgeArtifact) {
-        await this.installArtifact(profileId, this.options.viewBridgeArtifact, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.options.viewBridgeArtifact)}`);
+      if (!pluginAligned) {
+        await this.installArtifact(profileId, this.options.pluginArtifact!, `dsh-spaces-plugin-${this.artifactDigest(this.options.pluginArtifact!)}`);
+      }
+      if (!bridgeAligned) {
+        await this.installArtifact(profileId, this.options.viewBridgeArtifact!, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.options.viewBridgeArtifact!)}`);
       }
       if (installed()?.digest !== selected.digest) {
         throw new Error("The installed manager plugin payload does not match the selected component group.");
+      }
+      if (this.options.viewBridgeArtifact && !bridgeMatches()) {
+        throw new Error("The installed manager view bridge does not match the selected component group.");
       }
     }));
   }
@@ -1419,7 +1429,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         await this.ensureViewBridge(name);
       }
       if (input.browser) {
-        await this.installArtifact(name, this.options.browserArtifact!, "dsh-spaces-browser");
+        await this.installArtifact(name, this.options.browserArtifact!, `dsh-spaces-browser-${this.artifactDigest(this.options.browserArtifact!)}`);
       }
     });
     // Spaces inherit shared connections by default; only an explicit choice is persisted.
@@ -1568,7 +1578,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         home: this.home, profileId: spaceId, payloadRoot: this.options.componentPayloadRoot!,
         bin: spaceRuntime.bin, cliVersion: spaceRuntime.version,
         install: async (bridge) => {
-          const artifact = bridge === "view-bridge" ? this.options.viewBridgeArtifact : this.options.llmBridgeArtifact;
+          const artifact = bridge === "view-bridge" ? this.options.viewBridgeArtifact
+            : bridge === "llm-bridge" ? this.options.llmBridgeArtifact
+            : this.options.browserArtifact;
           if (!artifact) throw new Error(`The selected ${bridge} archive is unavailable.`);
           const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
           await this.installArtifact(spaceId, artifact, `dsh-spaces-${bridge}-${digest}`);
@@ -1943,7 +1955,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.options.viewBridgeArtifact) return;
     if (profileId === this.managerId) return;
     if (profileHasViewBridge(this.home, profileId)) return;
-    await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
+    await this.installArtifact(profileId, this.options.viewBridgeArtifact, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.options.viewBridgeArtifact)}`);
   }
 }
 

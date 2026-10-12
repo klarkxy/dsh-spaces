@@ -1764,7 +1764,6 @@ test("startup aligns a mismatched manager plugin once before the manager starts"
   const artifactDigest = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 20);
   assert.deepEqual(specs.sort(), [
     `dsh-spaces-plugin-${artifactDigest(artifacts.pluginArtifact)}.tgz`,
-    `dsh-spaces-view-bridge-${artifactDigest(artifacts.viewBridgeArtifact)}.tgz`,
   ].sort());
   assert.equal(state.role, "manager");
   assert.equal(installs, 1);
@@ -1794,6 +1793,36 @@ test("startup skips the manager plugin align when the installed payload matches"
   });
   const state = await handle.runtime.state();
   assert.equal(installs, 0);
+  assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));
+});
+
+test("a matching manager plugin does not block alignment of a drifted manager view bridge", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-drift-")), "drift");
+  installManagerModules(home, payload, payload.packageRoot);
+  writeFileSync(join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "view-bridge", "lib", "index.js"), "drifted;\n");
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const specs: string[] = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    pluginAdd: async (addedHome, profile, spec) => {
+      specs.push(basename(spec));
+      if (spec.includes("dsh-spaces-view-bridge")) {
+        cpSync(join(payload.payloadRootLib, "view-bridge"), join(addedHome, "profiles", profile, "node_modules", "@dsh-spaces", "view-bridge"), { recursive: true });
+      }
+    },
+  });
+  const state = await handle.runtime.state();
+  const artifactDigest = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 20);
+  assert.deepEqual(specs, [`dsh-spaces-view-bridge-${artifactDigest(artifacts.viewBridgeArtifact)}.tgz`]);
   assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));
 });
 
