@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createRequire } from "node:module";
 import * as esbuild from "esbuild";
+import type { Page } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -67,22 +68,9 @@ test("DOM: model center saves through the credential channel and never stores th
     chromium: {
       launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{
         close: () => Promise<void>;
-        newPage: () => Promise<BrowserPage>;
+        newPage: () => Promise<Page>;
       }>;
     };
-  };
-  type BrowserPage = {
-    goto: (url: string, opts?: { waitUntil?: string }) => Promise<unknown>;
-    getByRole: (role: string, opts: { name: string }) => { click: () => Promise<void> };
-    locator: (sel: string) => {
-      fill: (v: string) => Promise<void>;
-      click: () => Promise<void>;
-      count: () => Promise<number>;
-      waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
-      selectOption: (v: string) => Promise<void>;
-    };
-    content: () => Promise<string>;
-    evaluate: (fn: () => unknown) => Promise<unknown>;
   };
   const browser = await launchChromium(chromium);
   t.after(() => browser.close());
@@ -127,7 +115,7 @@ const CONNECTION_OPTION = "11111111-1111-4111-8111-111111111111";
 async function launchChromium(chromium: {
   launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{
     close: () => Promise<void>;
-    newPage: () => Promise<unknown>;
+    newPage: () => Promise<Page>;
   }>;
 }) {
   try {

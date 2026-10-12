@@ -9,9 +9,11 @@ import { SpaceMessageRouter } from '../src/adapters/node/message-bus/router.ts';
 import { dshSessionCookie } from '../src/adapters/node/dsh-endpoint.ts';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const cli = process.env.DSH_WEB_CLI;
-const artifacts = process.env.DSH_WEB_ARTIFACT_DIR;
-if (!cli || !artifacts) throw new Error('Set DSH_WEB_CLI to official dsh lib/bin.js and DSH_WEB_ARTIFACT_DIR to the packed Spaces tarball directory.');
+const cliEnv = process.env.DSH_WEB_CLI;
+const artifactsEnv = process.env.DSH_WEB_ARTIFACT_DIR;
+if (!cliEnv || !artifactsEnv) throw new Error('Set DSH_WEB_CLI to official dsh lib/bin.js and DSH_WEB_ARTIFACT_DIR to the packed Spaces tarball directory.');
+const cli = cliEnv;
+const artifacts = artifactsEnv;
 const temp = mkdtempSync(join(tmpdir(), 'dsh-spaces-browser-web-'));
 const home = join(temp, 'home');
 const packDir = join(temp, 'artifacts');

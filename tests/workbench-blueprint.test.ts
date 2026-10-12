@@ -202,7 +202,7 @@ function describePayload(enabled = true, modelId = "m1", revision = 1): LlmApiRe
     defaultModel: null,
     capabilities: {
       adapter: "llm-pi-ai",
-      adapterVersion: "0.1.5-rc.2",
+      adapterVersion: "0.2.0-rc.2",
       protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
       keyless: false,
     },
@@ -546,10 +546,10 @@ test("generation keeps current edits and restores provenance placeholders instea
       },
     ],
   });
-  assert.equal(generated.blueprint.profile.settings.demo && (generated.blueprint.profile.settings.demo as { theme?: string }).theme, "new");
-  assert.equal((generated.blueprint.profile.settings.demo as { output?: unknown }).output, null);
-  assert.equal(generated.blueprint.packages.find((pkg) => pkg.name === "demo-package")?.version, "1.0.0");
-  assert.ok(generated.blueprint.packages.some((pkg) => pkg.name === "new-package"));
+  assert.equal((generated.blueprint as Blueprint).profile.settings.demo && ((generated.blueprint as Blueprint).profile.settings.demo as { theme?: string }).theme, "new");
+  assert.equal(((generated.blueprint as Blueprint).profile.settings.demo as { output?: unknown }).output, null);
+  assert.equal((generated.blueprint as Blueprint).packages.find((pkg) => pkg.name === "demo-package")?.version, "1.0.0");
+  assert.ok((generated.blueprint as Blueprint).packages.some((pkg) => pkg.name === "new-package"));
   assert.equal(JSON.stringify(generated.blueprint).includes("D:\\\\docs"), false);
 });
 
@@ -566,7 +566,7 @@ test("unselected invalid patch does not block generating selected settings", asy
     metadata: { name: "test", version: "1.0.0" },
     selection: { packages: [], includePatch: false, settingsNamespaces: ["demo"] },
   });
-  assert.equal((generated.blueprint.profile.settings.demo as { theme?: string }).theme, "live");
+  assert.equal(((generated.blueprint as Blueprint).profile.settings.demo as { theme?: string }).theme, "live");
 });
 
 test("YAML conversion keeps targeted insert ids and null group/disabled", async () => {
@@ -581,10 +581,10 @@ test("YAML conversion keeps targeted insert ids and null group/disabled", async 
     metadata: { name: "test", version: "1.0.0" },
     selection: { packages: [], includePatch: true, settingsNamespaces: [] },
   });
-  const first = generated.blueprint.profile.patch[0] as { id?: string; insert?: unknown[] };
+  const first = (generated.blueprint as Blueprint).profile.patch[0] as { id?: string; insert?: unknown[] };
   assert.equal(first.id, "existing-group");
   assert.ok(Array.isArray(first.insert));
-  const cleared = generated.blueprint.profile.patch[1] as { id?: string; disabled?: unknown; group?: unknown };
+  const cleared = (generated.blueprint as Blueprint).profile.patch[1] as { id?: string; disabled?: unknown; group?: unknown };
   assert.equal(cleared.id, "cleared");
   assert.equal(cleared.disabled, null);
   assert.equal(cleared.group, null);
@@ -1242,11 +1242,11 @@ test("regeneration restores reordered patch bindings and nested optional leaves"
     metadata: { name: "test", version: "1.0.0" },
     selection: { packages: [], includePatch: true, settingsNamespaces: ["demo"] },
   });
-  const alpha = generated.blueprint.profile.patch.find((row) => "id" in row && row.id === "alpha") as { config?: { path?: unknown } };
-  const beta = generated.blueprint.profile.patch.find((row) => "id" in row && row.id === "beta") as { config?: { path?: unknown } };
+  const alpha = (generated.blueprint as Blueprint).profile.patch.find((row) => "id" in row && row.id === "alpha") as { config?: { path?: unknown } };
+  const beta = (generated.blueprint as Blueprint).profile.patch.find((row) => "id" in row && row.id === "beta") as { config?: { path?: unknown } };
   assert.equal(alpha?.config?.path, null);
   assert.equal(beta?.config?.path, "keep-beta");
-  const demo = generated.blueprint.profile.settings.demo as { nested?: { keep?: unknown; leaf?: unknown }; extra?: unknown; leaf?: unknown };
+  const demo = (generated.blueprint as Blueprint).profile.settings.demo as { nested?: { keep?: unknown; leaf?: unknown }; extra?: unknown; leaf?: unknown };
   assert.equal(demo.nested?.leaf, null);
   assert.equal(demo.nested?.keep, true);
   assert.equal(demo.extra, 1);
@@ -1873,12 +1873,12 @@ test("explicit override remaps a renamed binding and refuses ambiguous remap by 
       { pointer: "/profile/patch/1/config/path", input: { id: "new-output", type: "string", label: "New output", required: true } },
     ],
   });
-  const alpha = generated.blueprint.profile.patch.find((row) => "id" in row && row.id === "alpha") as { config?: { path?: unknown } };
-  const beta = generated.blueprint.profile.patch.find((row) => "id" in row && row.id === "beta") as { config?: { path?: unknown } };
+  const alpha = (generated.blueprint as Blueprint).profile.patch.find((row) => "id" in row && row.id === "alpha") as { config?: { path?: unknown } };
+  const beta = (generated.blueprint as Blueprint).profile.patch.find((row) => "id" in row && row.id === "beta") as { config?: { path?: unknown } };
   assert.equal(alpha?.config?.path, null);
   assert.equal(beta?.config?.path, "keep-beta");
-  assert.equal(generated.blueprint.inputs.some((item) => item.id === "new-output"), true);
-  assert.equal(generated.blueprint.inputs.some((item) => item.id === "output"), false);
+  assert.equal((generated.blueprint as Blueprint).inputs.some((item) => item.id === "new-output"), true);
+  assert.equal((generated.blueprint as Blueprint).inputs.some((item) => item.id === "output"), false);
   assert.equal(JSON.stringify(generated.blueprint).includes("my-local-output"), false);
   assert.equal(JSON.stringify(generated.blueprint).includes("recv"), false);
 
@@ -1902,9 +1902,9 @@ test("explicit override remaps a renamed binding and refuses ambiguous remap by 
       { pointer: "/profile/patch/0/config/path", input: { id: "new-output", type: "string", label: "New output", required: true } },
     ],
   });
-  const sameAlpha = sameIndex.blueprint.profile.patch.find((row) => "id" in row && row.id === "alpha") as { config?: { path?: unknown } };
+  const sameAlpha = (sameIndex.blueprint as Blueprint).profile.patch.find((row) => "id" in row && row.id === "alpha") as { config?: { path?: unknown } };
   assert.equal(sameAlpha?.config?.path, null);
-  assert.equal(sameIndex.blueprint.inputs.some((item) => item.id === "new-output"), true);
+  assert.equal((sameIndex.blueprint as Blueprint).inputs.some((item) => item.id === "new-output"), true);
   assert.equal(JSON.stringify(sameIndex.blueprint).includes("my-local-output"), false);
 
   writeSpace(dshHome, "dup", {

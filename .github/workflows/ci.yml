@@ -23,6 +23,7 @@ jobs:
       - run: npm run check:test-lists
       - run: npm run typecheck
       - run: npm run typecheck:spaces
+      - run: npm run typecheck:tests
       - name: Windows dashboard private files, browser boundary and Supervisor lifecycle
         run: node --import tsx --test --test-concurrency=1 tests/private-files-helper.test.ts tests/private-files-windows.test.ts tests/dashboard-async-commit.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home-gateway.test.ts tests/dashboard-workbench-cors.test.ts tests/dashboard-supervisor.test.ts
       - run: npm test

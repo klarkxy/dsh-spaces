@@ -12,10 +12,7 @@ import { WORKBENCH_CSS } from "../packages/plugin/src/workbench/styles.ts";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const playwrightRoot = process.env.DSH_TEST_PLAYWRIGHT || join(root, "node_modules/playwright");
 
-type Page = {
-  setContent: (html: string) => Promise<void>;
-  evaluate: <T>(fn: () => Promise<T> | T) => Promise<T>;
-};
+type Page = import("playwright").Page;
 
 async function launchChromium(chromium: {
   launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{
@@ -258,19 +255,7 @@ test("create dialog shrinks a chosen image before it can be saved", { timeout: 6
   assert.equal(await page.locator('.dsh-wb-avatars button[aria-pressed="true"]').count(), 1);
 });
 
-type PickerPage = {
-  goto: (url: string, opts?: { waitUntil?: "networkidle" }) => Promise<unknown>;
-  evaluate: <T>(fn: () => Promise<T> | T) => Promise<T>;
-  waitForSelector: (selector: string) => Promise<unknown>;
-  waitForFunction: (fn: () => boolean) => Promise<unknown>;
-  locator: (selector: string) => {
-    innerText: () => Promise<string>;
-    getAttribute: (name: string) => Promise<string | null>;
-    isDisabled: () => Promise<boolean>;
-    count: () => Promise<number>;
-  };
-  getByRole: (role: string, opts: { name: string }) => { click: () => Promise<void> };
-};
+type PickerPage = Page;
 
 test("rail icons stay in their buttons when host image rules use !important", { timeout: 60_000 }, async () => {
   const require = createRequire(join(playwrightRoot, "index.js"));

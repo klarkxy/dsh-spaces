@@ -442,7 +442,7 @@ test("downloadPlugin cancel aborts the tarball reader and does not publish", asy
   let tarSignal: AbortSignal | undefined;
   globalThis.fetch = (async (url, init) => {
     if (String(url).includes(".tgz")) {
-      tarSignal = init?.signal;
+      tarSignal = init?.signal ?? undefined;
       abort.abort();
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
@@ -568,7 +568,7 @@ test("downloadPlugin aborts an unconsumed non-ok body without aborting the paren
   let fetchSignal: AbortSignal | undefined;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (_url, init) => {
-    fetchSignal = init?.signal;
+    fetchSignal = init?.signal ?? undefined;
     return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new Uint8Array([1]));

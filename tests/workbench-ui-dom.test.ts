@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createRequire } from "node:module";
 import * as esbuild from "esbuild";
+import type { Page } from "playwright";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -34,7 +35,7 @@ function routeView(
 async function launchChromium(chromium: {
   launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{
     close: () => Promise<void>;
-    newPage: () => Promise<unknown>;
+    newPage: () => Promise<Page>;
   }>;
 }) {
   if (process.env.DSH_TEST_CHROMIUM) return chromium.launch({ headless: true, executablePath: process.env.DSH_TEST_CHROMIUM });
@@ -113,21 +114,11 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   const { chromium } = require("playwright") as {
     chromium: { launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
   };
-  type Page = {
-    goto: (url: string, opts?: { waitUntil?: string }) => Promise<unknown>;
-    getByRole: (role: string, opts: { name: string }) => { click: () => Promise<void> };
-    locator: (sel: string) => {
-      waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
-      evaluate: (fn: (el: Element) => unknown) => Promise<unknown>;
-    };
-    frameLocator: (sel: string) => { locator: (sel: string) => { fill: (v: string) => Promise<void>; inputValue: () => Promise<string> } };
-    evaluate: (fn: () => unknown) => Promise<unknown>;
-  };
   const browser = await launchChromium(chromium);
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
-  const browserPage = page as unknown as import("playwright").Page;
+  const browserPage = page;
   await browserPage.setViewportSize({ width: 1280, height: 800 });
   // Home now opens the dashboard; chat is a separate, lazy and persistent view.
   await browserPage.getByRole('button', { name: '聊天', exact: true }).click();
@@ -233,21 +224,6 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   const require = createRequire(join(playwrightRoot, "index.js"));
   const { chromium } = require("playwright") as {
     chromium: { launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
-  };
-  type Locator = {
-    click: () => Promise<void>;
-    fill: (v: string) => Promise<void>;
-    waitFor: (opts?: { state?: string; timeout?: number }) => Promise<void>;
-    inputValue: () => Promise<string>;
-    getByRole: (role: string, opts: { name: string }) => Locator;
-    first: () => Locator;
-    locator: (sel: string) => Locator;
-  };
-  type Page = {
-    goto: (url: string, opts?: { waitUntil?: string }) => Promise<unknown>;
-    getByRole: (role: string, opts: { name: string }) => Locator;
-    locator: (sel: string) => Locator;
-    evaluate: (fn: () => unknown) => Promise<unknown>;
   };
   const browser = await launchChromium(chromium);
   t.after(() => browser.close());

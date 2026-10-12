@@ -44,7 +44,7 @@ test('Browser starts with one blank home and opens separate tabs', () => {
   assert.equal(opened.requestedUrl, opened.url);
   assert.notEqual(opened.id, home[0]?.id);
   assert.deepEqual(tabs.listTabs().map(tab => tab.url), [null, 'https://example.com/path']);
-  home[0] = { id: 'forged', url: 'https://evil.example/' };
+  home[0] = { id: 'forged', requestedUrl: 'https://evil.example/', url: 'https://evil.example/', title: 'forged' };
   assert.notEqual(tabs.listTabs()[0]?.id, 'forged');
 });
 

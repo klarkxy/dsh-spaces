@@ -547,9 +547,7 @@ test("spawn error on the child object fails fast", async () => {
           const child = new EventEmitter() as unknown as ChildProcess;
           child.stdout = new PassThrough();
           child.stderr = new PassThrough();
-          child.pid = undefined;
-          child.exitCode = null;
-          child.signalCode = null;
+          Object.assign(child, { pid: undefined, exitCode: null, signalCode: null });
           queueMicrotask(() => child.emit("error", new Error("broken pipe")));
           return child;
         },

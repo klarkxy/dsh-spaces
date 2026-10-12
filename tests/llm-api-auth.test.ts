@@ -510,7 +510,7 @@ test("busy or unknown spaces refuse apply before any restart", async () => {
   const unknown = new MemoryInstances();
   unknown.put("alpha");
   unknown.put("beta", { status: "unknown" });
-  const { host: unknownHost } = hostOf({ writable: true, instances: unknown, restart: async (spaceId) => ran.push(spaceId) });
+  const { host: unknownHost } = hostOf({ writable: true, instances: unknown, restart: async (spaceId) => { ran.push(spaceId); } });
   await unknownHost.dispatch({ method: "saveConnection", draft: noneDraft(), expectedRevision: 0 });
   await assert.rejects(
     () =>

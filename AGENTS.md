@@ -22,7 +22,8 @@ Development and tests use `.sandbox/dsh-home` or another non-real `DSH_SPACES_HO
 
 ## Verification
 
-Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces` and
+Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces`,
+`npm run typecheck:tests` and
 `npm run build`, then the test groups: `npm test`, `npm run test:spaces`,
 `npm run test:workbench`, `npm run test:workbench:recovery`, `npm run test:llm`,
 `npm run test:blueprints`, `npm run test:browser` and `npm run test:dashboard`.

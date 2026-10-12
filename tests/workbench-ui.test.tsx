@@ -18,9 +18,10 @@ import type {
   WorkbenchSnapshot,
   WorkbenchSpace,
   WorkbenchState,
-  WorkbenchView,
+  WorkbenchView as WorkbenchViewInfo,
 } from "../src/shared/workbench.ts";
 import type { WorkbenchProductRequest, WorkbenchProductResult } from "../src/shared/workbench-product.ts";
+import type { PackageSource } from "../src/shared/types.ts";
 import { WorkbenchApp } from "../packages/plugin/src/workbench/app.tsx";
 import { RecoverySurface } from "../packages/plugin/src/workbench/recovery.tsx";
 import { JobsList, WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
@@ -120,7 +121,7 @@ function state(partial: Partial<WorkbenchState> = {}): WorkbenchState {
     availability: "ready",
     role: "manager",
     managerId: "hub",
-    owner: { kind: "supervisor", since: "2026-09-12T00:00:00.000Z" },
+    owner: { kind: "web", since: "2026-09-12T00:00:00.000Z" },
     writable: true,
     mode: "verified-full",
     dshVersion: "0.1.5-rc.1",
@@ -135,7 +136,7 @@ function state(partial: Partial<WorkbenchState> = {}): WorkbenchState {
 const CHILD_ORIGIN = "http://127.0.0.1:3101";
 const SUPERVISOR_ORIGIN = "http://127.0.0.1:3100";
 
-function viewOf(spaceId: string, generation = 1): WorkbenchView {
+function viewOf(spaceId: string, generation = 1): WorkbenchViewInfo {
   return {
     serviceEpoch: EPOCH,
     spaceId,
@@ -303,7 +304,7 @@ test("temporary disconnection preserves the visited frame and recovers without s
 });
 
 test("polling does not duplicate a hanging view request or postpone its timeout", async () => {
-  const pending = deferred<WorkbenchView>();
+  const pending = deferred<WorkbenchViewInfo>();
   const timers: Array<() => void> = [];
   let calls = 0;
   const ctrl = controller(fakeApi({ view: () => { calls++; return pending.promise; } }), {
@@ -623,11 +624,11 @@ test("same space reuses iframe; generation change destroys it", () => {
 });
 
 test("controller last view() wins and does not unload the previous ready iframe", async () => {
-  const pending = new Map<string, ReturnType<typeof deferred<WorkbenchView>>>();
+  const pending = new Map<string, ReturnType<typeof deferred<WorkbenchViewInfo>>>();
   const api = fakeApi({
     state: async () => state({ spaces: [manager, space({ id: "alpha" }), space({ id: "beta" })] }),
     view: (spaceId) => {
-      const item = deferred<WorkbenchView>();
+      const item = deferred<WorkbenchViewInfo>();
       pending.set(spaceId, item);
       return item.promise;
     },
@@ -1918,7 +1919,7 @@ test("repeat submit of the same pending intent reuses requestId and does not res
 });
 
 test("settings.update success then later dirty edit is not overwritten by polling the same terminal job", async () => {
-  const saved = { portStart: 3100, portEnd: 3199, packageSource: "official" as const, catalogUrl: "" };
+  const saved = { portStart: 3100, portEnd: 3199, packageSource: "official" as PackageSource, catalogUrl: "" };
   let settingsReads = 0;
   let jobs: WorkbenchJob[] = [];
   const api = fakeApi({

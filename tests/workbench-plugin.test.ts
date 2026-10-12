@@ -1326,7 +1326,7 @@ test("initialize rejects a CLI that cannot be bound before manager allocation or
   let attempts = 0;
   const runtime = new WorkbenchHostRuntime({
     ...identityInput(home, "web", { argv: [process.execPath, bin, "--profile", "web"] }),
-    bootstrap: async () => { attempts++; return { connected: false, reasons: ["not run"] }; },
+    bootstrap: async () => { attempts++; return { connected: false, origin: null, reasons: ["not run"] }; },
   });
   const result = await runtime.initialize();
   assert.equal(result.ok, false);
@@ -1345,7 +1345,7 @@ test("initialize refuses a desktop lease without an endpoint and preserves owner
   let attempts = 0;
   const runtime = new WorkbenchHostRuntime({
     ...identityInput(home, "web"),
-    bootstrap: async () => { attempts++; return { connected: false, reasons: ["not run"] }; },
+    bootstrap: async () => { attempts++; return { connected: false, origin: null, reasons: ["not run"] }; },
   });
   const result = await runtime.initialize();
   assert.equal(result.ok, false);
@@ -1360,7 +1360,7 @@ test("initialize rechecks identity damage that appears after the page loads", as
   let attempts = 0;
   const runtime = new WorkbenchHostRuntime({
     ...identityInput(home, "web"),
-    bootstrap: async () => { attempts++; return { connected: false, reasons: ["not run"] }; },
+    bootstrap: async () => { attempts++; return { connected: false, origin: null, reasons: ["not run"] }; },
   });
   assert.equal(runtime.identity.recoveryRequired, false);
   mkdirSync(join(home, HOME_CONTROL_DIR_NAME), { recursive: true });
@@ -1422,7 +1422,7 @@ test("removing a loaded ordinary profile never turns a query into a cold start",
     ...identityInput(home, "web"),
     bootstrap: async options => {
       if (options.allowColdStart) coldStarts++;
-      return { connected: false, reasons: ["no workbench"] };
+      return { connected: false, origin: null, reasons: ["no workbench"] };
     },
   });
   const target = join(home, "profiles", "web");

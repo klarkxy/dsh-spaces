@@ -64,7 +64,7 @@ function state(partial: Partial<WorkbenchState> = {}): WorkbenchState {
     availability: "ready",
     role: "manager",
     managerId: "hub",
-    owner: { kind: "supervisor", since: "2026-09-21T00:00:00.000Z" },
+    owner: { kind: "web", since: "2026-09-21T00:00:00.000Z" },
     writable: true,
     mode: "verified-full",
     dshVersion: "0.1.5-rc.2",

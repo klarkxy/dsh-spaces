@@ -12,7 +12,7 @@ import {
   recipeFromTemplate,
   validateImportedPatch,
 } from "../src/core/application/space-recipe.ts";
-import { LLM_SHARE_NOTE } from "../src/core/domain/llm-share.ts";
+import { LLM_SHARE_NOTE, type LlmShareManifest } from "../src/core/domain/llm-share.ts";
 import { SPACE_TEMPLATES_FILE, createSpaceFromTemplate, listSpaceTemplates } from "../src/adapters/node/space-templates.ts";
 import {
   FULL_SPACES_PACKAGE,
@@ -176,7 +176,7 @@ test("invalid isolation is rejected before create", async () => {
 
 test("LLM requirements stay unmapped and do not carry sender bindings", async () => {
   const written: unknown[] = [];
-  const llm = {
+  const llm: LlmShareManifest = {
     schemaVersion: 1 as const,
     kind: "dsh-space-llm-requirements" as const,
     sourceSharedMode: "all" as const,

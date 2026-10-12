@@ -353,6 +353,7 @@ test("startup leftover queued jobs are failed interrupted and are not replayed",
   assert.equal(store.job("new-start").status, "succeeded");
 
   await assert.rejects(
+    // @ts-expect-error the removed kind is rejected intentionally
     () => store.submit({ kind: "recovery.resume" }, "resume-1", async () => {
       ran += 1;
     }),
@@ -559,6 +560,7 @@ test("persist failure on a running job fails that job and does not freeze later 
   assert.equal(secondSide, 1);
 
   await assert.rejects(
+    // @ts-expect-error the removed kind is rejected intentionally
     () => store.submit({ kind: "recovery.resume" }, "job-resume", async () => {
       return { snapshotId: "snap-1" };
     }),
@@ -584,6 +586,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
     view: {
       spaceId: "alpha",
       generation: 2,
+      serviceEpoch: "a".repeat(64),
       origin: "http://127.0.0.1:3210/?token=private-launch-token",
       entryOrigin,
       entryPath: "/workbench/view/alpha",
@@ -607,6 +610,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
     view: {
       spaceId: "beta",
       generation: 1,
+      serviceEpoch: "a".repeat(64),
       origin: "http://127.0.0.1:3210",
       entryOrigin,
       entryPath: "//127.0.0.1/workbench/view/beta",
@@ -622,6 +626,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
     view: {
       spaceId: "gamma",
       generation: 1,
+      serviceEpoch: "a".repeat(64),
       origin: "http://user:pass@127.0.0.1:3210",
       entryOrigin,
       entryPath: "/workbench/view/gamma",
@@ -664,6 +669,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
     view: {
       spaceId: "epsilon",
       generation: 1,
+      serviceEpoch: "a".repeat(64),
       origin: "http://127.0.0.1:3210",
       entryOrigin: "http://192.168.0.5:3100",
       entryPath: "/view/epsilon/1",
@@ -679,6 +685,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
     view: {
       spaceId: "zeta",
       generation: 4,
+      serviceEpoch: "a".repeat(64),
       origin: "http://127.0.0.1:3210",
       entryOrigin: "http://127.0.0.1:3100/?token=private-entry-token",
       entryPath: "/view/zeta/4",

@@ -19,6 +19,7 @@
     "build": "npm run build:spaces",
     "build:spaces": "node scripts/build-spaces.mjs",
     "typecheck:spaces": "tsc --noEmit -p tsconfig.spaces.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "test:spaces": "tsx --test tests/spaces-core.test.ts tests/spaces-lock.test.ts tests/spaces-host.test.ts tests/spaces-panel.test.tsx tests/spaces-doctor.test.ts tests/compatible-dsh-cli.test.ts tests/profile-settings.test.ts tests/profile-alpha-migration.test.ts tests/profile-02-transition.test.ts tests/component-cli-02.test.ts",
     "test:browser": "node --import tsx --test tests/browser-space.test.ts tests/browser-space-bus.test.ts",
     "test:llm": "tsx --test tests/llm-domain.test.ts tests/llm-compat.test.ts tests/llm-settings-bridge.test.ts tests/llm-multi-space.test.ts tests/llm-store.test.ts tests/llm-stream.test.ts tests/llm-api-auth.test.ts tests/llm-space-settings.test.ts tests/llm-ui.test.tsx tests/llm-share.test.ts tests/llm-packaging.test.ts tests/llm-default-resolution.test.ts tests/llm-credentials.test.ts tests/llm-concurrency.test.ts tests/llm-secret-leaks.test.ts tests/llm-gates.test.ts",

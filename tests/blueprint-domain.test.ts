@@ -589,7 +589,7 @@ test("group children only bind config values, never identity or disabled", () =>
     }),
   );
   const bound = bindBlueprintInputs(parsed, { x: "ok" });
-  const child = (bound.patch[0] as { config: Array<{ config: { x: string }; id: string; disabled: boolean }> }).config[0];
+  const child = (bound.patch[0] as unknown as { config: Array<{ config: { x: string }; id: string; disabled: boolean }> }).config[0];
   assert.equal(child?.config.x, "ok");
   assert.equal(child?.id, "child");
   assert.equal(child?.disabled, false);
@@ -683,7 +683,7 @@ test("bound string and directory values reject unpaired surrogates; !!js strings
     "writing-model": { connectionId: "c", modelId: "m" },
   });
   assert.equal(
-    (bound.patch[0] as { config: { outlineMode: string } }).config.outlineMode,
+    (bound.patch[0] as unknown as { config: { outlineMode: string } }).config.outlineMode,
     "!!js dshHomePath('hub/x')",
   );
 });
@@ -706,7 +706,7 @@ test("official insert entries bind inside config and keep module names as data",
     }),
   );
   const bound = bindBlueprintInputs(blueprint, {});
-  const inserted = bound.patch[0] as { insert: Array<{ name: string; config: { output: string }; disabled: boolean }> };
+  const inserted = bound.patch[0] as unknown as { insert: Array<{ name: string; config: { output: string }; disabled: boolean }> };
   assert.equal(inserted.insert[0]?.name, "demo-plugin");
   assert.equal(inserted.insert[0]?.config.output, "notes");
   assert.equal(inserted.insert[0]?.disabled, false);

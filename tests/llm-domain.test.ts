@@ -130,7 +130,7 @@ test("mode none keeps the space off the shared catalog", () => {
   const catalog = emptyCatalog();
   const shared = connection();
   catalog.connections[shared.id] = shared as never;
-  const none = { schemaVersion: 1, revision: 1, shared: { mode: "none" as const } };
+  const none = { schemaVersion: 1 as const, revision: 1, shared: { mode: "none" as const } };
   assert.deepEqual(selectSharedConnections(catalog, none), []);
 });
 
@@ -147,7 +147,7 @@ test("mode all binds every current connection including disabled ones", () => {
   const stopped = connection({ enabled: false });
   catalog.connections[live.id] = live as never;
   catalog.connections[stopped.id] = stopped as never;
-  const policy = { schemaVersion: 1, revision: 1, shared: { mode: "all" as const } };
+  const policy = { schemaVersion: 1 as const, revision: 1, shared: { mode: "all" as const } };
   assert.equal(policyBindsConnection(policy, live.id), true);
   assert.equal(policyBindsConnection(policy, stopped.id), true);
   assert.deepEqual(selectSharedConnections(catalog, policy).map((item) => item.id), [live.id]);
@@ -159,7 +159,7 @@ test("mode selected still binds a disabled connection by id", () => {
   const stopped = connection({ enabled: false });
   catalog.connections[stopped.id] = stopped as never;
   const policy = {
-    schemaVersion: 1,
+    schemaVersion: 1 as const,
     revision: 1,
     shared: { mode: "selected" as const, connectionIds: [stopped.id] },
   };

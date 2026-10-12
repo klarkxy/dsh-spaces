@@ -19,7 +19,7 @@ if (hook) {
     runtime: Parameters<typeof originalCreate>[0],
     reason?: Parameters<typeof originalCreate>[1],
   ) {
-    const store = this as SnapshotStore & { inject?: SnapshotInject };
+    const store = this as unknown as { inject?: SnapshotInject };
     const previous = store.inject;
     store.inject = (op, detail) => {
       previous?.(op, detail);

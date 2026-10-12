@@ -170,10 +170,10 @@ test("v1 import continues to collect receiver-local model inputs", async () => {
 test("Spaces management exposes blueprint creation and the controller opens use mode", async () => {
   const state: WorkbenchState = {
     protocolVersion: 2, ...observation, revision: observation.expectedRevision, availability: "ready", role: "manager", managerId: "hub",
-    owner: { kind: "supervisor", since: "2026-10-09T00:00:00Z" }, writable: true, mode: "verified-full", dshVersion: "0.2.0-rc.2",
+    owner: { kind: "web", since: "2026-10-09T00:00:00Z" }, writable: true, mode: "verified-full", dshVersion: "0.2.0-rc.2",
     maintenance: false, reasons: [], spaces: [], jobs: [],
   };
-  const controller = new WorkbenchController({ state: async () => state } as WorkbenchApi, {
+  const controller = new WorkbenchController({ state: async () => state } as unknown as WorkbenchApi, {
     uuid: () => "test", now: () => 0, storage: { getItem: () => null, setItem: () => undefined }, hidden: () => false,
     onVisibilityChange: () => () => undefined, addMessageListener: () => () => undefined, openUrl: () => undefined,
   });
@@ -207,7 +207,7 @@ test("a second apply tracks its request through tab changes and polling historic
   const api = {
     state: async (): Promise<WorkbenchState> => ({
       protocolVersion: 2, serviceEpoch: observation.serviceEpoch, revision: observation.expectedRevision,
-      availability: "ready", role: "manager", managerId: "hub", owner: { kind: "supervisor", since: "2026-10-09T00:00:00Z" },
+      availability: "ready", role: "manager", managerId: "hub", owner: { kind: "web", since: "2026-10-09T00:00:00Z" },
       writable: true, mode: "verified-full", dshVersion: "0.2.0-rc.2", maintenance: false, reasons: [], spaces: [], jobs,
     }),
     product: async (request: WorkbenchProductRequest): Promise<WorkbenchProductResult> => {
@@ -221,7 +221,7 @@ test("a second apply tracks its request through tab changes and polling historic
       pendingFailure = job;
       return new Promise((resolve) => { finishSubmit = resolve; });
     },
-  } as WorkbenchApi;
+  } as unknown as WorkbenchApi;
   const controller = new WorkbenchController(api, {
     uuid: () => `request-${++requestNumber}`, now: () => 0, storage: { getItem: () => null, setItem: () => undefined }, hidden: () => false,
     onVisibilityChange: () => () => undefined, addMessageListener: () => () => undefined, openUrl: () => undefined,

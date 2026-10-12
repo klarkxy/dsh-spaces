@@ -601,6 +601,7 @@ test("config restore preview is forbidden", async () => {
   state.backups = [{ id: "cordis.patch.yml.bak-1", createdAt: "2026-01-01T00:00:00.000Z", size: 10, tooLarge: false }];
   await assert.rejects(
     () => maintenance.preview({
+      // @ts-expect-error the removed kind is rejected intentionally
       kind: "config.restore",
       spaceId: "spaces-hub",
       backupId: "cordis.patch.yml.bak-1",
@@ -792,7 +793,7 @@ function createMaintenance(
         throw new Error("snapshot create not stubbed");
       }),
       delete: async () => undefined,
-    } as SnapshotExecutor,
+    } as unknown as SnapshotExecutor,
     runtimes: {
       inventory: () => ({
         installed: [{ version: "0.1.5-rc.1", bin: "bin.js", dir: home }],
@@ -800,7 +801,7 @@ function createMaintenance(
       }),
       catalog: async () => ({ versions: [{ version: "0.1.5-rc.2" }], distTags: { next: "0.1.5-rc.2" } }),
       install: async (version: string) => ({ version, bin: "bin.js", dir: home }),
-    } as WorkbenchMaintenancePorts["runtimes"],
+    } as unknown as WorkbenchMaintenancePorts["runtimes"],
     upgrades: {
       preview: (version: string) => ({ version, currentVersion: "0.1.5-rc.1", profiles: [] }),
       upgrade: async (version: string, planId?: string) => {
@@ -808,7 +809,7 @@ function createMaintenance(
         if (state.upgrade) return state.upgrade(version, planId);
         throw new Error("upgrade not stubbed");
       },
-    } as CoordinatedUpgrade,
+    } as unknown as CoordinatedUpgrade,
     diagnostics: {
       get: (name: string) => ({
         name,
@@ -817,7 +818,7 @@ function createMaintenance(
         backups: state.backups,
         canRestore: name !== "web",
       }),
-    } as DiagnosticsService,
+    } as unknown as DiagnosticsService,
     managerId: () => "spaces-hub",
     assertWritable: () => {
       if (!state.writable) throw new Error("owner missing C:\\\\Users\\\\admin\\\\.dsh");
@@ -903,14 +904,14 @@ function snapshotHarness() {
       inventory: () => ({ installed: [{ version: runtime.version, bin: join(runtimeDir, "bin.js"), dir: runtimeDir }] }),
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async (version: string) => ({ version, bin: join(runtimeDir, "bin.js"), dir: runtimeDir }),
-    } as WorkbenchMaintenancePorts["runtimes"],
+    } as unknown as WorkbenchMaintenancePorts["runtimes"],
     upgrades: {
       preview: (version: string) => ({ version, profiles: [] }),
       upgrade: async () => {
         throw new Error("unused");
       },
-    } as CoordinatedUpgrade,
-    diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as DiagnosticsService,
+    } as unknown as CoordinatedUpgrade,
+    diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as unknown as DiagnosticsService,
     managerId: () => "spaces-hub",
     assertWritable: () => undefined,
     validateSpace: (spaceId: string, allowManager?: boolean) => {
@@ -1001,7 +1002,7 @@ async function upgradeHarness() {
     snapshots: executorFromStore(snapshots),
     runtimes,
     upgrades: inner,
-    diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as DiagnosticsService,
+    diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as unknown as DiagnosticsService,
     managerId: () => "spaces-hub",
     assertWritable: () => undefined,
     validateSpace: () => undefined,

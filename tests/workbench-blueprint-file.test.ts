@@ -130,7 +130,7 @@ test("listedProviderModels keeps enabled configured connections and listed model
     pendingRestartSpaceIds: [],
     capabilities: {
       adapter: "llm-pi-ai",
-      adapterVersion: "0.1.5-rc.2",
+      adapterVersion: "0.2.0-rc.2",
       protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
       keyless: false,
     },

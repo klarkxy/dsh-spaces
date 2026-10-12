@@ -58,7 +58,7 @@ test("sync snapshot create stalls the HTTP heartbeat; worker create does not", a
   const asyncFix = snapshotCreateFixture("dsh-async-create-");
   fillTree(join(asyncFix.home, "profiles", "coding", "payload"), FILE_COUNT);
   const executor = new SnapshotExecutor({ home: asyncFix.home, root: asyncFix.root, workerFile: worker });
-  const asyncPulse = await withHeartbeat(() => executor.create(asyncFix.runtime, "upgrade"));
+  const asyncPulse = await withHeartbeat(async () => { await executor.create(asyncFix.runtime, "upgrade"); });
 
   assert.equal(executor.list().length, 1);
   assert.ok(asyncPulse.elapsed >= 0);

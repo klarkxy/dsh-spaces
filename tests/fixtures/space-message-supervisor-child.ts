@@ -27,4 +27,4 @@ const server = createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ result: { ok: true, value: {} } }));
 });
 server.listen(port, '127.0.0.1', () => console.log(`dsh web: http://127.0.0.1:${port}/?token=test-only-launch`));
-process.on('SIGTERM', async () => { await ctx.dispose(); server.closeAllConnections(); server.close(() => process.exit(0)); });
+process.on('SIGTERM', async () => { await ctx.fiber.dispose(); server.closeAllConnections(); server.close(() => process.exit(0)); });

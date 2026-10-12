@@ -23,7 +23,7 @@ afterEach(() => {
   }
 });
 
-type PatchRow = { id?: unknown; name?: unknown; insert?: unknown; config?: unknown };
+type PatchRow = { id?: unknown; name?: unknown; insert?: unknown; config?: unknown; inject?: unknown };
 type OfficialAppBoot = {
   loadOverlayPatches: (binName: string, file: string) => PatchRow[];
   composeEntries: (layers: unknown[][], warn?: (message: string) => void) => PatchRow[];

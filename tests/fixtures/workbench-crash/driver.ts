@@ -160,7 +160,7 @@ export async function startCrashDriver(flags: CrashDriverFlags) {
     snapshotRoot: flags.snapshotRoot,
     controlToolRoot: flags.controlToolRoot,
     createMaintenance: (ports) => {
-      attachUpgradeInject(ports.upgrades as { opts?: { inject?: (op: string) => void } }, flags);
+      attachUpgradeInject(ports.upgrades as unknown as { opts?: { inject?: (op: string) => void } }, flags);
       return new WorkbenchMaintenance(ports, {
         log: (operation, error) => {
           const detail = String(error instanceof Error ? error.message : error ?? "").slice(0, 4000);

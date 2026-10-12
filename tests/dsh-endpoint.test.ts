@@ -8,7 +8,7 @@ import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "../src/ada
 function childFixture(): ChildProcess {
   const child = new EventEmitter() as ChildProcess;
   child.stdout = new PassThrough();
-  child.exitCode = null; child.signalCode = null;
+  Object.assign(child, { exitCode: null, signalCode: null });
   return child;
 }
 test("readiness waits for the complete endpoint announced by the owned child", async () => {

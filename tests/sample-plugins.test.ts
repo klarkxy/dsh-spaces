@@ -153,7 +153,7 @@ test("workbench installs sample plugins from packed tarballs and keeps A when B 
 
 async function loadFixture(name: string) {
   return import(pathToFileURL(join(FIXTURES, name, "index.js")).href) as Promise<{
-    default: new (ctx?: unknown) => { ping?: () => string; list?: () => string[]; canvas?: () => unknown; hop?: (a: string, b: string) => string };
+    default: new (ctx?: unknown) => { ping: () => string; list: () => string[]; canvas: () => unknown; hop: (a: string, b: string) => string };
   }>;
 }
 
@@ -212,21 +212,21 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
         throw new Error("unused");
       },
       delete: async () => undefined,
-    } as SnapshotExecutor,
+    } as unknown as SnapshotExecutor,
     runtimes: {
       inventory: () => ({ installed: [], current: { version: runtime.version, bin: "bin.js", origin: "store" as const } }),
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async () => ({ version: runtime.version, bin: "bin.js", dir: home }),
-    } as WorkbenchMaintenancePorts["runtimes"],
+    } as unknown as WorkbenchMaintenancePorts["runtimes"],
     upgrades: {
       preview: () => ({ version: runtime.version, profiles: [] }),
       upgrade: async () => {
         throw new Error("unused");
       },
-    } as CoordinatedUpgrade,
+    } as unknown as CoordinatedUpgrade,
     diagnostics: {
       get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: false }),
-    } as DiagnosticsService,
+    } as unknown as DiagnosticsService,
     managerId: () => "spaces-hub",
     assertWritable: () => undefined,
     validateSpace: (spaceId: string, allowManager?: boolean) => {
@@ -278,7 +278,7 @@ function sampleFetch(packed: Record<string, { tarball: Buffer; version: string }
         ok: true,
         status: 200,
         json: async () => ({}),
-        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
       };
     }
     const name = Object.keys(packed).find((item) => url.includes(encodeURIComponent(item)) || url.endsWith(`/${item}`));

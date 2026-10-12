@@ -91,7 +91,7 @@ function liveState() {
     availability: "ready",
     role: "manager",
     managerId: "spaces-hub",
-    owner: { kind: "supervisor", since: "2026-09-21T00:00:00.000Z" },
+    owner: { kind: "web", since: "2026-09-21T00:00:00.000Z" },
     writable: true,
     mode: "verified-full",
     dshVersion: "0.1.5-rc.2",

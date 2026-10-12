@@ -661,7 +661,7 @@ test("prepare cancel aborts a stalled download body and unblocks the job tail", 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url, init) => {
     if (String(url).includes(".tgz")) {
-      tarSignal = init?.signal;
+      tarSignal = init?.signal ?? undefined;
       bodyStarted = true;
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
@@ -1129,7 +1129,7 @@ function createUpgrade(
     viewBridgeArtifact?: string;
     events?: string[];
     snapshotId?: string;
-    pluginAdd?: typeof mockPluginAdd;
+    pluginAdd?: (dshHome: string, name: string, spec: string) => Promise<void>;
     stopAll?: () => Promise<void>;
     omitHandoff?: boolean;
     handoff?: (input: WorkbenchPackageHandoffInput) => Promise<void>;
@@ -1168,7 +1168,7 @@ function createUpgrade(
         return { id: snapshotId } as SnapshotMeta;
       },
     },
-    pluginAdd: opts.pluginAdd ?? mockPluginAdd,
+    pluginAdd: opts.pluginAdd ?? (async (dshHome, name, spec) => { mockPluginAdd(dshHome, name, spec); }),
     fetchImpl: opts.fetchImpl,
     pack: opts.pack,
     downloadTimeoutMs: opts.downloadTimeoutMs,

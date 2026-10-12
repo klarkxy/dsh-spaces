@@ -251,7 +251,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
     availability: "ready",
     role: "manager",
     managerId: "hub",
-    owner: { kind: "supervisor", since: "2026-09-12T00:00:00.000Z" },
+    owner: { kind: "web", since: "2026-09-12T00:00:00.000Z" },
     writable: true,
     mode: "verified-full",
     dshVersion: "0.1.5-rc.1",

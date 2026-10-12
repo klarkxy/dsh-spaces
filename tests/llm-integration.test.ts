@@ -116,8 +116,8 @@ test("three processes stream one shared official route while an unjoined space s
   const bText = await call(beta, { op: "stream", provider: route, model: "demo-large" });
   assert.equal(aText.ok, true, JSON.stringify(aText));
   assert.equal(bText.ok, true);
-  assert.equal(aText.result.text, "hello-shared-v1");
-  assert.equal(bText.result.text, "hello-shared-v1");
+  assert.equal(aText.result?.text, "hello-shared-v1");
+  assert.equal(bText.result?.text, "hello-shared-v1");
   assert.equal(first.hits.length, 2);
   assert.equal(first.hits.every((hit) => hit.auth === `Bearer ${SHARED_SECRET}`), true);
   assert.equal(first.hits.every((hit) => hit.model === "demo-large"), true);
@@ -141,7 +141,7 @@ test("three processes stream one shared official route while an unjoined space s
   );
   const again = await call(alpha, { op: "stream", provider: route, model: "demo-large" });
   assert.equal(again.ok, true);
-  assert.equal(again.result.text, "hello-shared-v1");
+  assert.equal(again.result?.text, "hello-shared-v1");
   assert.equal(second.hits.length, 0);
   assert.equal(first.hits.length, 3);
   assert.equal(children.length, 3);

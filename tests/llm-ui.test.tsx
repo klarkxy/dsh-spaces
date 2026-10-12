@@ -16,7 +16,7 @@ function describeResult(): LlmDescribeResult {
     defaultModel: { connectionId: CONNECTION_ID, modelId: "demo-large" },
     capabilities: {
       adapter: "llm-pi-ai",
-      adapterVersion: "0.1.5-rc.2",
+      adapterVersion: "0.2.0-rc.2",
       protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
       keyless: false,
     },
@@ -161,7 +161,7 @@ test("create space submits the explicit shared-connection choice", async () => {
         availability: "ready",
         role: "manager",
         managerId: "hub",
-        owner: { kind: "supervisor", since: "2026-09-18T00:00:00.000Z" },
+        owner: { kind: "web", since: "2026-09-18T00:00:00.000Z" },
         writable: true,
         mode: "verified-full",
         dshVersion: "0.1.5-rc.2",
@@ -173,7 +173,7 @@ test("create space submits the explicit shared-connection choice", async () => {
     detail: async () => {
       throw new Error("unused");
     },
-    submit: async (command) => {
+    submit: async (command: Parameters<WorkbenchApi["submit"]>[0]) => {
       calls.push(command);
       return {
         id: "job",
@@ -210,7 +210,7 @@ test("create space submits the explicit shared-connection choice", async () => {
     },
     runtimes: async () => [],
     backups: async () => [],
-  } as WorkbenchApi;
+  } as unknown as WorkbenchApi;
   const ctrl = new WorkbenchController(api, {
     uuid: () => "u",
     storage: { getItem: () => null, setItem: () => undefined },

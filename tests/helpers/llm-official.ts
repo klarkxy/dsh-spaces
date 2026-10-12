@@ -199,7 +199,7 @@ export async function startPlainSettings(path: string, dshHome: string) {
 }
 
 export function nativeSettingsFacade(ctx: Context): NativeSettingsFacade {
-  const settings = ctx.settings as NativeSettingsFacade;
+  const settings = ctx.settings as unknown as NativeSettingsFacade;
   return {
     get documentPath() {
       return settings.documentPath;
