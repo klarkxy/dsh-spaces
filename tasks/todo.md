@@ -6,10 +6,10 @@
 - [x] A：删除不可达的恢复结算、restore/recover 桩、孤儿模块与壳时代导出，启用 `noUnusedLocals`（`a00cae3`）。公开恢复命令仍明确失败，历史恢复证据仍阻断写入。
 - [x] B：新增 `check:test-lists` 守卫与 `test:dashboard`，补齐 20 个未入组测试，修复 3 项基线失败和两处测试侧竞态（`15f71f1`）。
 - [x] C：把 `workbench-supervisor.ts` 拆到 `src/adapters/node/supervisor/` 下的模块和四个协作者，对外导出不变（`2af8c61`）。
-- [x] D：REQUIREMENTS 定位改为插件，历史任务记录归档到 `tasks/archive/`。
-- [ ] tests 类型检查：`tsconfig.tests.json` 有 187 处错误，未接入 CI。
-- [ ] `packages/dashboard/src/host/http.ts` 返回 413 时请求体未消费即 `Connection: close`，负载下偶发 ECONNRESET；属产品行为，待决定。
-- [ ] 蓝图 `assertBundlePatches` / `provenanceMismatch` 自 `2930449` 起从未被调用，已在 A 中删除；是否应接回应用流程待评估。
+- [x] D：REQUIREMENTS 定位改为插件，历史任务记录归档到 `tasks/archive/`（`f20fcb6`）。
+- [x] E：看板请求体超限时在 8 MiB 上限内读完再回 413，客户端不再因连接重置丢失 413；超过上限直接断开（`824e575`、`b931430`）。
+- [x] F：测试类型检查 187 → 0，新增 `typecheck:tests` 并接入 CI，只改测试代码（`d83d18e`）。
+- [x] 蓝图 `assertBundlePatches` / `provenanceMismatch` 不接回：应用时的真实模块解析（`blueprint-workbench.ts` 中 `resolvedIdentityAllowed`、"no bundle patch" 资格检查）和生成时的 `locateProvenancePointer` 已覆盖它们的用途。
 - [ ] `WorkbenchSupervisorRuntime` 仍约 2000 行，计划执行与生命周期管线未拆。
 
 # 2026-10-12 移除自有 Electron 桌面壳
