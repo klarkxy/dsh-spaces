@@ -594,6 +594,7 @@ export class WorkbenchController {
   openDetail = (spaceId: string): void => {
     this.patch({ overlay: { type: "detail", spaceId } });
     void this.loadDetail(spaceId);
+    if (this.ui.runtimesStatus === "idle") void this.loadRuntimes();
   };
 
   openMenu = (spaceId: string, x: number, y: number): void => {

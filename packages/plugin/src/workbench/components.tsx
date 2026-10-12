@@ -11,6 +11,8 @@ import { installBrowserRelay } from "./browser-relay";
 import { readLocalIcon } from "./fit-icon";
 import { isDataImageIcon, KNOWN_GLYPHS } from "./icons";
 import { SPACE_AVATARS, defaultSpaceAvatar } from "../../../../src/shared/space-avatars";
+import { SPACES_MIN_DSH_VERSION } from "../../../../src/shared/runtime";
+import { gte as semverGte } from "semver";
 import { SpaceGlyph } from "./space-glyph";
 export { SpaceGlyph } from "./space-glyph";
 import { t, type WorkbenchLocale } from "./i18n";
@@ -661,15 +663,30 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
             {runtime.installed ? ` · ${t(locale, "runtime.installed")}` : ""}
             {runtime.host ? ` · ${t(locale, "runtime.host")}` : ""}
             {runtime.compatible ? ` · ${t(locale, "runtime.compatible")}` : ` · ${t(locale, "runtime.incompatible")}`}
+            {runtime.pinnedBy.length
+              ? ` · ${t(locale, "runtime.pinnedBy", { names: runtime.pinnedBy.join(locale === "zh" ? "、" : ", ") })}`
+              : ""}
           </span>
-          <button
-            type="button"
-            className="dsh-wb-btn"
-            disabled={!writable}
-            onClick={() => controller.preview({ kind: "runtime.install", version: runtime.version })}
-          >
-            {t(locale, "runtime.install")}
-          </button>
+          {!runtime.installed && !runtime.host ? (
+            <button
+              type="button"
+              className="dsh-wb-btn"
+              disabled={!writable}
+              onClick={() => controller.preview({ kind: "runtime.install", version: runtime.version })}
+            >
+              {t(locale, "runtime.install")}
+            </button>
+          ) : null}
+          {runtime.removable ? (
+            <button
+              type="button"
+              className="dsh-wb-btn"
+              disabled={!writable}
+              onClick={() => controller.preview({ kind: "runtime.remove", version: runtime.version })}
+            >
+              {t(locale, "runtime.remove")}
+            </button>
+          ) : null}
         </div>
       ))}
     </>
@@ -841,7 +858,7 @@ function IdleCard({
 function Overlays({ ui, controller, systemPage }: WorkbenchViewProps): ReactElement | null {
   return (
     <>
-      {ui.overlay?.type === "create" && <CreateDialog locale={ui.locale} controller={controller} />}
+      {ui.overlay?.type === "create" && <CreateDialog locale={ui.locale} controller={controller} hostVersion={ui.state?.dshVersion ?? null} />}
       {ui.overlay?.type === "rename" && (
         <RenameDialog locale={ui.locale} space={controller.space(ui.overlay.spaceId)} controller={controller} />
       )}
@@ -928,7 +945,7 @@ function PlanDialog({
   );
 }
 
-function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; controller: WorkbenchController }): ReactElement {
+function CreateDialog({ locale, controller, hostVersion }: { locale: WorkbenchLocale; controller: WorkbenchController; hostVersion: string | null }): ReactElement {
   const nameRef = useRef<HTMLInputElement>(null);
   const displayRef = useRef<HTMLInputElement>(null);
   const iconRef = useRef<string>(SPACE_AVATARS[0].image);
@@ -977,6 +994,7 @@ function CreateDialog({ locale, controller }: { locale: WorkbenchLocale; control
           {t(locale, "create.browser")}
         </label>
         <p className="dsh-wb-muted">{t(locale, "create.browserHint")}</p>
+        <p className="dsh-wb-muted">{t(locale, "create.dshVersion", { version: hostVersion ?? "—" })}</p>
         <IconPicker locale={locale} value={iconRef.current} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
         <div className="dsh-wb-actions">
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
@@ -1250,6 +1268,47 @@ function SettingsDialog({ ui, controller, systemPage }: WorkbenchViewProps): Rea
   );
 }
 
+function DshVersionSection({ ui, controller, space }: WorkbenchViewProps & { space: WorkbenchSpace }): ReactElement {
+  const locale = ui.locale;
+  const pin = space.dshVersion;
+  const host = ui.state?.dshVersion ?? null;
+  const floor = pin ?? SPACES_MIN_DSH_VERSION;
+  const candidates = ui.runtimes
+    .filter((runtime) => runtime.compatible && semverGte(runtime.version, floor))
+    .map((runtime) => runtime.version);
+  const versions = [...new Set([...(pin ? [pin] : []), ...candidates])];
+  const [target, setTarget] = useState(pin ?? host ?? "");
+  const ready = ui.runtimesStatus === "ready";
+  const disabled = !controller.canMutate() || controller.isBusy() || !ready || !target;
+  return (
+    <>
+      <h3>{t(locale, "detail.dshVersion")}</h3>
+      <p>{pin ?? t(locale, "detail.dshNotPinned")}</p>
+      {ui.runtimesStatus === "loading" ? <p role="status">{t(locale, "app.loading")}</p> : null}
+      {ui.runtimesStatus === "error" ? (
+        <p className="dsh-wb-alert" role="alert">{ui.readError.runtimes ?? t(locale, "app.genericError")}</p>
+      ) : null}
+      <label className="dsh-wb-field">
+        {t(locale, "detail.dshTarget")}
+        <select value={target} disabled={!ready} onChange={(event) => setTarget(event.target.value)}>
+          {versions.map((version) => (
+            <option key={version} value={version}>{version}</option>
+          ))}
+        </select>
+      </label>
+      <p className="dsh-wb-muted">{t(locale, "detail.dshHint")}</p>
+      <button
+        type="button"
+        className="dsh-wb-btn"
+        disabled={disabled}
+        onClick={() => controller.preview({ kind: "space.runtime.set", spaceId: space.id, version: target })}
+      >
+        {t(locale, "detail.dshPreview")}
+      </button>
+    </>
+  );
+}
+
 function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceId: string }): ReactElement {
   const locale = ui.locale;
   const space = controller.space(spaceId);
@@ -1279,6 +1338,9 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
             <dt>{t(locale, "detail.isolation")}</dt>
             <dd>{space.isolation}</dd>
           </dl>
+        )}
+        {space && space.managed && !controller.isManagerId(space.id) && (
+          <DshVersionSection ui={ui} controller={controller} space={space} />
         )}
         {detail && (
           <>

@@ -243,7 +243,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
       needsIsolation: false,
       dshVersion: null,
     },
-    space("alpha", "Alpha"),
+    { ...space("alpha", "Alpha"), dshVersion: "0.1.5-rc.1" },
     space("beta", "Beta"),
   ];
   const state: WorkbenchState = {
@@ -336,7 +336,11 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
       bytes: 0,
       restorable: false,
     }),
-    runtimes: async () => [],
+    runtimes: async () => [
+      { version: "0.1.5-rc.1", installed: true, host: true, pinnedBy: ["alpha"], removable: false, compatible: true },
+      { version: "0.2.0", installed: false, host: false, pinnedBy: [], removable: false, compatible: true },
+      { version: "0.3.0", installed: true, host: false, pinnedBy: [], removable: true, compatible: true },
+    ],
     backups: async () => [],
   };
 }

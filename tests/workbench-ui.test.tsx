@@ -958,7 +958,91 @@ test("SSR ready home shows management actions and plugin install wording", async
   ctrl.setHomeTab("runtime");
   await flush();
   const runtime = ready(ctrl);
-  assert.ok(runtime.includes(t("zh", "runtime.install")));
+  assert.ok(runtime.includes(t("zh", "runtime.installed")));
+  assert.ok(!runtime.includes(`>${t("zh", "runtime.install")}<`), "installed host runtime has no install button");
+});
+
+function runtimeEntry(partial: Partial<WorkbenchRuntime> & Pick<WorkbenchRuntime, "version">): WorkbenchRuntime {
+  return { installed: false, host: false, pinnedBy: [], removable: false, compatible: true, ...partial };
+}
+
+test("detail dialog shows the pinned DSH version and offers only compatible upgrades", async () => {
+  const api = fakeApi({
+    state: async () => state({ spaces: [manager, space({ id: "alpha", dshVersion: "0.9.9" })] }),
+    runtimes: async () => {
+      calls.push({ method: "runtimes", arg: undefined });
+      return [
+        runtimeEntry({ version: "0.9.8", installed: true }),
+        runtimeEntry({ version: "0.9.9", installed: true, pinnedBy: ["alpha"] }),
+        runtimeEntry({ version: "0.9.10" }),
+        runtimeEntry({ version: "1.0.0", compatible: false }),
+      ];
+    },
+  });
+  const calls = api.calls;
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  assert.ok(api.calls.some((item) => item.method === "runtimes"), "opening details loads runtimes");
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "detail.dshVersion")));
+  assert.ok(html.includes('value="0.9.9"'));
+  assert.ok(html.includes('value="0.9.10"'));
+  assert.ok(!html.includes('value="0.9.8"'), "lower versions are filtered out");
+  assert.ok(!html.includes('value="1.0.0"'), "incompatible versions are filtered out");
+  assert.ok(html.includes(t("zh", "detail.dshHint")));
+  assert.ok(html.includes(`<button type="button" class="dsh-wb-btn">${t("zh", "detail.dshPreview")}</button>`));
+});
+
+test("detail dialog shows not pinned and defaults to the host version", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () => state({ dshVersion: "0.2.0-rc.2", spaces: [manager, alpha] }),
+    runtimes: async () => [runtimeEntry({ version: "0.2.0-rc.2", installed: true, host: true })],
+  }));
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "detail.dshNotPinned")));
+  assert.ok(html.includes('value="0.2.0-rc.2"'));
+});
+
+test("detail DSH section is hidden for the manager", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openDetail("hub");
+  await flush();
+  await flush();
+  assert.ok(!ready(ctrl).includes(t("zh", "detail.dshVersion")));
+});
+
+test("runtime tab shows pinned users and gates install/remove buttons", async () => {
+  const ctrl = controller(fakeApi({
+    runtimes: async () => [
+      runtimeEntry({ version: "0.2.0-rc.2", installed: true, host: true, pinnedBy: ["alpha", "beta"] }),
+      runtimeEntry({ version: "0.3.0", installed: true, removable: true }),
+      runtimeEntry({ version: "0.4.0" }),
+    ],
+  }));
+  await ctrl.poll();
+  ctrl.setHomeTab("runtime");
+  await flush();
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes("被 alpha、beta 使用"));
+  assert.equal(html.split(t("zh", "runtime.install")).length - 1, 1, "install only for the missing non-host runtime");
+  assert.equal(html.split(`>${t("zh", "runtime.remove")}<`).length - 1, 1, "remove only for the removable runtime");
+});
+
+test("create dialog shows the host DSH version", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openCreate();
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "create.dshVersion", { version: "0.1.5-rc.1" })));
 });
 
 test("workspace iframe src is only the authorized view and pending stays hidden", async () => {

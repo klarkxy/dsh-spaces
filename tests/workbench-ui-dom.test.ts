@@ -265,3 +265,84 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   assert.ok(calls.some((item) => item.method === "submit" && item.arg?.kind === "catalog.refresh"));
   assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "share.export"));
 });
+
+test("DOM: space details and runtime tab preview DSH version plans", { timeout: 120_000 }, async (t) => {
+  const bundled = await esbuild.build({
+    absWorkingDir: root,
+    entryPoints: [join(audit, "host.tsx")],
+    bundle: true,
+    write: false,
+    format: "iife",
+    platform: "browser",
+    jsx: "automatic",
+    outfile: "host.js",
+  });
+  const hostJs = bundled.outputFiles[0]?.text ?? "";
+  const childHtml = readFileSync(join(audit, "child.html"), "utf8");
+
+  const child = await listen((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(childHtml);
+  });
+  t.after(() => child.close());
+
+  let supervisorUrl = "";
+  const supervisor = await listen((req, res) => {
+    const url = new URL(req.url ?? "/", supervisorUrl || "http://127.0.0.1");
+    if (routeView(url, child.url, res)) return;
+    if (url.pathname === "/host.js") {
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+      res.end(hostJs);
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>workbench fixture</title></head>
+  <body>
+    <div id="root" style="height:100vh"></div>
+    <script>window.__WB = ${JSON.stringify({ supervisor: supervisorUrl, child: child.url })};</script>
+    <script src="/host.js"></script>
+  </body>
+</html>`);
+  });
+  supervisorUrl = supervisor.url;
+  t.after(() => supervisor.close());
+
+  const require = createRequire(join(playwrightRoot, "index.js"));
+  const { chromium } = require("playwright") as {
+    chromium: { launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{ close: () => Promise<void>; newPage: () => Promise<Page> }> };
+  };
+  const browser = await launchChromium(chromium);
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(supervisor.url, { waitUntil: "networkidle" });
+
+  const previewCalls = () =>
+    page.evaluate(
+      () =>
+        ((window as Window & { __WB_CALLS?: Array<{ method: string; arg?: unknown }> }).__WB_CALLS ?? [])
+          .filter((item) => item.method === "preview")
+          .map((item) => item.arg),
+    );
+
+  await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "空间" }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "诊断" }).click();
+  const select = page.locator("select");
+  await select.waitFor({ state: "visible", timeout: 15_000 });
+  await select.selectOption("0.2.0");
+  await page.getByRole("button", { name: "预览切换" }).click();
+  await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
+  assert.deepEqual(await previewCalls(), [{ kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" }]);
+  await page.getByRole("button", { name: "取消" }).click();
+
+  await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "运行时" }).click();
+  await page.getByRole("button", { name: "删除" }).click();
+  await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
+  assert.deepEqual(await previewCalls(), [
+    { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
+    { kind: "runtime.remove", version: "0.3.0" },
+  ]);
+});
