@@ -58,6 +58,17 @@ export function stageComponentPayload(
   return copyComponentPayload(source.payloadRootLib, dest);
 }
 
+export function readSelectedPointerDigest(
+  home: string,
+  toolsRoot: string,
+  access?: ComponentHomeAccess,
+): string | undefined {
+  const homeReal = boundHome(home, access);
+  const homeDigest = digestHomeIdentity(homeReal);
+  const toolsReal = boundToolsRoot(toolsRoot, homeReal);
+  return readPointer(toolsReal, homeDigest)?.artifactDigest;
+}
+
 export function readSelectedComponentPayload(
   home: string,
   toolsRoot: string,
@@ -66,26 +77,8 @@ export function readSelectedComponentPayload(
   const homeReal = boundHome(home, access);
   const homeDigest = digestHomeIdentity(homeReal);
   const toolsReal = boundToolsRoot(toolsRoot, homeReal);
-  const pointer = selectedPointerPath(toolsReal, homeDigest);
-  let raw: string;
-  try {
-    const st = lstatSync(pointer);
-    if (st.isSymbolicLink() || !st.isFile()) {
-      throw fail("Selected component payload pointer is not a regular file.");
-    }
-    raw = readFileSync(pointer, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    if (error instanceof ComponentSelectionError || error instanceof ComponentPayloadError) throw error;
-    throw fail("Selected component payload pointer could not be read.");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw fail("Selected component payload pointer is not valid JSON.");
-  }
-  const row = parsePointer(parsed, homeDigest);
+  const row = readPointer(toolsReal, homeDigest);
+  if (!row) return undefined;
   const lib = join(toolsReal, "components", row.artifactDigest, "lib");
   const selected = validateComponentPayload(lib);
   if (selected.digest !== row.artifactDigest) {
@@ -131,6 +124,29 @@ export function selectComponentPayload(
     )}\n`,
   );
   return selected;
+}
+
+function readPointer(toolsReal: string, homeDigest: string): { artifactDigest: string } | undefined {
+  const pointer = selectedPointerPath(toolsReal, homeDigest);
+  let raw: string;
+  try {
+    const st = lstatSync(pointer);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw fail("Selected component payload pointer is not a regular file.");
+    }
+    raw = readFileSync(pointer, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if (error instanceof ComponentSelectionError || error instanceof ComponentPayloadError) throw error;
+    throw fail("Selected component payload pointer could not be read.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw fail("Selected component payload pointer is not valid JSON.");
+  }
+  return parsePointer(parsed, homeDigest);
 }
 
 function parsePointer(value: unknown, homeDigest: string): { artifactDigest: string } {

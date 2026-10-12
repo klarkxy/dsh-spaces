@@ -9,6 +9,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   readSelectedComponentPayload,
+  readSelectedPointerDigest,
   selectComponentPayload,
   stageComponentPayload,
   coldStartLockLabel,
@@ -198,9 +199,10 @@ export async function bootstrapSupervisor(
     return fail(["snapshotRoot must be a real directory outside snapshot-replaced Home entries."]);
   }
 
-  let selected: ValidatedComponentPayload | undefined;
+  let selectedPayloadDir: string | undefined;
   try {
-    selected = readSelectedComponentPayload(home, toolsRoot, access);
+    const pointerDigest = readSelectedPointerDigest(home, toolsRoot, access);
+    selectedPayloadDir = pointerDigest ? join(toolsRoot, "components", pointerDigest, "lib") : undefined;
   } catch (error) {
     return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
   }
@@ -211,7 +213,7 @@ export async function bootstrapSupervisor(
   }
   const reservation = new HomeOperationLock(toolsRoot);
   if (initiallyPreparing) {
-    return await pollEndpoint(home, selected?.payloadRootLib ?? payloadRoot, toolsRoot, options, [
+    return await pollEndpoint(home, selectedPayloadDir ?? payloadRoot, toolsRoot, options, [
       "Another supervisor cold start was already in progress when this request began.",
     ]);
   }
@@ -235,7 +237,7 @@ export async function bootstrapSupervisor(
       // The initial discovery is bound to this launch. A failed competing launch
       // must not become a second automatic attempt by a waiter.
       const current = await attachExistingSupervisor({ home, allowRealHome: access.allowRealHome, fetch: options.fetch });
-      if ("endpoint" in current) return { connected: true, origin: current.endpoint.origin, endpoint: current.endpoint, payloadDir: selected?.payloadRootLib ?? payloadRoot, toolsDir: toolsRoot };
+      if ("endpoint" in current) return { connected: true, origin: current.endpoint.origin, endpoint: current.endpoint, payloadDir: selectedPayloadDir ?? payloadRoot, toolsDir: toolsRoot };
       if (!("missing" in current)) return fail(current.reasons);
       if (readLaunchMarker(home, toolsRoot) !== initialLaunch) {
         return fail(["Another startup finished before this request obtained ownership. No second startup was attempted.", ...readLastSupervisorDiagnostics(home, toolsRoot)]);
@@ -243,14 +245,27 @@ export async function bootstrapSupervisor(
       options.progress?.("prepare");
       diagnosticFile = beginLaunchDiagnostics(home, toolsRoot);
       retirePreviousSupervisor(home, "missing" in attached ? attached.previousOwner : undefined, access.allowRealHome);
+      let bundled: ValidatedComponentPayload;
       try {
-        selected = readSelectedComponentPayload(home, toolsRoot, access);
+        bundled = validateComponentPayload(payloadRoot);
+      } catch (error) {
+        return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
+      }
+      let pointerDigest: string | undefined;
+      try {
+        pointerDigest = readSelectedPointerDigest(home, toolsRoot, access);
       } catch (error) {
         return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
       }
-      if (!selected) {
+      let selected: ValidatedComponentPayload | undefined;
+      if (pointerDigest === bundled.digest) {
         try {
-          validateComponentPayload(payloadRoot);
+          selected = readSelectedComponentPayload(home, toolsRoot, access);
+        } catch (error) {
+          return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
+        }
+      } else {
+        try {
           const staged = stageComponentPayload(home, toolsRoot, payloadRoot, access);
           selected = selectComponentPayload(home, toolsRoot, staged.digest, access);
         } catch (error) {
@@ -351,7 +366,7 @@ export async function bootstrapSupervisor(
     return result;
   } catch (error) {
     if (!entered && error instanceof HomeLockBusyError) {
-      return await pollEndpoint(home, selected?.payloadRootLib ?? payloadRoot, toolsRoot, options, [
+      return await pollEndpoint(home, selectedPayloadDir ?? payloadRoot, toolsRoot, options, [
         "Another supervisor cold start is already in progress.",
       ]);
     }

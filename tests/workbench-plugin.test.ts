@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn as spawnChild } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -32,7 +32,7 @@ import {
   bootstrapSupervisor,
   writeEndpointFile,
 } from "../packages/plugin/src/host/supervisor-bootstrap.ts";
-import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
+import { writeComponentPayloadManifest, validateComponentPayload, COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
 import {
   readSelectedComponentPayload,
   selectComponentPayload,
@@ -749,7 +749,7 @@ test("v1 supervisor manifest is not a successful payload", async () => {
   assert.ok(result.reasons.some((row) => /schemaVersion|staged|payload/i.test(row)));
 });
 
-test("selected pointer is authoritative and is not overwritten by a new bundled payload", async () => {
+test("a selected payload with a different digest is replaced by the bundled payload", async () => {
   const home = tempDir("dsh-wb-selected-");
   writeProfile(home, "web");
   const toolsRoot = tempDir("dsh-wb-selected-tools-");
@@ -757,6 +757,8 @@ test("selected pointer is authoritative and is not overwritten by a new bundled 
   const staged = stageComponentPayload(home, toolsRoot, firstLib);
   const selected = await new HomeOperationLock(toolsRoot).run(coldStartLockLabel(home), async () => selectComponentPayload(home, toolsRoot, staged.digest));
   const bundled = writePayload(tempDir("dsh-wb-selected-bundled-"), "bundled");
+  const bundledDigest = validateComponentPayload(bundled).digest;
+  assert.notEqual(staged.digest, bundledDigest);
   const bearer = "B".repeat(32);
   const epochRef = { value: HEX64_A };
   const fixture = await startFixture({ bearer, epochRef });
@@ -783,9 +785,98 @@ test("selected pointer is authoritative and is not overwritten by a new bundled 
     });
     assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
     const again = readSelectedComponentPayload(home, toolsRoot);
-    assert.equal(again?.digest, selected.digest);
+    assert.ok(again);
+    assert.equal(again.digest, bundledDigest);
+    assert.ok(spawned[0]?.includes(again.payloadRootLib));
+    assert.equal(result.connected && result.payloadDir, again.payloadRootLib);
+    assert.ok(existsSync(join(toolsRoot, "components", selected.digest)));
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("a selected payload matching the bundled digest launches without restaging", async () => {
+  const home = tempDir("dsh-wb-same-");
+  writeProfile(home, "web");
+  const toolsRoot = tempDir("dsh-wb-same-tools-");
+  const bundled = writePayload(tempDir("dsh-wb-same-payload-"), "bundled");
+  const staged = stageComponentPayload(home, toolsRoot, bundled);
+  const selected = await new HomeOperationLock(toolsRoot).run(coldStartLockLabel(home), async () => selectComponentPayload(home, toolsRoot, staged.digest));
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const spawned: string[][] = [];
+  const packedRoots: string[] = [];
+  try {
+    const result = await bootstrapSupervisor({
+      home,
+      argv: [process.execPath, writeCli(home), "--profile", "web"],
+      env: { ...process.env, DSH_HOME: home },
+      execPath: process.execPath,
+      payloadRoot: bundled,
+      toolsRoot,
+      allowColdStart: true,
+      timeoutMs: 3_000,
+      pollMs: 20,
+      pack: async (request) => { packedRoots.push(request.packageRoot); return stubPack(request); },
+      fetch: (input, init) => fetch(input, init),
+      spawn: (request) => {
+        spawned.push([...request.argv]);
+        const handle = leaseWeb(home, fixture.origin);
+        epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+        writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+      },
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+    assert.ok(packedRoots.includes(selected.packageRoot));
     assert.ok(spawned[0]?.includes(selected.payloadRootLib));
-    assert.equal(result.connected && result.payloadDir, selected.payloadRootLib);
+    assert.deepEqual(readdirSync(join(toolsRoot, "components")), [selected.digest]);
+    assert.equal(readSelectedComponentPayload(home, toolsRoot)?.digest, selected.digest);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("a well-formed pointer to a payload that fails validation is replaced by the bundled payload", async () => {
+  const home = tempDir("dsh-wb-stale-");
+  writeProfile(home, "web");
+  const toolsRoot = tempDir("dsh-wb-stale-tools-");
+  const firstLib = writePayload(tempDir("dsh-wb-stale-first-"), "first");
+  const staged = stageComponentPayload(home, toolsRoot, firstLib);
+  await new HomeOperationLock(toolsRoot).run(coldStartLockLabel(home), async () => selectComponentPayload(home, toolsRoot, staged.digest));
+  rmSync(join(toolsRoot, "components", staged.digest, "lib", "supervisor", "index.js"));
+  const bundled = writePayload(tempDir("dsh-wb-stale-bundled-"), "bundled");
+  const bundledDigest = validateComponentPayload(bundled).digest;
+  const bearer = "B".repeat(32);
+  const epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const spawned: string[][] = [];
+  try {
+    const result = await bootstrapSupervisor({
+      home,
+      argv: [process.execPath, writeCli(home), "--profile", "web"],
+      env: { ...process.env, DSH_HOME: home },
+      execPath: process.execPath,
+      payloadRoot: bundled,
+      toolsRoot,
+      allowColdStart: true,
+      timeoutMs: 3_000,
+      pollMs: 20,
+      pack: stubPack,
+      fetch: (input, init) => fetch(input, init),
+      spawn: (request) => {
+        spawned.push([...request.argv]);
+        const handle = leaseWeb(home, fixture.origin);
+        epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+        writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+      },
+    });
+    assert.equal(result.connected, true, result.connected ? "" : result.reasons.join(" | "));
+    const again = readSelectedComponentPayload(home, toolsRoot);
+    assert.ok(again);
+    assert.equal(again.digest, bundledDigest);
+    assert.ok(spawned[0]?.includes(again.payloadRootLib));
+    assert.ok(existsSync(join(toolsRoot, "components", staged.digest)));
   } finally {
     await fixture.close();
   }
