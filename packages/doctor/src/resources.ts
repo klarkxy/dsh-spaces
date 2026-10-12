@@ -1,7 +1,6 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { HOME_CONTROL_DIR_NAME } from "../../../src/adapters/node/home-controller.ts";
-import { atomicWrite } from "../../../src/adapters/node/atomic.ts";
 import { isCompatibleDshCliVersion } from "../../../src/adapters/node/spaces-control.ts";
 import {
   CONTROL_TOOLCHAIN_FILE,
@@ -10,9 +9,6 @@ import {
   fail,
   inspectNamedDir,
   inspectNamedFile,
-  inside,
-  pathInsideAny,
-  runningToolPaths,
   type Json,
 } from "./common.ts";
 
@@ -152,125 +148,3 @@ export function resolveResources(home: string, flags: Record<string, string>): R
   return { cli, cliError, snapshotRoot, runtimeRoot, toolchainRoot, toolchain, missing };
 }
 
-export function verifyBoundRuntime(bin: string, version: string): { bin: string; version: string } {
-  const bound = bindCli(bin, false);
-  if (bound.version !== version) {
-    throw fail(EXIT.recovery, "RUNTIME_MISMATCH", "Runtime pointer did not match the restored snapshot.");
-  }
-  return { bin: bound.bin, version: bound.version };
-}
-
-export function requireWriteResources(resources: ResolvedResources, command: string): {
-  cli: BoundCli;
-  snapshotRoot: string;
-  runtimeRoot: string;
-  toolchainRoot?: string;
-} {
-  if (!resources.cli) {
-    throw fail(
-      EXIT.usage,
-      "CLI_REQUIRED",
-      `${command} needs an absolute --cli or a verified toolchain.json bin. Production app data was not guessed.`,
-      { command, missing: resources.missing },
-    );
-  }
-  if (!resources.cli.allowedWrite) {
-    throw fail(
-      EXIT.runtime,
-      "RUNTIME_REFUSED",
-      "The --cli path is not an exact DSH CLI version.",
-      { command, version: resources.cli.version },
-    );
-  }
-  if (!resources.snapshotRoot) {
-    throw fail(
-      EXIT.usage,
-      "SNAPSHOT_ROOT_REQUIRED",
-      `${command} needs --snapshot-root or toolchain.json snapshotRoot. An empty directory was not initialized as old snapshots.`,
-      { command, missing: resources.missing },
-    );
-  }
-  if (!resources.runtimeRoot) {
-    throw fail(
-      EXIT.usage,
-      "RUNTIME_ROOT_REQUIRED",
-      `${command} needs --runtime-root or toolchain.json runtimeRoot. Production toolchain paths were not guessed.`,
-      { command, missing: resources.missing },
-    );
-  }
-  return {
-    cli: resources.cli,
-    snapshotRoot: resources.snapshotRoot,
-    runtimeRoot: resources.runtimeRoot,
-    toolchainRoot: resources.toolchainRoot,
-  };
-}
-
-export function syncHomeToolchain(
-  home: string,
-  current: { bin: string; version: string },
-  roots: { snapshotRoot: string; runtimeRoot: string; toolchainRoot?: string },
-): void {
-  const path = join(home, HOME_CONTROL_DIR_NAME, CONTROL_TOOLCHAIN_FILE);
-  const state = inspectNamedFile(path);
-  let existing: Record<string, unknown> = {};
-  if (state === "unreadable" || state === "ambiguous") {
-    throw fail(
-      EXIT.recovery,
-      "TOOLCHAIN_UNREADABLE",
-      "Home toolchain record is unreadable and was not overwritten.",
-    );
-  }
-  if (state === "ok") {
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw fail(
-          EXIT.recovery,
-          "TOOLCHAIN_UNREADABLE",
-          "Home toolchain record is unreadable and was not overwritten.",
-        );
-      }
-      existing = parsed as Record<string, unknown>;
-      if (existing.version !== 1) {
-        throw fail(
-          EXIT.recovery,
-          "TOOLCHAIN_UNREADABLE",
-          "Home toolchain record uses an unsupported version and was not overwritten.",
-        );
-      }
-    } catch (error) {
-      if (error instanceof Fail) throw error;
-      throw fail(
-        EXIT.recovery,
-        "TOOLCHAIN_UNREADABLE",
-        "Home toolchain record is unreadable and was not overwritten.",
-      );
-    }
-  }
-  const next: Record<string, unknown> = { ...existing, version: 1, bin: current.bin, dshVersion: current.version };
-  if (typeof existing.nodeExe === "string" && existing.nodeExe.trim()) next.nodeExe = existing.nodeExe;
-  if (typeof existing.runtimeRoot === "string" && existing.runtimeRoot.trim()) next.runtimeRoot = existing.runtimeRoot;
-  else next.runtimeRoot = roots.runtimeRoot;
-  if (typeof existing.snapshotRoot === "string" && existing.snapshotRoot.trim()) next.snapshotRoot = existing.snapshotRoot;
-  else next.snapshotRoot = roots.snapshotRoot;
-  if (typeof existing.toolchainRoot === "string" && existing.toolchainRoot.trim()) {
-    next.toolchainRoot = existing.toolchainRoot;
-  } else if (roots.toolchainRoot) {
-    next.toolchainRoot = roots.toolchainRoot;
-  }
-  if (typeof existing.boundAt === "string" && existing.boundAt.trim()) next.boundAt = existing.boundAt;
-  else next.boundAt = new Date().toISOString();
-  atomicWrite(path, `${JSON.stringify(next, null, 2)}\n`);
-}
-
-export function assertToolIndependent(home: string, cliBin?: string): void {
-  const tools = runningToolPaths();
-  if (pathInsideAny(home, tools) || (cliBin && inside(home, cliBin))) {
-    throw fail(
-      EXIT.recovery,
-      "TOOL_INSIDE_TARGET",
-      "This doctor CLI or bound runtime lives inside the Home restore would replace. Use an independently distributed doctor.",
-    );
-  }
-}

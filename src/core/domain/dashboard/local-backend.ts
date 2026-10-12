@@ -1,5 +1,5 @@
 import type {
-  Board, BoardMutation, BoardMutationReceipt, BoundProviderRegistry, CatalogEntry,
+  BoardMutation, BoardMutationReceipt, BoundProviderRegistry, CatalogEntry,
   DashboardBackend, DashboardQuery, DashboardQueryData, DashboardQueryResponse,
   InstanceRef, InstanceView, ProviderRegistration, SourceTarget, WidgetInstance, WidgetType,
 } from '../../../shared/dashboard.js';

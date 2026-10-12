@@ -4,7 +4,7 @@
  * install it into official `web` with `dsh plugin add`, then start `dsh web`.
  *
  * Does not write the real ~/.dsh. Does not click 初始化 Spaces — that stays
- * an explicit action in the browser. Electron remains `pnpm run dev`.
+ * an explicit action in the browser.
  *
  *   node scripts/dev-dsh-web.mjs
  *
@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { assertNoSpaces, defaultPackDest } from "./pack-spaces-plugin.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ELECTRON_HOME = join(REPO, ".sandbox", "dsh-home");
+const SHARED_SANDBOX_HOME = join(REPO, ".sandbox", "dsh-home");
 const DEFAULT_HOME = join(REPO, ".sandbox", "dsh-web-home");
 const REAL_HOME = join(homedir(), ".dsh");
 const WEB_PROFILE = "web";
@@ -58,9 +58,9 @@ function resolveHome() {
   const override = process.env.DSH_SPACES_WEB_HOME?.trim();
   const home = resolve(override || DEFAULT_HOME);
   refuseRealHome(home);
-  if (samePath(home, ELECTRON_HOME)) {
+  if (samePath(home, SHARED_SANDBOX_HOME)) {
     throw new Error(
-      "dev:web Home must not be the Electron sandbox (.sandbox/dsh-home). Unset DSH_SPACES_WEB_HOME or point it at a separate directory.",
+      "dev:web Home must not be the shared sandbox (.sandbox/dsh-home). Unset DSH_SPACES_WEB_HOME or point it at a separate directory.",
     );
   }
   return home;
@@ -222,7 +222,6 @@ function startWeb(cli, home) {
 
 function main() {
   info("runtime: official dsh web with this plugin preinstalled");
-  info("Electron shell is pnpm run dev");
 
   const home = resolveHome();
   const cli = resolveCli();

@@ -1,7 +1,7 @@
 import type {
   BoardMutation, BoardMutationReceipt, CatalogEntry, DashboardBackend, DashboardQuery,
   DashboardQueryData, DashboardQueryResponse, HeartbeatAck, InstanceRef, InstanceView,
-  PublicationPlanInput, PublicationPolicy, PublicationSelection, PublisherGrant,
+  PublicationPlanInput, PublicationPolicy, PublisherGrant,
   PublishAck, SourceSummary, SourceTarget,
 } from '../../../shared/dashboard.js';
 import { emptyLayout, parseLayoutDocument, prepareLayout, readReceipt, type LayoutDocument } from './boards.js';
@@ -10,7 +10,7 @@ import { CHANNEL_STALE_MS, DASHBOARD_LIMITS } from './limits.js';
 import { preparePublication, readProjection, selectionAllows, type Projection } from './projection.js';
 import {
   byteLength, canonicalJson, copyJson, identifier, object, parseHeartbeat, parsePublicationPlan,
-  parsePublishAck, parsePublishRequest, parseQuery, parseSelection, refKey, timestampMillis,
+  parsePublishAck, parsePublishRequest, parseQuery, parseSelection, refKey
 } from './validation.js';
 
 export type StoredPublicationPolicy = Omit<PublicationPolicy, 'pendingStart'>;

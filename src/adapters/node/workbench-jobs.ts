@@ -1130,10 +1130,6 @@ function isEnoent(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT");
 }
 
-function isSettleStatus(value: unknown): value is WorkbenchJobSettleStatus {
-  return value === "succeeded" || value === "failed" || value === "cancelled";
-}
-
 function isJobErrorCode(value: string): value is WorkbenchJobErrorCode {
   return Object.prototype.hasOwnProperty.call(WORKBENCH_JOB_ERROR, value);
 }

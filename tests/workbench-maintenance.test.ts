@@ -76,21 +76,6 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-test("ROOT abandoned package recover is unsupported and does not clear evidence", async () => {
-  let active = true;
-  const packageUpgrade = {
-    hasEvidence: () => active,
-    recover: async () => {
-      active = false;
-      return { planId: "11111111-1111-4111-8111-111111111111", rolledBack: false, outcome: "abandoned" };
-    },
-  } as unknown as WorkbenchMaintenancePorts["packageUpgrade"];
-  const { maintenance } = harness({ packageUpgrade });
-  await assert.rejects(() => maintenance.recover(), matchCode("workbench/forbidden"));
-  assert.equal(active, true);
-  assert.equal(maintenance.recoveryOutcome(), undefined);
-});
-
 test("preview hands space and controller actions to supervisor runtime", async () => {
   const { maintenance } = harness();
   await assert.rejects(() => maintenance.preview({ kind: "space.stop", spaceId: "coding" }), matchCode("workbench/runtime-handoff"));
@@ -470,151 +455,6 @@ test("cancel is honored before mutation and ignored after the irreversible point
   assert.deepEqual(state2.started, ["coding"]);
 });
 
-test("recover is unsupported and does not reconcile pending snapshot or wipe an unreadable journal", async () => {
-  let pending: {
-    snapshotId: string;
-    beforeRestoreId: string;
-    runtimeVersion: string;
-    binRelative: string;
-    startedAt: string;
-  } | undefined = {
-    snapshotId: "11111111-1111-1111-1111-111111111111",
-    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
-    runtimeVersion: "0.1.5-rc.1",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-  };
-  let recoveredPending = false;
-  const { maintenance, state } = harness({
-    pendingRestore: () => pending,
-    recoverUpgrade: async () => {
-      recoveredPending = true;
-      pending = undefined;
-      return { restoreCompleted: true };
-    },
-  });
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(recoveredPending, false);
-  assert.ok(pending);
-  assert.equal(state.reinitialized, 0);
-  assert.equal(state.restoreCalls, 0);
-  assert.equal(maintenance.recoveryOutcome(), undefined);
-
-  const blocked = harness();
-  mkdirSync(join(blocked.home, UPGRADE_STAGE_DIR), { recursive: true });
-  const journal = join(blocked.home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
-  writeFileSync(journal, "{not-json");
-  const journalBefore = readFileSync(journal);
-  let recovered = false;
-  blocked.state.recoverUpgrade = async () => {
-    recovered = true;
-    return {};
-  };
-  await assert.rejects(() => blocked.maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(recovered, false);
-  assert.deepEqual(readFileSync(journal), journalBefore);
-  assert.equal(blocked.maintenance.recoveryOutcome(), undefined);
-  assert.equal(blocked.state.reinitialized, 0);
-});
-
-test("unreadable pending restore is left in place and recover is unsupported", async () => {
-  const { maintenance, state } = harness({
-    pendingRestore: () => {
-      throw new Error("unreadable restore record");
-    },
-  });
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(maintenance.recoveryOutcome(), undefined);
-  assert.equal(state.restoreCalls, 0);
-  assert.equal(state.reinitialized, 0);
-});
-
-test("repeated recover stays unsupported and does not settle empty journals", async () => {
-  let pending: {
-    snapshotId: string;
-    beforeRestoreId: string;
-    runtimeVersion: string;
-    binRelative: string;
-    startedAt: string;
-  } | undefined = {
-    snapshotId: "11111111-1111-1111-1111-111111111111",
-    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
-    runtimeVersion: "0.1.5-rc.1",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-  };
-  let recovered = false;
-  const { maintenance } = harness({
-    pendingRestore: () => pending,
-    recoverUpgrade: async () => {
-      recovered = true;
-      pending = undefined;
-      return { restoreCompleted: true };
-    },
-  });
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(recovered, false);
-  assert.ok(pending);
-  assert.equal(maintenance.recoveryOutcome(), undefined);
-});
-
-test("recover is unsupported and does not stop instances or change pointers", async () => {
-  let recovered = false;
-  const { maintenance, state } = harness({
-    pendingRestore: () => ({
-      snapshotId: "11111111-1111-1111-1111-111111111111",
-      beforeRestoreId: "22222222-2222-2222-2222-222222222222",
-      runtimeVersion: "0.1.5-rc.1",
-      binRelative: "bin.js",
-      startedAt: "2026-09-12T00:00:00.000Z",
-    }),
-    recoverUpgrade: async () => {
-      recovered = true;
-      return { restoreCompleted: true };
-    },
-  });
-  state.stopAllImpl = async () => {
-    throw new Error("stop failed");
-  };
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(recovered, false);
-  assert.equal(state.reinitialized, 0);
-  assert.equal(state.stopAll, 0);
-  assert.equal(state.restoreCalls, 0);
-  assert.equal(maintenance.recoveryOutcome(), undefined);
-});
-
-test("recover is unsupported and does not clear plugin-mutation or upgrade journal", async () => {
-  const { home, maintenance, state } = harness();
-  mkdirSync(join(home, UPGRADE_STAGE_DIR), { recursive: true });
-  const journal = join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
-  writeFileSync(
-    journal,
-    `${JSON.stringify({ phase: "preparing", planId: "plan-upgrade-1", snapshotId: "11111111-1111-1111-1111-111111111111" })}\n`,
-  );
-  const mutation = `${JSON.stringify({
-    schemaVersion: 1,
-    phase: "mutating",
-    planId: "plan-plugin-1",
-    spaceIds: ["coding"],
-    expected: [],
-    startedAt: "2026-01-01T00:00:00.000Z",
-  })}\n`;
-  mkdirSync(join(home, WORKBENCH_CONTROL_DIR_NAME), { recursive: true });
-  writeFileSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE), mutation);
-  const journalBefore = readFileSync(journal);
-  state.recoverUpgrade = async () => {
-    rmSync(journal, { force: true });
-    return { upgradeRolledBack: true };
-  };
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(readFileSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE), "utf8"), mutation);
-  assert.deepEqual(readFileSync(journal), journalBefore);
-  assert.equal(state.reinitialized, 0);
-  assert.equal(state.restoreCalls, 0);
-});
-
 test("runtime upgrade execute passes the stored plan id", async () => {
   const { maintenance, state } = harness();
   state.upgrade = async (version) => ({
@@ -626,42 +466,6 @@ test("runtime upgrade execute passes the stored plan id", async () => {
   const plan = await maintenance.preview({ kind: "runtime.upgrade", version: "0.1.5-rc.1" });
   await maintenance.execute(plan.id, jobCtx());
   assert.equal(state.lastUpgradePlanId, plan.id);
-});
-
-test("recover is unsupported and does not rewrite a junctioned profiles tree", async () => {
-  let pending: {
-    snapshotId: string;
-    beforeRestoreId: string;
-    runtimeVersion: string;
-    binRelative: string;
-    startedAt: string;
-  } | undefined = {
-    snapshotId: "11111111-1111-1111-1111-111111111111",
-    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
-    runtimeVersion: "0.1.5-rc.1",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-  };
-  let recovered = false;
-  const { home, maintenance, state } = harness({
-    pendingRestore: () => pending,
-    recoverUpgrade: async () => {
-      recovered = true;
-      pending = undefined;
-      return { restoreCompleted: true };
-    },
-  });
-  const profiles = join(home, "profiles");
-  const hidden = join(home, "elsewhere-profiles");
-  rmSync(hidden, { recursive: true, force: true });
-  rmSync(profiles, { recursive: true, force: true });
-  mkdirSync(hidden, { recursive: true });
-  symlinkSync(hidden, profiles, process.platform === "win32" ? "junction" : "dir");
-  await assert.rejects(() => maintenance.recover(jobCtx()), matchCode("workbench/forbidden"));
-  assert.equal(recovered, false);
-  assert.ok(pending);
-  assert.equal(state.restoreCalls, 0);
-  assert.equal(maintenance.recoveryOutcome(), undefined);
 });
 
 test("plugin mutation failure keeps diagnostic files, stops the target, and does not fake a manifest rollback", async () => {
@@ -734,9 +538,6 @@ test("plugin lock mismatch fails verification and interrupted mutation stays ope
   });
   await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
   assert.equal(existsSync(join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_PLUGIN_MUTATION_FILE)), true);
-
-  const again = createMaintenance(home, state, { fetch: defaultOutlineFetch(), pluginAdd: addFromTarball });
-  await assert.rejects(() => again.recover(jobCtx()), matchCode("workbench/forbidden"));
   assert.equal(state.started.includes("coding"), false);
 });
 
@@ -817,7 +618,6 @@ test("snapshot restore preview and execute are unsupported", async () => {
     () => maintenance.preview({ kind: "snapshot.restore", snapshotId } as never),
     matchCode("workbench/unsupported"),
   );
-  assert.equal(state.restoreCalls, 0);
   assert.equal(existsSync(join(home, WORKBENCH_CONTROL_DIR_NAME, "plans")), false);
   assert.deepEqual(readFileSync(codingManifest), before);
 
@@ -849,7 +649,6 @@ test("snapshot restore preview and execute are unsupported", async () => {
     })}\n`,
   );
   await assert.rejects(() => maintenance.execute(planId, jobCtx()), matchCode("workbench/unsupported"));
-  assert.equal(state.restoreCalls, 0);
   assert.deepEqual(readFileSync(codingManifest), before);
 });
 
@@ -876,7 +675,6 @@ test("config restore preview is unsupported and does not restore or reinitialize
       } as never),
     matchCode("workbench/unsupported"),
   );
-  assert.deepEqual(state.restored, []);
   assert.equal(state.reinitialized, 0);
   assert.equal(state.started.includes("coding"), false);
   assert.deepEqual(readFileSync(codingManifest), before);
@@ -923,13 +721,10 @@ interface HarnessState {
   reinitialized: number;
   maintenance: boolean[];
   order: string[];
-  restored: string[];
   backups: Array<{ id: string; createdAt: string; size: number; tooLarge: boolean }>;
-  restoreCalls: number;
   onStop?: () => void;
   stopAllImpl?: () => Promise<void>;
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
-  recoverUpgrade?: CoordinatedUpgrade["recover"];
   lastUpgradePlanId?: string;
   upgrade?: (version: string, planId?: string) => Promise<{ version: string; snapshotId: string; profiles: string[]; official: { base?: string; web?: string } }>;
 }
@@ -942,7 +737,6 @@ function harness(overrides: {
   pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
   snapshotsCreate?: SnapshotExecutor["create"];
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
-  recoverUpgrade?: CoordinatedUpgrade["recover"];
   log?: (message: string, error?: unknown) => void;
 } = {}) {
   const home = tempDir("dsh-spaces-maint-");
@@ -960,11 +754,8 @@ function harness(overrides: {
     reinitialized: 0,
     maintenance: [],
     order: [],
-    restored: [],
     backups: [],
-    restoreCalls: 0,
     pendingRestore: overrides.pendingRestore,
-    recoverUpgrade: overrides.recoverUpgrade,
   };
   const maintenance = createMaintenance(home, state, overrides);
   return { home, state, maintenance };
@@ -981,7 +772,6 @@ function createMaintenance(
     pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
     snapshotsCreate?: SnapshotExecutor["create"];
     pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
-    recoverUpgrade?: CoordinatedUpgrade["recover"];
     log?: (message: string, error?: unknown) => void;
   } = {},
 ): WorkbenchMaintenance {
@@ -998,15 +788,9 @@ function createMaintenance(
       runtimeBin: () => "bin.js",
       runtimeRoot: () => home,
       pendingRestore: () => state.pendingRestore?.() ?? overrides.pendingRestore?.(),
-      completeRestore: () => undefined,
       create: overrides.snapshotsCreate ?? (async () => {
         throw new Error("snapshot create not stubbed");
       }),
-      restore: async () => {
-        state.restoreCalls += 1;
-        throw new Error("snapshot restore must not be called");
-      },
-      recover: async () => state.pendingRestore?.(),
       delete: async () => undefined,
     } as SnapshotExecutor,
     runtimes: {
@@ -1024,13 +808,6 @@ function createMaintenance(
         if (state.upgrade) return state.upgrade(version, planId);
         throw new Error("upgrade not stubbed");
       },
-      restore: async () => {
-        throw new Error("restore not stubbed");
-      },
-      recover: async () => {
-        state.order.push("recover");
-        return state.recoverUpgrade ? state.recoverUpgrade() : overrides.recoverUpgrade ? overrides.recoverUpgrade() : {};
-      },
     } as CoordinatedUpgrade,
     diagnostics: {
       get: (name: string) => ({
@@ -1040,11 +817,6 @@ function createMaintenance(
         backups: state.backups,
         canRestore: name !== "web",
       }),
-      restoreBackup: async (name: string) => {
-        state.restored.push(name);
-        state.stopped.push(name);
-        state.status[name] = "stopped";
-      },
     } as DiagnosticsService,
     managerId: () => "spaces-hub",
     assertWritable: () => {
@@ -1120,9 +892,7 @@ function snapshotHarness() {
     reinitialized: 0,
     maintenance: [],
     order: [],
-    restored: [],
     backups: [],
-    restoreCalls: 0,
   };
   const ports: WorkbenchMaintenancePorts = {
     home,
@@ -1138,12 +908,6 @@ function snapshotHarness() {
       preview: (version: string) => ({ version, profiles: [] }),
       upgrade: async () => {
         throw new Error("unused");
-      },
-      restore: async (id: string) => store.restore(id, runtime),
-      recover: async () => {
-        const pending = store.recover() ?? store.pendingRestore();
-        if (pending) store.completeRestore();
-        return pending ? { restoreCompleted: true } : {};
       },
     } as CoordinatedUpgrade,
     diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as DiagnosticsService,
@@ -1228,9 +992,7 @@ async function upgradeHarness() {
     reinitialized: 0,
     maintenance: [],
     order: [],
-    restored: [],
     backups: [],
-    restoreCalls: 0,
   };
   const ports: WorkbenchMaintenancePorts = {
     home,
@@ -1281,10 +1043,7 @@ function executorFromStore(store: SnapshotStore): SnapshotExecutor {
     runtimeBin: (id: string) => store.runtimeBin(id),
     runtimeRoot: (id: string) => store.runtimeRoot(id),
     pendingRestore: () => store.pendingRestore(),
-    completeRestore: () => store.completeRestore(),
     create: async (runtime: SnapshotRuntime, reason?: string) => store.create(runtime, reason),
-    restore: async (id: string, runtime?: SnapshotRuntime) => store.restore(id, runtime),
-    recover: async () => store.recover(),
     delete: async (id: string) => {
       store.delete(id);
     },

@@ -3,7 +3,6 @@ import type {
   WorkbenchJob,
   WorkbenchPlan,
   WorkbenchPlugin,
-  WorkbenchRuntime,
   WorkbenchSnapshot,
   WorkbenchSpace,
   WorkbenchState,

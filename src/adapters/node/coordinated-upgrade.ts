@@ -13,7 +13,6 @@ import {
 import { createRequire } from "node:module";
 import { type ChildProcess, type SpawnOptions } from "node:child_process";
 import { withoutChildObservation, type ChildObservation } from "./owned-process-record";
-import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,8 +29,7 @@ import { renameDirectory as renameSync } from "./atomic";
 import { sanitizeLogText } from "./diagnostics";
 import { PROTECTED_PLUGIN_PACKAGES } from "../../shared/types";
 import { isExactRuntimeVersion } from "../../shared/runtime";
-import type { PendingRestore, RestoreResult, RestoreRecoveryReceipt, SnapshotMeta, SnapshotRuntime } from "../../shared/snapshots";
-import type { SnapshotRestoreOptions } from "./snapshot-store";
+import type { PendingRestore, RestoreRecoveryReceipt, SnapshotMeta, SnapshotRuntime } from "../../shared/snapshots";
 import type {
   OfficialPluginChange,
   UpgradePhase,
@@ -75,10 +73,7 @@ export interface RuntimeStoreLike {
 
 export interface SnapshotStoreLike {
   create(runtime: SnapshotRuntime, reason?: string): SnapshotMeta | Promise<SnapshotMeta>;
-  restore(id: string, currentRuntime: SnapshotRuntime, options?: SnapshotRestoreOptions): RestoreResult | Promise<RestoreResult>;
-  completeRestore(): void | Promise<void>;
   pendingRestore(): PendingRestore | undefined;
-  recover(): PendingRestore | undefined | Promise<PendingRestore | undefined>;
   recoveryReceipt?(): RestoreRecoveryReceipt | undefined;
   preview(id: string): SnapshotMeta;
   runtimeBin(id: string): string;
@@ -246,15 +241,6 @@ export class CoordinatedUpgrade {
     } finally {
       this.committed = false;
     }
-  }
-
-  async restore(_id: string, _planId?: string): Promise<RestoreResult> {
-    throw new Error("Snapshot restore is not supported.");
-  }
-
-  async recover(_options: { receiptPlanId?: string } = {}): Promise<{ upgradeRolledBack?: boolean; upgradePlanId?: string; restoreCompleted?: boolean;
-    restoreRolledBack?: boolean; restoreReceipt?: RestoreRecoveryReceipt }> {
-    throw new Error("Upgrade recovery is not supported.");
   }
 
   private assertClear(): void {

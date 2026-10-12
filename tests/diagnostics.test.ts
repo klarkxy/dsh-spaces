@@ -38,8 +38,6 @@ test("record caps logs at 1000 entries or 256KiB, whichever first, and redacts s
     home,
     profiles: () => [profile(home, "coding")],
     statusOf: () => "stopped",
-    stop: async () => undefined,
-    isMaintenance: () => false,
   });
   const chunk = "n".repeat(64 * 1024);
   for (let i = 0; i < 5; i++) bulky.record("coding", "stderr", `${chunk}-${i}`);
@@ -96,18 +94,6 @@ test("unknown profile and path-escaping backup ids are rejected", async () => {
   assert.throws(() => service.get("missing"), { message: t("errors.unknownProfile", { name: "missing" }) });
   assert.equal(service.record("missing", "stdout", "should-not-throw"), undefined);
 
-  await assert.rejects(
-    () => service.restoreBackup("coding", "../web/cordis.patch.yml.bak-keep"),
-    /not supported/,
-  );
-  await assert.rejects(
-    () => service.restoreBackup("coding", "..\\cordis.patch.yml.bak-keep"),
-    /not supported/,
-  );
-  await assert.rejects(
-    () => service.restoreBackup("coding", "cordis.patch.yml.bak-keep/../../web/cordis.patch.yml"),
-    /not supported/,
-  );
   assert.throws(
     () => service.previewBackup("coding", "/tmp/cordis.patch.yml.bak-keep"),
     /Backup id is not a configuration backup file/,
@@ -116,38 +102,19 @@ test("unknown profile and path-escaping backup ids are rejected", async () => {
   const other = join(home, "profiles", "other");
   mkdirSync(other, { recursive: true });
   writeFileSync(join(other, "cordis.patch.yml.bak-stolen"), "stolen\n", "utf8");
-  await assert.rejects(
-    () => service.restoreBackup("coding", "cordis.patch.yml.bak-stolen"),
-    /not supported/,
-  );
   assert.equal(readFileSync(join(other, "cordis.patch.yml.bak-stolen"), "utf8"), "stolen\n");
   assert.equal(readFileSync(join(dir, "cordis.patch.yml.bak-keep"), "utf8"), "- id: keep\n");
 });
 
-test("configuration restore is not supported", async () => {
-  const { service } = harness();
-  await assert.rejects(() => service.restoreBackup("coding", "cordis.patch.yml.bak-1"), /not supported/);
-  assert.equal(service.get("coding").canRestore, false);
-});
-
-test("web can be diagnosed but configuration restore is refused", async () => {
+test("web can be diagnosed", async () => {
   const home = fakeHome();
   mkdirSync(join(home, "profiles", "web"), { recursive: true });
   writeFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "[]\n", "utf8");
   writeFileSync(join(home, "profiles", "web", "cordis.patch.yml.bak-1"), "[]\n", "utf8");
-  let stopped = 0;
-  let verified = 0;
   const service = new DiagnosticsService({
     home,
     profiles: () => [profile(home, "web", "root")],
     statusOf: () => "stopped",
-    stop: async () => {
-      stopped += 1;
-    },
-    isMaintenance: () => false,
-    verify: async () => {
-      verified += 1;
-    },
   });
 
   const snap = service.get("web");
@@ -156,57 +123,8 @@ test("web can be diagnosed but configuration restore is refused", async () => {
   service.record("web", "lifecycle", "started");
   assert.equal(service.get("web").logs.at(-1)?.text, "started");
 
-  await assert.rejects(() => service.restoreBackup("web", "cordis.patch.yml.bak-1"), /not supported/);
-  assert.equal(stopped, 0);
-  assert.equal(verified, 0);
   assert.equal(readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8"), "[]\n");
   assert.equal(readFileSync(join(home, "profiles", "web", "cordis.patch.yml.bak-1"), "utf8"), "[]\n");
-});
-
-test("configuration restore does not mutate patches or invoke stop/verify", async () => {
-  const { dir, serviceFor } = harness();
-  const patchPath = join(dir, "cordis.patch.yml");
-  const original = `- id: keep-me
-  config:
-    foo: 1
-- id: session-persistence-jsonl
-  config:
-    root: !!js dshHomePath('sessions')
-`;
-  const backupBody = `- id: from-backup
-  config:
-    foo: 2
-`;
-  writeFileSync(patchPath, original, "utf8");
-  const backupId = "cordis.patch.yml.bak-20260101T000000000Z-aaaa";
-  writeFileSync(join(dir, backupId), backupBody, "utf8");
-
-  let stopped = 0;
-  let verified = 0;
-  const stop = async () => {
-    stopped += 1;
-  };
-  const verifyOk = async () => {
-    verified += 1;
-  };
-
-  await assert.rejects(
-    () => serviceFor({ stop, verify: verifyOk }).restoreBackup("coding", backupId),
-    /not supported/,
-  );
-  assert.equal(stopped, 0);
-  assert.equal(verified, 0);
-  assert.equal(readFileSync(patchPath, "utf8"), original);
-  assert.equal(readFileSync(join(dir, backupId), "utf8"), backupBody);
-
-  const oversizedId = "cordis.patch.yml.bak-oversized";
-  writeFileSync(join(dir, oversizedId), "x".repeat(MAX_BACKUP_BYTES + 8), "utf8");
-  await assert.rejects(
-    () => serviceFor({ stop, verify: verifyOk }).restoreBackup("coding", oversizedId),
-    /not supported/,
-  );
-  assert.equal(readFileSync(patchPath, "utf8"), original);
-  assert.equal(readFileSync(join(dir, oversizedId), "utf8"), "x".repeat(MAX_BACKUP_BYTES + 8));
 });
 
 test("JSONL disk size stays at 256KiB including a single large record and oversized files are tailed", () => {
@@ -241,8 +159,6 @@ test("JSONL disk size stays at 256KiB including a single large record and oversi
     home: home2,
     profiles: () => [profile(home2, "coding")],
     statusOf: () => "stopped",
-    stop: async () => undefined,
-    isMaintenance: () => false,
   });
   const loaded = reloaded.get("coding");
   const loadedEncoded = loaded.logs.reduce(
@@ -256,48 +172,11 @@ test("JSONL disk size stays at 256KiB including a single large record and oversi
   assert.match(reloaded.get("coding").logs.map((entry) => entry.text).join("\n"), /after-tail/);
 });
 
-test("restore does not rewrite missing or existing patch files", async () => {
-  const { dir, serviceFor } = harness();
-  const patchPath = join(dir, "cordis.patch.yml");
-  const backupId = "cordis.patch.yml.bak-invalid-mapping";
-  writeFileSync(join(dir, backupId), "invalid: mapping\n", "utf8");
-  const original = readFileSync(patchPath, "utf8");
-  assert.equal(existsSync(patchPath), true);
-
-  await assert.rejects(() => serviceFor({}).restoreBackup("coding", backupId), /not supported/);
-  assert.equal(readFileSync(patchPath, "utf8"), original);
-  assert.equal(readFileSync(join(dir, backupId), "utf8"), "invalid: mapping\n");
-
-  rmSync(patchPath);
-  assert.equal(existsSync(patchPath), false);
-  await assert.rejects(() => serviceFor({}).restoreBackup("coding", backupId), /not supported/);
-  assert.equal(existsSync(patchPath), false);
-  assert.equal(readFileSync(join(dir, backupId), "utf8"), "invalid: mapping\n");
-});
-
 test("junctions and log symlinks cannot escape the DSH home", async () => {
   const { home } = harness();
   const outside = fakeHome();
-  writeFileSync(join(outside, "cordis.patch.yml.bak-escape"), "stolen-backup\n", "utf8");
   writeFileSync(join(outside, "diagnostics.log"), "OUTSIDE_SECRET\n", "utf8");
   writeFileSync(join(outside, "leak.log"), "LEAK\n", "utf8");
-
-  const notesDir = join(home, "profiles", "notes");
-  mkdirSync(notesDir, { recursive: true });
-  rmSync(notesDir, { recursive: true, force: true });
-  symlinkOrSkip(outside, notesDir, "dir");
-  const notesService = new DiagnosticsService({
-    home,
-    profiles: () => [profile(home, "coding"), profile(home, "notes")],
-    statusOf: () => "stopped",
-    stop: async () => undefined,
-    isMaintenance: () => false,
-  });
-  await assert.rejects(
-    () => notesService.restoreBackup("notes", "cordis.patch.yml.bak-escape"),
-    /not supported|outside the DSH home|not a configuration backup|Backup must be a regular file/,
-  );
-  assert.equal(readFileSync(join(outside, "cordis.patch.yml.bak-escape"), "utf8"), "stolen-backup\n");
 
   const hubCoding = join(home, "hub", "coding");
   mkdirSync(join(home, "hub"), { recursive: true });
@@ -307,8 +186,6 @@ test("junctions and log symlinks cannot escape the DSH home", async () => {
     home,
     profiles: () => [profile(home, "coding")],
     statusOf: () => "stopped",
-    stop: async () => undefined,
-    isMaintenance: () => false,
   });
   assert.doesNotThrow(() => escaped.record("coding", "stderr", "should-not-leak"));
   const escapedSnap = escaped.get("coding");
@@ -329,8 +206,6 @@ test("junctions and log symlinks cannot escape the DSH home", async () => {
       home: home3,
       profiles: () => [profile(home3, "coding")],
       statusOf: () => "stopped",
-      stop: async () => undefined,
-      isMaintenance: () => false,
     });
     assert.doesNotThrow(() => linked.record("coding", "stderr", "append-through-symlink"));
     const linkedSnap = linked.get("coding");
@@ -361,8 +236,6 @@ test("log read and write failures surface on get and do not throw from record", 
     home: home2,
     profiles: () => [profile(home2, "coding")],
     statusOf: () => "crashed" satisfies ProfileStatus,
-    stop: async () => undefined,
-    isMaintenance: () => false,
   });
   const failed = blocked.get("coding");
   assert.ok(failed.logError);
@@ -379,8 +252,6 @@ function harness() {
     home,
     profiles: () => [profile(home, "coding")],
     statusOf: () => "stopped" as const,
-    stop: async () => undefined,
-    isMaintenance: () => false,
   };
   const service = new DiagnosticsService(options);
   return {
@@ -388,18 +259,7 @@ function harness() {
     dir,
     service,
     logsPath: join(home, "hub", "coding", "diagnostics.log"),
-    serviceFor(overrides: {
-      stop?: () => Promise<void>;
-      verify?: (name: string) => Promise<void>;
-      maintenance?: boolean;
-    }) {
-      return new DiagnosticsService({
-        ...options,
-        stop: overrides.stop ?? options.stop,
-        isMaintenance: () => Boolean(overrides.maintenance),
-        verify: overrides.verify,
-      });
-    },
+
   };
 }
 

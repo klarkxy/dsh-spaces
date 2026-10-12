@@ -33,13 +33,6 @@ export class ComponentSelectionError extends Error {
   }
 }
 
-export function stagedComponentDir(toolsRoot: string, digest: string): string {
-  if (typeof digest !== "string" || !DIGEST_RE.test(digest)) {
-    throw fail("Component payload digest must be 64 lowercase hex characters.");
-  }
-  return join(resolve(toolsRoot), COMPONENT_STAGED_DIR_NAME, digest);
-}
-
 export function selectedPointerPath(toolsRoot: string, homeDigest: string): string {
   if (typeof homeDigest !== "string" || !DIGEST_RE.test(homeDigest)) {
     throw fail("Home digest must be 64 lowercase hex characters.");

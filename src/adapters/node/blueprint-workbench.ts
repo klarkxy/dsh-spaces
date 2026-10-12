@@ -7,7 +7,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { parseDocument, stringify as stringifyYaml, isMap, isScalar, isSeq, Scalar, YAMLMap } from "yaml";
+import { parseDocument, stringify as stringifyYaml, isMap, isScalar, isSeq, Scalar } from "yaml";
 import {
   parseBlueprint,
 } from "../../core/domain/blueprint";
@@ -101,7 +101,7 @@ import {
   type PreparedBlueprintPackage,
 } from "./blueprint-package";
 import { sanitizeLogText } from "./diagnostics";
-import { assertNotRealHome, isInsideRealHome, realDshHome } from "./home-guard";
+import { assertNotRealHome, realDshHome } from "./home-guard";
 import { settingsPath } from "./hub-settings";
 import { spaceDataRoot } from "./llm-policy-store";
 import { spaceSettingsPath } from "./llm-space-settings";
@@ -116,7 +116,6 @@ const MANAGED_ENTRY_SET = new Set<string>(BLUEPRINT_MANAGED_ENTRY_IDS);
 const FORBIDDEN_SETTINGS = new Set<string>(BLUEPRINT_FORBIDDEN_SETTINGS);
 const LIFECYCLE_SCRIPTS = ["preinstall", "install", "postinstall", "prepare"] as const;
 const JS_TAG = "tag:yaml.org,2002:js";
-const DSH_HOME_PATH_RE = /^dshHomePath\(\s*(['"])([^'"]+)\1\s*\)$/;
 const CREDENTIAL_KEY_RE = /(?:^|[_-])(?:api[_-]?key|password|secret|token|cookie|authorization|credential|private[_-]?key)(?:$|[_-])/i;
 const GITHUB_APPLY_MESSAGE = "This version cannot apply blueprints with GitHub sources.";
 const INSPECT_RUNTIME_FAILED = "The bound runtime could not be inspected.";
@@ -1957,25 +1956,6 @@ function readOrigin(home: string, spaceId: string): OriginRecipe | null {
   }
 }
 
-function provenanceMismatch(origin: BlueprintOriginRecord, home: string, spaceId: string): string | null {
-  const patchPath = join(home, "profiles", spaceId, "cordis.patch.yml");
-  const currentPatch = existsSync(patchPath)
-    ? yamlPatchToBlueprint(readFileSync(patchPath, "utf8"), spaceId, [], [])
-    : [];
-  for (const binding of origin.bindings) {
-    if (binding.kind !== "value" || !binding.pointer) continue;
-    if (binding.entryId) {
-      const currentId = patchEntryId(currentPatch, binding.pointer);
-      if (currentId !== binding.entryId) return binding.pointer;
-    }
-    if (binding.namespace) {
-      const settings = describeSettings(home, spaceId);
-      if (!settings.some((row) => row.info.namespace === binding.namespace)) return binding.pointer;
-    }
-  }
-  return null;
-}
-
 function composeBundles(
   home: string,
   spaceId: string,
@@ -2006,55 +1986,6 @@ function writeProfileBundles(home: string, spaceId: string, bundles: string[]): 
   dsh.profile = profile;
   raw.dsh = dsh;
   atomicWrite(path, `${JSON.stringify(raw, null, 2)}\n`);
-}
-
-function assertBundlePatches(home: string, spaceId: string, blueprint: Blueprint): void {
-  const allowed = allowedModuleNames(home, spaceId, blueprint);
-  for (const name of blueprint.profile.bundles) {
-    const installed = readInstalledManifest(home, spaceId, name);
-    if (!installed?.hasBundle) {
-      throw publicError(`Package ${name} has no bundle patch and cannot be composed.`);
-    }
-  }
-  walkPatchEntries(blueprint.profile.patch, (entry, pointer) => {
-    if (!entry.name) return;
-    if (!moduleRefAllowed(entry.name, allowed)) {
-      throw publicError(`Patch module ${entry.name} does not resolve to a selected or host package.`, `${pointer}/name`);
-    }
-  });
-}
-
-function allowedModuleNames(home: string, spaceId: string, blueprint: Blueprint): Set<string> {
-  const names = new Set<string>([
-    ...HOST_PACKAGE_SET,
-    ...CONTROL_PACKAGE_SET,
-    ...blueprint.packages.map((pkg) => pkg.name),
-  ]);
-  const manifest = readProfileManifest(home, spaceId);
-  for (const name of [...Object.keys(manifest.dependencies), ...manifest.bundles]) {
-    if (isOwnedBridgeName(name)) names.add(name);
-  }
-  for (const pkg of blueprint.packages) {
-    const installed = readInstalledManifest(home, spaceId, pkg.name);
-    for (const dep of installed?.dependencies ?? []) names.add(dep);
-  }
-  return names;
-}
-
-function moduleRefAllowed(name: string, allowed: Set<string>): boolean {
-  if (looksLikeModulePath(name)) return false;
-  if (allowed.has(name)) return true;
-  const pkg = packageNameOfModule(name);
-  return Boolean(pkg && allowed.has(pkg));
-}
-
-function packageNameOfModule(name: string): string | null {
-  if (name.startsWith("@")) {
-    const parts = name.split("/");
-    if (parts.length < 2) return null;
-    return `${parts[0]}/${parts[1]}`;
-  }
-  return name.split("/")[0] ?? null;
 }
 
 function looksLikeModulePath(name: string): boolean {

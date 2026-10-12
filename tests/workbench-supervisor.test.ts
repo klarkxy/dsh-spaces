@@ -481,7 +481,6 @@ function fakeMaintenance(): WorkbenchMaintenance {
     },
     runtimes: async () => [],
     backups: async () => [],
-    recover: async () => undefined,
   };
 }
 
@@ -1068,14 +1067,6 @@ test("recovery.resume is unsupported and leftover jobs stay failed", async () =>
   const handle = await startSupervisor(home, {
     createMaintenance: () => ({
       ...fakeMaintenance(),
-      recover: async () => undefined,
-      recoveryOutcome: () => ({
-        restoreCompleted: false,
-        upgradeRolledBack: false,
-        consistent: true,
-        settleInterruptedJobs: true,
-        message: "No pending snapshot or upgrade journal.",
-      }),
     }),
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
@@ -1182,16 +1173,6 @@ test("recovery resume does not settle jobs or start the manager when pending rec
   const handle = await startSupervisor(home, {
     createMaintenance: () => ({
       ...fakeMaintenance(),
-      recover: async () => {
-        throw new Error("pending restore unreadable");
-      },
-      recoveryOutcome: () => ({
-        restoreCompleted: false,
-        upgradeRolledBack: false,
-        consistent: false,
-        settleInterruptedJobs: false,
-        message: "Pending restore metadata is unreadable. Original bytes were left in place.",
-      }),
     }),
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);

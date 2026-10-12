@@ -29,7 +29,6 @@ import { packLocalArtifacts, validateSnapshotRoot, type PackOneRequest } from ".
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
 import {
   diagnoseEndpointResidue,
-  readEndpointFile,
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
 } from "./supervisor-endpoint";
@@ -43,7 +42,6 @@ export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";
 export const VIEW_BRIDGE_PAYLOAD_DIRNAME = "view-bridge";
 export const BROWSER_PAYLOAD_DIRNAME = "browser";
 export const LLM_BRIDGE_PAYLOAD_DIRNAME = "llm-bridge";
-export const SNAPSHOT_WORKER_FILE = "snapshot-worker.mjs";
 
 /** Matches parseSupervisorArgs in src/adapters/node/workbench-supervisor.ts. */
 export const SUPERVISOR_CLI_FLAGS = {

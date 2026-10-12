@@ -148,29 +148,7 @@ test("actual worker runtimeInstall reports invalid version without publishing", 
   assert.equal(existsSync(join(runtimeRoot, "versions")), false);
 });
 
-test("worker restore/recover/completeRestore are unsupported and leave pending evidence", async () => {
-  const worker = requireWorker();
-  const home = tempDir("dsh-rt-home-");
-  const root = tempDir("dsh-rt-snaps-");
-  const pendingPath = join(root, "pending-restore.json");
-  const pending = Buffer.from(`${JSON.stringify({
-    snapshotId: "59ca7cee-0c06-4610-bc95-e86849247cef",
-    beforeRestoreId: "ae95e8a4-691a-4aeb-852b-876076372daa",
-    runtimeVersion: "1.0.0",
-    binRelative: "bin.js",
-    startedAt: "2026-01-01T00:00:00.000Z",
-  }, null, 2)}\n`);
-  writeFileSync(pendingPath, pending);
-  for (const operation of ["restore", "recover", "completeRestore"] as const) {
-    await assert.rejects(
-      () => runSnapshotWorker(worker, { home, root, operation, id: "59ca7cee-0c06-4610-bc95-e86849247cef" }),
-      /not supported/,
-    );
-  }
-  assert.deepEqual(readFileSync(pendingPath), pending);
-});
-
-test("SnapshotExecutor restore methods reject without clearing read-only pending evidence", async () => {
+test("SnapshotExecutor pendingRestore reads evidence without clearing it", async () => {
   const worker = requireWorker();
   const home = tempDir("dsh-rt-home-");
   const root = tempDir("dsh-rt-snaps-");
@@ -185,9 +163,6 @@ test("SnapshotExecutor restore methods reject without clearing read-only pending
   writeFileSync(pendingPath, pending);
   const executor = new SnapshotExecutor({ home, root, workerFile: worker });
   assert.equal(executor.pendingRestore()?.snapshotId, "59ca7cee-0c06-4610-bc95-e86849247cef");
-  await assert.rejects(() => executor.restore("59ca7cee-0c06-4610-bc95-e86849247cef"), /not supported/);
-  await assert.rejects(() => executor.recover(), /not supported/);
-  await assert.rejects(() => executor.completeRestore(), /not supported/);
   assert.deepEqual(readFileSync(pendingPath), pending);
   assert.equal(executor.pendingRestore()?.snapshotId, "59ca7cee-0c06-4610-bc95-e86849247cef");
 });

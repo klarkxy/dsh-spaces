@@ -6,7 +6,7 @@ import {
   statSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertNotRealHome, isInsideRealHome } from "./home-guard";
 import { isBareNpmPackageName } from "../../shared/plugin";

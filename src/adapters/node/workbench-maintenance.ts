@@ -39,7 +39,7 @@ import { sanitizeJobText, WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { runBatch } from "../../shared/batch";
-import { BACKUP_FILE_PREFIX, type ConfigBackupMeta } from "../../shared/diagnostics";
+import { type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
 import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES } from "../../shared/types";
 import type { SnapshotMeta } from "../../shared/snapshots";
@@ -147,34 +147,6 @@ export interface WorkbenchMaintenanceOptions {
   log?: (message: string, error?: unknown) => void;
 }
 
-export interface WorkbenchRecoveryOutcome {
-  restoreCompleted: boolean;
-  restoreRolledBack?: boolean;
-  restorePlanId?: string;
-  upgradeRolledBack: boolean;
-  /**
-   * Snapshot/upgrade/plugin-mutation journals were inspected and are in a known-good state.
-   * Does not prove arbitrary space/plugin jobs finished.
-   */
-  consistent: boolean;
-  /**
-   * True only after a pending snapshot restore or upgrade journal was reconciled.
-   * Supervisor may settle that maintenance job. Never mass-settle unrelated interrupted jobs,
-   * and never true merely because no journal exists.
-   */
-  settleInterruptedJobs: boolean;
-  message: string;
-  /** Pending restore id captured before recover. Bind settlement to this snapshot only. */
-  snapshotId?: string;
-  /** Plugin-mutation plan id, only when a whole-home restore completed. */
-  pluginPlanId?: string;
-  /** Upgrade journal plan id captured before recover. Bind settlement to this plan only. */
-  upgradePlanId?: string;
-  workbenchPlanId?: string;
-  workbenchRolledBack?: boolean;
-  workbenchSucceeded?: boolean;
-}
-
 type ResolvedCommand =
   | {
       kind: "plugin.install";
@@ -244,7 +216,6 @@ export class WorkbenchMaintenance {
   private readonly setSpacePluginImpl: typeof defaultSetSpacePlugin;
   private readonly source: () => PackageSource;
   private readonly logImpl?: (message: string, error?: unknown) => void;
-  private recovery?: WorkbenchRecoveryOutcome;
 
   constructor(
     private readonly ports: WorkbenchMaintenancePorts,
@@ -262,10 +233,6 @@ export class WorkbenchMaintenance {
       return configured ?? currentPackageSource();
     };
     this.logImpl = options.log;
-  }
-
-  recoveryOutcome(): WorkbenchRecoveryOutcome | undefined {
-    return this.recovery ? { ...this.recovery } : undefined;
   }
 
   async preview(request: WorkbenchPlanRequest): Promise<WorkbenchPlan> {
@@ -432,10 +399,6 @@ export class WorkbenchMaintenance {
 
   async workbenchPackage(): Promise<WorkbenchPackageRelease | null> {
     return await this.ports.packageUpgrade?.describe() ?? null;
-  }
-
-  async recover(_ctx?: WorkbenchJobContext): Promise<void> {
-    throw new WorkbenchMaintenanceError("workbench/forbidden");
   }
 
   private assertWritable(): void {
@@ -1736,13 +1699,6 @@ function parseSnapshotId(value: unknown): string {
   return value;
 }
 
-function parseBackupId(value: unknown): string {
-  if (typeof value !== "string" || !value.startsWith(BACKUP_FILE_PREFIX) || value !== value.split(/[/\\]/).pop()) {
-    throw new WorkbenchMaintenanceError("workbench/invalid-input");
-  }
-  return value;
-}
-
 function requireExactVersion(value: unknown): string {
   if (typeof value !== "string" || !isExactRuntimeVersion(value)) {
     throw new WorkbenchMaintenanceError("workbench/invalid-input");
@@ -1987,16 +1943,6 @@ async function defaultFetcher(
   } finally {
     clearTimeout(timer);
   }
-}
-
-function silentJobContext(): WorkbenchJobContext {
-  return {
-    signal: new AbortController().signal,
-    phase: () => undefined,
-    message: () => undefined,
-    cancellable: () => undefined,
-    result: () => undefined,
-  };
 }
 
 export type { WorkbenchJob, WorkbenchJobContext, WorkbenchJobResult };

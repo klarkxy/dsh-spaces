@@ -7,7 +7,6 @@ import {
   type BlueprintInputType,
   type BlueprintInputValue,
   type BlueprintInputValues,
-  type BlueprintJson,
 } from "./blueprint";
 import type { BlueprintDocument as Blueprint } from "@klarkxy/dsh-blueprint/document";
 
@@ -33,10 +32,7 @@ export const BLUEPRINT_PRODUCT_METHODS = [
 
 export type BlueprintProductMethod = (typeof BLUEPRINT_PRODUCT_METHODS)[number];
 
-export const BLUEPRINT_APPLY_KIND = "blueprint.apply" as const;
-
 export const BLUEPRINT_APPLY_STAGES = ["space-create", "packages", "presets", "start"] as const;
-export type BlueprintApplyStageName = (typeof BLUEPRINT_APPLY_STAGES)[number];
 export type BlueprintStageStatus = "succeeded" | "failed" | "not-run";
 
 export type BlueprintPackageSourceKind = "npm" | "builtin" | "local" | "unknown";
@@ -238,22 +234,6 @@ export type WorkbenchBlueprintApplyOutcome = {
   source?: { name: string; version?: string };
 };
 
-export type WorkbenchBlueprintProductRequest =
-  | WorkbenchBlueprintSourceRequest
-  | WorkbenchBlueprintGenerateRequest
-  | WorkbenchBlueprintInspectRequest
-  | WorkbenchBlueprintPreviewRequest;
-
-export type WorkbenchBlueprintProductPayload =
-  | WorkbenchBlueprintSourcePayload
-  | WorkbenchBlueprintGeneratePayload
-  | WorkbenchBlueprintInspectPayload
-  | WorkbenchBlueprintPreviewPayload;
-
-export function isBlueprintProductMethod(method: string): method is BlueprintProductMethod {
-  return (BLUEPRINT_PRODUCT_METHODS as readonly string[]).includes(method);
-}
-
 /** Inspect/preview carry share-code or JSON content. */
 export function isBlueprintLargeRequestMethod(method: string): boolean {
   return method === "blueprint.inspect" || method === "blueprint.preview";
@@ -280,9 +260,4 @@ export type BlueprintOriginRecord = {
     namespace?: string;
   }>;
   appliedAt: string;
-};
-
-export type BlueprintLocalRecord = {
-  schemaVersion: typeof BLUEPRINT_ORIGIN_SCHEMA_VERSION;
-  values: { [inputId: string]: BlueprintJson };
 };

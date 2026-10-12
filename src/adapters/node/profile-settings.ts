@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, renameSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { isAlias, isMap, isScalar, isSeq, parseDocument, visit, YAMLMap, YAMLSeq, type Document, type Node } from "yaml";
+import { isAlias, isMap, isScalar, isSeq, parseDocument, visit, YAMLMap, type Document, type Node } from "yaml";
 import { atomicWrite } from "./atomic";
 import { assertSafeSpaceId } from "./llm-policy-store";
 

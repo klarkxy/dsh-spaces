@@ -9,8 +9,6 @@ export const MANAGED_HOME_ENTRIES = [
 
 export type ManagedHomeEntry = (typeof MANAGED_HOME_ENTRIES)[number];
 
-export const EXCLUDED_HOME_FILES = [".credentials.yaml", ".anonymous-user-id"] as const;
-
 export const RESTORE_STAGE_DIR = ".dsh-spaces-restore";
 
 export const SNAPSHOT_ID_RE =
@@ -38,10 +36,6 @@ export interface SnapshotMeta {
   runtimeMissing?: boolean;
 }
 
-export interface RestoreSnapshotOptions {
-  allowDataOnlyBackup?: boolean;
-}
-
 export interface PendingRestore {
   snapshotId: string;
   beforeRestoreId: string;
@@ -55,11 +49,6 @@ export interface PendingRestore {
 export interface RestoreRecoveryReceipt extends PendingRestore {
   schemaVersion: 1;
   outcome: "completed" | "rolled-back";
-}
-
-export interface RestoreResult {
-  restored: SnapshotMeta;
-  beforeRestore: SnapshotMeta;
 }
 
 export type RestorePhase = "copying" | "swapping" | "swapped";

@@ -122,7 +122,6 @@ test("failure before commit leaves live profiles untouched and kills registered 
   assertCandidateStopped(child, pid);
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
-  assert.equal(ctx.restores, 0);
 });
 
 test("workbench with web plugin fails dump when isolation roots are missing", async (t) => {
@@ -153,7 +152,6 @@ test("commit:backup failure leaves live profiles and selected runtime unchanged"
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
   assert.deepEqual(ctx.selectCalls, []);
   assert.deepEqual(ctx.selectExistingCalls, []);
-  assert.equal(ctx.restores, 0);
   assert.equal(readJournal(ctx.home).phase, "committing");
   assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
   await assertUnfinishedBlocksReplay(ctx);
@@ -176,7 +174,6 @@ test("commit:swap failure keeps the moved backup and does not restore it onto li
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
   assert.deepEqual(ctx.selectCalls, []);
   assert.deepEqual(ctx.selectExistingCalls, []);
-  assert.equal(ctx.restores, 0);
   assert.equal(readJournal(ctx.home).phase, "committing");
   assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
   await assertUnfinishedBlocksReplay(ctx);
@@ -198,7 +195,6 @@ test("commit:retarget failure keeps published live and backup and does not selec
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
   assert.deepEqual(ctx.selectCalls, []);
   assert.deepEqual(ctx.selectExistingCalls, []);
-  assert.equal(ctx.restores, 0);
   assert.equal(readJournal(ctx.home).phase, "committing");
   assert.ok(ctx.snapshots.list().some((row) => row.reason === "upgrade"));
   await assertUnfinishedBlocksReplay(ctx);
@@ -220,7 +216,6 @@ test("commit:select failure keeps published live and backup and does not select 
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
   assert.deepEqual(ctx.selectCalls, []);
   assert.deepEqual(ctx.selectExistingCalls, []);
-  assert.equal(ctx.restores, 0);
   assert.equal(readJournal(ctx.home).phase, "committing");
   await assertUnfinishedBlocksReplay(ctx);
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
@@ -287,53 +282,6 @@ test("kill failure keeps stage and journal and does not restore or delete live p
   assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
 });
 
-test("recover and restore are not supported", async (t) => {
-  const ctx = await harness(t);
-  await assert.rejects(() => ctx.upgrade.recover(), /not supported/);
-  await assert.rejects(() => ctx.upgrade.restore("snap-1"), /not supported/);
-});
-
-test("recover does not rebuild after an interrupted commit", async (t) => {
-  const ctx = await harness(t);
-  const snap = ctx.snapshots.create(descriptor(ctx.runtimes), "upgrade");
-  const stage = join(ctx.home, ".dsh-spaces-upgrade");
-  mkdirSync(stage, { recursive: true });
-  writeFileSync(
-    join(stage, "journal.json"),
-    `${JSON.stringify({ phase: "committing", snapshotId: snap.id, version: "0.9.9", startedAt: new Date().toISOString() }, null, 2)}\n`,
-  );
-  renameSync(join(ctx.home, "profiles"), join(stage, "backup-profiles"));
-  mkdirSync(join(ctx.home, "profiles", "web"), { recursive: true });
-  writeFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "half-committed\n");
-  const patchBefore = readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"));
-  await assert.rejects(() => ctx.upgrade.recover(), /not supported/);
-  assert.deepEqual(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml")), patchBefore);
-  assert.equal(existsSync(join(stage, "journal.json")), true);
-});
-
-test("discarding a junctioned stage unlinks the junction without deleting the target tree", async (t) => {
-  const ctx = await harness(t);
-  const outside = fakeDir(t, "dsh-outside-");
-  writeFileSync(join(outside, "keep.txt"), "safe\n");
-  const stage = join(ctx.home, ".dsh-spaces-upgrade");
-  linkDir(outside, stage);
-  await assert.rejects(() => ctx.upgrade.recover(), /not supported/);
-  assert.equal(readFileSync(join(outside, "keep.txt"), "utf8"), "safe\n");
-  assert.equal(lstatSync(stage).isSymbolicLink(), true);
-});
-
-test("successful restore is not supported and does not rewrite live profiles", async (t) => {
-  const ctx = await harness(t);
-  await ctx.upgrade.upgrade("0.9.9");
-  const snap = ctx.snapshots.list().find((row) => row.reason === "upgrade");
-  assert.ok(snap);
-  writeFileSync(join(ctx.home, "profiles", "coding", "cordis.patch.yml"), "after-upgrade\n");
-  const installsBefore = ctx.installs.slice();
-  await assert.rejects(() => ctx.upgrade.restore(snap.id), /not supported/);
-  assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "cordis.patch.yml"), "utf8"), "after-upgrade\n");
-  assert.deepEqual(ctx.installs, installsBefore);
-});
-
 test("resolveOfficialVersions uses realpath and createRequire, and refuses range-only manifests", (t) => {
   const root = fakeDir(t, "dsh-cli-");
   const bin = writeCandidate(root, "0.9.9", "0.2.0", "0.2.1");
@@ -381,7 +329,6 @@ test("upgrade does not recover after a successful commit", async (t) => {
     return mockCli(ctx, stagedHome, args);
   } });
   await ctx.upgrade.upgrade("0.9.9");
-  await assert.rejects(() => ctx.upgrade.recover(), /not supported/);
   assert.equal(ctx.runtimes.current()?.version, "0.9.9");
   assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.2.0");
 });
@@ -431,7 +378,6 @@ test("interrupted snapshot restore is not recovered by CoordinatedUpgrade", asyn
   const liveVersion = ctx.runtimes.current()?.version;
   const liveCoding = readFileSync(join(ctx.home, "profiles", "coding", "package.json"));
   ctx.upgrade = makeUpgrade(ctx);
-  await assert.rejects(() => ctx.upgrade.recover({ receiptPlanId: planId }), /not supported/);
   assert.equal(readFileSync(pendingPath, "utf8"), pendingBytes);
   assert.equal(readFileSync(journalPath, "utf8"), journalBytes);
   assert.equal(ctx.snapshots.pendingRestore()?.snapshotId, snapshot.id);
@@ -439,20 +385,11 @@ test("interrupted snapshot restore is not recovered by CoordinatedUpgrade", asyn
   assert.equal(ctx.runtimes.current()?.version, liveVersion);
   assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8"), liveCoding.toString("utf8"));
   assert.equal(readFileSync(marker, "utf8"), "before-restore data\n");
-  assert.equal(ctx.restores, 0);
   await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /Unfinished restore evidence/);
   assert.equal(readFileSync(pendingPath, "utf8"), pendingBytes);
   assert.equal(readFileSync(journalPath, "utf8"), journalBytes);
   assert.equal(ctx.runtimes.current()?.version, liveVersion);
   assert.equal(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8"), liveCoding.toString("utf8"));
-});
-
-test("CoordinatedUpgrade restore is unsupported and does not persist a restore plan", async t => {
-  const ctx = await harness(t);
-  const snapshot = ctx.snapshots.create(descriptor(ctx.runtimes));
-  const planId = "32345678-1234-1234-1234-123456789abc";
-  await assert.rejects(() => ctx.upgrade.restore(snapshot.id, planId), /not supported/);
-  await assert.rejects(() => ctx.upgrade.recover({ receiptPlanId: planId }), /not supported/);
 });
 
 interface Harness {
@@ -466,7 +403,6 @@ interface Harness {
   pluginAdds: string[];
   dumps: string[];
   smokeHomes: string[];
-  restores: number;
   installs: string[];
   selectCalls: string[];
   selectExistingCalls: Array<{ bin: string; version: string }>;
@@ -498,7 +434,6 @@ async function harness(t: { after: (fn: () => void) => void }): Promise<Harness>
     pluginAdds: [],
     dumps: [],
     smokeHomes: [],
-    restores: 0,
     installs: [],
     selectCalls: [],
     selectExistingCalls: [],
@@ -517,11 +452,6 @@ async function harness(t: { after: (fn: () => void) => void }): Promise<Harness>
   runtimes.selectExisting = async (ref) => {
     ctx.selectExistingCalls.push({ bin: ref.bin, version: ref.version });
     return selectExisting(ref);
-  };
-  const restore = snapshots.restore.bind(snapshots);
-  snapshots.restore = (id, currentRuntime, options) => {
-    ctx.restores += 1;
-    return restore(id, currentRuntime, options);
   };
   ctx.upgrade = makeUpgrade(ctx);
   return ctx;
@@ -745,14 +675,12 @@ async function assertUnfinishedBlocksReplay(ctx: Harness): Promise<void> {
   const pluginAddsBefore = ctx.pluginAdds.slice();
   const selectBefore = ctx.selectCalls.slice();
   const selectExistingBefore = ctx.selectExistingCalls.slice();
-  const restoresBefore = ctx.restores;
   await assert.rejects(() => makeUpgrade(ctx).upgrade("0.9.9"), /Unfinished upgrade evidence/);
   assert.deepEqual(readFileSync(journalPath(ctx.home)), journalBefore);
   assert.deepEqual(ctx.installs, installsBefore);
   assert.deepEqual(ctx.pluginAdds, pluginAddsBefore);
   assert.deepEqual(ctx.selectCalls, selectBefore);
   assert.deepEqual(ctx.selectExistingCalls, selectExistingBefore);
-  assert.equal(ctx.restores, restoresBefore);
 }
 
 function isolationPatch(name: string): string {

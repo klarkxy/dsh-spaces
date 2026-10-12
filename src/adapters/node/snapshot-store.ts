@@ -23,8 +23,6 @@ import {
   type PendingRestore,
   type RestoreJournal,
   type RestoreRecoveryReceipt,
-  type RestoreResult,
-  type RestoreSnapshotOptions,
   type SnapshotMeta,
   type SnapshotPresence,
   type SnapshotRuntime,
@@ -38,13 +36,6 @@ const DATA_DIR = "data";
 const RUNTIME_DIR = "runtime";
 
 export type SnapshotInject = (op: string, detail?: string) => void;
-
-export type SnapshotRestoreOptions = RestoreSnapshotOptions & {
-  /** Layout recorded from a damaged current pointer. Never copied as a runtime. */
-  recordedRuntime?: SnapshotRuntime;
-  /** Workbench plan identity. Strict UUID; omit for legacy desktop restores. */
-  planId?: string;
-};
 
 export interface SnapshotStoreOptions {
   home: string;
@@ -182,10 +173,6 @@ export class SnapshotStore {
     return bin;
   }
 
-  restore(_id: string, _currentRuntime?: SnapshotRuntime, _options?: SnapshotRestoreOptions): RestoreResult {
-    throw new Error("Snapshot restore is not supported.");
-  }
-
   delete(id: string): void {
     this.assertWritable();
     const resolved = this.requireId(id);
@@ -214,14 +201,6 @@ export class SnapshotStore {
     if (!lexists(path)) return undefined;
     this.assertInsideStore(path);
     return parseReceipt(readFileSync(path, "utf8"), path);
-  }
-
-  completeRestore(): void {
-    throw new Error("Snapshot restore is not supported.");
-  }
-
-  recover(): PendingRestore | undefined {
-    throw new Error("Snapshot recover is not supported.");
   }
 
   private writeSnapshot(input: {

@@ -98,9 +98,6 @@ export function expectedAuthCookieName(authority: string): string {
   return `dsh-auth-${b64}`;
 }
 
-export function supervisorCookieName(port: number): string {
-  return expectedAuthCookieName(`${HOST}:${port}`);
-}
 
 function closeUnexposed(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -911,21 +908,4 @@ setInterval(() => { void refresh(); }, 1000);
 </script>
 </body>
 </html>`;
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
 }

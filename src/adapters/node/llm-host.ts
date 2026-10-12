@@ -1,6 +1,5 @@
 import { GlobalLlmHost, type GlobalLlmHostOptions } from "../../core/application/global-llm-host";
 import { GlobalLlmService } from "../../core/application/global-llm-service";
-import type { LlmInstanceRecord, LlmInstanceStatusPort } from "../../core/ports/llm-runtime";
 import { FileLlmCatalogStore } from "./llm-catalog-store";
 import { FileLlmCredentialStore } from "./llm-credential-store";
 import { FileLlmOperationStore } from "./llm-operation-store";
@@ -32,20 +31,3 @@ export function createHomeLlmHost(
   });
 }
 
-export class MapLlmInstanceStatus implements LlmInstanceStatusPort {
-  constructor(private readonly rows: Map<string, LlmInstanceRecord>) {}
-
-  async list(): Promise<LlmInstanceRecord[]> {
-    return [...this.rows.values()];
-  }
-
-  async get(spaceId: string): Promise<LlmInstanceRecord | undefined> {
-    return this.rows.get(spaceId);
-  }
-
-  async markApplied(spaceId: string, catalogRevision: number): Promise<void> {
-    const current = this.rows.get(spaceId);
-    if (!current) return;
-    this.rows.set(spaceId, { ...current, catalogRevision });
-  }
-}

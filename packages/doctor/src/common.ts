@@ -11,8 +11,6 @@ export const CONTROL_INSTANCES_DIR = "instances";
 export const CONTROL_PLANS_DIR = "plans";
 export const PLUGIN_MUTATION_FILE = "plugin-mutation.json";
 export const PLUGIN_MUTATION_FILES_DIR = "plugin-mutation-files";
-export const PLUGIN_MUTATION_ARCHIVE_DIR = "plugin-mutation-archive";
-export const DOCTOR_CONTROL_KIND = "web" as const;
 
 export const EXIT = {
   ok: 0,

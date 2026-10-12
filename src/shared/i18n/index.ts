@@ -6,8 +6,6 @@ export type AppLocale = "en" | "zh";
 export type { MessageKey, Messages, LocalePreference };
 export { en, zh };
 
-export const APP_LOCALES = ["zh", "en"] as const satisfies readonly AppLocale[];
-
 const dictionaries: Record<AppLocale, Messages> = { en, zh };
 
 let currentLocale: AppLocale = inferAppLocale();
@@ -22,10 +20,6 @@ export function resolveLocale(preference: LocalePreference, systemLocale?: strin
   return inferAppLocale(systemLocale);
 }
 
-export function getLocale(): AppLocale {
-  return currentLocale;
-}
-
 export function setLocale(locale: AppLocale): AppLocale {
   currentLocale = locale;
   return currentLocale;
@@ -33,10 +27,6 @@ export function setLocale(locale: AppLocale): AppLocale {
 
 export function applyAppLocale(preference: LocalePreference, systemLocale?: string): AppLocale {
   return setLocale(resolveLocale(preference, systemLocale));
-}
-
-export function htmlLang(locale: AppLocale = currentLocale): string {
-  return locale === "zh" ? "zh-CN" : "en";
 }
 
 export type MessageParams = Record<string, string | number>;

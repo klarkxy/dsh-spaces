@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { PrivateFileError, readPrivateFile } from '../../../../src/shared/node/private-files.js';
-import type { PublishRequest, PublisherGrant } from '../../../../src/shared/dashboard.js';
+import type { PublisherGrant } from '../../../../src/shared/dashboard.js';
 import { HomePublisher, PublicationChannel } from '../../../../src/core/domain/dashboard/provider.js';
 import { DashboardFault, publicError } from '../../../../src/core/domain/dashboard/errors.js';
 import { canonicalJson, identifier, object, parsePublishAck, parseSelection, parseStrictJson, timestampMillis } from '../../../../src/core/domain/dashboard/validation.js';

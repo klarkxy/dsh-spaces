@@ -127,23 +127,11 @@ export interface PluginManageRow {
   inLibrary: boolean;
 }
 
-export interface PluginInstallRequest {
-  profiles: string[];
-  catalogId?: string;
-  spec?: string;
-}
-
 export interface PluginDownloadRequest {
   catalogId?: string;
   spec?: string;
   /** Exact npm version to pin. Omit to resolve and pin current latest. Ignored for git specs. */
   version?: string;
-}
-
-export interface PluginSpaceToggleRequest {
-  profile: string;
-  id: string;
-  enabled: boolean;
 }
 
 export interface PluginInstallResult {
@@ -182,13 +170,6 @@ export interface CliEnsureStatus {
   state: CliEnsureState;
   message: string;
   step?: CliEnsureStep;
-}
-
-export interface RuntimeStatus {
-  node: boolean;
-  pnpm: boolean;
-  cli: boolean;
-  packageSource: PackageSource;
 }
 
 export const RESERVED_PROFILE_NAMES = ["web", "desktop", "hub", "headless", "node_modules"] as const;

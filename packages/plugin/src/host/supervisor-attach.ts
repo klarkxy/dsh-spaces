@@ -68,21 +68,6 @@ export async function pingSupervisorState(
   }
 }
 
-export function inspectLease(
-  home: string,
-  origin: string,
-  allowRealHome: boolean,
-  identity?: { homeId: string; serviceEpoch: string },
-): LeaseVerdict {
-  let controller: HomeController;
-  try {
-    controller = new HomeController(home, { allowRealHome });
-  } catch {
-    return "ambiguous";
-  }
-  return verdictOf(controller.inspect(), origin, identity);
-}
-
 export async function attachExistingSupervisor(
   options: SupervisorAttachOptions,
 ): Promise<SupervisorAttachResult> {

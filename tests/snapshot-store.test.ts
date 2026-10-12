@@ -64,7 +64,7 @@ test("create lists presence, keeps credentials out of the snapshot, and does not
   assert.equal(existsSync(join(root, original.id, "data", "profiles", "notes")), false);
 });
 
-test("path-escaping ids are rejected and restore methods do not write", () => {
+test("path-escaping ids are rejected without writes", () => {
   const { home, store, runtime, root } = harness();
   seedHome(home, { profiles: ["web"], settings: "a\n" });
   const snap = store.create(runtime);
@@ -73,9 +73,6 @@ test("path-escaping ids are rejected and restore methods do not write", () => {
   assert.throws(() => store.preview(`${snap.id}/../${snap.id}`), /not a snapshot directory/);
   assert.throws(() => store.delete(join(root, snap.id)), /not a snapshot directory/);
   assert.throws(() => store.preview(`/tmp/${snap.id}`), /not a snapshot directory/);
-  assert.throws(() => store.restore(snap.id, runtime), /not supported/);
-  assert.throws(() => store.recover(), /not supported/);
-  assert.throws(() => store.completeRestore(), /not supported/);
   assert.deepEqual(readFileSync(join(home, "settings.yaml")), settings);
   assert.equal(store.list().length, 1);
   assert.equal(existsSync(join(root, "pending-restore.json")), false);
@@ -343,9 +340,6 @@ test("unfinished pending/journal/receipt evidence is read-only and blocks writes
   assert.equal(store.restoreJournal()?.phase, "swapping");
   assert.throws(() => store.create(runtime), /Unfinished restore evidence/);
   assert.throws(() => store.delete(snap.id), /Unfinished restore evidence/);
-  assert.throws(() => store.restore(snap.id, runtime), /not supported/);
-  assert.throws(() => store.recover(), /not supported/);
-  assert.throws(() => store.completeRestore(), /not supported/);
   assert.deepEqual(readFileSync(pendingPath), pending);
   assert.deepEqual(readFileSync(journalPath), journal);
   assert.deepEqual(readFileSync(join(home, "settings.yaml")), settings);

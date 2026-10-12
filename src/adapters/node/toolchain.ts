@@ -6,7 +6,7 @@ import { spawnObserved } from "./owned-process-record";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { t } from "../../shared/i18n";
-import type { PackageSource, RuntimeStatus } from "../../shared/types";
+import type { PackageSource } from "../../shared/types";
 import { inferPackageSource } from "../../shared/types";
 import { atomicWrite, renameDirectoryAsync } from "./atomic";
 import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
@@ -357,11 +357,3 @@ export async function ensurePnpm(onLine?: (line: string) => void): Promise<strin
   return pnpmJs;
 }
 
-export function runtimeProbe(): RuntimeStatus {
-  return {
-    node: Boolean(nodeExecutable()),
-    pnpm: Boolean(pnpmCjs()),
-    cli: false,
-    packageSource: currentPackageSource(),
-  };
-}

@@ -15,7 +15,6 @@ import { RESTORE_STAGE_DIR } from "../../../src/shared/snapshots.ts";
 import { PROFILE_NAME_RE, type SpacesFile } from "../../../src/shared/types.ts";
 import {
   CONTROL_INSTANCES_DIR,
-  CONTROL_PLANS_DIR,
   MUTATION_JOURNAL,
   PLUGIN_MUTATION_FILE,
   PLUGIN_MUTATION_FILES_DIR,
@@ -135,33 +134,6 @@ export function readUpgradeJournal(home: string): Json {
     return { needed: true, phase: "unknown", unreadable: true };
   } catch {
     return { needed: true, unreadable: true };
-  }
-}
-
-export function readPluginMutationRecord(home: string): {
-  status: "none" | "open" | "unreadable";
-  planId?: string;
-  spaceIds?: string[];
-  phase?: string;
-} {
-  const path = join(home, HOME_CONTROL_DIR_NAME, PLUGIN_MUTATION_FILE);
-  const state = inspectNamedFile(path);
-  if (state === "missing") return { status: "none" };
-  if (state !== "ok") return { status: "unreadable" };
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.spaceIds)) return { status: "unreadable" };
-    const phase =
-      parsed.phase === "prepared" || parsed.phase === "mutating" || parsed.phase === "failed" ? parsed.phase : undefined;
-    if (!phase) return { status: "unreadable" };
-    return {
-      status: "open",
-      phase,
-      planId: typeof parsed.planId === "string" && parsed.planId.trim() ? parsed.planId : undefined,
-      spaceIds: parsed.spaceIds.filter((item): item is string => typeof item === "string"),
-    };
-  } catch {
-    return { status: "unreadable" };
   }
 }
 
@@ -337,44 +309,6 @@ export function readInstances(home: string): { public: Json; rows: InstanceRow[]
     rows,
     recoveryMode,
   };
-}
-
-export function readPlans(home: string): Json[] {
-  const dir = join(home, HOME_CONTROL_DIR_NAME, CONTROL_PLANS_DIR);
-  if (inspectNamedDir(dir) !== "ok") return [];
-  let names: string[] = [];
-  try {
-    names = readdirSync(dir).filter((name) => name.endsWith(".json"));
-  } catch {
-    return [];
-  }
-  const plans: Json[] = [];
-  for (const name of names) {
-    const path = join(dir, name);
-    if (inspectNamedFile(path) !== "ok") continue;
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-      if (parsed.schemaVersion !== 1) continue;
-      const command = parsed.command && typeof parsed.command === "object" ? (parsed.command as Record<string, unknown>) : {};
-      plans.push({
-        id: typeof parsed.id === "string" ? parsed.id : name.slice(0, -".json".length),
-        status: typeof parsed.status === "string" ? parsed.status : "unknown",
-        kind: typeof command.kind === "string" ? command.kind : "unknown",
-        snapshotId: typeof command.snapshotId === "string" ? command.snapshotId : undefined,
-      });
-    } catch {
-      /* leave bytes; diagnosis does not rewrite plans */
-    }
-  }
-  return plans;
-}
-
-export function recoveryBlocksVerify(home: string): boolean {
-  const mutation = readMutationJournal(home);
-  const restore = readRestoreJournal(home);
-  const upgrade = readUpgradeJournal(home);
-  const plugin = readPluginMutation(home);
-  return Boolean(mutation) || restore.needed === true || upgrade.needed === true || plugin.present === true;
 }
 
 export function findingsFromInspect(input: {

@@ -9,7 +9,6 @@ import {
   copyLinkedTree,
   retargetTree,
   SnapshotStore,
-  type SnapshotRestoreOptions,
 } from "./snapshot-store";
 import type { SnapshotRuntime } from "../../shared/snapshots";
 import type { RuntimeRef } from "../../shared/runtime";
@@ -19,10 +18,7 @@ import { ProcessTerminationError } from "./terminate-process";
 type SnapshotWorkerOperation =
   | "runtimeInstall"
   | "create"
-  | "restore"
-  | "recover"
   | "delete"
-  | "completeRestore"
   | "copyLinkedTree"
   | "removeTree"
   | "renameTree"
@@ -37,7 +33,6 @@ const input = workerData as {
   runtime?: SnapshotRuntime;
   id?: string;
   reason?: string;
-  options?: SnapshotRestoreOptions;
   src?: string;
   dest?: string;
   fallbackRuntimeRoot?: string;
@@ -97,9 +92,6 @@ function dispatch(data: typeof input): unknown {
   if (data.operation === "clearRuntimeFallback") {
     clearRuntimeFallback(data.profiles!, data.runtimeRoot!);
     return undefined;
-  }
-  if (data.operation === "restore" || data.operation === "recover" || data.operation === "completeRestore") {
-    throw new Error("Snapshot restore is not supported.");
   }
   const store = new SnapshotStore({ home: data.home, root: data.root! });
   if (data.operation === "create") return store.create(data.runtime!, data.reason);

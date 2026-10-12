@@ -199,15 +199,6 @@ export function validateSnapshotRoot(home: string, snapshotRoot: string): string
   return real;
 }
 
-export function pluginPackageRootFromLib(payloadRoot: string): string | null {
-  const lib = realDirectory(payloadRoot);
-  if (!lib) return null;
-  const parent = dirname(lib);
-  if (packageNameIs(parent, "@dsh-spaces/plugin")) return parent;
-  if (packageNameIs(lib, "@dsh-spaces/plugin")) return lib;
-  return null;
-}
-
 async function defaultNpmPack(request: PackOneRequest): Promise<string> {
   const timeoutMs = request.timeoutMs;
   const args = ["pack", "--ignore-scripts", "--json", "--pack-destination", request.destination];

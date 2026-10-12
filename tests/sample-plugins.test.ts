@@ -214,10 +214,6 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
       create: async () => {
         throw new Error("unused");
       },
-      restore: async () => {
-        throw new Error("snapshot restore must not be called");
-      },
-      recover: async () => undefined,
       delete: async () => undefined,
     } as SnapshotExecutor,
     runtimes: {
@@ -229,12 +225,6 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
       preview: () => ({ version: runtime.version, profiles: [] }),
       upgrade: async () => {
         throw new Error("unused");
-      },
-      restore: async () => {
-        throw new Error("restore not stubbed");
-      },
-      recover: async () => {
-        throw new Error("recover not stubbed");
       },
     } as CoordinatedUpgrade,
     diagnostics: {

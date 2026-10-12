@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, type FormEvent, type ReactElement } from "react";
 import type { LlmDescribeResult, RedactedConnection } from "../../../../../src/shared/llm-api";
 import { localizeError, t, type WorkbenchLocale } from "../i18n";
-import { createWorkbenchLlmClient, newOperationId, type LlmUiClient, type LlmUiSpace } from "./client";
+import { newOperationId, type LlmUiClient, type LlmUiSpace } from "./client";
 import { SpaceBindingPanel } from "./space-binding";
 
 export type LlmModelCenterProps = {
@@ -590,6 +590,3 @@ function DeletePanel({
   );
 }
 
-export function workbenchLlmClient(api: Parameters<typeof createWorkbenchLlmClient>[0], uuid: () => string): LlmUiClient {
-  return createWorkbenchLlmClient(api, uuid);
-}

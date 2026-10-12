@@ -268,22 +268,6 @@ export async function resolveInstallSpec(
   return spec;
 }
 
-export async function installPluginToProfiles(
-  dshHome: string,
-  profiles: string[],
-  spec: string,
-  runningOf: (name: string) => boolean,
-): Promise<PluginInstallResult> {
-  if (profiles.length === 0) {
-    throw new Error(t("errors.pluginNeedTarget"));
-  }
-  const unique = [...new Set(profiles)];
-  for (const name of unique) {
-    await pluginAdd(dshHome, name, spec);
-  }
-  return { running: unique.filter(runningOf) };
-}
-
 export function listPluginLibrary(
   dshHome: string,
   profileNames: string[],
@@ -465,17 +449,6 @@ async function writeAtomicBin(file: string, contents: Buffer): Promise<void> {
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, contents);
   renameSync(tmp, file);
-}
-
-function npmPackageName(spec: string): string {
-  if (spec.startsWith("@")) {
-    const slash = spec.indexOf("/");
-    if (slash < 0) return spec;
-    const scope = spec.slice(0, slash);
-    const rest = spec.slice(slash + 1).split("@")[0];
-    return rest ? `${scope}/${rest}` : spec;
-  }
-  return spec.split("@")[0] || spec;
 }
 
 export function parseNpmNameAndVersion(spec: string): { name: string; version: string } | null {

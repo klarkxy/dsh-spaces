@@ -1,5 +1,4 @@
 /** Narrow, non-secret presentation protocol; no generic Electron or webview API. */
-export const BROWSER_GUEST_IPC = 'dsh-spaces-browser:guest';
 export const BROWSER_PRESENT = 'dsh-spaces-browser:present';
 export const BROWSER_HIDE = 'dsh-spaces-browser:hide';
 export const BROWSER_RELAY = 'dsh-spaces-browser:relay';
@@ -37,14 +36,6 @@ export function parseBrowserChild(value: unknown): BrowserChildRequest | null {
   if (v.source === BROWSER_PRESENT && Object.keys(v).length === 8 && id(v.tabId) && browserUrl(v.url) && browserViewport(v.viewport)) return v;
   return null;
 }
-export function parseBrowserRelay(value: unknown): BrowserRelay | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const v = value as BrowserRelay;
-  if (v.source !== BROWSER_RELAY || !id(v.requestId) || !browserIdentity(v.identity)) return null;
-  if (v.kind === 'hide' && Object.keys(v).length === 4) return v;
-  if (v.kind === 'present' && Object.keys(v).length === 7 && id(v.tabId) && browserUrl(v.url) && browserViewport(v.viewport)) return v;
-  return null;
-}
 export function clipBrowserViewport(value: BrowserViewport, container: BrowserViewport): BrowserViewport | null {
   if (!browserViewport(value) || !browserViewport(container)) return null;
   const x = Math.max(value.x, container.x), y = Math.max(value.y, container.y);
@@ -70,11 +61,4 @@ export function parseBrowserObservations(value: unknown): BrowserGuestObservatio
     ids.add(row.tabId);
   }
   return value as BrowserGuestObservation[];
-}
-export function browserNavigationAllowed(value: unknown, protectedOrigins: readonly string[]): value is string {
-  if (!browserUrl(value)) return false;
-  const url = new URL(value);
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && !url.hostname.endsWith('.localhost')) return true;
-  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
-  return !protectedOrigins.some(origin => { const u = new URL(origin); return port === (u.port || (u.protocol === 'https:' ? '443' : '80')); });
 }

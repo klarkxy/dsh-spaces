@@ -1,5 +1,4 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
@@ -26,7 +25,7 @@ import { inspectHomeToolchain } from "./control-residue";
 import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { WorkbenchLog } from "./workbench-log";
-import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver, spawnNode } from "./dsh-cli";
+import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "./dsh-cli";
 import { assertNotRealHome, authorizeProductHome, samePath } from "./home-guard";
 import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
 import { archiveAbsPath } from "./plugin-library";
@@ -123,7 +122,6 @@ import {
 } from "./component-handoff";
 import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
 import {
-  WorkbenchJobError,
   WorkbenchJobStore,
   WORKBENCH_JOBS_DIR_NAME,
   type WorkbenchJobContext,
@@ -132,8 +130,6 @@ import {
 import { packLocalArtifacts } from "../../../packages/plugin/src/host/supervisor-pack.ts";
 import {
   WorkbenchMaintenance as WorkbenchMaintenanceService,
-  WORKBENCH_PLANS_DIR_NAME,
-  type WorkbenchRecoveryOutcome,
 } from "./workbench-maintenance";
 import type { WorkbenchMaintenancePorts } from "./workbench-maintenance-ports";
 import {
@@ -226,8 +222,6 @@ export interface WorkbenchMaintenance {
   runtimes(): Promise<WorkbenchRuntimeDto[]>;
   workbenchPackage?(): Promise<WorkbenchPackageRelease | null>;
   backups(spaceId: string): Promise<WorkbenchBackup[]>;
-  recover(ctx?: WorkbenchJobContext): Promise<void>;
-  recoveryOutcome?(): WorkbenchRecoveryOutcome | undefined;
 }
 
 export interface WorkbenchSupervisorOptions {
@@ -332,7 +326,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   readonly home: string;
   readonly controlDir: string;
   private origin = "";
-  private cookie = "";
   private session = "";
   private bearer = "";
   private bootstrap = new Map<string, number>();
@@ -376,8 +369,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private maintenanceBlocked = false;
   private runtimeStore: RuntimeStore | undefined;
   private readonly unmanaged = new Set<string>();
-  /** Skip starting the manager while recovery jobs are still being bound. */
-  private holdManagerStart = false;
   private readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   private readonly pidAlive: PidAliveFn;
   private readonly llmApplied = new Map<string, number>();
@@ -1376,7 +1367,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.packageUpgrade = new WorkbenchPackageUpgrade({
       home: this.home, managerId: () => this.managerId,
       pluginArtifact: this.options.pluginArtifact, viewBridgeArtifact: this.options.viewBridgeArtifact,
-      snapshots, upgrades, currentRuntime: () => this.currentRuntime(),
+      snapshots, currentRuntime: () => this.currentRuntime(),
       stopAll: () => this.stopOwnedAll(), reinitializeManager: () => this.reinitializeManager(),
       pluginAdd: this.options.pluginAdd,
       execPath: this.nodeExe,
@@ -1529,7 +1520,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     const loader = this.managerId ? await this.syncLoader(this.managerId, managerDump) : undefined;
     this.spaces = this.createSpacesControlWithLoader(loader);
-    if (this.holdManagerStart) return;
     if (this.managerId && this.managerInstall === "manager" && !this.unmanaged.has(this.managerId)) {
       const runningWorkspaces = this.ownedSpaceIds().filter(
         (id) => id !== this.managerId && this.statusOf(id) === "running",
@@ -1824,14 +1814,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       default:
         throw new WorkbenchPublicError("workbench/invalid-input");
     }
-  }
-
-  private async resumeRecovery(_ctx: WorkbenchJobContext): Promise<void> {
-    throw new WorkbenchPublicError("workbench/unsupported");
-  }
-
-  private async settleProvedRecoveryJobs(_outcome: WorkbenchRecoveryOutcome): Promise<void> {
-    return;
   }
 
   private async finishRelinquish(): Promise<void> {
@@ -2565,8 +2547,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       home: this.home,
       profiles: () => this.registry.scan(),
       statusOf: (name) => this.statusOf(name),
-      stop: (name) => this.stopOwned(name),
-      isMaintenance: () => this.maintenanceFlag,
     });
     return this.diagnostics;
   }
@@ -3228,124 +3208,6 @@ function publicPluginVersion(spec: unknown): string | null {
   return isExactRuntimeVersion(spec) ? spec : null;
 }
 
-function isPlanIdentity(value: string): boolean {
-  return ENTITY_RE.test(value);
-}
-
-function readContainedJson(home: string, parts: string[]): unknown | undefined {
-  let current = home;
-  for (const part of parts) {
-    if (!part || part === "." || part === ".." || /[\\/]/.test(part)) return undefined;
-    const next = join(current, part);
-    try {
-      const st = lstatSync(next);
-      if (st.isSymbolicLink()) return undefined;
-      current = next;
-    } catch {
-      return undefined;
-    }
-  }
-  try {
-    const st = lstatSync(current);
-    if (!st.isFile() || st.isSymbolicLink()) return undefined;
-    return JSON.parse(readFileSync(current, "utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
-function readJobPlanId(home: string, jobId: string): string | undefined {
-  if (!isPlanIdentity(jobId)) return undefined;
-  const parsed = readContainedJson(home, [HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, `${jobId}.json`]) as
-    | { command?: { planId?: unknown } }
-    | undefined;
-  const planId = parsed?.command?.planId;
-  return typeof planId === "string" && isPlanIdentity(planId) ? planId : undefined;
-}
-
-function readPlanEvidence(
-  home: string,
-  planId: string,
-): { kind: string; snapshotId?: string } | undefined {
-  if (!isPlanIdentity(planId)) return undefined;
-  const parsed = readContainedJson(home, [HOME_CONTROL_DIR_NAME, WORKBENCH_PLANS_DIR_NAME, `${planId}.json`]) as
-    | { schemaVersion?: unknown; id?: unknown; command?: { kind?: unknown; snapshotId?: unknown } }
-    | undefined;
-  if (!parsed || parsed.schemaVersion !== 1 || parsed.id !== planId) return undefined;
-  const kind = parsed.command?.kind;
-  if (typeof kind !== "string" || !kind) return undefined;
-  const snapshotId = parsed.command?.snapshotId;
-  return {
-    kind,
-    snapshotId: typeof snapshotId === "string" ? snapshotId : undefined,
-  };
-}
-
-function settlementForRecoveredJob(
-  kind: string,
-  planId: string | undefined,
-  plan: { kind: string; snapshotId?: string } | undefined,
-  outcome: WorkbenchRecoveryOutcome,
-): { status: "succeeded" | "failed" | "cancelled"; message: string } | undefined {
-  if (kind !== "plan.execute" || !planId || !plan) return undefined;
-  if (plan.kind === "workbench.upgrade" && outcome.workbenchPlanId === planId) {
-    return outcome.workbenchSucceeded
-      ? { status: "succeeded", message: "Workbench package update completed; its durable receipt was recovered." }
-      : { status: "failed", message: outcome.workbenchRolledBack
-        ? "Workbench package update was rolled back to its whole-home snapshot."
-        : "Workbench package update was abandoned before replacing packages." };
-  }
-  if (
-    plan.kind === "snapshot.restore" &&
-    (outcome.restoreCompleted || outcome.restoreRolledBack) &&
-    outcome.restorePlanId === planId &&
-    typeof outcome.snapshotId === "string" &&
-    plan.snapshotId === outcome.snapshotId
-  ) {
-    return outcome.restoreRolledBack
-      ? { status: "failed", message: "Interrupted whole-home restore was rolled back; previous data was retained." }
-      : { status: "succeeded", message: "Whole-home restore completed by recovery." };
-  }
-  if (
-    plan.kind === "runtime.upgrade" &&
-    outcome.upgradeRolledBack &&
-    typeof outcome.upgradePlanId === "string" &&
-    planId === outcome.upgradePlanId
-  ) {
-    return { status: "failed", message: "Runtime upgrade was rolled back by recovery." };
-  }
-  if (
-    plan.kind.startsWith("plugin.") &&
-    outcome.restoreCompleted &&
-    outcome.pluginPlanId &&
-    planId === outcome.pluginPlanId
-  ) {
-    return {
-      status: "failed",
-      message: "Plugin mutation was overwritten by a whole-home restore. Audit evidence was kept.",
-    };
-  }
-  return undefined;
-}
-
-function markHandledPlan(home: string, planId: string, status: "succeeded" | "failed" | "cancelled"): void {
-  if (!isPlanIdentity(planId)) return;
-  const existing = readContainedJson(home, [HOME_CONTROL_DIR_NAME, WORKBENCH_PLANS_DIR_NAME, `${planId}.json`]);
-  if (!existing || typeof existing !== "object") return;
-  const parsed = existing as Record<string, unknown>;
-  if (parsed.schemaVersion !== 1 || parsed.id !== planId) return;
-  parsed.status = status;
-  parsed.finishedAt = new Date().toISOString();
-  const path = join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_PLANS_DIR_NAME, `${planId}.json`);
-  try {
-    const st = lstatSync(path);
-    if (!st.isFile() || st.isSymbolicLink()) return;
-    atomicWrite(path, `${JSON.stringify(parsed, null, 2)}\n`);
-  } catch {
-    /* keep original plan bytes */
-  }
-}
-
 function profileHasLlmBridge(home: string, profileId: string): boolean {
   try {
     const pkg = JSON.parse(readFileSync(join(home, "profiles", profileId, "package.json"), "utf8")) as {
@@ -3524,46 +3386,4 @@ function expectKeys(value: Record<string, unknown>, required: string[], optional
   }
 }
 
-function syntheticJob(requestId: string, kind: string, status: WorkbenchJob["status"], message: string): WorkbenchJob {
-  const now = new Date().toISOString();
-  return {
-    id: requestId,
-    requestId,
-    kind,
-    status,
-    phase: status,
-    message,
-    affectedSpaceIds: [],
-    createdAt: now,
-    updatedAt: now,
-    canCancel: false,
-  };
-}
 
-function termPid(pid: number): Promise<void> {
-  if (process.platform === "win32") {
-    return new Promise((resolve) => {
-      const killer = spawn("taskkill", ["/PID", String(pid), "/T"], { stdio: "ignore", windowsHide: true });
-      const timer = setTimeout(() => {
-        killer.kill();
-        resolve();
-      }, 5_000);
-      const done = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      killer.once("exit", done);
-      killer.once("error", done);
-    });
-  }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      /* gone */
-    }
-  }
-  return Promise.resolve();
-}

@@ -1,23 +1,19 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { spawnObserved } from "./owned-process-record";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { t } from "../../shared/i18n";
 import { DSH_DEFAULT_VERSION, DSH_RUNTIME_PACKAGE } from "../../shared/runtime";
-import type { CliEnsureStatus, PackageSource, PluginQueueSnapshot, RuntimeStatus } from "../../shared/types";
+import type { CliEnsureStatus, PluginQueueSnapshot } from "../../shared/types";
 import { npmRegistry } from "./package-source";
 import { terminateProcessTree } from "./terminate-process";
 import {
   currentPackageSource,
-  ensureNode,
-  ensurePnpm,
   nodeExecutable,
   npmCliJs,
   pnpmCjs,
   runProcess,
-  runtimeProbe,
-  setPackageSource,
   toolchainEnv,
 } from "./toolchain";
 
@@ -38,8 +34,6 @@ let cliStatus: CliEnsureStatus = {
   state: "idle",
   message: "",
 };
-const cliListeners = new Set<(status: CliEnsureStatus) => void>();
-
 function binUnder(nodeModulesRoot: string): string {
   return join(nodeModulesRoot, "@deepseek-ai", "dsh", "lib", "bin.js");
 }
@@ -117,19 +111,6 @@ export function resetDshBinCache(): void {
 
 function setCliStatus(next: CliEnsureStatus): void {
   cliStatus = next;
-  for (const listener of cliListeners) listener(cliStatus);
-}
-
-export function cliStatusSnapshot(): CliEnsureStatus {
-  if (cliStatus.state === "idle") {
-    return { ...cliStatus, message: t("cli.idleMessage") };
-  }
-  return cliStatus;
-}
-
-export function onCliStatus(listener: (status: CliEnsureStatus) => void): () => void {
-  cliListeners.add(listener);
-  return () => cliListeners.delete(listener);
 }
 
 export function dshBin(): string {
@@ -242,52 +223,6 @@ export function ensureDshCli(): Promise<string> {
   return ensuring;
 }
 
-export function getRuntimeStatus(): RuntimeStatus {
-  const probe = runtimeProbe();
-  return { ...probe, cli: Boolean(findDshBin()) };
-}
-
-let ensuringRuntime: Promise<string> | undefined;
-
-export function ensureRuntime(source?: PackageSource): Promise<string> {
-  if (!ensuringRuntime) {
-    ensuringRuntime = doEnsureRuntime(source).finally(() => {
-      ensuringRuntime = undefined;
-    });
-  }
-  return ensuringRuntime;
-}
-
-async function doEnsureRuntime(source?: PackageSource): Promise<string> {
-  try {
-    if (source) setPackageSource(source);
-    const existing = findDshBin();
-    if (existing && nodeExecutable() && pnpmCjs()) {
-      // Older DSH snapshots do not need a newer Node to reopen offline.
-      if (readFileSync(existing, "utf8").includes("import.meta.main")) await ensureNode();
-      await ensurePnpm();
-      setCliStatus({ state: "ready", message: existing });
-      return existing;
-    }
-    setCliStatus({ state: "installing", step: "node", message: t("cli.installingNode") });
-    await ensureNode((line) => {
-      setCliStatus({ state: "installing", step: "node", message: line.slice(0, 200) });
-    });
-    setCliStatus({ state: "installing", step: "pnpm", message: t("cli.installingPnpm") });
-    await ensurePnpm((line) => {
-      setCliStatus({ state: "installing", step: "pnpm", message: line.slice(0, 200) });
-    });
-    setCliStatus({ state: "installing", step: "cli", message: t("cli.installingCli", { spec: DSH_CLI_SPEC }) });
-    const bin = await ensureDshCli();
-    setCliStatus({ state: "ready", message: bin });
-    return bin;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    setCliStatus({ state: "error", message });
-    throw err;
-  }
-}
-
 /** An explicitly bound Host runtime wins, including Electron's ASAR-capable Node. */
 export function spawnNode(args: string[], options: SpawnOptions = {}): ChildProcess {
   const managed = managedNodeOverride ?? nodeExecutable();
@@ -352,17 +287,6 @@ export async function runDsh(
 
 let pending = 0;
 let current: string | undefined;
-const queueListeners = new Set<(snap: PluginQueueSnapshot) => void>();
-
-function emitQueue(): void {
-  const snap = { pending, current };
-  for (const listener of queueListeners) listener(snap);
-}
-
-export function onPluginQueue(listener: (snap: PluginQueueSnapshot) => void): () => void {
-  queueListeners.add(listener);
-  return () => queueListeners.delete(listener);
-}
 
 export function pluginQueueSnapshot(): PluginQueueSnapshot {
   return { pending, current };
@@ -370,34 +294,25 @@ export function pluginQueueSnapshot(): PluginQueueSnapshot {
 
 let pluginTail: Promise<void> = Promise.resolve();
 
-export function drainPluginQueue(): Promise<void> {
-  return pluginTail;
-}
-
 export function enqueuePlugin<T>(label: string, work: () => Promise<T>): Promise<T> {
   pending += 1;
-  emitQueue();
   const run = pluginTail.then(
     async () => {
       current = label;
-      emitQueue();
       try {
         return await work();
       } finally {
         pending -= 1;
         current = undefined;
-        emitQueue();
       }
     },
     async () => {
       current = label;
-      emitQueue();
       try {
         return await work();
       } finally {
         pending -= 1;
         current = undefined;
-        emitQueue();
       }
     },
   );

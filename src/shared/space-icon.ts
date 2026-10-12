@@ -8,8 +8,6 @@ export const MAX_SPACE_ICON_DATA_URL_CHARS = 240_000;
 
 export const MAX_SPACE_ICON_SVG_BYTES = 64 * 1024;
 
-export const SPACE_ICON_SIZE = 128;
-
 const DATA_URL_RE =
   /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,([A-Za-z0-9+/]+={0,2})$/i;
 

@@ -36,7 +36,6 @@ import {
   type BlueprintModelRef,
   type BlueprintOs,
   type BlueprintPackage,
-  type BlueprintPackageEvidence,
   type BlueprintPackageSource,
   type BlueprintPatch,
   type BlueprintPatchEntry,

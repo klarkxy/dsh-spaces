@@ -39,8 +39,6 @@ export const LLM_API_METHODS = [
   "operationStatus",
 ] as const;
 
-export type LlmApiMethod = (typeof LLM_API_METHODS)[number];
-
 export const LLM_WRITE_API_METHODS = [
   "saveConnection",
   "setDefault",

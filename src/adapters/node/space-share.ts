@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isGitSpec } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
@@ -409,10 +409,3 @@ export async function importSpaceArchive(
   );
 }
 
-export function writeSpaceArchiveFile(path: string, archive: Buffer): void {
-  writeFileSync(path, archive);
-}
-
-export function readSpaceArchiveFile(path: string): Buffer {
-  return readFileSync(path);
-}

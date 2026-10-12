@@ -1,4 +1,4 @@
-import type { DashboardBackend, PublicationPlanInput, PublicationPolicy, PublicationSelection } from '../../../../src/shared/dashboard';
+import type { PublicationPlanInput, PublicationPolicy, PublicationSelection } from '../../../../src/shared/dashboard';
 import type { WorkbenchApi, WorkbenchView } from '../../../../src/shared/workbench';
 import type { DashboardReadBackend } from '../../../dashboard/src/model';
 import { createDashboardHttpBackend } from '../../../dashboard/src/http-client';

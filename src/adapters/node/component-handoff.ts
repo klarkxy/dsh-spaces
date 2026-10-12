@@ -32,7 +32,6 @@ export const COMPONENT_HANDOFF_IPC_VERSION = 1 as const;
 export const COMPONENT_HANDOFF_RECEIPT_FILE = "handoff-receipt.json";
 export const COMPONENT_HANDOFF_DEADLINE_MS = 30_000;
 export const COMPONENT_HANDOFF_FLAG = "--accept-handoff";
-export const COMPONENT_HANDOFF_CODE = "component-handoff/failed" as const;
 
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;

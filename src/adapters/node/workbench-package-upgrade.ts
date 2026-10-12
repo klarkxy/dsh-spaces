@@ -23,7 +23,6 @@ import {
 } from "./plugin-ops";
 import { readLibraryOrThrow } from "./workbench-products";
 import { ProcessTerminationError } from "./terminate-process";
-import type { CoordinatedUpgrade } from "./coordinated-upgrade";
 import type { SnapshotExecutor } from "./snapshot-executor";
 import { SNAPSHOT_ID_RE, type SnapshotRuntime } from "../../shared/snapshots";
 import { PROFILE_NAME_RE } from "../../shared/types";
@@ -69,7 +68,6 @@ const PLUGIN_ARCHIVE_PREFIX = "dsh-spaces-plugin";
 const VIEW_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-view-bridge";
 const BROWSER_ARCHIVE_PREFIX = "dsh-spaces-browser";
 const VIEW_BRIDGE_FILES = ["package.json", "lib/index.js", "lib/client.js"] as const;
-const LLM_BRIDGE_FILES = ["package.json", "lib/index.js"] as const;
 const LLM_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-llm-bridge";
 const PREPARE_SCRATCH_DIR = "workbench-prepare";
 const IDENTITY_JSON: Record<ComponentPayloadName, string> = {
@@ -98,13 +96,6 @@ export class WorkbenchPackageUpgradeError extends Error {
 }
 
 export type WorkbenchPackageOutcome = "succeeded" | "rolled-back" | "abandoned";
-
-export interface WorkbenchPackageRecovery {
-  planId: string;
-  rolledBack: boolean;
-  outcome: WorkbenchPackageOutcome;
-  snapshotId?: string;
-}
 
 export interface WorkbenchPackageUpgradeInput {
   planId: string;
@@ -137,7 +128,6 @@ export interface WorkbenchPackageUpgradeOptions {
   toolsRoot?: string;
   handoff?: WorkbenchPackageHandoff;
   snapshots: Pick<SnapshotExecutor, "create">;
-  upgrades: Pick<CoordinatedUpgrade, "restore" | "recover">;
   currentRuntime: () => SnapshotRuntime;
   stopAll: () => Promise<void>;
   /** Kept for Supervisor construction; execute does not restart the old manager. */
@@ -395,18 +385,6 @@ export class WorkbenchPackageUpgrade {
       }
       throw error;
     }
-  }
-
-  /**
-   * Consume one unfinished marker, or read one exact-plan receipt.
-   * Does not list historical receipts. Root selects consumption via unfinishedPlanIds.
-   * Cold recover success/abandon does not start the manager; root reinitializes once.
-   */
-  async recover(
-    _ctx: WorkbenchJobContext,
-    _planId?: string,
-  ): Promise<WorkbenchPackageRecovery | undefined> {
-    throw new WorkbenchPackageUpgradeError("unavailable", "Workbench package recovery is not supported.");
   }
 
   hasEvidence(): boolean {

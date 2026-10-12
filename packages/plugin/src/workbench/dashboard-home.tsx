@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, type ReactElement } from 'react';
-import type { DashboardBackend, DashboardError, PublicationPolicy } from '../../../../src/shared/dashboard';
+import type { DashboardError, PublicationPolicy } from '../../../../src/shared/dashboard';
 import type { WorkbenchApi } from '../../../../src/shared/workbench';
 import type { DashboardReadBackend } from '../../../dashboard/src/model';
 import { DashboardApp } from '../../../dashboard/src/view';

@@ -18,7 +18,6 @@ import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { ProcessTerminationError } from "../src/adapters/node/terminate-process.ts";
 import { archiveAbsPath, pluginLibraryPath, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
-import type { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
 import type { SnapshotMeta, SnapshotRuntime } from "../src/shared/snapshots.ts";
 import { WorkbenchJobStore, type WorkbenchJobContext } from "../src/adapters/node/workbench-jobs.ts";
 import { setTimeout as delay } from "node:timers/promises";
@@ -49,20 +48,6 @@ afterEach(() => {
   for (const dir of temps.splice(0)) {
     rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
-});
-
-test("ROOT nested settlement cannot substitute a different plan", async () => {
-  const home = tempHome();
-  seedManager(home);
-  const planId = randomUUID();
-  const snapshotId = randomUUID();
-  const marker = { ...crashMarker(home, planId, snapshotId), settlement: {
-    schemaVersion: 1, planId: randomUUID(), snapshotId, outcome: "succeeded", rolledBack: false, at: new Date().toISOString(),
-  } };
-  writeJson(markerPath(home), marker);
-  const upgrade = createUpgrade(home, {});
-  await assert.rejects(() => upgrade.recover(jobCtx()));
-  assert.deepEqual(readJson(markerPath(home)), marker);
 });
 
 test("describe returns undefined when artifacts are missing or not official packages", async () => {
@@ -227,7 +212,6 @@ test("successful execute installs digest-named archives, reads back contents, an
   assert.ok(after);
   assert.equal(after.updateAvailable, false);
   assert.equal(after.digest, preview.digest);
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
   const receipt = readJson(receiptPath(home, planId));
   assert.equal(receipt.outcome, "succeeded");
   assert.equal(receipt.rolledBack, false);
@@ -340,10 +324,6 @@ test("known install failure after snapshot reports the original error and does n
       events.push("pluginAdd");
       throw new Error("plugin add failed");
     },
-    restore: async () => {
-      events.push("restore");
-      return dummyRestore(randomUUID());
-    },
   });
   const preview = await upgrade.describe();
   assert.ok(preview);
@@ -357,14 +337,11 @@ test("known install failure after snapshot reports the original error and does n
     }, jobCtx()),
     /plugin add failed/,
   );
-  assert.equal(events.includes("restore"), false);
-  assert.equal(events.includes("upgradeRecover"), false);
   assert.equal(events.includes("handoff"), false);
   assert.equal(upgrade.hasEvidence(), false);
   const receipt = readJson(receiptPath(home, planId));
   assert.equal(receipt.outcome, "abandoned");
   assert.equal(receipt.rolledBack, false);
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
 });
 
 test("unknown subprocess state keeps the marker and does not roll back", async () => {
@@ -378,10 +355,6 @@ test("unknown subprocess state keeps the marker and does not roll back", async (
     pluginAdd: async () => {
       events.push("pluginAdd");
       throw new ProcessTerminationError("subprocess state unknown");
-    },
-    restore: async () => {
-      events.push("restore");
-      return dummyRestore(randomUUID());
     },
   });
   const preview = await upgrade.describe();
@@ -397,8 +370,6 @@ test("unknown subprocess state keeps the marker and does not roll back", async (
     (error: unknown) => error instanceof ProcessTerminationError,
   );
   assert.equal(upgrade.hasEvidence(), true);
-  assert.equal(events.includes("restore"), false);
-  assert.equal(events.includes("upgradeRecover"), false);
   const marker = readJson(markerPath(home));
   assert.equal(marker.planId, planId.toLowerCase());
   assert.ok(marker.snapshotId);
@@ -417,10 +388,6 @@ test("stopAll failure before a snapshot abandons the plan and is not success", a
       events.push("stopAll");
       throw new Error("stop failed");
     },
-    restore: async () => {
-      events.push("restore");
-      return dummyRestore(randomUUID());
-    },
   });
   const preview = await upgrade.describe();
   assert.ok(preview);
@@ -435,10 +402,8 @@ test("stopAll failure before a snapshot abandons the plan and is not success", a
     /stop failed/,
   );
   assert.equal(upgrade.hasEvidence(), false);
-  assert.equal(events.includes("restore"), false);
   assert.equal(events.includes("reinitialize"), false);
   assert.equal(events.includes("handoff"), false);
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
   const receipt = readJson(receiptPath(home, planId));
   assert.equal(receipt.outcome, "abandoned");
   assert.notEqual(receipt.outcome, "succeeded");
@@ -469,32 +434,6 @@ test("ProcessTerminationError before a snapshot keeps evidence", async () => {
   assert.equal(readJson(markerPath(home)).snapshotId, undefined);
 });
 
-test("a leftover crash marker is not restored and recover is unsupported", async () => {
-  const home = tempHome();
-  seedManager(home);
-  const pair = packPair(tempHome());
-  const snapshotId = randomUUID();
-  const planId = randomUUID();
-  const marker = crashMarker(home, planId, snapshotId);
-  writeJson(markerPath(home), marker);
-
-  const events: string[] = [];
-  const upgrade = createUpgrade(home, {
-    ...pair,
-    events,
-    restore: async () => {
-      events.push("restore");
-      return dummyRestore(snapshotId);
-    },
-  });
-  const before = readFileSync(markerPath(home));
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.deepEqual(readFileSync(markerPath(home)), before);
-  assert.equal(events.includes("restore"), false);
-  assert.equal(events.includes("upgradeRecover"), false);
-  assert.equal(upgrade.hasEvidence(), true);
-});
-
 test("install failure after snapshot does not start a restore journal", async () => {
   const home = tempHome();
   seedManager(home);
@@ -507,10 +446,6 @@ test("install failure after snapshot does not start a restore journal", async ()
     pluginAdd: async () => {
       events.push("pluginAdd");
       throw new Error("plugin add failed");
-    },
-    restore: async () => {
-      events.push("restore");
-      return dummyRestore(randomUUID());
     },
   });
   const preview = await upgrade.describe();
@@ -525,117 +460,6 @@ test("install failure after snapshot does not start a restore journal", async ()
     }, jobCtx()),
     /plugin add failed/,
   );
-  assert.equal(events.includes("restore"), false);
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
-});
-
-test("recover without a snapshot id is unsupported and leaves the marker", async () => {
-  const home = tempHome();
-  seedManager(home);
-  const pair = packPair(tempHome());
-  const planId = randomUUID();
-  const marker = crashMarker(home, planId, randomUUID());
-  delete marker.snapshotId;
-  writeJson(markerPath(home), marker);
-
-  const events: string[] = [];
-  const upgrade = createUpgrade(home, {
-    ...pair,
-    events,
-    restore: async () => {
-      events.push("restore");
-      return dummyRestore(randomUUID());
-    },
-  });
-  const before = readFileSync(markerPath(home));
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.deepEqual(readFileSync(markerPath(home)), before);
-  assert.equal(events.includes("restore"), false);
-});
-
-test("bad, future, and illegal-identity markers are kept and refused", async () => {
-  const home = tempHome();
-  seedManager(home);
-  const pair = packPair(tempHome());
-  const upgrade = createUpgrade(home, pair);
-
-  mkdirSync(dirname(markerPath(home)), { recursive: true });
-  writeFileSync(markerPath(home), "{not-json");
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  writeJson(markerPath(home), { schemaVersion: 2, kind: "workbench.upgrade", planId: randomUUID() });
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  writeJson(markerPath(home), crashMarker(home, "not-a-uuid", randomUUID()));
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  const badSnapshot = crashMarker(home, randomUUID(), "not-a-snapshot");
-  writeJson(markerPath(home), badSnapshot);
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  const foreign = crashMarker(home, randomUUID(), randomUUID());
-  foreign.managerId = "coding";
-  writeJson(markerPath(home), foreign);
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  const otherHome = crashMarker(home, randomUUID(), randomUUID());
-  otherHome.home = join(home, "other-home");
-  writeJson(markerPath(home), otherHome);
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-});
-
-test("bad or mismatched receipts are kept and cannot stand in for this plan", async () => {
-  const home = tempHome();
-  seedManager(home);
-  const pair = packPair(tempHome());
-  const upgrade = createUpgrade(home, pair);
-  const planId = randomUUID();
-  const snapshotId = randomUUID();
-  writeJson(markerPath(home), crashMarker(home, planId, snapshotId));
-  mkdirSync(dirname(receiptPath(home, planId)), { recursive: true });
-  writeFileSync(receiptPath(home, planId), "{not-json");
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-  assert.equal(readFileSync(receiptPath(home, planId), "utf8"), "{not-json");
-
-  writeJson(receiptPath(home, planId), {
-    schemaVersion: 2,
-    planId,
-    outcome: "succeeded",
-    rolledBack: false,
-    at: "2026-09-13T00:00:00.000Z",
-  });
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  writeJson(receiptPath(home, planId), {
-    schemaVersion: 1,
-    planId: randomUUID(),
-    snapshotId,
-    outcome: "succeeded",
-    rolledBack: false,
-    at: "2026-09-13T00:00:00.000Z",
-  });
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-
-  writeJson(receiptPath(home, planId), {
-    schemaVersion: 1,
-    planId,
-    snapshotId: randomUUID(),
-    outcome: "succeeded",
-    rolledBack: false,
-    at: "2026-09-13T00:00:00.000Z",
-  });
-  await assert.rejects(() => upgrade.recover(jobCtx(), planId), matchCode("unavailable"));
-  assert.equal(existsSync(markerPath(home)), true);
-  assert.equal(readJson(markerPath(home)).planId, planId.toLowerCase());
 });
 
 test("hasEvidence treats unreadable marker paths as present", async () => {
@@ -644,7 +468,6 @@ test("hasEvidence treats unreadable marker paths as present", async () => {
   const upgrade = createUpgrade(home, packPair(tempHome()));
   mkdirSync(markerPath(home), { recursive: true });
   assert.equal(upgrade.hasEvidence(), true);
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
   assert.equal(upgrade.hasEvidence(), true);
 
   rmSync(markerPath(home), { recursive: true, force: true });
@@ -655,7 +478,6 @@ test("hasEvidence treats unreadable marker paths as present", async () => {
     return;
   }
   assert.equal(upgrade.hasEvidence(), true);
-  await assert.rejects(() => upgrade.recover(jobCtx()), matchCode("unavailable"));
   assert.equal(existsSync(markerPath(home)), true);
 });
 
@@ -676,7 +498,6 @@ test("receipt directory junctions are refused and the marker is kept", async () 
   }
   const upgrade = createUpgrade(home, {
     ...pair,
-    restore: async (id) => dummyRestore(id),
   });
   const preview = await upgrade.describe();
   assert.ok(preview);
@@ -692,7 +513,7 @@ test("receipt directory junctions are refused and the marker is kept", async () 
   assert.equal(upgrade.hasEvidence(), true);
 });
 
-test("concurrent execute keeps the first plan identity and recover can filter by planId", async () => {
+test("concurrent execute keeps the first plan identity", async () => {
   const home = tempHome();
   seedManager(home);
   const pair = packPair(tempHome());
@@ -735,18 +556,15 @@ test("concurrent execute keeps the first plan identity and recover can filter by
     matchCode("conflict"),
   );
   assert.equal(readJson(markerPath(home)).planId, firstPlan.toLowerCase());
-  await assert.rejects(() => upgrade.recover(jobCtx(), secondPlan), matchCode("unavailable"));
   assert.equal(existsSync(markerPath(home)), true);
 
   gate.release();
   const result = await first;
   assert.ok(result.snapshotId);
   assert.equal(upgrade.hasEvidence(), false);
-  await assert.rejects(() => upgrade.recover(jobCtx(), firstPlan), matchCode("unavailable"));
   const receipt = readJson(receiptPath(home, firstPlan));
   assert.equal(receipt.outcome, "succeeded");
   assert.equal(receipt.snapshotId, result.snapshotId);
-  await assert.rejects(() => upgrade.recover(jobCtx(), secondPlan), matchCode("unavailable"));
 });
 
 test("prepare downloads a changed version and reuses the library cache", async () => {
@@ -1312,8 +1130,6 @@ function createUpgrade(
     events?: string[];
     snapshotId?: string;
     pluginAdd?: typeof mockPluginAdd;
-    restore?: CoordinatedUpgrade["restore"];
-    recoverUpgrade?: CoordinatedUpgrade["recover"];
     stopAll?: () => Promise<void>;
     omitHandoff?: boolean;
     handoff?: (input: WorkbenchPackageHandoffInput) => Promise<void>;
@@ -1351,16 +1167,6 @@ function createUpgrade(
         assert.equal(reason, WORKBENCH_UPGRADE_SNAPSHOT_REASON);
         return { id: snapshotId } as SnapshotMeta;
       },
-    },
-    upgrades: {
-      restore: opts.restore ?? (async () => {
-        events.push("restore");
-        throw new Error("restore should not run");
-      }),
-      recover: opts.recoverUpgrade ?? (async () => {
-        events.push("upgradeRecover");
-        return {};
-      }),
     },
     pluginAdd: opts.pluginAdd ?? mockPluginAdd,
     fetchImpl: opts.fetchImpl,
@@ -1542,13 +1348,6 @@ function crashMarker(home: string, planId: string, snapshotId: string) {
     viewBridgeDigest: "c".repeat(64),
     startedAt: "2026-09-13T00:00:00.000Z",
     snapshotId,
-  };
-}
-
-function dummyRestore(id: string) {
-  return {
-    restored: { id } as SnapshotMeta,
-    beforeRestore: { id } as SnapshotMeta,
   };
 }
 

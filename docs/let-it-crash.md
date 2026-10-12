@@ -18,7 +18,7 @@
 
 当前实现已拒绝公开恢复命令：`snapshot.restore`、`config.restore`、`controller.shutdown` 以及 Doctor `unlock` / `recover` / `rollback` 均为 unsupported。中断任务失败留证、不重放。Doctor 只诊断。
 
-源码侧恢复编排已删：`RestoreSession` 不存在。`SnapshotStore.restore` / `recover` / `completeRestore` 与 snapshot-worker 的同名操作抛出不支持，不是可执行恢复链。`packages/doctor/src/recover.ts` 仅为编译桩，CLI `index.ts` 不引用。历史 `pending-restore.json` 与 restore journal 仍可读作未完成证据并挡住后续写入，不重放、不修补。
+源码侧恢复编排已删：`RestoreSession`、`SnapshotStore.restore` / `recover` / `completeRestore`、snapshot-worker 的同名操作以及 Doctor 恢复编译桩均已移除。历史 `pending-restore.json` 与 restore journal 仍可读作未完成证据并挡住后续写入，不重放、不修补。
 
 运行时安装 IO 已抽到 `src/adapters/node/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及升级过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。
 

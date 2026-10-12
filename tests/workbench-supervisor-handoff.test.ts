@@ -1058,7 +1058,6 @@ function fakeMaintenance(): WorkbenchMaintenance {
     },
     runtimes: async () => [],
     backups: async () => [],
-    recover: async () => undefined,
   };
 }
 

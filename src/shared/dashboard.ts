@@ -224,10 +224,6 @@ export interface DashboardError {
   requestId?: Id;
   details?: { field?: string; limit?: number; actual?: number };
 }
-export interface ErrorResponse {
-  protocolVersion: 1;
-  error: DashboardError;
-}
 export interface DashboardBackend {
   query(request: DashboardQuery): Promise<DashboardQueryResponse>;
   mutate(request: BoardMutation): Promise<BoardMutationReceipt>;

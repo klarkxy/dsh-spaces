@@ -9,11 +9,8 @@ import {
   readSync,
   readdirSync,
   realpathSync,
-  unlinkSync,
-  writeFileSync,
   type Stats,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { t } from "../../shared/i18n";
 import {
@@ -31,16 +28,11 @@ import type { ProfileRecord, ProfileStatus } from "../../shared/types";
 import { PROFILE_NAME_RE } from "../../shared/types";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
-import { PatchWriter } from "./patch-writer";
 
 export interface DiagnosticsServiceOptions {
   home: string;
   profiles: () => ProfileRecord[];
   statusOf: (name: string) => ProfileStatus;
-  stop: (name: string) => Promise<void>;
-  isMaintenance: () => boolean;
-  /** Test seam. Production uses PatchWriter.verify (real dump-config). Restore always calls this. */
-  verify?: (name: string) => Promise<void>;
 }
 
 interface ProfileLogs {
@@ -61,10 +53,6 @@ export class DiagnosticsService {
   private readonly homeRoot: string;
   private readonly profiles: () => ProfileRecord[];
   private readonly statusOf: (name: string) => ProfileStatus;
-  private readonly stop: (name: string) => Promise<void>;
-  private readonly isMaintenance: () => boolean;
-  private readonly verify: (name: string) => Promise<void>;
-  private readonly writer: PatchWriter;
   private readonly logs = new Map<string, ProfileLogs>();
   private readonly privateKeyBlocks = new Set<string>();
 
@@ -74,10 +62,6 @@ export class DiagnosticsService {
     this.homeRoot = existsSync(opts.home) ? realpathSync(opts.home) : resolve(opts.home);
     this.profiles = opts.profiles;
     this.statusOf = opts.statusOf;
-    this.stop = opts.stop;
-    this.isMaintenance = opts.isMaintenance;
-    this.writer = new PatchWriter(opts.home);
-    this.verify = opts.verify ?? ((name) => this.writer.verify(name));
   }
 
   get(name: string): DiagnosticsSnapshot {
@@ -136,10 +120,6 @@ export class DiagnosticsService {
     if (meta.tooLarge) return meta;
     const content = readFileSync(this.resolvedBackupFile(name, backupId), "utf8");
     return { ...meta, content };
-  }
-
-  async restoreBackup(_name: string, _backupId: string): Promise<void> {
-    throw new Error("Configuration restore is not supported.");
   }
 
   private requireProfile(name: string): ProfileRecord {
@@ -336,36 +316,12 @@ export class DiagnosticsService {
     this.assertInsideHome(realpathSync(dir), dir);
   }
 
-  private assertRegularManagedFile(file: string, label: string): void {
-    const st = lstatSync(file);
-    if (st.isSymbolicLink()) throw new Error(`${label} is a symlink`);
-    if (!st.isFile()) throw new Error(`${label} is not a regular file`);
-    this.assertInsideHome(realpathSync(file), label);
-  }
-
   private assertInsideHome(realPath: string, label: string): void {
     if (!isInside(this.homeRoot, realPath)) {
       throw new Error(`Refusing path outside the DSH home (${label})`);
     }
   }
 
-  private backupCurrentPatch(patchPath: string, original: string): void {
-    const stamp = new Date().toISOString().replaceAll(":", "").replaceAll(".", "");
-    const bakPath = `${patchPath}.bak-${stamp}-${randomUUID()}`;
-    writeFileSync(bakPath, original, { encoding: "utf8", flag: "wx" });
-  }
-
-  private rollbackPatch(patchPath: string, original: string | null): void {
-    if (original !== null) {
-      atomicWrite(patchPath, original);
-      if (!existsSync(patchPath) || readFileSync(patchPath, "utf8") !== original) {
-        throw new Error("could not restore the previous patch file");
-      }
-      return;
-    }
-    if (existsSync(patchPath)) unlinkSync(patchPath);
-    if (existsSync(patchPath)) throw new Error("could not remove the candidate patch file");
-  }
 }
 
 export function sanitizeLogText(text: string): string {

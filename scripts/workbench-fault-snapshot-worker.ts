@@ -14,16 +14,12 @@ import {
   copyLinkedTree,
   retargetTree,
   SnapshotStore,
-  type SnapshotRestoreOptions,
 } from "../src/adapters/node/snapshot-store.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 type SnapshotWorkerOperation =
   | "create"
-  | "restore"
-  | "recover"
   | "delete"
-  | "completeRestore"
   | "copyLinkedTree"
   | "removeTree"
   | "renameTree"
@@ -39,7 +35,6 @@ const input = workerData as {
   runtime?: SnapshotRuntime;
   id?: string;
   reason?: string;
-  options?: SnapshotRestoreOptions;
   src?: string;
   dest?: string;
   fallbackRuntimeRoot?: string;
@@ -85,9 +80,6 @@ function dispatch(data: typeof input): unknown {
   if (data.operation === "clearRuntimeFallback") {
     clearRuntimeFallback(data.profiles!, data.runtimeRoot!);
     return undefined;
-  }
-  if (data.operation === "restore" || data.operation === "recover" || data.operation === "completeRestore") {
-    throw new Error("Snapshot restore is not supported.");
   }
   const store = new SnapshotStore({
     home: data.home,
