@@ -44,7 +44,7 @@ Shared LLM connections are a Home-level catalog. Management uses `POST /api/work
 
 From the repository root after `npm install`. `npm run build:spaces` writes `packages/*/lib` including the v2 component manifest at `packages/plugin/lib/supervisor/manifest.json`. Pack **outside** the package trees.
 
-The manifest names six components: Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install consumes that group. Missing components fail closed. An older installed five-component Supervisor cannot hot-upgrade to this six-component group; the component-set mismatch is rejected. Start with a new isolated installation for this branch rather than overwriting an existing Home. There is no automatic migration.
+The manifest names six components: Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install consumes that group. Missing components fail closed. On cold start the Supervisor selects the group bundled with the host plugin and reuses a previously selected group only when its digest matches; an old Home is never rewritten or migrated.
 
 PowerShell (directories **without spaces**; every path absolute):
 
@@ -142,9 +142,9 @@ Home backups are ordinary management. `snapshot.restore` and `config.restore` st
 
 Runtime **预览安装** / **预览升级** follow official **`latest`**, pin the exact version. A candidate that never becomes current is a failed prepare.
 
-**B5 upgrade in source:** after install of a complete validated candidate, the old service stages the payload and hands the lock to a one-shot launcher (`packages/supervisor/src/launcher.ts`, `--accept-handoff`, job phase `handoff-pending`). Isolated pack/archive and unit tests exist.
+**Upgrading Spaces:** install the new host plugin with `dsh plugin --profile web add <new tarball>`, shut the service down from the manager UI, and reopen Spaces. The Supervisor selects the host plugin's component group and aligns the manager plugin before it starts; each space's bridges align at space start. Leftover `workbench-upgrade.json` / `.dsh-spaces-upgrade/journal.json` evidence from an interrupted older update still blocks writes.
 
-**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs`, `scripts/verify-component-update.mjs`, and `scripts/verify-workbench-maintenance-product.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows and platform limits. Retired crash/faults/package-upgrade scripts fail closed on invocation; they are not current evidence.
+**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs` and `scripts/verify-workbench-maintenance-product.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows and platform limits. Retired crash/faults scripts fail closed on invocation; they are not current evidence.
 
 ### Logs and doctor
 
@@ -182,6 +182,6 @@ Production Home: `--home` and `--allow-real-home`. Old recover / unlock / rollba
 
 一个 Supervisor 持有 Home 运行权。协议版本 **2**，变更带 epoch 与 revision。没有公开的接管/释放运行权或恢复命令。关闭标签或宿主窗口不停止服务。停止全部空间和 `service.shutdown` 是两个操作。
 
-构建清单覆盖五组件。启动需要 `--component-payload`、同组三份制品（plugin / view-bridge / llm-bridge）以及同组 `--snapshot-worker`（正常快照 create/delete 与树拷贝 IO）。运行时安装已抽到 `runtime-installation.ts`，worker 只转发。组件升级通过一次性 launcher 交接，只有新管理器就绪才确认成功；真实流程和构建证据见 [合并验收记录](../tasks/merge-execution.md)。
+构建清单覆盖六组件。启动需要 `--component-payload`、同组四份制品（plugin / view-bridge / Browser / llm-bridge）以及同组 `--snapshot-worker`（正常快照 create/delete 与树拷贝 IO）。运行时安装已抽到 `runtime-installation.ts`，worker 只转发。Spaces 跟随宿主插件升级：用 `dsh plugin --profile web add <新包>` 更新宿主插件，在管理界面停止服务后重新打开；Supervisor 选择宿主插件的组件组并在管理器启动前对齐管理插件，各空间启动时桥接对齐。
 
 管理 UI 里用预览关闭服务来停 Supervisor。备份可创建、查看、删除，不能恢复。Doctor 只诊断。不要把接管、救援、回滚写成当前能力。

@@ -42,6 +42,8 @@ Windows CLI `0.1.5-rc.1` splits tarball paths that contain spaces. `pnpm run pac
 | **Community listing, pending** | Marketplace search/install once the scoped package is owned and published. Not done. |
 | **Not a release** | GitHub root is the monorepo. A CI pack artifact is for review, not `npm publish`. Desktop tags stay on the Release workflow. |
 
+Upgrade an existing install: `dsh plugin --profile web add <new tarball>` replaces the host plugin entry, then shut the Spaces service down from the manager UI and reopen Spaces. The Supervisor selects the plugin's bundled component group, aligns the manager plugin before it starts, and each space's bridges align at space start.
+
 Uninstall the ordinary entry: `dsh plugin --profile web remove @dsh-spaces/plugin`. That must drop the web bundle row. It does not by itself delete a manager already created for the Home.
 
 ## Operators

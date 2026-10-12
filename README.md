@@ -39,7 +39,7 @@ One Supervisor per Home. Browser tabs and host windows attach to that process wh
 
 See [docs/let-it-crash.md](docs/let-it-crash.md). Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management. Public restore APIs fail explicitly. Remaining unrun CLI/browser items: [tasks/q-coverage.md](tasks/q-coverage.md).
 
-Spaces component updates and official DSH runtime upgrades are different flows. A candidate that never becomes current is a failed prepare, not a restore. After a committed pointer switch, a later fault is reported in place.
+Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Official DSH runtime upgrades are a separate flow; a candidate that never becomes current is a failed prepare, not a restore.
 
 ## Current architecture (this branch)
 
@@ -47,13 +47,13 @@ Protocol **2**. Management state carries `protocolVersion`, `serviceEpoch`, `rev
 
 Shared Node modules for supervisor, jobs, products, and upgrade live under `src/adapters/node`.
 
-Build lists six immutable components in `lib/supervisor/manifest.json` (schemaVersion 2): Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker. Cold start and pack consume that group. Bootstrap passes `--component-payload` and the same group's plugin / view-bridge / Browser / llm-bridge artifacts plus `--snapshot-worker`. An installed Supervisor with the older five-component payload cannot hot-upgrade to this group: the component-set mismatch is rejected. Use a new isolated installation for this branch; no automatic migration or rewrite of an existing Home is provided.
+Build lists six immutable components in `lib/supervisor/manifest.json` (schemaVersion 2): Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker. Cold start and pack consume that group. Bootstrap passes `--component-payload` and the same group's plugin / view-bridge / Browser / llm-bridge artifacts plus `--snapshot-worker`. On cold start the Supervisor always selects the group bundled with the host plugin; a previously selected group is reused only when its digest matches. An old Home is never rewritten or migrated.
 
 The create dialog offers a Browser preset. It creates an ordinary Space, installs the bundled Browser plugin and view bridge, selects its independent Browser root, and leaves cross-Space callers denied until the Browser Space's `allowedSpaces` is edited explicitly. Browser Host and client use official DSH Web profile services (Cordis, authenticated Connection RPC and slots); the small standalone Browser root and tab state belong to this repository. Web pages appear in iframes, so sites may refuse embedding and cross-origin navigation cannot update the displayed address. See [Browser plugin notes](packages/browser/README.md).
 
 `--snapshot-worker` remains required for **normal Home snapshots** and remaining installation IO. Runtime-installation has been extracted; the worker is not a restore product.
 
-After a user-confirmed component upgrade, the old service stages the candidate, stops owned processes, and hands the Home lock to a one-shot launcher that selects the new payload and starts Supervisor once. Acceptance covers a real component handoff and standard plugin installation. See [the acceptance record](tasks/merge-execution.md) for exact builds and platform limits.
+To upgrade Spaces, install the new host plugin with `dsh plugin --profile web add <new tarball>`, shut the service down from the manager UI, and reopen Spaces. The Supervisor then selects the host plugin's component group, aligns the manager plugin before it starts, and each space's bridges align at space start. Leftover evidence from an interrupted earlier update still blocks writes. See [the acceptance record](tasks/merge-execution.md) for exact builds and platform limits.
 
 ## Requirements
 
