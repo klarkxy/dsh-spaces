@@ -51,9 +51,10 @@ import {
 } from "../src/adapters/node/home-controller.ts";
 import { WORKBENCH_JOBS_DIR_NAME } from "../src/adapters/node/workbench-jobs.ts";
 import { readHandoffReceipt } from "../src/adapters/node/component-handoff.ts";
-import { DesktopServiceClient } from "../src/adapters/desktop/service-client.ts";
+import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor-attach.ts";
 import { bootstrapSupervisor } from "../packages/plugin/src/host/supervisor-bootstrap.ts";
-import { createWorkbenchHttpClient } from "../packages/plugin/src/host/workbench-http.ts";
+import { createWorkbenchHttpClient, mintSupervisorHandoff } from "../packages/plugin/src/host/workbench-http.ts";
+import { parseLoopbackOrigin, parseSupervisorHandoffPath } from "../packages/plugin/src/host/loopback.ts";
 import {
   readEndpointFile,
   SUPERVISOR_ENDPOINT_FILE,
@@ -105,6 +106,29 @@ const PREPARE_MS = 180_000;
 const EXECUTE_MS = 600_000;
 const BOOT_MS = 240_000;
 const PACK_MS = 60_000;
+
+/** Read-only public attach: connect to the running Supervisor or fail. Never cold-starts. */
+async function publicAttachEndpoint(home, label) {
+  const attached = await attachExistingSupervisor({ home, allowRealHome: false });
+  if (!("endpoint" in attached)) {
+    const reasons = "reasons" in attached && Array.isArray(attached.reasons) && attached.reasons.length
+      ? attached.reasons.join("; ")
+      : "no attachable supervisor endpoint";
+    throw new Error(`${label}: ${reasons}`);
+  }
+  return attached.endpoint;
+}
+
+/** Mint the one-shot workbench entry URL for an attached Supervisor endpoint. */
+async function workbenchEntryUrl(endpoint) {
+  const origin = parseLoopbackOrigin(endpoint.origin);
+  if (!origin) throw new Error("supervisor endpoint origin is not an exact loopback origin");
+  const raw = await mintSupervisorHandoff(fetch, endpoint);
+  const candidate = raw.startsWith("/") ? `${origin}${raw}` : raw;
+  const path = parseSupervisorHandoffPath(candidate, origin);
+  if (!path) throw new Error("workbench entry handoff could not be minted");
+  return `${origin}${path}`;
+}
 
 const proved = [];
 const contractIssues = [];
@@ -991,7 +1015,7 @@ async function cachedPluginLibraryId(api, version) {
 }
 
 async function runBrowserSuccessUpdate({
-  attachClient,
+  entry,
   candidateVersion,
   home,
   toolsRoot,
@@ -1013,7 +1037,6 @@ async function runBrowserSuccessUpdate({
   let ordinaryBootChange = null;
   try {
     const page = await browser.newPage();
-    const entry = await attachClient.entryUrl();
     await page.goto(entry, { waitUntil: "domcontentloaded", timeout: 60_000 });
     const frame = page.frameLocator("iframe#manager-frame");
     await frame.locator(".dsh-workbench").waitFor({ timeout: 60_000 });
@@ -1346,16 +1369,7 @@ async function live() {
   const state0 = await waitReadonlyInitialized(api, childRef, "OLD manager ready", BOOT_MS);
   assertV2State(state0, "old start");
   pass(`OLD manager ready writable role=manager id=${state0.managerId} space running`);
-  const attachClient = new DesktopServiceClient({
-    home,
-    payloadRoot: oldPayload.payloadRootLib,
-    toolsRoot,
-    snapshotRoot,
-  });
-  const attached = await attachClient.connect();
-  if (attached.status !== "connected") {
-    throw new Error(`public attach before update failed: ${attached.reasons.join("; ")}`);
-  }
+  const attachedEndpoint = await publicAttachEndpoint(home, "public attach before update failed");
   pass("public attach reused the running OLD service (no extra cold start)");
 
   const tamperState = await waitReadonlyInitialized(api, childRef, "OLD manager ready before tamper", BOOT_MS);
@@ -1421,7 +1435,7 @@ async function live() {
 
   if (withBrowser) {
     const ui = await runBrowserSuccessUpdate({
-      attachClient,
+      entry: await workbenchEntryUrl(attachedEndpoint),
       candidateVersion,
       home,
       toolsRoot,
@@ -1569,18 +1583,8 @@ async function live() {
   }
   pass("new Supervisor CLI has no fetch-shim --import and runs the selected supervisor entry");
 
-  attachClient.dispose();
-  const second = new DesktopServiceClient({
-    home,
-    payloadRoot: join(toolsRoot, "components", newPointer, "lib"),
-    toolsRoot,
-    snapshotRoot,
-  });
-  const secondState = await second.connect();
-  if (secondState.status !== "connected") {
-    throw new Error(`post-handoff attach failed (would imply extra cold start): ${secondState.reasons.join("; ")}`);
-  }
-  const newApi = second.getApi();
+  const secondEndpoint = await publicAttachEndpoint(home, "post-handoff attach failed (would imply extra cold start)");
+  const newApi = createWorkbenchHttpClient({ endpoint: secondEndpoint });
   const fresh = await waitReadonlyInitialized(newApi, { current: null }, "new manager ready after handoff receipt", BOOT_MS);
   assertV2State(fresh, "new service");
   if (fresh.serviceEpoch !== nextIdentity.endpoint.serviceEpoch) {

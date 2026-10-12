@@ -44,7 +44,7 @@ queued → running → succeeded / failed / cancelled
 - UI 不提供修改管理环境的任意插件或主题。管理器自身包更新是用户主动的维护。
 - 轮询不触发启动、停机或重放。
 - 快照 API 只有创建、查看、删除。`--snapshot-worker` 服务正常快照与剩余安装 IO；运行时安装已抽出。没有恢复链。
-- 通用 Node 模块在 `src/adapters/node`（从 `src/main` 迁出）。Electron 壳留在桌面进程。
+- 通用 Node 模块在 `src/adapters/node`。自有 Electron 壳已移除，插件 tarball 是唯一发行单元。
 
 构建清单覆盖 Supervisor、管理插件、view-bridge、llm-bridge、安装 worker。冷启动与 pack 使用同一组制品和 `--component-payload`。组件升级的一次性启动器交接是合同目标；实现与双端验收仍由 Supervisor/launcher 写者完成，本文不把它写成已通过。
 

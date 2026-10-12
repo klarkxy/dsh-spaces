@@ -18,7 +18,7 @@ Default official CLI version for new installations: **`0.2.0-rc.2`**. An unteste
 
 在项目根目录运行以下命令。插件会使用该 DSH Web 自己的数据目录，无需另填路径。
 
-从本仓库开发时，`pnpm run dev:web` 会重建 `.sandbox/dsh-web-home`、打包并预装当前插件、启动官方 `dsh web`。Electron 仍是 `pnpm run dev`。浏览器里再点 **初始化 Spaces**。
+从本仓库开发时，`pnpm run dev:web` 会重建 `.sandbox/dsh-web-home`、打包并预装当前插件、启动官方 `dsh web`。浏览器里再点 **初始化 Spaces**。
 
 ```powershell
 pnpm run pack:plugin

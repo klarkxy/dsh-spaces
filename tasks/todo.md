@@ -1,3 +1,14 @@
+# 2026-10-12 移除自有 Electron 桌面壳
+
+用户确认 Electron 方案废弃，产品只通过插件安装进官方 DSH Web / DSH Desktop。本轮移除自有桌面壳，不做发布。
+
+- [x] 删除 `src/main`、`src/preload`、`src/renderer`、`src/adapters/desktop`、`src/shared/desktop-shell.ts`、`src/shared/layout.ts`、`electron.vite.config.ts`；`src/shared`/`src/core`/`src/adapters/node` 与 `packages/*` 保留（官方 Desktop 宿主桥接不属于自有壳）。
+- [x] 删除 Electron 脚本（dev-electron、ensure-electron、run-smoke、verify-spaces-desktop、verify-workbench-dual-control）与桌面 CI 工作流（desktop-startup.yml、release.yml）；`scripts/verify-component-update.mjs` 改用 `attachExistingSupervisor` + `mintSupervisorHandoff`，不再依赖桌面客户端。
+- [x] 删除壳专属测试（browser-guest、desktop-startup*、desktop-service-client、frontend-recovery、package-build、development-refresh 及其孤儿模块）；`supervisor-reopen`、`process-manager`、`llm-secret-leaks`、`write-paths` 改为不引用壳。
+- [x] package.json 移除 electron/electron-builder/electron-vite/electron-updater 与 vite/tailwind/lucide-react/motion/fontsource 及 electron-builder 配置；`npm run build` 现在只构建组件组。
+- [ ] `.github` 之外的历史验收记录（tasks/、docs/dashboard/ 等）按惯例保留原文；其中提到的桌面流程不再是现行门槛。
+- [ ] 官方 Desktop 宿主嵌入（native-host 桥、`dsh-app://app`）保留，仍待独立验收。
+
 # 2026-10-09 精简 MVP：消息总线、能力查询、Browser Space
 
 当前工作分支包含最小跨 Space 总线、权限过滤的静态能力查询，以及可作为第六组件安装的独立 Browser Space。云端验收边界见 [Workbench Browser Web 验收](../docs/workbench.md#browser-web-acceptance-in-an-isolated-home)，可复现脚本为 `scripts/accept-browser-web.ts`。未做 PR、合并或部署。

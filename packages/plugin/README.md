@@ -12,7 +12,7 @@ Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations ma
 pnpm run pack:plugin
 ```
 
-From this checkout, `pnpm run dev:web` packs the plugin, installs it into a disposable Home at `.sandbox/dsh-web-home`, and starts official `dsh web`. `pnpm run dev` remains the Electron shell.
+From this checkout, `pnpm run dev:web` packs the plugin, installs it into a disposable Home at `.sandbox/dsh-web-home`, and starts official `dsh web`.
 
 Run the printed `dsh plugin --profile web add <tarball>` command, then `dsh web`. In the ordinary DSH sidebar choose **工作台 / Workbench**, then **初始化 Spaces / Initialize Spaces**.
 
@@ -38,7 +38,7 @@ Closing a browser tab does not stop the supervisor or spaces. Use the workbench'
 
 ## Distribution
 
-The repository root also contains the Electron app; a Git install of the monorepo root is not this plugin. Distribute a built npm package or this tarball. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
+The repository root is a monorepo, not an installable plugin directory. Distribute a built npm package or this tarball. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
 
 Metadata includes `repository.directory`, `keywords` (`dsh-plugin`, `deepseek-harness`), public publish configuration and MIT license. npm publication and community catalog listing still require completion; local pack success is not a public release.
 

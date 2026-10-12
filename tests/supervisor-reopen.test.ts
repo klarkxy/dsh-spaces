@@ -7,8 +7,6 @@ import { afterEach, test } from "node:test";
 import { HomeController, type HomeControlOwner } from "../src/adapters/node/home-controller.ts";
 import { retirePreviousSupervisor } from "../src/adapters/node/supervisor-launch.ts";
 import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor-attach.ts";
-import { DesktopServiceClient } from "../src/adapters/desktop/service-client.ts";
-import { createDesktopStartup } from "../src/main/desktop-startup.ts";
 import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { SpaceMessageRouter } from "../src/adapters/node/message-bus/router.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
@@ -48,7 +46,7 @@ process.exit(17);
   return inspection.owner;
 }
 
-test("real exited owner: discovery is read-only, a new desktop open reaches one launch", async () => {
+test("real exited owner: discovery is read-only, a new launch retires it once", async () => {
   const home = tempHome();
   const owner = await exitedHolder(home);
   const controller = new HomeController(home);
@@ -63,33 +61,15 @@ test("real exited owner: discovery is read-only, a new desktop open reaches one 
   assert.deepEqual(readFileSync(ownerFile), bytes);
   assert.deepEqual(readFileSync(endpointFile), endpointBytes);
   assert.throws(() => controller.acquire("web"), /dead pid/);
-  let launches = 0;
-  const client = new DesktopServiceClient({ home, payloadRoot: home,
-    bootstrap: async () => {
-      launches++;
-      retirePreviousSupervisor(home, owner, false);
-      const next = controller.acquire("web", "http://127.0.0.1:9");
-      assert.notEqual(next.owner.nonce, owner.nonce);
-      next.release();
-      return { connected: false, origin: null, reasons: ["Injected startup failure"] };
-    },
-  });
-  const startup = createDesktopStartup({
-    connect: async () => { await client.connect(); }, status: () => client.publicState().status,
-    canStart: () => true, start: () => client.start({ nodeExe: process.execPath, cliBin: "test-cli" }),
-  });
-  await startup.open();
-  assert.equal(launches, 1);
-  assert.deepEqual(client.publicState().reasons, ["Injected startup failure"]);
-  await startup.environmentPrepared();
-  await startup.open();
-  assert.equal(launches, 1, "an in-session failure is not relaunched");
+  retirePreviousSupervisor(home, owner, false);
+  const next = controller.acquire("web", "http://127.0.0.1:9");
+  assert.notEqual(next.owner.nonce, owner.nonce);
+  next.release();
   assert.equal(existsSync(endpointFile), false);
   const evidence = readFileSync(join(controller.controlDir, "previous-controller-exit.json"), "utf8");
   assert.match(evidence, /exited-without-releasing-lease/);
   assert.ok(!evidence.includes(owner.nonce) && !evidence.includes("B".repeat(32)));
   assert.equal(readFileSync(jobs, "utf8"), '{"status":"failed","stage":"unknown"}');
-  client.dispose();
 });
 
 test("dead web owner without an endpoint permits a new launch", async () => {

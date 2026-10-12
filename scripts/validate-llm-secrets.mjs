@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Secret and recovery-product gate for the global LLM library.
- * Scans Supervisor/Host/jobs/shared-shell/credential-channel contracts.
+ * Scans Supervisor/Host/jobs/credential-channel contracts.
  * Does not touch ~/.dsh or live keys.
  */
 import { readFileSync } from "node:fs";
@@ -32,8 +32,6 @@ const SECRET_SCAN = [
   "src/adapters/node/workbench-http.ts",
   "src/adapters/node/workbench-supervisor.ts",
   "src/shared/llm-api.ts",
-  "src/shared/desktop-shell.ts",
-  "src/preload/index.ts",
   "packages/llm-bridge/src/plugin.ts",
   "packages/llm-bridge/src/official-host.ts",
   "packages/plugin/src/host/workbench-http.ts",
@@ -44,7 +42,6 @@ const SECRET_SCAN = [
 
 const LIVE_KEY = /\bsk-[A-Za-z0-9_-]{8,}\b/;
 const PRODUCT_RECOVERY = /\b(autoRetry|retryFailed|rollback\(|restoreSnapshot|replayOperation|fallbackModel|installLlmPiAi)\b/;
-const CREDENTIAL_IPC = /llmCredential|saveConnectionWithCredential/;
 
 for (const rel of SECRET_SCAN) {
   const text = readFileSync(join(REPO, rel), "utf8");
@@ -83,27 +80,6 @@ if (!hostRemote.includes("@Remote(\"llmCredential\")")) fail("Host Remote must e
 const credentials = readFileSync(join(REPO, "src/adapters/node/llm-credential-store.ts"), "utf8");
 if (!credentials.includes("readSecret") || !credentials.includes("writeRecord")) {
   fail("credential store must keep writeRecord/readSecret off the public catalog");
-}
-
-const shell = readFileSync(join(REPO, "src/shared/desktop-shell.ts"), "utf8");
-if (!shell.includes("DESKTOP_SHELL_IPC") || !shell.includes("DESKTOP_SHELL_INVOKE_CHANNELS")) {
-  fail("shared shell must define the closed DESKTOP_SHELL_IPC invoke set");
-}
-if (CREDENTIAL_IPC.test(shell)) fail("shared shell IPC must not carry llmCredential");
-if (shell.includes("DESKTOP_WRITE_IPC_CHANNELS")) fail("shared shell must not revive the old desktop write IPC list");
-const shellChannels = [...shell.matchAll(/["'](desktop-shell:[^"']+)["']/g)].map((row) => row[1]);
-if (shellChannels.length === 0) fail("shared shell IPC channel names were not found");
-for (const channel of shellChannels) {
-  if (/llm|credential|secret|token|bearer|apiKey|restore/i.test(channel)) {
-    fail(`shared shell IPC channel ${channel} is not a closed non-secret channel`);
-  }
-}
-
-const preload = readFileSync(join(REPO, "src/preload/index.ts"), "utf8");
-if (!preload.includes("DESKTOP_SHELL_IPC")) fail("preload must bind DESKTOP_SHELL_IPC");
-if (CREDENTIAL_IPC.test(preload)) fail("preload must not expose llmCredential");
-if (/ipcRenderer\.invoke\((?!DESKTOP_SHELL_IPC)/.test(preload)) {
-  fail("preload invoke is not closed over DESKTOP_SHELL_IPC");
 }
 
 const share = readFileSync(join(REPO, "src/core/domain/llm-share.ts"), "utf8");

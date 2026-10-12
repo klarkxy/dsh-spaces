@@ -16,7 +16,7 @@ Chinese: [中文](#dsh-spaces-工作台).
 
 - Protocol **2**. State includes `protocolVersion`, `serviceEpoch`, `revision`, `availability`. Writes use `{ serviceEpoch, expectedRevision }`. Old protocol or a mismatched epoch/revision is rejected. There is no public `controller.acquire`, `controller.release`, `recovery.*`, `snapshot.restore`, or `config.restore`.
 - One Supervisor per Home. A second client attaches to a healthy existing service. It does not start a second controller and does not take over a live or unclear lock.
-- Closing a tab does not stop spaces. **Exiting the desktop client destroys that client only** — the Supervisor stays up. Stopping all spaces and **stopping the service** (`service.shutdown`, preview then execute) are separate user actions.
+- Closing a tab or host window does not stop spaces or the Supervisor. Stopping all spaces and **stopping the service** (`service.shutdown`, preview then execute) are separate user actions.
 - Manager profile `spaces-hub` (or `spaces-hub-2`, …). Ordinary spaces use a 72px rail and their own iframe origin. A failed start keeps the previous view and marks this switch as failed.
 - User-initiated Home backups: **create**, **list**, **delete**. Create stops owned spaces first. That is not restore.
 
@@ -26,8 +26,8 @@ Default DSH channel is official **`latest`**, resolved to an exact version and p
 
 | | Development | Product Home |
 |---|---|---|
-| Purpose | Disposable directory | A Home you chose, often `~/.dsh` in a packaged desktop |
-| How | Absolute `--home` **without** `--allow-real-home`. `npm run dev` uses `.sandbox/dsh-home`. `npm run dev:web` recreates `.sandbox/dsh-web-home` | Packaged desktop defaults to `~/.dsh`. Supervisor / doctor need `--home` **and** `--allow-real-home` |
+| Purpose | Disposable directory | A Home you chose, often `~/.dsh` |
+| How | Absolute `--home` **without** `--allow-real-home`. `npm run dev:web` recreates `.sandbox/dsh-web-home` | Supervisor / doctor need `--home` **and** `--allow-real-home` |
 | Do not | Point experiments at `~/.dsh` | Use production as a tutorial Home |
 
 Browser callers never submit filesystem paths, CLI commands, or launch tokens.
@@ -36,7 +36,7 @@ Browser callers never submit filesystem paths, CLI commands, or launch tokens.
 
 After `npm run build:spaces`, pack the current group with `DSH_PACK_DEST=<absolute-output-dir> node scripts/pack-spaces-plugin.mjs`. Set `DSH_WEB_CLI` to an installed official `@deepseek-ai/dsh@0.2.0-rc.2` `lib/bin.js` and `DSH_WEB_ARTIFACT_DIR` to that output directory, then run `node --import tsx scripts/accept-browser-web.ts`. The script creates and removes a disposable DSH Home, creates two official Web profiles, installs the bundled view bridge and Browser plus a test-only caller plugin through official `dsh plugin add`, and launches two actual DSH Hosts with the private Space IPC router. It checks default denial, permission-filtered capabilities, cross-Space open/list, and authenticated Browser HTTP RPC. It prints no launch token.
 
-The Browser create preset's command validation has fixture coverage, and the Supervisor's create path orders view-bridge installation before Browser installation. The acceptance script currently installs into its disposable profiles directly; it does not demonstrate a single production Supervisor create → cold-start path. `tests/browser-space.test.ts` verifies official slot election and server-rendered Browser-only root. Cloud Chromium GUI could not be exercised, so visual iframe rendering and site-specific embed behavior remain for local Web testing. Desktop GUI remains for local acceptance as well.
+The Browser create preset's command validation has fixture coverage, and the Supervisor's create path orders view-bridge installation before Browser installation. The acceptance script currently installs into its disposable profiles directly; it does not demonstrate a single production Supervisor create → cold-start path. `tests/browser-space.test.ts` verifies official slot election and server-rendered Browser-only root. Cloud Chromium GUI could not be exercised, so visual iframe rendering and site-specific embed behavior remain for local Web testing.
 
 Shared LLM connections are a Home-level catalog. Management uses `POST /api/workbench/llm` and `POST /api/workbench/llmCredential`. See [the global LLM plan](plans/global-llm-connections.md).
 
@@ -44,7 +44,7 @@ Shared LLM connections are a Home-level catalog. Management uses `POST /api/work
 
 From the repository root after `npm install`. `npm run build:spaces` writes `packages/*/lib` including the v2 component manifest at `packages/plugin/lib/supervisor/manifest.json`. Pack **outside** the package trees.
 
-The manifest names six components: Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install and desktop payload consume that group. Missing components fail closed. An older installed five-component Supervisor cannot hot-upgrade to this six-component group; the component-set mismatch is rejected. Start with a new isolated installation for this branch rather than overwriting an existing Home. There is no automatic migration.
+The manifest names six components: Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install consumes that group. Missing components fail closed. An older installed five-component Supervisor cannot hot-upgrade to this six-component group; the component-set mismatch is rejected. Start with a new isolated installation for this branch rather than overwriting an existing Home. There is no automatic migration.
 
 PowerShell (directories **without spaces**; every path absolute):
 
@@ -108,8 +108,7 @@ In the manager UI:
 
 - **启动** / **停止** / **重启** on a space. Restart is a new user command.
 - Closing a tab is not shutdown.
-- **预览关闭服务** uses `service.shutdown` (preview then execute). That stops the Supervisor after owned work is stopped. It is not desktop Exit.
-- Desktop: close window hides to tray; **退出** drops the desktop client and leaves the service running.
+- **预览关闭服务** uses `service.shutdown` (preview then execute). That stops the Supervisor after owned work is stopped. Closing a host window or tab is not shutdown.
 - Backups: create / list / preview-delete. No restore action.
 
 Do not document **救援入口**, **需要恢复**, **接管**, **移交写控制权**, **配置恢复**, or **整 Home 恢复** as current capability.
@@ -145,7 +144,7 @@ Runtime **预览安装** / **预览升级** follow official **`latest`**, pin th
 
 **B5 upgrade in source:** after install of a complete validated candidate, the old service stages the payload and hands the lock to a one-shot launcher (`packages/supervisor/src/launcher.ts`, `--accept-handoff`, job phase `handoff-pending`). Isolated pack/archive and unit tests exist.
 
-**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs`, `scripts/verify-spaces-desktop.mjs`, `scripts/verify-component-update.mjs`, and `scripts/verify-workbench-maintenance-product.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows, packaged desktop checks and platform limits. Retired crash/faults/package-upgrade/dual-control scripts fail closed on invocation; they are not current evidence.
+**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs`, `scripts/verify-component-update.mjs`, and `scripts/verify-workbench-maintenance-product.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows and platform limits. Retired crash/faults/package-upgrade scripts fail closed on invocation; they are not current evidence.
 
 ### Logs and doctor
 
@@ -181,8 +180,8 @@ Production Home: `--home` and `--allow-real-home`. Old recover / unlock / rollba
 
 故障政策：[let it crash](let-it-crash.md)。**用户安装：** [plugin-standard-install.md](plugin-standard-install.md)。本包未发布到 npm。
 
-一个 Supervisor 持有 Home 运行权。协议版本 **2**，变更带 epoch 与 revision。没有公开的接管/释放运行权或恢复命令。关标签或退出桌面客户端不停止服务。停止全部空间和 `service.shutdown` 是两个操作。
+一个 Supervisor 持有 Home 运行权。协议版本 **2**，变更带 epoch 与 revision。没有公开的接管/释放运行权或恢复命令。关闭标签或宿主窗口不停止服务。停止全部空间和 `service.shutdown` 是两个操作。
 
 构建清单覆盖五组件。启动需要 `--component-payload`、同组三份制品（plugin / view-bridge / llm-bridge）以及同组 `--snapshot-worker`（正常快照 create/delete 与树拷贝 IO）。运行时安装已抽到 `runtime-installation.ts`，worker 只转发。组件升级通过一次性 launcher 交接，只有新管理器就绪才确认成功；真实流程和构建证据见 [合并验收记录](../tasks/merge-execution.md)。
 
-管理 UI 里用预览关闭服务来停 Supervisor。桌面退出只销毁客户端。备份可创建、查看、删除，不能恢复。Doctor 只诊断。不要把接管、救援、回滚写成当前能力。
+管理 UI 里用预览关闭服务来停 Supervisor。备份可创建、查看、删除，不能恢复。Doctor 只诊断。不要把接管、救援、回滚写成当前能力。

@@ -8,6 +8,7 @@
 >
 > 配套文档：`REQUIREMENTS.md`（需求与验收）、`IMPLEMENTATION_PLAN.md`（阶段计划与技术栈，早期记录）。
 > 历史阶段按当时完成情况保留勾选。禁止跳过隔离阶段。
+> 2026-10-12：自有 Electron 桌面壳已移除（`src/main`、`src/preload`、`src/renderer`、`src/adapters/desktop`、打包/发布配置），插件 tarball 是唯一发行单元。下文 Electron 阶段均为历史记录。
 > 迷路时看本文件末尾的「决策规则」和 `docs/let-it-crash.md`。
 
 ---

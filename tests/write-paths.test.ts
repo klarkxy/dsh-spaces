@@ -4,13 +4,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-const mainDir = join(dirname(fileURLToPath(import.meta.url)), "../src/main");
+const adapterDir = join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node");
 
-test("no main-process write path targets profiles/web", () => {
-  const files = readdirSync(mainDir).filter((name) => name.endsWith(".ts"));
+test("no Node-adapter write path targets profiles/web", () => {
+  const files = readdirSync(adapterDir).filter((name) => name.endsWith(".ts"));
   const offenders: string[] = [];
   for (const name of files) {
-    const text = readFileSync(join(mainDir, name), "utf8");
+    const text = readFileSync(join(adapterDir, name), "utf8");
     if (name === "patch-writer.ts") {
       assert.match(text, /errors\.webSacred/);
       assert.match(text, /name === "web"/);

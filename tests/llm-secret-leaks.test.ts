@@ -11,11 +11,6 @@ import { llmCatalogPath, llmCredentialsPath } from "../src/adapters/node/llm-pat
 import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { GlobalLlmHost } from "../src/core/application/global-llm-host.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
-import {
-  DESKTOP_SHELL_EVENT_CHANNELS,
-  DESKTOP_SHELL_INVOKE_CHANNELS,
-  DESKTOP_SHELL_IPC,
-} from "../src/shared/desktop-shell.ts";
 import { LLM_CREDENTIAL_METHOD } from "../src/shared/llm-api.ts";
 
 const temps: string[] = [];
@@ -103,21 +98,5 @@ test("jobs, operations, catalog, and IPC never persist the live key", async () =
       const path = join(jobsDir, name);
       if (existsSync(path)) assert.doesNotMatch(readFileSync(path, "utf8"), new RegExp(SECRET));
     }
-  }
-  const invoke = [...DESKTOP_SHELL_INVOKE_CHANNELS];
-  const events = [...DESKTOP_SHELL_EVENT_CHANNELS];
-  assert.deepEqual([...invoke, ...events].sort(), Object.values(DESKTOP_SHELL_IPC).slice().sort());
-  assert.deepEqual(invoke, [
-    DESKTOP_SHELL_IPC.getState,
-    DESKTOP_SHELL_IPC.prepareEnvironment,
-    DESKTOP_SHELL_IPC.startService,
-    DESKTOP_SHELL_IPC.setPreference,
-    DESKTOP_SHELL_IPC.windowMinimize,
-    DESKTOP_SHELL_IPC.windowToggleMaximize,
-    DESKTOP_SHELL_IPC.windowClose,
-    DESKTOP_SHELL_IPC.windowIsMaximized,
-  ]);
-  for (const channel of [...invoke, ...events]) {
-    assert.equal(/llm|credential|secret|token|bearer|apiKey|restore/i.test(channel), false, channel);
   }
 });

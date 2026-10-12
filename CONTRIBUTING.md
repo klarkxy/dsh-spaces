@@ -27,8 +27,8 @@ Historical recovery plans, tests, and screenshots are evidence of what was built
 1. `npm install`
 2. `node scripts/setup-sandbox.mjs` (once, after a global `dsh` install)
 3. `npm test` and `npm run typecheck`
-4. Isolation gate: `npm run validate:isolation` (do not run while the Electron app holds the same sandbox profiles)
-5. `npm run dev` builds current components and refreshes the existing idle development sandbox before opening Electron. Quit the previous dev command first; the manager plugin is not served by renderer HMR. Run `npm run test:development` for the refresh/ownership/failure checks. `npm run dev:web` is a separate fresh official `dsh web` workflow.
+4. Isolation gate: `npm run validate:isolation`
+5. `npm run dev:web` recreates `.sandbox/dsh-web-home`, packs and installs this checkout's plugin into official `web`, and starts `dsh web`. Click **初始化 Spaces / Initialize Spaces** in the browser. There is no standalone desktop build; the plugin tarball is the only distribution unit.
 
 ## Phase gates
 
