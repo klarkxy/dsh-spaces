@@ -4,6 +4,7 @@ import { atomicWrite } from "../atomic";
 import type { PidAliveFn } from "../home-controller";
 import { parseSpaceName } from "./input";
 import type { SupervisorLifecycle } from "./lifecycle";
+import type { SpaceRunRegistry } from "./space-runs";
 import type { StoredPlan } from "./types";
 
 const INSTANCES_DIR_NAME = "instances";
@@ -11,8 +12,7 @@ const LIFECYCLE_PLANS_DIR_NAME = "lifecycle-plans";
 
 export interface SupervisorInstanceRecordsHost {
   controlDir: string;
-  spawned: Map<string, { pid: number; startedAt: string }>;
-  unmanaged: Set<string>;
+  runs: SpaceRunRegistry;
   lifecycle: SupervisorLifecycle;
   pidAlive: PidAliveFn;
   plans: Map<string, StoredPlan>;
@@ -30,7 +30,7 @@ export class SupervisorInstanceRecords {
   }
 
   writeInstanceRecord(id: string, port: number, generation: number): void {
-    const spawned = this.host.spawned.get(id);
+    const spawned = this.host.runs.spawned.get(id);
     if (!spawned) return;
     mkdirSync(this.instancesDir(), { recursive: true });
     atomicWrite(
@@ -62,7 +62,7 @@ export class SupervisorInstanceRecords {
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("ambiguous instance directory");
       names = readdirSync(this.instancesDir()).filter((name) => name.endsWith(".json"));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.host.unmanaged.add("unknown-records");
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.host.runs.unmanaged.add("unknown-records");
       return;
     }
     for (const name of names) {
@@ -75,7 +75,7 @@ export class SupervisorInstanceRecords {
         record = JSON.parse(readFileSync(path, "utf8"));
         parseSpaceName(id);
       } catch {
-        this.host.unmanaged.add("unknown-records");
+        this.host.runs.unmanaged.add("unknown-records");
         continue;
       }
       const maintenanceChild = record?.kind === "maintenance" && /^maintenance-[a-f0-9]{12}$/.test(id);
@@ -84,7 +84,7 @@ export class SupervisorInstanceRecords {
         (!maintenanceChild && (!Number.isInteger(record.port) || record.port! < 1 || record.port! > 65535 ||
         !Number.isInteger(record.generation) || record.generation! < 0 ||
         record.origin !== `http://127.0.0.1:${record.port}`))) {
-        this.host.unmanaged.add(id);
+        this.host.runs.unmanaged.add(id);
         continue;
       }
       const liveness = this.host.pidAlive(record.pid!, record.startedAt);
@@ -92,7 +92,7 @@ export class SupervisorInstanceRecords {
         this.removeInstanceRecord(id);
         continue;
       }
-      this.host.unmanaged.add(id);
+      this.host.runs.unmanaged.add(id);
       this.host.lifecycle.reasons.push(`Leftover process for ${id} was not adopted.`);
     }
   }

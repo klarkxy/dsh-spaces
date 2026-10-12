@@ -10,6 +10,7 @@ import type { WorkbenchJobContext, WorkbenchJobStore } from "../workbench-jobs";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorLifecycle } from "./lifecycle";
 import { profileHasLlmBridge } from "./profile-probe";
+import type { SpaceRunRegistry } from "./space-runs";
 
 export interface SupervisorLlmHost {
   home: string;
@@ -18,9 +19,7 @@ export interface SupervisorLlmHost {
   lifecycle: SupervisorLifecycle;
   managerId: () => string | null;
   llmBridgeArtifact: () => string | undefined;
-  unmanaged: Set<string>;
-  generations: Map<string, number>;
-  llmApplied: Map<string, number>;
+  runs: SpaceRunRegistry;
   observeChildWork: <T>(action: () => T) => T;
   requireManaged: (spaceId: string) => string;
   stopOwned: (spaceId: string) => Promise<void>;
@@ -148,13 +147,13 @@ export class SupervisorLlm {
 
   listLlmInstances(): LlmInstanceRecord[] {
     return this.host.homeProfileNames().map((id) => {
-      const leftover = this.host.unmanaged.has(id);
+      const leftover = this.host.runs.unmanaged.has(id);
       const status = leftover ? "unknown" : this.host.publicStatus(id);
       return {
         spaceId: id,
         status,
-        generation: this.host.generations.get(id) ?? 0,
-        catalogRevision: this.host.llmApplied.get(id) ?? null,
+        generation: this.host.runs.generations.get(id) ?? 0,
+        catalogRevision: this.host.runs.llmApplied.get(id) ?? null,
         policyRevision: null,
         busy: this.llmBusy.has(id),
         serviceEpoch: this.host.currentServiceEpoch(),

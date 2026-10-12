@@ -146,9 +146,9 @@ import {
   profileHasViewBridge,
   publicPluginVersion,
 } from "./supervisor/profile-probe";
+import { SpaceRunRegistry } from "./supervisor/space-runs";
 import type {
   BoundCli,
-  ChildView,
   StoredPlan,
   WorkbenchMaintenance,
   WorkbenchSupervisorHandle,
@@ -173,13 +173,6 @@ export {
 } from "./supervisor/payload";
 export { parseSupervisorArgs, supervisorCliArgs } from "./supervisor/cli-args";
 
-const VIEW_ENV = {
-  parent: "DSH_SPACES_VIEW_PARENT_ORIGIN",
-  id: "DSH_SPACES_VIEW_ID",
-  generation: "DSH_SPACES_VIEW_GENERATION",
-  channel: "DSH_SPACES_VIEW_CHANNEL",
-  epoch: "DSH_SPACES_VIEW_SERVICE_EPOCH",
-} as const;
 const PLAN_TTL_MS = 5 * 60_000;
 const STOP_NOT_FORCED = "Timed stop did not force-kill the process. The instance is still recorded.";
 const ENDPOINT_FILE = "endpoint.json";
@@ -238,16 +231,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private managerId: string | null = null;
   private managerInstall: "missing" | "manager" | "ordinary" | "damaged" = "missing";
   private readonly messageBus = new SpaceMessageRouter();
-  private readonly generations = new Map<string, number>();
-  private readonly views = new Map<string, ChildView>();
-  private readonly workspaceOrigins = new Set<string>();
+  private readonly runs = new SpaceRunRegistry();
   private readonly plans = new Map<string, StoredPlan>();
   private httpClose: (() => Promise<void>) | undefined;
   private runtimeStore: RuntimeStore | undefined;
-  private readonly unmanaged = new Set<string>();
-  private readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   private readonly pidAlive: PidAliveFn;
-  private readonly llmApplied = new Map<string, number>();
   private selectedPayload: ValidatedComponentPayload | undefined;
   private packageUpgrade: WorkbenchPackageUpgrade | undefined;
   readonly llmHost: GlobalLlmHost;
@@ -266,7 +254,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       options: this.options,
       controller: this.controller,
       messageBus: this.messageBus,
-      spawned: this.spawned,
+      spawned: this.runs.spawned,
       lifecycle: this.lifecycle,
       jobs: () => this.jobs,
       origin: () => this.origin,
@@ -304,8 +292,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     this.instances = new SupervisorInstanceRecords({
       controlDir: this.controlDir,
-      spawned: this.spawned,
-      unmanaged: this.unmanaged,
+      runs: this.runs,
       lifecycle: this.lifecycle,
       pidAlive: this.pidAlive,
       plans: this.plans,
@@ -317,9 +304,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       lifecycle: this.lifecycle,
       managerId: () => this.managerId,
       llmBridgeArtifact: () => this.options.llmBridgeArtifact,
-      unmanaged: this.unmanaged,
-      generations: this.generations,
-      llmApplied: this.llmApplied,
+      runs: this.runs,
       observeChildWork: (action) => this.observeChildWork(action),
       requireManaged: (spaceId) => this.requireManaged(spaceId),
       stopOwned: (spaceId) => this.stopOwned(spaceId),
@@ -342,8 +327,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       requireServiceEpoch: () => this.requireServiceEpoch(),
       managerOrigin: () => this.managerOrigin(),
       listSpaces: () => this.listSpaces(),
-      unmanaged: this.unmanaged,
-      generations: this.generations,
+      runs: this.runs,
       cookieName: () => this.cookieName(),
       sessionEquals: (value) => this.sessionEquals(value),
     });
@@ -353,7 +337,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         list: async () => this.llmOps.listLlmInstances(),
         get: async (spaceId) => this.llmOps.listLlmInstances().find((row) => row.spaceId === spaceId),
         markApplied: async (spaceId, catalogRevision) => {
-          this.llmApplied.set(spaceId, catalogRevision);
+          this.runs.llmApplied.set(spaceId, catalogRevision);
         },
       },
       assertWritable: () => this.llmOps.assertLlmWritable(),
@@ -383,10 +367,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return this.origin;
   }
   managerOrigin(): string | null {
-    return this.managerId ? this.views.get(this.managerId)?.origin ?? null : null;
+    return this.managerId ? this.runs.views.get(this.managerId)?.origin ?? null : null;
   }
   isWorkspaceOrigin(origin: string): boolean {
-    return this.workspaceOrigins.has(origin);
+    return this.runs.workspaceOrigins.has(origin);
   }
 
   attachHttp(origin: string, close: () => Promise<void>): void {
@@ -557,7 +541,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   entryPage(): string {
     const managerId = this.managerId;
-    const view = managerId ? this.views.get(managerId) : undefined;
+    const view = managerId ? this.runs.views.get(managerId) : undefined;
     const running = managerId ? this.statusOf(managerId) === "running" : false;
     const epoch = this.currentServiceEpoch();
     const viewPath =
@@ -588,7 +572,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!epoch || epoch !== currentEpoch) {
       return { status: 403, message: "View entry requires the current service epoch." };
     }
-    const view = this.views.get(id);
+    const view = this.runs.views.get(id);
     const owned = this.processes?.statusOf(id) === "running";
     if (!view || view.generation !== gen || !owned || view.serviceEpoch !== currentEpoch) {
       return { status: 403, message: "View entry is only issued for owned ready children." };
@@ -596,7 +580,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const launch = this.processes?.urlOf(id);
     if (!launch) return { status: 403, message: "View entry is only issued for owned ready children." };
     const port = this.processes?.portOf(id);
-    if (!port || this.unmanaged.has(id)) {
+    if (!port || this.runs.unmanaged.has(id)) {
       return { status: 403, message: "View entry is only issued for owned ready children." };
     }
     const response = await this.fetchImpl(launch, { redirect: "manual", signal: AbortSignal.timeout(8_000) });
@@ -628,9 +612,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const inventory = this.lifecycle.maintenanceFlag ? this.lifecycle.maintenanceInventory : null;
     const spaces = inventory ? inventory.spaces.map(row => ({
       ...row,
-      status: this.unmanaged.has(row.id) ? "unknown" as const : this.publicStatus(row.id),
-      generation: this.views.get(row.id)?.generation ?? this.generations.get(row.id) ?? row.generation,
-      managed: Boolean(this.lifecycle.handle) && !this.unmanaged.has(row.id),
+      status: this.runs.unmanaged.has(row.id) ? "unknown" as const : this.publicStatus(row.id),
+      generation: this.runs.views.get(row.id)?.generation ?? this.runs.generations.get(row.id) ?? row.generation,
+      managed: Boolean(this.lifecycle.handle) && !this.runs.unmanaged.has(row.id),
     })) : this.listSpaces();
     return {
       protocolVersion: WORKBENCH_PROTOCOL_VERSION,
@@ -712,26 +696,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   async view(spaceId: string): Promise<WorkbenchView> {
     const id = this.requireSpace(spaceId);
-    if (this.unmanaged.has(id) || this.statusOf(id) !== "running") {
+    if (this.runs.unmanaged.has(id) || this.statusOf(id) !== "running") {
       throw new WorkbenchPublicError("workbench/not-found");
     }
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/not-found");
-    const generation = this.generations.get(id) ?? 0;
     const epoch = this.requireServiceEpoch();
-    let current = this.views.get(id);
-    if (!current || current.generation !== generation || current.serviceEpoch !== epoch) {
-      current = {
-        spaceId: id,
-        generation,
-        origin: `http://127.0.0.1:${port}`,
-        channel: randomBytes(8).toString("hex"),
-        serviceEpoch: epoch,
-        issued: true,
-      };
-      this.views.set(id, current);
-    }
-    current.issued = true;
+    const current = this.runs.issueView(id, port, epoch);
     return {
       serviceEpoch: current.serviceEpoch,
       spaceId: current.spaceId,
@@ -760,7 +731,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const dashboard = this.dashboardHost.requireDashboard();
         this.assertLiveContext(parsedContext);
         this.protectSpecial(this.requireManaged(parsed.spaceId), { allowManager: false });
-        if (this.unmanaged.has(parsed.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
+        if (this.runs.unmanaged.has(parsed.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
         await dashboard.validatePreview(parsed);
         this.assertLiveContext(parsedContext);
         return this.previewLocal(parsed);
@@ -808,7 +779,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.dashboardHost.initDashboard();
     this.bindProductService();
     this.instances.reconcileInstanceRecords();
-    if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size) {
+    if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.runs.unmanaged.size) {
       this.maintenance = this.createMaintenance();
       this.refreshAvailability();
       return;
@@ -859,7 +830,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     this.refreshAvailability();
 
-    if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.unmanaged.has(identity.profileId)) {
+    if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.runs.unmanaged.has(identity.profileId)) {
       try {
         await this.startSpace(identity.profileId, silentJobContext());
       } catch (error) {
@@ -1046,34 +1017,39 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const env: NodeJS.ProcessEnv = {
           ...(options.env as NodeJS.ProcessEnv | undefined),
           DSH_HOME: this.home,
-          ...this.childViewEnv(profile),
+          ...this.runs.childViewEnv(profile, {
+            managerId: this.managerId,
+            origin: this.origin,
+            managerOrigin: this.managerOrigin(),
+            currentEpoch: this.currentServiceEpoch(),
+          }),
           ...writeSpaceLlmLaunchSnapshot(this.home, profile),
         };
         delete env[DASHBOARD_LAUNCH_ENV]; // never inherit another Host's private handoff
-        Object.assign(env, this.dashboard?.environment(profile, this.generations.get(profile) ?? 0));
-        const dashboardGeneration = this.generations.get(profile) ?? 0;
+        Object.assign(env, this.dashboard?.environment(profile, this.runs.generation(profile)));
+        const dashboardGeneration = this.runs.generation(profile);
         const spawnFn = injected.spawn ?? children.spawn;
         const port = Number(args[args.indexOf("--port") + 1]);
         mkdirSync(this.instances.instancesDir(), { recursive: true });
         atomicWrite(this.instances.instancePath(profile), `${JSON.stringify({ version: 1, spaceId: profile,
-          phase: "spawning", port, generation: this.generations.get(profile) ?? 0,
+          phase: "spawning", port, generation: this.runs.generation(profile),
           origin: `http://127.0.0.1:${port}`, startedAt: this.now().toISOString() })}\n`);
         let child;
         try { child = spawnFn(args, { ...options, env }); }
         catch (error) { this.instances.removeInstanceRecord(profile); throw error; }
         if (child.pid) {
           if (profile !== this.managerId) this.messageBus.attach(profile, child);
-          this.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
-          try { this.instances.writeInstanceRecord(profile, port, this.generations.get(profile) ?? 0); }
+          this.runs.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
+          try { this.instances.writeInstanceRecord(profile, port, this.runs.generation(profile)); }
           catch {
             this.lifecycle.maintenanceBlocked = true;
             this.lifecycle.reasons.push("The child identity record could not be saved. Run rights were kept.");
           }
           child.once("exit", () => {
-            const recorded = this.spawned.get(profile);
+            const recorded = this.runs.spawned.get(profile);
             if (recorded?.pid === child.pid) {
               this.dashboardHost.retireDashboardRun(profile, dashboardGeneration);
-              this.spawned.delete(profile);
+              this.runs.spawned.delete(profile);
               this.instances.removeInstanceRecord(profile);
             }
           });
@@ -1323,7 +1299,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     const loader = this.managerId ? await this.syncLoader(this.managerId, managerDump) : undefined;
     this.spaces = this.createSpacesControlWithLoader(loader);
-    if (this.managerId && this.managerInstall === "manager" && !this.unmanaged.has(this.managerId)) {
+    if (this.managerId && this.managerInstall === "manager" && !this.runs.unmanaged.has(this.managerId)) {
       const runningWorkspaces = this.ownedSpaceIds().filter(
         (id) => id !== this.managerId && this.statusOf(id) === "running",
       );
@@ -1333,20 +1309,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (this.statusOf(this.managerId) === "running") await this.stopOwned(this.managerId);
       await this.startSpace(this.managerId, silentJobContext());
     }
-  }
-
-  private childViewEnv(profile: string): NodeJS.ProcessEnv {
-    const generation = String(this.generations.get(profile) ?? 0);
-    const view = this.views.get(profile);
-    const parent =
-      profile === this.managerId ? this.origin : this.managerOrigin() ?? this.origin;
-    return {
-      [VIEW_ENV.parent]: parent,
-      [VIEW_ENV.id]: profile,
-      [VIEW_ENV.generation]: generation,
-      [VIEW_ENV.channel]: view?.channel ?? "",
-      [VIEW_ENV.epoch]: view?.serviceEpoch ?? this.currentServiceEpoch(),
-    };
   }
 
   private async runCommand(command: WorkbenchCommand, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
@@ -1444,18 +1406,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     ctx.cancellable(true);
     const id = this.requireSpace(spaceId);
     if (id === "web" || id === "desktop") throw new WorkbenchPublicError("workbench/protected");
-    if (this.unmanaged.has(id)) throw new WorkbenchPublicError("workbench/unmanaged");
+    if (this.runs.unmanaged.has(id)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (this.statusOf(id) === "running") {
-      if (!this.views.has(id)) throw new WorkbenchPublicError("workbench/unavailable");
+      if (!this.runs.views.has(id)) throw new WorkbenchPublicError("workbench/unavailable");
       return { spaceId: id, view: await this.view(id) };
     }
     if (id !== this.managerId) await this.ensureViewBridge(id);
     await this.llmOps.ensureLlmBridge(id);
-    const gen = (this.generations.get(id) ?? 0) + 1;
-    this.generations.set(id, gen);
+    const gen = this.runs.nextGeneration(id);
     const channel = randomBytes(8).toString("hex");
     const epoch = this.requireServiceEpoch();
-    this.views.set(id, {
+    this.runs.views.set(id, {
       spaceId: id,
       generation: gen,
       origin: this.origin,
@@ -1479,14 +1440,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/failed");
     const childOrigin = `http://127.0.0.1:${port}`;
-    const current = this.views.get(id);
+    const current = this.runs.views.get(id);
     if (!current || current.generation !== gen) {
       throw new WorkbenchPublicError("workbench/failed");
     }
     current.origin = childOrigin;
-    if (id !== this.managerId) this.workspaceOrigins.add(childOrigin);
+    if (id !== this.managerId) this.runs.workspaceOrigins.add(childOrigin);
     this.instances.writeInstanceRecord(id, port, gen);
-    this.llmApplied.set(id, await this.llmHost.catalogRevision());
+    this.runs.llmApplied.set(id, await this.llmHost.catalogRevision());
     return {
       spaceId: id,
       view: {
@@ -1552,7 +1513,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
             this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
             if (this.fingerprint(request) !== stored.fingerprint) throw new WorkbenchPublicError("workbench/conflict");
             this.protectSpecial(this.requireManaged(request.spaceId), { allowManager: false });
-            if (this.unmanaged.has(request.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
+            if (this.runs.unmanaged.has(request.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
           };
           await dashboard.apply(request, assertPlan);
         });
@@ -1676,7 +1637,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       );
     }
     const managerId = this.managerId;
-    if (!managerId || this.managerInstall !== "manager" || this.unmanaged.has(managerId)) {
+    if (!managerId || this.managerInstall !== "manager" || this.runs.unmanaged.has(managerId)) {
       throw new WorkbenchPublicError(
         "workbench/unavailable",
         "Accepted startup did not start the manager. Run rights were kept.",
@@ -1689,7 +1650,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       );
     }
     const epoch = this.currentServiceEpoch();
-    const view = this.views.get(managerId);
+    const view = this.runs.views.get(managerId);
     if (!epoch || !view || view.serviceEpoch !== epoch || !view.origin || view.origin === this.origin) {
       throw new WorkbenchPublicError(
         "workbench/unavailable",
@@ -1785,7 +1746,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private fingerprint(request: WorkbenchPlanRequest): string {
     const spaces =
       "spaceId" in request
-        ? [{ id: request.spaceId, status: this.statusOf(request.spaceId), generation: this.generations.get(request.spaceId) ?? 0 }]
+        ? [{ id: request.spaceId, status: this.statusOf(request.spaceId), generation: this.runs.generation(request.spaceId) }]
         : this.ownedSpaceIds().map((id) => ({ id, status: this.statusOf(id) }));
     return JSON.stringify({ request, spaces, owner: Boolean(this.lifecycle.handle) });
   }
@@ -1793,7 +1754,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async startOwned(spaceId: string): Promise<void> {
     this.lifecycle.assertWritable();
     if (!this.processes) throw new WorkbenchPublicError("workbench/read-only");
-    if (this.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
+    if (this.runs.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (spaceId === "web") throw new WorkbenchPublicError("workbench/protected");
     if (this.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
@@ -1830,19 +1791,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private async stopOwned(spaceId: string): Promise<void> {
     if (!this.processes) return;
-    if (this.unmanaged.has(spaceId)) return;
+    if (this.runs.unmanaged.has(spaceId)) return;
     const dashboardError = this.dashboardHost.retireDashboardRun(spaceId);
     await this.processes.stop(spaceId);
-    const gen = (this.generations.get(spaceId) ?? 0) + 1;
-    this.generations.set(spaceId, gen);
-    this.views.delete(spaceId);
+    this.runs.nextGeneration(spaceId);
+    this.runs.views.delete(spaceId);
     this.instances.removeInstanceRecord(spaceId);
     if (dashboardError) throw dashboardError;
   }
 
   private async stopOwnedAll(): Promise<void> {
     if (!this.processes) return;
-    const names = this.ownedSpaceIds().filter((id) => !this.unmanaged.has(id));
+    const names = this.ownedSpaceIds().filter((id) => !this.runs.unmanaged.has(id));
     for (const name of names) {
       try {
         await this.stopOwned(name);
@@ -1865,9 +1825,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return records
       .filter((row) => row.name !== "web")
       .map((row) => {
-        const leftover = this.unmanaged.has(row.name);
+        const leftover = this.runs.unmanaged.has(row.name);
         const status = leftover ? "unknown" : this.publicStatus(row.name);
-        const view = this.views.get(row.name);
+        const view = this.runs.views.get(row.name);
         return {
           id: row.name,
           displayName: row.meta.displayName || row.name,
@@ -1876,7 +1836,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           isolation: row.needsConversion ? "unverified" : "verified",
           icon: row.meta.icon ?? "",
           status,
-          generation: view?.generation ?? this.generations.get(row.name) ?? 0,
+          generation: view?.generation ?? this.runs.generation(row.name),
           managed: Boolean(this.lifecycle.handle) && !leftover,
           needsIsolation: row.needsConversion,
         } satisfies WorkbenchSpace;
@@ -1898,7 +1858,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private ownedSpaceIds(): string[] {
     return this.listSpaces()
-      .filter((row) => row.managed && !this.unmanaged.has(row.id))
+      .filter((row) => row.managed && !this.runs.unmanaged.has(row.id))
       .map((row) => row.id);
   }
 
@@ -1976,7 +1936,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return this.lifecycle.availability({
       cli: Boolean(this.cli),
       managerUsable: !(this.managerId && this.managerInstall !== "manager"),
-      unmanaged: this.unmanaged.size,
+      unmanaged: this.runs.unmanaged.size,
     });
   }
 
@@ -2101,7 +2061,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.managerId && this.managerInstall !== "manager") {
       extra.push("The manager profile cannot be used.");
     }
-    if (this.unmanaged.size) extra.push("Leftover processes were not adopted.");
+    if (this.runs.unmanaged.size) extra.push("Leftover processes were not adopted.");
     if (this.lifecycle.maintenanceBlocked) extra.push(STOP_KEPT_REASON);
     this.lifecycle.applyDerivedReasons(extra, latchBlock);
   }

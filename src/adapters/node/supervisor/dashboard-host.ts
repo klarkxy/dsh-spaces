@@ -7,6 +7,7 @@ import type { HomeOperationLock } from "../home-operation-lock";
 import type { WorkbenchSpace } from "../../../shared/workbench";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorLifecycle } from "./lifecycle";
+import type { SpaceRunRegistry } from "./space-runs";
 
 export interface SupervisorDashboardHostDeps {
   home: string;
@@ -21,8 +22,7 @@ export interface SupervisorDashboardHostDeps {
   requireServiceEpoch: () => string;
   managerOrigin: () => string | null;
   listSpaces: () => WorkbenchSpace[];
-  unmanaged: Set<string>;
-  generations: Map<string, number>;
+  runs: SpaceRunRegistry;
   cookieName: () => string;
   sessionEquals: (value: string) => boolean;
 }
@@ -76,7 +76,7 @@ export class SupervisorDashboardHost {
       assertSource: (id, generation) => {
         this.assertOwner();
         const space = this.host.listSpaces().find(s => s.id === id && !s.isHost && s.managed);
-        if (!space || this.host.unmanaged.has(id) || this.host.generations.get(id) !== generation) {
+        if (!space || this.host.runs.unmanaged.has(id) || this.host.runs.generations.get(id) !== generation) {
           throw new WorkbenchPublicError("workbench/conflict", "The source generation is no longer owned.");
         }
       },

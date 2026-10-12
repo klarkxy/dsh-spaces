@@ -11,6 +11,7 @@ import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
 import { SpaceMessageRouter } from "../src/adapters/node/message-bus/router.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
 import { SupervisorLifecycle } from "../src/adapters/node/supervisor/lifecycle.ts";
+import { SpaceRunRegistry } from "../src/adapters/node/supervisor/space-runs.ts";
 
 const homes: string[] = [];
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -195,6 +196,7 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     lifecycle.handle = lease;
     const runtime = Object.assign(Object.create(WorkbenchSupervisorRuntime.prototype), {
       home, controlDir: controller.controlDir, jobs, lifecycle,
+      runs: new SpaceRunRegistry(),
       messageBus: new SpaceMessageRouter(),
       options: { onNormalExit: () => { exited = true; } }, httpClose: async () => {},
     });
