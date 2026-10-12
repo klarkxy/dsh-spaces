@@ -348,20 +348,7 @@ function writeRuntimeTree(version: string): { bin: string; root: string } {
   const bin = join(dsh, "lib", "bin.js");
   writeFileSync(bin, "console.log('cli');\n");
   writeFileSync(join(dsh, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version })}\n`);
-  for (const name of ["dsh-base", "dsh-web-app"]) {
-    const dir = join(root, "node_modules", "@deepseek-ai", name);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version })}\n`);
-  }
   return { bin, root };
-}
-
-function materializeOfficial(home: string, profile: string, spec: string): void {
-  const match = spec.match(/^(@deepseek-ai\/[a-z-]+)@(.+)$/);
-  if (!match) return;
-  const dir = join(home, "profiles", profile, "node_modules", ...match[1]!.split("/"));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: match[1], version: match[2] })}\n`);
 }
 
 test("space.runtime.set preview rejects invalid versions, protected targets, and unsupported plugins", async () => {
@@ -405,25 +392,25 @@ test("space.runtime.set preview rejects invalid versions, protected targets, and
   );
 });
 
-test("space.runtime.set pins the version and aligns official plugins for a stopped space", async () => {
+test("space.runtime.set pins the version for a stopped space without installing official plugins", async () => {
   const runtime = writeRuntimeTree("0.2.0-rc.3");
   const specs: string[] = [];
   const { maintenance, home, state } = harness({
     installedBin: (version) => (version === "0.2.0-rc.3" ? runtime.bin : undefined),
-    pluginAdd: async (dshHome, profile, spec) => {
+    pluginAdd: async (_dshHome, _profile, spec) => {
       specs.push(spec);
-      materializeOfficial(dshHome, profile, spec);
     },
   });
   state.status.coding = "stopped";
   const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
   assert.ok(plan.changes.some((line) => /Pin coding to DSH 0\.2\.0-rc\.3\./.test(line)), plan.changes.join(" | "));
   assert.ok(plan.changes.some((line) => /already installed/.test(line)));
+  assert.ok(plan.changes.some((line) => /Official plugins come from DSH 0\.2\.0-rc\.3 itself\./.test(line)), plan.changes.join(" | "));
   const result = await maintenance.execute(plan.id, jobCtx());
   assert.deepEqual(result, { spaceId: "coding", dshVersion: "0.2.0-rc.3" });
   const meta = new ProfileRegistry(home).scan().find((row) => row.name === "coding")?.meta;
   assert.equal(meta?.dshVersion, "0.2.0-rc.3");
-  assert.deepEqual(specs, ["@deepseek-ai/dsh-base@0.2.0-rc.3", "@deepseek-ai/dsh-web-app@0.2.0-rc.3"]);
+  assert.deepEqual(specs, []);
   assert.equal(state.stopped.includes("coding"), false);
   assert.equal(state.started.includes("coding"), false);
 });
@@ -440,9 +427,8 @@ test("space.runtime.set downloads a missing runtime and restarts a running space
       installed.set(version, runtime.bin);
       return { version, bin: runtime.bin, dir: runtime.root };
     },
-    pluginAdd: async (dshHome, profile, spec) => {
+    pluginAdd: async (_dshHome, _profile, spec) => {
       specs.push(spec);
-      materializeOfficial(dshHome, profile, spec);
     },
   });
   const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
@@ -452,46 +438,23 @@ test("space.runtime.set downloads a missing runtime and restarts a running space
   assert.deepEqual(installs, ["0.2.0-rc.3"]);
   assert.deepEqual(state.stopped, ["coding"]);
   assert.deepEqual(state.started, ["coding"]);
-  assert.equal(specs.length, 2);
+  assert.equal(specs.filter((spec) => spec.startsWith("@deepseek-ai/")).length, 0);
 });
 
-test("a failed official alignment after the pin leaves the pin written and the space stopped", async () => {
+test("a failed restart after the pin leaves the pin written and the space stopped", async () => {
   const runtime = writeRuntimeTree("0.2.0-rc.3");
   const { maintenance, home, state } = harness({
     installedBin: (version) => (version === "0.2.0-rc.3" ? runtime.bin : undefined),
-    pluginAdd: async () => {
-      throw new Error("npm exploded");
-    },
   });
+  state.onStart = () => {
+    throw new Error("spawn exploded");
+  };
   const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
-  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()));
+  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), /spawn exploded/);
   const meta = new ProfileRegistry(home).scan().find((row) => row.name === "coding")?.meta;
   assert.equal(meta?.dshVersion, "0.2.0-rc.3");
   assert.deepEqual(state.stopped, ["coding"]);
-  assert.equal(state.started.includes("coding"), false);
-});
-
-test("re-applying the pinned version repairs a mismatched official plugin", async () => {
-  const runtime = writeRuntimeTree("0.2.0-rc.3");
-  const specs: string[] = [];
-  const { maintenance, home, state } = harness({
-    installedBin: (version) => (version === "0.2.0-rc.3" ? runtime.bin : undefined),
-    pluginAdd: async (dshHome, profile, spec) => {
-      specs.push(spec);
-      materializeOfficial(dshHome, profile, spec);
-    },
-  });
-  state.status.coding = "stopped";
-  const registry = new ProfileRegistry(home);
-  registry.updateMeta("coding", { dshVersion: "0.2.0-rc.3" });
-  const web = join(home, "profiles", "coding", "node_modules", "@deepseek-ai", "dsh-web-app");
-  mkdirSync(web, { recursive: true });
-  writeFileSync(join(web, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version: "0.9.9" })}\n`);
-  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
-  assert.equal(plan.title, "Re-apply DSH 0.2.0-rc.3 to coding");
-  const result = await maintenance.execute(plan.id, jobCtx());
-  assert.deepEqual(result, { spaceId: "coding", dshVersion: "0.2.0-rc.3" });
-  assert.deepEqual(specs, ["@deepseek-ai/dsh-base@0.2.0-rc.3", "@deepseek-ai/dsh-web-app@0.2.0-rc.3"]);
+  assert.equal(state.status.coding, "stopped");
 });
 
 test("runtime.remove refuses host, legacy, pinned, and missing versions and removes an unused one", async () => {
@@ -865,6 +828,7 @@ interface HarnessState {
   order: string[];
   backups: Array<{ id: string; createdAt: string; size: number; tooLarge: boolean }>;
   onStop?: () => void;
+  onStart?: () => void;
   stopAllImpl?: () => Promise<void>;
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
 }
@@ -977,6 +941,7 @@ function createMaintenance(
       }
     },
     startSpace: async (spaceId: string) => {
+      state.onStart?.();
       state.started.push(spaceId);
       state.status[spaceId] = "running";
     },

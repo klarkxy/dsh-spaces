@@ -337,7 +337,6 @@ test("Supervisor start admits the known transition under its writer lock before 
     lifecycle: { assertWritable: () => { steps.push("guard"); } }, statusOf: () => "stopped",
     pinnedDshVersion: () => undefined,
     resolveSpaceRuntime: () => ({ bin: f.input.bin, version: f.input.cliVersion }),
-    assertOfficialRuntime: () => undefined,
     processes: { start: async () => { steps.push("spawn"); } },
     lock: { run: async (_name: string, action: () => Promise<void>) => { steps.push("lock"); await action(); steps.push("unlock"); } },
     installArtifact: async (_id: string, artifact: string) => { steps.push("install"); await f.input.install(artifact.endsWith("view.tgz") ? "view-bridge" : "llm-bridge"); },

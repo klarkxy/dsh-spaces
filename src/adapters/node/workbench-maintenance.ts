@@ -40,13 +40,6 @@ import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAl
 import { isExactRuntimeVersion, SPACES_MIN_DSH_VERSION } from "../../shared/runtime";
 import { lt as semverLt } from "semver";
 import { dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
-import {
-  OFFICIAL_BASE_PACKAGE,
-  OFFICIAL_WEB_PACKAGE,
-  packageVersionAt,
-  resolveOfficialVersions,
-  usedOfficial,
-} from "./official-plugins";
 import { runBatch } from "../../shared/batch";
 import { type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
@@ -782,7 +775,7 @@ export class WorkbenchMaintenance {
             ? `Re-apply DSH ${version} to ${spaceId}.`
             : `Switch ${spaceId} from DSH ${pin} to DSH ${version}.`,
         willDownload ? `Download and install DSH ${version}.` : `DSH ${version} is already installed.`,
-        `Official plugins will be set to the versions bundled with DSH ${version}.`,
+        `Official plugins come from DSH ${version} itself.`,
         "No snapshot is created. Downgrading later is not allowed.",
         runningSpaceIds.length ? `${spaceId} will be stopped and started again.` : `${spaceId} is stopped and stays stopped.`,
       ],
@@ -1044,36 +1037,13 @@ export class WorkbenchMaintenance {
       ctx.phase("runtime");
       ctx.message(`Installing runtime ${version}.`);
       await this.ports.runtimes.install(version);
+      if (!this.runtimeBinFor(version)) {
+        throw new WorkbenchMaintenanceError("workbench/failed", `DSH ${version} is not installed.`);
+      }
     }
-    const bin = this.runtimeBinFor(version);
-    if (!bin) throw new WorkbenchMaintenanceError("workbench/failed", `DSH ${version} is not installed.`);
     ctx.phase("pin");
     ctx.message(`Pinning ${spaceId} to DSH ${version}.`);
     this.ports.registry.updateMeta(spaceId, { dshVersion: version });
-    const profileDir = join(this.ports.home, "profiles", spaceId);
-    const used = usedOfficial(profileDir);
-    if (used.base || used.web) {
-      const official = resolveOfficialVersions(bin);
-      const targets = [
-        ...(used.base ? [{ name: OFFICIAL_BASE_PACKAGE, version: official.base }] : []),
-        ...(used.web ? [{ name: OFFICIAL_WEB_PACKAGE, version: official.web }] : []),
-      ];
-      const mismatched = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
-      if (mismatched.length) {
-        ctx.phase("plugins");
-        for (const target of mismatched) {
-          ctx.message(`Installing ${target.name}@${target.version} on ${spaceId}.`);
-          await this.pluginAddImpl(this.ports.home, spaceId, `${target.name}@${target.version}`);
-        }
-        const still = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
-        if (still.length) {
-          throw new WorkbenchMaintenanceError(
-            "workbench/failed",
-            `The space's official plugins do not match DSH ${version}: ${still.map((target) => target.name).join(", ")}.`,
-          );
-        }
-      }
-    }
     if (wasRunning) {
       ctx.phase("start");
       ctx.message(`Starting ${spaceId}.`);

@@ -24,13 +24,6 @@ import { assertNotRealHome, authorizeProductHome } from "./home-guard";
 import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
 import { archiveAbsPath } from "./plugin-library";
 import { pluginAdd } from "./plugin-ops";
-import {
-  OFFICIAL_BASE_PACKAGE,
-  OFFICIAL_WEB_PACKAGE,
-  packageVersionAt,
-  resolveOfficialVersions,
-  usedOfficial,
-} from "./official-plugins";
 import { lt as semverLt } from "semver";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
@@ -816,15 +809,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.lifecycle.reasons.push(`The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim());
       }
     }
-    if (!this.lifecycle.blocked && this.managerInstall === "manager" && this.cli) {
-      try {
-        await this.alignManagerOfficialPlugins(identity.profileId);
-      } catch (error) {
-        this.lifecycle.blocked = true;
-        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
-        this.lifecycle.reasons.push(`The manager's official DSH plugins could not be aligned with host DSH ${this.cli.version}. ${detail}`.trim());
-      }
-    }
     if (this.cli) {
       try {
         await this.pinExistingSpaces();
@@ -1015,48 +999,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         throw new Error("The installed manager plugin payload does not match the selected component group.");
       }
     }));
-  }
-
-  private async alignManagerOfficialPlugins(profileId: string): Promise<void> {
-    const profileDir = join(this.home, "profiles", profileId);
-    const used = usedOfficial(profileDir);
-    if (!used.base && !used.web) return;
-    const targets: Array<{ name: string; version: string }> = [];
-    const official = resolveOfficialVersions(this.cli!.bin);
-    if (used.base) targets.push({ name: OFFICIAL_BASE_PACKAGE, version: official.base });
-    if (used.web) targets.push({ name: OFFICIAL_WEB_PACKAGE, version: official.web });
-    const mismatched = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
-    if (!mismatched.length) return;
-    await this.lock.run("manager.official-align", () => this.observeChildWork(async () => {
-      const add = this.options.pluginAdd ?? pluginAdd;
-      for (const target of mismatched) {
-        await add(this.home, profileId, `${target.name}@${target.version}`);
-      }
-      const still = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
-      if (still.length) {
-        throw new Error(`The manager's official plugins do not match the host CLI: ${still.map((row) => row.name).join(", ")}.`);
-      }
-    }));
-  }
-
-  /** A space may only start when its used official plugins match its bound runtime. */
-  private assertOfficialRuntime(spaceId: string, spaceRuntime: { bin: string; version: string }): void {
-    const profileDir = join(this.home, "profiles", spaceId);
-    const used = usedOfficial(profileDir);
-    if (!used.base && !used.web) return;
-    const official = resolveOfficialVersions(spaceRuntime.bin);
-    const mismatched: string[] = [];
-    if (used.base && packageVersionAt(profileDir, OFFICIAL_BASE_PACKAGE) !== official.base) {
-      mismatched.push(OFFICIAL_BASE_PACKAGE);
-    }
-    if (used.web && packageVersionAt(profileDir, OFFICIAL_WEB_PACKAGE) !== official.web) {
-      mismatched.push(OFFICIAL_WEB_PACKAGE);
-    }
-    if (!mismatched.length) return;
-    throw new WorkbenchPublicError(
-      "workbench/incompatible",
-      `This space's official DSH plugins (${mismatched.join(", ")}) do not match DSH ${spaceRuntime.version}. Re-apply DSH ${spaceRuntime.version} from the space settings.`,
-    );
   }
 
   private async pinExistingSpaces(): Promise<void> {
@@ -1620,7 +1562,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       );
     }
     const spaceRuntime = this.resolveSpaceRuntime(spaceId);
-    if (spaceId !== this.managerId) this.assertOfficialRuntime(spaceId, spaceRuntime);
     if (this.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
       await this.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({
