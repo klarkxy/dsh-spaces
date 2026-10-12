@@ -15,6 +15,9 @@ export const WORKBENCH_ERROR = {
   "workbench/maintenance": "That maintenance action is not available yet.",
 } as const;
 
+export const STOP_KEPT_REASON = "Owned processes could not be stopped. Run rights were kept.";
+export const WRITABLE_STARTUP_FAILED_REASON = "Writable startup did not finish. The stable entry is still available.";
+
 export type WorkbenchErrorCode = keyof typeof WORKBENCH_ERROR;
 
 export class WorkbenchPublicError extends Error {

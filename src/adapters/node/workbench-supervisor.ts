@@ -123,7 +123,7 @@ import { GlobalLlmHost } from "../../core/application/global-llm-host";
 import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
 import { SupervisorComponentHandoff } from "./supervisor/component-handoff-host";
 import { SupervisorDashboardHost } from "./supervisor/dashboard-host";
-import { WORKBENCH_ERROR, WorkbenchPublicError } from "./supervisor/errors";
+import { STOP_KEPT_REASON, WORKBENCH_ERROR, WorkbenchPublicError, WRITABLE_STARTUP_FAILED_REASON } from "./supervisor/errors";
 import {
   expectKeys,
   expectObject,
@@ -243,7 +243,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private maintenanceInventory: { mode: WorkbenchState["mode"]; spaces: WorkbenchSpace[] } | null = null;
   private blocked = false;
   private reasons: string[] = [];
-  private derivedRecoveryReasons = new Set<string>();
+  private derivedReasons = new Set<string>();
   private readonly messageBus = new SpaceMessageRouter();
   private readonly generations = new Map<string, number>();
   private readonly views = new Map<string, ChildView>();
@@ -466,7 +466,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return;
       }
       this.blocked = true;
-      this.reasons = ["Writable startup did not finish. The stable entry is still available."];
+      this.reasons = [WRITABLE_STARTUP_FAILED_REASON];
       return;
     }
     this.writeHostBearer();
@@ -477,7 +477,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.blocked = true;
       this.reasons = [
         ...this.reasons,
-        "Writable startup did not finish. The stable entry is still available.",
+        WRITABLE_STARTUP_FAILED_REASON,
       ];
     }
   }
@@ -513,8 +513,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } catch (error) {
       this.maintenanceBlocked = true;
       this.blocked = true;
-      if (!this.reasons.includes("Owned processes could not be stopped. Run rights were kept.")) {
-        this.reasons.push("Owned processes could not be stopped. Run rights were kept.");
+      if (!this.reasons.includes(STOP_KEPT_REASON)) {
+        this.reasons.push(STOP_KEPT_REASON);
       }
       throw error instanceof Error ? error : new Error(STOP_NOT_FORCED);
     }
@@ -719,9 +719,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
     }
     this.assertWritable();
-    if (this.maintenanceBlocked) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
-    }
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
     const parsedCommand = isWorkbenchProductCommand(command) ? parseWorkbenchProductCommand(command) : command;
     const job = await this.jobs.submit(parsedCommand, requestId, (ctx) => {
@@ -862,14 +859,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.reasons = [
         "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
       ];
-      this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
       this.refreshAvailability();
       return;
     }
     if (this.managerInstall === "damaged") {
       this.blocked = true;
       this.reasons = ["The manager profile record is damaged and was not rebuilt."];
-      this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
       this.refreshAvailability();
       return;
     }
@@ -878,7 +873,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (!this.cli) {
         this.blocked = true;
         this.reasons = ["A compatible DSH CLI is required before the manager profile can be created."];
-        this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
+        this.refreshAvailability();
         return;
       }
       try {
@@ -1656,7 +1651,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           throw error;
         }
         ctx.phase("finalizing");
-        this.relinquishKind = "service.shutdown";
         return;
       }
       default:
@@ -1892,19 +1886,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async stopOwnedAll(): Promise<void> {
     if (!this.processes) return;
     const names = this.ownedSpaceIds().filter((id) => !this.unmanaged.has(id));
-    const failures: string[] = [];
     for (const name of names) {
       try {
         await this.stopOwned(name);
       } catch (error) {
-        failures.push(name);
         if (!this.reasons.some((row) => row.includes("could not be stopped"))) {
-          this.reasons.push("Owned processes could not be stopped. Run rights were kept.");
+          this.reasons.push(STOP_KEPT_REASON);
         }
         throw error instanceof Error ? error : new Error(STOP_NOT_FORCED);
       }
     }
-    if (failures.length) throw new Error(STOP_NOT_FORCED);
   }
 
   private listSpaces(): WorkbenchSpace[] {
@@ -2036,7 +2027,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.handle || this.closed || this.sealing) return "unavailable";
     if (this.blocked || this.maintenanceBlocked || this.unmanaged.size > 0 || !this.cli) return "limited";
     if (this.managerId && this.managerInstall !== "manager") return "limited";
-    if (this.derivedRecoveryReasons.size > 0) return "limited";
+    if (this.derivedReasons.size > 0) return "limited";
     return "ready";
   }
 
@@ -2162,12 +2153,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       extra.push("The manager profile cannot be used.");
     }
     if (this.unmanaged.size) extra.push("Leftover processes were not adopted.");
-    if (this.maintenanceBlocked) extra.push("Owned processes could not be stopped. Run rights were kept.");
+    if (this.maintenanceBlocked) extra.push(STOP_KEPT_REASON);
     this.reasons = [...new Set([
-      ...this.reasons.filter(reason => !this.derivedRecoveryReasons.has(reason)),
+      ...this.reasons.filter(reason => !this.derivedReasons.has(reason)),
       ...extra,
     ])];
-    this.derivedRecoveryReasons = new Set(extra);
+    this.derivedReasons = new Set(extra);
     if (latchBlock && extra.length > 0) this.blocked = true;
   }
 
