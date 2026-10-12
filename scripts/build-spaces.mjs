@@ -75,7 +75,6 @@ if (!process.argv.includes('--core-only')) {
   }
 
   await buildNodeCli('packages/supervisor/src/index.ts', 'packages/supervisor/lib/index.js');
-  await buildNodeCli('packages/supervisor/src/launcher.ts', 'packages/supervisor/lib/launcher.mjs');
   await build({ ...common, platform: 'node', banner: { js: nodeRequire },
     entryPoints: ['src/adapters/node/snapshot-worker.ts'], outfile: 'packages/supervisor/lib/snapshot-worker.mjs' });
   await copyFile(at('LICENSE'), at('packages/supervisor/LICENSE'));

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   lstatSync,
   mkdirSync,
@@ -13,8 +13,8 @@ import { join } from "node:path";
 import { atomicWrite } from "./atomic";
 import { samePath } from "./home-guard";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
-import { HomeLockBusyError, HomeOperationLock, canonicalHome } from "./home-operation-lock";
-import { deriveServiceEpoch, digestHomeIdentity } from "./workbench-protocol";
+import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
+import { digestHomeIdentity } from "./workbench-protocol";
 
 export const HOME_CONTROL_DIR_NAME = ".dsh-spaces-control";
 export const HOME_CONTROL_MANAGER_FILE = "manager.json";
@@ -48,21 +48,6 @@ export interface HomeControlOwner {
 
 export type HomeControlHandoffPhase = "launcher" | "authorized";
 
-export type HomeControlHandoffErrorCode =
-  | "not-held"
-  | "nonce-mismatch"
-  | "pid-mismatch"
-  | "home-mismatch"
-  | "binding-mismatch"
-  | "phase-mismatch"
-  | "duplicate"
-  | "invalid-target"
-  | "invalid-token"
-  | "incomplete"
-  | "ambiguous"
-  | "busy"
-  | "write-failed";
-
 /** Reservation bound into the run-owner record. Node-only; not a public DTO. */
 export interface HomeControlHandoffBinding {
   homeDigest: string;
@@ -71,43 +56,11 @@ export interface HomeControlHandoffBinding {
   artifactDigest: string;
 }
 
-/**
- * Capability returned to the trusted Node launcher. `secret` is never copied
- * into inspect() or public workbench DTOs.
- */
-export interface HomeControlHandoffToken {
-  readonly v: 1;
-  readonly homeDigest: string;
-  readonly handoffId: string;
-  readonly serviceEpoch: string;
-  readonly artifactDigest: string;
-  readonly nonce: string;
-  readonly secret: string;
-}
-
 export interface HomeControlHandoffEvidence {
   phase: HomeControlHandoffPhase;
   binding: HomeControlHandoffBinding;
   original: { pid: number; kind: ControlKind; startedAt: string };
   target?: { pid: number; startedAt: string };
-}
-
-export interface HomeControlTransferToLauncherRequest {
-  nonce: string;
-  binding: HomeControlHandoffBinding;
-  /** Defaults to this process. Spawned launcher pid must already exist. */
-  launcher?: { pid: number; startedAt: string };
-}
-
-export interface HomeControlAuthorizeHandoffRequest {
-  token: HomeControlHandoffToken;
-  target: { pid: number; startedAt: string };
-}
-
-export interface HomeControlAcceptHandoffRequest {
-  token: HomeControlHandoffToken;
-  kind: ControlKind;
-  endpoint?: string;
 }
 
 export type HomeControlInspect =
@@ -160,16 +113,6 @@ export class HomeControlReleaseError extends Error {
 
 export class HomeControlPathError extends Error {
   readonly name = "HomeControlPathError";
-}
-
-export class HomeControlHandoffError extends Error {
-  readonly name = "HomeControlHandoffError";
-  constructor(
-    message: string,
-    readonly code: HomeControlHandoffErrorCode,
-  ) {
-    super(message);
-  }
 }
 
 /**
@@ -287,30 +230,6 @@ export class HomeController {
     };
   }
 
-  /**
-   * Current owner (this process.pid + nonce) atomically replaces occupancy
-   * with a one-shot launcher in the same run directory. Caller confirms stop;
-   * this method only checks identity and keeps the lock held.
-   */
-  async transferToLauncher(request: HomeControlTransferToLauncherRequest): Promise<HomeControlHandoffToken> {
-    return this.withHandoffLock(() => this.transferToLauncherLocked(request));
-  }
-
-  /**
-   * Launcher occupancy (this process.pid + token) binds the new Supervisor
-   * pid/startedAt. Those values must come from this trusted local process.
-   */
-  async authorizeHandoff(request: HomeControlAuthorizeHandoffRequest): Promise<HomeControlHandoffToken> {
-    return this.withHandoffLock(() => this.authorizeHandoffLocked(request));
-  }
-
-  /**
-   * New Supervisor accepts only if token + current record + this process.pid
-   * match the launcher-authorized target. Disk-readable state alone is not enough.
-   */
-  async acceptHandoff(request: HomeControlAcceptHandoffRequest): Promise<HomeControlHandle> {
-    return this.withHandoffLock(() => this.acceptHandoffLocked(request));
-  }
 
   reclaimDead(options?: { expectedOwner: HomeControlOwner; beforeRelease: (owner: HomeControlOwner) => void }): ReclaimDeadResult {
     const first = this.inspect();
@@ -393,183 +312,6 @@ export class HomeController {
         detail: error instanceof Error ? error.message : String(error),
       };
     }
-  }
-
-  private async withHandoffLock<T>(action: () => T): Promise<T> {
-    try {
-      return await this.lock.run("control-handoff", async () => action());
-    } catch (error) {
-      if (error instanceof HomeLockBusyError) {
-        throw new HomeControlHandoffError(
-          `handoff is blocked by the home transaction lock: ${error.message}`,
-          "busy",
-        );
-      }
-      throw error;
-    }
-  }
-
-  private transferToLauncherLocked(request: HomeControlTransferToLauncherRequest): HomeControlHandoffToken {
-    const binding = requireBinding(request.binding);
-    this.assertHomeDigest(binding.homeDigest);
-    const current = this.requireMutableOwnerFile();
-    if (current.state === "handoff") {
-      throw new HomeControlHandoffError("handoff is already in progress", "duplicate");
-    }
-    const owner = current.owner;
-    this.assertCurrentOwner(owner, request.nonce);
-    if (!secretsEqual(binding.serviceEpoch, deriveServiceEpoch(owner.nonce))) {
-      throw new HomeControlHandoffError(
-        "handoff serviceEpoch does not match the current owner",
-        "binding-mismatch",
-      );
-    }
-    const launcher = this.requireLiveProcess(request.launcher ?? { pid: process.pid, startedAt: new Date().toISOString() });
-    const nonce = randomBytes(16).toString("hex");
-    const secret = randomBytes(32).toString("hex");
-    const disk: HandoffDiskRecord = {
-      version: 2,
-      phase: "launcher",
-      pid: launcher.pid,
-      nonce,
-      startedAt: launcher.startedAt,
-      handoffId: binding.handoffId,
-      homeDigest: binding.homeDigest,
-      serviceEpoch: binding.serviceEpoch,
-      artifactDigest: binding.artifactDigest,
-      secretHash: hashSecret(secret),
-      original: {
-        pid: owner.pid,
-        nonce: owner.nonce,
-        startedAt: owner.startedAt,
-        kind: owner.kind,
-        ...(owner.endpoint ? { endpoint: owner.endpoint } : {}),
-      },
-    };
-    replaceOwnerFile(this.ownerFile, disk);
-    return freezeToken({ ...binding, nonce, secret });
-  }
-
-  private authorizeHandoffLocked(request: HomeControlAuthorizeHandoffRequest): HomeControlHandoffToken {
-    const token = requireToken(request.token);
-    this.assertHomeDigest(token.homeDigest);
-    const current = this.requireHandoffFile();
-    if (current.disk.phase !== "launcher") {
-      throw new HomeControlHandoffError(
-        "handoff is not waiting for launcher authorization",
-        current.disk.phase === "authorized" ? "duplicate" : "phase-mismatch",
-      );
-    }
-    this.assertLauncherCaller(current, token);
-    const target = this.requireLiveProcess(request.target);
-    const disk: HandoffDiskRecord = {
-      ...current.disk,
-      phase: "authorized",
-      target: { pid: target.pid, startedAt: target.startedAt },
-    };
-    replaceOwnerFile(this.ownerFile, disk);
-    return freezeToken(token);
-  }
-
-  private acceptHandoffLocked(request: HomeControlAcceptHandoffRequest): HomeControlHandle {
-    const token = requireToken(request.token);
-    this.assertHomeDigest(token.homeDigest);
-    const kind = requireKind(request.kind);
-    const endpoint = request.endpoint === undefined ? undefined : parseControlEndpoint(request.endpoint);
-    const current = this.requireHandoffFile();
-    if (current.disk.phase !== "authorized" || !current.disk.target) {
-      throw new HomeControlHandoffError("handoff is not authorized for a new supervisor", "phase-mismatch");
-    }
-    assertTokenMatchesDisk(token, current.disk);
-    if (process.pid !== current.disk.target.pid) {
-      throw new HomeControlHandoffError("accepting process is not the authorized target", "pid-mismatch");
-    }
-    if (this.pidAlive(process.pid, current.disk.target.startedAt) !== "alive") {
-      throw new HomeControlHandoffError("authorized target startedAt does not match this process", "invalid-target");
-    }
-    const owner: HomeControlOwner = {
-      pid: current.disk.target.pid,
-      nonce: randomBytes(16).toString("hex"),
-      startedAt: current.disk.target.startedAt,
-      kind,
-      ...(endpoint ? { endpoint } : {}),
-    };
-    replaceOwnerFile(this.ownerFile, serializeLegacyOwner(owner));
-    return {
-      owner,
-      release: (beforeRelease) => {
-        removeOwnedRun(this.ownerFile, this.runDir, owner.nonce, beforeRelease);
-      },
-    };
-  }
-
-  private requireMutableOwnerFile(): { state: "legacy"; owner: HomeControlOwner } | { state: "handoff"; occupant: HomeControlOwner; disk: HandoffDiskRecord } {
-    const inspection = this.inspect();
-    if (!inspection.held) {
-      throw new HomeControlHandoffError("control run lock is not held", "not-held");
-    }
-    if ("reclaim" in inspection && inspection.reclaim) {
-      throw new HomeControlHandoffError("control reclaim is in progress", "busy");
-    }
-    if ("incomplete" in inspection && inspection.incomplete) {
-      throw new HomeControlHandoffError("control owner is incomplete", "incomplete");
-    }
-    if ("ambiguous" in inspection && inspection.ambiguous) {
-      throw new HomeControlHandoffError(`control owner is ambiguous (${inspection.reason})`, "ambiguous");
-    }
-    const owner = readOwnerFile(this.ownerFile);
-    if (owner.state === "legacy") return owner;
-    if (owner.state === "handoff") return owner;
-    if (owner.state === "missing") {
-      throw new HomeControlHandoffError("control owner is incomplete", "incomplete");
-    }
-    if (owner.state === "symlink") {
-      throw new HomeControlHandoffError("control owner path is a symlink", "ambiguous");
-    }
-    throw new HomeControlHandoffError(owner.reason, "ambiguous");
-  }
-
-  private requireHandoffFile(): { state: "handoff"; occupant: HomeControlOwner; disk: HandoffDiskRecord } {
-    const current = this.requireMutableOwnerFile();
-    if (current.state !== "handoff") {
-      throw new HomeControlHandoffError("control owner is not in a handoff", "phase-mismatch");
-    }
-    return current;
-  }
-
-  private assertHomeDigest(homeDigest: string): void {
-    if (!secretsEqual(homeDigest, digestHomeIdentity(this.home))) {
-      throw new HomeControlHandoffError("handoff home digest does not match this Home", "home-mismatch");
-    }
-  }
-
-  private assertCurrentOwner(owner: HomeControlOwner, nonce: string): void {
-    if (!secretsEqual(owner.nonce, nonce)) {
-      throw new HomeControlHandoffError("handoff nonce does not match the current owner", "nonce-mismatch");
-    }
-    if (owner.pid !== process.pid) {
-      throw new HomeControlHandoffError("handoff must be initiated by the current owner process", "pid-mismatch");
-    }
-  }
-
-  private assertLauncherCaller(
-    current: { occupant: HomeControlOwner; disk: HandoffDiskRecord },
-    token: HomeControlHandoffToken,
-  ): void {
-    assertTokenMatchesDisk(token, current.disk);
-    if (current.occupant.pid !== process.pid) {
-      throw new HomeControlHandoffError("handoff must be continued by the current launcher process", "pid-mismatch");
-    }
-  }
-
-  private requireLiveProcess(input: { pid: number; startedAt: string }): { pid: number; startedAt: string } {
-    const pid = requirePid(input.pid);
-    const startedAt = requireStartedAt(input.startedAt);
-    const liveness = this.pidAlive(pid, startedAt);
-    if (liveness !== "alive") {
-      throw new HomeControlHandoffError("target pid is not a live process", "invalid-target");
-    }
-    return { pid, startedAt };
   }
 
   private toIdentity(record: ManagerRecord): ManagerIdentity {
@@ -1023,23 +765,6 @@ function writeOwnerFile(ownerFile: string, owner: HomeControlOwner): void {
   });
 }
 
-function replaceOwnerFile(ownerFile: string, payload: unknown): void {
-  const tmp = `${ownerFile}.${process.pid}.tmp`;
-  try {
-    atomicWrite(ownerFile, `${JSON.stringify(payload)}\n`);
-  } catch (error) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      /* leave any tmp; never delete owner.json */
-    }
-    throw new HomeControlHandoffError(
-      `handoff owner write failed; previous owner left in place: ${error instanceof Error ? error.message : String(error)}`,
-      "write-failed",
-    );
-  }
-}
-
 export function sameControlOwner(a: HomeControlOwner, b: HomeControlOwner): boolean {
   return a.pid === b.pid && a.nonce === b.nonce && a.kind === b.kind &&
     a.startedAt === b.startedAt && a.endpoint === b.endpoint;
@@ -1107,98 +832,6 @@ function publicHandoffEvidence(disk: HandoffDiskRecord): HomeControlHandoffEvide
     },
     ...(disk.target ? { target: { pid: disk.target.pid, startedAt: disk.target.startedAt } } : {}),
   };
-}
-
-function hashSecret(secret: string): string {
-  return createHash("sha256").update(secret, "utf8").digest("hex");
-}
-
-function secretsEqual(left: string, right: string): boolean {
-  const a = Buffer.from(left, "utf8");
-  const b = Buffer.from(right, "utf8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
-function freezeToken(input: HomeControlHandoffBinding & { nonce: string; secret: string }): HomeControlHandoffToken {
-  return Object.freeze({
-    v: 1 as const,
-    homeDigest: input.homeDigest,
-    handoffId: input.handoffId,
-    serviceEpoch: input.serviceEpoch,
-    artifactDigest: input.artifactDigest,
-    nonce: input.nonce,
-    secret: input.secret,
-  });
-}
-
-function requireBinding(binding: HomeControlHandoffBinding): HomeControlHandoffBinding {
-  if (!binding || typeof binding !== "object") {
-    throw new HomeControlHandoffError("handoff binding is required", "invalid-token");
-  }
-  return {
-    homeDigest: requireHex64("homeDigest", binding.homeDigest),
-    handoffId: requireHandoffId(binding.handoffId),
-    serviceEpoch: requireHex64("serviceEpoch", binding.serviceEpoch),
-    artifactDigest: requireHex64("artifactDigest", binding.artifactDigest),
-  };
-}
-
-function requireToken(token: HomeControlHandoffToken): HomeControlHandoffToken {
-  if (!token || typeof token !== "object" || token.v !== 1) {
-    throw new HomeControlHandoffError("handoff token is invalid", "invalid-token");
-  }
-  if (typeof token.nonce !== "string" || !HEX32.test(token.nonce)) {
-    throw new HomeControlHandoffError("handoff token nonce is invalid", "invalid-token");
-  }
-  if (typeof token.secret !== "string" || !HEX64.test(token.secret)) {
-    throw new HomeControlHandoffError("handoff token secret is invalid", "invalid-token");
-  }
-  const binding = requireBinding(token);
-  return freezeToken({ ...binding, nonce: token.nonce, secret: token.secret });
-}
-
-function requireHex64(name: string, value: unknown): string {
-  if (typeof value !== "string" || !HEX64.test(value)) {
-    throw new HomeControlHandoffError(`${name} must be a 64-character lowercase hex digest`, "invalid-token");
-  }
-  return value;
-}
-
-function requireHandoffId(value: unknown): string {
-  if (typeof value !== "string" || !HANDOFF_ID_RE.test(value)) {
-    throw new HomeControlHandoffError("handoffId is invalid", "invalid-token");
-  }
-  return value;
-}
-
-function requirePid(pid: unknown): number {
-  if (!Number.isInteger(pid) || (pid as number) <= 0) {
-    throw new HomeControlHandoffError("target pid is invalid", "invalid-target");
-  }
-  return pid as number;
-}
-
-function requireStartedAt(value: unknown): string {
-  if (typeof value !== "string" || !value || !Number.isFinite(Date.parse(value))) {
-    throw new HomeControlHandoffError("target startedAt is invalid", "invalid-target");
-  }
-  return value;
-}
-
-function assertTokenMatchesDisk(token: HomeControlHandoffToken, disk: HandoffDiskRecord): void {
-  if (!secretsEqual(token.homeDigest, disk.homeDigest) || token.handoffId !== disk.handoffId) {
-    throw new HomeControlHandoffError("handoff token does not match the current reservation", "binding-mismatch");
-  }
-  if (token.serviceEpoch !== disk.serviceEpoch || token.artifactDigest !== disk.artifactDigest) {
-    throw new HomeControlHandoffError("handoff token does not match the current reservation", "binding-mismatch");
-  }
-  if (!secretsEqual(token.nonce, disk.nonce)) {
-    throw new HomeControlHandoffError("handoff token nonce does not match the current launcher", "nonce-mismatch");
-  }
-  if (!secretsEqual(hashSecret(token.secret), disk.secretHash)) {
-    throw new HomeControlHandoffError("handoff token secret does not match the current reservation", "invalid-token");
-  }
 }
 
 function abortUncommittedRun(runDir: string, ownerFile: string): void {

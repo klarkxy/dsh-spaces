@@ -693,7 +693,6 @@ export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> =
 ]);
 
 export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("workbench.prepare"), version: z.union([z.literal("latest"), exactVersionSchema]).optional() }).strict(),
   z.object({ kind: z.literal("settings.update"), settings: homeSettingsSchema }).strict(),
   z.object({ kind: z.literal("catalog.refresh"), url: optionalHttpUrlSchema.optional() }).strict(),
   z
@@ -733,11 +732,6 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
 ]);
 
 export const workbenchProductOutcomeSchema: z.ZodType<WorkbenchProductOutcome> = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("workbench.prepare"), candidate: z.object({
-    id: z.literal("bundled-workbench"), version: exactVersionSchema,
-    installedVersion: z.union([exactVersionSchema, z.null()]),
-    digest: z.string().regex(DIGEST_RE), updateAvailable: z.boolean(),
-  }).strict() }).strict(),
   z.object({ kind: z.literal("settings.update"), settings: homeSettingsSchema }).strict(),
   z.object({ kind: z.literal("catalog.refresh"), count: z.number().int().nonnegative().max(10_000) }).strict(),
   z.object({ kind: z.literal("plugin.download"), item: libraryItemSchema }).strict(),

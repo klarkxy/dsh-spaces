@@ -39,7 +39,7 @@ import {
   stageComponentPayload,
   coldStartLockLabel,
 } from "../src/adapters/node/component-selection.ts";
-import { catalogIdSchema, workbenchCommandSchema, workbenchInitializeResultSchema, workbenchViewSchema, workbenchPackageResultSchema, workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
+import { catalogIdSchema, workbenchCommandSchema, workbenchInitializeResultSchema, workbenchViewSchema, workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import { GUIDE_METHODS, TYPERT } from "../packages/plugin/src/typert.host.ts";
 import {
   createWorkbenchGuideRemote,
@@ -64,22 +64,6 @@ const handles: HomeControlHandle[] = [];
 const HEX64_A = "ab".repeat(32);
 const HEX64_B = "cd".repeat(32);
 const STATE_SINCE = "2026-09-20T00:00:00.000Z";
-
-test("package update RPC preserves a missing candidate and rejects browser paths", async () => {
-  const endpoints: string[] = [];
-  const remote = createWorkbenchRemote({ rpc: { call: async (_channel: string, endpoint: string) => {
-    endpoints.push(endpoint);
-    return { ok: true, value: null };
-  } } } as never);
-  assert.equal(await remote.workbenchPackage?.(), null);
-  assert.deepEqual(endpoints, ["workbench/workbenchPackage"]);
-  const request = { kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" };
-  assert.deepEqual(workbenchPlanRequestSchema.parse(request), request);
-  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, path: "C:/replacement.tgz" }).success, false);
-  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, expectedDigest: "a".repeat(64) }).success, false);
-  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, catalogId: "file:replacement.tgz" }).success, false);
-  assert.equal(workbenchPackageResultSchema.parse(null), null);
-});
 
 afterEach(async () => {
   for (const handle of handles.splice(0)) {
@@ -161,7 +145,6 @@ function writePayload(pluginRoot: string, marker = "payload"): string {
     ["lib/client.js", "export {};\n"],
     ["lib/supervisor/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.supervisor)],
     ["lib/supervisor/index.js", "export {};\n"],
-    ["lib/supervisor/launcher.mjs", "export {};\n"],
     ["lib/supervisor/snapshot-worker.mjs", "export {};\n"],
     ["lib/view-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["view-bridge"])],
     ["lib/view-bridge/cordis.patch.yml", "view: dummy\n"],

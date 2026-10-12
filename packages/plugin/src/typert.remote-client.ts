@@ -11,7 +11,6 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime,
-  WorkbenchPackageRelease,
   WorkbenchSnapshot,
   WorkbenchState,
   WorkbenchView,
@@ -51,7 +50,6 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     snapshots: () => Promise<RemoteResult<WorkbenchSnapshot[]>>;
     snapshot: (id: string) => Promise<RemoteResult<WorkbenchSnapshot>>;
     runtimes: () => Promise<RemoteResult<WorkbenchRuntime[]>>;
-    workbenchPackage: () => Promise<RemoteResult<WorkbenchPackageRelease | null>>;
     backups: (spaceId: string) => Promise<RemoteResult<WorkbenchBackup[]>>;
     llm: (request: LlmApiRequest) => Promise<RemoteResult<LlmApiResult>>;
     llmCredential: (request: LlmCredentialRequest) => Promise<RemoteResult<LlmApiResult>>;
@@ -76,7 +74,6 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "workbench/snapshots": () => Promise<RemoteResult<WorkbenchSnapshot[]>>;
     "workbench/snapshot": (id: string) => Promise<RemoteResult<WorkbenchSnapshot>>;
     "workbench/runtimes": () => Promise<RemoteResult<WorkbenchRuntime[]>>;
-    "workbench/workbenchPackage": () => Promise<RemoteResult<WorkbenchPackageRelease | null>>;
     "workbench/backups": (spaceId: string) => Promise<RemoteResult<WorkbenchBackup[]>>;
     "workbench/llm": (request: LlmApiRequest) => Promise<RemoteResult<LlmApiResult>>;
     "workbench/llmCredential": (request: LlmCredentialRequest) => Promise<RemoteResult<LlmApiResult>>;

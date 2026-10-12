@@ -7,9 +7,9 @@ import {
   COMPONENT_PAYLOAD_ENTRIES,
   ComponentPayloadError,
   validateComponentPayload,
+  validateComponentPayloadArtifacts,
   type ValidatedComponentPayload,
 } from "../component-payload";
-import { validateComponentPayloadArtifacts } from "../workbench-package-upgrade";
 import { WorkbenchPublicError } from "./errors";
 import type { BoundCli, WorkbenchSupervisorOptions } from "./types";
 
@@ -54,10 +54,8 @@ export function bindSupervisorComponentPayload(
   const viewEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["view-bridge"]);
   const llmEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["llm-bridge"]);
   const browserEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.browser);
-  const launcher = payloadRel(selected.packageRoot, "lib/supervisor/launcher.mjs");
   assertRealFile(worker, "Selected snapshot worker");
   assertRealDirectory(supervisorDir, "Selected supervisor assets");
-  assertRealFile(launcher, "Selected launcher");
   assertRealFile(viewEntry, "Selected view-bridge");
   assertRealFile(llmEntry, "Selected llm-bridge");
   assertRealFile(browserEntry, "Selected browser");
@@ -91,31 +89,6 @@ export function bindSupervisorComponentPayload(
     assertRealFile(options.pluginArtifact, "plugin-artifact");
   }
   return options;
-}
-
-export function assertHandoffTokenMatchesSelectedPayload(
-  token: { artifactDigest: string },
-  payloadRoot: string,
-  runningEntry?: string,
-  validated?: ValidatedComponentPayload,
-): ValidatedComponentPayload {
-  const selected = validated ?? validateComponentPayload(payloadRoot);
-  if (token.artifactDigest !== selected.digest) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "Handoff token artifactDigest does not match the selected component group.",
-    );
-  }
-  if (runningEntry) {
-    const expected = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.supervisor);
-    if (!sameRealPath(runningEntry, expected)) {
-      throw new WorkbenchPublicError(
-        "workbench/invalid-input",
-        "Supervisor entry is not from the selected component group.",
-      );
-    }
-  }
-  return selected;
 }
 
 /**
@@ -208,18 +181,6 @@ export function sameRealPath(left: string, right: string): boolean {
 export function pathInsideHome(home: string, path: string): boolean {
   const rel = relative(resolve(home), resolve(path));
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-export function resolveLauncherEntry(payload: ValidatedComponentPayload): string {
-  const live = validateComponentPayload(payload.payloadRootLib);
-  const declared = live.manifest.components.supervisor.files.some((file) => file.path === "lib/supervisor/launcher.mjs");
-  if (!declared) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "Selected component group does not declare lib/supervisor/launcher.mjs.",
-    );
-  }
-  return assertRealFile(payloadRel(live.packageRoot, "lib/supervisor/launcher.mjs"), "Selected launcher");
 }
 
 export function bindSelectedCli(bin: string): BoundCli {

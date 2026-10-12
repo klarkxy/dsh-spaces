@@ -51,7 +51,7 @@ import {
   type PluginLibrarySource,
   type ThemePreference,
 } from "../../shared/types";
-import type { WorkbenchPackageRelease, WorkbenchSpace } from "../../shared/workbench";
+import type { WorkbenchSpace } from "../../shared/workbench";
 import {
   MAX_WORKBENCH_SHARE_BASE64,
   MAX_WORKBENCH_SHARE_BYTES,
@@ -99,7 +99,6 @@ export interface WorkbenchProductPorts {
   workbenchLog?(): WorkbenchLog;
   withWrite<T>(label: string, action: () => Promise<T>): Promise<T>;
   settingsChanged?(settings: WorkbenchHomeSettings): void;
-  prepareWorkbench?(input: { version?: string }, ctx: WorkbenchJobContext): Promise<WorkbenchPackageRelease>;
   now?(): Date;
   fetchImpl?: WorkbenchProductFetcher;
   packGit?: GitPacker;
@@ -224,13 +223,6 @@ export class WorkbenchProductService {
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchProductOutcome> {
     switch (command.kind) {
-      case "workbench.prepare": {
-        if (!this.ports.prepareWorkbench) throw new Error("Workbench update preparation is unavailable.");
-        const candidate = await this.ports.prepareWorkbench({ version: command.version }, ctx);
-        const outcome: WorkbenchProductOutcome = { kind: "workbench.prepare", candidate };
-        recordProductResult(ctx, outcome);
-        return outcome;
-      }
       case "settings.update":
         return this.updateSettings(command.settings, ctx);
       case "catalog.refresh":

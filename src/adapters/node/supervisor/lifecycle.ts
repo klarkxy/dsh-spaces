@@ -1,7 +1,6 @@
 import type { WorkbenchSpace, WorkbenchState } from "../../../shared/workbench";
 import type { HomeControlHandle } from "../home-controller";
 import { WorkbenchPublicError } from "./errors";
-import type { PendingComponentHandoff } from "./types";
 
 export class SupervisorLifecycle {
   handle: HomeControlHandle | undefined;
@@ -15,8 +14,6 @@ export class SupervisorLifecycle {
   maintenanceInventory: { mode: WorkbenchState["mode"]; spaces: WorkbenchSpace[] } | null = null;
   relinquishKind: "service.shutdown" | null = null;
   relinquishJobId: string | null = null;
-  transferredOwner = false;
-  pendingHandoff: PendingComponentHandoff | undefined;
   activeJobId: string | undefined;
   reasons: string[] = [];
   private derivedReasons = new Set<string>();

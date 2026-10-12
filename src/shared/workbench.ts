@@ -64,14 +64,6 @@ export function formatWorkbenchFailure(input: {
   return lines.filter((line, i, all) => line !== '' || (all[i - 1] !== '' && i !== 0)).join('\n').trim();
 }
 
-export interface WorkbenchPackageRelease {
-  id: 'bundled-workbench';
-  version: string;
-  installedVersion: string | null;
-  digest: string;
-  updateAvailable: boolean;
-}
-
 export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   icon: string;
   status: 'running' | 'starting' | 'stopping' | 'stopped' | 'crashed' | 'unknown';
@@ -166,7 +158,6 @@ export type WorkbenchPlanRequest =
   | { kind: 'snapshot.create' }
   | { kind: 'snapshot.delete'; snapshotId: string }
   | { kind: 'runtime.install' | 'runtime.upgrade'; version: string }
-  | { kind: 'workbench.upgrade'; catalogId: 'bundled-workbench'; version: string }
   | { kind: 'service.shutdown' };
 
 export interface WorkbenchPlan {
@@ -225,8 +216,6 @@ export interface WorkbenchApi {
   snapshots(): Promise<WorkbenchSnapshot[]>;
   snapshot(id: string): Promise<WorkbenchSnapshot>;
   runtimes(): Promise<WorkbenchRuntime[]>;
-  /** Optional for older adapters; candidates are bound by the local supervisor. */
-  workbenchPackage?(): Promise<WorkbenchPackageRelease | null>;
   backups(spaceId: string): Promise<WorkbenchBackup[]>;
   /** Redacted global LLM management. Secrets use the Host-only llmCredential HTTP method. */
   llm?(request: LlmApiRequest): Promise<LlmApiResult>;

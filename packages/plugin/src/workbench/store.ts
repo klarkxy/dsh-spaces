@@ -7,7 +7,6 @@ import type {
   WorkbenchCommand,
   WorkbenchJob,
   WorkbenchMutationContext,
-  WorkbenchPackageRelease,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchPlugin,
@@ -141,8 +140,6 @@ export interface WorkbenchUiState {
   snapshotsStatus: "idle" | "loading" | "ready" | "error";
   runtimes: WorkbenchRuntime[];
   runtimesStatus: "idle" | "loading" | "ready" | "error";
-  workbenchPackage: WorkbenchPackageRelease | null;
-  workbenchPackageStatus: "idle" | "loading" | "ready" | "error";
   templates: SpaceTemplate[];
   templatesStatus: "idle" | "loading" | "ready" | "error";
   templateId: string;
@@ -293,9 +290,6 @@ export class WorkbenchController {
   private submittedSettingsJson: string | null = null;
   private restoreId: string | null;
   private notedCreates = new Set<string>();
-  private awaitingPackagePlanId: string | null = null;
-  private awaitingPackageJobId: string | null = null;
-  private prepareEpoch: string | null = null;
   private persistEmpty: boolean;
   private appliedClientDefaults = false;
   private ui: WorkbenchUiState;
@@ -369,8 +363,6 @@ export class WorkbenchController {
       snapshotsStatus: "idle",
       runtimes: [],
       runtimesStatus: "idle",
-      workbenchPackage: null,
-      workbenchPackageStatus: "idle",
       templates: [],
       templatesStatus: "idle",
       templateId: "",
@@ -447,7 +439,6 @@ export class WorkbenchController {
     }
     if (homeTab === "snapshots" && this.ui.snapshotsStatus === "idle") void this.loadSnapshots();
     if (homeTab === "runtime" && this.ui.runtimesStatus === "idle") void this.loadRuntimes();
-    if (homeTab === "runtime" && this.ui.workbenchPackageStatus === "idle") void this.loadWorkbenchPackage();
     if (homeTab === "templates" && this.ui.templatesStatus === "idle") void this.loadTemplates();
     if (homeTab === "overview") void this.loadLogs();
   };
@@ -697,10 +688,6 @@ export class WorkbenchController {
       this.patch({ planError: this.msg("app.managerProtected"), pendingPlan: null });
       return;
     }
-    if (request.kind === "workbench.upgrade") {
-      this.previewWorkbenchUpgrade();
-      return;
-    }
     void this.runPreview(request);
   };
 
@@ -709,10 +696,6 @@ export class WorkbenchController {
     if (!pending) {
       this.patch({ planError: this.msg("app.noPlan") });
       return;
-    }
-    if (pending.request.kind === "workbench.upgrade" || pending.plan.kind === "workbench.upgrade") {
-      this.awaitingPackagePlanId = pending.plan.id;
-      this.awaitingPackageJobId = null;
     }
     this.patch({ pendingPlan: null, overlay: null });
     void this.submit({ kind: "plan.execute", planId: pending.plan.id });
@@ -810,19 +793,6 @@ export class WorkbenchController {
     void this.submit({ kind: "plugin.library.remove", libraryId });
   };
 
-  prepareWorkbenchPackage = (): void => {
-    if (!this.canMutate()) {
-      this.rejectReadonly();
-      return;
-    }
-    if (this.isBusy()) {
-      this.patch({ commandError: localizeError(this.ui.locale, "workbench/locked") });
-      return;
-    }
-    this.prepareEpoch = this.ui.state?.serviceEpoch ?? null;
-    void this.submit({ kind: "workbench.prepare" });
-  };
-
   previewInstallSelected = (): void => {
     const { pluginSpaceId, pluginCatalogId, pluginVersion } = this.ui;
     if (!pluginSpaceId || !pluginCatalogId || !pluginVersion) {
@@ -860,28 +830,6 @@ export class WorkbenchController {
     }, (message) => {
       if (!this.stillOpen(cycle)) return;
       this.patch({ runtimesStatus: "error", readError: this.readErrors("runtimes", message) });
-    });
-  };
-
-  loadWorkbenchPackage = (): Promise<void> => {
-    const loader = this.api.workbenchPackage;
-    if (typeof loader !== "function") {
-      this.patch({ workbenchPackage: null, workbenchPackageStatus: "ready", readError: this.readErrors("package") });
-      return Promise.resolve();
-    }
-    const cycle = this.cycle;
-    this.patch({ workbenchPackageStatus: "loading", readError: this.readErrors("package") });
-    return this.wrap(async () => {
-      const release = await loader();
-      if (!this.stillOpen(cycle)) return;
-      this.patch({
-        workbenchPackage: release?.id === "bundled-workbench" ? release : null,
-        workbenchPackageStatus: "ready",
-        readError: this.readErrors("package"),
-      });
-    }, (message) => {
-      if (!this.stillOpen(cycle)) return;
-      this.patch({ workbenchPackage: null, workbenchPackageStatus: "error", readError: this.readErrors("package", message) });
     });
   };
 
@@ -1311,7 +1259,6 @@ export class WorkbenchController {
     }
     for (const item of state.jobs) {
       this.noteCreated(item, true);
-      this.onUpgradeJobUpdate(item);
       this.onProductJob(item);
     }
     const restoreId = this.restoreId;
@@ -1529,9 +1476,6 @@ export class WorkbenchController {
       await this.wrap(async () => {
         const job = await this.api.submit(command, requestId, context);
         if (!this.stillOpen(cycle)) return;
-        if (command.kind === "plan.execute" && command.planId === this.awaitingPackagePlanId) {
-          this.awaitingPackageJobId = job.id;
-        }
         this.mergeJob(job);
         this.noteCreated(job);
         this.onProductJob(job);
@@ -1550,7 +1494,6 @@ export class WorkbenchController {
     jobs.unshift(job);
     this.patch({ state: { ...state, jobs } });
     this.noteCreated(job);
-    this.onUpgradeJobUpdate(job);
     this.onProductJob(job);
   }
 
@@ -1605,22 +1548,7 @@ export class WorkbenchController {
         this.patch({ templatesStatus: "idle" });
         if (this.ui.homeTab === "templates") void this.loadTemplates();
       }
-      if (job.kind === "workbench.prepare" || product?.kind === "workbench.prepare") {
-        this.applyPreparedWorkbenchPackage();
-      }
-    } else if (job.status === "failed" && (job.kind === "workbench.prepare" || product?.kind === "workbench.prepare")) {
-      this.prepareEpoch = null;
-      this.patch({
-        commandError: job.error?.message || localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }),
-      });
     }
-  }
-
-  private applyPreparedWorkbenchPackage(): void {
-    if (this.prepareEpoch && this.ui.state?.serviceEpoch !== this.prepareEpoch) return;
-    this.prepareEpoch = null;
-    this.patch({ workbenchPackageStatus: "idle" });
-    if (this.ui.homeTab === "runtime") void this.loadWorkbenchPackage();
   }
 
   private noteCreated(job: WorkbenchJob, fromSnapshot = false): void {
@@ -1691,34 +1619,6 @@ export class WorkbenchController {
       theme: defaults.theme,
     });
     this.writePersist();
-  }
-
-  private previewWorkbenchUpgrade(): void {
-    if (this.ui.state?.maintenance || this.hasActiveJobs()) {
-      this.patch({
-        planError: localizeError(this.ui.locale, "workbench/locked"),
-        pendingPlan: null,
-      });
-      return;
-    }
-    const pkg = this.ui.workbenchPackage;
-    if (!pkg || pkg.id !== "bundled-workbench" || !pkg.updateAvailable) return;
-    void this.runPreview({
-      kind: "workbench.upgrade",
-      catalogId: "bundled-workbench",
-      version: pkg.version,
-    });
-  }
-
-  private onUpgradeJobUpdate(job: WorkbenchJob): void {
-    if (!this.awaitingPackageJobId || job.id !== this.awaitingPackageJobId) return;
-    if (ACTIVE_JOB.has(job.status)) return;
-    if ((this.ui.state?.jobs ?? []).some((item) => ACTIVE_JOB.has(item.status))) return;
-    if (job.status === "succeeded" && job.phase === "handoff-pending") return;
-    this.awaitingPackagePlanId = null;
-    this.awaitingPackageJobId = null;
-    this.patch({ workbenchPackageStatus: "idle" });
-    if (this.ui.homeTab === "runtime") void this.loadWorkbenchPackage();
   }
 
   private touchesManagerPlugins(request: WorkbenchPlanRequest): boolean {

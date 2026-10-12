@@ -11,7 +11,6 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime,
-  WorkbenchPackageRelease,
   WorkbenchSnapshot,
   WorkbenchState,
   WorkbenchView,
@@ -139,7 +138,6 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
     snapshots: () => callRemote<WorkbenchSnapshot[]>(connection, "workbench/snapshots", {}),
     snapshot: (id) => callRemote<WorkbenchSnapshot>(connection, "workbench/snapshot", { id }),
     runtimes: () => callRemote<WorkbenchRuntime[]>(connection, "workbench/runtimes", {}),
-    workbenchPackage: () => callRemote<WorkbenchPackageRelease | null>(connection, "workbench/workbenchPackage", {}, undefined, true),
     backups: (spaceId) => callRemote<WorkbenchBackup[]>(connection, "workbench/backups", { spaceId }),
     llm: (request: LlmApiRequest) => callRemote<LlmApiResult>(connection, "workbench/llm", { request }),
     llmCredential: (request: LlmCredentialRequest) =>

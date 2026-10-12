@@ -1,5 +1,4 @@
 import { isAbsolute, resolve } from "node:path";
-import { COMPONENT_HANDOFF_FLAG } from "../component-handoff";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorCliOptions } from "./types";
 
@@ -8,10 +7,6 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--allow-real-home") { flags.allowRealHome = "1"; continue; }
-    if (token === COMPONENT_HANDOFF_FLAG || token === "--accept-handoff") {
-      flags.acceptHandoff = "1";
-      continue;
-    }
     const mapped = flagName(token);
     if (!mapped) throw new WorkbenchPublicError("workbench/invalid-input", `Unknown flag: ${token}`);
     const value = argv[i + 1];
@@ -26,7 +21,6 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   const bin = requirePath(flags.bin ?? flags.cli, binFlag);
   const options: SupervisorCliOptions = { home, bin };
   if (flags.allowRealHome === "1") options.allowRealHome = true;
-  if (flags.acceptHandoff === "1") options.acceptHandoff = true;
   if (flags.node) options.nodeExe = requirePath(flags.node, "--node");
   if (flags.port) {
     const port = Number(flags.port);
@@ -34,14 +28,6 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
       throw new WorkbenchPublicError("workbench/invalid-input", "Port must be an integer 0-65535.");
     }
     options.port = port;
-  }
-  if (options.acceptHandoff) {
-    if (!Number.isInteger(options.port) || options.port! < 1 || options.port! > 65535) {
-      throw new WorkbenchPublicError(
-        "workbench/invalid-input",
-        "--accept-handoff requires an explicit nonzero --port.",
-      );
-    }
   }
   if (flags["control-tool-root"]) options.controlToolRoot = requirePath(flags["control-tool-root"], "--control-tool-root");
   if (flags["supervisor-asset-root"]) {
@@ -79,7 +65,6 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
   if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
   if (options.componentPayloadRoot) args.push("--component-payload", options.componentPayloadRoot);
-  if (options.acceptHandoff) args.push(COMPONENT_HANDOFF_FLAG);
   return args;
 }
 

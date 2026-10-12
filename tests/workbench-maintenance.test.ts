@@ -48,30 +48,6 @@ const BASE = "@deepseek-ai/dsh-base";
 const WEB = "@deepseek-ai/dsh-web-app";
 const temps: string[] = [];
 
-test("ROOT package preview binds server content and executes without a second manager restart", async () => {
-  let digest = "a".repeat(64);
-  const inputs: unknown[] = [];
-  const packageUpgrade = {
-    describe: async () => ({ id: "bundled-workbench", version: "0.2.0", installedVersion: "0.2.0", digest, updateAvailable: true }),
-    hasEvidence: () => false,
-    execute: async (input: unknown) => { inputs.push(input); return { snapshotId: "saved-snapshot" }; },
-  } as unknown as WorkbenchMaintenancePorts["packageUpgrade"];
-  const { maintenance, state } = harness({ packageUpgrade });
-  const request = { kind: "workbench.upgrade", catalogId: "bundled-workbench", version: "0.2.0" } as const;
-  const stale = await maintenance.preview(request);
-  digest = "b".repeat(64);
-  await assert.rejects(() => maintenance.execute(stale.id, jobCtx()), matchCode("workbench/stale"));
-  assert.equal(inputs.length, 0);
-  const plan = await maintenance.preview(request);
-  assert.equal(plan.scope, "home");
-  assert.deepEqual(plan.runningSpaceIds, ["spaces-hub", "coding"]);
-  assert.equal(JSON.stringify(plan).includes(digest), false);
-  await maintenance.execute(plan.id, jobCtx());
-  assert.deepEqual(inputs, [{ ...request, expectedDigest: digest, planId: plan.id }]);
-  assert.equal(state.reinitialized, 0, "module owns reinitialization; wrapper must not restart it again");
-  assert.deepEqual(state.maintenance, [true, false]);
-});
-
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -731,7 +707,6 @@ interface HarnessState {
 }
 
 function harness(overrides: {
-  packageUpgrade?: WorkbenchMaintenancePorts["packageUpgrade"];
   now?: () => Date;
   fetch?: MaintenanceFetcher;
   compatible?: (version: string) => boolean;
@@ -766,8 +741,7 @@ function createMaintenance(
   home: string,
   state: HarnessState,
   overrides: {
-    packageUpgrade?: WorkbenchMaintenancePorts["packageUpgrade"];
-    now?: () => Date;
+      now?: () => Date;
     fetch?: MaintenanceFetcher;
     compatible?: (version: string) => boolean;
     pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
@@ -856,7 +830,6 @@ function createMaintenance(
       state.maintenance.push(active);
     },
     isCompatibleRuntime: overrides.compatible ?? ((version: string) => version === "0.1.5-rc.1"),
-    packageUpgrade: overrides.packageUpgrade,
     observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) }),
   };
   return new WorkbenchMaintenance(ports, {

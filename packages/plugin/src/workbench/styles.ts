@@ -361,7 +361,6 @@ export const WORKBENCH_CSS = `
 .dsh-wb-job { border: 1px solid var(--wb-border); border-radius: 8px; padding: 8px 10px; }
 .dsh-wb-job[data-status="failed"] { border-color: var(--wb-danger); }
 .dsh-wb-job[data-status="succeeded"] { border-color: var(--wb-ok); }
-.dsh-wb-job[data-status="succeeded"][data-phase="handoff-pending"] { border-color: var(--wb-warn); }
 .dsh-wb-glyphs { display: flex; flex-wrap: wrap; gap: 8px; }
 .dsh-wb-avatars { display: grid; grid-template-columns: repeat(auto-fit, 48px); gap: 10px; max-width: 280px; }
 

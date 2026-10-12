@@ -14,11 +14,11 @@ import {
   stageComponentPayload,
 } from "../src/adapters/node/component-selection.ts";
 import {
+  HOME_CONTROL_OWNER_FILE,
   HomeControlBusyError,
   HomeController,
   homeControlDigest,
 } from "../src/adapters/node/home-controller.ts";
-import { deriveServiceEpoch } from "../src/adapters/node/workbench-protocol.ts";
 import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
 
 describe("component-selection", { concurrency: 1 }, () => {
@@ -52,7 +52,6 @@ function dummyPayload(): { root: string; lib: string } {
     ["lib/client.js", "export const client = 1;\n"],
     ["lib/supervisor/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES.supervisor, version: "2.0.0" })}\n`],
     ["lib/supervisor/index.js", "export const supervisor = 1;\n"],
-    ["lib/supervisor/launcher.mjs", "export const launcher = 1;\n"],
     ["lib/supervisor/LICENSE", "supervisor-license\n"],
     ["lib/supervisor/snapshot-worker.mjs", "export const worker = 1;\n"],
     ["lib/view-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["view-bridge"], version: "3.0.0" })}\n`],
@@ -103,7 +102,6 @@ test("stage reads a validated payload from profiles/web inside the target Home",
     ["lib/client.js", "export const client = 1;\n"],
     ["lib/supervisor/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES.supervisor, version: "2.0.0" })}\n`],
     ["lib/supervisor/index.js", "export const supervisor = 1;\n"],
-    ["lib/supervisor/launcher.mjs", "export const launcher = 1;\n"],
     ["lib/supervisor/LICENSE", "supervisor-license\n"],
     ["lib/supervisor/snapshot-worker.mjs", "export const worker = 1;\n"],
     ["lib/view-bridge/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["view-bridge"], version: "3.0.0" })}\n`],
@@ -196,48 +194,53 @@ test("select refuses a live non-launcher owner and does not write a pointer", ()
   handle.release();
 });
 
-test("select is allowed for the current launcher occupancy", async () => {
+test("select is allowed for the current launcher occupancy", () => {
   const home = tempDir("dsh-sel-home-");
   const tools = tempDir("dsh-sel-tools-");
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
   const controller = new HomeController(home);
   const handle = controller.acquire("desktop");
-  await controller.transferToLauncher({
-    nonce: handle.owner.nonce,
-    binding: {
-      homeDigest: homeControlDigest(home),
-      handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
-      serviceEpoch: deriveServiceEpoch(handle.owner.nonce),
-      artifactDigest: staged.digest,
-    },
-  });
+  writeFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
+    version: 2,
+    phase: "launcher",
+    pid: process.pid,
+    nonce: "cc".repeat(16),
+    startedAt: new Date().toISOString(),
+    handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
+    homeDigest: "ab".repeat(32),
+    serviceEpoch: "cd".repeat(32),
+    artifactDigest: "ef".repeat(32),
+    secretHash: "12".repeat(32),
+    original: { pid: handle.owner.pid, nonce: handle.owner.nonce, startedAt: handle.owner.startedAt, kind: "desktop" },
+  })}\n`);
   assert.throws(() => new HomeController(home).acquire("web"), HomeControlBusyError);
   const selected = selectComponentPayload(home, tools, staged.digest);
   assert.equal(selected.digest, staged.digest);
   assert.equal(readSelectedComponentPayload(home, tools)?.digest, staged.digest);
 });
 
-test("select refuses authorized occupancy; only launcher phase may switch the pointer", async () => {
+test("select refuses authorized occupancy; only launcher phase may switch the pointer", () => {
   const home = tempDir("dsh-sel-home-");
   const tools = tempDir("dsh-sel-tools-");
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
   const controller = new HomeController(home);
   const handle = controller.acquire("web");
-  const token = await controller.transferToLauncher({
-    nonce: handle.owner.nonce,
-    binding: {
-      homeDigest: homeControlDigest(home),
-      handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
-      serviceEpoch: deriveServiceEpoch(handle.owner.nonce),
-      artifactDigest: staged.digest,
-    },
-  });
-  await controller.authorizeHandoff({
-    token,
+  writeFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
+    version: 2,
+    phase: "authorized",
+    pid: process.pid,
+    nonce: "cc".repeat(16),
+    startedAt: new Date().toISOString(),
+    handoffId: "a1b2c3d4e5f60718a1b2c3d4e5f60718",
+    homeDigest: "ab".repeat(32),
+    serviceEpoch: "cd".repeat(32),
+    artifactDigest: "ef".repeat(32),
+    secretHash: "12".repeat(32),
+    original: { pid: handle.owner.pid, nonce: handle.owner.nonce, startedAt: handle.owner.startedAt, kind: "web" },
     target: { pid: process.pid, startedAt: new Date().toISOString() },
-  });
+  })}\n`);
   assert.throws(() => selectComponentPayload(home, tools, staged.digest), /launcher phase|authorization/);
   assert.equal(readSelectedComponentPayload(home, tools), undefined);
 });

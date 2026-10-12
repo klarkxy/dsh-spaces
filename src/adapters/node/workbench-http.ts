@@ -24,7 +24,6 @@ export const WORKBENCH_API_METHODS = [
   "snapshots",
   "snapshot",
   "runtimes",
-  "workbenchPackage",
   "backups",
   "llm",
   "llmCredential",

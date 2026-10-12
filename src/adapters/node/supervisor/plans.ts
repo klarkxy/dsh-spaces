@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProfileStatus } from "../../../shared/types";
 import type {
@@ -12,8 +12,7 @@ import type { SupervisorDashboard } from "../dashboard/supervisor";
 import type { HomeOperationLock } from "../home-operation-lock";
 import type { SpaceMessageRouter } from "../message-bus/router";
 import type { ProfileRegistry } from "../profile-registry";
-import type { WorkbenchJobContext } from "../workbench-jobs";
-import type { SupervisorComponentHandoff } from "./component-handoff-host";
+import { WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, type WorkbenchJobContext, type WorkbenchJobStore } from "../workbench-jobs";
 import type { SupervisorDashboardHost } from "./dashboard-host";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorInstanceRecords } from "./instance-records";
@@ -35,7 +34,7 @@ export interface SupervisorPlansHost {
   options: WorkbenchSupervisorOptions;
   dashboard: () => SupervisorDashboard | null;
   dashboardHost: () => SupervisorDashboardHost;
-  componentHandoff: () => SupervisorComponentHandoff;
+  jobs: () => WorkbenchJobStore | undefined;
   maintenance: () => WorkbenchMaintenance | null;
   closeHttp: () => Promise<void>;
   dropWritable: () => void;
@@ -230,22 +229,8 @@ export class SupervisorPlans {
   }
 
   async afterPlanJobSettled(jobId: string): Promise<void> {
-    const pending = this.host.lifecycle.pendingHandoff;
-    if (pending && pending.jobId === jobId) {
-      if (this.host.componentHandoff().jobPersistedSuccess(jobId)) {
-        try {
-          await this.host.componentHandoff().finalizeComponentHandoff(pending);
-        } catch (error) {
-          this.host.componentHandoff().recordHandoffDiagnostic(error);
-        }
-        return;
-      }
-      this.host.lifecycle.pendingHandoff = undefined;
-      this.host.componentHandoff().recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
-      return;
-    }
     if (this.host.lifecycle.relinquishKind && this.host.lifecycle.relinquishJobId === jobId) {
-      if (!this.host.componentHandoff().jobPersistedSuccess(jobId)) {
+      if (!this.jobPersistedSuccess(jobId)) {
         this.host.lifecycle.endRelinquish();
         this.host.lifecycle.maintenanceBlocked = true;
         this.host.lifecycle.blocked = true;
@@ -253,6 +238,23 @@ export class SupervisorPlans {
         return;
       }
       await this.finishRelinquish();
+    }
+  }
+
+  private jobPersistedSuccess(jobId: string): boolean {
+    const jobs = this.host.jobs();
+    if (!jobs) return false;
+    try {
+      if (jobs.job(jobId).status !== "succeeded") return false;
+    } catch {
+      return false;
+    }
+    try {
+      const raw = readFileSync(join(this.host.home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, `${jobId}.json`), "utf8");
+      const parsed = JSON.parse(raw) as { status?: string };
+      return parsed.status === "succeeded";
+    } catch {
+      return false;
     }
   }
 }

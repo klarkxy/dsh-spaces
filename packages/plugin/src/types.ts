@@ -4,7 +4,6 @@ import type { WorkbenchApi, WorkbenchRole } from "../../../src/shared/workbench"
 
 export type { SpaceDetail, SpacesOverview, WorkbenchApi, WorkbenchRole };
 export type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../src/shared/llm-api";
-export type { WorkbenchPackageRelease } from "../../../src/shared/workbench";
 
 export interface WorkbenchHostHint {
   role: WorkbenchRole;

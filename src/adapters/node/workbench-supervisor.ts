@@ -90,7 +90,6 @@ import {
   HomeController,
   defaultPidAlive,
   parseControlEndpoint,
-  type HomeControlHandle,
   type PidAliveFn,
 } from "./home-controller";
 import {
@@ -107,10 +106,6 @@ import {
 } from "./workbench-maintenance";
 import type { WorkbenchMaintenancePorts } from "./workbench-maintenance-ports";
 import {
-  WorkbenchPackageUpgrade,
-  type WorkbenchPackageHandoffInput,
-} from "./workbench-package-upgrade";
-import {
   expectedAuthCookieName,
   renderEntryPage,
   safeEqual,
@@ -122,7 +117,6 @@ import {
 import { createHomeLlmHost } from "./llm-host";
 import { GlobalLlmHost } from "../../core/application/global-llm-host";
 import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
-import { SupervisorComponentHandoff } from "./supervisor/component-handoff-host";
 import { SupervisorDashboardHost } from "./supervisor/dashboard-host";
 import { STOP_KEPT_REASON, WORKBENCH_ERROR, WorkbenchPublicError, WRITABLE_STARTUP_FAILED_REASON } from "./supervisor/errors";
 import {
@@ -167,7 +161,6 @@ export type {
   WorkbenchSupervisorOptions,
 } from "./supervisor/types";
 export {
-  assertHandoffTokenMatchesSelectedPayload,
   bindSupervisorComponentPayload,
   preflightSupervisorComponentPayload,
   validateSupervisorComponentPayload,
@@ -187,7 +180,7 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "dashboard.publication.set",
 ]);
 const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume"]);
-const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore"]);
+const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade"]);
 
 /**
  * Independent web supervisor: stable 127.0.0.1 entry, HomeController run
@@ -237,38 +230,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private runtimeStore: RuntimeStore | undefined;
   private readonly pidAlive: PidAliveFn;
   private selectedPayload: ValidatedComponentPayload | undefined;
-  private packageUpgrade: WorkbenchPackageUpgrade | undefined;
   readonly llmHost: GlobalLlmHost;
   private readonly instances: SupervisorInstanceRecords;
   private readonly llmOps: SupervisorLlm;
   private readonly dashboardHost: SupervisorDashboardHost;
-  private componentHandoffInstance: SupervisorComponentHandoff | undefined;
-
-  // Lazy so bare `Object.create(prototype)` test doubles that skip the
-  // constructor can still drive the settle path through this collaborator.
-  private get componentHandoff(): SupervisorComponentHandoff {
-    this.componentHandoffInstance ??= new SupervisorComponentHandoff({
-      home: this.home,
-      controlDir: this.controlDir,
-      nodeExe: this.nodeExe,
-      options: this.options,
-      controller: this.controller,
-      messageBus: this.messageBus,
-      spawned: this.runs.spawned,
-      lifecycle: this.lifecycle,
-      jobs: () => this.jobs,
-      origin: () => this.origin,
-      closeHttp: async () => { await this.httpClose?.(); this.httpClose = undefined; },
-      removeEndpointFile: () => this.removeEndpointFile(),
-      dashboard: () => this.dashboard,
-      selectedPayload: () => this.selectedPayload,
-      ownedSpaceIds: () => this.ownedSpaceIds(),
-      statusOf: (id) => this.statusOf(id),
-      pidAlive: this.pidAlive,
-    });
-    return this.componentHandoffInstance;
-  }
-
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
     this.options = { ...options };
     this.home = canonicalHome(options.home, { allowRealHome: options.allowRealHome });
@@ -302,7 +267,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       options: this.options,
       dashboard: () => this.dashboard,
       dashboardHost: () => this.dashboardHost,
-      componentHandoff: () => this.componentHandoff,
+      jobs: () => this.jobs,
       maintenance: () => this.maintenance,
       closeHttp: async () => { await this.httpClose?.(); },
       dropWritable: () => this.dropWritable(),
@@ -460,28 +425,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
-  /**
-   * Use an already-accepted run owner instead of acquire. Fresh bearer; epoch
-   * follows the accepted nonce. Failure does not acquire a fallback owner.
-   */
-  async takeAcceptedOwner(handle: HomeControlHandle): Promise<void> {
-    this.assertAcceptedHandle(handle);
-    this.lifecycle.handle = handle;
-    this.writeHostBearer();
-    this.writeEndpointFile();
-    await this.initWritable();
-    this.assertAcceptedStartupReady();
-  }
-
   async close(): Promise<void> {
     if (this.lifecycle.closed) return;
-    if (this.lifecycle.transferredOwner) {
-      this.lifecycle.closed = true;
-      this.lifecycle.sealing = true;
-      this.lifecycle.handle = undefined;
-      await this.httpClose?.();
-      return;
-    }
     this.lifecycle.sealing = true;
     try {
       if (this.jobs) await this.jobs.whenIdle();
@@ -548,9 +493,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "runtimes":
         expectKeys(body, []);
         return this.runtimes();
-      case "workbenchPackage":
-        expectKeys(body, []);
-        return this.maintenance?.workbenchPackage?.() ?? null;
       case "backups":
         expectKeys(body, ["spaceId"]);
         return this.backups(parseSpaceName(body.spaceId));
@@ -1221,19 +1163,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     });
     const diagnostics = this.ensureDiagnostics();
     const ports = this.maintenancePorts(snapshots, runtimes, upgrades, diagnostics);
-    const toolsRoot = this.componentHandoff.toolsRootOutsideHome();
-    const handoff = this.componentHandoff.componentHandoffCallback();
-    this.packageUpgrade = new WorkbenchPackageUpgrade({
-      home: this.home, managerId: () => this.managerId,
-      pluginArtifact: this.options.pluginArtifact, viewBridgeArtifact: this.options.viewBridgeArtifact,
-      snapshots, currentRuntime: () => this.currentRuntime(),
-      stopAll: () => this.stopOwnedAll(), reinitializeManager: () => this.reinitializeManager(),
-      pluginAdd: this.options.pluginAdd,
-      execPath: this.nodeExe,
-      ...(toolsRoot ? { toolsRoot } : {}),
-      ...(handoff ? { handoff } : {}),
-    });
-    ports.packageUpgrade = this.packageUpgrade;
     const create = this.options.createMaintenance ?? ((next) => new WorkbenchMaintenanceService(next, {
       packageSource: () => this.readHomeSettings().packageSource,
       log: (operation, error) => {
@@ -1550,67 +1479,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     await this.spaces.verify(id);
   }
 
-  /**
-   * Package-upgrade handoff port. Confirms owned children are stopped, seals
-   * further mutations, and records an in-memory pending transfer. Does not wait
-   * for this job's tail.
-   */
-  async handoffWorkbenchPackage(input: WorkbenchPackageHandoffInput, ctx: WorkbenchJobContext): Promise<void> {
-    return this.componentHandoff.handoffWorkbenchPackage(input, ctx);
-  }
-
-  private assertAcceptedStartupReady(): void {
-    if (this.lifecycle.maintenanceBlocked) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Accepted startup could not stop owned processes. Run rights were kept.",
-      );
-    }
-    const managerId = this.managerId;
-    if (!managerId || this.managerInstall !== "manager" || this.runs.unmanaged.has(managerId)) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Accepted startup did not start the manager. Run rights were kept.",
-      );
-    }
-    if (this.statusOf(managerId) !== "running") {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Accepted startup did not start the manager. Run rights were kept.",
-      );
-    }
-    const epoch = this.currentServiceEpoch();
-    const view = this.runs.views.get(managerId);
-    if (!epoch || !view || view.serviceEpoch !== epoch || !view.origin || view.origin === this.origin) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Accepted startup did not bind a ready manager view. Run rights were kept.",
-      );
-    }
-  }
-
-  private assertAcceptedHandle(handle: HomeControlHandle): void {
-    const inspection = this.controller.inspect();
-    if (!inspection.held || !("owner" in inspection)) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Accepted run rights are not held.");
-    }
-    if (inspection.owner.pid !== handle.owner.pid || inspection.owner.nonce !== handle.owner.nonce) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Accepted run rights do not match the current owner.");
-    }
-    let origin: string;
-    try {
-      origin = parseControlEndpoint(this.origin);
-    } catch {
-      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor origin is not a valid loopback endpoint.");
-    }
-    if (handle.owner.endpoint && parseControlEndpoint(handle.owner.endpoint) !== origin) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The owner endpoint origin does not match this supervisor.");
-    }
-    if (inspection.owner.endpoint && parseControlEndpoint(inspection.owner.endpoint) !== origin) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The owner endpoint origin does not match this supervisor.");
-    }
-  }
-
   private observeChildWork<T>(action: () => T): T {
     return withChildObservation(
       () => observeMaintenanceChild(this.home, () => {
@@ -1621,9 +1489,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private dropWritable(): void {
-    if (!this.lifecycle.transferredOwner) {
-      this.lifecycle.handle?.release(() => this.removeEndpointFile());
-    }
+    this.lifecycle.handle?.release(() => this.removeEndpointFile());
     this.lifecycle.handle = undefined;
     this.jobs = undefined;
     this.processes = undefined;
@@ -1631,7 +1497,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.maintenance = null;
     this.products = null;
     this.dashboard = null;
-    this.packageUpgrade = undefined;
   }
 
   private async startOwned(spaceId: string): Promise<void> {
@@ -1883,13 +1748,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.processes?.setPortRange(settings.portStart, settings.portEnd);
       },
       now: this.now,
-      prepareWorkbench: async (input, ctx) => {
-        if (!this.packageUpgrade) {
-          throw new WorkbenchPublicError("workbench/unavailable", "Workbench update preparation is unavailable.");
-        }
-        setPackageSource(this.readHomeSettings().packageSource);
-        return this.packageUpgrade.prepare({ version: input.version }, ctx);
-      },
     });
   }
 
@@ -2036,14 +1894,7 @@ export async function createWorkbenchSupervisor(
   const resolved = await preflightSupervisorComponentPayload(options, validated);
   const runtime = new WorkbenchSupervisorRuntime(resolved, validated);
   let port = resolved.port;
-  if (resolved.acceptedHandle) {
-    if (!Number.isInteger(port) || port! < 1 || port! > 65535) {
-      throw new WorkbenchPublicError(
-        "workbench/invalid-input",
-        "Accepted handoff requires an explicit nonzero --port.",
-      );
-    }
-  } else if (port === undefined) {
+  if (port === undefined) {
     const path = join(resolve(resolved.home), HOME_CONTROL_DIR_NAME, "entry-port.json");
     if (existsSync(path)) {
       const stat = lstatSync(path);
@@ -2058,20 +1909,8 @@ export async function createWorkbenchSupervisor(
   const http = await startWorkbenchHttp(runtime, port ?? 0);
   runtime.attachHttp(http.origin, http.close);
   try {
-    if (resolved.acceptedHandle) {
-      await runtime.takeAcceptedOwner(resolved.acceptedHandle);
-    } else {
-      await runtime.tryOwn();
-    }
-  } catch (error) {
-    if (resolved.acceptedHandle) {
-      try {
-        await http.close();
-      } catch {
-        /* owner and selected pointer stay; HTTP must not leak */
-      }
-      throw error;
-    }
+    await runtime.tryOwn();
+  } catch {
     /* HTTP and any acquired lease stay; caller inspects state/reasons */
   }
   return {

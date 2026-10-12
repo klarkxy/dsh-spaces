@@ -1,4 +1,5 @@
 /** Node-only v2 component payload. Do not import this from browser shared contracts. */
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -57,7 +58,7 @@ export const COMPONENT_PAYLOAD_ENTRIES: Record<ComponentPayloadName, string> = {
 };
 
 export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, readonly string[]> = {
-  supervisor: ["lib/supervisor/package.json", "lib/supervisor/index.js", "lib/supervisor/launcher.mjs"],
+  supervisor: ["lib/supervisor/package.json", "lib/supervisor/index.js"],
   "manager-plugin": [
     "package.json",
     "cordis.patch.yml",
@@ -613,4 +614,288 @@ function sha256(value: string): string {
 
 function fail(message: string): never {
   throw new ComponentPayloadError(message);
+}
+
+const TAR_TIMEOUT_MS = 15_000;
+const MAX_TAR_ENTRY_BYTES = 16 * 1024 * 1024;
+const MAX_TAR_LIST_BYTES = 256 * 1024;
+const DIGEST_ID_LENGTH = 32;
+const PLUGIN_ARCHIVE_PREFIX = "dsh-spaces-plugin";
+const VIEW_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-view-bridge";
+const BROWSER_ARCHIVE_PREFIX = "dsh-spaces-browser";
+const LLM_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-llm-bridge";
+
+export type ComponentArtifactPaths = {
+  pluginArtifact: string;
+  viewBridgeArtifact: string;
+  browserArtifact: string;
+  llmBridgeArtifact: string;
+};
+
+export interface ComponentArtifactInspection {
+  packageName: string;
+  version: string;
+  artifact: string;
+  fileDigest: string;
+  archiveId: string;
+  files: Record<string, string>;
+}
+
+export async function validateComponentPayloadArtifacts(
+  payload: ValidatedComponentPayload,
+  artifacts: ComponentArtifactPaths,
+): Promise<void> {
+  const current = validateComponentPayload(payload.payloadRootLib);
+  if (current.digest !== payload.digest) {
+    fail("Selected component payload changed before startup.");
+  }
+  assertPackedMatchesPayload(await inspectComponentPayloadArtifacts(current, artifacts), current);
+}
+
+function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "browser" | "llm-bridge"): string[] {
+  const prefix = `lib/${name}/`;
+  return payload.manifest.components[name].files.map((file) => {
+    if (!file.path.startsWith(prefix)) {
+      fail(`Component ${name} declares a file outside its package.`);
+    }
+    return file.path.slice(prefix.length);
+  });
+}
+
+function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "view-bridge" | "browser" | "llm-bridge", artifact: ComponentArtifactInspection): void {
+  const component = payload.manifest.components[name];
+  const prefix = `lib/${name}/`;
+  if (artifact.version !== component.version || artifact.packageName !== component.packageName) {
+    fail(`Packed ${name} identity does not match the staged payload.`);
+  }
+  for (const file of component.files) {
+    if (!file.path.startsWith(prefix) || artifact.files[file.path.slice(prefix.length)] !== file.sha256) {
+      fail(`Packed ${name} bytes do not match the staged payload.`);
+    }
+  }
+}
+
+async function inspectComponentPayloadArtifacts(payload: ValidatedComponentPayload, artifacts: ComponentArtifactPaths) {
+  const [plugin, viewBridge, browser, llmBridge] = await Promise.all([
+    inspectPluginArchive(artifacts.pluginArtifact),
+    inspectArtifact(artifacts.viewBridgeArtifact, COMPONENT_PAYLOAD_PACKAGES["view-bridge"], bridgeFiles(payload, "view-bridge"), VIEW_BRIDGE_ARCHIVE_PREFIX),
+    inspectArtifact(artifacts.browserArtifact, COMPONENT_PAYLOAD_PACKAGES.browser, bridgeFiles(payload, "browser"), BROWSER_ARCHIVE_PREFIX),
+    inspectArtifact(artifacts.llmBridgeArtifact, COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], bridgeFiles(payload, "llm-bridge"), LLM_BRIDGE_ARCHIVE_PREFIX),
+  ]);
+  return { plugin, viewBridge, browser, llmBridge };
+}
+
+function assertPackedMatchesPayload(
+  packed: { plugin: ComponentArtifactInspection; viewBridge: ComponentArtifactInspection; browser: ComponentArtifactInspection; llmBridge: ComponentArtifactInspection },
+  payload: ValidatedComponentPayload,
+): void {
+  if (packed.plugin.packageName !== COMPONENT_PAYLOAD_PACKAGES["manager-plugin"]) {
+    fail("Packed plugin is not the official Spaces plugin.");
+  }
+  if (packed.viewBridge.packageName !== COMPONENT_PAYLOAD_PACKAGES["view-bridge"] || packed.browser.packageName !== COMPONENT_PAYLOAD_PACKAGES.browser || packed.llmBridge.packageName !== COMPONENT_PAYLOAD_PACKAGES["llm-bridge"]) {
+    fail("Packed workbench artifacts are not official packages.");
+  }
+  if (packed.plugin.version !== payload.manifest.components["manager-plugin"].version) {
+    fail("Packed plugin version does not match the staged manager plugin.");
+  }
+  if (packed.viewBridge.version !== payload.manifest.components["view-bridge"].version) {
+    fail("Packed view-bridge version does not match the staged view-bridge.");
+  }
+  if (packed.llmBridge.version !== payload.manifest.components["llm-bridge"].version) {
+    fail("Packed llm-bridge version does not match the staged llm-bridge.");
+  }
+  if (packed.browser.version !== payload.manifest.components.browser.version) {
+    fail("Packed browser version does not match the staged browser.");
+  }
+  for (const [name, artifact] of [["view-bridge", packed.viewBridge], ["browser", packed.browser], ["llm-bridge", packed.llmBridge]] as const) {
+    assertBridgeMatchesPayload(payload, name, artifact);
+  }
+  for (const file of payload.files) {
+    if (packed.plugin.files[file.path] !== file.sha256) {
+      fail("Packed workbench plugin does not match the staged payload.");
+    }
+  }
+  for (const [rel, hash] of Object.entries(packed.plugin.files)) {
+    const listed = payload.files.find((file) => file.path === rel);
+    if (!listed || listed.sha256 !== hash) {
+      fail("Packed workbench plugin does not match the staged payload.");
+    }
+  }
+}
+
+async function inspectPluginArchive(artifact: string): Promise<ComponentArtifactInspection> {
+  const resolved = resolve(artifact);
+  const entries = await listTarEntries(resolved);
+  const root = archivePackageRoot(entries);
+  const manifestBytes = await readTarEntry(resolved, `${root}${COMPONENT_PAYLOAD_MANIFEST_REL}`);
+  const parsed = parseComponentPayloadManifest(JSON.parse(manifestBytes.toString("utf8")));
+  const hashes: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const name of COMPONENT_PAYLOAD_NAMES) {
+    const row = parsed.components[name];
+    const listed = new Set(row.files.map((file) => file.path));
+    for (const required of COMPONENT_PAYLOAD_REQUIRED_FILES[name]) {
+      if (!listed.has(required)) fail(`component is missing ${required}`);
+    }
+    if (!listed.has(row.entry) || row.entry !== COMPONENT_PAYLOAD_ENTRIES[name]) {
+      fail(`component does not list its entry: ${name}`);
+    }
+    for (const file of row.files) {
+      if (seen.has(file.path)) fail(`duplicate component path ${file.path}`);
+      seen.add(file.path);
+      const bytes = await readTarEntry(resolved, `${root}${file.path}`);
+      if (bytes.length !== file.size) {
+        fail(`component file size does not match archive: ${file.path}`);
+      }
+      const digest = sha256Bytes(bytes);
+      if (digest !== file.sha256) {
+        fail(`component file digest does not match archive: ${file.path}`);
+      }
+      hashes[file.path] = digest;
+    }
+    const identity = parsePackageIdentity((await readTarEntry(resolved, `${root}${IDENTITY_JSON[name]}`)).toString("utf8"));
+    if (!identity || identity.name !== row.packageName || identity.version !== row.version) {
+      fail(`component identity does not match archive: ${name}`);
+    }
+  }
+  const pkg = parsed.components["manager-plugin"];
+  const fileDigest = sha256File(resolved);
+  return {
+    packageName: pkg.packageName,
+    version: pkg.version,
+    artifact: resolved,
+    fileDigest,
+    archiveId: `${PLUGIN_ARCHIVE_PREFIX}-${fileDigest.slice(0, DIGEST_ID_LENGTH)}`,
+    files: hashes,
+  };
+}
+
+async function inspectArtifact(
+  artifact: string,
+  expectedName: string,
+  files: readonly string[],
+  archivePrefix: string,
+): Promise<ComponentArtifactInspection> {
+  const resolved = resolve(artifact);
+  const entries = await listTarEntries(resolved);
+  const root = archivePackageRoot(entries);
+  const manifestBytes = await readTarEntry(resolved, `${root}package.json`);
+  const identity = parsePackageIdentity(manifestBytes.toString("utf8"));
+  if (!identity || identity.name !== expectedName) {
+    fail("artifact package name is not official");
+  }
+  const hashes: Record<string, string> = { "package.json": sha256Bytes(manifestBytes) };
+  await Promise.all(
+    files.filter((rel) => rel !== "package.json").map(async (rel) => {
+      hashes[rel] = sha256Bytes(await readTarEntry(resolved, `${root}${rel}`));
+    }),
+  );
+  const fileDigest = sha256File(resolved);
+  return {
+    packageName: identity.name,
+    version: identity.version,
+    artifact: resolved,
+    fileDigest,
+    archiveId: `${archivePrefix}-${fileDigest.slice(0, DIGEST_ID_LENGTH)}`,
+    files: hashes,
+  };
+}
+
+function archivePackageRoot(entries: string[]): string {
+  const normalized = entries.map((entry) => entry.replaceAll("\\", "/"));
+  if (normalized.includes("package/package.json")) return "package/";
+  if (normalized.includes("package.json")) return "";
+  fail("tarball has no package manifest");
+}
+
+function parsePackageIdentity(source: string): { name: string; version: string } | undefined {
+  try {
+    const parsed = JSON.parse(source) as { name?: unknown; version?: unknown };
+    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+    const version = typeof parsed.version === "string" ? parsed.version.trim() : "";
+    if (!name || !version) return undefined;
+    return { name, version };
+  } catch {
+    return undefined;
+  }
+}
+
+function listTarEntries(archive: string): Promise<string[]> {
+  return new Promise((resolvePromise, reject) => {
+    execFile(
+      tarExecutable(),
+      ["-tf", archive],
+      { timeout: TAR_TIMEOUT_MS, windowsHide: true, maxBuffer: MAX_TAR_LIST_BYTES },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const entries = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim().replaceAll("\\", "/"))
+          .filter((line) => line && !line.endsWith("/") && isSafeTarEntry(line));
+        resolvePromise(entries);
+      },
+    );
+  });
+}
+
+function readTarEntry(archive: string, entry: string): Promise<Buffer> {
+  if (!isSafeTarEntry(entry)) return Promise.reject(new Error("unsafe tarball entry"));
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(tarExecutable(), ["-xOf", archive, entry], {
+      windowsHide: true,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let settled = false;
+    const timer = setTimeout(() => finish(new Error("tarball read timed out")), TAR_TIMEOUT_MS);
+    const finish = (error?: Error, data?: Buffer) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!child.killed) child.kill();
+      if (error) reject(error);
+      else resolvePromise(data ?? Buffer.alloc(0));
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_TAR_ENTRY_BYTES) {
+        finish(new Error("tarball entry exceeds the read limit"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    child.once("error", (error) => finish(error));
+    child.once("close", (code) => {
+      if (code !== 0) finish(new Error("tarball entry could not be read"));
+      else finish(undefined, Buffer.concat(chunks));
+    });
+  });
+}
+
+function tarExecutable(): string {
+  if (process.platform === "win32") {
+    return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+  }
+  return "tar";
+}
+
+function isSafeTarEntry(entry: string): boolean {
+  const normalized = entry.replaceAll("\\", "/");
+  if (!normalized || normalized.includes("\\0") || isAbsolute(normalized) || /^[a-zA-Z]:/.test(normalized)) {
+    return false;
+  }
+  return normalized.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+function sha256File(path: string): string {
+  return sha256Bytes(readFileSync(path));
+}
+
+function sha256Bytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }

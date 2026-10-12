@@ -51,7 +51,6 @@ import {
   type WorkbenchPlanRequest,
   type WorkbenchPlugin,
   type WorkbenchRuntime,
-  type WorkbenchPackageRelease,
   type WorkbenchSnapshot,
 } from "../../shared/workbench";
 import {
@@ -162,9 +161,7 @@ type ResolvedCommand =
   | { kind: "snapshot.restore"; snapshotId: string }
   | { kind: "snapshot.delete"; snapshotId: string }
   | { kind: "config.restore"; spaceId: string; backupId: string }
-  | { kind: "runtime.install"; version: string }
-  | { kind: "runtime.upgrade"; version: string }
-  | { kind: "workbench.upgrade"; catalogId: "bundled-workbench"; version: string; expectedDigest: string };
+  | { kind: "runtime.install" | "runtime.upgrade"; version: string };
 
 type PlanStatus = "previewed" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -397,10 +394,6 @@ export class WorkbenchMaintenance {
     }
   }
 
-  async workbenchPackage(): Promise<WorkbenchPackageRelease | null> {
-    return await this.ports.packageUpgrade?.describe() ?? null;
-  }
-
   private assertWritable(): void {
     try {
       this.ports.assertWritable();
@@ -476,24 +469,6 @@ export class WorkbenchMaintenance {
           const planId = stored.id;
           return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeUpgrade(version, ctx, planId)));
         }
-        case "workbench.upgrade": {
-          const upgrade = this.ports.packageUpgrade;
-          if (!upgrade) throw new WorkbenchMaintenanceError("workbench/unsupported");
-          const command = stored.command;
-          return await this.finishPlan(stored, () => withIrreversible(async () => {
-            this.ports.setMaintenance(true);
-            try {
-              return await upgrade.execute({ ...command, planId: stored.id }, ctx);
-            } catch (error) {
-              this.log("workbench package update", error);
-              if (upgrade.hasEvidence()) throw new WorkbenchJobError("workbench/persist-failed");
-              throw error;
-            } finally {
-              // The package transaction owns manager reinitialization. Do not run it twice.
-              if (!upgrade.hasEvidence()) this.ports.setMaintenance(false);
-            }
-          }));
-        }
       }
     } catch (error) {
       if (uncertainMaintenance(error)) {
@@ -534,8 +509,6 @@ export class WorkbenchMaintenance {
         return this.planRuntimeInstall(id, createdAt, expiresAt, request.version);
       case "runtime.upgrade":
         return this.planRuntimeUpgrade(id, createdAt, expiresAt, request.version);
-      case "workbench.upgrade":
-        return this.planWorkbenchUpgrade(id, createdAt, expiresAt, request);
       default:
         throw new WorkbenchMaintenanceError("workbench/runtime-handoff");
     }
@@ -713,28 +686,6 @@ export class WorkbenchMaintenance {
       changes: [`Delete snapshot ${meta.id} taken at ${meta.createdAt}.`],
       destructive: true,
       expiresAt,
-    });
-  }
-
-  private async planWorkbenchUpgrade(
-    id: string, createdAt: string, expiresAt: string,
-    request: Extract<WorkbenchPlanRequest, { kind: "workbench.upgrade" }>,
-  ): Promise<StoredPlan> {
-    const release = await this.workbenchPackage();
-    if (!release || !release.updateAvailable) throw new WorkbenchMaintenanceError("workbench/unsupported");
-    if (request.catalogId !== release.id || request.version !== release.version) {
-      throw new WorkbenchMaintenanceError("workbench/stale");
-    }
-    const affectedSpaceIds = this.owned();
-    return this.storeable(id, createdAt, expiresAt, { ...request, expectedDigest: release.digest }, {
-      kind: "workbench.upgrade", title: `Update workbench to ${release.version}`,
-      scope: "home", affectedSpaceIds, runningSpaceIds: this.runningOf(affectedSpaceIds),
-      changes: [
-        `Update the manager and view bridge from the bundled workbench package ${release.version}.`,
-        "Stop all owned instances, including the manager, and create a whole-home snapshot.",
-        "A failed update stays failed in place. Other workspaces are not restarted automatically.",
-        "The supervisor entry remains available. Its running program updates on the next cold start.",
-      ], destructive: true, expiresAt,
     });
   }
 
@@ -1608,11 +1559,6 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(input, ["kind", "version"]);
       return { kind, version: requireExactVersion(input.version) };
     }
-    case "workbench.upgrade": {
-      expectKeys(input, ["kind", "catalogId", "version"]);
-      if (input.catalogId !== "bundled-workbench") throw new WorkbenchMaintenanceError("workbench/invalid-input");
-      return { kind, catalogId: "bundled-workbench", version: requireExactVersion(input.version) };
-    }
     case "controller.release":
     case "controller.shutdown":
       throw new WorkbenchMaintenanceError("workbench/unsupported");
@@ -1645,8 +1591,6 @@ function requestFromCommand(command: ResolvedCommand): WorkbenchPlanRequest {
     case "runtime.install":
     case "runtime.upgrade":
       return { kind: command.kind, version: command.version };
-    case "workbench.upgrade":
-      return { kind: command.kind, catalogId: command.catalogId, version: command.version };
   }
 }
 

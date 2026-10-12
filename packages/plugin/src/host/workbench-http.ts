@@ -35,7 +35,6 @@ import {
   workbenchProductRequestSchema,
   workbenchProductResultSchema,
   workbenchRuntimeListSchema,
-  workbenchPackageResultSchema,
   workbenchSnapshotSchema,
   workbenchStateSchema,
   workbenchViewSchema,
@@ -60,7 +59,6 @@ export const WORKBENCH_HTTP_METHODS = [
   "snapshots",
   "snapshot",
   "runtimes",
-  "workbenchPackage",
   "backups",
   "llm",
   "llmCredential",
@@ -130,7 +128,6 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
     snapshots: async () => call("snapshots", {}, workbenchSnapshotSchema.array()),
     snapshot: async (id) => call("snapshot", { id: parseOrInvalid(snapshotIdSchema, id) }, workbenchSnapshotSchema),
     runtimes: async () => call("runtimes", {}, workbenchRuntimeListSchema),
-    workbenchPackage: async () => call("workbenchPackage", {}, workbenchPackageResultSchema),
     backups: async (spaceId) => call("backups", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, backupsResultSchema),
     llm: async (request) => call("llm", parseOrInvalid(llmApiRequestSchema, request), llmApiResultSchema) as Promise<LlmApiResult>,
     llmCredential: async (request: LlmCredentialRequest) =>

@@ -6,15 +6,9 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime as WorkbenchRuntimeDto,
-  WorkbenchPackageRelease,
   WorkbenchSnapshot,
 } from "../../../shared/workbench";
-import type { HomeControlHandle, PidAliveFn } from "../home-controller";
-import type { ValidatedComponentPayload } from "../component-payload";
-import type {
-  SpawnComponentLauncherOptions,
-  spawnComponentLauncher,
-} from "../component-handoff";
+import type { PidAliveFn } from "../home-controller";
 import type { ProcessRuntime } from "../process-manager";
 import type { PatchWriter } from "../patch-writer";
 import type { BoundCliRunner } from "../spaces-control";
@@ -29,7 +23,6 @@ export interface WorkbenchMaintenance {
   snapshots(): Promise<WorkbenchSnapshot[]>;
   snapshot(id: string): Promise<WorkbenchSnapshot>;
   runtimes(): Promise<WorkbenchRuntimeDto[]>;
-  workbenchPackage?(): Promise<WorkbenchPackageRelease | null>;
   backups(spaceId: string): Promise<WorkbenchBackup[]>;
 }
 
@@ -48,14 +41,10 @@ export interface WorkbenchSupervisorOptions {
   snapshotRoot?: string;
   /** Selected v2 payload `lib` root (`--component-payload`). Absent keeps library callers compatible. */
   componentPayloadRoot?: string;
-  /** Internal-only accepted run owner. Never a public browser field. */
-  acceptedHandle?: HomeControlHandle;
-  /** CLI-only: process may exit after a durable shutdown or flushed handoff commit. */
+  /** CLI-only: process may exit after a durable shutdown. */
   onNormalExit?: () => void | Promise<void>;
   /** Test seam forwarded to WorkbenchJobStore. */
   jobsInject?: WorkbenchJobsInject;
-  /** Test seam for the one-shot launcher spawn. Production uses spawnComponentLauncher. */
-  spawnLauncher?: (options: SpawnComponentLauncherOptions) => ReturnType<typeof spawnComponentLauncher>;
   runtimeRoot?: string;
   allowRealHome?: boolean;
   portStart?: number;
@@ -74,7 +63,6 @@ export interface WorkbenchSupervisorOptions {
 export interface SupervisorCliOptions extends WorkbenchSupervisorOptions {
   home: string;
   bin: string;
-  acceptHandoff?: boolean;
 }
 
 export interface WorkbenchSupervisorHandle {
@@ -100,17 +88,6 @@ export interface StoredPlan {
   fingerprint: string;
   consumed?: boolean;
 }
-
-export type PendingComponentHandoff = {
-  jobId: string;
-  planId: string;
-  snapshotId: string;
-  payload: ValidatedComponentPayload;
-  pluginArtifact?: string;
-  viewBridgeArtifact?: string;
-  browserArtifact?: string;
-  llmBridgeArtifact?: string;
-};
 
 export interface BoundCli {
   bin: string;

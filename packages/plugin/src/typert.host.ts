@@ -22,7 +22,6 @@ import {
   workbenchProductResultSchema,
   workbenchReturnTargetSchema,
   workbenchRuntimeListSchema,
-  workbenchPackageResultSchema,
   workbenchSnapshotSchema,
   workbenchSpaceDetailSchema,
   workbenchStateSchema,
@@ -194,7 +193,6 @@ export const TYPERT = {
       result("@dsh-spaces/plugin/types#WorkbenchSnapshot", workbenchSnapshotSchema),
     ),
     invocation("workbench", "runtimes", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchRuntime[]", workbenchRuntimeListSchema)),
-    invocation("workbench", "workbenchPackage", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchPackageRelease | null", workbenchPackageResultSchema)),
     invocation(
       "workbench",
       "backups",
@@ -238,7 +236,6 @@ export const MANAGER_METHODS = [
   "snapshots",
   "snapshot",
   "runtimes",
-  "workbenchPackage",
   "backups",
   "llm",
   "llmCredential",

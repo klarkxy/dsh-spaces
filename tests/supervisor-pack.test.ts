@@ -52,7 +52,6 @@ function writeV2Plugin(pluginRoot: string): string {
     ["lib/client.js", "export {};\n"],
     ["lib/supervisor/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.supervisor)],
     ["lib/supervisor/index.js", "export {};\n"],
-    ["lib/supervisor/launcher.mjs", "export {};\n"],
     ["lib/supervisor/snapshot-worker.mjs", "export {};\n"],
     ["lib/view-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["view-bridge"])],
     ["lib/view-bridge/cordis.patch.yml", "view: dummy\n"],

@@ -46,7 +46,7 @@ export class SupervisorDashboardHost {
   private assertOwner(): void {
     const current = this.host.controller.inspect();
     const expected = this.host.lifecycle.handle?.owner;
-    if (!expected || this.host.lifecycle.closed || this.host.lifecycle.transferredOwner || !current.held || !("owner" in current) ||
+    if (!expected || this.host.lifecycle.closed || !current.held || !("owner" in current) ||
       current.handoff || current.liveness !== "alive" || current.owner.nonce !== expected.nonce ||
       current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt) {
       throw new WorkbenchPublicError("workbench/read-only", "The current Home owner is required.");

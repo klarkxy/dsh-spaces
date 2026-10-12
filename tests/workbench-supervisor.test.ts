@@ -1634,7 +1634,6 @@ function writePayload(pluginRoot: string, marker = "payload"): ValidatedComponen
     ["lib/client.js", "export {};\n"],
     ["lib/supervisor/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.supervisor)],
     ["lib/supervisor/index.js", "export {};\n"],
-    ["lib/supervisor/launcher.mjs", "export {};\n"],
     ["lib/supervisor/snapshot-worker.mjs", "export {};\n"],
     ["lib/view-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["view-bridge"], true)],
     ["lib/view-bridge/cordis.patch.yml", `- insert:\n    - id: dsh-spaces-view-bridge\n      name: '${COMPONENT_PAYLOAD_PACKAGES["view-bridge"]}'\n      config: {}\n- id: settings\n  disabled: true\n- insert:\n    - id: dsh-spaces-settings\n      name: '${COMPONENT_PAYLOAD_PACKAGES["view-bridge"]}/settings'\n`],

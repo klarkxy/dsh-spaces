@@ -61,10 +61,6 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
     case "runtime.upgrade":
       expectKeys(body, ["kind", "version"]);
       return { kind, version: parseId(body.version) };
-    case "workbench.upgrade":
-      expectKeys(body, ["kind", "catalogId", "version"]);
-      if (body.catalogId !== "bundled-workbench") throw new WorkbenchPublicError("workbench/invalid-input");
-      return { kind, catalogId: "bundled-workbench", version: parseId(body.version) };
     default:
       throw new WorkbenchPublicError("workbench/invalid-input");
   }
