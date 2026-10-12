@@ -5,18 +5,12 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
-  realpathSync,
   unlinkSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { basename, dirname, join, resolve } from "node:path";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { SupervisorDashboard, DASHBOARD_LAUNCH_ENV } from "./dashboard/supervisor";
-import { handleDashboardUnavailable } from "./dashboard/gateway";
-import { cookieValue } from "./workbench-http";
-import { parsePublicationPlan } from "../../core/domain/dashboard/validation";
 import { atomicWrite } from "./atomic";
 import { SpaceMessageRouter } from "./message-bus/router";
 import { CooperativeChildren } from "./cooperative-children";
@@ -26,13 +20,12 @@ import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { WorkbenchLog } from "./workbench-log";
 import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "./dsh-cli";
-import { assertNotRealHome, authorizeProductHome, samePath } from "./home-guard";
+import { assertNotRealHome, authorizeProductHome } from "./home-guard";
 import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
 import { archiveAbsPath } from "./plugin-library";
 import { pluginAdd } from "./plugin-ops";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
-import { llmCatalogPath } from "./llm-paths";
 import { ProfileRegistry } from "./profile-registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
@@ -41,11 +34,8 @@ import { migrateProfileToAlpha } from "./profile-alpha-migration";
 import { cliLoadError, dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
 import { SnapshotExecutor } from "./snapshot-executor";
 import { setPackageSource, setToolchainRoot } from "./toolchain";
-import { beginLaunchDiagnostics } from "./supervisor-launch";
 import type { ProfileStatus } from "../../shared/types";
-import { isExactRuntimeVersion } from "../../shared/runtime";
 import { redactPublicReason } from "../../shared/public-reason";
-import { sanitizeSpaceIcon } from "../../shared/space-icon";
 import type { SnapshotRuntime } from "../../shared/snapshots";
 import type { SpaceDetail } from "../../shared/spaces-control";
 import type {
@@ -58,7 +48,6 @@ import type {
   WorkbenchPlanRequest,
   WorkbenchPlugin,
   WorkbenchRuntime as WorkbenchRuntimeDto,
-  WorkbenchPackageRelease,
   WorkbenchSnapshot,
   WorkbenchSpace,
   WorkbenchState,
@@ -92,10 +81,6 @@ import {
 import {
   isCompatibleDshCliVersion,
   NodeSpacesControl,
-  bindDshCli,
-  parseSpaceId,
-  SpacesPublicError,
-  type BoundCliRunner,
   type SpacesLoaderView,
 } from "./spaces-control";
 import {
@@ -108,34 +93,20 @@ import {
   type PidAliveFn,
 } from "./home-controller";
 import {
-  COMPONENT_PAYLOAD_ENTRIES,
-  ComponentPayloadError,
   validateComponentPayload,
   type ValidatedComponentPayload,
 } from "./component-payload";
-import {
-  COMPONENT_HANDOFF_FLAG,
-  createComponentHandoffBinding,
-  spawnComponentLauncher,
-  type ComponentHandoffCommit,
-  type SpawnComponentLauncherOptions,
-} from "./component-handoff";
 import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
 import {
   WorkbenchJobStore,
-  WORKBENCH_JOBS_DIR_NAME,
   type WorkbenchJobContext,
-  type WorkbenchJobsInject,
 } from "./workbench-jobs";
-import { packLocalArtifacts } from "../../../packages/plugin/src/host/supervisor-pack.ts";
 import {
   WorkbenchMaintenance as WorkbenchMaintenanceService,
 } from "./workbench-maintenance";
 import type { WorkbenchMaintenancePorts } from "./workbench-maintenance-ports";
 import {
   WorkbenchPackageUpgrade,
-  validateComponentPayloadArtifacts,
-  type WorkbenchPackageHandoff,
   type WorkbenchPackageHandoffInput,
 } from "./workbench-package-upgrade";
 import {
@@ -148,15 +119,60 @@ import {
   type ViewBootstrap,
 } from "./workbench-http";
 import { createHomeLlmHost } from "./llm-host";
-import { GlobalLlmHost, type LlmApplyCommand } from "../../core/application/global-llm-host";
-import { LLM_ERROR, LlmConfigError } from "../../core/domain/llm-connections";
-import type { LlmInstanceRecord } from "../../core/ports/llm-runtime";
-import { isLlmWriteMethod, type LlmApiRequest, type LlmApiResult } from "../../shared/llm-api";
+import { GlobalLlmHost } from "../../core/application/global-llm-host";
+import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
+import { SupervisorComponentHandoff } from "./supervisor/component-handoff-host";
+import { SupervisorDashboardHost } from "./supervisor/dashboard-host";
+import { WORKBENCH_ERROR, WorkbenchPublicError } from "./supervisor/errors";
+import {
+  expectKeys,
+  expectObject,
+  parseIcon,
+  parseId,
+  parsePlanRequest,
+  parseRequestId,
+  parseSpaceName,
+} from "./supervisor/input";
+import { SupervisorInstanceRecords } from "./supervisor/instance-records";
+import { SupervisorLlm } from "./supervisor/llm";
+import {
+  bindSelectedCli,
+  defaultSnapshotWorkerFile,
+  preflightSupervisorComponentPayload,
+} from "./supervisor/payload";
+import {
+  inspectManagerInstall,
+  profileHasViewBridge,
+  publicPluginVersion,
+} from "./supervisor/profile-probe";
+import type {
+  BoundCli,
+  ChildView,
+  PendingComponentHandoff,
+  StoredPlan,
+  WorkbenchMaintenance,
+  WorkbenchSupervisorHandle,
+  WorkbenchSupervisorOptions,
+} from "./supervisor/types";
 
 export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./workbench-http";
 export { isCompatibleDshCliVersion };
+export { WORKBENCH_ERROR, WorkbenchPublicError };
+export type { WorkbenchErrorCode } from "./supervisor/errors";
+export type {
+  SupervisorCliOptions,
+  WorkbenchMaintenance,
+  WorkbenchSupervisorHandle,
+  WorkbenchSupervisorOptions,
+} from "./supervisor/types";
+export {
+  assertHandoffTokenMatchesSelectedPayload,
+  bindSupervisorComponentPayload,
+  preflightSupervisorComponentPayload,
+  validateSupervisorComponentPayload,
+} from "./supervisor/payload";
+export { parseSupervisorArgs, supervisorCliArgs } from "./supervisor/cli-args";
 
-const SPACES_PLUGIN = "@dsh-spaces/plugin";
 const VIEW_ENV = {
   parent: "DSH_SPACES_VIEW_PARENT_ORIGIN",
   id: "DSH_SPACES_VIEW_ID",
@@ -166,10 +182,6 @@ const VIEW_ENV = {
 } as const;
 const PLAN_TTL_MS = 5 * 60_000;
 const STOP_NOT_FORCED = "Timed stop did not force-kill the process. The instance is still recorded.";
-const ENTITY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const GLYPH_RE = /^[a-z0-9-]{1,32}$/;
-const INSTANCES_DIR_NAME = "instances";
-const LIFECYCLE_PLANS_DIR_NAME = "lifecycle-plans";
 const ENDPOINT_FILE = "endpoint.json";
 const HOST_BEARER_FILE = "host.bearer";
 const VIEW_BRIDGE_ID = "dsh-spaces-view-bridge";
@@ -183,130 +195,6 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
 ]);
 const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume"]);
 const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore"]);
-
-export const WORKBENCH_ERROR = {
-  "workbench/invalid-input": "The request is not a valid workbench operation.",
-  "workbench/unauthorized": "Authentication is required.",
-  "workbench/forbidden": "This origin cannot call that workbench method.",
-  "workbench/not-found": "That item was not found.",
-  "workbench/read-only": "The workbench is read-only until control is acquired.",
-  "workbench/unavailable": "The workbench cannot accept this request.",
-  "workbench/unsupported": "That command is not supported.",
-  "workbench/conflict": "The service epoch or state revision does not match.",
-  "workbench/busy": "Another controller already holds run rights for this home.",
-  "workbench/unmanaged": "This instance is not managed here. It can be viewed only.",
-  "workbench/protected": "The web profile and manager space cannot be changed this way.",
-  "workbench/incompatible": "The bound DSH CLI could not be validated as an exact installed version.",
-  "workbench/failed": "The workbench request failed.",
-  "workbench/maintenance": "That maintenance action is not available yet.",
-} as const;
-
-export type WorkbenchErrorCode = keyof typeof WORKBENCH_ERROR;
-
-export class WorkbenchPublicError extends Error {
-  readonly name = "WorkbenchPublicError";
-  constructor(
-    readonly code: WorkbenchErrorCode,
-    message: string = WORKBENCH_ERROR[code],
-  ) {
-    super(message);
-  }
-}
-
-export interface WorkbenchMaintenance {
-  preview(request: WorkbenchPlanRequest): Promise<WorkbenchPlan>;
-  execute(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void>;
-  plugins(query: string): Promise<WorkbenchPlugin[]>;
-  snapshots(): Promise<WorkbenchSnapshot[]>;
-  snapshot(id: string): Promise<WorkbenchSnapshot>;
-  runtimes(): Promise<WorkbenchRuntimeDto[]>;
-  workbenchPackage?(): Promise<WorkbenchPackageRelease | null>;
-  backups(spaceId: string): Promise<WorkbenchBackup[]>;
-}
-
-export interface WorkbenchSupervisorOptions {
-  home: string;
-  bin: string;
-  nodeExe?: string;
-  port?: number;
-  controlToolRoot?: string;
-  supervisorAssetRoot?: string;
-  pluginArtifact?: string;
-  viewBridgeArtifact?: string;
-  browserArtifact?: string;
-  llmBridgeArtifact?: string;
-  snapshotWorkerFile?: string;
-  snapshotRoot?: string;
-  /** Selected v2 payload `lib` root (`--component-payload`). Absent keeps library callers compatible. */
-  componentPayloadRoot?: string;
-  /** Internal-only accepted run owner. Never a public browser field. */
-  acceptedHandle?: HomeControlHandle;
-  /** CLI-only: process may exit after a durable shutdown or flushed handoff commit. */
-  onNormalExit?: () => void | Promise<void>;
-  /** Test seam forwarded to WorkbenchJobStore. */
-  jobsInject?: WorkbenchJobsInject;
-  /** Test seam for the one-shot launcher spawn. Production uses spawnComponentLauncher. */
-  spawnLauncher?: (options: SpawnComponentLauncherOptions) => ReturnType<typeof spawnComponentLauncher>;
-  runtimeRoot?: string;
-  allowRealHome?: boolean;
-  portStart?: number;
-  portEnd?: number;
-  now?: () => Date;
-  fetch?: typeof fetch;
-  pidAlive?: PidAliveFn;
-  processRuntime?: Partial<ProcessRuntime>;
-  createMaintenance?: (ports: WorkbenchMaintenancePorts) => WorkbenchMaintenance;
-  runCli?: BoundCliRunner;
-  pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
-  dumpConfig?: (profile: string) => Promise<string>;
-  patchWriter?: PatchWriter;
-}
-
-export interface SupervisorCliOptions extends WorkbenchSupervisorOptions {
-  home: string;
-  bin: string;
-  acceptHandoff?: boolean;
-}
-
-export interface WorkbenchSupervisorHandle {
-  server: Server;
-  runtime: WorkbenchSupervisorRuntime;
-  origin: string;
-  bootstrapUrl: string;
-  close(): Promise<void>;
-}
-
-interface ChildView {
-  spaceId: string;
-  generation: number;
-  origin: string;
-  channel: string;
-  serviceEpoch: string;
-  issued: boolean;
-}
-
-interface StoredPlan {
-  plan: WorkbenchPlan;
-  request: WorkbenchPlanRequest;
-  fingerprint: string;
-  consumed?: boolean;
-}
-
-type PendingComponentHandoff = {
-  jobId: string;
-  planId: string;
-  snapshotId: string;
-  payload: ValidatedComponentPayload;
-  pluginArtifact?: string;
-  viewBridgeArtifact?: string;
-  browserArtifact?: string;
-  llmBridgeArtifact?: string;
-};
-
-interface BoundCli {
-  bin: string;
-  version: string;
-}
 
 /**
  * Independent web supervisor: stable 127.0.0.1 entry, HomeController run
@@ -372,13 +260,50 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   private readonly pidAlive: PidAliveFn;
   private readonly llmApplied = new Map<string, number>();
-  private readonly llmBusy = new Set<string>();
   private activeJobId: string | undefined;
   private pendingHandoff: PendingComponentHandoff | undefined;
   private transferredOwner = false;
   private selectedPayload: ValidatedComponentPayload | undefined;
   private packageUpgrade: WorkbenchPackageUpgrade | undefined;
   readonly llmHost: GlobalLlmHost;
+  private readonly instances: SupervisorInstanceRecords;
+  private readonly llmOps: SupervisorLlm;
+  private readonly dashboardHost: SupervisorDashboardHost;
+  private componentHandoffInstance: SupervisorComponentHandoff | undefined;
+
+  // Lazy so bare `Object.create(prototype)` test doubles that skip the
+  // constructor can still drive the settle path through this collaborator.
+  private get componentHandoff(): SupervisorComponentHandoff {
+    this.componentHandoffInstance ??= new SupervisorComponentHandoff({
+      home: this.home,
+      controlDir: this.controlDir,
+      nodeExe: this.nodeExe,
+      options: this.options,
+      controller: this.controller,
+      messageBus: this.messageBus,
+      spawned: this.spawned,
+      reasons: () => this.reasons,
+      jobs: () => this.jobs,
+      handle: () => this.handle,
+      clearHandle: () => { this.handle = undefined; },
+      origin: () => this.origin,
+      closeHttp: async () => { await this.httpClose?.(); this.httpClose = undefined; },
+      removeEndpointFile: () => this.removeEndpointFile(),
+      dashboard: () => this.dashboard,
+      activeJobId: () => this.activeJobId,
+      pendingHandoff: () => this.pendingHandoff,
+      setPendingHandoff: (value) => { this.pendingHandoff = value; },
+      seal: () => { this.sealing = true; },
+      markTransferredOwner: () => { this.transferredOwner = true; },
+      markClosed: () => { this.closed = true; },
+      markBlocked: () => { this.blocked = true; },
+      selectedPayload: () => this.selectedPayload,
+      ownedSpaceIds: () => this.ownedSpaceIds(),
+      statusOf: (id) => this.statusOf(id),
+      pidAlive: this.pidAlive,
+    });
+    return this.componentHandoffInstance;
+  }
 
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
     this.options = { ...options };
@@ -401,17 +326,73 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       // Reuse the launch validation when provided; it must belong to this root.
       this.selectedPayload = selectedPayload ?? validateComponentPayload(options.componentPayloadRoot);
     }
+    this.instances = new SupervisorInstanceRecords({
+      controlDir: this.controlDir,
+      spawned: this.spawned,
+      unmanaged: this.unmanaged,
+      reasons: () => this.reasons,
+      pidAlive: this.pidAlive,
+      plans: this.plans,
+    });
+    this.llmOps = new SupervisorLlm({
+      home: this.home,
+      llmHost: () => this.llmHost,
+      jobs: () => this.jobs,
+      handle: () => this.handle,
+      sealing: () => this.sealing,
+      relinquishKind: () => this.relinquishKind,
+      maintenanceBlocked: () => this.maintenanceBlocked,
+      managerId: () => this.managerId,
+      llmBridgeArtifact: () => this.options.llmBridgeArtifact,
+      unmanaged: this.unmanaged,
+      generations: this.generations,
+      llmApplied: this.llmApplied,
+      assertWritable: () => this.assertWritable(),
+      observeChildWork: (action) => this.observeChildWork(action),
+      requireManaged: (spaceId) => this.requireManaged(spaceId),
+      stopOwned: (spaceId) => this.stopOwned(spaceId),
+      startSpace: (spaceId, ctx) => this.startSpace(spaceId, ctx),
+      installArtifact: (profileId, artifact, id) => this.installArtifact(profileId, artifact, id),
+      homeProfileNames: () => this.homeProfileNames(),
+      publicStatus: (id) => this.publicStatus(id),
+      currentServiceEpoch: () => this.currentServiceEpoch(),
+    });
+    this.dashboardHost = new SupervisorDashboardHost({
+      home: this.home,
+      controller: this.controller,
+      lock: this.lock,
+      now: this.now,
+      origin: () => this.origin,
+      dashboard: () => this.dashboard,
+      setDashboard: (dashboard) => { this.dashboard = dashboard; },
+      handle: () => this.handle,
+      closed: () => this.closed,
+      sealing: () => this.sealing,
+      blocked: () => this.blocked,
+      maintenanceFlag: () => this.maintenanceFlag,
+      maintenanceBlocked: () => this.maintenanceBlocked,
+      transferredOwner: () => this.transferredOwner,
+      hasMaintenanceEvidence: () => this.hasMaintenanceEvidence(),
+      requireServiceEpoch: () => this.requireServiceEpoch(),
+      managerOrigin: () => this.managerOrigin(),
+      listSpaces: () => this.listSpaces(),
+      unmanaged: this.unmanaged,
+      generations: this.generations,
+      cookieName: () => this.cookieName(),
+      sessionEquals: (value) => this.sessionEquals(value),
+      reasons: () => this.reasons,
+    });
     this.llmHost = createHomeLlmHost(this.home, {
       listSpaceIds: async () => this.homeProfileNames(),
       instances: {
-        list: async () => this.listLlmInstances(),
-        get: async (spaceId) => this.listLlmInstances().find((row) => row.spaceId === spaceId),
+        list: async () => this.llmOps.listLlmInstances(),
+        get: async (spaceId) => this.llmOps.listLlmInstances().find((row) => row.spaceId === spaceId),
         markApplied: async (spaceId, catalogRevision) => {
           this.llmApplied.set(spaceId, catalogRevision);
         },
       },
-      assertWritable: () => this.assertLlmWritable(),
-      submitApply: (command, requestId) => this.submitLlmApply(command, requestId),
+      assertWritable: () => this.llmOps.assertLlmWritable(),
+      submitApply: (command, requestId) => this.llmOps.submitLlmApply(command, requestId),
     });
   }
 
@@ -452,63 +433,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   async handleDashboardRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     if (!req.url?.startsWith("/api/dashboard/") && !req.url?.startsWith("/internal/dashboard/")) return false;
-    if (this.dashboard) return this.dashboard.handle(req, res);
-    return handleDashboardUnavailable(req, res, {
-      origin: () => this.origin, managerOrigin: () => this.managerOrigin(),
-      authorize: request => {
-        const value = cookieValue(request.headers.cookie, this.cookieName());
-        return !this.closed && value && this.sessionEquals(value)
-          ? { subjectId: "supervisor-local-operator", layoutWrite: false, publicationsManage: false } : null;
-      },
-    });
-  }
-
-  private assertDashboardOwner(): void {
-    const current = this.controller.inspect();
-    const expected = this.handle?.owner;
-    if (!expected || this.closed || this.transferredOwner || !current.held || !("owner" in current) ||
-      current.handoff || current.liveness !== "alive" || current.owner.nonce !== expected.nonce ||
-      current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt) {
-      throw new WorkbenchPublicError("workbench/read-only", "The current Home owner is required.");
-    }
-  }
-
-  private dashboardManagementAllowed(): boolean {
-    return Boolean(this.handle) && !this.closed && !this.sealing && !this.blocked &&
-      !this.maintenanceFlag && !this.maintenanceBlocked && !this.hasMaintenanceEvidence();
-  }
-
-  private requireDashboard(): SupervisorDashboard {
-    this.assertDashboardOwner();
-    if (!this.dashboard) throw new WorkbenchPublicError("workbench/unavailable", "Home dashboard is unavailable.");
-    if (!this.dashboardManagementAllowed()) throw new WorkbenchPublicError("workbench/maintenance");
-    return this.dashboard;
-  }
-
-  private initDashboard(): void {
-    this.dashboard = new SupervisorDashboard({
-      home: this.home, epoch: this.requireServiceEpoch(), origin: () => this.origin, now: this.now,
-      managerOrigin: () => this.managerOrigin(),
-      spaces: () => this.listSpaces(), assertOwner: () => this.assertDashboardOwner(),
-      canManage: () => this.dashboardManagementAllowed() && !this.lock.inspect().held, cookieName: () => this.cookieName(),
-      sessionEquals: value => this.sessionEquals(value),
-      assertSource: (id, generation) => {
-        this.assertDashboardOwner();
-        const space = this.listSpaces().find(s => s.id === id && !s.isHost && s.managed);
-        if (!space || this.unmanaged.has(id) || this.generations.get(id) !== generation) {
-          throw new WorkbenchPublicError("workbench/conflict", "The source generation is no longer owned.");
-        }
-      },
-    });
-  }
-
-  private retireDashboardRun(id: string, generation?: number): Error | undefined {
-    try { this.dashboard?.retire(id, generation); }
-    catch {
-      const message = "Dashboard publishing was revoked but private handoff cleanup failed.";
-      if (!this.reasons.includes(message)) this.reasons.push(message);
-      return new WorkbenchPublicError("workbench/failed", message);
-    }
+    return this.dashboardHost.handle(req, res);
   }
 
   bootstrapUrl(): string {
@@ -654,9 +579,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         expectKeys(body, ["spaceId"]);
         return this.backups(parseSpaceName(body.spaceId));
       case "llm":
-        return this.dispatchLlm(body);
+        return this.llmOps.dispatchLlm(body);
       case "llmCredential":
-        return this.dispatchLlmCredential(body);
+        return this.llmOps.dispatchLlmCredential(body);
       case "product":
         expectKeys(body, ["request"]);
         return this.product(parseWorkbenchProductRequest(body.request));
@@ -664,84 +589,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async llm(request: LlmApiRequest): Promise<LlmApiResult> {
-    return this.dispatchLlm(request) as Promise<LlmApiResult>;
-  }
-
-  private async dispatchLlm(body: unknown): Promise<unknown> {
-    const method = body && typeof body === "object" ? (body as { method?: unknown }).method : undefined;
-    if (method === "applyPlan") {
-      if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-      return this.llmHost.dispatch(body);
-    }
-    if (typeof method === "string" && isLlmWriteMethod(method)) {
-      if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-      return this.jobs.runExclusive(async () => {
-        this.assertLlmMutationAllowed();
-        const result = await this.llmHost.dispatch(body);
-        await this.maybeInstallLlmBridge(body);
-        return result;
-      });
-    }
-    const result = await this.llmHost.dispatch(body);
-    await this.maybeInstallLlmBridge(body);
-    return result;
-  }
-
-  private async dispatchLlmCredential(body: unknown): Promise<unknown> {
-    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    return this.jobs.runExclusive(async () => {
-      this.assertLlmMutationAllowed();
-      return this.llmHost.dispatchCredential(body);
-    });
-  }
-
-  private assertLlmMutationAllowed(): void {
-    this.assertWritable();
-    if (this.sealing) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
-    }
-    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-  }
-
-  private async dispatchLlmAdmitted(body: unknown): Promise<LlmApiResult> {
-    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    return this.jobs.runAdmitted(async () => {
-      const method = body && typeof body === "object" ? (body as { method?: unknown }).method : undefined;
-      if (typeof method === "string" && isLlmWriteMethod(method)) {
-        this.assertLlmMutationAllowed();
-      }
-      const result = await this.llmHost.dispatch(body);
-      await this.maybeInstallLlmBridge(body);
-      return result as LlmApiResult;
-    });
-  }
-
-  private llmCatalogObservation(): { revision: number; digest: string } {
-    const path = llmCatalogPath(this.home);
-    let digest = createHash("sha256").update("").digest("hex");
-    let revision = 0;
-    try {
-      const bytes = readFileSync(path);
-      digest = createHash("sha256").update(bytes).digest("hex");
-      const parsed = JSON.parse(bytes.toString("utf8")) as { revision?: unknown };
-      if (typeof parsed.revision === "number" && Number.isInteger(parsed.revision) && parsed.revision >= 0) {
-        revision = parsed.revision;
-      }
-    } catch {
-      /* missing catalog is an empty observation */
-    }
-    return { revision, digest };
-  }
-
-  private async maybeInstallLlmBridge(body: unknown): Promise<void> {
-    const request = body as { method?: string; spaceId?: string; shared?: { mode?: string } };
-    if (
-      typeof request.spaceId === "string" &&
-      (request.method === "mapImported" ||
-        (request.method === "updateSpacePolicy" && request.shared?.mode && request.shared.mode !== "none"))
-    ) {
-      await this.ensureLlmBridge(request.spaceId);
-    }
+    return this.llmOps.dispatchLlm(request) as Promise<LlmApiResult>;
   }
 
   entryPage(): string {
@@ -952,7 +800,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     if (parsed.kind === "dashboard.publication.set") {
       return this.lock.run("dashboard.publication.preview", async () => {
-        const dashboard = this.requireDashboard();
+        const dashboard = this.dashboardHost.requireDashboard();
         this.assertLiveContext(parsedContext);
         this.protectSpecial(this.requireManaged(parsed.spaceId), { allowManager: false });
         if (this.unmanaged.has(parsed.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
@@ -1000,9 +848,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
     this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
     this.processes = this.createProcessManager();
-    this.initDashboard();
+    this.dashboardHost.initDashboard();
     this.bindProductService();
-    this.reconcileInstanceRecords();
+    this.instances.reconcileInstanceRecords();
     if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.unmanaged.size) {
       this.maintenance = this.createMaintenance();
       this.refreshAvailability();
@@ -1251,17 +1099,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const dashboardGeneration = this.generations.get(profile) ?? 0;
         const spawnFn = injected.spawn ?? children.spawn;
         const port = Number(args[args.indexOf("--port") + 1]);
-        mkdirSync(this.instancesDir(), { recursive: true });
-        atomicWrite(this.instancePath(profile), `${JSON.stringify({ version: 1, spaceId: profile,
+        mkdirSync(this.instances.instancesDir(), { recursive: true });
+        atomicWrite(this.instances.instancePath(profile), `${JSON.stringify({ version: 1, spaceId: profile,
           phase: "spawning", port, generation: this.generations.get(profile) ?? 0,
           origin: `http://127.0.0.1:${port}`, startedAt: this.now().toISOString() })}\n`);
         let child;
         try { child = spawnFn(args, { ...options, env }); }
-        catch (error) { this.removeInstanceRecord(profile); throw error; }
+        catch (error) { this.instances.removeInstanceRecord(profile); throw error; }
         if (child.pid) {
           if (profile !== this.managerId) this.messageBus.attach(profile, child);
           this.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
-          try { this.writeInstanceRecord(profile, port, this.generations.get(profile) ?? 0); }
+          try { this.instances.writeInstanceRecord(profile, port, this.generations.get(profile) ?? 0); }
           catch {
             this.maintenanceBlocked = true;
             this.reasons.push("The child identity record could not be saved. Run rights were kept.");
@@ -1269,14 +1117,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           child.once("exit", () => {
             const recorded = this.spawned.get(profile);
             if (recorded?.pid === child.pid) {
-              this.retireDashboardRun(profile, dashboardGeneration);
+              this.dashboardHost.retireDashboardRun(profile, dashboardGeneration);
               this.spawned.delete(profile);
-              this.removeInstanceRecord(profile);
+              this.instances.removeInstanceRecord(profile);
             }
           });
         } else child.once("error", () => {
-          this.retireDashboardRun(profile, dashboardGeneration);
-          this.removeInstanceRecord(profile);
+          this.dashboardHost.retireDashboardRun(profile, dashboardGeneration);
+          this.instances.removeInstanceRecord(profile);
         });
         return child;
       },
@@ -1362,8 +1210,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     });
     const diagnostics = this.ensureDiagnostics();
     const ports = this.maintenancePorts(snapshots, runtimes, upgrades, diagnostics);
-    const toolsRoot = this.toolsRootOutsideHome();
-    const handoff = this.componentHandoffCallback();
+    const toolsRoot = this.componentHandoff.toolsRootOutsideHome();
+    const handoff = this.componentHandoff.componentHandoffCallback();
     this.packageUpgrade = new WorkbenchPackageUpgrade({
       home: this.home, managerId: () => this.managerId,
       pluginArtifact: this.options.pluginArtifact, viewBridgeArtifact: this.options.viewBridgeArtifact,
@@ -1564,7 +1412,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "plan.execute":
         return this.executePlan(command.planId, ctx);
       case "llm.apply":
-        return this.runLlmApply(command, ctx);
+        return this.llmOps.runLlmApply(command, ctx);
       default:
         if (isWorkbenchProductCommand(command)) return this.runProductCommand(command, ctx);
         throw new WorkbenchPublicError("workbench/unsupported");
@@ -1608,7 +1456,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         shared: input.useSharedLlm ? { mode: "all" } : { mode: "none" },
         expectedRevision: 0,
       });
-      if (input.useSharedLlm) await this.ensureLlmBridge(name);
+      if (input.useSharedLlm) await this.llmOps.ensureLlmBridge(name);
     }
     return { spaceId: name };
   }
@@ -1647,7 +1495,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       return { spaceId: id, view: await this.view(id) };
     }
     if (id !== this.managerId) await this.ensureViewBridge(id);
-    await this.ensureLlmBridge(id);
+    await this.llmOps.ensureLlmBridge(id);
     const gen = (this.generations.get(id) ?? 0) + 1;
     this.generations.set(id, gen);
     const channel = randomBytes(8).toString("hex");
@@ -1669,7 +1517,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
       await this.startOwned(id);
     } catch (error) {
-      this.retireDashboardRun(id, gen);
+      this.dashboardHost.retireDashboardRun(id, gen);
       throw error;
     }
     if (this.maintenanceBlocked) throw new WorkbenchPublicError("workbench/unavailable");
@@ -1682,7 +1530,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     current.origin = childOrigin;
     if (id !== this.managerId) this.workspaceOrigins.add(childOrigin);
-    this.writeInstanceRecord(id, port, gen);
+    this.instances.writeInstanceRecord(id, port, gen);
     this.llmApplied.set(id, await this.llmHost.catalogRevision());
     return {
       spaceId: id,
@@ -1707,11 +1555,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async executePlan(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
-    const stored = this.plans.get(planId) ?? this.readLifecyclePlan(planId);
+    const stored = this.plans.get(planId) ?? this.instances.readLifecyclePlan(planId);
     if (stored) {
       if (stored.consumed) throw new WorkbenchPublicError("workbench/not-found");
       if (Date.parse(stored.plan.expiresAt) <= this.now().getTime()) {
-        this.consumeLifecyclePlan(planId);
+        this.instances.consumeLifecyclePlan(planId);
         throw new WorkbenchPublicError("workbench/invalid-input", "The preview expired. Request a new preview.");
       }
       if (!stored.plan.serviceEpoch || stored.plan.serviceEpoch !== this.currentServiceEpoch()) {
@@ -1724,7 +1572,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (fingerprint !== stored.fingerprint) {
         throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
       }
-      this.consumeLifecyclePlan(planId);
+      this.instances.consumeLifecyclePlan(planId);
       if (stored.request.kind === "service.shutdown") {
         if (!this.activeJobId) throw new WorkbenchPublicError("workbench/invalid-input", "Shutdown requires an active job.");
         this.relinquishKind = stored.request.kind;
@@ -1743,9 +1591,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         ctx.phase("dashboard-publication");
         ctx.cancellable(false);
         await this.lock.run("dashboard.publication.set", async () => {
-          const dashboard = this.requireDashboard();
+          const dashboard = this.dashboardHost.requireDashboard();
           const assertPlan = () => {
-            this.requireDashboard();
+            this.dashboardHost.requireDashboard();
             this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
             if (this.fingerprint(request) !== stored.fingerprint) throw new WorkbenchPublicError("workbench/conflict");
             this.protectSpecial(this.requireManaged(request.spaceId), { allowManager: false });
@@ -1774,7 +1622,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.protectSpecial(id, { allowManager: false });
         await this.lock.run("space.delete", async () => {
           await this.dashboard?.revokeSpace(id, () => {
-            this.requireDashboard();
+            this.dashboardHost.requireDashboard();
             this.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
           });
           await this.stopOwned(id);
@@ -1835,20 +1683,20 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async afterPlanJobSettled(jobId: string): Promise<void> {
     const pending = this.pendingHandoff;
     if (pending && pending.jobId === jobId) {
-      if (this.jobPersistedSuccess(jobId)) {
+      if (this.componentHandoff.jobPersistedSuccess(jobId)) {
         try {
-          await this.finalizeComponentHandoff(pending);
+          await this.componentHandoff.finalizeComponentHandoff(pending);
         } catch (error) {
-          this.recordHandoffDiagnostic(error);
+          this.componentHandoff.recordHandoffDiagnostic(error);
         }
         return;
       }
       this.pendingHandoff = undefined;
-      this.recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
+      this.componentHandoff.recordHandoffDiagnostic("Handoff was not transferred because the job did not persist success.");
       return;
     }
     if (this.relinquishKind && this.relinquishJobId === jobId) {
-      if (!this.jobPersistedSuccess(jobId)) {
+      if (!this.componentHandoff.jobPersistedSuccess(jobId)) {
         this.relinquishKind = null;
         this.relinquishJobId = null;
         this.maintenanceBlocked = true;
@@ -1866,242 +1714,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
    * for this job's tail.
    */
   async handoffWorkbenchPackage(input: WorkbenchPackageHandoffInput, ctx: WorkbenchJobContext): Promise<void> {
-    if (this.ownedChildStillRunning()) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Owned processes are still running. The component handoff was not started.",
-      );
-    }
-    const jobId = this.activeJobId;
-    if (!jobId) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Component handoff requires the running upgrade job.");
-    }
-    const artifacts = await this.artifactsForPayload(input.payload);
-    this.sealing = true;
-    this.pendingHandoff = {
-      jobId,
-      planId: input.planId,
-      snapshotId: input.snapshotId,
-      payload: input.payload,
-      ...artifacts,
-    };
-    ctx.phase("handoff-pending");
-    ctx.message("Handoff preparation is complete. New service startup is unconfirmed.");
-    ctx.result({ snapshotId: input.snapshotId });
-  }
-
-  private toolsRootOutsideHome(): string | undefined {
-    const toolsRoot = this.options.controlToolRoot;
-    if (typeof toolsRoot !== "string" || !toolsRoot.trim()) return undefined;
-    const resolved = resolve(toolsRoot.trim());
-    if (pathInsideHome(this.home, resolved)) return undefined;
-    return resolved;
-  }
-
-  private componentHandoffCallback(): WorkbenchPackageHandoff | undefined {
-    if (typeof this.options.onNormalExit !== "function" || !this.selectedPayload) return undefined;
-    if (!this.toolsRootOutsideHome()) return undefined;
-    return (input, ctx) => this.handoffWorkbenchPackage(input, ctx);
-  }
-
-  private componentHandoffPort(): { toolsRoot: string; handoff: WorkbenchPackageHandoff } | undefined {
-    const toolsRoot = this.toolsRootOutsideHome();
-    const handoff = this.componentHandoffCallback();
-    if (!toolsRoot || !handoff) return undefined;
-    return { toolsRoot, handoff };
-  }
-
-  private jobPersistedSuccess(jobId: string): boolean {
-    if (!this.jobs) return false;
-    try {
-      if (this.jobs.job(jobId).status !== "succeeded") return false;
-    } catch {
-      return false;
-    }
-    try {
-      const raw = readFileSync(join(this.controlDir, WORKBENCH_JOBS_DIR_NAME, `${jobId}.json`), "utf8");
-      const parsed = JSON.parse(raw) as { status?: string };
-      return parsed.status === "succeeded";
-    } catch {
-      return false;
-    }
-  }
-
-  private ownedChildStillRunning(): boolean {
-    const ids = new Set([...this.ownedSpaceIds(), ...this.spawned.keys()]);
-    for (const id of ids) {
-      const spawned = this.spawned.get(id);
-      if (spawned) {
-        const liveness = this.pidAlive(spawned.pid, spawned.startedAt);
-        if (liveness === "alive" || liveness === "ambiguous") return true;
-      }
-      const status = this.statusOf(id);
-      if (status === "running" || status === "starting") return true;
-    }
-    return false;
-  }
-
-  private async finalizeComponentHandoff(pending: PendingComponentHandoff): Promise<void> {
-    this.pendingHandoff = undefined;
-    if (this.ownedChildStillRunning()) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Owned processes are still running. The component handoff was not transferred.",
-      );
-    }
-    const owner = this.handle;
-    if (!owner) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Run rights are not held for the component handoff.");
-    }
-    const toolsRoot = this.componentHandoffPort()?.toolsRoot ?? this.options.controlToolRoot;
-    if (!toolsRoot) {
-      throw new WorkbenchPublicError("workbench/unavailable", "A tools root outside Home is required for handoff.");
-    }
-    const targetDiagnosticFile = beginLaunchDiagnostics(this.home, resolve(toolsRoot));
-    const port = Number(new URL(this.origin).port);
-    if (!Number.isInteger(port) || port < 1) {
-      throw new WorkbenchPublicError("workbench/invalid-input", "Handoff requires the preserved nonzero management port.");
-    }
-
-    await this.httpClose?.();
-    this.httpClose = undefined;
-    this.removeEndpointFile();
-
-    const oldPayload = this.selectedPayload;
-    if (!oldPayload) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The running component group is not validated.");
-    }
-    const launcherEntry = resolveLauncherEntry(oldPayload);
-    const spawnFn = this.options.spawnLauncher ?? spawnComponentLauncher;
-    let launcher;
-    try {
-      launcher = spawnFn({
-        home: this.home,
-        launcherEntry,
-        execPath: this.nodeExe,
-        allowRealHome: this.options.allowRealHome,
-      });
-    } catch (error) {
-      this.recordHandoffDiagnostic(error);
-      throw error;
-    }
-
-    this.messageBus.close();
-    await this.dashboard?.close();
-    let token;
-    try {
-      token = await this.controller.transferToLauncher({
-        nonce: owner.owner.nonce,
-        binding: createComponentHandoffBinding(
-          this.home,
-          owner.owner.nonce,
-          pending.payload.digest,
-          undefined,
-          { allowRealHome: this.options.allowRealHome },
-        ),
-        launcher: { pid: launcher.pid, startedAt: launcher.startedAt },
-      });
-    } catch (error) {
-      try {
-        launcher.disconnect();
-      } catch {
-        /* ignore */
-      }
-      this.recordHandoffDiagnostic(error);
-      throw error;
-    }
-    this.transferredOwner = true;
-
-    const newEntry = payloadRel(pending.payload.packageRoot, COMPONENT_PAYLOAD_ENTRIES.supervisor);
-    const newWorker = payloadRel(pending.payload.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
-    const argv = supervisorCliArgs({
-      home: this.home,
-      bin: this.options.bin,
-      nodeExe: this.nodeExe,
-      port,
-      allowRealHome: this.options.allowRealHome,
-      controlToolRoot: resolve(toolsRoot),
-      snapshotRoot: this.options.snapshotRoot,
-      pluginArtifact: pending.pluginArtifact,
-      viewBridgeArtifact: pending.viewBridgeArtifact,
-      browserArtifact: pending.browserArtifact,
-      llmBridgeArtifact: pending.llmBridgeArtifact,
-      snapshotWorkerFile: newWorker,
-      componentPayloadRoot: pending.payload.payloadRootLib,
-      acceptHandoff: true,
-    });
-    const commit: ComponentHandoffCommit = {
-      token,
-      home: this.home,
-      toolsRoot: resolve(toolsRoot),
-      artifactDigest: pending.payload.digest,
-      oldPid: process.pid,
-      oldStartedAt: owner.owner.startedAt,
-      cleanStopConfirmed: true,
-      runtime: {
-        execPath: this.nodeExe,
-        entry: newEntry,
-        argv,
-        cwd: dirname(newEntry),
-        env: { ...process.env, DSH_SPACES_SUPERVISOR_DIAGNOSTICS: targetDiagnosticFile },
-      },
-      ...(this.options.allowRealHome ? { allowRealHome: true } : {}),
-    };
-    try {
-      await launcher.sendCommit(commit);
-    } catch (error) {
-      this.recordHandoffDiagnostic(error);
-      throw error;
-    }
-    launcher.disconnect();
-    this.closed = true;
-    this.handle = undefined;
-    if (this.options.onNormalExit) await this.options.onNormalExit();
-  }
-
-  private async artifactsForPayload(
-    payload: ValidatedComponentPayload,
-  ): Promise<{ pluginArtifact: string; viewBridgeArtifact: string; browserArtifact?: string; llmBridgeArtifact?: string }> {
-    const live = validateComponentPayload(payload.payloadRootLib);
-    const toolsRoot = this.options.controlToolRoot;
-    if (typeof toolsRoot !== "string" || !toolsRoot.trim() || pathInsideHome(this.home, resolve(toolsRoot))) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        "Selected component artifacts require a tools root outside Home.",
-      );
-    }
-    const packed = await packLocalArtifacts({
-      pluginPackageRoot: live.packageRoot,
-      viewBridgeRoot: join(live.payloadRootLib, "view-bridge"),
-      browserRoot: join(live.payloadRootLib, "browser"),
-      llmBridgeRoot: join(live.payloadRootLib, "llm-bridge"),
-      artifactDir: join(resolve(toolsRoot), "artifacts"),
-      home: this.home,
-      execPath: this.nodeExe,
-    });
-    if ("reasons" in packed) {
-      throw new WorkbenchPublicError(
-        "workbench/unavailable",
-        packed.reasons[0] ?? "Selected component artifacts could not be packed.",
-      );
-    }
-    if (!packed.pluginArtifact || !packed.viewBridgeArtifact || !packed.browserArtifact) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Selected component artifacts could not be packed.");
-    }
-    return {
-      pluginArtifact: packed.pluginArtifact,
-      viewBridgeArtifact: packed.viewBridgeArtifact,
-      browserArtifact: packed.browserArtifact,
-      ...(packed.llmBridgeArtifact ? { llmBridgeArtifact: packed.llmBridgeArtifact } : {}),
-    };
-  }
-
-  private recordHandoffDiagnostic(error: unknown): void {
-    const message = sanitizeLogText(
-      error instanceof Error ? error.message : typeof error === "string" ? error : "Component handoff failed.",
-    ).slice(0, 400);
-    if (!this.reasons.includes(message)) this.reasons.push(message);
-    this.blocked = true;
+    return this.componentHandoff.handoffWorkbenchPackage(input, ctx);
   }
 
   private assertAcceptedStartupReady(): void {
@@ -2214,7 +1827,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     };
     const stored: StoredPlan = { plan, request, fingerprint: this.fingerprint(request) };
     this.plans.set(plan.id, stored);
-    this.writeLifecyclePlan(stored);
+    this.instances.writeLifecyclePlan(stored);
     return plan;
   }
 
@@ -2267,12 +1880,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async stopOwned(spaceId: string): Promise<void> {
     if (!this.processes) return;
     if (this.unmanaged.has(spaceId)) return;
-    const dashboardError = this.retireDashboardRun(spaceId);
+    const dashboardError = this.dashboardHost.retireDashboardRun(spaceId);
     await this.processes.stop(spaceId);
     const gen = (this.generations.get(spaceId) ?? 0) + 1;
     this.generations.set(spaceId, gen);
     this.views.delete(spaceId);
-    this.removeInstanceRecord(spaceId);
+    this.instances.removeInstanceRecord(spaceId);
     if (dashboardError) throw dashboardError;
   }
 
@@ -2378,51 +1991,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
   }
 
-  private assertLlmWritable(): void {
-    if (!this.handle) {
-      throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");
-    }
-    if (this.maintenanceBlocked) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
-    }
-    if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
-  }
-
-  private async submitLlmApply(command: LlmApplyCommand, requestId: string): Promise<WorkbenchJob> {
-    this.assertLlmMutationAllowed();
-    if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
-    return this.jobs.submit(command, requestId, (ctx) =>
-      this.observeChildWork(() => this.runLlmApply(command, ctx)),
-    );
-  }
-
-  private async runLlmApply(command: LlmApplyCommand, ctx: WorkbenchJobContext): Promise<void> {
-    this.assertLlmMutationAllowed();
-    ctx.phase("apply");
-    await this.llmHost.executeApply(command, async (spaceId) => {
-      ctx.message(`restart ${spaceId}`);
-      const id = this.requireManaged(spaceId);
-      await this.stopOwned(id);
-      await this.startSpace(id, ctx);
-    });
-  }
-
-  private listLlmInstances(): LlmInstanceRecord[] {
-    return this.homeProfileNames().map((id) => {
-      const leftover = this.unmanaged.has(id);
-      const status = leftover ? "unknown" : this.publicStatus(id);
-      return {
-        spaceId: id,
-        status,
-        generation: this.generations.get(id) ?? 0,
-        catalogRevision: this.llmApplied.get(id) ?? null,
-        policyRevision: null,
-        busy: this.llmBusy.has(id),
-        serviceEpoch: this.currentServiceEpoch(),
-      };
-    });
-  }
-
   private role(): WorkbenchState["role"] {
     if (!this.managerId) return "uninitialized";
     if (this.managerInstall === "manager") return "manager";
@@ -2505,8 +2073,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const add = this.options.pluginAdd ?? pluginAdd;
         await add(this.home, spaceId, spec);
       },
-      llm: (request) => this.dispatchLlmAdmitted(request),
-      llmAdmitted: (request) => this.dispatchLlmAdmitted(request),
+      llm: (request) => this.llmOps.dispatchLlmAdmitted(request),
+      llmAdmitted: (request) => this.llmOps.dispatchLlmAdmitted(request),
       llmBridgeAvailable: () => Boolean(this.options.llmBridgeArtifact),
       dshVersion: () => this.cli?.version ?? null,
       spacesVersion: () => {
@@ -2517,7 +2085,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       inspectRuntime: (options) => inspectBlueprintRuntime(options),
       composeRuntime: (options, input) => composeBlueprintRuntime(options, input),
       resolveModule: (options, input) => resolveBlueprintModule(options, input),
-      llmCatalogObservation: () => this.llmCatalogObservation(),
+      llmCatalogObservation: () => this.llmOps.llmCatalogObservation(),
       diagnostics: (spaceId) => this.productDiagnostics(spaceId),
       workbenchLog: () => this.workbenchLog(),
       withWrite: (label, action) => this.lock.run(label, action),
@@ -2667,113 +2235,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return spawnBoundCli(this.nodeExe, this.cli.bin, this.home, { ...process.env, DSH_HOME: this.home }, args);
   }
 
-  private instancesDir(): string {
-    return join(this.controlDir, INSTANCES_DIR_NAME);
-  }
-
-  private instancePath(id: string): string {
-    return join(this.instancesDir(), `${id}.json`);
-  }
-
-  private writeInstanceRecord(id: string, port: number, generation: number): void {
-    const spawned = this.spawned.get(id);
-    if (!spawned) return;
-    mkdirSync(this.instancesDir(), { recursive: true });
-    atomicWrite(
-      this.instancePath(id),
-      `${JSON.stringify({
-        version: 1,
-        spaceId: id,
-        pid: spawned.pid,
-        startedAt: spawned.startedAt,
-        port,
-        generation,
-        origin: `http://127.0.0.1:${port}`,
-      })}\n`,
-    );
-  }
-
-  private removeInstanceRecord(id: string): void {
-    try {
-      unlinkSync(this.instancePath(id));
-    } catch {
-      /* gone */
-    }
-  }
-
-  private reconcileInstanceRecords(): void {
-    let names: string[] = [];
-    try {
-      const stat = lstatSync(this.instancesDir());
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("ambiguous instance directory");
-      names = readdirSync(this.instancesDir()).filter((name) => name.endsWith(".json"));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.unmanaged.add("unknown-records");
-      return;
-    }
-    for (const name of names) {
-      const path = join(this.instancesDir(), name);
-      const id = name.replace(/\.json$/, "");
-      let record: { version?: number; kind?: string; spaceId?: string; pid?: number; startedAt?: string; port?: number; generation?: number; origin?: string };
-      try {
-        const stat = lstatSync(path);
-        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("ambiguous record");
-        record = JSON.parse(readFileSync(path, "utf8"));
-        parseSpaceName(id);
-      } catch {
-        this.unmanaged.add("unknown-records");
-        continue;
-      }
-      const maintenanceChild = record?.kind === "maintenance" && /^maintenance-[a-f0-9]{12}$/.test(id);
-      if (record?.version !== 1 || record.spaceId !== id || !Number.isInteger(record.pid) || record.pid! <= 0 ||
-        typeof record.startedAt !== "string" || !Number.isFinite(Date.parse(record.startedAt)) ||
-        (!maintenanceChild && (!Number.isInteger(record.port) || record.port! < 1 || record.port! > 65535 ||
-        !Number.isInteger(record.generation) || record.generation! < 0 ||
-        record.origin !== `http://127.0.0.1:${record.port}`))) {
-        this.unmanaged.add(id);
-        continue;
-      }
-      const liveness = this.pidAlive(record.pid!, record.startedAt);
-      if (liveness === "dead") {
-        this.removeInstanceRecord(id);
-        continue;
-      }
-      this.unmanaged.add(id);
-      this.reasons.push(`Leftover process for ${id} was not adopted.`);
-    }
-  }
-
-  private writeLifecyclePlan(stored: StoredPlan): void {
-    const dir = join(this.controlDir, LIFECYCLE_PLANS_DIR_NAME);
-    mkdirSync(dir, { recursive: true });
-    atomicWrite(join(dir, `${stored.plan.id}.json`), `${JSON.stringify(stored)}\n`);
-  }
-
-  private readLifecyclePlan(id: string): StoredPlan | undefined {
-    const memory = this.plans.get(id);
-    if (memory) return memory;
-    try {
-      const parsed = JSON.parse(readFileSync(join(this.controlDir, LIFECYCLE_PLANS_DIR_NAME, `${id}.json`), "utf8")) as StoredPlan;
-      if (!parsed?.plan?.id || !parsed.request || !parsed.fingerprint) return undefined;
-      if (!parsed.plan.serviceEpoch || !parsed.plan.stateRevision) return undefined;
-      this.plans.set(id, parsed);
-      return parsed;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private consumeLifecyclePlan(id: string): void {
-    const stored = this.plans.get(id);
-    if (stored) stored.consumed = true;
-    this.plans.delete(id);
-    try {
-      unlinkSync(join(this.controlDir, LIFECYCLE_PLANS_DIR_NAME, `${id}.json`));
-    } catch {
-      /* gone */
-    }
-  }
-
   private removeEndpointFile(): void {
     try {
       unlinkSync(join(this.controlDir, ENDPOINT_FILE));
@@ -2788,159 +2249,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (profileHasViewBridge(this.home, profileId)) return;
     await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
   }
-
-  private async ensureLlmBridge(profileId: string): Promise<void> {
-    if (!this.options.llmBridgeArtifact) return;
-    if (profileId === "web" || profileId === this.managerId) return;
-    if (profileHasLlmBridge(this.home, profileId)) return;
-    await this.installArtifact(profileId, this.options.llmBridgeArtifact, "dsh-spaces-llm-bridge");
-  }
-}
-
-/**
- * Fail-closed v2 payload validation with the binding error shape. Launch code
- * calls this once per start and threads the result through bind, preflight,
- * and runtime construction, so the manifest and every declared file are read
- * and hashed a single time; all non-hash checks still run on each call.
- */
-export function validateSupervisorComponentPayload(payloadRootLib: string): ValidatedComponentPayload {
-  try {
-    return validateComponentPayload(payloadRootLib);
-  } catch (error) {
-    const detail = error instanceof ComponentPayloadError || error instanceof Error
-      ? error.message
-      : "Component payload is invalid.";
-    throw new WorkbenchPublicError("workbench/invalid-input", detail);
-  }
-}
-
-/**
- * Cold-start binding for `--component-payload`. Library callers that omit the
- * root stay unchanged. A present root is v2-validated and fail-closed: worker
- * and supervisor assets come from that group, and packed view/llm artifacts
- * must be real files already supplied by bootstrap.
- */
-export function bindSupervisorComponentPayload(
-  options: WorkbenchSupervisorOptions,
-  validated?: ValidatedComponentPayload,
-): WorkbenchSupervisorOptions {
-  const root = options.componentPayloadRoot;
-  if (root === undefined) return options;
-  if (typeof root !== "string" || !root.trim()) {
-    throw new WorkbenchPublicError("workbench/invalid-input", "--component-payload must be a filesystem path.");
-  }
-  // `validated` must be the validation of this same payload root; every check
-  // below still runs, only the manifest read and file hashing are reused.
-  const selected = validated ?? validateSupervisorComponentPayload(root);
-  options.componentPayloadRoot = selected.payloadRootLib;
-  const worker = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
-  const supervisorDir = payloadRel(selected.packageRoot, "lib/supervisor");
-  const viewEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["view-bridge"]);
-  const llmEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["llm-bridge"]);
-  const browserEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.browser);
-  const launcher = payloadRel(selected.packageRoot, "lib/supervisor/launcher.mjs");
-  assertRealFile(worker, "Selected snapshot worker");
-  assertRealDirectory(supervisorDir, "Selected supervisor assets");
-  assertRealFile(launcher, "Selected launcher");
-  assertRealFile(viewEntry, "Selected view-bridge");
-  assertRealFile(llmEntry, "Selected llm-bridge");
-  assertRealFile(browserEntry, "Selected browser");
-
-  if (options.snapshotWorkerFile !== undefined && !sameRealPath(options.snapshotWorkerFile, worker)) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "snapshot-worker is not from the selected component group.",
-    );
-  }
-  options.snapshotWorkerFile = worker;
-
-  if (options.supervisorAssetRoot !== undefined && !sameRealPath(options.supervisorAssetRoot, supervisorDir)) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "supervisor-asset-root is not from the selected component group.",
-    );
-  }
-  options.supervisorAssetRoot = supervisorDir;
-
-  if (options.viewBridgeArtifact !== undefined) {
-    assertRealFile(options.viewBridgeArtifact, "view-bridge-artifact");
-  }
-  if (options.llmBridgeArtifact !== undefined) {
-    assertRealFile(options.llmBridgeArtifact, "llm-bridge-artifact");
-  }
-  if (options.browserArtifact !== undefined) {
-    assertRealFile(options.browserArtifact, "browser-artifact");
-  }
-  if (options.pluginArtifact !== undefined) {
-    assertRealFile(options.pluginArtifact, "plugin-artifact");
-  }
-  return options;
-}
-
-export function assertHandoffTokenMatchesSelectedPayload(
-  token: { artifactDigest: string },
-  payloadRoot: string,
-  runningEntry?: string,
-  validated?: ValidatedComponentPayload,
-): ValidatedComponentPayload {
-  const selected = validated ?? validateComponentPayload(payloadRoot);
-  if (token.artifactDigest !== selected.digest) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "Handoff token artifactDigest does not match the selected component group.",
-    );
-  }
-  if (runningEntry) {
-    const expected = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.supervisor);
-    if (!sameRealPath(runningEntry, expected)) {
-      throw new WorkbenchPublicError(
-        "workbench/invalid-input",
-        "Supervisor entry is not from the selected component group.",
-      );
-    }
-  }
-  return selected;
-}
-
-/**
- * Async group preflight: bind the v2 payload, require the plugin/view/llm
- * artifact tuple, and validate tar bytes against the selected manifest.
- * Call before runtime construction, HTTP, or Home writers. When `validated`
- * is the launch validation of the same payload root, its manifest/digest
- * conclusion is reused instead of re-reading and re-hashing the group.
- */
-export async function preflightSupervisorComponentPayload(
-  options: WorkbenchSupervisorOptions,
-  validated?: ValidatedComponentPayload,
-): Promise<WorkbenchSupervisorOptions> {
-  const resolved: WorkbenchSupervisorOptions = { ...options };
-  bindSupervisorComponentPayload(resolved, validated);
-  if (resolved.componentPayloadRoot === undefined) return resolved;
-  const pluginArtifact = resolved.pluginArtifact;
-  const viewBridgeArtifact = resolved.viewBridgeArtifact;
-  const llmBridgeArtifact = resolved.llmBridgeArtifact;
-  const browserArtifact = resolved.browserArtifact;
-  if (!pluginArtifact || !viewBridgeArtifact || !browserArtifact || !llmBridgeArtifact) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "A component payload requires plugin, view-bridge, browser, and llm-bridge artifacts from the same group.",
-    );
-  }
-  const payload = validated && validated.payloadRootLib === resolved.componentPayloadRoot
-    ? validated
-    : validateComponentPayload(resolved.componentPayloadRoot);
-  try {
-    await validateComponentPayloadArtifacts(payload, {
-      pluginArtifact,
-      viewBridgeArtifact,
-      browserArtifact,
-      llmBridgeArtifact,
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Component payload artifacts are invalid.";
-    throw new WorkbenchPublicError("workbench/invalid-input", detail);
-  }
-  return resolved;
 }
 
 export async function createWorkbenchSupervisor(
@@ -2997,201 +2305,6 @@ export async function createWorkbenchSupervisor(
   };
 }
 
-export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
-  const flags: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (token === "--allow-real-home") { flags.allowRealHome = "1"; continue; }
-    if (token === COMPONENT_HANDOFF_FLAG || token === "--accept-handoff") {
-      flags.acceptHandoff = "1";
-      continue;
-    }
-    const mapped = flagName(token);
-    if (!mapped) throw new WorkbenchPublicError("workbench/invalid-input", `Unknown flag: ${token}`);
-    const value = argv[i + 1];
-    if (!value || value.startsWith("-")) {
-      throw new WorkbenchPublicError("workbench/invalid-input", `Missing value for ${token}`);
-    }
-    flags[mapped] = value;
-    i += 1;
-  }
-  const home = requirePath(flags.home, "--home");
-  const binFlag = flags.bin ? "--bin" : flags.cli ? "--cli" : "--bin";
-  const bin = requirePath(flags.bin ?? flags.cli, binFlag);
-  const options: SupervisorCliOptions = { home, bin };
-  if (flags.allowRealHome === "1") options.allowRealHome = true;
-  if (flags.acceptHandoff === "1") options.acceptHandoff = true;
-  if (flags.node) options.nodeExe = requirePath(flags.node, "--node");
-  if (flags.port) {
-    const port = Number(flags.port);
-    if (!Number.isInteger(port) || port < 0 || port > 65535) {
-      throw new WorkbenchPublicError("workbench/invalid-input", "Port must be an integer 0-65535.");
-    }
-    options.port = port;
-  }
-  if (options.acceptHandoff) {
-    if (!Number.isInteger(options.port) || options.port! < 1 || options.port! > 65535) {
-      throw new WorkbenchPublicError(
-        "workbench/invalid-input",
-        "--accept-handoff requires an explicit nonzero --port.",
-      );
-    }
-  }
-  if (flags["control-tool-root"]) options.controlToolRoot = requirePath(flags["control-tool-root"], "--control-tool-root");
-  if (flags["supervisor-asset-root"]) {
-    options.supervisorAssetRoot = requirePath(flags["supervisor-asset-root"], "--supervisor-asset-root");
-  }
-  if (flags["plugin-artifact"]) options.pluginArtifact = requirePath(flags["plugin-artifact"], "--plugin-artifact");
-  if (flags["view-bridge-artifact"]) {
-    options.viewBridgeArtifact = requirePath(flags["view-bridge-artifact"], "--view-bridge-artifact");
-  }
-  if (flags["llm-bridge-artifact"]) {
-    options.llmBridgeArtifact = requirePath(flags["llm-bridge-artifact"], "--llm-bridge-artifact");
-  }
-  if (flags["browser-artifact"]) {
-    options.browserArtifact = requirePath(flags["browser-artifact"], "--browser-artifact");
-  }
-  if (flags["snapshot-worker"]) options.snapshotWorkerFile = requirePath(flags["snapshot-worker"], "--snapshot-worker");
-  if (flags["snapshot-root"]) options.snapshotRoot = requirePath(flags["snapshot-root"], "--snapshot-root");
-  if (flags["component-payload"]) {
-    options.componentPayloadRoot = requirePath(flags["component-payload"], "--component-payload");
-  }
-  return options;
-}
-
-export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
-  const args = ["--home", options.home, "--bin", options.bin];
-  if (options.allowRealHome) args.push("--allow-real-home");
-  if (options.nodeExe) args.push("--node", options.nodeExe);
-  if (options.port !== undefined) args.push("--port", String(options.port));
-  if (options.controlToolRoot) args.push("--control-tool-root", options.controlToolRoot);
-  if (options.supervisorAssetRoot) args.push("--supervisor-asset-root", options.supervisorAssetRoot);
-  if (options.pluginArtifact) args.push("--plugin-artifact", options.pluginArtifact);
-  if (options.viewBridgeArtifact) args.push("--view-bridge-artifact", options.viewBridgeArtifact);
-  if (options.llmBridgeArtifact) args.push("--llm-bridge-artifact", options.llmBridgeArtifact);
-  if (options.browserArtifact) args.push("--browser-artifact", options.browserArtifact);
-  if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
-  if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
-  if (options.componentPayloadRoot) args.push("--component-payload", options.componentPayloadRoot);
-  if (options.acceptHandoff) args.push(COMPONENT_HANDOFF_FLAG);
-  return args;
-}
-
-function flagName(token: string): string | undefined {
-  const names: Record<string, string> = {
-    "--home": "home",
-    "--bin": "bin",
-    "--cli": "cli",
-    "--node": "node",
-    "--port": "port",
-    "--control-tool-root": "control-tool-root",
-    "--supervisor-asset-root": "supervisor-asset-root",
-    "--plugin-artifact": "plugin-artifact",
-    "--view-bridge-artifact": "view-bridge-artifact",
-    "--llm-bridge-artifact": "llm-bridge-artifact",
-    "--browser-artifact": "browser-artifact",
-    "--snapshot-worker": "snapshot-worker",
-    "--snapshot-root": "snapshot-root",
-    "--component-payload": "component-payload",
-  };
-  return names[token];
-}
-
-function requirePath(value: string | undefined, flag: string): string {
-  if (!value?.trim()) throw new WorkbenchPublicError("workbench/invalid-input", `${flag} is required.`);
-  const resolved = resolve(value);
-  if (!isAbsolute(resolved)) throw new WorkbenchPublicError("workbench/invalid-input", `${flag} must be a filesystem path.`);
-  return resolved;
-}
-
-function payloadRel(packageRoot: string, rel: string): string {
-  return join(packageRoot, ...rel.split("/").filter(Boolean));
-}
-
-function assertRealFile(path: string, label: string): string {
-  const abs = resolve(path);
-  let st;
-  try {
-    st = lstatSync(abs);
-  } catch {
-    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is missing.`);
-  }
-  if (st.isSymbolicLink()) {
-    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is a symlink or junction.`);
-  }
-  if (!st.isFile()) {
-    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is not a regular file.`);
-  }
-  return abs;
-}
-
-function assertRealDirectory(path: string, label: string): string {
-  const abs = resolve(path);
-  let st;
-  try {
-    st = lstatSync(abs);
-  } catch {
-    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is missing.`);
-  }
-  if (st.isSymbolicLink()) {
-    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is a symlink or junction.`);
-  }
-  if (!st.isDirectory()) {
-    throw new WorkbenchPublicError("workbench/invalid-input", `${label} is not a directory.`);
-  }
-  return abs;
-}
-
-function sameRealPath(left: string, right: string): boolean {
-  try {
-    return samePath(realpathSync(resolve(left)), realpathSync(resolve(right)));
-  } catch {
-    return false;
-  }
-}
-
-function pathInsideHome(home: string, path: string): boolean {
-  const rel = relative(resolve(home), resolve(path));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-function resolveLauncherEntry(payload: ValidatedComponentPayload): string {
-  const live = validateComponentPayload(payload.payloadRootLib);
-  const declared = live.manifest.components.supervisor.files.some((file) => file.path === "lib/supervisor/launcher.mjs");
-  if (!declared) {
-    throw new WorkbenchPublicError(
-      "workbench/invalid-input",
-      "Selected component group does not declare lib/supervisor/launcher.mjs.",
-    );
-  }
-  return assertRealFile(payloadRel(live.packageRoot, "lib/supervisor/launcher.mjs"), "Selected launcher");
-}
-
-function bindSelectedCli(bin: string): BoundCli {
-  const bound = bindDshCli(resolve(bin));
-  if (!bound) {
-    throw new WorkbenchPublicError("workbench/incompatible", "The selected DSH CLI could not be bound from disk.");
-  }
-  if (!isCompatibleDshCliVersion(bound.version)) {
-    throw new WorkbenchPublicError("workbench/incompatible");
-  }
-  return bound;
-}
-
-function defaultSnapshotWorkerFile(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, "../../../packages/supervisor/lib/snapshot-worker.mjs"),
-    join(here, "../../lib/snapshot-worker.mjs"),
-  ];
-  if (typeof process.argv[1] === "string") {
-    candidates.push(join(dirname(process.argv[1]), "snapshot-worker.mjs"));
-    candidates.push(join(dirname(process.argv[1]), "../lib/snapshot-worker.mjs"));
-  }
-  const found = candidates.map((path) => resolve(path)).find((path) => existsSync(path));
-  return found ?? resolve(candidates[0]);
-}
-
 function silentJobContext(): WorkbenchJobContext {
   return {
     signal: new AbortController().signal,
@@ -3201,189 +2314,3 @@ function silentJobContext(): WorkbenchJobContext {
     result: () => undefined,
   };
 }
-
-function publicPluginVersion(spec: unknown): string | null {
-  if (typeof spec !== "string") return null;
-  if (/[\\/]|file:|git\+|github:|:\/\/|token|password|login/i.test(spec)) return null;
-  return isExactRuntimeVersion(spec) ? spec : null;
-}
-
-function profileHasLlmBridge(home: string, profileId: string): boolean {
-  try {
-    const pkg = JSON.parse(readFileSync(join(home, "profiles", profileId, "package.json"), "utf8")) as {
-      dependencies?: Record<string, unknown>;
-      dsh?: { profile?: { bundles?: unknown } };
-    };
-    const names = [
-      ...Object.keys(pkg.dependencies ?? {}),
-      ...(Array.isArray(pkg.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : []),
-    ];
-    return names.some((name) => typeof name === "string" && /llm-bridge/i.test(name));
-  } catch {
-    return false;
-  }
-}
-
-function profileHasViewBridge(home: string, profileId: string): boolean {
-  try {
-    const pkg = JSON.parse(readFileSync(join(home, "profiles", profileId, "package.json"), "utf8")) as {
-      dependencies?: Record<string, unknown>;
-      dsh?: { profile?: { bundles?: unknown } };
-    };
-    const names = [
-      ...Object.keys(pkg.dependencies ?? {}),
-      ...(Array.isArray(pkg.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : []),
-    ];
-    return names.some((name) => typeof name === "string" && /view-bridge/i.test(name));
-  } catch {
-    return false;
-  }
-}
-
-function inspectManagerInstall(home: string, profileId: string): "missing" | "manager" | "ordinary" | "damaged" {
-  const dir = join(home, "profiles", profileId);
-  if (!existsSync(dir)) return "missing";
-  const pkgPath = join(dir, "package.json");
-  if (!existsSync(pkgPath)) return "damaged";
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-      dependencies?: Record<string, unknown>;
-      dsh?: { profile?: { bundles?: unknown } };
-    };
-    const bundles = Array.isArray(pkg.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : [];
-    const deps = pkg.dependencies ?? {};
-    if (bundles.includes(SPACES_PLUGIN) || Object.prototype.hasOwnProperty.call(deps, SPACES_PLUGIN)) {
-      return "manager";
-    }
-    return "ordinary";
-  } catch {
-    return "damaged";
-  }
-}
-
-function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
-  const body = expectObject(input);
-  const kind = body.kind;
-  if (typeof kind !== "string") throw new WorkbenchPublicError("workbench/invalid-input");
-  switch (kind) {
-    case "dashboard.publication.set":
-      return parsePublicationPlan(input);
-    case "space.stop":
-    case "space.restart":
-      expectKeys(body, ["kind", "spaceId"]);
-      return { kind, spaceId: parseSpaceName(body.spaceId) };
-    case "space.delete":
-      expectKeys(body, ["kind", "spaceId"], ["removeData"]);
-      return {
-        kind,
-        spaceId: parseSpaceName(body.spaceId),
-        removeData: body.removeData === undefined ? false : body.removeData === true,
-      };
-    case "controller.release":
-    case "controller.shutdown":
-    case "snapshot.restore":
-    case "config.restore":
-      throw new WorkbenchPublicError("workbench/unsupported");
-    case "service.shutdown":
-      expectKeys(body, ["kind"]);
-      return { kind };
-    case "plugin.install":
-      expectKeys(body, ["kind", "spaceIds", "catalogId", "version"]);
-      return {
-        kind,
-        spaceIds: parseIdList(body.spaceIds).map((id) => parseSpaceName(id)),
-        catalogId: parsePluginKey(body.catalogId),
-        version: parseId(body.version),
-      };
-    case "plugin.remove":
-      expectKeys(body, ["kind", "spaceId", "packageName"]);
-      return { kind, spaceId: parseSpaceName(body.spaceId), packageName: parsePluginKey(body.packageName) };
-    case "plugin.toggle":
-      expectKeys(body, ["kind", "spaceId", "pluginId", "enabled"]);
-      if (typeof body.enabled !== "boolean") throw new WorkbenchPublicError("workbench/invalid-input");
-      return { kind, spaceId: parseSpaceName(body.spaceId), pluginId: parsePluginKey(body.pluginId), enabled: body.enabled };
-    case "plugin.cleanup-manager":
-      expectKeys(body, ["kind", "spaceId"]);
-      return { kind, spaceId: parseSpaceName(body.spaceId) };
-    case "snapshot.create":
-      expectKeys(body, ["kind"]);
-      return { kind };
-    case "snapshot.delete":
-      expectKeys(body, ["kind", "snapshotId"]);
-      return { kind, snapshotId: parseId(body.snapshotId) };
-    case "runtime.install":
-    case "runtime.upgrade":
-      expectKeys(body, ["kind", "version"]);
-      return { kind, version: parseId(body.version) };
-    case "workbench.upgrade":
-      expectKeys(body, ["kind", "catalogId", "version"]);
-      if (body.catalogId !== "bundled-workbench") throw new WorkbenchPublicError("workbench/invalid-input");
-      return { kind, catalogId: "bundled-workbench", version: parseId(body.version) };
-    default:
-      throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-}
-
-function parseIcon(value: string): string {
-  if (GLYPH_RE.test(value)) return value;
-  return sanitizeSpaceIcon(value);
-}
-
-function parseId(value: unknown): string {
-  if (typeof value !== "string" || !ENTITY_RE.test(value)) {
-    throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-  if (value.includes("/") || value.includes("\\") || value.includes("..")) {
-    throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-  return value;
-}
-
-function parsePluginKey(value: unknown): string {
-  if (typeof value !== "string" || value.length > 214 ||
-    !/^(?:@?[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(value)) {
-    throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-  return value;
-}
-
-function parseSpaceName(value: unknown): string {
-  const id = parseId(value);
-  try {
-    return parseSpaceId(id);
-  } catch (error) {
-    if (error instanceof SpacesPublicError) throw new WorkbenchPublicError("workbench/invalid-input");
-    throw error;
-  }
-}
-
-function parseIdList(value: unknown): string[] {
-  if (!Array.isArray(value)) throw new WorkbenchPublicError("workbench/invalid-input");
-  return value.map(parseId);
-}
-
-function parseRequestId(value: unknown): string {
-  if (typeof value !== "string" || !ENTITY_RE.test(value)) {
-    throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-  return value;
-}
-
-function expectObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-  return value as Record<string, unknown>;
-}
-
-function expectKeys(value: Record<string, unknown>, required: string[], optional: string[] = []): void {
-  const allowed = new Set([...required, ...optional]);
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-  for (const key of required) {
-    if (!(key in value)) throw new WorkbenchPublicError("workbench/invalid-input");
-  }
-}
-
-
