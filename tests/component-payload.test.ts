@@ -22,10 +22,14 @@ import {
   COMPONENT_PAYLOAD_SCHEMA_VERSION,
   ComponentPayloadError,
   copyComponentPayload,
+  listTarEntries,
+  readTarEntry,
   validateComponentPayload,
   writeComponentPayloadManifest,
   type ComponentPayloadManifest,
 } from "../src/adapters/node/component-payload.ts";
+import { extractArchiveAsync } from "../src/adapters/node/toolchain.ts";
+import { create as createTar } from "tar";
 import { PLUGIN_REQUIRED } from "../scripts/pack-spaces-plugin.mjs";
 
 const temps: string[] = [];
@@ -373,3 +377,28 @@ test("optional LICENSE files are included when present as regular files", () => 
   }
   assert.equal(existsSync(join(root, "LICENSE")), true);
 });
+
+test(
+  "listTarEntries/readTarEntry/extractArchiveAsync handle an archive at an absolute drive path",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const dir = mkdtempSync(join(process.cwd(), ".tmp-tar-"));
+    temps.push(dir);
+    const archive = join(dir, "sample.tgz");
+    assert.match(archive, /^[A-Za-z]:[\\/]/);
+    const src = join(dir, "src", "package", "nested");
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, "..", "hello.txt"), "hello tar\n");
+    writeFileSync(join(src, "second.txt"), "second\n");
+    await createTar({ gzip: true, file: archive, cwd: join(dir, "src") }, ["package"]);
+
+    const entries = await listTarEntries(archive);
+    assert.deepEqual(entries.sort(), ["package/hello.txt", "package/nested/second.txt"]);
+    assert.equal((await readTarEntry(archive, "package/hello.txt")).toString("utf8"), "hello tar\n");
+
+    const dest = join(dir, "dest");
+    await extractArchiveAsync(archive, dest);
+    assert.equal(readFileSync(join(dest, "package", "hello.txt"), "utf8"), "hello tar\n");
+    assert.equal(readFileSync(join(dest, "package", "nested", "second.txt"), "utf8"), "second\n");
+  },
+);

@@ -6,6 +6,7 @@ import { Script } from "node:vm";
 import { parseSpaceHostAudience, parsePortalSnapshot, portalMessage } from "../src/shared/space-host.ts";
 import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
 import { HostShellController, type HostShellEnvironment } from "../packages/plugin/src/client/host-shell-state.ts";
+import type { WorkbenchGuideApi } from "../packages/plugin/src/types.ts";
 import { parseSurfaceSelection, attachSurfaceBridge } from "../packages/plugin/src/workbench/surface-bridge.ts";
 import { mintSupervisorPortal } from "../packages/plugin/src/host/workbench-http.ts";
 
@@ -115,7 +116,7 @@ function fixture(origin = parentOrigin, hasManager = true) {
   const calls: string[] = [], timers = new Map<number, () => void>(); let timer = 0;
   const env: HostShellEnvironment = { origin: () => origin, channel: () => channel,
     setTimeout: fn => { timers.set(++timer, fn); return timer as never; }, clearTimeout: id => { timers.delete(id as never); } };
-  const guide = {
+  const guide: WorkbenchGuideApi = {
     role: async () => { calls.push("role"); return { role: "workspace" as const, profileId: "entry", managerId: hasManager ? "spaces-hub" : null, unavailable: false, reasons: [] }; },
     bootstrap: async () => { throw new Error("not used by renderer"); },
     returnTarget: async () => { throw new Error("must not navigate"); },

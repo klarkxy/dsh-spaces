@@ -5,6 +5,7 @@ import { type ChildProcess } from "node:child_process";
 import { spawnObserved } from "./owned-process-record";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { extract as extractTarArchive } from "tar";
 import { t } from "../../shared/i18n";
 import type { PackageSource } from "../../shared/types";
 import { inferPackageSource } from "../../shared/types";
@@ -237,19 +238,46 @@ async function downloadFile(url: string, dest: string, onLine?: (line: string) =
   if (!existsSync(dest)) throw new Error(t("errors.downloadEmpty", { url }));
 }
 
-async function extractArchiveAsync(archive: string, dest: string): Promise<void> {
+export async function extractArchiveAsync(archive: string, dest: string): Promise<void> {
   mkdirSync(dest, { recursive: true });
-  const result = await runProcess("tar", ["-xf", archive, "-C", dest], {
-    timeoutMs: 120_000,
-    env: process.env,
-  });
-  if (result.code !== 0) {
+  // Windows node distributions are .zip; the npm tar package only reads tar archives.
+  if (archive.toLowerCase().endsWith(".zip")) {
+    const quoted = (path: string) => `'${path.replaceAll("'", "''")}'`;
+    const result = await runProcess(
+      "powershell",
+      [
+        "-NoProfile", "-NonInteractive", "-Command",
+        `Expand-Archive -LiteralPath ${quoted(archive)} -DestinationPath ${quoted(dest)} -Force`,
+      ],
+      { timeoutMs: 120_000, env: process.env },
+    );
+    if (result.code !== 0) {
+      throw new Error(
+        t("errors.extractFailed", {
+          code: result.code,
+          detail: (result.stderr || result.stdout).slice(0, 400),
+        }),
+      );
+    }
+    return;
+  }
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      extractTarArchive({ file: archive, cwd: dest }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("archive extraction timed out")), 120_000);
+      }),
+    ]);
+  } catch (error) {
     throw new Error(
       t("errors.extractFailed", {
-        code: result.code,
-        detail: (result.stderr || result.stdout).slice(0, 400),
+        code: 1,
+        detail: (error instanceof Error ? error.message : String(error)).slice(0, 400),
       }),
     );
+  } finally {
+    clearTimeout(timer);
   }
 }
 

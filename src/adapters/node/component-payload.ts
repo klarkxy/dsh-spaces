@@ -1,5 +1,4 @@
 /** Node-only v2 component payload. Do not import this from browser shared contracts. */
-import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -10,6 +9,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { list as listTarArchive } from "tar";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome, isInsideRealHome } from "./home-guard";
 import { isExactRuntimeVersion } from "../../shared/runtime";
@@ -820,68 +820,73 @@ function parsePackageIdentity(source: string): { name: string; version: string }
   }
 }
 
-function listTarEntries(archive: string): Promise<string[]> {
-  return new Promise((resolvePromise, reject) => {
-    execFile(
-      tarExecutable(),
-      ["-tf", archive],
-      { timeout: TAR_TIMEOUT_MS, windowsHide: true, maxBuffer: MAX_TAR_LIST_BYTES },
-      (error, stdout) => {
-        if (error) {
-          reject(error);
-          return;
+export function listTarEntries(archive: string): Promise<string[]> {
+  return withTarTimeout(async () => {
+    const entries: string[] = [];
+    let listed = 0;
+    await listTarArchive({
+      file: archive,
+      onentry: (entry) => {
+        listed += entry.path.length + 1;
+        if (listed > MAX_TAR_LIST_BYTES) {
+          throw new Error("tarball listing exceeds the read limit");
         }
-        const entries = stdout
-          .split(/\r?\n/)
-          .map((line) => line.trim().replaceAll("\\", "/"))
-          .filter((line) => line && !line.endsWith("/") && isSafeTarEntry(line));
-        resolvePromise(entries);
+        const name = entry.path.replaceAll("\\", "/");
+        if (name && entry.type !== "Directory" && isSafeTarEntry(name)) {
+          entries.push(name);
+        }
+        entry.resume();
       },
-    );
+    });
+    return entries;
   });
 }
 
-function readTarEntry(archive: string, entry: string): Promise<Buffer> {
+export function readTarEntry(archive: string, entry: string): Promise<Buffer> {
   if (!isSafeTarEntry(entry)) return Promise.reject(new Error("unsafe tarball entry"));
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(tarExecutable(), ["-xOf", archive, entry], {
-      windowsHide: true,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+  return withTarTimeout(async () => {
+    let data: Promise<Buffer> | undefined;
+    let oversized = false;
+    await listTarArchive({
+      file: archive,
+      onentry: (current) => {
+        const name = current.path.replaceAll("\\", "/");
+        if (data === undefined && !oversized && name === entry) {
+          if (current.size > MAX_TAR_ENTRY_BYTES) {
+            oversized = true;
+          } else {
+            data = collectBoundedTarEntry(current);
+            return;
+          }
+        }
+        current.resume();
+      },
     });
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let settled = false;
-    const timer = setTimeout(() => finish(new Error("tarball read timed out")), TAR_TIMEOUT_MS);
-    const finish = (error?: Error, data?: Buffer) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (!child.killed) child.kill();
-      if (error) reject(error);
-      else resolvePromise(data ?? Buffer.alloc(0));
-    };
-    child.stdout.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_TAR_ENTRY_BYTES) {
-        finish(new Error("tarball entry exceeds the read limit"));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    child.once("error", (error) => finish(error));
-    child.once("close", (code) => {
-      if (code !== 0) finish(new Error("tarball entry could not be read"));
-      else finish(undefined, Buffer.concat(chunks));
-    });
+    if (oversized) throw new Error("tarball entry exceeds the read limit");
+    const bytes = data ? await data : undefined;
+    if (bytes === undefined) throw new Error("tarball entry could not be read");
+    return bytes;
   });
 }
 
-function tarExecutable(): string {
-  if (process.platform === "win32") {
-    return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+async function collectBoundedTarEntry(entry: { size: number } & AsyncIterable<Buffer>): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of entry) {
+    size += chunk.length;
+    if (size > MAX_TAR_ENTRY_BYTES) continue;
+    chunks.push(chunk);
   }
-  return "tar";
+  if (size > MAX_TAR_ENTRY_BYTES) throw new Error("tarball entry exceeds the read limit");
+  return Buffer.concat(chunks);
+}
+
+function withTarTimeout<T>(run: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("tarball read timed out")), TAR_TIMEOUT_MS);
+  });
+  return Promise.race([run(), timeout]).finally(() => clearTimeout(timer));
 }
 
 function isSafeTarEntry(entry: string): boolean {
