@@ -114,7 +114,7 @@ export interface WorkbenchProductPorts {
     pkg: BlueprintPackage,
     options?: { fetchImpl?: WorkbenchProductFetcher; signal?: AbortSignal },
   ): Promise<PreparedBlueprintPackage>;
-  runtimeBin?(): string | undefined;
+  runtimeBin?(spaceId?: string): string | undefined;
   inspectRuntime?: BlueprintWorkbenchPorts["inspectRuntime"];
   composeRuntime?: BlueprintWorkbenchPorts["composeRuntime"];
   resolveModule?: BlueprintWorkbenchPorts["resolveModule"];

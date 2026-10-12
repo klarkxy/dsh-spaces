@@ -37,6 +37,7 @@ function space(id: string, displayName: string): WorkbenchSpace {
     generation: 1,
     managed: true,
     needsIsolation: false,
+    dshVersion: null,
   };
 }
 
@@ -240,6 +241,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
       generation: 1,
       managed: true,
       needsIsolation: false,
+      dshVersion: null,
     },
     space("alpha", "Alpha"),
     space("beta", "Beta"),

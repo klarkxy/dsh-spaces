@@ -83,6 +83,7 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     generation: 1,
     managed: true,
     needsIsolation: false,
+    dshVersion: null,
     ...partial,
   };
 }
@@ -958,7 +959,6 @@ test("SSR ready home shows management actions and plugin install wording", async
   await flush();
   const runtime = ready(ctrl);
   assert.ok(runtime.includes(t("zh", "runtime.install")));
-  assert.ok(runtime.includes(t("zh", "runtime.upgrade")));
 });
 
 test("workspace iframe src is only the authorized view and pending stays hidden", async () => {

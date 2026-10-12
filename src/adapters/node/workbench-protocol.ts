@@ -41,6 +41,7 @@ export type WorkbenchRevisionSpace = Pick<
   | "needsIsolation"
   | "isHost"
   | "hasWebApp"
+  | "dshVersion"
 >;
 
 export type WorkbenchRevisionInput = {
@@ -74,6 +75,7 @@ export function computeWorkbenchRevision(input: WorkbenchRevisionInput): string 
   }
   const spaces = input.spaces.map((space) => ({
     displayName: space.displayName,
+    dshVersion: space.dshVersion,
     generation: space.generation,
     hasWebApp: space.hasWebApp,
     icon: space.icon,

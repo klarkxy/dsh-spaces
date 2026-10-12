@@ -17,7 +17,6 @@ import { SpaceMessageRouter } from "./message-bus/router";
 import { CooperativeChildren } from "./cooperative-children";
 import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
 import { inspectHomeToolchain } from "./control-residue";
-import { CoordinatedUpgrade } from "./coordinated-upgrade";
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { WorkbenchLog } from "./workbench-log";
 import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "./dsh-cli";
@@ -25,6 +24,14 @@ import { assertNotRealHome, authorizeProductHome } from "./home-guard";
 import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
 import { archiveAbsPath } from "./plugin-library";
 import { pluginAdd } from "./plugin-ops";
+import {
+  OFFICIAL_BASE_PACKAGE,
+  OFFICIAL_WEB_PACKAGE,
+  packageVersionAt,
+  resolveOfficialVersions,
+  usedOfficial,
+} from "./official-plugins";
+import { lt as semverLt } from "semver";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
 import { ProfileRegistry } from "./profile-registry";
@@ -54,6 +61,7 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../shared/workbench";
+import { SPACES_MIN_DSH_VERSION } from "../../shared/runtime";
 import { isWorkbenchProductCommand } from "../../shared/workbench-product";
 import type {
   WorkbenchDiagnostics,
@@ -180,7 +188,7 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "dashboard.publication.set",
 ]);
 const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume"]);
-const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade"]);
+const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.upgrade"]);
 
 /**
  * Independent web supervisor: stable 127.0.0.1 entry, HomeController run
@@ -808,6 +816,24 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.lifecycle.reasons.push(`The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim());
       }
     }
+    if (!this.lifecycle.blocked && this.managerInstall === "manager" && this.cli) {
+      try {
+        await this.alignManagerOfficialPlugins(identity.profileId);
+      } catch (error) {
+        this.lifecycle.blocked = true;
+        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
+        this.lifecycle.reasons.push(`The manager's official DSH plugins could not be aligned with host DSH ${this.cli.version}. ${detail}`.trim());
+      }
+    }
+    if (this.cli) {
+      try {
+        await this.pinExistingSpaces();
+      } catch (error) {
+        this.lifecycle.blocked = true;
+        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
+        this.lifecycle.reasons.push(`The DSH version records of existing spaces could not be written. ${detail}`.trim());
+      }
+    }
     this.refreshAvailability();
 
     if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.runs.unmanaged.has(identity.profileId)) {
@@ -828,11 +854,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       const recorded = inspectHomeToolchain(this.home);
       if (recorded.kind === "invalid") throw new Error(recorded.reason);
       if (recorded.kind === "verified") {
-        this.cli = bindSelectedCli(recorded.bin);
         this.options.controlToolRoot = recorded.toolchainRoot ?? this.options.controlToolRoot;
         this.options.runtimeRoot = recorded.runtimeRoot ?? this.options.runtimeRoot;
         this.options.snapshotRoot = recorded.snapshotRoot ?? this.options.snapshotRoot;
-      } else this.cli = bindSelectedCli(this.options.bin);
+      }
+      this.cli = bindSelectedCli(this.options.bin);
     } catch (error) {
       this.cli = null;
       this.lifecycle.blocked = true;
@@ -846,7 +872,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     setToolchainRoot(toolRoot);
     setManagedCliPrefix(this.options.controlToolRoot ?? join(this.controlDir, "cli"));
     setManagedNodeExecutable(this.nodeExe);
-    setSelectedDshResolver(() => this.cli?.bin);
+    setSelectedDshResolver((profile) => this.resolveCliBin(profile));
     atomicWrite(
       join(this.controlDir, "toolchain.json"),
       `${JSON.stringify(
@@ -991,6 +1017,48 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }));
   }
 
+  private async alignManagerOfficialPlugins(profileId: string): Promise<void> {
+    const profileDir = join(this.home, "profiles", profileId);
+    const used = usedOfficial(profileDir);
+    if (!used.base && !used.web) return;
+    const targets: Array<{ name: string; version: string }> = [];
+    const official = resolveOfficialVersions(this.cli!.bin);
+    if (used.base) targets.push({ name: OFFICIAL_BASE_PACKAGE, version: official.base });
+    if (used.web) targets.push({ name: OFFICIAL_WEB_PACKAGE, version: official.web });
+    const mismatched = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
+    if (!mismatched.length) return;
+    await this.lock.run("manager.official-align", () => this.observeChildWork(async () => {
+      const add = this.options.pluginAdd ?? pluginAdd;
+      for (const target of mismatched) {
+        await add(this.home, profileId, `${target.name}@${target.version}`);
+      }
+      const still = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
+      if (still.length) {
+        throw new Error(`The manager's official plugins do not match the host CLI: ${still.map((row) => row.name).join(", ")}.`);
+      }
+    }));
+  }
+
+  private async pinExistingSpaces(): Promise<void> {
+    let current: string | undefined;
+    try {
+      current = this.runtimeStore?.current()?.version;
+    } catch {
+      current = undefined;
+    }
+    const recorded = inspectHomeToolchain(this.home);
+    const version = current
+      ?? (recorded.kind === "verified" ? recorded.dshVersion : undefined)
+      ?? this.cli?.version;
+    if (!version) return;
+    const pending = this.registry.scan().filter((row) =>
+      row.name !== "web" && row.name !== this.managerId && !row.meta.dshVersion);
+    if (!pending.length) return;
+    await this.lock.run("runtime.pin-existing", async () => {
+      for (const row of pending) this.registry.updateMeta(row.name, { dshVersion: version });
+    });
+  }
+
   private installedManagerPluginLib(profileId: string): string | undefined {
     const target = join(this.home, "profiles", profileId, "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
     let st;
@@ -1085,7 +1153,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         });
         return child;
       },
-      ensureCli: injected.ensureCli ?? (async () => this.cli?.bin ?? this.options.bin),
+      ensureCli: injected.ensureCli ?? (async (profile) => this.resolveCliBin(profile) ?? this.options.bin),
       // Managed profiles are already prepared independently. Even dump-config
       // can materialize files in the user's default web profile.
       prepareHome: injected.prepareHome ?? (async () => undefined),
@@ -1155,18 +1223,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       legacy: () => (this.cli ? { bin: this.cli.bin, version: this.cli.version } : undefined),
     });
     this.runtimeStore = runtimes;
-    const upgrades = new CoordinatedUpgrade({
-      home: this.home,
-      workerFile: worker,
-      observeChild: () => observeMaintenanceChild(this.home, () => { this.lifecycle.maintenanceBlocked = true; }),
-      profiles: () => this.homeProfileNames(),
-      stopAll: () => this.stopOwnedAll(),
-      snapshots,
-      runtimes,
-      runtimeDescriptor: () => this.currentRuntime(),
-    });
     const diagnostics = this.ensureDiagnostics();
-    const ports = this.maintenancePorts(snapshots, runtimes, upgrades, diagnostics);
+    const ports = this.maintenancePorts(snapshots, runtimes, diagnostics);
     const create = this.options.createMaintenance ?? ((next) => new WorkbenchMaintenanceService(next, {
       packageSource: () => this.readHomeSettings().packageSource,
       log: (operation, error) => {
@@ -1192,7 +1250,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private maintenancePorts(
     snapshots: SnapshotExecutor,
     runtimes: RuntimeStore,
-    upgrades: CoordinatedUpgrade,
     diagnostics: DiagnosticsService,
   ): WorkbenchMaintenancePorts {
     return {
@@ -1201,7 +1258,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       lock: this.lock,
       snapshots,
       runtimes,
-      upgrades,
       diagnostics,
       managerId: () => this.managerId,
       assertWritable: () => this.lifecycle.assertWritable(),
@@ -1285,13 +1341,32 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return describeRuntime(ref);
   }
 
+  private pinnedDshVersion(spaceId: string): string | undefined {
+    return this.registry.scan().find((row) => row.name === spaceId)?.meta.dshVersion;
+  }
+
+  /** The DSH runtime a profile runs on: the host CLI for the manager/web, else its pin. */
+  private resolveSpaceRuntime(spaceId: string): { bin: string; version: string } {
+    if (!this.cli) throw new WorkbenchPublicError("workbench/incompatible");
+    const version = this.pinnedDshVersion(spaceId) ?? this.cli.version;
+    if (version === this.cli.version) return { bin: this.cli.bin, version };
+    const installed = this.runtimeStore?.installedBin(version);
+    if (installed) return { bin: installed, version };
+    const legacy = this.runtimeStore?.current();
+    if (legacy && legacy.version === version) return { bin: legacy.bin, version };
+    throw new WorkbenchPublicError(
+      "workbench/incompatible",
+      `DSH ${version} for this space is not installed. Install it from the space settings.`,
+    );
+  }
+
+  private resolveCliBin(profile?: string): string | undefined {
+    if (!profile || profile === "web" || profile === this.managerId) return this.cli?.bin;
+    return this.resolveSpaceRuntime(profile).bin;
+  }
+
   private async reinitializeManager(): Promise<void> {
-    const selected = this.runtimeStore?.current();
-    if (selected && isCompatibleDshCliVersion(selected.version)) {
-      this.cli = { bin: selected.bin, version: selected.version };
-    } else if (selected) {
-      throw new WorkbenchPublicError("workbench/incompatible");
-    } else if (this.options.bin) {
+    if (!this.cli) {
       this.cli = bindSelectedCli(this.options.bin);
     }
     if (this.cli) {
@@ -1300,7 +1375,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       atomicWrite(bindingPath, `${JSON.stringify({ ...binding, bin: this.cli.bin,
         dshVersion: this.cli.version, boundAt: this.now().toISOString() }, null, 2)}\n`);
     }
-    setSelectedDshResolver(() => this.cli?.bin);
+    setSelectedDshResolver((profile) => this.resolveCliBin(profile));
     let managerDump: string | undefined;
     if (this.managerId) {
       this.managerInstall = inspectManagerInstall(this.home, this.managerId);
@@ -1366,6 +1441,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       } else {
         throw new WorkbenchPublicError("workbench/unavailable");
       }
+      if (this.cli) this.registry.updateMeta(name, { dshVersion: this.cli.version });
       if (input.icon !== undefined) {
         this.registry.updateMeta(name, { icon: parseIcon(input.icon) });
       }
@@ -1508,11 +1584,19 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.processes) throw new WorkbenchPublicError("workbench/read-only");
     if (this.runs.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (spaceId === "web") throw new WorkbenchPublicError("workbench/protected");
+    const pinned = spaceId === this.managerId ? undefined : this.pinnedDshVersion(spaceId);
+    if (pinned && semverLt(pinned, SPACES_MIN_DSH_VERSION)) {
+      throw new WorkbenchPublicError(
+        "workbench/incompatible",
+        `This space uses DSH ${pinned}, below the minimum ${SPACES_MIN_DSH_VERSION} supported by this Spaces version. Upgrade it in the space settings.`,
+      );
+    }
+    const spaceRuntime = this.resolveSpaceRuntime(spaceId);
     if (this.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
       await this.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({
         home: this.home, profileId: spaceId, payloadRoot: this.options.componentPayloadRoot!,
-        bin: this.cli?.bin, cliVersion: this.cli?.version,
+        bin: spaceRuntime.bin, cliVersion: spaceRuntime.version,
         install: async (bridge) => {
           const artifact = bridge === "view-bridge" ? this.options.viewBridgeArtifact : this.options.llmBridgeArtifact;
           if (!artifact) throw new Error(`The selected ${bridge} archive is unavailable.`);
@@ -1526,9 +1610,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         },
       }));
     } else {
-      const cliBlock = this.cli ? unmetDshPeers(this.cli.version, dshPeerRangesFromProfile(join(this.home, "profiles", spaceId))) : [];
-      if (cliBlock.length && this.cli) {
-        throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(this.cli.version, cliBlock));
+      const cliBlock = unmetDshPeers(spaceRuntime.version, dshPeerRangesFromProfile(join(this.home, "profiles", spaceId)));
+      if (cliBlock.length) {
+        throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(spaceRuntime.version, cliBlock));
       }
       if (existsSync(join(this.home, "hub", spaceId, "settings.yaml"))) {
         await this.lock.run("space.settings-migrate", async () => {
@@ -1591,6 +1675,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           generation: view?.generation ?? this.runs.generation(row.name),
           managed: Boolean(this.lifecycle.handle) && !leftover,
           needsIsolation: row.needsConversion,
+          dshVersion: row.name === this.managerId ? null : (row.meta.dshVersion ?? null),
         } satisfies WorkbenchSpace;
       });
   }
@@ -1733,7 +1818,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const version = this.selectedPayload?.manifest.version;
         return typeof version === "string" && version.length > 0 ? version : null;
       },
-      runtimeBin: () => this.cli?.bin ?? this.options.bin,
+      runtimeBin: (spaceId) => (spaceId ? this.resolveCliBin(spaceId) : (this.cli?.bin ?? this.options.bin)),
       inspectRuntime: (options) => inspectBlueprintRuntime(options),
       composeRuntime: (options, input) => composeBlueprintRuntime(options, input),
       resolveModule: (options, input) => resolveBlueprintModule(options, input),
@@ -1861,18 +1946,19 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       }
     }
     try {
-      const result = await this.runBoundCli(["--profile", profile, "--dump-config"]);
+      const result = await this.runBoundCli(["--profile", profile, "--dump-config"], profile);
       return result.code === 0 ? result.stdout : undefined;
     } catch {
       return undefined;
     }
   }
 
-  private async runBoundCli(args: readonly string[]) {
+  private async runBoundCli(args: readonly string[], profile?: string) {
     if (this.options.runCli) return this.options.runCli(args);
-    if (!this.cli) throw new WorkbenchPublicError("workbench/incompatible");
+    const bin = this.resolveCliBin(profile);
+    if (!bin) throw new WorkbenchPublicError("workbench/incompatible");
     const { spawnBoundCli } = await import("./spaces-control.ts");
-    return spawnBoundCli(this.nodeExe, this.cli.bin, this.home, { ...process.env, DSH_HOME: this.home }, args);
+    return spawnBoundCli(this.nodeExe, bin, this.home, { ...process.env, DSH_HOME: this.home }, args);
   }
 
   private removeEndpointFile(): void {

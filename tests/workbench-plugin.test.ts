@@ -199,6 +199,7 @@ function v2State(epoch: string) {
         generation: 1,
         managed: true,
         needsIsolation: false,
+        dshVersion: null,
       },
     ],
     jobs: [],

@@ -213,13 +213,19 @@ test("HTTP state during owned manager bootstrap stays limited without latching b
     },
     dumpConfig: async (profile) => dumpText(profile),
     createMaintenance: () => fakeMaintenance(),
-    pluginAdd: async (_home, profile) => {
+    pluginAdd: async (_home, profile, spec) => {
       enteredAdd = true;
       await held;
       writeProfile(home, profile, {
         dependencies: { "@dsh-spaces/plugin": "0.2.0" },
         dsh: { profile: { bundles: ["@dsh-spaces/plugin"] } },
       });
+      const match = /^(@?[a-z0-9-]+(?:\/[a-z0-9-]+)?)@([^@]+)$/.exec(spec);
+      if (match) {
+        const dir = join(home, "profiles", profile, "node_modules", ...match[1].split("/"));
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: match[1], version: match[2] })}\n`);
+      }
     },
   });
   creating.then(
@@ -309,11 +315,16 @@ function tempHome(): string {
   return home;
 }
 
-function writeFakeCli(home: string, version = "0.1.5-rc.1"): string {
+function writeFakeCli(home: string, version = "0.2.0-rc.2"): string {
   const root = join(home, "cli");
   mkdirSync(join(root, "lib"), { recursive: true });
   writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version })}\n`);
   writeFileSync(join(root, "lib", "bin.js"), "console.log('fake-dsh');\n");
+  for (const name of ["dsh-base", "dsh-web-app"]) {
+    const dir = join(root, "node_modules", "@deepseek-ai", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version })}\n`);
+  }
   return join(root, "lib", "bin.js");
 }
 
@@ -540,6 +551,13 @@ async function startSupervisor(
     },
     dumpConfig: async (profile) => dumpText(profile),
     createMaintenance: () => fakeMaintenance(),
+    pluginAdd: async (addedHome, profile, spec) => {
+      const official = spec.match(/^(@?[a-z0-9-]+(?:\/[a-z0-9-]+)?)@([^@]+)$/);
+      if (!official) return;
+      const dir = join(addedHome, "profiles", profile, "node_modules", ...official[1]!.split("/"));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: official[1], version: official[2] })}\n`);
+    },
     ...extra,
   });
   handles.push(handle);
@@ -1597,6 +1615,10 @@ function writeFakeCliWithWebApp(home: string, version = "0.2.0-rc.2"): string {
   mkdirSync(web, { recursive: true });
   writeFileSync(join(web, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version, dsh: { bundle: { patch: "./cordis.patch.yml" } } })}\n`);
   writeFileSync(join(web, "cordis.patch.yml"), "- insert:\n    - id: settings\n      name: '@deepseek-ai/dsh-web-app'\n");
+  const base = join(root, "node_modules", "@deepseek-ai", "dsh-base");
+  mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-base", version, dsh: { bundle: { patch: "./cordis.patch.yml" } } })}\n`);
+  writeFileSync(join(base, "cordis.patch.yml"), "- insert:\n    - id: dsh-base\n      name: '@deepseek-ai/dsh-base'\n");
   const bootFacade = join(root, "node_modules", "@deepseek-ai", "dsh-app-boot");
   mkdirSync(bootFacade, { recursive: true });
   writeFileSync(join(bootFacade, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-app-boot", type: "module", main: "index.js" })}\n`);
@@ -1607,6 +1629,11 @@ function writeFakeCliWithWebApp(home: string, version = "0.2.0-rc.2"): string {
 function installManagerModules(home: string, payload: ValidatedComponentPayload, pluginRoot: string): void {
   cpSync(pluginRoot, join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
   cpSync(join(payload.payloadRootLib, "view-bridge"), join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "view-bridge"), { recursive: true });
+  for (const name of ["dsh-base", "dsh-web-app"]) {
+    const dir = join(home, "profiles", "spaces-hub", "node_modules", "@deepseek-ai", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version: "0.2.0-rc.2" })}\n`);
+  }
 }
 
 function alphaDump(profile: string): string {
@@ -1803,3 +1830,275 @@ test("startup blocks and does not start the manager when the align cannot be ver
   assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
   assert.equal(state.managerId && spawned.includes(state.managerId), false);
 });
+
+test("existing spaces pin once to the runtime they run; manager and web stay unpinned", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  writeProfile(home, "beta");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha", "beta"],
+      meta: {
+        alpha: { displayName: "alpha", order: 1000, dshVersion: "9.9.9" },
+        web: { displayName: "web", order: -1 },
+      },
+    }, null, 2)}\n`,
+  );
+  const handle = await startSupervisor(home);
+  const readMeta = () => (JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8")) as {
+    meta: Record<string, { dshVersion?: string }>;
+  }).meta;
+  assert.equal(readMeta().alpha.dshVersion, "9.9.9");
+  assert.equal(readMeta().beta.dshVersion, "0.2.0-rc.2");
+  assert.equal(readMeta()["spaces-hub"]?.dshVersion, undefined);
+  assert.equal(readMeta().web.dshVersion, undefined);
+  const state = await handle.runtime.state();
+  assert.equal(state.spaces.find((row) => row.id === "alpha")?.dshVersion, "9.9.9");
+  assert.equal(state.spaces.find((row) => row.id === "beta")?.dshVersion, "0.2.0-rc.2");
+  assert.ok(state.managerId);
+  assert.equal(state.spaces.find((row) => row.id === state.managerId)?.dshVersion, null);
+  await handle.close();
+  await startSupervisor(home);
+  assert.equal(readMeta().alpha.dshVersion, "9.9.9");
+  assert.equal(readMeta().beta.dshVersion, "0.2.0-rc.2");
+});
+
+test("a new space pins the host DSH version", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const created = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.create", input: { name: "created" } },
+    requestId: "create-created",
+  });
+  assert.equal(created.body.ok, true, JSON.stringify(created.body));
+  await waitJob(handle.origin, cookie, "create-created");
+  const state = await api(handle.origin, cookie, "state");
+  const row = (state.body.value as { spaces: Array<{ id: string; dshVersion: string | null }> }).spaces
+    .find((space) => space.id === "created");
+  assert.equal(row?.dshVersion, "0.2.0-rc.2");
+});
+
+test("spaces pinned to different installed runtimes spawn with their own binaries; the manager uses the host CLI", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  writeProfile(home, "beta");
+  const hostBin = writeFakeCli(home);
+  const runtimeRoot = join(home, "runtimes");
+  const betaDir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", "dsh");
+  mkdirSync(join(betaDir, "lib"), { recursive: true });
+  const betaBin = join(betaDir, "lib", "bin.js");
+  writeFileSync(betaBin, "console.log('beta');\n");
+  writeFileSync(join(betaDir, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.9.9" })}\n`);
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha", "beta"],
+      meta: {
+        alpha: { displayName: "alpha", order: 1000, dshVersion: "0.2.0-rc.2" },
+        beta: { displayName: "beta", order: 1001, dshVersion: "0.9.9" },
+      },
+    }, null, 2)}\n`,
+  );
+  const spawned: Array<{ profile: string; bin: string }> = [];
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    processRuntime: {
+      ...alignProcessRuntime([]),
+      spawn: (args, options = {}) => {
+        spawned.push({ profile: args[args.indexOf("--profile") + 1] ?? "", bin: String(args[0]) });
+        return spawnFixture("ok")(args, options);
+      },
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.ok(state.managerId);
+  assert.equal(spawned.find((row) => row.profile === state.managerId)?.bin, hostBin);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "alpha" },
+    requestId: "start-a",
+  });
+  await waitJob(handle.origin, cookie, "start-a");
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "beta" },
+    requestId: "start-b",
+  });
+  await waitJob(handle.origin, cookie, "start-b");
+  assert.equal(spawned.find((row) => row.profile === "alpha")?.bin, hostBin);
+  assert.equal(spawned.find((row) => row.profile === "beta")?.bin, betaBin);
+});
+
+test("a pinned version below the supported minimum rejects at start", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha"],
+      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.0.1-rc.1" } },
+    }, null, 2)}\n`,
+  );
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "alpha" },
+    requestId: "start-min",
+  });
+  const job = await waitJob(handle.origin, cookie, "start-min", "failed");
+  assert.match(
+    job.error?.message ?? "",
+    /uses DSH 0\.0\.1-rc\.1, below the minimum 0\.2\.0-rc\.2 supported by this Spaces version\. Upgrade it in the space settings\./,
+  );
+});
+
+test("a pinned version that is not installed rejects at start", async () => {
+  const home = tempHome();
+  writeProfile(home, "beta");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["beta"],
+      meta: { beta: { displayName: "beta", order: 1000, dshVersion: "0.9.9" } },
+    }, null, 2)}\n`,
+  );
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "beta" },
+    requestId: "start-missing",
+  });
+  const job = await waitJob(handle.origin, cookie, "start-missing", "failed");
+  assert.match(
+    job.error?.message ?? "",
+    /DSH 0\.9\.9 for this space is not installed\. Install it from the space settings\./,
+  );
+});
+
+test("runtime.upgrade previews are rejected as unsupported", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const preview = await mutate(handle.origin, cookie, "preview", {
+    request: { kind: "runtime.upgrade", version: "0.9.9" },
+  });
+  assert.equal(preview.body.ok, false);
+  assert.equal(preview.body.error?.code, "workbench/unsupported");
+});
+
+test("startup aligns the manager's official plugins to the host CLI versions", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: {
+      "@dsh-spaces/plugin": "0.2.0",
+      "@deepseek-ai/dsh-web-app": "0.1.5-rc.1",
+    },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-official-payload-")), "official");
+  installManagerModules(home, payload, payload.packageRoot);
+  const staleWeb = join(home, "profiles", "spaces-hub", "node_modules", "@deepseek-ai", "dsh-web-app");
+  writeFileSync(join(staleWeb, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version: "0.1.5-rc.1" })}\n`);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const specs: string[] = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    pluginAdd: async (addedHome, profile, spec) => {
+      specs.push(spec);
+      const official = spec.match(/^(@deepseek-ai\/[a-z-]+)@(.+)$/);
+      if (official) {
+        const dir = join(addedHome, "profiles", profile, "node_modules", ...official[1]!.split("/"));
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: official[1], version: official[2] })}\n`);
+      }
+      if (spec.includes("dsh-spaces")) {
+        cpSync(payload.packageRoot, join(addedHome, "profiles", profile, "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
+      }
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.deepEqual(specs.filter((spec) => spec.startsWith("@deepseek-ai/")), ["@deepseek-ai/dsh-web-app@0.2.0-rc.2"]);
+  assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));
+});
+
+test("equal manager official plugin versions invoke no install", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-official-eq-")), "equal");
+  installManagerModules(home, payload, payload.packageRoot);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const specs: string[] = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    pluginAdd: async (_addedHome, _profile, spec) => {
+      specs.push(spec);
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(specs.filter((spec) => spec.startsWith("@deepseek-ai/")).length, 0);
+  assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));
+});
+
+test("manager official alignment failure blocks startup and does not start the manager", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: {
+      "@dsh-spaces/plugin": "0.2.0",
+      "@deepseek-ai/dsh-web-app": "0.1.5-rc.1",
+    },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-official-fail-")), "failing");
+  installManagerModules(home, payload, payload.packageRoot);
+  const staleWeb = join(home, "profiles", "spaces-hub", "node_modules", "@deepseek-ai", "dsh-web-app");
+  writeFileSync(join(staleWeb, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version: "0.1.5-rc.1" })}\n`);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const spawned: string[] = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    processRuntime: alignProcessRuntime(spawned),
+    pluginAdd: async (_addedHome, _profile, _spec) => undefined,
+  });
+  const state = await handle.runtime.state();
+  assert.ok(state.reasons.some((reason) => reason.includes("The manager's official DSH plugins could not be aligned with host DSH 0.2.0-rc.2.")));
+  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+  assert.equal(state.managerId && spawned.includes(state.managerId), false);
+});
+
+test("bridge packages declare peer ranges covering the supported DSH minimum", () => {
+  const root = dirname(fileURLToPath(import.meta.url));
+  for (const name of ["view-bridge", "llm-bridge", "browser"]) {
+    const pkg = JSON.parse(
+      readFileSync(join(root, "..", "packages", name, "package.json"), "utf8"),
+    ) as { peerDependencies?: Record<string, string> };
+    for (const [dep, range] of Object.entries(pkg.peerDependencies ?? {})) {
+      if (!dep.startsWith("@deepseek-ai/dsh-")) continue;
+      assert.equal(range, ">=0.2.0-rc.2", `${name} peer ${dep}`);
+    }
+  }
+});
+

@@ -49,6 +49,7 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     generation: 1,
     managed: true,
     needsIsolation: false,
+    dshVersion: null,
     ...partial,
   };
 }

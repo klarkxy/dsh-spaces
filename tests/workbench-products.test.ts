@@ -94,6 +94,7 @@ function space(id: string, extra: Partial<WorkbenchSpace> = {}): WorkbenchSpace 
     generation: 1,
     managed: true,
     needsIsolation: false,
+    dshVersion: null,
     ...extra,
   };
 }

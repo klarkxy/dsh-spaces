@@ -9,13 +9,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 import type { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
 import {
   FULL_SPACES_PACKAGE,
-  UPGRADE_JOURNAL_FILE,
-  UPGRADE_STAGE_DIR,
   WORKBENCH_MAINTENANCE_ERROR,
   WORKBENCH_PLAN_TTL_MS,
   WORKBENCH_PLUGIN_MUTATION_FILE,
@@ -31,14 +29,12 @@ import {
   WorkbenchJobError,
   type WorkbenchJobContext,
 } from "../src/adapters/node/workbench-jobs.ts";
-import { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
 import { ProcessTerminationError } from "../src/adapters/node/terminate-process.ts";
 import { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
 import { CATALOG_CACHE_FILE } from "../src/adapters/node/plugin-catalog.ts";
 import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
 import { listProfilePlugins } from "../src/adapters/node/plugin-ops.ts";
 import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
-import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
 import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
 import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
@@ -337,12 +333,8 @@ test("snapshot create is whole-home, stops owned spaces, and public DTO strips h
   assert.ok(existsSync(join(home, "profiles", "coding")));
 });
 
-test("runtime upgrade of an incompatible version is refused, but install remains a candidate", async () => {
+test("runtime install of an incompatible version remains a candidate", async () => {
   const { maintenance } = harness({ compatible: () => false });
-  await assert.rejects(
-    () => maintenance.preview({ kind: "runtime.upgrade", version: "0.1.5-rc.2" }),
-    matchCode("workbench/unsupported"),
-  );
   const plan = await maintenance.preview({ kind: "runtime.install", version: "0.1.5-rc.2" });
   assert.ok(plan.changes.some((line) => /unverified candidate/i.test(line)));
   const result = await maintenance.execute(plan.id, jobCtx());
@@ -362,38 +354,6 @@ test("lost progress persistence or uncertain child termination keeps the plan op
     assert.equal(state.reinitialized, 0);
     assert.equal(state.maintenance.at(-1), true);
   }
-});
-
-test("upgrade failure with proven live home does not reinitialize the manager", async () => {
-  const ctx = await upgradeHarness();
-  const plan = await ctx.maintenance.preview({ kind: "runtime.upgrade", version: "0.9.9" });
-  assert.equal(plan.scope, "home");
-  await assert.rejects(() => ctx.maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
-  assert.equal(readManifest(ctx.home, "coding").dependencies?.[BASE], "0.1.1-rc.2");
-  assert.equal(ctx.runtimes.current()?.version, "0.1.1-rc.2");
-  assert.equal(existsSync(join(ctx.home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE)), false);
-  assert.deepEqual(ctx.order.filter((item) => item === "reinitialize" || item === "upgrade-fail"), [
-    "upgrade-fail",
-  ]);
-});
-
-test("upgrade failure with leftover journal must not start the manager", async () => {
-  const { maintenance, state, home } = harness({
-    compatible: () => true,
-  });
-  mkdirSync(join(home, UPGRADE_STAGE_DIR), { recursive: true });
-  writeFileSync(
-    join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE),
-    `${JSON.stringify({ phase: "committing", snapshotId: "s", version: "0.9.9", startedAt: "2026-09-12T00:00:00.000Z" })}\n`,
-  );
-  state.upgrade = async () => {
-    throw new Error("commit failed");
-  };
-  const plan = await maintenance.preview({ kind: "runtime.upgrade", version: "0.9.9" });
-  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
-  assert.equal(state.reinitialized, 0);
-  assert.equal(state.maintenance.at(-1), true);
-  assert.equal(existsSync(join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE)), true);
 });
 
 test("cancel is honored before mutation and ignored after the irreversible point", async () => {
@@ -431,17 +391,16 @@ test("cancel is honored before mutation and ignored after the irreversible point
   assert.deepEqual(state2.started, ["coding"]);
 });
 
-test("runtime upgrade execute passes the stored plan id", async () => {
-  const { maintenance, state } = harness();
-  state.upgrade = async (version) => ({
-    version,
-    snapshotId: "11111111-1111-1111-1111-111111111111",
-    profiles: ["coding", "spaces-hub"],
-    official: {},
-  });
-  const plan = await maintenance.preview({ kind: "runtime.upgrade", version: "0.1.5-rc.1" });
-  await maintenance.execute(plan.id, jobCtx());
-  assert.equal(state.lastUpgradePlanId, plan.id);
+test("runtime upgrade plans are rejected as unsupported", async () => {
+  const { maintenance } = harness();
+  await assert.rejects(
+    () =>
+      maintenance.preview({
+        kind: "runtime.upgrade",
+        version: "0.1.5-rc.1",
+      } as never),
+    matchCode("workbench/unsupported"),
+  );
 });
 
 test("plugin mutation failure keeps diagnostic files, stops the target, and does not fake a manifest rollback", async () => {
@@ -702,8 +661,6 @@ interface HarnessState {
   onStop?: () => void;
   stopAllImpl?: () => Promise<void>;
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
-  lastUpgradePlanId?: string;
-  upgrade?: (version: string, planId?: string) => Promise<{ version: string; snapshotId: string; profiles: string[]; official: { base?: string; web?: string } }>;
 }
 
 function harness(overrides: {
@@ -776,14 +733,6 @@ function createMaintenance(
       catalog: async () => ({ versions: [{ version: "0.1.5-rc.2" }], distTags: { next: "0.1.5-rc.2" } }),
       install: async (version: string) => ({ version, bin: "bin.js", dir: home }),
     } as unknown as WorkbenchMaintenancePorts["runtimes"],
-    upgrades: {
-      preview: (version: string) => ({ version, currentVersion: "0.1.5-rc.1", profiles: [] }),
-      upgrade: async (version: string, planId?: string) => {
-        state.lastUpgradePlanId = planId;
-        if (state.upgrade) return state.upgrade(version, planId);
-        throw new Error("upgrade not stubbed");
-      },
-    } as unknown as CoordinatedUpgrade,
     diagnostics: {
       get: (name: string) => ({
         name,
@@ -878,12 +827,6 @@ function snapshotHarness() {
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async (version: string) => ({ version, bin: join(runtimeDir, "bin.js"), dir: runtimeDir }),
     } as unknown as WorkbenchMaintenancePorts["runtimes"],
-    upgrades: {
-      preview: (version: string) => ({ version, profiles: [] }),
-      upgrade: async () => {
-        throw new Error("unused");
-      },
-    } as unknown as CoordinatedUpgrade,
     diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as unknown as DiagnosticsService,
     managerId: () => "spaces-hub",
     assertWritable: () => undefined,
@@ -923,89 +866,6 @@ function snapshotHarness() {
     snapRoot,
     runtime,
     state,
-    maintenance: new WorkbenchMaintenance(ports, { packageSource: "official", fetch: defaultOutlineFetch() }),
-  };
-}
-
-async function upgradeHarness() {
-  const home = tempDir("dsh-spaces-upg-");
-  const snapRoot = tempDir("dsh-spaces-upg-snap-");
-  const runtimeRoot = tempDir("dsh-spaces-upg-rt-");
-  seedUpgradeProfiles(home);
-  const runtimes = new RuntimeStore({
-    root: runtimeRoot,
-    source: () => "official",
-    legacy: () => undefined,
-    run: mockInstallRun(),
-    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
-  });
-  await runtimes.install("0.1.1-rc.2");
-  runtimes.select("0.1.1-rc.2");
-  const snapshots = new SnapshotStore({ home, root: snapRoot });
-  const order: string[] = [];
-  const inner = new CoordinatedUpgrade({
-    home,
-    profiles: () => ["web", "coding"],
-    stopAll: async () => undefined,
-    drainPlugins: async () => undefined,
-    snapshots,
-    runtimes,
-    runtimeDescriptor: () => descriptor(runtimes),
-    runCli: async (_bin, stagedHome, args) => mockUpgradeCli(stagedHome, args),
-    smokeWeb: async () => {
-      order.push("upgrade-fail");
-      throw new Error("smoke failed C:\\\\secret\\\\bin.js");
-    },
-  });
-  const state: HarnessState = {
-    writable: true,
-    status: { web: "running", coding: "running", "spaces-hub": "running" },
-    stopped: [],
-    started: [],
-    stopAll: 0,
-    reinitialized: 0,
-    maintenance: [],
-    order: [],
-    backups: [],
-  };
-  const ports: WorkbenchMaintenancePorts = {
-    home,
-    registry: new ProfileRegistry(home),
-    lock: { run: async (_label, action) => action() } as HomeOperationLock,
-    snapshots: executorFromStore(snapshots),
-    runtimes,
-    upgrades: inner,
-    diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as unknown as DiagnosticsService,
-    managerId: () => "spaces-hub",
-    assertWritable: () => undefined,
-    validateSpace: () => undefined,
-    statusOf: (spaceId: string) => state.status[spaceId] ?? "stopped",
-    ownedSpaceIds: () => ["web", "coding", "spaces-hub"],
-    stopSpace: async (spaceId: string) => {
-      state.stopped.push(spaceId);
-      state.status[spaceId] = "stopped";
-    },
-    stopAll: async () => {
-      state.stopAll += 1;
-    },
-    startSpace: async (spaceId: string) => {
-      state.started.push(spaceId);
-    },
-    currentRuntime: () => descriptor(runtimes),
-    reinitializeManager: async () => {
-      order.push("reinitialize");
-      state.reinitialized += 1;
-    },
-    setMaintenance: (active: boolean) => {
-      state.maintenance.push(active);
-    },
-    isCompatibleRuntime: (version: string) => version === "0.9.9" || version === "0.1.1-rc.2",
-    observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) }),
-  };
-  return {
-    home,
-    runtimes,
-    order,
     maintenance: new WorkbenchMaintenance(ports, { packageSource: "official", fetch: defaultOutlineFetch() }),
   };
 }
@@ -1159,105 +1019,4 @@ function packumentFetch(packuments: Record<string, object>): MaintenanceFetcher 
       arrayBuffer: async () => new ArrayBuffer(0),
     };
   };
-}
-
-function seedUpgradeProfiles(home: string): void {
-  writeManifest(home, "web", { bundles: [BASE, WEB], dependencies: { [BASE]: "0.1.1-rc.2", [WEB]: "0.1.1-rc.2" } });
-  writeFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "web-bytes\n");
-  writeManifest(home, "coding", {
-    bundles: [BASE, WEB, "dsh-outline"],
-    dependencies: { [BASE]: "0.1.1-rc.2", [WEB]: "0.1.1-rc.2", "dsh-outline": "1.2.3" },
-  });
-  writeFileSync(
-    join(home, "profiles", "coding", "cordis.patch.yml"),
-    `- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('hub/coding/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/coding/storages')\n`,
-  );
-  writeManifest(home, "spaces-hub", {
-    bundles: [BASE, WEB, FULL_SPACES_PACKAGE],
-    dependencies: { [BASE]: "0.1.1-rc.2", [WEB]: "0.1.1-rc.2", [FULL_SPACES_PACKAGE]: "0.2.0" },
-  });
-}
-
-function descriptor(runtimes: RuntimeStore): SnapshotRuntime {
-  const current = runtimes.current();
-  if (!current) throw new Error("no current runtime");
-  const root = resolve(dirname(current.bin), "..", "..", "..", "..");
-  return {
-    version: current.version,
-    root,
-    binRelative: relative(root, current.bin).split(/[/\\]/).join("/"),
-  };
-}
-
-async function mockUpgradeCli(
-  home: string,
-  args: string[],
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  if (args.includes("--dump-config")) {
-    const name = args[args.indexOf("--profile") + 1];
-    if (name === "coding") {
-      return {
-        code: 0,
-        stdout:
-          `- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('hub/coding/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/coding/storages')\n`,
-        stderr: "",
-      };
-    }
-    return { code: 0, stdout: "- id: dsh-web-app\n", stderr: "" };
-  }
-  if (args.includes("plugin") && args.includes("add")) {
-    const name = args[args.indexOf("--profile") + 1];
-    const spec = args.at(-1) ?? "";
-    const at = spec.lastIndexOf("@");
-    const pkg = spec.slice(0, at);
-    const version = spec.slice(at + 1);
-    const manifest = readManifest(home, name);
-    manifest.dependencies = { ...manifest.dependencies, [pkg]: version };
-    writeFileSync(
-      join(home, "profiles", name, "package.json"),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
-    return { code: 0, stdout: "added", stderr: "" };
-  }
-  return { code: 1, stdout: "", stderr: `unexpected ${args.join(" ")}` };
-}
-
-function mockInstallRun(): RunProcessFn {
-  return async (_command, args) => {
-    if (args.includes("install")) {
-      const spec = args.find((item) => item.startsWith("@deepseek-ai/dsh@"));
-      assert.ok(spec);
-      const version = spec.slice("@deepseek-ai/dsh@".length);
-      const prefix = args[args.indexOf("--prefix") + 1];
-      writeCandidate(prefix, version, version === "0.1.1-rc.2" ? version : "0.2.0", version === "0.1.1-rc.2" ? version : "0.2.1");
-      return { code: 0, stdout: "added", stderr: "" };
-    }
-    if (args.includes("--version")) {
-      const bin = args.find((item) => item.endsWith("bin.js")) ?? args[0];
-      const pkg = join(bin, "..", "..", "package.json");
-      const version = (JSON.parse(readFileSync(pkg, "utf8")) as { version: string }).version;
-      return { code: 0, stdout: `dsh ${version}\n`, stderr: "" };
-    }
-    return { code: 1, stdout: "", stderr: "unexpected" };
-  };
-}
-
-function writeCandidate(prefix: string, cli: string, base: string, web: string): void {
-  const pkg = join(prefix, "node_modules", "@deepseek-ai", "dsh");
-  mkdirSync(join(pkg, "lib"), { recursive: true });
-  writeFileSync(join(pkg, "lib", "bin.js"), "console.log('dsh')\n");
-  writeFileSync(
-    join(pkg, "package.json"),
-    `${JSON.stringify({ name: "@deepseek-ai/dsh", version: cli, dependencies: { [BASE]: `^${base}`, [WEB]: `^${web}` } }, null, 2)}\n`,
-  );
-  mkdirSync(join(prefix, "node_modules", "@deepseek-ai", "dsh-base"), { recursive: true });
-  writeFileSync(
-    join(prefix, "node_modules", "@deepseek-ai", "dsh-base", "package.json"),
-    `${JSON.stringify({ name: BASE, version: base }, null, 2)}\n`,
-  );
-  mkdirSync(join(prefix, "node_modules", "@deepseek-ai", "dsh-web-app"), { recursive: true });
-  writeFileSync(
-    join(prefix, "node_modules", "@deepseek-ai", "dsh-web-app", "package.json"),
-    `${JSON.stringify({ name: WEB, version: web }, null, 2)}\n`,
-  );
 }

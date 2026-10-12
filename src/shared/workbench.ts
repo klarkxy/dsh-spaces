@@ -70,6 +70,8 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   generation: number;
   managed: boolean;
   needsIsolation: boolean;
+  /** Exact pinned DSH runtime version; null for the manager, which follows the host CLI. */
+  dshVersion: string | null;
 }
 
 export interface WorkbenchState {
@@ -157,7 +159,7 @@ export type WorkbenchPlanRequest =
   | { kind: 'plugin.cleanup-manager'; spaceId: string }
   | { kind: 'snapshot.create' }
   | { kind: 'snapshot.delete'; snapshotId: string }
-  | { kind: 'runtime.install' | 'runtime.upgrade'; version: string }
+  | { kind: 'runtime.install'; version: string }
   | { kind: 'service.shutdown' };
 
 export interface WorkbenchPlan {

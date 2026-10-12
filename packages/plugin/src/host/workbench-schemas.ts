@@ -76,6 +76,7 @@ export const workbenchSpaceSchema = z
     generation: z.number().int(),
     managed: z.boolean(),
     needsIsolation: z.boolean(),
+    dshVersion: exactVersionSchema.nullable(),
   })
   .strict();
 
@@ -295,7 +296,6 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot.create") }).strict(),
   z.object({ kind: z.literal("snapshot.delete"), snapshotId: snapshotIdSchema }).strict(),
   z.object({ kind: z.literal("runtime.install"), version: exactVersionSchema }).strict(),
-  z.object({ kind: z.literal("runtime.upgrade"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("service.shutdown") }).strict(),
 ]);
 
@@ -314,7 +314,6 @@ export const workbenchPlanSchema = z
       "snapshot.create",
       "snapshot.delete",
       "runtime.install",
-      "runtime.upgrade",
       "service.shutdown",
     ]),
     title: z.string().max(200),

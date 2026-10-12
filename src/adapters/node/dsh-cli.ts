@@ -21,10 +21,10 @@ export const DSH_CLI_SPEC = `${DSH_RUNTIME_PACKAGE}@${DSH_DEFAULT_VERSION}`;
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 let cachedBin: string | undefined;
-let selectedBin: (() => string | undefined) | undefined;
+let selectedBin: ((profile?: string) => string | undefined) | undefined;
 
 /** A persisted selection is authoritative; resolver errors must not trigger a fallback install. */
-export function setSelectedDshResolver(resolver: () => string | undefined): void {
+export function setSelectedDshResolver(resolver: (profile?: string) => string | undefined): void {
   selectedBin = resolver;
 }
 let managedPrefixOverride: string | undefined;
@@ -92,8 +92,8 @@ function probeNpmGlobalRoot(): string | undefined {
   }
 }
 
-export function findDshBin(): string | undefined {
-  return selectedBin ? selectedBin() : findLegacyDshBin();
+export function findDshBin(profile?: string): string | undefined {
+  return selectedBin ? selectedBin(profile) : findLegacyDshBin();
 }
 
 export function findLegacyDshBin(): string | undefined {
@@ -207,8 +207,8 @@ async function doEnsure(): Promise<string> {
   }
 }
 
-export function ensureDshCli(): Promise<string> {
-  const existing = findDshBin();
+export function ensureDshCli(profile?: string): Promise<string> {
+  const existing = findDshBin(profile);
   if (existing) {
     if (cliStatus.state !== "ready" || cliStatus.message !== existing) {
       setCliStatus({ state: "ready", message: existing });
@@ -240,10 +240,10 @@ export function spawnNode(args: string[], options: SpawnOptions = {}): ChildProc
 export async function runDsh(
   dshHome: string,
   args: string[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; profile?: string } = {},
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   const timeoutMs = options.timeoutMs ?? 180_000;
-  const bin = await ensureDshCli();
+  const bin = await ensureDshCli(options.profile);
   return new Promise((resolvePromise, reject) => {
     const child = spawnNode([bin, ...args], {
       env: {
@@ -323,8 +323,8 @@ export function enqueuePlugin<T>(label: string, work: () => Promise<T>): Promise
   return run;
 }
 
-export async function dshVersion(dshHome: string): Promise<string> {
-  const { stdout, stderr, code } = await runDsh(dshHome, ["--version"], { timeoutMs: 20_000 });
+export async function dshVersion(dshHome: string, profile?: string): Promise<string> {
+  const { stdout, stderr, code } = await runDsh(dshHome, ["--version"], { timeoutMs: 20_000, profile });
   const text = `${stdout}\n${stderr}`;
   const match = text.match(/(\d+\.\d+\.\d+(?:-[\w.]+)?)/);
   if (!match) {
@@ -335,9 +335,9 @@ export async function dshVersion(dshHome: string): Promise<string> {
 
 export async function addWebApp(dshHome: string, name: string): Promise<void> {
   await enqueuePlugin(t("queue.pluginAdd", { name }), async () => {
-    const version = await dshVersion(dshHome);
+    const version = await dshVersion(dshHome, name);
     const spec = `@deepseek-ai/dsh-web-app@${version}`;
-    const { stdout, stderr, code } = await runDsh(dshHome, ["plugin", "--profile", name, "add", spec]);
+    const { stdout, stderr, code } = await runDsh(dshHome, ["plugin", "--profile", name, "add", spec], { profile: name });
     if (code !== 0) {
       throw new Error(
         t("errors.pluginAddFailed", { spec, code, detail: (stderr || stdout).slice(0, 800) }),

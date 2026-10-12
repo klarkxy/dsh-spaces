@@ -180,8 +180,8 @@ function addableSpec(dshHome: string, spec: string): string {
  */
 const ARGV_PRESERVING_CLI = "0.1.7-alpha.1";
 
-function selectedCliVersion(): string | undefined {
-  const bin = findDshBin();
+function selectedCliVersion(profile?: string): string | undefined {
+  const bin = findDshBin(profile);
   if (!bin) return undefined;
   for (const path of [join(dirname(bin), "package.json"), join(dirname(bin), "..", "package.json")]) {
     try {
@@ -196,7 +196,7 @@ function selectedCliVersion(): string | undefined {
 
 function archiveAddArgument(dshHome: string, profile: string, target: string): string {
   if (process.platform !== "win32" || !isHubPluginArchive(dshHome, target)) return target;
-  const version = selectedCliVersion();
+  const version = selectedCliVersion(profile);
   if (!version || !semverValid(version) || !semverLt(version, ARGV_PRESERVING_CLI)) return target;
   const spec = relative(profileDir(dshHome, profile), target).replaceAll("\\", "/");
   return `"file:${spec}"`;
@@ -210,7 +210,7 @@ export async function pluginAdd(dshHome: string, name: string, spec: string): Pr
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "add", cliTarget],
-      { timeoutMs: PLUGIN_TIMEOUT_MS },
+      { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
     if (code !== 0) throw pluginError(name, target, code, stdout, stderr);
   });
@@ -228,7 +228,7 @@ export async function pluginRemove(dshHome: string, name: string, packageName: s
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "remove", packageName],
-      { timeoutMs: PLUGIN_TIMEOUT_MS },
+      { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
     if (code !== 0) {
       throw new Error(

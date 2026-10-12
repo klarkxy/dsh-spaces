@@ -114,17 +114,18 @@ test("rejects tags, paths, and shell fragments as install versions", () => {
   assert.equal(isExactRuntimeVersion("1.0.0|id"), false);
 });
 
-test("restored runtime reports snapshot origin, including older system-labelled pointers", async () => {
+test("restored runtime reports snapshot origin, including older system-labelled pointers", () => {
   const base = tempDir("dsh-snapshot-origin-");
   const root = join(base, "runtimes");
   const snapshotRoot = join(base, "snapshots");
   const bin = writeFakeCli(join(snapshotRoot, "backup", "runtime"), "1.2.3");
   const runtime = new RuntimeStore({ root, snapshotRoot, source: () => "official", legacy: () => undefined, run: mockRun() });
-  assert.equal((await runtime.selectExisting({ bin, version: "1.2.3" })).origin, "snapshot");
+  mkdirSync(root, { recursive: true });
   writeFileSync(join(root, "current.json"), JSON.stringify({ bin, version: "1.2.3", origin: "system" }));
   assert.equal(runtime.current()?.origin, "snapshot");
   const outside = writeFakeCli(join(base, "snapshots-other"), "1.2.3");
-  assert.equal((await runtime.selectExisting({ bin: outside, version: "1.2.3" })).origin, "system");
+  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: outside, version: "1.2.3", origin: "system" }));
+  assert.equal(runtime.current()?.origin, "system");
 });
 
 test("current uses legacy when the store has no selection", () => {
@@ -154,18 +155,15 @@ test("install verifies the exact version and does not change current", async () 
   assert.ok(npm.args.includes("@deepseek-ai/dsh@0.1.1-rc.2"));
   assert.ok(!npm.args.includes("@deepseek-ai/dsh@latest"));
   assert.equal(npm.env?.npm_config_registry, npmRegistry("china"));
-  runtime.select("0.1.1-rc.2");
-  const current = runtime.current();
-  assert.ok(current);
-  assert.equal(current.origin, "store");
-  assert.equal(current.version, "0.1.1-rc.2");
-  assert.equal(current.bin, installed.bin);
+  assert.equal(runtime.installedBin("0.1.1-rc.2"), installed.bin);
+  assert.equal(runtime.installedBin("0.2.0"), undefined);
+  assert.equal(runtime.installedBin("latest"), undefined);
 });
 
 test("install failure keeps the previous selection", async () => {
   const { runtime, root } = store();
-  await runtime.install("0.1.1-rc.2");
-  runtime.select("0.1.1-rc.2");
+  const installed = await runtime.install("0.1.1-rc.2");
+  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: installed.bin, version: "0.1.1-rc.2", origin: "store" }));
   const before = runtime.current();
   const failing = store({ root, run: mockRun({ failInstall: true }) }).runtime;
   await assert.rejects(() => failing.install("0.2.0"), /npm failed|exited/);
@@ -202,8 +200,8 @@ test("a damaged stored selection fails instead of falling back", async () => {
     run: mockRun(),
   });
   await runtime.install("0.1.1-rc.2");
-  await runtime.install("0.2.0");
-  runtime.select("0.2.0");
+  const installed = await runtime.install("0.2.0");
+  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: installed.bin, version: "0.2.0", origin: "store" }));
   const recorded = runtime.recordedRef();
   assert.equal(recorded?.version, "0.2.0");
   rmSync(join(root, "versions", "0.2.0"), { recursive: true, force: true });
@@ -275,28 +273,18 @@ test("catalog fetches the user-selected official or china registry", async () =>
   assert.equal(seen[1], npmPackumentUrl("official", "@deepseek-ai/dsh"));
 });
 
-test("catalog retries a dropped registry connection and surfaces the socket cause", async () => {
-  const packument = {
-    "dist-tags": { latest: "0.1.5-rc.1", next: "0.1.5-rc.2" },
-    versions: { "0.1.5-rc.1": {}, "0.1.5-rc.2": {} },
-    time: {
-      "0.1.5-rc.1": "2026-09-10T03:12:53.293Z",
-      "0.1.5-rc.2": "2026-09-10T14:57:10.790Z",
-    },
-  };
+test("catalog makes exactly one fetch attempt and surfaces the failure", async () => {
   let attempts = 0;
-  const { runtime } = store({
-    fetch: async () => {
-      attempts += 1;
-      if (attempts < 3) {
+  await assert.rejects(
+    store({
+      fetch: async () => {
+        attempts += 1;
         throw new TypeError("fetch failed", { cause: new Error("other side closed") });
-      }
-      return { ok: true, status: 200, json: async () => packument };
-    },
-  });
-  const catalog = await runtime.catalog();
-  assert.equal(attempts, 3);
-  assert.equal(preferredTaggedVersion(catalog), "0.1.5-rc.1");
+      },
+    }).runtime.catalog(),
+    /other side closed/,
+  );
+  assert.equal(attempts, 1);
 
   let notFound = 0;
   await assert.rejects(
@@ -309,21 +297,12 @@ test("catalog retries a dropped registry connection and surfaces the socket caus
     /HTTP 404/,
   );
   assert.equal(notFound, 1);
-
-  await assert.rejects(
-    store({
-      fetch: async () => {
-        throw new TypeError("fetch failed", { cause: new Error("other side closed") });
-      },
-    }).runtime.catalog(),
-    /other side closed/,
-  );
 });
 
 test("npm non-zero exit is rejected even when a complete package is left behind", async () => {
   const { runtime, root } = store();
-  await runtime.install("0.1.1-rc.2");
-  runtime.select("0.1.1-rc.2");
+  const installed = await runtime.install("0.1.1-rc.2");
+  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: installed.bin, version: "0.1.1-rc.2", origin: "store" }));
   const before = runtime.current();
   const failing = store({
     root,
@@ -341,46 +320,19 @@ test("probe non-zero exit is rejected even when stdout contains the version", as
   assert.equal(runtime.current(), undefined);
   assert.deepEqual(runtime.inventory().installed, []);
   assert.deepEqual(leftoverStaging(root), []);
-
-  const prefix = tempDir("dsh-existing-");
-  const bin = writeFakeCli(prefix, "0.1.1-rc.2");
-  await assert.rejects(
-    () => runtime.selectExisting({ bin, version: "0.1.1-rc.2" }),
-    /Could not parse|无法解析/,
-  );
-  assert.equal(runtime.current(), undefined);
 });
 
-test("explicit managed or system current is invalid if package.json is gone", async () => {
+test("explicit managed or system current is invalid if package.json is gone", () => {
   const home = tempDir("dsh-managed-");
   const prefix = join(home, "dsh-spaces", "dsh-cli");
   const bin = writeFakeCli(prefix, "0.1.1-rc.2");
-  const { runtime } = store({
+  const { runtime, root } = store({
     legacy: { bin: writeFakeCli(tempDir("dsh-legacy-"), "0.1.0"), version: "0.1.0" },
   });
-  const selected = await runtime.selectExisting({ bin, version: "0.1.1-rc.2" });
-  assert.equal(selected.origin, "managed");
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "current.json"), JSON.stringify({ bin, version: "0.1.1-rc.2", origin: "managed" }));
   assert.equal(runtime.current()?.version, "0.1.1-rc.2");
   rmSync(join(prefix, "node_modules", "@deepseek-ai", "dsh", "package.json"));
   assert.throws(() => runtime.current(), /metadata is unreadable/);
   assert.throws(() => runtime.inventory(), /metadata is unreadable/);
-});
-
-test("selectExisting records a trusted path after verifying the real version", async () => {
-  const prefix = tempDir("dsh-existing-");
-  const bin = writeFakeCli(prefix, "0.1.1-rc.2");
-  const { runtime } = store({ run: mockRun() });
-  const selected = await runtime.selectExisting({ bin, version: "0.1.1-rc.2" });
-  assert.equal(selected.origin, "system");
-  assert.equal(selected.bin, bin);
-  assert.equal(runtime.current()?.bin, bin);
-  assert.ok(existsSync(bin));
-  await assert.rejects(
-    () => runtime.selectExisting({ bin, version: "9.9.9" }),
-    /reports 0\.1\.1-rc\.2, expected 9\.9\.9/,
-  );
-  await assert.rejects(
-    () => runtime.selectExisting({ bin: join(prefix, "missing.js"), version: "0.1.1-rc.2" }),
-    /not found/,
-  );
 });

@@ -28,8 +28,6 @@ export type CrashDriverFlags = {
   controlToolRoot?: string;
   snapshotRoot?: string;
   markerDir?: string;
-  upgradeHook?: string;
-  upgradeAction?: string;
   snapshotHook?: string;
   snapshotAction?: string;
   port?: number;
@@ -69,8 +67,6 @@ export function parseCrashDriverArgs(argv: string[]): CrashDriverFlags {
       "--marker-dir": "markerDir",
     };
     const textFlag: Record<string, keyof CrashDriverFlags> = {
-      "--upgrade-hook": "upgradeHook",
-      "--upgrade-action": "upgradeAction",
       "--snapshot-hook": "snapshotHook",
       "--snapshot-action": "snapshotAction",
     };
@@ -106,39 +102,6 @@ function refuseProductionHome(home: string): void {
   }
 }
 
-function writeMarker(markerDir: string | undefined, payload: Record<string, unknown>): void {
-  if (!markerDir) throw new Error("marker-dir is required when an upgrade hook fires");
-  mkdirSync(markerDir, { recursive: true });
-  writeFileSync(join(markerDir, "fault-marker.json"), `${JSON.stringify(payload, null, 2)}\n`);
-  appendFileSync(join(markerDir, "fault-marker.jsonl"), `${JSON.stringify(payload)}\n`);
-}
-
-function attachUpgradeInject(
-  upgrades: { opts?: { inject?: (op: string) => void } },
-  flags: CrashDriverFlags,
-): void {
-  const hook = String(flags.upgradeHook ?? "").trim();
-  if (!hook) return;
-  const action = String(flags.upgradeAction ?? "throw").trim();
-  if (!upgrades || typeof upgrades !== "object") throw new Error("ports.upgrades missing");
-  const opts = upgrades.opts;
-  if (!opts || typeof opts !== "object") {
-    throw new Error("CoordinatedUpgrade.opts missing; the documented test seam is unavailable");
-  }
-  opts.inject = (op: string) => {
-    if (op !== hook) return;
-    writeMarker(flags.markerDir, {
-      kind: "upgrade",
-      op,
-      pid: process.pid,
-      action,
-      at: new Date().toISOString(),
-    });
-    if (action === "kill") process.kill(process.pid, "SIGKILL");
-    throw new Error(`fault inject ${op}`);
-  };
-}
-
 export async function startCrashDriver(flags: CrashDriverFlags) {
   if (!flags.home) throw new Error("--home is required");
   refuseProductionHome(flags.home);
@@ -160,7 +123,6 @@ export async function startCrashDriver(flags: CrashDriverFlags) {
     snapshotRoot: flags.snapshotRoot,
     controlToolRoot: flags.controlToolRoot,
     createMaintenance: (ports) => {
-      attachUpgradeInject(ports.upgrades as unknown as { opts?: { inject?: (op: string) => void } }, flags);
       return new WorkbenchMaintenance(ports, {
         log: (operation, error) => {
           const detail = String(error instanceof Error ? error.message : error ?? "").slice(0, 4000);

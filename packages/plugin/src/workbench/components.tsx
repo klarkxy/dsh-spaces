@@ -670,14 +670,6 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
           >
             {t(locale, "runtime.install")}
           </button>
-          <button
-            type="button"
-            className="dsh-wb-btn"
-            disabled={!writable || runtime.current || !runtime.compatible}
-            onClick={() => controller.preview({ kind: "runtime.upgrade", version: runtime.version })}
-          >
-            {t(locale, "runtime.upgrade")}
-          </button>
         </div>
       ))}
     </>

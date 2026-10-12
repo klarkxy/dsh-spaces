@@ -28,7 +28,6 @@ import {
 import { isHubPluginArchive, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
 import { listProfilePlugins } from "../src/adapters/node/plugin-ops.ts";
 import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
-import type { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
 import type { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
 import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
@@ -218,12 +217,6 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async () => ({ version: runtime.version, bin: "bin.js", dir: home }),
     } as unknown as WorkbenchMaintenancePorts["runtimes"],
-    upgrades: {
-      preview: () => ({ version: runtime.version, profiles: [] }),
-      upgrade: async () => {
-        throw new Error("unused");
-      },
-    } as unknown as CoordinatedUpgrade,
     diagnostics: {
       get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: false }),
     } as unknown as DiagnosticsService,

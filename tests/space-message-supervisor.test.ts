@@ -13,6 +13,10 @@ function profile(home: string, id: string, manager = false) {
   const packages = ['@deepseek-ai/dsh-web-app', manager ? '@dsh-spaces/plugin' : '@dsh-spaces/view-bridge'];
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: Object.fromEntries(packages.map(p => [p, '0.2.0-rc.2'])), dsh: { profile: { bundles: packages } } }));
   writeFileSync(join(root, 'cordis.patch.yml'), '- id: storage-json\n  config:\n    root: isolated\n');
+  if (manager) {
+    const web = join(root, 'node_modules', '@deepseek-ai', 'dsh-web-app'); mkdirSync(web, { recursive: true });
+    writeFileSync(join(web, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-web-app', version: '0.2.0-rc.2' }));
+  }
 }
 function call(child: ChildProcess, data: Record<string, unknown>): Promise<any> {
   const id = randomUUID();
@@ -27,6 +31,10 @@ test('real Supervisor launches two Cordis Space services, routes IPC, and dispos
   const cli = join(home, 'cli'); mkdirSync(join(cli, 'lib'), { recursive: true });
   writeFileSync(join(cli, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '0.2.0-rc.2' }));
   writeFileSync(join(cli, 'lib', 'bin.js'), '');
+  for (const name of ['dsh-base', 'dsh-web-app']) {
+    const dir = join(cli, 'node_modules', '@deepseek-ai', name); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@deepseek-ai/${name}`, version: '0.2.0-rc.2' }));
+  }
   profile(home, 'alpha'); profile(home, 'beta');
   const children = new Map<string, ChildProcess>();
   const handle = await createWorkbenchSupervisor({

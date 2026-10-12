@@ -29,6 +29,7 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
     case "controller.shutdown":
     case "snapshot.restore":
     case "config.restore":
+    case "runtime.upgrade":
       throw new WorkbenchPublicError("workbench/unsupported");
     case "service.shutdown":
       expectKeys(body, ["kind"]);
@@ -58,7 +59,6 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(body, ["kind", "snapshotId"]);
       return { kind, snapshotId: parseId(body.snapshotId) };
     case "runtime.install":
-    case "runtime.upgrade":
       expectKeys(body, ["kind", "version"]);
       return { kind, version: parseId(body.version) };
     default:

@@ -20,7 +20,6 @@ import { fileURLToPath } from "node:url";
 import { after, afterEach, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { build } from "esbuild";
-import { CoordinatedUpgrade } from "../src/adapters/node/coordinated-upgrade.ts";
 import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
 import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
 import { retargetTree, SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
@@ -86,60 +85,6 @@ test("missing snapshot worker keeps pending restore evidence", async () => {
   const missing = new SnapshotExecutor({ home, root, workerFile: missingWorker });
   await assert.rejects(() => missing.delete("59ca7cee-0c06-4610-bc95-e86849247cef"), /Snapshot worker exited|Cannot find|ENOENT|not found/i);
   assert.deepEqual(readFileSync(pendingPath), pendingBytes);
-});
-
-test("upgrade copy/rm through the snapshot worker keeps heartbeat and the same commit result", async (t) => {
-  const worker = requireWorker();
-  const ctx = await upgradeHarness(t, worker);
-  fillTree(join(ctx.home, "profiles", "coding", "payload"), FILE_COUNT);
-  const pulse = await withHeartbeat(async () => {
-    const result = await ctx.upgrade.upgrade("0.9.9");
-    assert.equal(result.version, "0.9.9");
-  });
-  assert.equal(readFileSync(join(ctx.home, "profiles", "web", "cordis.patch.yml"), "utf8"), "web-bytes\n");
-  assert.equal(JSON.parse(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8")).dependencies[BASE], "0.2.0");
-  assert.equal(existsSync(join(ctx.home, ".dsh-spaces-upgrade")), false);
-  assert.equal(existsSync(join(ctx.home, "profiles", "coding", "payload", "b0", "f0.dat")), true);
-  if (pulse.elapsed >= STALL_MS) {
-    assert.ok(pulse.during > 0, `upgrade tree copy/rm blocked HTTP (${pulse.elapsed}ms, hits=${pulse.during})`);
-  }
-});
-
-test("worker copy failure leaves live profiles untouched", async (t) => {
-  const worker = requireWorker();
-  const ctx = await upgradeHarness(t, worker);
-  const outside = fakeDir(t, "dsh-copy-outside-");
-  writeFileSync(join(outside, "secret.txt"), "nope\n");
-  linkDir(outside, join(ctx.home, "profiles", "coding", "node_modules", "escaped"));
-  const fakeSnap = {
-    id: "59ca7cee-0c06-4610-bc95-e86849247cef",
-    createdAt: new Date().toISOString(),
-    reason: "upgrade",
-    home: ctx.home,
-    runtimeVersion: "0.1.1-rc.2",
-    binRelative: "node_modules/@deepseek-ai/dsh/lib/bin.js",
-    profiles: ["coding", "headless", "web"],
-    size: 1,
-    presence: {
-      profiles: true,
-      sessions: false,
-      storages: false,
-      hub: false,
-      "settings.yaml": false,
-      "cordis.patch.yml": false,
-    },
-  };
-  ctx.upgrade = makeUpgrade(ctx, {
-    workerFile: worker,
-    snapshots: {
-      create: async () => fakeSnap,
-      pendingRestore: () => undefined,
-      preview: () => fakeSnap,
-      runtimeBin: () => ctx.runtimes.current()!.bin,
-    },
-  });
-  await assert.rejects(() => ctx.upgrade.upgrade("0.9.9"), /External link is not in snapshot scope/);
-  assert.equal(JSON.parse(readFileSync(join(ctx.home, "profiles", "coding", "package.json"), "utf8")).dependencies[BASE], "0.1.1-rc.2");
 });
 
 test("runtime leftover staging rm keeps the HTTP heartbeat and still installs", async () => {
@@ -430,107 +375,6 @@ function fillTree(root: string, files: number): void {
   }
 }
 
-interface Harness {
-  home: string;
-  snapshots: SnapshotStore | SnapshotExecutor;
-  runtimes: RuntimeStore;
-  upgrade: CoordinatedUpgrade;
-  drained: boolean;
-  stopped: boolean;
-}
-
-async function upgradeHarness(t: { after: (fn: () => void) => void }, worker?: string): Promise<Harness> {
-  const home = fakeDir(t, "dsh-home-");
-  const snapRoot = fakeDir(t, "dsh-snaps-");
-  const runtimeRoot = fakeDir(t, "dsh-runtime-");
-  seedProfiles(home);
-  const runtimes = new RuntimeStore({
-    root: runtimeRoot,
-    source: () => "official",
-    legacy: () => undefined,
-    run: mockInstallRun(),
-    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
-  });
-  await runtimes.install("0.1.1-rc.2");
-  runtimes.select("0.1.1-rc.2");
-  const snapshots = worker
-    ? new SnapshotExecutor({ home, root: snapRoot, workerFile: worker })
-    : new SnapshotStore({ home, root: snapRoot });
-  const ctx: Harness = {
-    home,
-    snapshots,
-    runtimes,
-    upgrade: undefined as unknown as CoordinatedUpgrade,
-    drained: false,
-    stopped: false,
-  };
-  ctx.upgrade = makeUpgrade(ctx, worker ? { workerFile: worker } : {});
-  return ctx;
-}
-
-function makeUpgrade(ctx: Harness, overrides: Partial<ConstructorParameters<typeof CoordinatedUpgrade>[0]> = {}) {
-  return new CoordinatedUpgrade({
-    home: ctx.home,
-    profiles: () => ["web", "coding", "headless"],
-    stopAll: async () => {
-      ctx.stopped = true;
-    },
-    drainPlugins: async () => {
-      ctx.drained = true;
-    },
-    snapshots: ctx.snapshots,
-    runtimes: ctx.runtimes,
-    runtimeDescriptor: () => descriptor(ctx.runtimes),
-    runCli: async (_bin, stagedHome, args) => mockCli(stagedHome, args),
-    smokeWeb: async ({ home }) => {
-      assert.ok(home.includes(".dsh-spaces-upgrade"));
-    },
-    ...overrides,
-  });
-}
-
-function descriptor(runtimes: RuntimeStore): SnapshotRuntime {
-  const current = runtimes.current();
-  if (!current) throw new Error("no current runtime");
-  const root = resolve(dirname(current.bin), "..", "..", "..", "..");
-  return {
-    version: current.version,
-    root,
-    binRelative: relative(root, current.bin).split(/[/\\]/).join("/"),
-  };
-}
-
-async function mockCli(home: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  if (args.includes("--dump-config")) {
-    const name = args[args.indexOf("--profile") + 1];
-    if (name === "notes") {
-      return {
-        code: 0,
-        stdout:
-          "- id: session-persistence-jsonl\n  config:\n    root: sessions\n- id: storage-json\n  config:\n    root: storages\n",
-        stderr: "",
-      };
-    }
-    if (name === "web") return { code: 0, stdout: "- id: dsh-web-app\n", stderr: "" };
-    return { code: 0, stdout: isolationDump(name), stderr: "" };
-  }
-  if (args.includes("plugin") && args.includes("add")) {
-    const name = args[args.indexOf("--profile") + 1];
-    const spec = args.at(-1) ?? "";
-    const at = spec.lastIndexOf("@");
-    const pkg = spec.slice(0, at);
-    const version = spec.slice(at + 1);
-    const dir = join(home, "profiles", name);
-    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
-      dependencies?: Record<string, string>;
-    };
-    manifest.dependencies = { ...manifest.dependencies, [pkg]: version };
-    writeFileSync(join(dir, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    return { code: 0, stdout: "added", stderr: "" };
-  }
-  return { code: 1, stdout: "", stderr: `unexpected ${args.join(" ")}` };
-}
-
 function mockInstallRun(): RunProcessFn {
   return async (_command, args) => {
     if (args.includes("install")) {
@@ -550,37 +394,6 @@ function mockInstallRun(): RunProcessFn {
     }
     return { code: 1, stdout: "", stderr: "unexpected" };
   };
-}
-
-function seedProfiles(home: string): void {
-  writeProfile(home, "web", {
-    bundles: [BASE, WEB],
-    dependencies: { [BASE]: "0.1.1-rc.2", [WEB]: "0.1.1-rc.2" },
-    patch: "web-bytes\n",
-  });
-  writeProfile(home, "coding", {
-    bundles: [BASE, WEB, "dsh-outline"],
-    dependencies: { [BASE]: "0.1.1-rc.2", [WEB]: "0.1.1-rc.2", "dsh-outline": "1.2.3" },
-    patch: isolationPatch("coding"),
-  });
-  writeProfile(home, "headless", {
-    bundles: [BASE],
-    dependencies: { [BASE]: "0.1.1-rc.2" },
-  });
-}
-
-function writeProfile(
-  home: string,
-  name: string,
-  opts: { bundles: string[]; dependencies: Record<string, string>; patch?: string },
-): void {
-  const dir = join(home, "profiles", name);
-  mkdirSync(join(dir, "node_modules"), { recursive: true });
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ dependencies: opts.dependencies, dsh: { profile: { bundles: opts.bundles } } }, null, 2)}\n`,
-  );
-  if (opts.patch !== undefined) writeFileSync(join(dir, "cordis.patch.yml"), opts.patch);
 }
 
 function writeCandidate(prefix: string, cli: string, base: string, web: string): string {
@@ -609,14 +422,6 @@ function writeCandidate(prefix: string, cli: string, base: string, web: string):
   return bin;
 }
 
-function isolationPatch(name: string): string {
-  return `- id: session-persistence-jsonl\n  config:\n    root: !!js dshHomePath('hub/${name}/sessions')\n- id: storage-json\n  config:\n    root: !!js dshHomePath('hub/${name}/storages')\n`;
-}
-
-function isolationDump(name: string): string {
-  return isolationPatch(name);
-}
-
 function linkDir(target: string, dest: string): void {
   mkdirSync(dirname(dest), { recursive: true });
   if (process.platform === "win32") {
@@ -624,12 +429,6 @@ function linkDir(target: string, dest: string): void {
     return;
   }
   symlinkSync(relative(dirname(dest), target) || ".", dest);
-}
-
-function fakeDir(t: { after: (fn: () => void) => void }, prefix: string): string {
-  const dir = fakeDirPath(prefix);
-  t.after(() => rmChecked(dir));
-  return dir;
 }
 
 function fakeDirPath(prefix: string): string {

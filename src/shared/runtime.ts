@@ -5,6 +5,8 @@ export const DSH_RUNTIME_PACKAGE = "@deepseek-ai/dsh";
 export const DSH_DEFAULT_VERSION = "0.2.0-rc.2";
 /** Official stable channel used when browsing the runtime catalog. */
 export const DSH_DEFAULT_CHANNEL = "latest";
+/** Oldest DSH runtime a space may be pinned to and still start. */
+export const SPACES_MIN_DSH_VERSION = "0.2.0-rc.2";
 
 /** Where the active CLI binary came from. Independent of npm dist-tags. */
 export type RuntimeOrigin = "store" | "managed" | "system" | "snapshot";

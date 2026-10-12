@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -163,6 +163,31 @@ test("pluginAdd error keeps generic dsh stderr and the pnpm stdout tail", async 
         return true;
       },
     );
+  } finally {
+    setSelectedDshResolver(() => undefined);
+    resetDshBinCache();
+  }
+});
+
+test("pluginAdd resolves the pinned runtime bin of the target space", async () => {
+  const dir = home();
+  writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
+  const captureA = join(dir, "argv-a.json");
+  const captureB = join(dir, "argv-b.json");
+  const binA = join(dir, "fake-a.cjs");
+  const binB = join(dir, "fake-b.cjs");
+  for (const [bin, capture] of [[binA, captureA], [binB, captureB]] as const) {
+    writeFileSync(bin, `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));`);
+  }
+  setSelectedDshResolver((profile) => profile === "coding" ? binA : binB);
+  resetDshBinCache();
+  try {
+    await pluginAdd(dir, "coding", "dsh-outline@1.2.3");
+    assert.deepEqual(
+      JSON.parse(readFileSync(captureA, "utf8")),
+      ["plugin", "--profile", "coding", "add", "dsh-outline@1.2.3"],
+    );
+    assert.equal(existsSync(captureB), false);
   } finally {
     setSelectedDshResolver(() => undefined);
     resetDshBinCache();

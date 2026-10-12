@@ -21,7 +21,7 @@ function write(path: string, value: unknown): void {
   writeFileSync(path, typeof value === "string" ? value : JSON.stringify(value));
 }
 function row(id: string): WorkbenchSpace {
-  return { id, displayName: id, isHost: false, hasWebApp: true, isolation: "verified", icon: "box", status: "stopped", generation: 1, managed: true, needsIsolation: false };
+  return { id, displayName: id, isHost: false, hasWebApp: true, isolation: "verified", icon: "box", status: "stopped", generation: 1, managed: true, needsIsolation: false, dshVersion: null };
 }
 function document(packages = [
   { name: "alpha", version: "1.0.0", source: "npm" },

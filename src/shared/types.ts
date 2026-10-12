@@ -6,6 +6,8 @@ export interface SpaceMeta {
   displayName: string;
   icon?: string;
   order: number;
+  /** Exact DSH runtime version this space is pinned to. */
+  dshVersion?: string;
 }
 
 export interface ProfileRecord {

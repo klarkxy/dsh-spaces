@@ -61,7 +61,7 @@ export class PatchWriter {
 }
 
 export async function dumpConfig(dshHome: string, name: string): Promise<string> {
-  return runDsh(dshHome, ["--profile", name, "--dump-config"], { timeoutMs: 30_000 }).then(
+  return runDsh(dshHome, ["--profile", name, "--dump-config"], { timeoutMs: 30_000, profile: name }).then(
     ({ stdout, stderr, code }) => {
       if (code !== 0) {
         throw new PatchVerifyError(t("errors.dumpConfigFailed", { code, detail: stderr.slice(0, 400) }));

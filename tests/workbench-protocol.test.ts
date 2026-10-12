@@ -38,6 +38,7 @@ const space = (id: string, generation = 1): WorkbenchRevisionSpace => ({
   status: "stopped",
   managed: true,
   needsIsolation: false,
+  dshVersion: null,
   isHost: id === "hub",
   hasWebApp: true,
 });
@@ -82,6 +83,7 @@ test("revision is deterministic for same-order copies and key permutation", () =
   const keyPermuted: WorkbenchRevisionSpace = {
     hasWebApp: true,
     needsIsolation: false,
+    dshVersion: null,
     managed: true,
     status: "stopped",
     generation: 1,

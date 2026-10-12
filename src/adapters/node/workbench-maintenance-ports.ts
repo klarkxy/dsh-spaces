@@ -1,7 +1,6 @@
 import type { ProfileRegistry } from './profile-registry';
 import type { SnapshotExecutor } from './snapshot-executor';
 import type { RuntimeStore } from './runtime-store';
-import type { CoordinatedUpgrade } from './coordinated-upgrade';
 import type { DiagnosticsService } from './diagnostics';
 import type { HomeOperationLock } from './home-operation-lock';
 import type { ProfileStatus } from '../../shared/types';
@@ -15,7 +14,6 @@ export interface WorkbenchMaintenancePorts {
   lock: HomeOperationLock;
   snapshots: SnapshotExecutor;
   runtimes: RuntimeStore;
-  upgrades: CoordinatedUpgrade;
   diagnostics: DiagnosticsService;
   managerId(): string | null;
   hasUnfinishedPlan?(planId: string): boolean;

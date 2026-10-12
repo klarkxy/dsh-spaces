@@ -38,7 +38,6 @@ import {
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const VERSION_TIMEOUT_MS = 20_000;
 const CATALOG_TIMEOUT_MS = 20_000;
-const CATALOG_ATTEMPTS = 3;
 const BIN_REL = join("node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
 
 export type RunProcessFn = (
@@ -126,7 +125,8 @@ function defaultFetch(url: string, init?: { signal?: AbortSignal; headers?: Reco
 
 /**
  * Installed DSH CLI versions live under `root/versions/<version>`.
- * `select` commits the current pointer after coordinated upgrade checks.
+ * A stored `current.json` pointer is legacy read-only evidence used to pin
+ * spaces to the runtime they actually ran on.
  * This module does not call findDshBin; a stored pointer is never replaced
  * by a cached system/managed lookup.
  */
@@ -184,29 +184,20 @@ export class RuntimeStore {
 
   async catalog(): Promise<RuntimeCatalog> {
     const url = npmPackumentUrl(this.source(), DSH_RUNTIME_PACKAGE);
-    let lastMessage = "unknown error";
-    for (let attempt = 0; attempt < CATALOG_ATTEMPTS; attempt++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), CATALOG_TIMEOUT_MS);
-      try {
-        const response = await this.fetchImpl(url, {
-          signal: controller.signal,
-          headers: { accept: "application/json", "user-agent": "dsh-spaces" },
-        });
-        if (!response.ok) throw new Error(`npm registry HTTP ${response.status}`);
-        return parsePackument(await response.json());
-      } catch (err) {
-        lastMessage = describeFetchError(err);
-        const retryable =
-          !(err instanceof Error && err.name === "AbortError") &&
-          !/^npm registry HTTP 4\d\d$/.test(lastMessage);
-        if (!retryable || attempt === CATALOG_ATTEMPTS - 1) break;
-        await sleep(200 * (attempt + 1));
-      } finally {
-        clearTimeout(timer);
-      }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CATALOG_TIMEOUT_MS);
+    try {
+      const response = await this.fetchImpl(url, {
+        signal: controller.signal,
+        headers: { accept: "application/json", "user-agent": "dsh-spaces" },
+      });
+      if (!response.ok) throw new Error(`npm registry HTTP ${response.status}`);
+      return parsePackument(await response.json());
+    } catch (err) {
+      throw new Error(`failed to fetch ${DSH_RUNTIME_PACKAGE} metadata: ${describeFetchError(err)}`);
+    } finally {
+      clearTimeout(timer);
     }
-    throw new Error(`failed to fetch ${DSH_RUNTIME_PACKAGE} metadata: ${lastMessage}`);
   }
 
   async install(version: string): Promise<InstalledRuntime> {
@@ -228,29 +219,10 @@ export class RuntimeStore {
     return pending;
   }
 
-  select(version: string): RuntimeCurrent {
-    const installed = this.requireInstalled(this.requireVersion(version));
-    return this.commit({
-      version: installed.version,
-      bin: installed.bin,
-      origin: "store",
-    });
-  }
-
-  async selectExisting(ref: RuntimeRef): Promise<RuntimeCurrent> {
-    const version = this.requireVersion(ref.version);
-    const bin = resolve(ref.bin);
-    if (!existsSync(bin)) throw new Error(`runtime binary not found: ${bin}`);
-    const actual = await this.probeVersion(bin);
-    if (actual !== version) {
-      throw new Error(`runtime at ${bin} reports ${actual}, expected ${version}`);
-    }
-    const fromFile = readPackageVersion(bin);
-    if (fromFile !== actual) {
-      throw new Error(`runtime metadata is unreadable: ${bin}`);
-    }
-    const origin = this.originOf(bin);
-    return this.commit({ version: fromFile, bin, origin });
+  /** Bin of an installed `versions/<version>` runtime, if present and intact. */
+  installedBin(version: string): string | undefined {
+    if (!isExactRuntimeVersion(version)) return undefined;
+    return this.readInstalled(version)?.bin;
   }
 
   private versionsDir(): string {
@@ -287,12 +259,6 @@ export class RuntimeStore {
     const actual = readPackageVersion(bin);
     if (actual !== version) return undefined;
     return { version, bin, dir };
-  }
-
-  private requireInstalled(version: string): InstalledRuntime {
-    const installed = this.readInstalled(version);
-    if (!installed) throw new Error(`runtime ${version} is not installed`);
-    return installed;
   }
 
   private readPointer(): CurrentPointer | undefined {
@@ -338,12 +304,6 @@ export class RuntimeStore {
     const normalized = resolve(bin).split(/[/\\]/).join(sep).toLowerCase();
     if (normalized.includes(`${sep}dsh-spaces${sep}dsh-cli${sep}`)) return "managed";
     return "system";
-  }
-
-  private commit(pointer: CurrentPointer): RuntimeCurrent {
-    mkdirSync(this.root, { recursive: true });
-    atomicWrite(this.pointerPath(), `${JSON.stringify(pointer, null, 2)}\n`);
-    return { bin: pointer.bin, version: pointer.version, origin: pointer.origin };
   }
 
   private nodeBin(): string {
@@ -469,10 +429,6 @@ async function renameTree(source: string, destination: string): Promise<void> {
       await new Promise((resolveWait) => setTimeout(resolveWait, 25));
     }
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function describeFetchError(err: unknown): string {

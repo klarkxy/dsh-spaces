@@ -170,7 +170,7 @@ export interface BlueprintWorkbenchPorts {
   llmBridgeAvailable?(): boolean;
   llmAdmitted?(request: LlmApiRequest): Promise<LlmApiResult>;
   llmCatalogObservation?(): { revision: number; digest: string };
-  runtimeBin?(): string | undefined;
+  runtimeBin?(spaceId?: string): string | undefined;
   inspectRuntime?(options: BlueprintRuntimeOptions): Promise<BlueprintRuntimeInspect>;
   composeRuntime?(
     options: BlueprintRuntimeOptions,
@@ -238,7 +238,7 @@ export class BlueprintWorkbench {
     const id = this.requireMutableSpace(spaceId, { mustExist: true });
     const manifest = readProfileManifest(this.ports.home, id);
     const library = readPluginLibrary(this.ports.home);
-    const packages = withBuiltinSources(sourcePackages(this.ports.home, id, manifest, library), manifest, await this.inspectRuntimeSnapshot());
+    const packages = withBuiltinSources(sourcePackages(this.ports.home, id, manifest, library), manifest, await this.inspectRuntimeSnapshot(undefined, id));
     const bundles = sourceBundles(manifest.bundles, packages);
     const patchInfo = describePatch(this.ports.home, id);
     const settingsNamespaces = describeSettings(this.ports.home, id);
@@ -268,7 +268,7 @@ export class BlueprintWorkbench {
     const id = this.requireMutableSpace(input.spaceId, { mustExist: true });
     if (input.formatVersion === 2) {
       const before = sourceFingerprint(this.ports.home, id);
-      const inspected = await this.inspectRuntimeSnapshot();
+      const inspected = await this.inspectRuntimeSnapshot(undefined, id);
       const manifest = readProfileManifest(this.ports.home, id);
       const available = withBuiltinSources(sourcePackages(this.ports.home, id, manifest, readPluginLibrary(this.ports.home)), manifest, inspected);
       let blueprint;
@@ -277,7 +277,7 @@ export class BlueprintWorkbench {
       } catch (error) {
         throw publicError(sanitizePublicMessage(error instanceof Error ? error.message : "Blueprint generation failed."));
       }
-      const rechecked = await this.inspectRuntimeSnapshot();
+      const rechecked = await this.inspectRuntimeSnapshot(undefined, id);
       if (before !== sourceFingerprint(this.ports.home, id) || inspected?.fingerprint !== rechecked?.fingerprint) {
         throw publicError("The space changed while the blueprint was being generated.");
       }
@@ -289,7 +289,7 @@ export class BlueprintWorkbench {
       };
     }
     if (!input.metadata.version) throw publicError("Blueprint v1 requires a metadata version.");
-    const runtime = await this.inspectRuntimeSnapshot();
+    const runtime = await this.inspectRuntimeSnapshot(undefined, id);
     const builtinNames = runtime?.builtinCatalog ?? runtime?.builtinLayers?.map((layer) => layer.name) ?? [];
     if (builtinNames.some((name) => input.selection.packages.includes(name))) {
       throw publicError("Builtin identities require Blueprint format version 2.");
@@ -783,8 +783,8 @@ export class BlueprintWorkbench {
     };
   }
 
-  async hostVersions(_spaceId?: string): Promise<BlueprintHostVersions> {
-    const inspected = await this.inspectRuntimeSnapshot();
+  async hostVersions(spaceId?: string): Promise<BlueprintHostVersions> {
+    const inspected = await this.inspectRuntimeSnapshot(undefined, spaceId);
     const ports = this.portHostVersions();
     return {
       ...ports,
@@ -806,14 +806,14 @@ export class BlueprintWorkbench {
     };
   }
 
-  private runtimeOptions(): BlueprintRuntimeOptions | null {
-    const bin = this.ports.runtimeBin?.();
+  private runtimeOptions(spaceId?: string): BlueprintRuntimeOptions | null {
+    const bin = this.ports.runtimeBin?.(spaceId);
     if (!bin) return null;
     return { home: this.ports.home, bin };
   }
 
-  private async inspectRuntimeSnapshot(blueprint?: Blueprint): Promise<BlueprintRuntimeInspect | null> {
-    const options = this.runtimeOptions();
+  private async inspectRuntimeSnapshot(blueprint?: Blueprint, spaceId?: string): Promise<BlueprintRuntimeInspect | null> {
+    const options = this.runtimeOptions(spaceId);
     if (!options || !this.ports.inspectRuntime) return null;
     if (blueprint) options.builtinPackages = blueprint.packages.filter((pkg) => pkg.source.type === "builtin").map((pkg) => pkg.name);
     try {
@@ -901,7 +901,7 @@ export class BlueprintWorkbench {
     extra?: { force?: boolean },
   ): Promise<string | undefined> {
     if (!extra?.force && patch.length === 0 && blueprint.profile.bundles.length === 0) return undefined;
-    const options = this.runtimeOptions();
+    const options = this.runtimeOptions(spaceId);
     if (!options || !this.ports.composeRuntime) {
       return "Blueprint composition cannot be verified.";
     }
@@ -928,7 +928,7 @@ export class BlueprintWorkbench {
     if (!this.ports.resolveModule) return "Blueprint composition cannot be verified.";
     let inspected: BlueprintRuntimeInspect | null;
     try {
-      inspected = await this.inspectRuntimeSnapshot();
+      inspected = await this.inspectRuntimeSnapshot(undefined, spaceId);
     } catch {
       return INSPECT_RUNTIME_FAILED;
     }

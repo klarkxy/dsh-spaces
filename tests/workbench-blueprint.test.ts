@@ -89,6 +89,7 @@ function space(id: string): WorkbenchSpace {
     generation: 1,
     managed: true,
     needsIsolation: false,
+    dshVersion: null,
   };
 }
 

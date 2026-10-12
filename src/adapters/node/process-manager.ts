@@ -20,7 +20,7 @@ export type KillKind = "term" | "kill";
 
 export interface ProcessRuntime {
   spawn: (args: string[], options: SpawnOptions) => ChildProcess;
-  ensureCli: () => Promise<string>;
+  ensureCli: (profile: string) => Promise<string>;
   prepareHome: (home: string) => Promise<void>;
   fetch: typeof fetch;
   extraEnv?: (name: string) => NodeJS.ProcessEnv;
@@ -64,7 +64,7 @@ const DEFAULT_RUNTIME: ProcessRuntime = {
   spawn: spawnNode,
   ensureCli: ensureDshCli,
   prepareHome: async (home) => {
-    const result = await runDsh(home, ["--profile", "web", "--dump-config"], { timeoutMs: 30_000 });
+    const result = await runDsh(home, ["--profile", "web", "--dump-config"], { timeoutMs: 30_000, profile: "web" });
     if (result.code !== 0) throw new Error(`DSH shared dependencies could not be initialized (exit ${result.code}).`);
   },
   fetch: globalThis.fetch.bind(globalThis),
@@ -423,7 +423,7 @@ export class ProcessManager {
       }
 
       ensureGen();
-      const bin = await this.runtime.ensureCli();
+      const bin = await this.runtime.ensureCli(name);
       ensureGen();
 
       port = await this.reservePort();

@@ -161,7 +161,7 @@ type ResolvedCommand =
   | { kind: "snapshot.restore"; snapshotId: string }
   | { kind: "snapshot.delete"; snapshotId: string }
   | { kind: "config.restore"; spaceId: string; backupId: string }
-  | { kind: "runtime.install" | "runtime.upgrade"; version: string };
+  | { kind: "runtime.install"; version: string };
 
 type PlanStatus = "previewed" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -464,11 +464,6 @@ export class WorkbenchMaintenance {
           const version = stored.command.version;
           return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeInstall(version, ctx)));
         }
-        case "runtime.upgrade": {
-          const version = stored.command.version;
-          const planId = stored.id;
-          return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeUpgrade(version, ctx, planId)));
-        }
       }
     } catch (error) {
       if (uncertainMaintenance(error)) {
@@ -507,8 +502,6 @@ export class WorkbenchMaintenance {
         return this.planSnapshotDelete(id, createdAt, expiresAt, request.snapshotId);
       case "runtime.install":
         return this.planRuntimeInstall(id, createdAt, expiresAt, request.version);
-      case "runtime.upgrade":
-        return this.planRuntimeUpgrade(id, createdAt, expiresAt, request.version);
       default:
         throw new WorkbenchMaintenanceError("workbench/runtime-handoff");
     }
@@ -706,37 +699,6 @@ export class WorkbenchMaintenance {
           : "This version is not marked compatible and remains an unverified candidate.",
       ],
       destructive: false,
-      expiresAt,
-    });
-  }
-
-  private planRuntimeUpgrade(id: string, createdAt: string, expiresAt: string, version: string): StoredPlan {
-    const exact = requireExactVersion(version);
-    if (!this.ports.isCompatibleRuntime(exact)) {
-      throw new WorkbenchMaintenanceError("workbench/unsupported");
-    }
-    let preview;
-    try {
-      preview = this.ports.upgrades.preview(exact);
-    } catch (error) {
-      throw this.fail(error, "upgrades.preview");
-    }
-    const affectedSpaceIds = this.owned();
-    const runningSpaceIds = this.runningOf(affectedSpaceIds);
-    const command: ResolvedCommand = { kind: "runtime.upgrade", version: exact };
-    return this.storeable(id, createdAt, expiresAt, command, {
-      kind: "runtime.upgrade",
-      title: `Upgrade runtime to ${exact}`,
-      scope: "home",
-      affectedSpaceIds,
-      runningSpaceIds,
-      changes: [
-        `Upgrade runtime from ${preview.currentVersion ?? this.currentVersionLabel()} to ${preview.version}.`,
-        "Stop every owned workspace, including the manager.",
-        "Create a whole-home snapshot, stage, smoke, then commit. A failed update stays failed in place.",
-        "Other workspaces are not started automatically after the upgrade.",
-      ],
-      destructive: true,
       expiresAt,
     });
   }
@@ -954,30 +916,6 @@ export class WorkbenchMaintenance {
     const installed = await this.ports.runtimes.install(version);
     ctx.result({ runtimeVersion: installed.version });
     return { runtimeVersion: installed.version };
-  }
-
-  private async runRuntimeUpgrade(version: string, ctx: WorkbenchJobContext, planId: string): Promise<WorkbenchJobResult> {
-    if (!this.ports.isCompatibleRuntime(version)) {
-      throw new WorkbenchMaintenanceError("workbench/unsupported");
-    }
-    return this.withMaintenance(ctx, async () => {
-      ctx.phase("prepare");
-      ctx.cancellable(true);
-      this.throwIfAborted(ctx);
-      ctx.cancellable(false);
-      ctx.message(`Upgrading runtime to ${version}.`);
-      const unsubscribe = this.ports.upgrades.onProgress?.(progress => {
-        ctx.phase(progress.phase);
-        // The phase is a fixed enum; CLI details can contain private paths.
-        ctx.message(`Runtime maintenance: ${progress.phase}.`);
-      });
-      let result;
-      try { result = await this.ports.upgrades.upgrade(version, planId); }
-      finally { unsubscribe?.(); }
-      ctx.phase("done");
-      ctx.result({ runtimeVersion: result.version, snapshotId: result.snapshotId });
-      return { runtimeVersion: result.version, snapshotId: result.snapshotId };
-    });
   }
 
   private async withMaintenance<T>(ctx: WorkbenchJobContext, action: () => Promise<T>): Promise<T> {
@@ -1554,11 +1492,12 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(input, ["kind", "snapshotId"]);
       return { kind, snapshotId: parseSnapshotId(input.snapshotId) };
     }
-    case "runtime.install":
-    case "runtime.upgrade": {
+    case "runtime.install": {
       expectKeys(input, ["kind", "version"]);
       return { kind, version: requireExactVersion(input.version) };
     }
+    case "runtime.upgrade":
+      throw new WorkbenchMaintenanceError("workbench/unsupported");
     case "controller.release":
     case "controller.shutdown":
       throw new WorkbenchMaintenanceError("workbench/unsupported");
@@ -1589,7 +1528,6 @@ function requestFromCommand(command: ResolvedCommand): WorkbenchPlanRequest {
     case "snapshot.delete":
       return { kind: command.kind, snapshotId: command.snapshotId };
     case "runtime.install":
-    case "runtime.upgrade":
       return { kind: command.kind, version: command.version };
   }
 }
