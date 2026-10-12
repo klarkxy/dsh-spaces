@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 test("managed CLI install pins the default official release", () => {
-  assert.equal(DSH_DEFAULT_VERSION, "0.1.7-alpha.1");
+  assert.equal(DSH_DEFAULT_VERSION, "0.2.0-rc.2");
   assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_VERSION}`);
 });
 

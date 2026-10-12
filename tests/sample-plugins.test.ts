@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { create as createTar, extract as extractTar } from "tar";
 import {
   cpSync,
   existsSync,
@@ -178,12 +178,9 @@ function packPlugin(name: string): Buffer {
   const inner = join(staging, "package");
   cpSync(join(FIXTURES, name), inner, { recursive: true });
   const tgz = join(staging, `${name}.tgz`);
-  const packed = spawnSync("tar", ["-czf", tgz, "-C", staging, "package"], {
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  if (packed.status !== 0 || !existsSync(tgz)) {
-    throw new Error(`tar pack ${name} failed: ${packed.stderr || packed.stdout}`);
+  createTar({ gzip: true, file: tgz, cwd: staging, sync: true }, ["package"]);
+  if (!existsSync(tgz)) {
+    throw new Error(`tar pack ${name} failed: no archive written`);
   }
   return readFileSync(tgz);
 }
@@ -344,10 +341,7 @@ async function addFromPackedTarball(home: string, profile: string, spec: string)
 
 function extractNpmTarball(tgz: string, dest: string): void {
   const staging = tempDir("dsh-sample-extract-");
-  const unpacked = spawnSync("tar", ["-xf", tgz, "-C", staging], { encoding: "utf8", windowsHide: true });
-  if (unpacked.status !== 0) {
-    throw new Error(`tar extract failed: ${unpacked.stderr || unpacked.stdout}`);
-  }
+  extractTar({ file: tgz, cwd: staging, sync: true });
   const inner = join(staging, "package");
   mkdirSync(dirname(dest), { recursive: true });
   rmSync(dest, { recursive: true, force: true });

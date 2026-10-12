@@ -20,6 +20,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run check:test-lists
       - run: npm run typecheck
       - run: npm run typecheck:spaces
       - name: Windows dashboard private files, browser boundary and Supervisor lifecycle

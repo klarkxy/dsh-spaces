@@ -363,14 +363,29 @@ test("early exit fails fast without waiting for the ready timeout", async () => 
 
 test("API poll uses per-fetch timeout and a bounded overall wait", async () => {
   const startedAt = Date.now();
+  const fetches: string[] = [];
+  const hangingFetch = ((_input: unknown, init?: RequestInit) => {
+    fetches.push(String(_input));
+    const signal = init?.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      const abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
+    });
+  }) as typeof fetch;
   await withManager(
     async (processes) => {
       await assert.rejects(processes.start("web"), /not ready|didn't open|未就绪/i);
       const elapsed = Date.now() - startedAt;
       assert.ok(elapsed >= 300, `too fast: ${elapsed}`);
-      assert.ok(elapsed < 4_000, `unbounded wait: ${elapsed}`);
+      // A hung fetch that is never timed out would leave start() pending forever;
+      // any rejection proves per-fetch aborts fired. The poll count bounds the
+      // overall wait independent of timer starvation under parallel load.
+      assert.ok(fetches.length >= 1, `no fetch attempted`);
+      assert.ok(fetches.length <= 60, `unbounded polling: ${fetches.length} fetches`);
+      assert.ok(elapsed < 30_000, `unbounded wait: ${elapsed}`);
     },
-    { runtime: runtime("slow-api", { readyTimeoutMs: 800, fetchTimeoutMs: 80, pollMs: 20 }) },
+    { runtime: runtime("slow-api", { readyTimeoutMs: 800, fetchTimeoutMs: 80, pollMs: 20, fetch: hangingFetch }) },
   );
 });
 

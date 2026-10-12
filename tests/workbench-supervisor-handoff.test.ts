@@ -839,7 +839,7 @@ test("failed stop does not transfer; failed persist does not transfer; durable s
   const okJob = await handle.runtime.job("ok-upgrade");
   assert.equal(okJob.status, "succeeded", JSON.stringify({ okJob, lastHandoffError: (runtime as WorkbenchSupervisorRuntime & { lastHandoffError?: string }).lastHandoffError }));
   assert.equal(okJob.phase, "handoff-pending");
-  await waitUntil(() => exited || existsSync(stamp) && readFileSync(stamp, "utf8").trim().length > 0, "handoff commit");
+  await waitUntil(() => exited && existsSync(stamp) && readFileSync(stamp, "utf8").trim().length > 0, "handoff commit");
   assert.equal(okJob.phase, "handoff-pending");
   const commitRaw = readFileSync(stamp, "utf8").trim();
   assert.notEqual(commitRaw, "");
