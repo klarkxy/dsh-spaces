@@ -39,13 +39,13 @@ One Supervisor per Home. Browser tabs and host windows attach to that process wh
 
 See [docs/let-it-crash.md](docs/let-it-crash.md). Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management. Public restore APIs fail explicitly. Remaining unrun CLI/browser items: [tasks/q-coverage.md](tasks/q-coverage.md).
 
-Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Official DSH runtime upgrades are a separate flow; a candidate that never becomes current is a failed prepare, not a restore.
+Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Each space pins an exact DSH version: existing spaces are pinned to the version they run on first start, and new spaces use the host version. Switch a space's runtime from its details — no downgrade, no automatic snapshot; incompatible third-party plugins block the switch and official plugins follow the selected runtime. The manager follows the host CLI.
 
 ## Current architecture (this branch)
 
 Protocol **2**. Management state carries `protocolVersion`, `serviceEpoch`, `revision`, and `availability`. Ordinary writes use `{ serviceEpoch, expectedRevision }`. Old protocol, missing context, or epoch/revision mismatch is rejected. There is no public `controller.acquire` / `controller.release` / `recovery.*` / `snapshot.restore` / `config.restore`.
 
-Shared Node modules for supervisor, jobs, products, and upgrade live under `src/adapters/node`.
+Shared Node modules for supervisor, jobs, products, and runtime live under `src/adapters/node`.
 
 Build lists six immutable components in `lib/supervisor/manifest.json` (schemaVersion 2): Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker. Cold start and pack consume that group. Bootstrap passes `--component-payload` and the same group's plugin / view-bridge / Browser / llm-bridge artifacts plus `--snapshot-worker`. On cold start the Supervisor always selects the group bundled with the host plugin; a previously selected group is reused only when its digest matches. An old Home is never rewritten or migrated.
 
@@ -59,7 +59,7 @@ To upgrade Spaces, install the new host plugin with `dsh plugin --profile web ad
 
 - Node 24 for contributing
 - Package source: China (npmmirror) or official (npmjs / nodejs.org)
-- First install uses `@deepseek-ai/dsh@0.2.0-rc.2`; existing selected runtimes are upgraded explicitly
+- First install uses `@deepseek-ai/dsh@0.2.0-rc.2`. Every space pins an exact DSH version — `0.2.0-rc.2` is the minimum, spaces below it refuse to start — and unused runtimes can be removed in settings
 - Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. Plugin peers on SDK `0.2.0-rc.2` for this repo's build; that is not a CLI allowlist
 
 ## Develop

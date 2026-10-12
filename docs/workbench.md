@@ -20,7 +20,7 @@ Chinese: [中文](#dsh-spaces-工作台).
 - Manager profile `spaces-hub` (or `spaces-hub-2`, …). Ordinary spaces use a 72px rail and their own iframe origin. A failed start keeps the previous view and marks this switch as failed.
 - User-initiated Home backups: **create**, **list**, **delete**. Create stops owned spaces first. That is not restore.
 
-New installations pin official **`0.2.0-rc.2`** (`DSH_DEFAULT_VERSION`). Runtime upgrade previews follow the official **`latest`** dist-tag, resolved to an exact version and pinned. Compatibility is required interfaces, not a permanent rc.1 / rc.2 allowlist.
+New installations pin official **`0.2.0-rc.2`** (`DSH_DEFAULT_VERSION`). Every space pins an exact DSH version: existing spaces are pinned to the version they actually run on first start, and new spaces use the host version. Switching happens from the space's details — downgrades are forbidden, no snapshot is created automatically, third-party plugins that do not support the target block the switch, and official plugins follow the selected runtime. The manager (`spaces-hub`) follows the host CLI. `SPACES_MIN_DSH_VERSION` is `0.2.0-rc.2`; spaces pinned below it refuse to start. Compatibility is required interfaces, not a permanent rc.1 / rc.2 allowlist.
 
 ## Isolated Home vs your Home
 
@@ -140,7 +140,7 @@ Batch: first failure ends that batch. Import records definition / plugin install
 
 Home backups are ordinary management. `snapshot.restore` and `config.restore` stay unsupported. Do not delete user backups to prove restore is gone.
 
-Runtime **预览安装** / **预览升级** follow official **`latest`**, pin the exact version. A candidate that never becomes current is a failed prepare.
+Runtime **预览安装** follows official **`latest`**, resolved to an exact version and installed into the runtime store; installing never switches a space. A space's DSH version changes only through the **预览切换** plan in that space's details — no downgrade, no automatic snapshot, and official plugins are re-aligned to the chosen runtime. **删除** in the runtime tab removes an installed runtime that no space pins.
 
 **Upgrading Spaces:** install the new host plugin with `dsh plugin --profile web add <new tarball>`, shut the service down from the manager UI, and reopen Spaces. The Supervisor selects the host plugin's component group and aligns the manager plugin before it starts; each space's bridges align at space start. Leftover `workbench-upgrade.json` / `.dsh-spaces-upgrade/journal.json` evidence from an interrupted older update still blocks writes.
 

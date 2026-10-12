@@ -6,7 +6,7 @@
 
 初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。
 
-新安装默认固定官方 **`0.2.0-rc.2`**。已有运行时通过正常升级操作更新。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add <完整包路径>` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.2.0-rc.2 web` 启动。
+新安装默认固定官方 **`0.2.0-rc.2`**。每个空间固定一个精确 DSH 版本：已有空间首次启动时固定为其实际运行的版本，新空间默认宿主版本；切换在空间详情中发起（禁止降级，不自动建快照，不兼容的第三方插件会阻止切换，官方插件跟随所选运行时）。管理空间（spaces-hub）跟随宿主 CLI，低于 `0.2.0-rc.2` 的空间拒绝启动；不再使用的运行时可在设置中删除。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add <完整包路径>` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.2.0-rc.2 web` 启动。
 
 现行验收脚本是 `scripts/verify-plugin-standard-install.mjs`（`pnpm run validate:plugin-install`）。当前 0.2 迁移与实际验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。`@dsh-spaces/plugin` **尚未发布到 npm**；现在使用本地预构建包。
 
