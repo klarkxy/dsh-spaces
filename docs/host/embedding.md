@@ -1,6 +1,6 @@
 # Spaces 宿主嵌入合同 / Host embedding contract
 
-状态：2026-09-26 增加官方 Desktop 隔离实验，见 [原生实验记录](../../tasks/native-desktop-acceptance-2026-09-26.md)。2026-09-25 的 Web 首批实现继续保留。基于 Home 看板 PR #16；不是已发布版本或全宿主兼容认证。验收及剩余范围见 [实施记录](implementation.md)。本页取代旧文档中“普通宿主只能跳转到管理工作台”的展示限制，不改变管理权限和故障政策。
+状态：2026-09-26 增加官方 Desktop 隔离实验，见 [原生实验记录](../../tasks/archive/native-desktop-acceptance-2026-09-26.md)。2026-09-25 的 Web 首批实现继续保留。基于 Home 看板 PR #16；不是已发布版本或全宿主兼容认证。验收及剩余范围见 [实施记录](implementation.md)。本页取代旧文档中“普通宿主只能跳转到管理工作台”的展示限制，不改变管理权限和故障政策。
 
 ## 产品边界
 

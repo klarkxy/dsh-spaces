@@ -24,7 +24,7 @@ Windows 上 **没有已依赖的官方只读 API 能把任意 DSH 进程精确�
 
 计划与合同要求：
 
-- 损坏或身份不明：报告无法读取或拒绝相关控制，不猜测清锁，不接管外部实例。**不**进入恢复模式（`tasks/workbench-implementation.md` 现行合同）。
+- 损坏或身份不明：报告无法读取或拒绝相关控制，不猜测清锁，不接管外部实例。**不**进入恢复模式（`tasks/archive/workbench-implementation.md` 现行合同）。
 - `managed=false` 的外部实例只能查看，不能 start/stop/restart/adopt（`tasks/workbench-contract.md`）。
 - 维护停机回调只能停所有权已知的实例，禁止自动强杀（`WorkbenchMaintenancePorts.stopSpace` 注释）。
 - 整 Home 快照/恢复 **已撤销**。不得为清理外部实例而恢复 Home，也不得把恢复当成发现缺口的补救。

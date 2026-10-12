@@ -1,6 +1,6 @@
 # 发布权限与安全边界
 
-状态：安全合同；Windows 私有文件实现与验证进度见 [Windows 修复验收](../../tasks/windows-dashboard-fix-2026-09-26.md)。授权接口见 [api.md](api.md)。本文约束不取代 [现有故障政策](../let-it-crash.md) 和 Home 单写者边界。
+状态：安全合同；Windows 私有文件实现与验证进度见 [Windows 修复验收](../../tasks/archive/windows-dashboard-fix-2026-09-26.md)。授权接口见 [api.md](api.md)。本文约束不取代 [现有故障政策](../let-it-crash.md) 和 Home 单写者边界。
 
 ## 1. 主体与最小权限
 

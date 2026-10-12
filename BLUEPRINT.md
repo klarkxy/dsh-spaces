@@ -11,11 +11,11 @@
 
 DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。`builtin` 表示接收端宿主提供的精确包身份，不会被改成 npm 安装。接收端缺少该包或版本不符时，在写入空间前报告失败。
 
-协议接口、独立使用与 v2 格式见[包说明](packages/blueprint/README.md)和[v2 协议](packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](tasks/blueprint-migration-0.2.md)。下文保留完整 v1 合同。
+协议接口、独立使用与 v2 格式见[包说明](packages/blueprint/README.md)和[v2 协议](packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](tasks/archive/blueprint-migration-0.2.md)。下文保留完整 v1 合同。
 
 ## DSH Spaces 蓝图规范 v1
 
-状态：v1 规范与使用指南。蓝图功能已随 [0.4.0](https://github.com/klarkxy/dsh-spaces/releases/tag/v0.4.0) 发布。验证结果与限制见[蓝图实施记录](tasks/blueprint-implementation.md)及[发布验收记录](tasks/release-0.4.0.md)。
+状态：v1 规范与使用指南。蓝图功能已随 [0.4.0](https://github.com/klarkxy/dsh-spaces/releases/tag/v0.4.0) 发布。验证结果与限制见[蓝图实施记录](tasks/archive/blueprint-implementation.md)及[发布验收记录](tasks/archive/release-0.4.0.md)。
 
 日期：2026-09-21。规范标识：`dsh-blueprint`。JSON 格式版本：`1`。
 
@@ -372,7 +372,7 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 - [minimal.dsh-blueprint.json](docs/examples/blueprints/minimal.dsh-blueprint.json)：上述最小对象。
 - [minimal.share.txt](docs/examples/blueprints/minimal.share.txt)：同一对象的真实 `J` 编码，供解码往返核对。
 - [writing.dsh-blueprint.json](docs/examples/blueprints/writing.dsh-blueprint.json)：主题选择、顺序、配置、本机目录和模型绑定的完整示意。包名、版本和插件配置为虚构教学数据，不是可安装产品或兼容验证记录。
-- [zhuqing.dsh-blueprint.json](docs/examples/blueprints/zhuqing.dsh-blueprint.json)：引用已发布的 `dsh-theme-plugin@0.3.3`，并记录实际制品的 SHA-512 摘要，可用于验证联网安装。实际功能验证范围见[实施记录](tasks/blueprint-implementation.md)；这里不添加未经验证的 `testedWith`。
+- [zhuqing.dsh-blueprint.json](docs/examples/blueprints/zhuqing.dsh-blueprint.json)：引用已发布的 `dsh-theme-plugin@0.3.3`，并记录实际制品的 SHA-512 摘要，可用于验证联网安装。实际功能验证范围见[实施记录](tasks/archive/blueprint-implementation.md)；这里不添加未经验证的 `testedWith`。
 
 写作样例同时列出两个主题包，只有纸张主题进入 `bundles`；运行依赖明确指向该主题。用户选定输出目录和模型后创建新的写作空间。替代主题的互斥声明可保留，但未参与组合不等于当前就发生冲突。
 
@@ -421,7 +421,7 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 | 生成及应用蓝图前后比较保护区 | `web`、其它空间和默认 sessions/storages 不被改写 |
 | 用最终发布制品在干净测试 Home 创建 | 接收者无需手工修改 profile 内部文件；作者实际功能可独立验收 |
 
-这些场景定义验收要求，逐项证据与未验证范围见[实施记录](tasks/blueprint-implementation.md)。文档样例解析和编码往返不等于安装、启动或真实用户流程通过。
+这些场景定义验收要求，逐项证据与未验证范围见[实施记录](tasks/archive/blueprint-implementation.md)。文档样例解析和编码往返不等于安装、启动或真实用户流程通过。
 
 ## 13. 依据
 
@@ -435,4 +435,4 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 - [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)：raw DEFLATE。
 - [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901)：JSON Pointer。
 
-上游资料提供设计背景。当前实现另外针对本机选定的官方运行时验证 patch、模块解析和安装行为；具体版本、真实流程结果及证据限制见[实施记录](tasks/blueprint-implementation.md)，不从上游文档推定兼容性。
+上游资料提供设计背景。当前实现另外针对本机选定的官方运行时验证 patch、模块解析和安装行为；具体版本、真实流程结果及证据限制见[实施记录](tasks/archive/blueprint-implementation.md)，不从上游文档推定兼容性。

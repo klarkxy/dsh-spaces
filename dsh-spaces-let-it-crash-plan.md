@@ -73,7 +73,7 @@
 | `tasks/plugin-management/plan.md` | 普通插件不自动恢复，但整 Home 恢复仍保留；失败项可重试、剩余项可继续 | 从局部约束升级为全局约束；取消整 Home 恢复例外与旧任务续跑 |
 | `tasks/todo.md` | 新段落已取消部分插件恢复，但旧未完成回滚矩阵仍挂起 | 标记恢复类待办已撤销，保留仍有效的安装、错误报告、导入导出与安全测试 |
 | `tasks/workbench-contract.md` | 稳定入口包含恢复页，任务包含中断恢复标记与恢复合同 | 去除恢复命令、状态和工作流；保留安全通信、幂等与操作预览 |
-| `tasks/workbench-jobs-worker.md` | `recovery-required`、全局 hold、`settleRecovery` 和 `recovery.resume` | 改为终态失败/中断记录；不要求恢复后才能继续，不重放旧命令 |
+| `tasks/archive/workbench-jobs-worker.md` | `recovery-required`、全局 hold、`settleRecovery` 和 `recovery.resume` | 改为终态失败/中断记录；不要求恢复后才能继续，不重放旧命令 |
 | `packages/doctor/README.md` | 同时提供诊断、unlock、recover、rollback | 只保留只读诊断与非变更验证的目标；移除恢复、解锁建议和操作入口 |
 | `packages/supervisor/README.md` | 管理器停止后保证救援页、检查并恢复 | 独立控制服务可保留，但不负责复活或修补；仍在线时只报告真实故障 |
 | `src/shared/workbench.ts` | 实际接口含 `recoveryRequired`、恢复状态、快照/配置恢复等命令 | 登记并实施公开接口、客户端、服务端、持久化读法的同步迁移 |
@@ -145,7 +145,7 @@ Documentation completion is not runtime migration completion.
 
 ## 5. 最新插件计划的逐任务修订
 
-针对 `tasks/plugin-management/plan.md`、`task-01-write-scope.md`、`tasks/plan.md`、`tasks/todo.md`：
+针对 `tasks/plugin-management/plan.md`、`task-01-write-scope.md`、`tasks/archive/plan.md`、`tasks/todo.md`：
 
 | 原编号 | 处置 | 修订后的交付定义 |
 |---|---|---|
@@ -428,67 +428,67 @@ Markdown 链接、标题锚点和当前用户命令需独立检查。纯文档�
 | `packages/doctor/README.md` | 重写目标职责 | 只读诊断，恢复/解锁命令与推荐流程退场 |
 | `packages/supervisor/README.md` | 重写目标职责 | 去救援、自愈和错误触发拉起；共享 worker 依赖如实描述 |
 | `packages/view-bridge` 下实际存在的文档 | 范围核查 | 桥失败/失联只展示，独立 origin 安全保留 |
-| `tasks/plan.md` | 混合修订 | 当前入口指向新原则，旧恢复计划不再有效 |
+| `tasks/archive/plan.md` | 混合修订 | 当前入口指向新原则，旧恢复计划不再有效 |
 | `tasks/todo.md` | 唯一活动账本 | D 与 R 分开；取消回滚矩阵，不勾成完成 |
 | `tasks/plugin-management/plan.md` | 逐任务修改 | 本文第 5 节全部要求 |
 | `tasks/plugin-management/task-01-write-scope.md` | 历史证据 | 写入范围测量保留，不为恢复功能留默认复活入口 |
 | `tasks/workbench-contract.md` | 有效合同修订 | 恢复命令/状态/流程退场，安全与幂等保留 |
-| `tasks/workbench-implementation.md` | 混合修订 | 顶部固定需求及当前未完成项更新；时间线保留 |
-| `tasks/workbench-supervisor-worker.md` | 派工/历史分层 | 不再建设管理器复活、救援与自动接管 |
-| `tasks/workbench-controller-worker.md` | 派工/历史分层 | 单写者与身份校验保留，错误恢复和清锁要求撤销 |
-| `tasks/workbench-jobs-worker.md` | 合同和待办修改 | 终态失败，移除 hold/settleRecovery/resume 目标 |
-| `tasks/workbench-maintenance-worker.md` | 派工/历史分层 | 快照/配置恢复/回滚去除，正常变更保留 |
-| `tasks/workbench-maintenance-product-worker.md` | 验收重定向 | 由成功恢复变为正确失败与无额外变更 |
-| `tasks/workbench-maintenance-responsiveness-worker.md` | 分离独立要求 | UI/控制服务响应性测试保留，不保留救援事务 |
-| `tasks/workbench-maintenance-faults-worker.md` | 历史/待办分类 | 旧恢复故障验收作废或被新用例取代，不更改旧结果 |
-| `tasks/workbench-crash-worker.md` | 历史/新验收映射 | kill 后恢复成功不再是通过条件 |
-| `tasks/workbench-doctor-worker.md` | 派工/历史分层 | 离线恢复、对账、回滚、解锁去除 |
-| `tasks/workbench-restore-receipt.md` | 历史证据 | 收据规则不继续成为运行阻塞门槛 |
-| `tasks/workbench-package-upgrade-worker.md` | 派工/历史分层 | 保留显式自升级正常路径，取消失败回滚和冷恢复 |
-| `tasks/workbench-package-acceptance-worker.md` | 验收修改 | 自升级失败报错与无补偿；无虚假成功 |
-| `tasks/workbench-self-update-audit.md` | 审计/待办分层 | 恢复相关缺口标政策取消，安全与正常更新问题保留 |
-| `tasks/workbench-plugin-worker.md` | 派工/历史分层 | 初始化、安装、Host 失败不自动补完或重装 |
-| `tasks/workbench-ui-worker.md` | UI 目标修订 | 错误卡片，删除恢复按钮/流程 |
-| `tasks/workbench-browser-failures-worker.md` | 失败验收修订 | view 失败、失联、刷新不触发恢复；消息认证保留 |
-| `tasks/workbench-desktop-worker.md` | 桌面目标修订 | 常规启停/托盘保留，不恢复崩溃任务 |
-| `tasks/workbench-dual-control-worker.md` | 控制权验收核查 | 双端只读与互斥保留，不把恢复接管当通过目标 |
-| `tasks/workbench-foundation-worker.md` | 历史/待办分层 | 独立入口可以观察错误，不要求救援功能 |
-| `tasks/workbench-documentation-worker.md` | 文档派工修订 | 中英文、命令、状态、旧实现差距同步 |
-| `tasks/workbench-audit.md` | 审计/待办分层 | 取消恢复缺口，保留真实安全与生命周期问题 |
+| `tasks/archive/workbench-implementation.md` | 混合修订 | 顶部固定需求及当前未完成项更新；时间线保留 |
+| `tasks/archive/workbench-supervisor-worker.md` | 派工/历史分层 | 不再建设管理器复活、救援与自动接管 |
+| `tasks/archive/workbench-controller-worker.md` | 派工/历史分层 | 单写者与身份校验保留，错误恢复和清锁要求撤销 |
+| `tasks/archive/workbench-jobs-worker.md` | 合同和待办修改 | 终态失败，移除 hold/settleRecovery/resume 目标 |
+| `tasks/archive/workbench-maintenance-worker.md` | 派工/历史分层 | 快照/配置恢复/回滚去除，正常变更保留 |
+| `tasks/archive/workbench-maintenance-product-worker.md` | 验收重定向 | 由成功恢复变为正确失败与无额外变更 |
+| `tasks/archive/workbench-maintenance-responsiveness-worker.md` | 分离独立要求 | UI/控制服务响应性测试保留，不保留救援事务 |
+| `tasks/archive/workbench-maintenance-faults-worker.md` | 历史/待办分类 | 旧恢复故障验收作废或被新用例取代，不更改旧结果 |
+| `tasks/archive/workbench-crash-worker.md` | 历史/新验收映射 | kill 后恢复成功不再是通过条件 |
+| `tasks/archive/workbench-doctor-worker.md` | 派工/历史分层 | 离线恢复、对账、回滚、解锁去除 |
+| `tasks/archive/workbench-restore-receipt.md` | 历史证据 | 收据规则不继续成为运行阻塞门槛 |
+| `tasks/archive/workbench-package-upgrade-worker.md` | 派工/历史分层 | 保留显式自升级正常路径，取消失败回滚和冷恢复 |
+| `tasks/archive/workbench-package-acceptance-worker.md` | 验收修改 | 自升级失败报错与无补偿；无虚假成功 |
+| `tasks/archive/workbench-self-update-audit.md` | 审计/待办分层 | 恢复相关缺口标政策取消，安全与正常更新问题保留 |
+| `tasks/archive/workbench-plugin-worker.md` | 派工/历史分层 | 初始化、安装、Host 失败不自动补完或重装 |
+| `tasks/archive/workbench-ui-worker.md` | UI 目标修订 | 错误卡片，删除恢复按钮/流程 |
+| `tasks/archive/workbench-browser-failures-worker.md` | 失败验收修订 | view 失败、失联、刷新不触发恢复；消息认证保留 |
+| `tasks/archive/workbench-desktop-worker.md` | 桌面目标修订 | 常规启停/托盘保留，不恢复崩溃任务 |
+| `tasks/archive/workbench-dual-control-worker.md` | 控制权验收核查 | 双端只读与互斥保留，不把恢复接管当通过目标 |
+| `tasks/archive/workbench-foundation-worker.md` | 历史/待办分层 | 独立入口可以观察错误，不要求救援功能 |
+| `tasks/archive/workbench-documentation-worker.md` | 文档派工修订 | 中英文、命令、状态、旧实现差距同步 |
+| `tasks/archive/workbench-audit.md` | 审计/待办分层 | 取消恢复缺口，保留真实安全与生命周期问题 |
 | `tasks/workbench-external-discovery.md` | 边界核查 | 未登记进程只读/不可控边界，不新增恢复接管 |
-| `tasks/workbench-rc2-worker.md` | 历史证据/策略更新 | 历史版本验证保留，与取消永久白名单决策一致 |
-| `tasks/workbench-xp-compatibility-worker.md` | 适配边界核查 | 显式用户选定适配器与故障后自动换实现分开 |
-| `tasks/workbench-demo-video-worker.md` | 分发叙事修订 | 不再演示或宣传救援、恢复、回滚 |
+| `tasks/archive/workbench-rc2-worker.md` | 历史证据/策略更新 | 历史版本验证保留，与取消永久白名单决策一致 |
+| `tasks/archive/workbench-xp-compatibility-worker.md` | 适配边界核查 | 显式用户选定适配器与故障后自动换实现分开 |
+| `tasks/archive/workbench-demo-video-worker.md` | 分发叙事修订 | 不再演示或宣传救援、恢复、回滚 |
 | `tasks/workbench-demo-narration.json` | 文案源修订 | 只修改叙事文本；不冒称已有视频已重制 |
-| `tasks/pluginization-plan.md` | 计划/历史分层 | 取消恢复核心与 Doctor 救援路线 |
-| `tasks/pluginization-core.md` | 合同/历史分层 | 共享错误与管理能力保留，恢复服务目标撤销 |
-| `tasks/pluginization-runtime.md` | 合同/历史分层 | 正常安装与能力检查保留，不故障回退 |
-| `tasks/pluginization-doctor.md` | 计划/历史分层 | 只读诊断替代离线恢复目标 |
-| `tasks/pluginization-lock.md` | 安全边界核查 | 互斥保留，不添加恢复解锁工作流 |
-| `tasks/pluginization-host.md` | Host 目标核查 | 错误传播，去异常后补救接线 |
-| `tasks/pluginization-frontend.md` | UI 目标核查 | 与错误卡片和无恢复命令一致 |
-| `tasks/pluginization-desktop.md` | 桌面目标核查 | 适配一致，正常视图显示不误删 |
-| `tasks/pluginization-bundle.md` | 包职责核查 | 不将恢复模块继续写成必需能力 |
+| `tasks/archive/pluginization-plan.md` | 计划/历史分层 | 取消恢复核心与 Doctor 救援路线 |
+| `tasks/archive/pluginization-core.md` | 合同/历史分层 | 共享错误与管理能力保留，恢复服务目标撤销 |
+| `tasks/archive/pluginization-runtime.md` | 合同/历史分层 | 正常安装与能力检查保留，不故障回退 |
+| `tasks/archive/pluginization-doctor.md` | 计划/历史分层 | 只读诊断替代离线恢复目标 |
+| `tasks/archive/pluginization-lock.md` | 安全边界核查 | 互斥保留，不添加恢复解锁工作流 |
+| `tasks/archive/pluginization-host.md` | Host 目标核查 | 错误传播，去异常后补救接线 |
+| `tasks/archive/pluginization-frontend.md` | UI 目标核查 | 与错误卡片和无恢复命令一致 |
+| `tasks/archive/pluginization-desktop.md` | 桌面目标核查 | 适配一致，正常视图显示不误删 |
+| `tasks/archive/pluginization-bundle.md` | 包职责核查 | 不将恢复模块继续写成必需能力 |
 | `tasks/pluginization-localization.md` | 双语文案核查 | 错误事实，不含修复建议或恢复动作 |
-| `tasks/pluginization-theme-compatibility.md` | 兼容边界核查 | 已知失败如实记录，未知组合允许尝试，不自动换主题 |
-| `tasks/pluginization-themes-worker.md` | 验收/派工核查 | 不为所有主题强行修好后才算空间可用 |
-| `tasks/pluginization-themes-acceptance.md` | 历史证据 | 保留实际成功/失败，不伪造新通过 |
-| `tasks/pluginization-acceptance.md` | 验收/历史分层 | 恢复成功条件被新的故障验收取代 |
-| `tasks/pluginization-trial-acceptance.md` | 历史证据 | 试用结果保留，当前恢复要求撤销 |
-| `tasks/pluginization-distribution.md` | 分发目标修订 | 移除恢复分发要求，保留正常安装测试 |
-| `tasks/pluginization-windows-distribution.md` | 分发/历史分层 | 独立 Doctor 诊断与构建资源同步 |
-| `tasks/plugin-cli-rc2-worker.md` | 版本记录核查 | 保留接口验证事实，不新增长期恢复兼容分支 |
-| `tasks/plugin-standard-install.md` | 计划/验收分层 | 正常安装有效，失败不补装或重建 |
-| `tasks/plugin-distribution-worker.md` | 分发派工核查 | 包元数据、安装说明和错误政策一致 |
-| `tasks/plugin-community-submission.md` | 对外文案核查 | 不宣传恢复、兜底或任意插件兼容 |
-| `tasks/handoff-2026-09-14.md` | 交接更新 | 新原则优先；去恢复资产及回滚待办，版本策略保留 |
+| `tasks/archive/pluginization-theme-compatibility.md` | 兼容边界核查 | 已知失败如实记录，未知组合允许尝试，不自动换主题 |
+| `tasks/archive/pluginization-themes-worker.md` | 验收/派工核查 | 不为所有主题强行修好后才算空间可用 |
+| `tasks/archive/pluginization-themes-acceptance.md` | 历史证据 | 保留实际成功/失败，不伪造新通过 |
+| `tasks/archive/pluginization-acceptance.md` | 验收/历史分层 | 恢复成功条件被新的故障验收取代 |
+| `tasks/archive/pluginization-trial-acceptance.md` | 历史证据 | 试用结果保留，当前恢复要求撤销 |
+| `tasks/archive/pluginization-distribution.md` | 分发目标修订 | 移除恢复分发要求，保留正常安装测试 |
+| `tasks/archive/pluginization-windows-distribution.md` | 分发/历史分层 | 独立 Doctor 诊断与构建资源同步 |
+| `tasks/archive/plugin-cli-rc2-worker.md` | 版本记录核查 | 保留接口验证事实，不新增长期恢复兼容分支 |
+| `tasks/archive/plugin-standard-install.md` | 计划/验收分层 | 正常安装有效，失败不补装或重建 |
+| `tasks/archive/plugin-distribution-worker.md` | 分发派工核查 | 包元数据、安装说明和错误政策一致 |
+| `tasks/archive/plugin-community-submission.md` | 对外文案核查 | 不宣传恢复、兜底或任意插件兼容 |
+| `tasks/archive/handoff-2026-09-14.md` | 交接更新 | 新原则优先；去恢复资产及回滚待办，版本策略保留 |
 | `tasks/history-recovery.md` | 历史证据+活动段落修订 | 保留历史代码找回事实；旧“当前有效需求”改为当时需求 |
-| `tasks/acceptance.md` | 历史证据/待办修订 | 旧通过事实保留，未完成恢复目标撤销 |
-| `tasks/fix-acceptance-2026-09-11.md` | 历史证据 | 说明旧恢复能力验收不代表现行产品承诺 |
-| `tasks/review-2026-09-11.md` | 历史审查 | 保留旧问题与证据，活动恢复建议取消 |
-| `tasks/review-config.md` | 配置审查 | 原子写、隔离校验保留，修复/恢复目标区分 |
-| `tasks/spaces-demo-video-worker.md` | 对外叙事修订 | 不再把恢复作为产品卖点 |
-| `tasks/spaces-demo-video-acceptance.md` | 历史与新要求分开 | 旧媒体验收保留；新媒体不宣传恢复 |
+| `tasks/archive/acceptance.md` | 历史证据/待办修订 | 旧通过事实保留，未完成恢复目标撤销 |
+| `tasks/archive/fix-acceptance-2026-09-11.md` | 历史证据 | 说明旧恢复能力验收不代表现行产品承诺 |
+| `tasks/archive/review-2026-09-11.md` | 历史审查 | 保留旧问题与证据，活动恢复建议取消 |
+| `tasks/archive/review-config.md` | 配置审查 | 原子写、隔离校验保留，修复/恢复目标区分 |
+| `tasks/archive/spaces-demo-video-worker.md` | 对外叙事修订 | 不再把恢复作为产品卖点 |
+| `tasks/archive/spaces-demo-video-acceptance.md` | 历史与新要求分开 | 旧媒体验收保留；新媒体不宣传恢复 |
 | `tasks/spaces-demo-narration.json` | 文案源修订 | 对齐新原则，不篡改既有生成媒体文件 |
 | `tasks/releases/**` 中的实际文档 | 历史/当前声明分类 | 历史发布说明保留，现行介绍与未来发布说明更新 |
 | `tasks/artifacts/**` 中的实际文档 | 证据索引核查 | 只更新解释性索引，不重写原始结果或截图 |
@@ -511,7 +511,7 @@ Markdown 链接、标题锚点和当前用户命令需独立检查。纯文档�
 | `tests/cooperative-children.test.ts`、`maintenance-responsiveness.test.ts`、`xp-compatibility.test.ts` | 不随 recovery 脚本名整组删除，保留非恢复目标 |
 | `tests/process-manager.test.ts`、`diagnostics.test.ts`、`plugin-ops.test.ts` | 生命周期、错误原文/脱敏、无自动重试/重装 |
 | `scripts/verify-workbench-crash.mjs`、`tests/fixtures/workbench-crash/**` | 从 kill 后成功恢复改为 kill 后失败可见、无自动恢复，保留生产路径测试 |
-| `tasks/recovery-acceptance.mjs`、`real-snapshot-check.mjs`、`real-upgrade-check.mjs`、`restored-*.mjs` | 区分历史实验与有效门槛；不再用于宣称新政策符合；不在真实 Home 运行 |
+| `tasks/archive/recovery-acceptance.mjs`、`real-snapshot-check.mjs`、`real-upgrade-check.mjs`、`restored-*.mjs` | 区分历史实验与有效门槛；不再用于宣称新政策符合；不在真实 Home 运行 |
 | `scripts/verify-plugin-install-write-scope.mjs` | 测量能力可留，恢复实验不能成为生产恢复模块的新入口 |
 | `scripts/build-spaces.mjs`、Supervisor manifest、Electron 打包条目 | 删除无用恢复产物时保留 runtime install 等共用能力 |
 | `package.json`、`.github/workflows/ci.yml` | 同步测试清单与名字，保留混合测试中的安全/隔离/响应性覆盖 |
@@ -528,11 +528,11 @@ Markdown 链接、标题锚点和当前用户命令需独立检查。纯文档�
 - [最新插件管理计划](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/plugin-management/plan.md)
 - [活动任务清单](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/todo.md)
 - [工作台接口契约](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/workbench-contract.md)
-- [任务持久化与恢复冻结记录](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/workbench-jobs-worker.md)
+- [任务持久化与恢复冻结记录](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/archive/workbench-jobs-worker.md)
 - [共享工作台接口](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/src/shared/workbench.ts)
 - [Doctor 说明](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/packages/doctor/README.md)
 - [Supervisor 说明](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/packages/supervisor/README.md)
-- [真实崩溃验收旧要求](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/workbench-crash-worker.md)
-- [版本策略交接](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/handoff-2026-09-14.md)
+- [真实崩溃验收旧要求](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/archive/workbench-crash-worker.md)
+- [版本策略交接](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/archive/handoff-2026-09-14.md)
 - [历史代码恢复记录](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/tasks/history-recovery.md)
 - [测试与构建入口](https://github.com/klarkxy/dsh-spaces/blob/c89dc05b364ca2ee4bb803a321c403e8a04cd9c0/package.json)

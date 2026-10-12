@@ -19,3 +19,15 @@ Documentation completion is not runtime migration completion.
 Never read or write the real `~/.dsh` except read-only `dsh --help` / `dsh --dump-config`.
 Development and tests use `.sandbox/dsh-home` or another non-real `DSH_SPACES_HOME`.
 `web` is sacred: do not write `profiles/web/` or the default `sessions/` / `storages/` trees.
+
+## Verification
+
+Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces` and
+`npm run build`, then the test groups: `npm test`, `npm run test:spaces`,
+`npm run test:workbench`, `npm run test:workbench:recovery`, `npm run test:llm`,
+`npm run test:blueprints`, `npm run test:browser` and `npm run test:dashboard`.
+`test:dashboard` needs `DSH_DASHBOARD_SDK_ROOT` pointing at an installed
+`@deepseek-ai/dsh@0.2.0-rc.2` tree (see the CI dashboard workflows).
+`test:workbench:browser` needs Playwright Chromium. In sandboxed shells where
+child processes cannot write the system temp dir, set `TMP`/`TEMP`/`TMPDIR` to
+`.sandbox/tmp`. Node 24 is the supported version.

@@ -20,7 +20,7 @@ Chinese: [中文](#dsh-spaces-工作台).
 - Manager profile `spaces-hub` (or `spaces-hub-2`, …). Ordinary spaces use a 72px rail and their own iframe origin. A failed start keeps the previous view and marks this switch as failed.
 - User-initiated Home backups: **create**, **list**, **delete**. Create stops owned spaces first. That is not restore.
 
-Default DSH channel is official **`latest`**, resolved to an exact version and pinned. Compatibility is required interfaces, not a permanent rc.1 / rc.2 allowlist.
+New installations pin official **`0.2.0-rc.2`** (`DSH_DEFAULT_VERSION`). Runtime upgrade previews follow the official **`latest`** dist-tag, resolved to an exact version and pinned. Compatibility is required interfaces, not a permanent rc.1 / rc.2 allowlist.
 
 ## Isolated Home vs your Home
 

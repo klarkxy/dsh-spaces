@@ -34,7 +34,7 @@ Closing a browser tab does not stop the supervisor or spaces. Use the workbench'
 
 `dsh plugin --profile web remove @dsh-spaces/plugin` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor. Workbench package maintenance is distinct from upgrading the supervisor itself; reinstalling this entry is not evidence that every component has upgraded.
 
-安装时可能需要联网获取官方依赖。当前 alpha 的真实管理器、原生设置与新旧空间启动验收见 [迁移记录](../../tasks/alpha-migration.md)；rc.1 / rc.2 的历史安装结果不替代 alpha 验证。故障政策见 [let it crash](../../docs/let-it-crash.md)。
+安装时可能需要联网获取官方依赖。当前 alpha 的真实管理器、原生设置与新旧空间启动验收见 [迁移记录](../../tasks/archive/alpha-migration.md)；rc.1 / rc.2 的历史安装结果不替代 alpha 验证。故障政策见 [let it crash](../../docs/let-it-crash.md)。
 
 ## Distribution
 

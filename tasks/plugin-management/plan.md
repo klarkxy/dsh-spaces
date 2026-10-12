@@ -65,7 +65,7 @@
 | `src/core/domain/isolation.ts` | 隔离字段读写 |
 | `packages/doctor/src/recover.ts` | 历史恢复入口仍在源码中（R5）。不得接线为产品能力 |
 
-[换机与版本策略](../handoff-2026-09-14.md) 中取消永久精确版本白名单的决定仍有效。任务 01 测得普通 hoisted 安装可按单空间拷贝 `profiles/<space>/`；该结论是测量证据，不是将来恢复功能的默认前置。
+[换机与版本策略](../archive/handoff-2026-09-14.md) 中取消永久精确版本白名单的决定仍有效。任务 01 测得普通 hoisted 安装可按单空间拷贝 `profiles/<space>/`；该结论是测量证据，不是将来恢复功能的默认前置。
 
 ## 4. 最小实现约定
 

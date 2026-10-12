@@ -17,7 +17,7 @@ Version 0.2.0-alpha.1 is a local unpublished candidate.
   coverage; a model-driven live Creator import and installed Desktop were not tested.
 - No npm publication, production installation or real DSH Home access occurred.
 
-The repository's `tasks/blueprint-migration-0.2.md` separates Spaces integration
+The repository's `tasks/archive/blueprint-migration-0.2.md` separates Spaces integration
 acceptance from this standalone evidence. Local test artifacts live under
 `.sandbox/blueprint-migration/` and `.sandbox/blueprint-live-acceptance/`.
 

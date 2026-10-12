@@ -4,7 +4,7 @@
 
 Current positioning and supported adapters: [Host embedding contract](docs/host/embedding.md). This branch adds an in-place rail to ordinary loopback Web hosts; official Desktop custom-scheme and third-party native adapters remain unverified.
 
-**Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md). The independently installable [`@klarkxy/dsh-blueprint`](packages/blueprint/README.md) lives in this repository; Spaces consumes its protocol for creating and sharing spaces. DSHBP2 shares plugin compositions; DSHBP1 retains configuration presets. Current migration and DSH 0.2 acceptance: [migration record](tasks/blueprint-migration-0.2.md).
+**Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md). The independently installable [`@klarkxy/dsh-blueprint`](packages/blueprint/README.md) lives in this repository; Spaces consumes its protocol for creating and sharing spaces. DSHBP2 shares plugin compositions; DSHBP1 retains configuration presets. Current migration and DSH 0.2 acceptance: [migration record](tasks/archive/blueprint-migration-0.2.md).
 
 Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
 
@@ -20,7 +20,7 @@ DSH Spaces does **not** promise that arbitrary plugin combinations will run. Fai
 
 ## Why
 
-Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces keeps each workbench's sessions, storage and local credentials under `$DSH_HOME/hub/<name>/`; alpha settings persist in `profiles/<name>/cordis.patch.yml` through the native ConfigEditor. Shared LLM connections live in a Home-level catalog. Named Spaces never import the root Home `settings.yaml` or write the default `web` profile. See the [alpha migration and acceptance record](tasks/alpha-migration.md).
+Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces keeps each workbench's sessions, storage and local credentials under `$DSH_HOME/hub/<name>/`; alpha settings persist in `profiles/<name>/cordis.patch.yml` through the native ConfigEditor. Shared LLM connections live in a Home-level catalog. Named Spaces never import the root Home `settings.yaml` or write the default `web` profile. See the [alpha migration and acceptance record](tasks/archive/alpha-migration.md).
 
 `web` is the unique home profile. Spaces never writes its isolation patch. The manager profile is `spaces-hub` (suffix if taken). Ordinary spaces install `@dsh-spaces/view-bridge`. Putting the full `@dsh-spaces/plugin` on an ordinary space is a misinstall.
 
@@ -98,7 +98,7 @@ MIT. See `LICENSE`.
 
 新定位及支持边界见 [宿主嵌入合同](docs/host/embedding.md)。本批支持普通 loopback Web 宿主内的空间栏；官方 Desktop 自定义协议与第三方原生适配仍待实现、验收。
 
-**使用或开发蓝图能力，请先阅读 [BLUEPRINT.md](BLUEPRINT.md)。** 独立蓝图插件在本仓库维护，Spaces 依赖其协议创建和分享空间；插件本身无需安装 Spaces。新版分享插件组合，旧格式保留配置预设。迁移及 DSH 0.2 验收见[迁移记录](tasks/blueprint-migration-0.2.md)。
+**使用或开发蓝图能力，请先阅读 [BLUEPRINT.md](BLUEPRINT.md)。** 独立蓝图插件在本仓库维护，Spaces 依赖其协议创建和分享空间；插件本身无需安装 Spaces。新版分享插件组合，旧格式保留配置预设。迁移及 DSH 0.2 验收见[迁移记录](tasks/archive/blueprint-migration-0.2.md)。
 
 现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。本次合并验证见 [验收记录](tasks/merge-execution.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
 

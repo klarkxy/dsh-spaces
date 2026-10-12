@@ -58,4 +58,4 @@ queued → running → succeeded / failed / cancelled
 
 公共合同、依赖和最终构建整合仍由主 Agent 单写。
 
-> 历史：早期合同曾把稳定入口写成恢复页，并把 `controller.acquire` / `controller.release` 写成双端交接。那些要求已由 2026-09-15 let it crash 与 2026-09-20 合同 v2 取代。当时实现痕迹见源码与 [workbench-jobs-worker.md](workbench-jobs-worker.md)，不要当成现行 API。
+> 历史：早期合同曾把稳定入口写成恢复页，并把 `controller.acquire` / `controller.release` 写成双端交接。那些要求已由 2026-09-15 let it crash 与 2026-09-20 合同 v2 取代。当时实现痕迹见源码与 [workbench-jobs-worker.md](archive/workbench-jobs-worker.md)，不要当成现行 API。
