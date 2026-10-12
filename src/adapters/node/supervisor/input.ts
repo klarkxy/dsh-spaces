@@ -58,7 +58,13 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
     case "snapshot.delete":
       expectKeys(body, ["kind", "snapshotId"]);
       return { kind, snapshotId: parseId(body.snapshotId) };
+    case "space.runtime.set":
+      expectKeys(body, ["kind", "spaceId", "version"]);
+      return { kind, spaceId: parseId(body.spaceId), version: parseId(body.version) };
     case "runtime.install":
+      expectKeys(body, ["kind", "version"]);
+      return { kind, version: parseId(body.version) };
+    case "runtime.remove":
       expectKeys(body, ["kind", "version"]);
       return { kind, version: parseId(body.version) };
     default:

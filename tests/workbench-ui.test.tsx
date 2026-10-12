@@ -447,7 +447,7 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
     },
     runtimes: async () => {
       calls.push({ method: "runtimes", arg: undefined });
-      return [{ version: "0.1.5-rc.1", installed: true, current: true, compatible: true } satisfies WorkbenchRuntime];
+      return [{ version: "0.1.5-rc.1", installed: true, host: true, pinnedBy: [], removable: false, compatible: true } satisfies WorkbenchRuntime];
     },
     backups: async (spaceId) => {
       calls.push({ method: "backups", arg: spaceId });

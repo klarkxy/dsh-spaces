@@ -36,6 +36,7 @@ import {
   WORKBENCH_HTTP_BODY_LIMIT,
   type WorkbenchHttpRuntime,
 } from "../src/adapters/node/workbench-http.ts";
+import { WorkbenchMaintenance as WorkbenchMaintenanceService } from "../src/adapters/node/workbench-maintenance.ts";
 import type { PatchWriter } from "../src/adapters/node/patch-writer.ts";
 import type { ProcessRuntime } from "../src/adapters/node/process-manager.ts";
 import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES, type ValidatedComponentPayload } from "../src/adapters/node/component-payload.ts";
@@ -382,7 +383,7 @@ function writeInterruptedPlan(
   );
 }
 
-function writeProfile(home: string, name: string, pkg: unknown = {}): void {
+function writeProfile(home: string, name: string, pkg: unknown = {}, officialVersion: string | null = "0.2.0-rc.2"): void {
   const dir = join(home, "profiles", name);
   mkdirSync(dir, { recursive: true });
   const record = pkg as { dependencies?: Record<string, string>; dsh?: { profile?: { bundles?: string[] } } };
@@ -402,6 +403,11 @@ function writeProfile(home: string, name: string, pkg: unknown = {}): void {
     },
   };
   writeFileSync(join(dir, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  if (officialVersion) {
+    const web = join(dir, "node_modules", "@deepseek-ai", "dsh-web-app");
+    mkdirSync(web, { recursive: true });
+    writeFileSync(join(web, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version: officialVersion })}\n`);
+  }
   writeFileSync(
     join(dir, "cordis.patch.yml"),
     `- id: session-persistence-jsonl\n  config:\n    root: keep\n- id: storage-json\n  config:\n    root: keep\n`,
@@ -1885,7 +1891,7 @@ test("a new space pins the host DSH version", async () => {
 test("spaces pinned to different installed runtimes spawn with their own binaries; the manager uses the host CLI", async () => {
   const home = tempHome();
   writeProfile(home, "alpha");
-  writeProfile(home, "beta");
+  writeProfile(home, "beta", {}, "0.9.9");
   const hostBin = writeFakeCli(home);
   const runtimeRoot = join(home, "runtimes");
   const betaDir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", "dsh");
@@ -1893,6 +1899,11 @@ test("spaces pinned to different installed runtimes spawn with their own binarie
   const betaBin = join(betaDir, "lib", "bin.js");
   writeFileSync(betaBin, "console.log('beta');\n");
   writeFileSync(join(betaDir, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.9.9" })}\n`);
+  for (const name of ["dsh-base", "dsh-web-app"]) {
+    const dir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version: "0.9.9" })}\n`);
+  }
   mkdirSync(join(home, "hub"), { recursive: true });
   writeFileSync(
     join(home, "hub", "spaces.json"),
@@ -1982,6 +1993,235 @@ test("a pinned version that is not installed rejects at start", async () => {
     job.error?.message ?? "",
     /DSH 0\.9\.9 for this space is not installed\. Install it from the space settings\./,
   );
+});
+
+test("an unpinned space is rejected at start instead of falling back to the host CLI", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home);
+  writeProfile(home, "ghost");
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "ghost" },
+    requestId: "start-ghost",
+  });
+  const job = await waitJob(handle.origin, cookie, "start-ghost", "failed");
+  assert.match(
+    job.error?.message ?? "",
+    /This space has no pinned DSH version\. Choose one in the space settings\./,
+  );
+});
+
+test("a space whose official plugins do not match its pinned runtime is rejected at start", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha", {}, "0.9.9");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha"],
+      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.2.0-rc.2" } },
+    }, null, 2)}\n`,
+  );
+  const handle = await startSupervisor(home);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "alpha" },
+    requestId: "start-official",
+  });
+  const job = await waitJob(handle.origin, cookie, "start-official", "failed");
+  assert.match(
+    job.error?.message ?? "",
+    /This space's official DSH plugins \(@deepseek-ai\/dsh-web-app\) do not match DSH 0\.2\.0-rc\.2\. Re-apply DSH 0\.2\.0-rc\.2 from the space settings\./,
+  );
+});
+
+test("space.runtime.set preview rejects protected, unmanaged, and downgrade targets", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha"],
+      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.9.9" } },
+    }, null, 2)}\n`,
+  );
+  const handle = await startSupervisor(home, {
+    createMaintenance: (ports) =>
+      new WorkbenchMaintenanceService(ports, {
+        packageSource: "official",
+        pluginAdd: async () => undefined,
+        log: () => undefined,
+      }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const preview = async (request: unknown) =>
+    (await mutate(handle.origin, cookie, "preview", { request })).body;
+
+  assert.equal((await preview({ kind: "space.runtime.set", spaceId: "web", version: "0.2.0-rc.2" })).error?.code, "workbench/not-found");
+  assert.equal((await preview({ kind: "space.runtime.set", spaceId: "desktop", version: "0.2.0-rc.2" })).error?.code, "workbench/protected");
+  const hub = await preview({ kind: "space.runtime.set", spaceId: "spaces-hub", version: "0.2.0-rc.2" });
+  assert.equal(hub.ok, false);
+  assert.equal(hub.error?.code, "workbench/forbidden");
+  const downgrade = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0-rc.2" });
+  assert.equal(downgrade.ok, false);
+  assert.equal(downgrade.error?.code, "workbench/invalid-input");
+  assert.match(downgrade.error?.message ?? "", /Downgrading a space's DSH version is not allowed\./);
+  const belowMin = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "0.0.1-rc.1" });
+  assert.equal(belowMin.error?.code, "workbench/invalid-input");
+  const range = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "latest" });
+  assert.equal(range.error?.code, "workbench/invalid-input");
+  const missing = await preview({ kind: "space.runtime.set", spaceId: "missing", version: "0.2.0-rc.2" });
+  assert.equal(missing.error?.code, "workbench/not-found");
+
+  const bridge = join(home, "profiles", "alpha", "node_modules", "@dsh-spaces", "view-bridge");
+  mkdirSync(bridge, { recursive: true });
+  writeFileSync(
+    join(bridge, "package.json"),
+    `${JSON.stringify({
+      name: "@dsh-spaces/view-bridge",
+      version: "0.2.0",
+      peerDependencies: { "@deepseek-ai/dsh": "^9.0.0" },
+    })}\n`,
+  );
+  const peers = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "0.9.9" });
+  assert.equal(peers.error?.code, "workbench/invalid-input");
+  assert.match(
+    peers.error?.message ?? "",
+    /These plugins do not support DSH 0\.9\.9: @deepseek-ai\/dsh@\^9\.0\.0\. Remove or upgrade them first\./,
+  );
+});
+
+test("space.runtime.set pins the new runtime, aligns official plugins, and restarts a running space", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  const runtimeRoot = join(home, "runtimes");
+  const nextDir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", "dsh");
+  mkdirSync(join(nextDir, "lib"), { recursive: true });
+  writeFileSync(join(nextDir, "lib", "bin.js"), "console.log('next');\n");
+  writeFileSync(join(nextDir, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.9.9" })}\n`);
+  for (const name of ["dsh-base", "dsh-web-app"]) {
+    const dir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version: "0.9.9" })}\n`);
+  }
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha"],
+      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.2.0-rc.2" } },
+    }, null, 2)}\n`,
+  );
+  const specs: string[] = [];
+  const spawned: string[] = [];
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    processRuntime: {
+      ...alignProcessRuntime([]),
+      spawn: (args, options = {}) => {
+        spawned.push(args[args.indexOf("--profile") + 1] ?? "");
+        return spawnFixture("ok")(args, options);
+      },
+    },
+    createMaintenance: (ports) =>
+      new WorkbenchMaintenanceService(ports, {
+        packageSource: "official",
+        pluginAdd: async (addedHome, profile, spec) => {
+          specs.push(spec);
+          const official = spec.match(/^(@deepseek-ai\/[a-z-]+)@(.+)$/);
+          if (official) {
+            const dir = join(addedHome, "profiles", profile, "node_modules", ...official[1]!.split("/"));
+            mkdirSync(dir, { recursive: true });
+            writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: official[1], version: official[2] })}\n`);
+          }
+        },
+        log: () => undefined,
+      }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "alpha" },
+    requestId: "start-alpha",
+  });
+  await waitJob(handle.origin, cookie, "start-alpha");
+  const preview = await mutate(handle.origin, cookie, "preview", {
+    request: { kind: "space.runtime.set", spaceId: "alpha", version: "0.9.9" },
+  });
+  assert.equal(preview.body.ok, true, JSON.stringify(preview.body));
+  const plan = preview.body.value as WorkbenchPlan;
+  assert.ok(plan.changes.some((line) => /0\.2\.0-rc\.2/.test(line) && /0\.9\.9/.test(line)), plan.changes.join(" | "));
+  assert.ok(plan.changes.some((line) => /bundled with DSH 0\.9\.9/.test(line)), plan.changes.join(" | "));
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "plan.execute", planId: plan.id },
+    requestId: "runtime-set",
+  });
+  const job = await waitJob(handle.origin, cookie, "runtime-set");
+  assert.equal(job.status, "succeeded");
+  const recorded = JSON.parse(
+    readFileSync(join(home, ".dsh-spaces-control", "jobs", "runtime-set.json"), "utf8"),
+  ) as { result?: { spaceId?: string; dshVersion?: string } };
+  assert.equal(recorded.result?.spaceId, "alpha");
+  assert.equal(recorded.result?.dshVersion, "0.9.9");
+  const meta = JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8")) as {
+    meta: Record<string, { dshVersion?: string }>;
+  };
+  assert.equal(meta.meta.alpha?.dshVersion, "0.9.9");
+  assert.deepEqual(specs.filter((spec) => spec.startsWith("@deepseek-ai/")), ["@deepseek-ai/dsh-web-app@0.9.9"]);
+  assert.equal(spawned.filter((name) => name === "alpha").length, 2);
+});
+
+test("runtime.remove removes an unpinned installed runtime and refuses protected versions", async () => {
+  const home = tempHome();
+  writeProfile(home, "alpha");
+  const runtimeRoot = join(home, "runtimes");
+  const staleDir = join(runtimeRoot, "versions", "0.9.9");
+  mkdirSync(join(staleDir, "node_modules", "@deepseek-ai", "dsh", "lib"), { recursive: true });
+  writeFileSync(join(staleDir, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"), "console.log('stale');\n");
+  writeFileSync(
+    join(staleDir, "node_modules", "@deepseek-ai", "dsh", "package.json"),
+    `${JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.9.9" })}\n`,
+  );
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(
+    join(home, "hub", "spaces.json"),
+    `${JSON.stringify({
+      version: 1,
+      order: ["alpha"],
+      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.2.0-rc.2" } },
+    }, null, 2)}\n`,
+  );
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    createMaintenance: (ports) =>
+      new WorkbenchMaintenanceService(ports, {
+        packageSource: "official",
+        pluginAdd: async () => undefined,
+        log: () => undefined,
+      }),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const preview = async (request: unknown) =>
+    (await mutate(handle.origin, cookie, "preview", { request })).body;
+
+  const host = await preview({ kind: "runtime.remove", version: "0.2.0-rc.2" });
+  assert.equal(host.error?.code, "workbench/invalid-input");
+  const pinned = await preview({ kind: "runtime.remove", version: "0.9.9" });
+  assert.equal(pinned.ok, true, JSON.stringify(pinned));
+  const plan = pinned.value as WorkbenchPlan;
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "plan.execute", planId: plan.id },
+    requestId: "runtime-remove",
+  });
+  const job = await waitJob(handle.origin, cookie, "runtime-remove");
+  assert.equal(job.status, "succeeded");
+  assert.equal(existsSync(staleDir), false);
+  const missing = await preview({ kind: "runtime.remove", version: "0.9.9" });
+  assert.equal(missing.error?.code, "workbench/invalid-input");
+  assert.match(missing.error?.message ?? "", /not installed in the Spaces runtime store\./);
 });
 
 test("runtime.upgrade previews are rejected as unsupported", async () => {

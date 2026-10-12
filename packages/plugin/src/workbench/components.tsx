@@ -643,7 +643,7 @@ function SnapshotRow({
 function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   const writable = controller.canMutate();
-  const current = ui.runtimes.find((row) => row.current);
+  const host = ui.runtimes.find((row) => row.host);
   return (
     <>
       {ui.runtimesStatus === "error" ? (
@@ -652,14 +652,14 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
         </p>
       ) : null}
       <p>
-        {t(locale, "runtime.current")}: {current?.version ?? t(locale, "runtime.none")}
+        {t(locale, "runtime.host")}: {host?.version ?? t(locale, "runtime.none")}
       </p>
       {ui.runtimes.map((runtime) => (
         <div key={runtime.version} className="dsh-wb-space-row">
           <span>
             {runtime.version}
             {runtime.installed ? ` · ${t(locale, "runtime.installed")}` : ""}
-            {runtime.current ? ` · ${t(locale, "runtime.current")}` : ""}
+            {runtime.host ? ` · ${t(locale, "runtime.host")}` : ""}
             {runtime.compatible ? ` · ${t(locale, "runtime.compatible")}` : ` · ${t(locale, "runtime.incompatible")}`}
           </span>
           <button

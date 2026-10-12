@@ -1,8 +1,11 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { rename, rm } from "node:fs/promises";
@@ -223,6 +226,23 @@ export class RuntimeStore {
   installedBin(version: string): string | undefined {
     if (!isExactRuntimeVersion(version)) return undefined;
     return this.readInstalled(version)?.bin;
+  }
+
+  /** Removes `versions/<version>` after proving it is a real directory inside the store. */
+  remove(version: string): void {
+    const exact = this.requireVersion(version);
+    const dir = join(this.versionsDir(), exact);
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || st.isSymbolicLink()) {
+      throw new Error(`runtime ${exact} at ${dir} is not a real installed directory`);
+    }
+    const rootReal = realpathSync(this.root);
+    const dirReal = realpathSync(dir);
+    const rel = relative(rootReal, dirReal);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+      throw new Error(`runtime ${exact} resolves outside the runtime store: ${dirReal}`);
+    }
+    rmSync(dir, { recursive: true });
   }
 
   private versionsDir(): string {

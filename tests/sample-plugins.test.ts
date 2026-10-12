@@ -245,6 +245,7 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
       state.status[spaceId] = "running";
     },
     currentRuntime: () => runtime,
+    hostRuntime: () => ({ bin: "bin.js", version: runtime.version }),
     reinitializeManager: async () => undefined,
     setMaintenance: () => undefined,
     isCompatibleRuntime: (version: string) => version === runtime.version,

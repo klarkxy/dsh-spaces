@@ -672,6 +672,9 @@ function publicResult(value: unknown): WorkbenchJobResult | undefined {
   if (typeof value.runtimeVersion === "string" && isExactRuntimeVersion(value.runtimeVersion)) {
     result.runtimeVersion = value.runtimeVersion;
   }
+  if (typeof value.dshVersion === "string" && isExactRuntimeVersion(value.dshVersion)) {
+    result.dshVersion = value.dshVersion;
+  }
   if (value.view !== undefined) {
     const view = publicView(value.view);
     if (view) result.view = view;
@@ -688,7 +691,7 @@ function publicResult(value: unknown): WorkbenchJobResult | undefined {
 
 function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   if (!isPlainObject(value)) return undefined;
-  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "view", "product"]);
+  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "dshVersion", "view", "product"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
   if (value.spaceId !== undefined && (typeof value.spaceId !== "string" || !ENTITY_ID_RE.test(value.spaceId))) {
     return undefined;
@@ -698,6 +701,9 @@ function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   }
   if (value.runtimeVersion !== undefined) {
     if (typeof value.runtimeVersion !== "string" || !isExactRuntimeVersion(value.runtimeVersion)) return undefined;
+  }
+  if (value.dshVersion !== undefined) {
+    if (typeof value.dshVersion !== "string" || !isExactRuntimeVersion(value.dshVersion)) return undefined;
   }
   if (value.view !== undefined && !publicView(value.view)) return undefined;
   if (value.product !== undefined) {

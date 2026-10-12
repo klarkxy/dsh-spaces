@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -335,4 +335,21 @@ test("explicit managed or system current is invalid if package.json is gone", ()
   rmSync(join(prefix, "node_modules", "@deepseek-ai", "dsh", "package.json"));
   assert.throws(() => runtime.current(), /metadata is unreadable/);
   assert.throws(() => runtime.inventory(), /metadata is unreadable/);
+});
+
+test("remove deletes an installed runtime directory and refuses invalid or linked paths", () => {
+  const { runtime, root } = store();
+  writeFakeCli(join(root, "versions", "0.9.9"), "0.9.9");
+  assert.ok(runtime.installedBin("0.9.9"));
+  runtime.remove("0.9.9");
+  assert.equal(runtime.installedBin("0.9.9"), undefined);
+  assert.equal(existsSync(join(root, "versions", "0.9.9")), false);
+  assert.throws(() => runtime.remove("../1.0.0"), /invalid runtime version/);
+  assert.throws(() => runtime.remove("0.9.9"));
+
+  const outside = tempDir("dsh-runtime-outside-");
+  mkdirSync(join(root, "versions"), { recursive: true });
+  symlinkSync(outside, join(root, "versions", "0.8.8"), "junction");
+  assert.throws(() => runtime.remove("0.8.8"), /not a real installed directory/);
+  assert.equal(existsSync(outside), true);
 });

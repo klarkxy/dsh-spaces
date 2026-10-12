@@ -120,6 +120,7 @@ export type WorkbenchJobResult = {
   spaceId?: string;
   snapshotId?: string;
   runtimeVersion?: string;
+  dshVersion?: string;
   view?: WorkbenchView;
   product?: WorkbenchProductOutcome;
 };
@@ -159,7 +160,9 @@ export type WorkbenchPlanRequest =
   | { kind: 'plugin.cleanup-manager'; spaceId: string }
   | { kind: 'snapshot.create' }
   | { kind: 'snapshot.delete'; snapshotId: string }
+  | { kind: 'space.runtime.set'; spaceId: string; version: string }
   | { kind: 'runtime.install'; version: string }
+  | { kind: 'runtime.remove'; version: string }
   | { kind: 'service.shutdown' };
 
 export interface WorkbenchPlan {
@@ -199,7 +202,9 @@ export interface WorkbenchSnapshot {
 export interface WorkbenchRuntime {
   version: string;
   installed: boolean;
-  current: boolean;
+  host: boolean;
+  pinnedBy: string[];
+  removable: boolean;
   compatible: boolean;
 }
 

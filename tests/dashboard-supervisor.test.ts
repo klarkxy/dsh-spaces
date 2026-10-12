@@ -16,10 +16,8 @@ function profile(home: string, id: string, dashboard = false, manager = false) {
   const packages = ['@deepseek-ai/dsh-web-app', ...(manager ? ['@dsh-spaces/plugin'] : []), ...(dashboard ? ['@dsh-spaces/dashboard'] : [])];
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: Object.fromEntries(packages.map(p => [p, '0.1.7-alpha.1'])), dsh: { profile: { bundles: packages } } }));
   writeFileSync(join(root, 'cordis.patch.yml'), '- id: storage-json\n  config:\n    root: isolated\n');
-  if (manager) {
-    const web = join(root, 'node_modules', '@deepseek-ai', 'dsh-web-app'); mkdirSync(web, { recursive: true });
-    writeFileSync(join(web, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-web-app', version: '0.2.0-rc.2' }));
-  }
+  const web = join(root, 'node_modules', '@deepseek-ai', 'dsh-web-app'); mkdirSync(web, { recursive: true });
+  writeFileSync(join(web, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-web-app', version: '0.2.0-rc.2' }));
 }
 async function setup() {
   mkdirSync('.sandbox', { recursive: true }); const home = mkdtempSync(resolve('.sandbox/dashboard-supervisor-'));

@@ -1039,6 +1039,26 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }));
   }
 
+  /** A space may only start when its used official plugins match its bound runtime. */
+  private assertOfficialRuntime(spaceId: string, spaceRuntime: { bin: string; version: string }): void {
+    const profileDir = join(this.home, "profiles", spaceId);
+    const used = usedOfficial(profileDir);
+    if (!used.base && !used.web) return;
+    const official = resolveOfficialVersions(spaceRuntime.bin);
+    const mismatched: string[] = [];
+    if (used.base && packageVersionAt(profileDir, OFFICIAL_BASE_PACKAGE) !== official.base) {
+      mismatched.push(OFFICIAL_BASE_PACKAGE);
+    }
+    if (used.web && packageVersionAt(profileDir, OFFICIAL_WEB_PACKAGE) !== official.web) {
+      mismatched.push(OFFICIAL_WEB_PACKAGE);
+    }
+    if (!mismatched.length) return;
+    throw new WorkbenchPublicError(
+      "workbench/incompatible",
+      `This space's official DSH plugins (${mismatched.join(", ")}) do not match DSH ${spaceRuntime.version}. Re-apply DSH ${spaceRuntime.version} from the space settings.`,
+    );
+  }
+
   private async pinExistingSpaces(): Promise<void> {
     let current: string | undefined;
     try {
@@ -1270,6 +1290,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       stopAll: () => this.stopOwnedAll(),
       startSpace: async (spaceId) => { await this.startSpace(spaceId, silentJobContext()); },
       currentRuntime: () => this.currentRuntime(),
+      hostRuntime: () => (this.cli ? { bin: this.cli.bin, version: this.cli.version } : null),
       reinitializeManager: () => this.reinitializeManager(),
       setMaintenance: (active) => {
         if (active && !this.lifecycle.maintenanceFlag) {
@@ -1348,7 +1369,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   /** The DSH runtime a profile runs on: the host CLI for the manager/web, else its pin. */
   private resolveSpaceRuntime(spaceId: string): { bin: string; version: string } {
     if (!this.cli) throw new WorkbenchPublicError("workbench/incompatible");
-    const version = this.pinnedDshVersion(spaceId) ?? this.cli.version;
+    const pinned = spaceId === this.managerId || spaceId === "web" ? this.cli.version : this.pinnedDshVersion(spaceId);
+    if (!pinned) {
+      throw new WorkbenchPublicError(
+        "workbench/incompatible",
+        "This space has no pinned DSH version. Choose one in the space settings.",
+      );
+    }
+    const version = pinned;
     if (version === this.cli.version) return { bin: this.cli.bin, version };
     const installed = this.runtimeStore?.installedBin(version);
     if (installed) return { bin: installed, version };
@@ -1592,6 +1620,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       );
     }
     const spaceRuntime = this.resolveSpaceRuntime(spaceId);
+    if (spaceId !== this.managerId) this.assertOfficialRuntime(spaceId, spaceRuntime);
     if (this.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
       await this.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({

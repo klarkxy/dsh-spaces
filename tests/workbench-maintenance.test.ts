@@ -341,6 +341,212 @@ test("runtime install of an incompatible version remains a candidate", async () 
   assert.equal(result?.runtimeVersion, "0.1.5-rc.2");
 });
 
+function writeRuntimeTree(version: string): { bin: string; root: string } {
+  const root = tempDir(`dsh-spaces-rt-${version.replace(/\W/g, "_")}-`);
+  const dsh = join(root, "node_modules", "@deepseek-ai", "dsh");
+  mkdirSync(join(dsh, "lib"), { recursive: true });
+  const bin = join(dsh, "lib", "bin.js");
+  writeFileSync(bin, "console.log('cli');\n");
+  writeFileSync(join(dsh, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version })}\n`);
+  for (const name of ["dsh-base", "dsh-web-app"]) {
+    const dir = join(root, "node_modules", "@deepseek-ai", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version })}\n`);
+  }
+  return { bin, root };
+}
+
+function materializeOfficial(home: string, profile: string, spec: string): void {
+  const match = spec.match(/^(@deepseek-ai\/[a-z-]+)@(.+)$/);
+  if (!match) return;
+  const dir = join(home, "profiles", profile, "node_modules", ...match[1]!.split("/"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: match[1], version: match[2] })}\n`);
+}
+
+test("space.runtime.set preview rejects invalid versions, protected targets, and unsupported plugins", async () => {
+  const { maintenance, home } = harness();
+  new ProfileRegistry(home).updateMeta("coding", { dshVersion: "0.9.9" });
+  const reject = async (request: unknown, code: string, pattern?: RegExp) => {
+    await assert.rejects(() => maintenance.preview(request as never), (error: unknown) => {
+      assert.ok(error instanceof WorkbenchMaintenanceError);
+      assert.equal(error.code, code);
+      if (pattern) assert.match(error.message, pattern);
+      return true;
+    });
+  };
+  await reject({ kind: "space.runtime.set", spaceId: "spaces-hub", version: "0.2.0-rc.2" }, "workbench/forbidden");
+  await reject({ kind: "space.runtime.set", spaceId: "missing", version: "0.2.0-rc.2" }, "workbench/not-found");
+  await reject({ kind: "space.runtime.set", spaceId: "coding", version: "latest" }, "workbench/invalid-input");
+  await reject(
+    { kind: "space.runtime.set", spaceId: "coding", version: "0.0.1-rc.1" },
+    "workbench/invalid-input",
+    /below the minimum 0\.2\.0-rc\.2/,
+  );
+  await reject(
+    { kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.2" },
+    "workbench/invalid-input",
+    /Downgrading a space's DSH version is not allowed\./,
+  );
+  const bridge = join(home, "profiles", "coding", "node_modules", "@dsh-spaces", "view-bridge");
+  mkdirSync(bridge, { recursive: true });
+  writeFileSync(
+    join(bridge, "package.json"),
+    `${JSON.stringify({
+      name: "@dsh-spaces/view-bridge",
+      version: "0.2.0",
+      peerDependencies: { "@deepseek-ai/dsh": "^9.9.0" },
+    })}\n`,
+  );
+  await reject(
+    { kind: "space.runtime.set", spaceId: "coding", version: "0.9.9" },
+    "workbench/invalid-input",
+    /These plugins do not support DSH 0\.9\.9: @deepseek-ai\/dsh@\^9\.9\.0\. Remove or upgrade them first\./,
+  );
+});
+
+test("space.runtime.set pins the version and aligns official plugins for a stopped space", async () => {
+  const runtime = writeRuntimeTree("0.2.0-rc.3");
+  const specs: string[] = [];
+  const { maintenance, home, state } = harness({
+    installedBin: (version) => (version === "0.2.0-rc.3" ? runtime.bin : undefined),
+    pluginAdd: async (dshHome, profile, spec) => {
+      specs.push(spec);
+      materializeOfficial(dshHome, profile, spec);
+    },
+  });
+  state.status.coding = "stopped";
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
+  assert.ok(plan.changes.some((line) => /Pin coding to DSH 0\.2\.0-rc\.3\./.test(line)), plan.changes.join(" | "));
+  assert.ok(plan.changes.some((line) => /already installed/.test(line)));
+  const result = await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(result, { spaceId: "coding", dshVersion: "0.2.0-rc.3" });
+  const meta = new ProfileRegistry(home).scan().find((row) => row.name === "coding")?.meta;
+  assert.equal(meta?.dshVersion, "0.2.0-rc.3");
+  assert.deepEqual(specs, ["@deepseek-ai/dsh-base@0.2.0-rc.3", "@deepseek-ai/dsh-web-app@0.2.0-rc.3"]);
+  assert.equal(state.stopped.includes("coding"), false);
+  assert.equal(state.started.includes("coding"), false);
+});
+
+test("space.runtime.set downloads a missing runtime and restarts a running space", async () => {
+  const runtime = writeRuntimeTree("0.2.0-rc.3");
+  const installed = new Map<string, string>();
+  const installs: string[] = [];
+  const specs: string[] = [];
+  const { maintenance, state } = harness({
+    installedBin: (version) => installed.get(version),
+    install: async (version) => {
+      installs.push(version);
+      installed.set(version, runtime.bin);
+      return { version, bin: runtime.bin, dir: runtime.root };
+    },
+    pluginAdd: async (dshHome, profile, spec) => {
+      specs.push(spec);
+      materializeOfficial(dshHome, profile, spec);
+    },
+  });
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
+  assert.ok(plan.changes.some((line) => /Download and install DSH 0\.2\.0-rc\.3\./.test(line)), plan.changes.join(" | "));
+  assert.ok(plan.changes.some((line) => /coding will be stopped and started again\./.test(line)));
+  await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(installs, ["0.2.0-rc.3"]);
+  assert.deepEqual(state.stopped, ["coding"]);
+  assert.deepEqual(state.started, ["coding"]);
+  assert.equal(specs.length, 2);
+});
+
+test("a failed official alignment after the pin leaves the pin written and the space stopped", async () => {
+  const runtime = writeRuntimeTree("0.2.0-rc.3");
+  const { maintenance, home, state } = harness({
+    installedBin: (version) => (version === "0.2.0-rc.3" ? runtime.bin : undefined),
+    pluginAdd: async () => {
+      throw new Error("npm exploded");
+    },
+  });
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
+  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()));
+  const meta = new ProfileRegistry(home).scan().find((row) => row.name === "coding")?.meta;
+  assert.equal(meta?.dshVersion, "0.2.0-rc.3");
+  assert.deepEqual(state.stopped, ["coding"]);
+  assert.equal(state.started.includes("coding"), false);
+});
+
+test("re-applying the pinned version repairs a mismatched official plugin", async () => {
+  const runtime = writeRuntimeTree("0.2.0-rc.3");
+  const specs: string[] = [];
+  const { maintenance, home, state } = harness({
+    installedBin: (version) => (version === "0.2.0-rc.3" ? runtime.bin : undefined),
+    pluginAdd: async (dshHome, profile, spec) => {
+      specs.push(spec);
+      materializeOfficial(dshHome, profile, spec);
+    },
+  });
+  state.status.coding = "stopped";
+  const registry = new ProfileRegistry(home);
+  registry.updateMeta("coding", { dshVersion: "0.2.0-rc.3" });
+  const web = join(home, "profiles", "coding", "node_modules", "@deepseek-ai", "dsh-web-app");
+  mkdirSync(web, { recursive: true });
+  writeFileSync(join(web, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh-web-app", version: "0.9.9" })}\n`);
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "coding", version: "0.2.0-rc.3" });
+  assert.equal(plan.title, "Re-apply DSH 0.2.0-rc.3 to coding");
+  const result = await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(result, { spaceId: "coding", dshVersion: "0.2.0-rc.3" });
+  assert.deepEqual(specs, ["@deepseek-ai/dsh-base@0.2.0-rc.3", "@deepseek-ai/dsh-web-app@0.2.0-rc.3"]);
+});
+
+test("runtime.remove refuses host, legacy, pinned, and missing versions and removes an unused one", async () => {
+  const removed: string[] = [];
+  const { maintenance, home } = harness({
+    installedBin: (version) => (version === "0.9.9" ? "bin.js" : undefined),
+    legacyCurrent: () => ({ version: "0.8.8", bin: "bin.js", origin: "store" }),
+    remove: (version) => removed.push(version),
+  });
+  new ProfileRegistry(home).updateMeta("coding", { dshVersion: "0.7.7" });
+  const reject = async (version: string, pattern: RegExp) => {
+    await assert.rejects(() => maintenance.preview({ kind: "runtime.remove", version }), (error: unknown) => {
+      assert.ok(error instanceof WorkbenchMaintenanceError);
+      assert.equal(error.code, "workbench/invalid-input");
+      assert.match(error.message, pattern);
+      return true;
+    });
+  };
+  await reject("0.1.5-rc.1", /is the host runtime\./);
+  await reject("0.8.8", /is the recorded legacy runtime pointer\./);
+  await reject("0.7.7", /is pinned by coding\./);
+  await reject("0.6.6", /is not installed in the Spaces runtime store\./);
+  const plan = await maintenance.preview({ kind: "runtime.remove", version: "0.9.9" });
+  const result = await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(result, { runtimeVersion: "0.9.9" });
+  assert.deepEqual(removed, ["0.9.9"]);
+});
+
+test("runtime inventory reports host, pinnedBy, and removable flags", async () => {
+  const { maintenance, home } = harness({
+    inventory: () => ({
+      installed: [
+        { version: "0.1.5-rc.1", bin: "bin.js", dir: home },
+        { version: "0.9.9", bin: "bin.js", dir: home },
+        { version: "0.7.7", bin: "bin.js", dir: home },
+      ],
+      current: { version: "0.1.5-rc.1", bin: "bin.js", origin: "store" },
+    }),
+    installedBin: () => "bin.js",
+  });
+  new ProfileRegistry(home).updateMeta("coding", { dshVersion: "0.9.9" });
+  const rows = await maintenance.runtimes();
+  const byVersion = new Map(rows.map((row) => [row.version, row]));
+  assert.equal(byVersion.get("0.1.5-rc.1")?.host, true);
+  assert.deepEqual(byVersion.get("0.1.5-rc.1")?.pinnedBy, []);
+  assert.equal(byVersion.get("0.1.5-rc.1")?.removable, false);
+  assert.equal(byVersion.get("0.9.9")?.host, false);
+  assert.deepEqual(byVersion.get("0.9.9")?.pinnedBy, ["coding"]);
+  assert.equal(byVersion.get("0.9.9")?.removable, false);
+  assert.equal(byVersion.get("0.7.7")?.removable, true);
+  assert.equal(byVersion.get("0.1.5-rc.2")?.installed, false);
+  assert.equal(byVersion.get("0.1.5-rc.2")?.removable, false);
+  assert.equal("current" in (byVersion.get("0.1.5-rc.1") ?? {}), false);
+});
+
 test("lost progress persistence or uncertain child termination keeps the plan open as unfinished evidence", async () => {
   for (const failure of [new WorkbenchJobError("workbench/persist-failed"), new ProcessTerminationError("unknown child")]) {
     const { maintenance, home, state } = harness();
@@ -663,7 +869,7 @@ interface HarnessState {
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
 }
 
-function harness(overrides: {
+interface HarnessOverrides {
   now?: () => Date;
   fetch?: MaintenanceFetcher;
   compatible?: (version: string) => boolean;
@@ -671,7 +877,14 @@ function harness(overrides: {
   snapshotsCreate?: SnapshotExecutor["create"];
   pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
   log?: (message: string, error?: unknown) => void;
-} = {}) {
+  inventory?: () => { installed: Array<{ version: string; bin: string; dir: string }>; current?: { version: string; bin: string; origin: "store" | "legacy" } };
+  installedBin?: (version: string) => string | undefined;
+  legacyCurrent?: () => { version: string; bin: string; origin: "store" | "legacy" } | undefined;
+  install?: (version: string) => Promise<{ version: string; bin: string; dir: string }>;
+  remove?: (version: string) => void;
+}
+
+function harness(overrides: HarnessOverrides = {}) {
   const home = tempDir("dsh-spaces-maint-");
   writeManifest(home, "coding", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
   writeManifest(home, "spaces-hub", {
@@ -697,15 +910,7 @@ function harness(overrides: {
 function createMaintenance(
   home: string,
   state: HarnessState,
-  overrides: {
-      now?: () => Date;
-    fetch?: MaintenanceFetcher;
-    compatible?: (version: string) => boolean;
-    pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
-    snapshotsCreate?: SnapshotExecutor["create"];
-    pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
-    log?: (message: string, error?: unknown) => void;
-  } = {},
+  overrides: HarnessOverrides = {},
 ): WorkbenchMaintenance {
   const runtime: SnapshotRuntime = { version: "0.1.5-rc.1", root: home, binRelative: "bin.js" };
   const ports: WorkbenchMaintenancePorts = {
@@ -726,12 +931,17 @@ function createMaintenance(
       delete: async () => undefined,
     } as unknown as SnapshotExecutor,
     runtimes: {
-      inventory: () => ({
+      inventory: overrides.inventory ?? (() => ({
         installed: [{ version: "0.1.5-rc.1", bin: "bin.js", dir: home }],
         current: { version: "0.1.5-rc.1", bin: "bin.js", origin: "store" as const },
-      }),
+      })),
       catalog: async () => ({ versions: [{ version: "0.1.5-rc.2" }], distTags: { next: "0.1.5-rc.2" } }),
-      install: async (version: string) => ({ version, bin: "bin.js", dir: home }),
+      install: overrides.install ?? (async (version: string) => ({ version, bin: "bin.js", dir: home })),
+      installedBin: overrides.installedBin ?? ((version: string) => (version === "0.1.5-rc.1" ? "bin.js" : undefined)),
+      current: overrides.legacyCurrent ?? (() => undefined),
+      remove: overrides.remove ?? (() => {
+        throw new Error("runtime remove not stubbed");
+      }),
     } as unknown as WorkbenchMaintenancePorts["runtimes"],
     diagnostics: {
       get: (name: string) => ({
@@ -771,6 +981,7 @@ function createMaintenance(
       state.status[spaceId] = "running";
     },
     currentRuntime: () => runtime,
+    hostRuntime: () => ({ bin: "bin.js", version: runtime.version }),
     reinitializeManager: async () => {
       state.order.push("reinitialize");
       state.reinitialized += 1;
@@ -826,6 +1037,11 @@ function snapshotHarness() {
       inventory: () => ({ installed: [{ version: runtime.version, bin: join(runtimeDir, "bin.js"), dir: runtimeDir }] }),
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async (version: string) => ({ version, bin: join(runtimeDir, "bin.js"), dir: runtimeDir }),
+      installedBin: (version: string) => (version === runtime.version ? join(runtimeDir, "bin.js") : undefined),
+      current: () => undefined,
+      remove: () => {
+        throw new Error("runtime remove not stubbed");
+      },
     } as unknown as WorkbenchMaintenancePorts["runtimes"],
     diagnostics: { get: () => ({ name: "coding", status: "stopped", logs: [], backups: [], canRestore: true }) } as unknown as DiagnosticsService,
     managerId: () => "spaces-hub",
@@ -852,6 +1068,7 @@ function snapshotHarness() {
       state.status[spaceId] = "running";
     },
     currentRuntime: () => runtime,
+    hostRuntime: () => ({ bin: "bin.js", version: runtime.version }),
     reinitializeManager: async () => {
       state.reinitialized += 1;
     },

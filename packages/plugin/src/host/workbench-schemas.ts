@@ -119,6 +119,7 @@ export const workbenchJobResultSchema = z
     spaceId: spaceIdSchema.optional(),
     snapshotId: snapshotIdSchema.optional(),
     runtimeVersion: exactVersionSchema.optional(),
+    dshVersion: exactVersionSchema.optional(),
     view: workbenchViewSchema.optional(),
     product: workbenchProductOutcomeSchema.optional(),
   })
@@ -295,7 +296,9 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("plugin.cleanup-manager"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("snapshot.create") }).strict(),
   z.object({ kind: z.literal("snapshot.delete"), snapshotId: snapshotIdSchema }).strict(),
+  z.object({ kind: z.literal("space.runtime.set"), spaceId: spaceIdSchema, version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("runtime.install"), version: exactVersionSchema }).strict(),
+  z.object({ kind: z.literal("runtime.remove"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("service.shutdown") }).strict(),
 ]);
 
@@ -313,7 +316,9 @@ export const workbenchPlanSchema = z
       "plugin.cleanup-manager",
       "snapshot.create",
       "snapshot.delete",
+      "space.runtime.set",
       "runtime.install",
+      "runtime.remove",
       "service.shutdown",
     ]),
     title: z.string().max(200),
@@ -358,7 +363,9 @@ export const workbenchRuntimeSchema = z
   .object({
     version: exactVersionSchema,
     installed: z.boolean(),
-    current: z.boolean(),
+    host: z.boolean(),
+    pinnedBy: z.array(spaceIdSchema).max(256),
+    removable: z.boolean(),
     compatible: z.boolean(),
   })
   .strict();

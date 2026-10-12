@@ -27,6 +27,8 @@ export interface WorkbenchMaintenancePorts {
   stopAll(): Promise<void>;
   startSpace(spaceId: string): Promise<void>;
   currentRuntime(): SnapshotRuntime;
+  /** The host CLI that manages the Home; ordinary spaces may pin a different runtime. */
+  hostRuntime(): { bin: string; version: string } | null;
   /** Refresh selected CLI resolver and re-establish the manager after maintenance. */
   reinitializeManager(): Promise<void>;
   setMaintenance(active: boolean): void;

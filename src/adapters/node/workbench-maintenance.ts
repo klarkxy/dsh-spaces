@@ -37,7 +37,16 @@ import { currentPackageSource } from "./toolchain";
 import { ProcessTerminationError } from "./terminate-process";
 import { sanitizeJobText, WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
-import { isExactRuntimeVersion } from "../../shared/runtime";
+import { isExactRuntimeVersion, SPACES_MIN_DSH_VERSION } from "../../shared/runtime";
+import { lt as semverLt } from "semver";
+import { dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
+import {
+  OFFICIAL_BASE_PACKAGE,
+  OFFICIAL_WEB_PACKAGE,
+  packageVersionAt,
+  resolveOfficialVersions,
+  usedOfficial,
+} from "./official-plugins";
 import { runBatch } from "../../shared/batch";
 import { type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
@@ -161,7 +170,9 @@ type ResolvedCommand =
   | { kind: "snapshot.restore"; snapshotId: string }
   | { kind: "snapshot.delete"; snapshotId: string }
   | { kind: "config.restore"; spaceId: string; backupId: string }
-  | { kind: "runtime.install"; version: string };
+  | { kind: "space.runtime.set"; spaceId: string; version: string }
+  | { kind: "runtime.install"; version: string }
+  | { kind: "runtime.remove"; version: string };
 
 type PlanStatus = "previewed" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -375,14 +386,27 @@ export class WorkbenchMaintenance {
       this.log("runtimes.catalog", error);
     }
     const installedSet = new Set(installed.map((row) => row.version));
+    const host = this.ports.hostRuntime()?.version;
+    const pinned = new Map<string, string[]>();
+    for (const row of this.ports.registry.scan()) {
+      if (!row.meta.dshVersion) continue;
+      const list = pinned.get(row.meta.dshVersion) ?? [];
+      list.push(row.name);
+      pinned.set(row.meta.dshVersion, list);
+    }
     return [...versions]
       .sort((a, b) => a.localeCompare(b))
-      .map((version) => ({
-        version,
-        installed: installedSet.has(version),
-        current: current === version,
-        compatible: this.ports.isCompatibleRuntime(version),
-      }));
+      .map((version) => {
+        const pinnedBy = (pinned.get(version) ?? []).sort();
+        return {
+          version,
+          installed: installedSet.has(version),
+          host: host === version,
+          pinnedBy,
+          removable: installedSet.has(version) && host !== version && current !== version && pinnedBy.length === 0,
+          compatible: this.ports.isCompatibleRuntime(version),
+        };
+      });
   }
 
   async backups(spaceId: string): Promise<WorkbenchBackup[]> {
@@ -464,6 +488,16 @@ export class WorkbenchMaintenance {
           const version = stored.command.version;
           return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeInstall(version, ctx)));
         }
+        case "space.runtime.set": {
+          const command = stored.command;
+          return await this.finishPlan(stored, () =>
+            withIrreversible(() => this.runSpaceRuntimeSet(command, ctx)),
+          );
+        }
+        case "runtime.remove": {
+          const version = stored.command.version;
+          return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeRemove(version, ctx)));
+        }
       }
     } catch (error) {
       if (uncertainMaintenance(error)) {
@@ -500,8 +534,12 @@ export class WorkbenchMaintenance {
         return this.planSnapshotCreate(id, createdAt, expiresAt);
       case "snapshot.delete":
         return this.planSnapshotDelete(id, createdAt, expiresAt, request.snapshotId);
+      case "space.runtime.set":
+        return this.planSpaceRuntimeSet(id, createdAt, expiresAt, request);
       case "runtime.install":
         return this.planRuntimeInstall(id, createdAt, expiresAt, request.version);
+      case "runtime.remove":
+        return this.planRuntimeRemove(id, createdAt, expiresAt, request.version);
       default:
         throw new WorkbenchMaintenanceError("workbench/runtime-handoff");
     }
@@ -699,6 +737,76 @@ export class WorkbenchMaintenance {
           : "This version is not marked compatible and remains an unverified candidate.",
       ],
       destructive: false,
+      expiresAt,
+    });
+  }
+
+  private async planSpaceRuntimeSet(
+    id: string,
+    createdAt: string,
+    expiresAt: string,
+    request: Extract<WorkbenchPlanRequest, { kind: "space.runtime.set" }>,
+  ): Promise<StoredPlan> {
+    const spaceId = this.targetSpace(request.spaceId, false);
+    const version = requireExactVersion(request.version);
+    if (semverLt(version, SPACES_MIN_DSH_VERSION)) {
+      throw new WorkbenchMaintenanceError(
+        "workbench/invalid-input",
+        `DSH ${version} is below the minimum ${SPACES_MIN_DSH_VERSION} supported by this Spaces version.`,
+      );
+    }
+    const pin = this.pinnedDshVersionOf(spaceId);
+    if (pin && semverLt(version, pin)) {
+      throw new WorkbenchMaintenanceError("workbench/invalid-input", "Downgrading a space's DSH version is not allowed.");
+    }
+    const unmet = unmetDshPeers(version, dshPeerRangesFromProfile(join(this.ports.home, "profiles", spaceId)));
+    if (unmet.length) {
+      throw new WorkbenchMaintenanceError(
+        "workbench/invalid-input",
+        `These plugins do not support DSH ${version}: ${unmet.join(", ")}. Remove or upgrade them first.`,
+      );
+    }
+    const runningSpaceIds = this.runningOf([spaceId]);
+    const command: ResolvedCommand = { kind: "space.runtime.set", spaceId, version };
+    const willDownload = !this.runtimeBinFor(version);
+    return this.storeable(id, createdAt, expiresAt, command, {
+      kind: "space.runtime.set",
+      title: pin === version ? `Re-apply DSH ${version} to ${spaceId}` : `Set ${spaceId} to DSH ${version}`,
+      scope: "space",
+      affectedSpaceIds: [spaceId],
+      runningSpaceIds,
+      changes: [
+        !pin
+          ? `Pin ${spaceId} to DSH ${version}.`
+          : pin === version
+            ? `Re-apply DSH ${version} to ${spaceId}.`
+            : `Switch ${spaceId} from DSH ${pin} to DSH ${version}.`,
+        willDownload ? `Download and install DSH ${version}.` : `DSH ${version} is already installed.`,
+        `Official plugins will be set to the versions bundled with DSH ${version}.`,
+        "No snapshot is created. Downgrading later is not allowed.",
+        runningSpaceIds.length ? `${spaceId} will be stopped and started again.` : `${spaceId} is stopped and stays stopped.`,
+      ],
+      destructive: false,
+      expiresAt,
+    });
+  }
+
+  private planRuntimeRemove(id: string, createdAt: string, expiresAt: string, version: string): StoredPlan {
+    const exact = requireExactVersion(version);
+    const blocked = this.runtimeRemoveBlockReason(exact);
+    if (blocked) throw new WorkbenchMaintenanceError("workbench/invalid-input", blocked);
+    const command: ResolvedCommand = { kind: "runtime.remove", version: exact };
+    return this.storeable(id, createdAt, expiresAt, command, {
+      kind: "runtime.remove",
+      title: `Remove runtime ${exact}`,
+      scope: "home",
+      affectedSpaceIds: this.owned(),
+      runningSpaceIds: [],
+      changes: [
+        `Delete the installed runtime ${exact} from the Spaces runtime store.`,
+        "Spaces pinned to other versions are not affected.",
+      ],
+      destructive: true,
       expiresAt,
     });
   }
@@ -916,6 +1024,74 @@ export class WorkbenchMaintenance {
     const installed = await this.ports.runtimes.install(version);
     ctx.result({ runtimeVersion: installed.version });
     return { runtimeVersion: installed.version };
+  }
+
+  private async runSpaceRuntimeSet(
+    command: Extract<ResolvedCommand, { kind: "space.runtime.set" }>,
+    ctx: WorkbenchJobContext,
+  ): Promise<WorkbenchJobResult> {
+    const { spaceId, version } = command;
+    const wasRunning = this.runningOf([spaceId]).length > 0;
+    if (wasRunning) {
+      ctx.phase("stop");
+      ctx.cancellable(true);
+      ctx.message(`Stopping ${spaceId}.`);
+      this.throwIfAborted(ctx);
+      await this.ports.stopSpace(spaceId);
+    }
+    ctx.cancellable(false);
+    if (!this.runtimeBinFor(version)) {
+      ctx.phase("runtime");
+      ctx.message(`Installing runtime ${version}.`);
+      await this.ports.runtimes.install(version);
+    }
+    const bin = this.runtimeBinFor(version);
+    if (!bin) throw new WorkbenchMaintenanceError("workbench/failed", `DSH ${version} is not installed.`);
+    ctx.phase("pin");
+    ctx.message(`Pinning ${spaceId} to DSH ${version}.`);
+    this.ports.registry.updateMeta(spaceId, { dshVersion: version });
+    const profileDir = join(this.ports.home, "profiles", spaceId);
+    const used = usedOfficial(profileDir);
+    if (used.base || used.web) {
+      const official = resolveOfficialVersions(bin);
+      const targets = [
+        ...(used.base ? [{ name: OFFICIAL_BASE_PACKAGE, version: official.base }] : []),
+        ...(used.web ? [{ name: OFFICIAL_WEB_PACKAGE, version: official.web }] : []),
+      ];
+      const mismatched = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
+      if (mismatched.length) {
+        ctx.phase("plugins");
+        for (const target of mismatched) {
+          ctx.message(`Installing ${target.name}@${target.version} on ${spaceId}.`);
+          await this.pluginAddImpl(this.ports.home, spaceId, `${target.name}@${target.version}`);
+        }
+        const still = targets.filter((target) => packageVersionAt(profileDir, target.name) !== target.version);
+        if (still.length) {
+          throw new WorkbenchMaintenanceError(
+            "workbench/failed",
+            `The space's official plugins do not match DSH ${version}: ${still.map((target) => target.name).join(", ")}.`,
+          );
+        }
+      }
+    }
+    if (wasRunning) {
+      ctx.phase("start");
+      ctx.message(`Starting ${spaceId}.`);
+      await this.ports.startSpace(spaceId);
+    }
+    ctx.result({ spaceId, dshVersion: version });
+    return { spaceId, dshVersion: version };
+  }
+
+  private async runRuntimeRemove(version: string, ctx: WorkbenchJobContext): Promise<WorkbenchJobResult> {
+    ctx.phase("remove");
+    ctx.cancellable(false);
+    const blocked = this.runtimeRemoveBlockReason(version);
+    if (blocked) throw new WorkbenchMaintenanceError("workbench/invalid-input", blocked);
+    ctx.message(`Removing runtime ${version}.`);
+    this.ports.runtimes.remove(version);
+    ctx.result({ runtimeVersion: version });
+    return { runtimeVersion: version };
   }
 
   private async withMaintenance<T>(ctx: WorkbenchJobContext, action: () => Promise<T>): Promise<T> {
@@ -1147,6 +1323,39 @@ export class WorkbenchMaintenance {
       const status = this.ports.statusOf(id);
       return status === "running" || status === "starting";
     });
+  }
+
+  private pinnedDshVersionOf(spaceId: string): string | undefined {
+    return this.ports.registry.scan().find((row) => row.name === spaceId)?.meta.dshVersion;
+  }
+
+  private pinnedSpacesOf(version: string): string[] {
+    return this.ports.registry
+      .scan()
+      .filter((row) => row.meta.dshVersion === version)
+      .map((row) => row.name)
+      .sort();
+  }
+
+  private runtimeBinFor(version: string): string | undefined {
+    const host = this.ports.hostRuntime();
+    if (host && host.version === version) return host.bin;
+    const installed = this.ports.runtimes.installedBin(version);
+    if (installed) return installed;
+    const legacy = this.ports.runtimes.current();
+    if (legacy && legacy.version === version) return legacy.bin;
+    return undefined;
+  }
+
+  private runtimeRemoveBlockReason(version: string): string | undefined {
+    const host = this.ports.hostRuntime();
+    if (host && host.version === version) return `DSH ${version} is the host runtime.`;
+    const legacy = this.ports.runtimes.current();
+    if (legacy && legacy.version === version) return `DSH ${version} is the recorded legacy runtime pointer.`;
+    const pinnedBy = this.pinnedSpacesOf(version);
+    if (pinnedBy.length) return `DSH ${version} is pinned by ${pinnedBy.join(", ")}.`;
+    if (!this.ports.runtimes.installedBin(version)) return `DSH ${version} is not installed in the Spaces runtime store.`;
+    return undefined;
   }
 
   private currentVersionLabel(): string {
@@ -1496,6 +1705,14 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(input, ["kind", "version"]);
       return { kind, version: requireExactVersion(input.version) };
     }
+    case "space.runtime.set": {
+      expectKeys(input, ["kind", "spaceId", "version"]);
+      return { kind, spaceId: parseSpaceId(input.spaceId), version: requireExactVersion(input.version) };
+    }
+    case "runtime.remove": {
+      expectKeys(input, ["kind", "version"]);
+      return { kind, version: requireExactVersion(input.version) };
+    }
     case "runtime.upgrade":
       throw new WorkbenchMaintenanceError("workbench/unsupported");
     case "controller.release":
@@ -1529,6 +1746,10 @@ function requestFromCommand(command: ResolvedCommand): WorkbenchPlanRequest {
       return { kind: command.kind, snapshotId: command.snapshotId };
     case "runtime.install":
       return { kind: command.kind, version: command.version };
+    case "space.runtime.set":
+      return { kind: command.kind, spaceId: command.spaceId, version: command.version };
+    case "runtime.remove":
+      return { kind: command.kind, version: command.version };
   }
 }
 
@@ -1540,6 +1761,7 @@ function affectedFromCommand(command: ResolvedCommand): string[] {
     case "plugin.toggle":
     case "plugin.cleanup-manager":
     case "config.restore":
+    case "space.runtime.set":
       return [command.spaceId];
     default:
       return [];
