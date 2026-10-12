@@ -41,27 +41,34 @@ export function authorizeDashboardRequest(req: IncomingMessage, ports: Dashboard
   const rejection = ports.rejection(req);
   if (rejection) throw new DashboardFault(rejection === 401 ? 'dashboard/unauthenticated' : 'dashboard/forbidden');
 }
+export const BODY_DRAIN_CAP = 8 * 1024 * 1024;
 function readBody(req: IncomingMessage): Promise<Uint8Array> {
   const length = req.headers['content-length'];
-  if (length !== undefined && (!/^\d+$/.test(length) || Number(length) > DASHBOARD_LIMITS.maxRequestBytes)) {
+  const declared = length !== undefined && /^\d+$/.test(length) ? Number(length) : undefined;
+  if (length !== undefined && declared === undefined) return Promise.reject(new DashboardFault('dashboard/limit-exceeded'));
+  // An oversized but drainable request is consumed before the 413 is written so
+  // the response is not lost to a reset on a socket that still has unread data.
+  if (declared !== undefined && declared > DASHBOARD_LIMITS.maxRequestBytes && declared > BODY_DRAIN_CAP) {
     return Promise.reject(new DashboardFault('dashboard/limit-exceeded'));
   }
   return new Promise((resolve, reject) => {
-    let size = 0, settled = false;
+    let size = 0, settled = false, draining = declared !== undefined && declared > DASHBOARD_LIMITS.maxRequestBytes;
     const chunks: Buffer[] = [];
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, pause = true) => {
       if (settled) return;
       settled = true; clearTimeout(timer);
       req.off('data', data); req.off('end', end); req.off('error', failed); req.off('aborted', aborted);
-      if (error) { chunks.length = 0; req.pause(); reject(error); }
+      if (error) { chunks.length = 0; if (pause) req.pause(); reject(error); }
       else resolve(Buffer.concat(chunks, size));
     };
     const data = (chunk: Buffer) => {
       size += chunk.byteLength;
-      if (size > DASHBOARD_LIMITS.maxRequestBytes) finish(new DashboardFault('dashboard/limit-exceeded'));
+      if (size > BODY_DRAIN_CAP) { finish(new DashboardFault('dashboard/limit-exceeded')); req.destroy(); }
+      else if (draining) return;
+      else if (size > DASHBOARD_LIMITS.maxRequestBytes) { draining = true; chunks.length = 0; }
       else chunks.push(chunk);
     };
-    const end = () => finish();
+    const end = () => draining ? finish(new DashboardFault('dashboard/limit-exceeded'), false) : finish();
     const failed = () => finish(new DashboardFault('dashboard/invalid-input'));
     const aborted = () => finish(new DashboardFault('dashboard/unavailable'));
     const timer = setTimeout(() => finish(new DashboardFault('dashboard/unavailable')), 5000);
