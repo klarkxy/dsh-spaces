@@ -1272,12 +1272,20 @@ function DshVersionSection({ ui, controller, space }: WorkbenchViewProps & { spa
   const locale = ui.locale;
   const pin = space.dshVersion;
   const host = ui.state?.dshVersion ?? null;
-  const floor = pin ?? SPACES_MIN_DSH_VERSION;
+  const floor = pin && semverGte(pin, SPACES_MIN_DSH_VERSION) ? pin : SPACES_MIN_DSH_VERSION;
   const candidates = ui.runtimes
     .filter((runtime) => runtime.compatible && semverGte(runtime.version, floor))
     .map((runtime) => runtime.version);
-  const versions = [...new Set([...(pin ? [pin] : []), ...candidates])];
-  const [target, setTarget] = useState(pin ?? host ?? "");
+  const versions = [
+    ...new Set([...(pin && semverGte(pin, SPACES_MIN_DSH_VERSION) ? [pin] : []), ...candidates]),
+  ];
+  const [target, setTarget] = useState(
+    pin && versions.includes(pin)
+      ? pin
+      : host && versions.includes(host)
+        ? host
+        : (versions[0] ?? ""),
+  );
   const ready = ui.runtimesStatus === "ready";
   const disabled = !controller.canMutate() || controller.isBusy() || !ready || !target;
   return (

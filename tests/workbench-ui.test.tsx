@@ -996,6 +996,33 @@ test("detail dialog shows the pinned DSH version and offers only compatible upgr
   assert.ok(html.includes(`<button type="button" class="dsh-wb-btn">${t("zh", "detail.dshPreview")}</button>`));
 });
 
+test("detail dialog offers nothing below the supported minimum when the pin is older", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () => state({ dshVersion: "0.1.5-rc.1", spaces: [manager, space({ id: "alpha", dshVersion: "0.1.5-rc.1" })] }),
+    runtimes: async () => [
+      runtimeEntry({ version: "0.1.5-rc.1", installed: true, host: true }),
+      runtimeEntry({ version: "0.2.0-rc.1" }),
+      runtimeEntry({ version: "0.2.0-rc.2", installed: true }),
+      runtimeEntry({ version: "0.3.0" }),
+    ],
+  }));
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  const html = ready(ctrl);
+  const select = html.match(/<select[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+  assert.ok(!select.includes('value="0.1.5-rc.1"'), "a pin below the minimum is not offered");
+  assert.ok(!select.includes('value="0.2.0-rc.1"'), "versions below the minimum are not offered");
+  assert.ok(select.includes('value="0.2.0-rc.2"'));
+  assert.ok(select.includes('value="0.3.0"'));
+  assert.match(
+    select,
+    /<option(?=[^>]*selected)(?=[^>]*value="0\.2\.0-rc\.2")[^>]*>/,
+    "the first supported version is preselected",
+  );
+});
+
 test("detail dialog shows not pinned and defaults to the host version", async () => {
   const ctrl = controller(fakeApi({
     state: async () => state({ dshVersion: "0.2.0-rc.2", spaces: [manager, alpha] }),
