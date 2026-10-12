@@ -11,6 +11,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { Script } from "node:vm";
@@ -1722,6 +1723,7 @@ test("startup aligns a mismatched manager plugin once before the manager starts"
   const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
   let installs = 0;
   const spawned: string[] = [];
+  const specs: string[] = [];
   const handle = await startSupervisor(home, {
     bin: writeFakeCliWithWebApp(home),
     componentPayloadRoot: payload.payloadRootLib,
@@ -1729,12 +1731,18 @@ test("startup aligns a mismatched manager plugin once before the manager starts"
     dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
     processRuntime: alignProcessRuntime(spawned),
     pluginAdd: async (addedHome, profile, spec) => {
+      specs.push(basename(spec));
       if (!spec.includes("dsh-spaces-plugin")) return;
       installs += 1;
       cpSync(payload.packageRoot, join(addedHome, "profiles", profile, "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
     },
   });
   const state = await handle.runtime.state();
+  const artifactDigest = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 20);
+  assert.deepEqual(specs.sort(), [
+    `dsh-spaces-plugin-${artifactDigest(artifacts.pluginArtifact)}.tgz`,
+    `dsh-spaces-view-bridge-${artifactDigest(artifacts.viewBridgeArtifact)}.tgz`,
+  ].sort());
   assert.equal(state.role, "manager");
   assert.equal(installs, 1);
   assert.equal(state.spaces.find((space) => space.id === state.managerId)?.status, "running", state.reasons.join(" | "));

@@ -981,9 +981,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     };
     if (installed()?.digest === selected.digest) return;
     await this.lock.run("manager.align", () => this.observeChildWork(async () => {
-      await this.installArtifact(profileId, this.options.pluginArtifact!, "dsh-spaces-plugin");
+      await this.installArtifact(profileId, this.options.pluginArtifact!, `dsh-spaces-plugin-${this.artifactDigest(this.options.pluginArtifact!)}`);
       if (this.options.viewBridgeArtifact) {
-        await this.installArtifact(profileId, this.options.viewBridgeArtifact, VIEW_BRIDGE_ID);
+        await this.installArtifact(profileId, this.options.viewBridgeArtifact, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.options.viewBridgeArtifact)}`);
       }
       if (installed()?.digest !== selected.digest) {
         throw new Error("The installed manager plugin payload does not match the selected component group.");
@@ -1018,6 +1018,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (record.version === 1 && record.profileId === profileId) return true;
     } catch { /* Keep unreadable evidence and fail closed. */ }
     throw new WorkbenchPublicError("workbench/unavailable", "The manager bootstrap record requires offline inspection.");
+  }
+
+  private artifactDigest(artifact: string): string {
+    return createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
   }
 
   private async installArtifact(profileId: string, artifact: string, id: string): Promise<void> {
