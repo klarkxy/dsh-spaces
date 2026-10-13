@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { setImmediate as tick } from "node:timers/promises";
 import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
@@ -287,4 +288,39 @@ test("host surfaces take background and text color from DSH 0.2 theme tokens", a
   assert.ok(clientIndex.includes('color: "var(--dsw-alias-label-primary'));
   assert.ok(clientStyles.includes("background: var(--dsw-alias-bg-base"));
   for (const text of [HOST_SHELL_CSS, clientIndex, clientStyles]) assert.ok(!text.includes("--dsw-alias-app-bg"));
+});
+
+test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () => {
+  // Verified against @deepseek-ai/dsh 0.2.0-rc.2 (.sandbox/dashboard-sdk).
+  const sdkTokens = new Set([
+    "--dsw-alias-bg-base",
+    "--dsw-alias-bg-layer-1",
+    "--dsw-alias-border-l3",
+    "--dsw-alias-button-elevated-fill",
+    "--dsw-alias-button-primary-fill",
+    "--dsw-alias-interactive-bg-active",
+    "--dsw-alias-interactive-bg-hover",
+    "--dsw-alias-label-error",
+    "--dsw-alias-label-primary",
+    "--dsw-alias-label-primary-inverted",
+    "--dsw-alias-label-secondary",
+    "--dsw-alias-state-success-primary",
+    "--dsw-alias-state-warn-primary",
+    "--dsw-specific-sidebar-fill",
+  ]);
+  const roots = [new URL("../src", import.meta.url), new URL("../packages", import.meta.url)];
+  const pending = roots.map(url => url.pathname.slice(1));
+  const used = new Map<string, string[]>();
+  while (pending.length) {
+    const dir = pending.pop()!;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) { if (entry.name !== "node_modules" && entry.name !== "lib") pending.push(path); continue; }
+      if (!/\.(ts|tsx|css)$/.test(entry.name)) continue;
+      for (const token of readFileSync(path, "utf8").match(/--dsw-[a-z0-9-]+/g) ?? [])
+        used.set(token, [...(used.get(token) ?? []), path]);
+    }
+  }
+  for (const [token, files] of used)
+    assert.ok(sdkTokens.has(token), `${token} is not a DSH 0.2 theme token (used in ${[...new Set(files)].join(", ")})`);
 });
