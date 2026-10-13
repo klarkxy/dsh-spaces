@@ -10,12 +10,22 @@ import { expectedAuthCookieName } from '../src/adapters/node/workbench-http.ts';
 import { HomeOperationLock } from '../src/adapters/node/home-operation-lock.ts';
 import type { PatchWriter } from '../src/adapters/node/patch-writer.ts';
 import type { WorkbenchPlanRequest } from '../src/shared/workbench.ts';
+import { writeRegisteredSpace } from './fixtures/space.ts';
+
+function pkgOf(dashboard = false, manager = false) {
+  const packages = ['@deepseek-ai/dsh-web-app', ...(manager ? ['@dsh-spaces/plugin'] : []), ...(dashboard ? ['@dsh-spaces/dashboard'] : [])];
+  return { dependencies: Object.fromEntries(packages.map(p => [p, '0.1.7-alpha.1'])), dsh: { profile: { bundles: packages } } };
+}
 
 function profile(home: string, id: string, dashboard = false, manager = false) {
   const root = join(home, 'profiles', id); mkdirSync(root, { recursive: true });
-  const packages = ['@deepseek-ai/dsh-web-app', ...(manager ? ['@dsh-spaces/plugin'] : []), ...(dashboard ? ['@dsh-spaces/dashboard'] : [])];
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: Object.fromEntries(packages.map(p => [p, '0.1.7-alpha.1'])), dsh: { profile: { bundles: packages } } }));
+  writeFileSync(join(root, 'package.json'), JSON.stringify(pkgOf(dashboard, manager)));
   writeFileSync(join(root, 'cordis.patch.yml'), '- id: storage-json\n  config:\n    root: isolated\n');
+}
+
+function space(home: string, id: string, dashboard = false, manager = false) {
+  writeRegisteredSpace(home, id, { pkg: pkgOf(dashboard, manager), dshVersion: '0.2.0-rc.2' });
+  writeFileSync(join(home, 'profiles', id, 'cordis.patch.yml'), '- id: storage-json\n  config:\n    root: isolated\n');
 }
 async function setup() {
   mkdirSync('.sandbox', { recursive: true }); const home = mkdtempSync(resolve('.sandbox/dashboard-supervisor-'));
@@ -26,7 +36,7 @@ async function setup() {
     const dir = join(cli, 'node_modules', '@deepseek-ai', name); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@deepseek-ai/${name}`, version: '0.2.0-rc.2' }));
   }
-  profile(home, 'a', true); profile(home, 'b', true); profile(home, 'plain');
+  space(home, 'space-a', true); space(home, 'space-b', true); space(home, 'space-plain');
   const children = new Map<string, ChildProcess>(), paths = new Map<string, string | undefined>();
   let failSpawn = false, cleanupWasBeforeKill = true, clock = Date.now();
   const handle = await createWorkbenchSupervisor({
@@ -40,7 +50,7 @@ async function setup() {
       spawn: (args, options) => {
         const id = args[args.indexOf('--profile') + 1], port = args[args.indexOf('--port') + 1];
         paths.set(id, options.env?.DSH_SPACES_DASHBOARD_BOOTSTRAP_FILE);
-        if (failSpawn && id === 'a') throw new Error('intentional launch failure');
+        if (failSpawn && id === 'space-a') throw new Error('intentional launch failure');
         const child = spawn(process.execPath, ['--import', 'tsx', resolve('tests/fixtures/dashboard-supervisor-child.ts')], {
           ...options, env: { ...process.env, ...options.env, DASHBOARD_TEST_PORT: port, DASHBOARD_TEST_COOKIE: expectedAuthCookieName(`127.0.0.1:${port}`) },
         }); children.set(id, child); return child;
@@ -73,7 +83,7 @@ async function setup() {
   }
   async function plan(request: WorkbenchPlanRequest) { const p = await preview(request); return command({ kind: 'plan.execute', planId: p.id }); }
   const query = async (value: any) => { const result = await post('/api/dashboard/v1/query', value); assert.equal(result.status, 200, JSON.stringify(result.body)); return result.body.data; };
-  const grant = async (id = 'a', revision = 'absent', selection: any = { kind: 'all' }, providerId = 'test-provider') => plan({ kind: 'dashboard.publication.set', spaceId: id, providerId, expectedGrantRevision: revision, selection });
+  const grant = async (id = 'space-a', revision = 'absent', selection: any = { kind: 'all' }, providerId = 'test-provider') => plan({ kind: 'dashboard.publication.set', spaceId: id, providerId, expectedGrantRevision: revision, selection });
   return { handle, home, children, paths, post, management, context, command, preview, plan, query, grant,
     fail: () => { failSpawn = true; }, advance: (ms: number) => { clock += ms; }, get cleanupWasBeforeKill() { return cleanupWasBeforeKill; }, async close() {
       await handle.close();
@@ -98,18 +108,18 @@ test('real Supervisor mounts Home endpoints and uses its own operator cookie onl
 });
 test('publication uses preview and persisted plan.execute; it never starts or installs a space', async () => {
   const f = await setup(); try {
-    const before = f.children.size; const p = await f.preview({ kind: 'dashboard.publication.set', spaceId: 'a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' } });
+    const before = f.children.size; const p = await f.preview({ kind: 'dashboard.publication.set', spaceId: 'space-a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' } });
     assert.equal(existsSync(join(f.home, '.spaces-dashboard', 'v1', 'policies.json')), false);
     assert.match(p.changes.join(' '), /No plugin installation/);
     const job = await f.command({ kind: 'plan.execute', planId: p.id }); assert.equal(job.status, 'succeeded', JSON.stringify(job));
-    assert.equal(f.children.size, before); assert.equal((await f.query({ kind: 'publications', spaceId: 'a' })).policies[0].pendingStart, true);
+    assert.equal(f.children.size, before); assert.equal((await f.query({ kind: 'publications', spaceId: 'space-a' })).policies[0].pendingStart, true);
     assert.equal((await f.command({ kind: 'plan.execute', planId: p.id })).status, 'failed');
     assert.equal((await f.post('/api/dashboard/v1/commands', { ...p, kind: 'dashboard.publication.set' })).status, 400);
   } finally { await f.close(); }
 });
 test('protected profiles, unknown fields, old grant and foreign epoch cannot authorize publication', async () => {
   const f = await setup(); try {
-    const input = { kind: 'dashboard.publication.set', spaceId: 'a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' } };
+    const input = { kind: 'dashboard.publication.set', spaceId: 'space-a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' } };
     await rejectedRequest(f, { ...input, spaceId: 'web' });
     await rejectedRequest(f, { ...input, spaceId: (await f.handle.runtime.state()).managerId });
     await rejectedRequest(f, { ...input, bearer: 'not-a-permission' });
@@ -120,7 +130,7 @@ test('protected profiles, unknown fields, old grant and foreign epoch cannot aut
 });
 test('two plans based on one grant revision cannot both commit', async () => {
   const f = await setup(); try {
-    const input = { kind: 'dashboard.publication.set' as const, spaceId: 'a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' as const } };
+    const input = { kind: 'dashboard.publication.set' as const, spaceId: 'space-a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' as const } };
     const a = await f.preview(input), b = await f.preview(input);
     assert.equal((await f.command({ kind: 'plan.execute', planId: a.id })).status, 'succeeded');
     assert.equal((await f.command({ kind: 'plan.execute', planId: b.id })).status, 'failed');
@@ -128,67 +138,67 @@ test('two plans based on one grant revision cannot both commit', async () => {
 });
 test('owned launches get separate private files and manager/plain spaces get no bootstrap', async () => {
   const f = await setup(); try {
-    assert.equal((await f.grant()).status, 'succeeded'); assert.equal((await f.grant('b')).status, 'succeeded');
-    for (const id of ['a', 'b', 'plain']) assert.equal((await f.command({ kind: 'space.start', spaceId: id })).status, 'succeeded');
-    const a = f.paths.get('a')!, b = f.paths.get('b')!; assert.ok(a && b && a !== b); assert.ok(existsSync(a));
-    assert.equal(f.paths.get('plain'), undefined); assert.equal(f.paths.get((await f.handle.runtime.state()).managerId!), undefined);
+    assert.equal((await f.grant()).status, 'succeeded'); assert.equal((await f.grant('space-b')).status, 'succeeded');
+    for (const id of ['space-a', 'space-b', 'space-plain']) assert.equal((await f.command({ kind: 'space.start', spaceId: id })).status, 'succeeded');
+    const a = f.paths.get('space-a')!, b = f.paths.get('space-b')!; assert.ok(a && b && a !== b); assert.ok(existsSync(a));
+    assert.equal(f.paths.get('space-plain'), undefined); assert.equal(f.paths.get((await f.handle.runtime.state()).managerId!), undefined);
     assert.equal((await f.query({ kind: 'catalog' })).entries.length, 2);
   } finally { await f.close(); }
 });
 test('stop invalidates run before SIGTERM, retains approved result and does not affect another space', async () => {
   const f = await setup(); try {
-    for (const id of ['a', 'b']) { await f.grant(id); assert.equal((await f.command({ kind: 'space.start', spaceId: id })).status, 'succeeded'); }
-    const bootstrap = JSON.parse(readFileSync(f.paths.get('a')!, 'utf8')); const bPid = f.children.get('b')!.pid;
-    assert.equal((await f.plan({ kind: 'space.stop', spaceId: 'a' })).status, 'succeeded');
-    assert.equal(f.cleanupWasBeforeKill, true); assert.equal(existsSync(f.paths.get('a')!), false);
+    for (const id of ['space-a', 'space-b']) { await f.grant(id); assert.equal((await f.command({ kind: 'space.start', spaceId: id })).status, 'succeeded'); }
+    const bootstrap = JSON.parse(readFileSync(f.paths.get('space-a')!, 'utf8')); const bPid = f.children.get('space-b')!.pid;
+    assert.equal((await f.plan({ kind: 'space.stop', spaceId: 'space-a' })).status, 'succeeded');
+    assert.equal(f.cleanupWasBeforeKill, true); assert.equal(existsSync(f.paths.get('space-a')!), false);
     const stale = await fetch(f.handle.origin + '/internal/dashboard/v1/grant', { headers: { Authorization: `Bearer ${bootstrap.bearer}` } }); assert.equal(stale.status, 401); await stale.body?.cancel();
-    assert.equal(f.children.get('b')!.pid, bPid);
-    const items = (await f.query({ kind: 'instances', refs: ['a','b'].map(spaceId => ({ spaceId, providerId: 'test-provider', instanceId: 'item' })) })).items;
+    assert.equal(f.children.get('space-b')!.pid, bPid);
+    const items = (await f.query({ kind: 'instances', refs: ['space-a','space-b'].map(spaceId => ({ spaceId, providerId: 'test-provider', instanceId: 'item' })) })).items;
     assert.equal(items[0].freshness, 'stale'); assert.equal(items[1].freshness, 'current');
   } finally { await f.close(); }
 });
 test('spontaneous owned process exit invalidates the private capability without waiting for heartbeat', async () => {
   const f = await setup(); try {
-    await f.grant(); await f.command({ kind: 'space.start', spaceId: 'a' }); const path = f.paths.get('a')!; const child = f.children.get('a')!;
+    await f.grant(); await f.command({ kind: 'space.start', spaceId: 'space-a' }); const path = f.paths.get('space-a')!; const child = f.children.get('space-a')!;
     const exited = new Promise(r => child.once('exit', r)); child.kill('SIGTERM'); await exited;
-    assert.equal(existsSync(path), false); assert.equal((await f.query({ kind: 'instances', refs: [{ spaceId: 'a', providerId: 'test-provider', instanceId: 'item' }] })).items[0].freshness, 'stale');
+    assert.equal(existsSync(path), false); assert.equal((await f.query({ kind: 'instances', refs: [{ spaceId: 'space-a', providerId: 'test-provider', instanceId: 'item' }] })).items[0].freshness, 'stale');
   } finally { await f.close(); }
 });
 test('failed spawn invalidates only that new handoff and does not replay the launch', async () => {
   const f = await setup(); try {
-    await f.grant(); f.fail(); const job = await f.command({ kind: 'space.start', spaceId: 'a' }); assert.equal(job.status, 'failed');
-    assert.ok(f.paths.get('a')); assert.equal(existsSync(f.paths.get('a')!), false); assert.deepEqual(readdirSync(join(f.home, '.spaces-dashboard', 'private')), []);
-    assert.equal(f.children.has('a'), false); await f.query({ kind: 'overview' }); assert.equal(f.children.has('a'), false);
+    await f.grant(); f.fail(); const job = await f.command({ kind: 'space.start', spaceId: 'space-a' }); assert.equal(job.status, 'failed');
+    assert.ok(f.paths.get('space-a')); assert.equal(existsSync(f.paths.get('space-a')!), false); assert.deepEqual(readdirSync(join(f.home, '.spaces-dashboard', 'private')), []);
+    assert.equal(f.children.has('space-a'), false); await f.query({ kind: 'overview' }); assert.equal(f.children.has('space-a'), false);
   } finally { await f.close(); }
 });
 test('revocation plan hides live source without restarting or stopping its process', async () => {
   const f = await setup(); try {
-    await f.grant(); await f.command({ kind: 'space.start', spaceId: 'a' }); const pid = f.children.get('a')!.pid;
-    const revision = (await f.query({ kind: 'publications', spaceId: 'a' })).policies[0].revision;
-    assert.equal((await f.grant('a', revision, null)).status, 'succeeded');
-    assert.equal((await f.query({ kind: 'catalog' })).entries.length, 0); assert.equal(f.children.get('a')!.pid, pid); assert.equal(f.children.get('a')!.exitCode, null);
+    await f.grant(); await f.command({ kind: 'space.start', spaceId: 'space-a' }); const pid = f.children.get('space-a')!.pid;
+    const revision = (await f.query({ kind: 'publications', spaceId: 'space-a' })).policies[0].revision;
+    assert.equal((await f.grant('space-a', revision, null)).status, 'succeeded');
+    assert.equal((await f.query({ kind: 'catalog' })).entries.length, 0); assert.equal(f.children.get('space-a')!.pid, pid); assert.equal(f.children.get('space-a')!.exitCode, null);
   } finally { await f.close(); }
 });
 test('space deletion revokes all source grants before deleting profile data', async () => {
   const f = await setup(); try {
-    await f.grant(); await f.grant('a', 'absent', { kind: 'all' }, 'second-provider'); await f.command({ kind: 'space.start', spaceId: 'a' });
-    const result = await f.plan({ kind: 'space.delete', spaceId: 'a', removeData: false }); assert.equal(result.status, 'succeeded', JSON.stringify(result));
-    assert.equal(existsSync(join(f.home, 'profiles', 'a')), false); const policies = JSON.parse(readFileSync(join(f.home, '.spaces-dashboard', 'v1', 'policies.json'), 'utf8'));
+    await f.grant(); await f.grant('space-a', 'absent', { kind: 'all' }, 'second-provider'); await f.command({ kind: 'space.start', spaceId: 'space-a' });
+    const result = await f.plan({ kind: 'space.delete', spaceId: 'space-a', removeData: false }); assert.equal(result.status, 'succeeded', JSON.stringify(result));
+    assert.equal(existsSync(join(f.home, 'profiles', 'space-a')), false); const policies = JSON.parse(readFileSync(join(f.home, '.spaces-dashboard', 'v1', 'policies.json'), 'utf8'));
     assert.equal(policies.policies.length, 2); assert.ok(policies.policies.every((p: any) => p.selection === null));
     assert.equal((await f.query({ kind: 'catalog' })).entries.length, 0);
   } finally { await f.close(); }
 });
 test('expired or generation-stale plans fail instead of being replayed', async () => {
   const f = await setup(); try {
-    const input = { kind: 'dashboard.publication.set' as const, spaceId: 'plain', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' as const } };
-    const stale = await f.preview(input); await f.command({ kind: 'space.start', spaceId: 'plain' });
+    const input = { kind: 'dashboard.publication.set' as const, spaceId: 'space-plain', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' as const } };
+    const stale = await f.preview(input); await f.command({ kind: 'space.start', spaceId: 'space-plain' });
     assert.equal((await f.command({ kind: 'plan.execute', planId: stale.id })).status, 'failed');
     const expired = await f.preview(input); f.advance(360000); assert.equal((await f.command({ kind: 'plan.execute', planId: expired.id })).status, 'failed');
   } finally { await f.close(); }
 });
 test('foreign Home mutation lock and maintenance evidence refuse authorization writes', async () => {
   const f = await setup(); try {
-    const input = { kind: 'dashboard.publication.set', spaceId: 'a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' } };
+    const input = { kind: 'dashboard.publication.set', spaceId: 'space-a', providerId: 'test-provider', expectedGrantRevision: 'absent', selection: { kind: 'all' } };
     const lock = new HomeOperationLock(f.home); await lock.run('test-owner', async () => { await rejectedRequest(f, input); });
     const evidence = join(f.home, '.dsh-spaces-mutation.json'); writeFileSync(evidence, '{}'); await rejectedRequest(f, input); rmSync(evidence);
     assert.equal(existsSync(join(f.home, '.spaces-dashboard', 'v1', 'policies.json')), false);
@@ -206,8 +216,8 @@ test('parent bootstrap paths cannot leak into manager or unapproved space launch
     const state = await f.handle.runtime.state();
     assert.equal(state.writable, true, JSON.stringify(state));
     assert.equal(f.paths.get(state.managerId!), undefined);
-    assert.equal((await f.command({ kind: 'space.start', spaceId: 'plain' })).status, 'succeeded');
-    assert.equal(f.paths.get('plain'), undefined);
+    assert.equal((await f.command({ kind: 'space.start', spaceId: 'space-plain' })).status, 'succeeded');
+    assert.equal(f.paths.get('space-plain'), undefined);
     assert.equal(existsSync(join(f.home, '.spaces-dashboard', 'private')), false);
   } finally {
     if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
