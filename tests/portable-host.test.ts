@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import { setImmediate as tick } from "node:timers/promises";
 import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
 import { Script } from "node:vm";
@@ -269,4 +270,21 @@ test("manager surface validates existing parent generation and cannot navigate t
   assert.equal((replies[1] as { type: string }).type, "selected");
   listener!(event(null, 1) as never); assert.equal(replies.length, 2);
   dispose(); assert.equal(listener, null);
+});
+
+test("host surfaces take background and text color from DSH 0.2 theme tokens", async () => {
+  const { HOST_SHELL_CSS } = await import("../packages/plugin/src/client/host-shell.tsx");
+  const clientIndex = await readFile(new URL("../packages/plugin/src/client/index.tsx", import.meta.url), "utf8");
+  const clientStyles = await readFile(new URL("../packages/plugin/src/client/styles.ts", import.meta.url), "utf8");
+  const rule = (name: string) => HOST_SHELL_CSS.split(`${name} {`)[1]?.split("}")[0] ?? "";
+  for (const name of [".dsh-host-surface", ".dsh-host-loading"]) {
+    assert.ok(rule(name).includes("--dsw-alias-bg-base"), name);
+    assert.ok(rule(name).includes("color:var(--dsw-alias-label-primary"), name);
+  }
+  assert.ok(rule(".dsh-host-guide").includes("color:var(--dsw-alias-label-primary"));
+  assert.ok(rule(".dsh-host-rail").includes("--dsw-alias-bg-base"));
+  assert.ok(clientIndex.includes('background: "var(--dsw-alias-bg-base'));
+  assert.ok(clientIndex.includes('color: "var(--dsw-alias-label-primary'));
+  assert.ok(clientStyles.includes("background: var(--dsw-alias-bg-base"));
+  for (const text of [HOST_SHELL_CSS, clientIndex, clientStyles]) assert.ok(!text.includes("--dsw-alias-app-bg"));
 });

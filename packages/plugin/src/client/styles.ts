@@ -11,7 +11,7 @@ export const SPACES_PANEL_CSS = `
   display: flex;
   flex-direction: column;
   color: var(--dsw-alias-label-primary, #1f2328);
-  background: var(--dsw-alias-app-bg, var(--dsw-specific-sidebar-fill, #ffffff));
+  background: var(--dsw-alias-bg-base, var(--dsw-specific-sidebar-fill, #ffffff));
   font-size: 14px;
   line-height: 1.5;
   overflow: hidden;

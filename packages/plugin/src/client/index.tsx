@@ -105,7 +105,7 @@ const panelStyle: CSSProperties = {
   height: "100%",
   padding: "24px",
   color: "var(--dsw-alias-label-primary, #1f2328)",
-  background: "var(--dsw-alias-app-bg, #fff)",
+  background: "var(--dsw-alias-bg-base, #fff)",
 };
 const bodyStyle: CSSProperties = {
   margin: "0 0 16px",
@@ -115,15 +115,15 @@ const primaryButtonStyle = (busy: boolean): CSSProperties => ({
   padding: "8px 14px",
   borderRadius: "8px",
   border: "none",
-  background: "var(--dsw-alias-interactive-primary, #5865f2)",
+  background: "var(--dsw-alias-button-primary-fill, #5865f2)",
   color: "#fff",
   cursor: busy ? "progress" : "pointer",
 });
-const alertStyle: CSSProperties = { color: "var(--dsw-alias-danger, #d1242f)" };
+const alertStyle: CSSProperties = { color: "var(--dsw-alias-label-error, #d1242f)" };
 const copyButtonStyle: CSSProperties = {
   padding: "8px 14px",
   borderRadius: "8px",
-  border: "1px solid var(--dsw-alias-border-primary, #d0d7de)",
+  border: "1px solid var(--dsw-alias-border-l3, #d0d7de)",
   background: "transparent",
   color: "var(--dsw-alias-label-primary, #1f2328)",
   cursor: "pointer",

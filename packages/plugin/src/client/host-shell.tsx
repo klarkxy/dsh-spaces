@@ -6,7 +6,7 @@ import { SpaceGlyph } from "../workbench/space-glyph";
 export const HOST_SHELL_CSS = `
 [data-spaces-host-rail] > [data-spaces-host-covered] { visibility: hidden !important; pointer-events: none !important; }
 .dsh-host-dock { position:absolute; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--dsw-alias-label-primary,#202127); }
-.dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-app-bg,#f0f1f5); border-right:1px solid var(--dsw-alias-border-primary,#d6d8de); }
+.dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-bg-base,#f0f1f5); border-right:1px solid var(--dsw-alias-border-l3,#d6d8de); }
 .dsh-host-rail-list { flex:1; min-height:0; overflow-y:auto; width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .dsh-host-rail button { flex-shrink:0; width:48px; height:48px; border:1px solid transparent; border-radius:14px; background:transparent; color:inherit; font:inherit; cursor:pointer; overflow:hidden; }
 .dsh-host-rail button:hover { background:color-mix(in srgb,currentColor 10%,transparent); }
@@ -15,12 +15,12 @@ export const HOST_SHELL_CSS = `
 .dsh-host-rail button:has(.dsh-wb-glyph-img) { padding:0; }
 .dsh-host-rail .dsh-wb-glyph-img { display:block; width:100% !important; height:100% !important; max-width:100%; max-height:100%; object-fit:cover; }
 .dsh-host-rail .dsh-wb-glyph { width:32px; height:32px; fill:currentColor; }
-.dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:72px; right:0; pointer-events:auto; background:var(--dsw-alias-app-bg,#fff); }
+.dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:72px; right:0; pointer-events:auto; background:var(--dsw-alias-bg-base,#fff); color:var(--dsw-alias-label-primary,#202127); }
 iframe.dsh-host-surface { width:calc(100% - 72px); height:calc(100% - var(--dsh-frame-top-clearance,0px)); border:0; }
 .dsh-host-surface[hidden] { display:none !important; }
-.dsh-host-guide { padding:24px; box-sizing:border-box; overflow:auto; }
+.dsh-host-guide { padding:24px; box-sizing:border-box; overflow:auto; color:var(--dsw-alias-label-primary,#202127); }
 .dsh-host-guide button { padding:8px 14px; margin:8px 8px 8px 0; border:1px solid currentColor; border-radius:8px; background:transparent; color:inherit; cursor:pointer; }
-.dsh-host-loading { position:absolute; bottom:12px; left:84px; padding:6px 12px; background:var(--dsw-alias-app-bg,#fff); pointer-events:none; }
+.dsh-host-loading { position:absolute; bottom:12px; left:84px; padding:6px 12px; background:var(--dsw-alias-bg-base,#fff); color:var(--dsw-alias-label-primary,#202127); pointer-events:none; }
 `;
 const texts = {
   zh: { current:"当前应用", home:"Spaces 首页", title:"空间", initialize:"初始化 Spaces", start:"启动工作台", connecting:"正在连接空间服务", loading:"正在打开空间", manage:"打开空间管理", stopped:"该空间尚未运行。请在空间管理中明确启动。", unsupported:"当前宿主尚未提供兼容的嵌入通道。本版内置通道需要 http://127.0.0.1；没有启动或修改宿主。", unavailable:"空间服务或宿主身份不可用。当前应用仍可继续使用。", entry:"空间视图未能完成认证或握手。该次操作已失败，未自动重连。", initBody:"在当前应用中使用空间栏。初始化只准备 Spaces 的独立管理服务，不接管当前应用。", startBody:"当前空间不是管理工作台。这里只会打开已认证的工作台入口；若工作台已停止，请启动它。管理能力仍在专用管理空间。" },
