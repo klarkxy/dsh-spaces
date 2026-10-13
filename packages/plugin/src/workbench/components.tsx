@@ -373,6 +373,61 @@ function WorkbenchLogSection({ ui, controller }: WorkbenchViewProps): ReactEleme
   );
 }
 
+function SpaceActions({
+  locale,
+  space,
+  controller,
+  includeStart = false,
+}: {
+  locale: WorkbenchLocale;
+  space: WorkbenchSpace;
+  controller: WorkbenchController;
+  /** The settings row's open button already starts a stopped space; the dialog needs its own. */
+  includeStart?: boolean;
+}): ReactElement | null {
+  if (!space.managed || controller.isManagerId(space.id)) return null;
+  const disabled = !controller.canMutate() || controller.isBusy();
+  const startable = space.status === "stopped" || space.status === "crashed";
+  const active = space.status === "running" || space.status === "starting";
+  return (
+    <>
+      {includeStart && startable ? (
+        <button type="button" className="dsh-wb-btn" disabled={disabled} onClick={() => controller.startSpace(space.id)}>
+          {t(locale, "app.start")}
+        </button>
+      ) : null}
+      {active ? (
+        <>
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            disabled={disabled}
+            onClick={() => controller.preview({ kind: "space.stop", spaceId: space.id })}
+          >
+            {t(locale, "app.stop")}
+          </button>
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            disabled={disabled}
+            onClick={() => controller.preview({ kind: "space.restart", spaceId: space.id })}
+          >
+            {t(locale, "app.restart")}
+          </button>
+        </>
+      ) : null}
+      <button
+        type="button"
+        className="dsh-wb-btn danger"
+        disabled={disabled}
+        onClick={() => controller.preview({ kind: "space.delete", spaceId: space.id, removeData: false })}
+      >
+        {t(locale, "app.delete")}
+      </button>
+    </>
+  );
+}
+
 function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
   const spaces = controller.workspaceSpaces();
@@ -389,7 +444,7 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
       </div>
       {spaces.length === 0 ? <p className="dsh-wb-muted">{t(locale, "home.spacesEmpty")}</p> : null}
       {spaces.map((space, index) => (
-        <div key={space.id} className="dsh-wb-space-row">
+        <div key={space.id} className="dsh-wb-space-row" data-space-id={space.id}>
           <SpaceGlyph icon={space.icon} spaceId={space.id} />
           <span>
             {space.displayName}{" "}
@@ -402,6 +457,7 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
           <button type="button" className="dsh-wb-btn" onClick={() => controller.selectSpace(space.id)}>
             {space.status === "running" ? space.displayName : t(locale, "app.start")}
           </button>
+          <SpaceActions locale={locale} space={space} controller={controller} />
           <button type="button" className="dsh-wb-btn" disabled={!writable || index === 0} onClick={() => controller.moveSpace(space.id, -1)}>
             {t(locale, "app.moveUp")}
           </button>
@@ -1384,6 +1440,7 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
           </div>
         ))}
         <div className="dsh-wb-actions">
+          {space ? <SpaceActions locale={locale} space={space} controller={controller} includeStart /> : null}
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
             {t(locale, "app.close")}
           </button>

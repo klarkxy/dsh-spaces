@@ -1044,6 +1044,118 @@ test("detail DSH section is hidden for the manager", async () => {
   assert.ok(!ready(ctrl).includes(t("zh", "detail.dshVersion")));
 });
 
+function rowButtons(html: string, spaceId: string): string[] {
+  const marker = `class="dsh-wb-space-row" data-space-id="${spaceId}"`;
+  const start = html.indexOf(marker);
+  assert.notEqual(start, -1, `settings row for ${spaceId}`);
+  const segment = html.slice(start, html.indexOf("</div>", start));
+  return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
+}
+
+function dialogActionButtons(html: string): string[] {
+  const start = html.lastIndexOf('class="dsh-wb-actions"');
+  assert.notEqual(start, -1);
+  const segment = html.slice(start, html.indexOf("</div>", start));
+  return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
+}
+
+test("settings space rows offer per-status start, stop, restart and delete actions", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () =>
+      state({
+        spaces: [
+          manager,
+          alpha,
+          space({ id: "beta", status: "stopped" }),
+          space({ id: "gamma", status: "crashed" }),
+          space({ id: "delta", status: "starting" }),
+          space({ id: "rogue", managed: false }),
+        ],
+      }),
+  }));
+  await ctrl.poll();
+  ctrl.setHomeTab("spaces");
+  const html = ready(ctrl);
+  const [start, stop, restart, del, diagnose, up, down] = [
+    t("zh", "app.start"), t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete"),
+    t("zh", "app.diagnose"), t("zh", "app.moveUp"), t("zh", "app.moveDown"),
+  ];
+  assert.ok(!html.includes('data-space-id="hub"'), "the manager has no settings row");
+  assert.deepEqual(rowButtons(html, "alpha"), ["Alpha", stop, restart, del, up, down, diagnose]);
+  assert.deepEqual(rowButtons(html, "beta"), [start, del, up, down, diagnose]);
+  assert.deepEqual(rowButtons(html, "gamma"), [start, del, up, down, diagnose]);
+  assert.deepEqual(rowButtons(html, "delta"), [start, stop, restart, del, up, down, diagnose]);
+  assert.deepEqual(rowButtons(html, "rogue"), ["rogue", up, down, diagnose]);
+});
+
+test("detail dialog offers the same per-status actions and hides them for the manager and unmanaged spaces", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () =>
+      state({
+        spaces: [manager, alpha, space({ id: "beta", status: "stopped" }), space({ id: "rogue", managed: false })],
+      }),
+  }));
+  await ctrl.poll();
+  const [start, stop, restart, del, close] = [
+    t("zh", "app.start"), t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete"), t("zh", "app.close"),
+  ];
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  assert.deepEqual(dialogActionButtons(ready(ctrl)), [stop, restart, del, close]);
+  ctrl.openDetail("beta");
+  await flush();
+  await flush();
+  assert.deepEqual(dialogActionButtons(ready(ctrl)), [start, del, close]);
+  ctrl.openDetail("rogue");
+  await flush();
+  await flush();
+  assert.deepEqual(dialogActionButtons(ready(ctrl)), [close]);
+  ctrl.openDetail("hub");
+  await flush();
+  await flush();
+  assert.deepEqual(dialogActionButtons(ready(ctrl)), [close]);
+});
+
+test("space actions render in contained mode and are disabled without mutation rights or while busy", async () => {
+  // The row's open button also reads 启动 for stopped spaces; SpaceActions on rows is stop/restart/delete.
+  const actionLabels = new Set([t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete")]);
+  const actionTags = (html: string, spaceId: string): Array<{ tag: string; label: string }> => {
+    const marker = `data-space-id="${spaceId}"`;
+    const start = html.indexOf(marker);
+    assert.notEqual(start, -1, `row for ${spaceId}`);
+    const segment = html.slice(start, html.indexOf("</div>", start));
+    return [...segment.matchAll(/<button[^>]*>([^<]*)<\/button>/g)]
+      .map((match) => ({ tag: match[0], label: match[1] }))
+      .filter((button) => actionLabels.has(button.label));
+  };
+
+  const readonly = controller(fakeApi({
+    state: async () => state({ writable: false, spaces: [manager, alpha, space({ id: "beta", status: "stopped" })] }),
+  }));
+  await readonly.poll();
+  readonly.setHomeTab("spaces");
+  const contained = renderToStaticMarkup(
+    React.createElement(WorkbenchView, { ui: readonly.getSnapshot(), controller: readonly, contained: true }),
+  );
+  assert.deepEqual(actionTags(contained, "alpha").map((button) => button.label), [t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete")]);
+  assert.deepEqual(actionTags(contained, "beta").map((button) => button.label), [t("zh", "app.delete")]);
+  for (const button of [...actionTags(contained, "alpha"), ...actionTags(contained, "beta")]) {
+    assert.ok(button.tag.includes("disabled"), button.tag);
+  }
+
+  const gate = deferred<WorkbenchPlan>();
+  const busy = controller(fakeApi({ preview: () => gate.promise }));
+  await busy.poll();
+  busy.setHomeTab("spaces");
+  void busy.preview({ kind: "space.stop", spaceId: "alpha" });
+  const buttons = actionTags(ready(busy), "alpha");
+  assert.equal(buttons.length, 3);
+  assert.ok(buttons.every((button) => button.tag.includes("disabled")));
+  gate.resolve(planOf({ kind: "space.stop", spaceId: "alpha" }));
+  await flush();
+});
+
 test("runtime tab shows pinned users and gates install/remove buttons", async () => {
   const ctrl = controller(fakeApi({
     runtimes: async () => [

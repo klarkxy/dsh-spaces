@@ -345,4 +345,29 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
     { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
     { kind: "runtime.remove", version: "0.3.0" },
   ]);
+  await page.getByRole("button", { name: "取消" }).click();
+
+  await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "空间" }).click();
+  const alphaRow = page.locator(".dsh-wb-space-row", { hasText: "Alpha" });
+  await alphaRow.getByRole("button", { name: "停止" }).click();
+  await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
+  assert.deepEqual(await previewCalls(), [
+    { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
+    { kind: "runtime.remove", version: "0.3.0" },
+    { kind: "space.stop", spaceId: "alpha" },
+  ]);
+  await page.getByRole("button", { name: "取消" }).click();
+
+  await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "空间" }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "删除" }).click();
+  await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
+  assert.deepEqual(await previewCalls(), [
+    { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
+    { kind: "runtime.remove", version: "0.3.0" },
+    { kind: "space.stop", spaceId: "alpha" },
+    { kind: "space.delete", spaceId: "alpha", removeData: false },
+  ]);
+  await page.getByRole("button", { name: "取消" }).click();
 });
