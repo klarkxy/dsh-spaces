@@ -47,7 +47,7 @@ import {
   sha256File,
   writeJson,
   writePnpmShim,
-} from "./verify-spaces-distribution.mjs";
+} from "./lib/distribution-harness.mjs";
 import { copyLinkedTree } from "../src/adapters/node/snapshot-store.ts";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -439,7 +439,7 @@ function packProbePlugin(nodeExe, npmCli, destDir, version) {
 function resolveOfficialCli() {
   try {
     const bin = dshBin();
-    return { bin, version: cliVersion(bin), source: process.env.DSH_TEST_BIN?.trim() ? "DSH_TEST_BIN" : "verify-spaces-distribution" };
+    return { bin, version: cliVersion(bin), source: process.env.DSH_TEST_BIN?.trim() ? "DSH_TEST_BIN" : "distribution-harness" };
   } catch (error) {
     const managed = process.env.APPDATA
       ? join(process.env.APPDATA, "dsh-spaces", "dsh-cli", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js")

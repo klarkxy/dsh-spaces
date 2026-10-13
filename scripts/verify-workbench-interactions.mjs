@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { isolatedEnv, refuseRealHome, stopOwned } from './verify-spaces-distribution.mjs';
+import { isolatedEnv, refuseRealHome, stopOwned } from './lib/distribution-harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = join(root, '.sandbox/workbench-product-themes');

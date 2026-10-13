@@ -75,7 +75,7 @@ import {
   sha256File,
   stopOwned,
   writePnpmShim,
-} from './verify-spaces-distribution.mjs';
+} from './lib/distribution-harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const node = process.execPath;

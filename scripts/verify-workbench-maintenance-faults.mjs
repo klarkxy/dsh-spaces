@@ -42,7 +42,7 @@ import {
   stopOwned,
   writePnpmShim,
   cliVersion,
-} from './verify-spaces-distribution.mjs';
+} from './lib/distribution-harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const node = process.execPath;
@@ -174,7 +174,7 @@ export async function runSelfCheck(outputDir = join(root, '.sandbox', 'workbench
   else pass('product-module-unsafe-not-imported', product);
 
   try {
-    const dist = await import(pathToFileURL(join(root, 'scripts/verify-spaces-distribution.mjs')).href);
+    const dist = await import(pathToFileURL(join(root, 'scripts/lib/distribution-harness.mjs')).href);
     assert.equal(typeof dist.refuseRealHome, 'function');
     assert.equal(typeof dist.isolatedEnv, 'function');
     pass('distribution-helpers-safe-import');

@@ -24,7 +24,7 @@
 - [x] P1b：Supervisor 可写启动时在管理器启动前对齐管理插件与绑定组件组；对齐失败即阻止启动并报告原因（`0bae5f9`）。
 - [x] P1c：删除自我更新与组件交接：`workbench.upgrade`、`workbench.prepare`、`component-handoff`、一次性 launcher、`--accept-handoff`、管理界面更新面板与对应 RPC。旧式更新遗留证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻断写入；旧客户端的 `workbench.upgrade` 返回 `workbench/unsupported`（`4f0a551`）。
 - [x] P2 按空间固定版本（已定决策，未实现）：每个空间固定精确的 DSH 运行时版本，官方基础插件（dsh-base / dsh-web-app）内置于运行时并随之变化，Spaces 不向 profile 安装；第三方插件安装与升级只接受精确版本。升级在空间设置中由用户发起，版本来源为插件库与 npm。已有空间首次启动时固定为当前实际使用的版本；新空间默认宿主的 DSH 版本。切换前不自动建快照，禁止降级。管理空间（spaces-hub）跟随宿主 CLI。Spaces 声明支持的 DSH 最低版本，桥接必须兼容整个范围；低于最低版本的空间启动失败并提示到空间设置升级。删除全局 runtime.install / runtime.upgrade 与协调升级。提供用户触发的删除未使用运行时（`f1e8a90`、`74ea256`、`cddabe9`、`86d51bf`）。
-- [ ] `validate:plugin` / `validate:distribution` 仍假定普通 profile 提供 `spaces/*`（专用 manager 之前的设计），已过时：改为查询 spaces-hub 或废弃，待定。
+- [x] `validate:plugin` / `validate:distribution` 仍假定普通 profile 提供 `spaces/*`（专用 manager 之前的设计），已过时：已删除两个校验入口与 `scripts/verify-spaces-plugin.mjs`、`scripts/verify-spaces-distribution.mjs`；共享 harness 移至 `scripts/lib/distribution-harness.mjs`（本条目即该提交记录）。
 - [ ] `packages/*/README.md` 中残留 `0.1.7-alpha.1` 等旧版本说明，待统一。
 
 # 2026-10-12 清理与结构拆分

@@ -33,7 +33,7 @@ import {
   sessionCookie,
   rpc,
   assertRpcOk,
-} from "./verify-spaces-distribution.mjs";
+} from "./lib/distribution-harness.mjs";
 import { startThemeProfile, readThemeProof } from "./verify-spaces-themes.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");

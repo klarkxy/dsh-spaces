@@ -46,7 +46,7 @@ import {
   waitPortClosed,
   writePnpmShim,
   cliVersion,
-} from './verify-spaces-distribution.mjs';
+} from './lib/distribution-harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const THIS_FILE = fileURLToPath(import.meta.url);

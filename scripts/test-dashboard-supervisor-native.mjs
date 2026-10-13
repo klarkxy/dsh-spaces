@@ -10,7 +10,7 @@ import { createWorkbenchSupervisor } from '../src/adapters/node/workbench-superv
 import { applyIsolationPatch } from '../src/core/domain/isolation.ts';
 import { HomeController } from '../src/adapters/node/home-controller.ts';
 import { resolveNpmCli } from './pack-spaces-plugin.mjs';
-import { isolatedEnv, resolvePnpmCjs, writePnpmShim } from './verify-spaces-distribution.mjs';
+import { isolatedEnv, resolvePnpmCjs, writePnpmShim } from './lib/distribution-harness.mjs';
 
 const sdk = process.env.DSH_DASHBOARD_SDK_ROOT;
 if (!sdk) throw new Error('An explicitly installed official SDK is required');

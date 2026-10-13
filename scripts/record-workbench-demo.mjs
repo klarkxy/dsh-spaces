@@ -31,7 +31,7 @@ import {
   stopOwned,
   rpc,
   assertRpcOk,
-} from "./verify-spaces-distribution.mjs";
+} from "./lib/distribution-harness.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const THEMES_ROOT = join(REPO, ".sandbox", "workbench-product-themes");

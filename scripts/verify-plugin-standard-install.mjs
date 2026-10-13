@@ -58,7 +58,7 @@ import {
   waitPortClosed,
   writeJson,
   writePnpmShim,
-} from "./verify-spaces-distribution.mjs";
+} from "./lib/distribution-harness.mjs";
 import { PLUGIN_REQUIRED, defaultPackDest, assertNoSpaces } from "./pack-spaces-plugin.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");

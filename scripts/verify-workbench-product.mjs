@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { DEFAULT_BIN, resolveNpmCli, resolvePnpmCjs, writePnpmShim, isolatedEnv, runDsh, run, refuseRealHome, stopOwned, rpc, assertRpcOk } from './verify-spaces-distribution.mjs';
+import { DEFAULT_BIN, resolveNpmCli, resolvePnpmCjs, writePnpmShim, isolatedEnv, runDsh, run, refuseRealHome, stopOwned, rpc, assertRpcOk } from './lib/distribution-harness.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageRoot = resolve(process.env.DSH_TEST_PACKAGE_ROOT || join(root, 'packages'));

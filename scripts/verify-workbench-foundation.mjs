@@ -54,7 +54,7 @@ import {
   sessionCookie,
   rpc,
   assertRpcOk,
-} from "./verify-spaces-distribution.mjs";
+} from "./lib/distribution-harness.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ARTIFACT = join(REPO, ".sandbox", "workbench-foundation");

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LLM_REQUIRED, PLUGIN_REQUIRED } from "./pack-spaces-plugin.mjs";
-import { resolveNpmCli } from "./verify-spaces-distribution.mjs";
+import { resolveNpmCli } from "./lib/distribution-harness.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LLM_DIR = join(REPO, "packages", "llm-bridge");

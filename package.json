@@ -32,8 +32,6 @@
     "test:workbench:browser": "tsx --test tests/workbench-ui-dom.test.ts tests/fit-icon-browser.test.ts tests/portable-host-dom.test.ts",
     "test:workbench:recovery": "tsx --test tests/workbench-doctor.test.ts tests/cooperative-children.test.ts tests/maintenance-responsiveness.test.ts tests/xp-compatibility.test.ts",
     "test:dashboard": "node scripts/test-dashboard-core.mjs && node --import tsx --test --test-concurrency=1 tests/dashboard-async-commit.test.ts tests/dashboard-home-gateway.test.ts tests/dashboard-home-node.test.ts tests/dashboard-home.test.ts tests/dashboard-http.test.ts tests/dashboard-lifetime.test.ts tests/dashboard-local.test.ts tests/dashboard-sdk.test.ts tests/dashboard-supervisor.test.ts tests/dashboard-view.test.tsx tests/dashboard-workbench-cors.test.ts tests/dashboard-workbench.test.ts tests/private-files-helper.test.ts tests/private-files-windows.test.ts",
-    "validate:plugin": "node scripts/verify-spaces-plugin.mjs",
-    "validate:distribution": "node scripts/verify-spaces-distribution.mjs",
     "pack:plugin": "node scripts/build-spaces.mjs && node scripts/pack-spaces-plugin.mjs",
     "check:plugin-package": "node scripts/pack-spaces-plugin.mjs --preflight",
     "check:test-lists": "node scripts/check-test-lists.mjs",
