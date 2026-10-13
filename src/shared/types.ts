@@ -8,6 +8,8 @@ export interface SpaceMeta {
   order: number;
   /** Exact DSH runtime version this space is pinned to. */
   dshVersion?: string;
+  /** ISO timestamp written by Spaces when the space was created. Registers the space. */
+  createdAt?: string;
 }
 
 export interface ProfileRecord {
@@ -177,6 +179,16 @@ export interface CliEnsureStatus {
 export const RESERVED_PROFILE_NAMES = ["web", "desktop", "hub", "headless", "node_modules"] as const;
 
 export const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
+
+/** A space id is the full profile directory name under profiles/, e.g. `space-demo`. */
+export const SPACE_ID_RE = /^space-[a-z0-9][a-z0-9-]{0,32}$/;
+
+/** The user-entered part of a space id (before the `space-` prefix). */
+export const SPACE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,32}$/;
+
+export function spaceIdFromName(name: string): string {
+  return `space-${name}`;
+}
 
 export const DEFAULT_HUB_SETTINGS: HubSettings = {
   portStart: 3100,

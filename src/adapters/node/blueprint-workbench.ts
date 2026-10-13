@@ -58,7 +58,7 @@ import {
 } from "../../shared/blueprint";
 import { isBareNpmPackageName, isGitSpec } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
-import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
+import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, SPACE_NAME_RE, spaceIdFromName } from "../../shared/types";
 import { scanShareEntries } from "../../core/domain/llm-share";
 import { LLM_ERROR, LlmConfigError } from "../../core/domain/llm-connections";
 import type { LlmApiRequest, LlmApiResult, LlmDescribeResult, LlmSpacePolicyResult } from "../../shared/llm-api";
@@ -577,21 +577,22 @@ export class BlueprintWorkbench {
     }
 
     ctx.phase("space-create");
+    const spaceId = spaceIdFromName(staged.name);
     try {
       throwIfAborted(ctx.signal);
       await this.ports.createSpace(
         { name: staged.name, displayName: staged.displayName || sourceName || "blueprint" },
         ctx,
       );
-      if (!this.ports.listSpaces().some((row) => row.id === staged.name)) {
+      if (!this.ports.listSpaces().some((row) => row.id === spaceId)) {
         failCreate("The space was not created.");
       }
-      outcome.spaceId = staged.name;
+      outcome.spaceId = spaceId;
       outcome.stages["space-create"] = { status: "succeeded" };
       publish(outcome);
     } catch (error) {
-      if (this.ports.listSpaces().some((row) => row.id === staged.name)) {
-        outcome.spaceId = staged.name;
+      if (this.ports.listSpaces().some((row) => row.id === spaceId)) {
+        outcome.spaceId = spaceId;
       }
       if (isAbortError(error)) failCreate("The blueprint apply was cancelled.");
       if ((error as { outcome?: WorkbenchBlueprintApplyOutcome }).outcome) throw error;
@@ -618,11 +619,11 @@ export class BlueprintWorkbench {
         await this.assertBuiltinRuntimeUnchanged(staged);
         throwIfAborted(ctx.signal);
         try {
-          await this.ports.installPlugin(staged.name, prepared.archivePath);
+          await this.ports.installPlugin(spaceId, prepared.archivePath);
         } catch (error) {
           throw publicError(durableFailureReason(error, "packages"));
         }
-        const actual = readInstalledIdentity(this.ports.home, staged.name, pkg.name);
+        const actual = readInstalledIdentity(this.ports.home, spaceId, pkg.name);
         if (!actual || actual.name !== prepared.name || actual.version !== prepared.version) {
           throw publicError("Installed package identity does not match the prepared archive.");
         }
@@ -637,10 +638,10 @@ export class BlueprintWorkbench {
         publish(outcome);
       }
       await this.assertBuiltinRuntimeUnchanged(staged);
-      composeBundles(this.ports.home, staged.name, staged.blueprint.profile.bundles, { includeLlmBridge: false });
-      const compositionError = await this.compositionError(staged.name, staged.blueprint, bound.patch);
+      composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles, { includeLlmBridge: false });
+      const compositionError = await this.compositionError(spaceId, staged.blueprint, bound.patch);
       if (compositionError) throw publicError(compositionError);
-      outcome.host = hostOutcome(await this.hostVersions(staged.name));
+      outcome.host = hostOutcome(await this.hostVersions(spaceId));
       outcome.stages.packages = { status: "succeeded" };
       publish(outcome);
     } catch (error) {
@@ -677,39 +678,39 @@ export class BlueprintWorkbench {
       throwIfAborted(ctx.signal);
       await this.assertBuiltinRuntimeUnchanged(staged);
       currentWrite = "patch";
-      this.writeBoundPatch(staged.name, bound.patch);
+      this.writeBoundPatch(spaceId, bound.patch);
       writes[0] = { kind: "patch", status: "succeeded" };
       currentWrite = undefined;
       outcome.writes = [...writes];
       publish(outcome);
       currentWrite = "settings";
-      writeBoundSettings(this.ports.home, staged.name, bound.settings);
+      writeBoundSettings(this.ports.home, spaceId, bound.settings);
       writes[1] = { kind: "settings", status: "succeeded" };
       currentWrite = undefined;
       outcome.writes = [...writes];
       publish(outcome);
       if (bound.model) {
         currentWrite = "model";
-        await this.bindModel(staged.name, bound.model);
+        await this.bindModel(spaceId, bound.model);
         writes[2] = { kind: "model", status: "succeeded" };
         currentWrite = undefined;
       }
       outcome.writes = [...writes];
       publish(outcome);
-      composeBundles(this.ports.home, staged.name, staged.blueprint.profile.bundles, {
+      composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles, {
         includeLlmBridge: Boolean(bound.model),
       });
       if (bound.model) {
-        const lateError = await this.compositionError(staged.name, staged.blueprint, bound.patch, { force: true });
+        const lateError = await this.compositionError(spaceId, staged.blueprint, bound.patch, { force: true });
         if (lateError) throw publicError(lateError);
       }
       currentWrite = "provenance";
       await this.assertBuiltinRuntimeUnchanged(staged);
-      writeProvenance(this.ports.home, staged.name, staged.blueprint, staged.values);
+      writeProvenance(this.ports.home, spaceId, staged.blueprint, staged.values);
       writes[3] = { kind: "provenance", status: "succeeded" };
       currentWrite = undefined;
       outcome.writes = [...writes];
-      outcome.host = hostOutcome(await this.hostVersions(staged.name));
+      outcome.host = hostOutcome(await this.hostVersions(spaceId));
       outcome.stages.presets = { status: "succeeded" };
       publish(outcome);
     } catch (error) {
@@ -1030,8 +1031,8 @@ export class BlueprintWorkbench {
   }
 
   private requireNewSpaceName(name: string): string {
-    assertMutableName(name, this.ports.managerId());
-    if (this.ports.listSpaces().some((row) => row.id === name)) {
+    if (!SPACE_NAME_RE.test(name)) throw publicError("That space name is not allowed.");
+    if (this.ports.listSpaces().some((row) => row.id === spaceIdFromName(name))) {
       throw publicError("A space with that name already exists.");
     }
     return name;

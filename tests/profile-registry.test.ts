@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { t } from "../src/shared/i18n/index.ts";
 import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
+import { writeOrdinaryProfile, writeRegisteredSpace } from "./fixtures/space.ts";
 
 const temps: string[] = [];
 
@@ -31,74 +32,80 @@ afterEach(() => {
   }
 });
 
-test("scan pins web as root and hides headless", () => {
+test("scan lists only spaces registered with createdAt", () => {
   const home = fakeHome();
+  writeRegisteredSpace(home, "space-coding");
   writeProfile(home, "web", ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]);
-  writeProfile(home, "coding", ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]);
+  writeProfile(home, "notes", ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]);
   writeProfile(home, "headless", ["@deepseek-ai/dsh-base"]);
   mkdirSync(join(home, "profiles", "node_modules"));
 
   const registry = new ProfileRegistry(home);
   const names = registry.scan().map((p) => p.name);
-  assert.deepEqual(names, ["web", "coding"]);
-  assert.equal(registry.scan()[0].kind, "root");
-  assert.equal(registry.scan()[1].kind, "workbench");
-  assert.equal(registry.scan()[1].needsConversion, true);
+  assert.deepEqual(names, ["space-coding"]);
+  assert.equal(registry.scan()[0].kind, "workbench");
+  assert.equal(registry.scan()[0].needsConversion, false);
+});
+
+test("scan ignores unregistered profile directories and stale meta", () => {
+  const home = fakeHome();
+  writeRegisteredSpace(home, "space-coding");
+  writeProfile(home, "web", ["@deepseek-ai/dsh-web-app"]);
+  writeOrdinaryProfile(home, "notes");
+  mkdirSync(join(home, "profiles", "web.before-reset-x"), { recursive: true });
+  mkdirSync(join(home, "profiles", "Bad_Name"), { recursive: true });
+  // A space-* directory without createdAt is not a space.
+  writeOrdinaryProfile(home, "space-x");
+  const registry = new ProfileRegistry(home);
+  registry.updateMeta("space-x", { displayName: "Legacy", dshVersion: "0.2.0-rc.2" });
+  const current = JSON.parse(readFileSync(registry.spacesPath(), "utf8")) as { meta: Record<string, unknown> };
+  current.meta["web.before-reset-x"] = { displayName: "Stale", order: 5 };
+  writeFileSync(registry.spacesPath(), JSON.stringify(current), "utf8");
+
+  assert.deepEqual(registry.scan().map((p) => p.name), ["space-coding"]);
+  // Stale meta stays on disk, it is simply not a space.
+  const file = JSON.parse(readFileSync(registry.spacesPath(), "utf8")) as { meta: Record<string, unknown> };
+  assert.ok(file.meta["web.before-reset-x"]);
+  assert.ok(file.meta["space-x"]);
+});
+
+test("a registered space whose profile directory is gone is not listed", () => {
+  const home = fakeHome();
+  writeRegisteredSpace(home, "space-coding");
+  rmSync(join(home, "profiles", "space-coding"), { recursive: true, force: true });
+  const registry = new ProfileRegistry(home);
+  assert.deepEqual(registry.scan(), []);
 });
 
 test("atomic spaces.json write and reorder persist order", () => {
   const home = fakeHome();
-  writeProfile(home, "web", ["@deepseek-ai/dsh-web-app"]);
-  writeProfile(home, "coding", ["@deepseek-ai/dsh-web-app"]);
-  writeProfile(home, "writing", ["@deepseek-ai/dsh-web-app"]);
+  writeRegisteredSpace(home, "space-coding");
+  writeRegisteredSpace(home, "space-writing");
   const registry = new ProfileRegistry(home);
-  registry.updateMeta("coding", { displayName: "Code" });
-  registry.updateMeta("writing", { displayName: "Write" });
-  registry.reorder(["writing", "coding"]);
+  registry.updateMeta("space-coding", { displayName: "Code" });
+  registry.updateMeta("space-writing", { displayName: "Write" });
+  registry.reorder(["space-writing", "space-coding"]);
 
   const text = readFileSync(registry.spacesPath(), "utf8");
   const parsed = JSON.parse(text) as { order: string[] };
-  assert.deepEqual(parsed.order, ["writing", "coding"]);
-  assert.equal(registry.scan()[1].name, "writing");
-  assert.equal(registry.scan()[2].name, "coding");
+  assert.deepEqual(parsed.order, ["space-writing", "space-coding"]);
+  assert.equal(registry.scan()[0].name, "space-writing");
+  assert.equal(registry.scan()[1].name, "space-coding");
 });
 
 test("validateNewName rejects reserved and existing", () => {
   const home = fakeHome();
-  writeProfile(home, "coding", ["@deepseek-ai/dsh-web-app"]);
+  writeOrdinaryProfile(home, "space-coding");
   const registry = new ProfileRegistry(home);
   assert.throws(() => registry.validateNewName("Web"), { message: t("errors.nameInvalid") });
   assert.throws(() => registry.validateNewName("web"), { message: t("errors.nameReserved", { name: "web" }) });
-  assert.throws(() => registry.validateNewName("coding"), {
-    message: t("errors.profileExists", { name: "coding" }),
+  assert.throws(() => registry.validateNewName("space-coding"), {
+    message: t("errors.profileExists", { name: "space-coding" }),
   });
-  registry.validateNewName("notes");
+  registry.validateNewName("space-notes");
 });
 
-test("scan ignores profile directories whose names cannot be managed", () => {
-  const home = fakeHome();
-  writeProfile(home, "web", ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]);
-  writeProfile(home, "coding", ["@deepseek-ai/dsh-web-app"]);
-  mkdirSync(join(home, "profiles", "web.before-reset-20260922"), { recursive: true });
-  mkdirSync(join(home, "profiles", "Bad_Name"), { recursive: true });
-  const registry = new ProfileRegistry(home);
-  registry.updateMeta("coding", { displayName: "Code" });
-  const current = JSON.parse(readFileSync(registry.spacesPath(), "utf8")) as { meta: Record<string, unknown> };
-  current.meta["web.before-reset-20260922"] = { displayName: "Stale", order: 5 };
-  writeFileSync(registry.spacesPath(), JSON.stringify(current), "utf8");
-
-  assert.deepEqual(registry.scan().map((p) => p.name), ["web", "coding"]);
-  assert.equal(registry.scan().find((p) => p.name === "web")!.kind, "root");
-  assert.deepEqual(
-    registry.scanOnboarding().profiles.map((p) => p.name).sort(),
-    ["coding", "web"],
-  );
-  // Stale meta for an unmanaged name is kept on disk, not deleted.
-  const file = JSON.parse(readFileSync(registry.spacesPath(), "utf8")) as { meta: Record<string, unknown> };
-  assert.ok(file.meta["web.before-reset-20260922"]);
-});
-
-test("official desktop profile is reserved, hidden and cannot be deleted", () => {
+test("official desktop profile is reserved and cannot be deleted", () => {
   const home = fakeHome();
   writeProfile(home, "desktop", ["@deepseek-ai/dsh-web-app"]);
   const hub = join(home, "hub", "desktop");
@@ -107,7 +114,6 @@ test("official desktop profile is reserved, hidden and cannot be deleted", () =>
   const registry = new ProfileRegistry(home);
   const before = readFileSync(join(home, "profiles", "desktop", "package.json"), "utf8");
   assert.deepEqual(registry.scan(), []);
-  assert.equal(registry.scanOnboarding().profiles[0]?.action, "hide");
   assert.throws(() => registry.validateNewName("desktop"));
   assert.throws(() => registry.removeOfficialProfile("desktop"));
   assert.throws(() => registry.removeHubData("desktop"));

@@ -8,11 +8,16 @@ import { test } from 'node:test';
 import { createWorkbenchSupervisor } from '../src/adapters/node/workbench-supervisor.ts';
 import { expectedAuthCookieName } from '../src/adapters/node/workbench-http.ts';
 import type { PatchWriter } from '../src/adapters/node/patch-writer.ts';
+import { writeRegisteredSpace } from './fixtures/space.ts';
 function profile(home: string, id: string, manager = false) {
   const root = join(home, 'profiles', id); mkdirSync(root, { recursive: true });
   const packages = ['@deepseek-ai/dsh-web-app', manager ? '@dsh-spaces/plugin' : '@dsh-spaces/view-bridge'];
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: Object.fromEntries(packages.map(p => [p, '0.2.0-rc.2'])), dsh: { profile: { bundles: packages } } }));
   writeFileSync(join(root, 'cordis.patch.yml'), '- id: storage-json\n  config:\n    root: isolated\n');
+}
+function space(home: string, id: string) {
+  writeRegisteredSpace(home, id, { dshVersion: '0.2.0-rc.2' });
+  profile(home, id);
 }
 function call(child: ChildProcess, data: Record<string, unknown>): Promise<any> {
   const id = randomUUID();
@@ -31,7 +36,7 @@ test('real Supervisor launches two Cordis Space services, routes IPC, and dispos
     const dir = join(cli, 'node_modules', '@deepseek-ai', name); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: `@deepseek-ai/${name}`, version: '0.2.0-rc.2' }));
   }
-  profile(home, 'alpha'); profile(home, 'beta');
+  space(home, 'space-alpha'); space(home, 'space-beta');
   const children = new Map<string, ChildProcess>();
   const handle = await createWorkbenchSupervisor({
     home, bin: join(cli, 'lib', 'bin.js'), port: 0, portStart: 39000, portEnd: 41999,
@@ -50,24 +55,24 @@ test('real Supervisor launches two Cordis Space services, routes IPC, and dispos
     },
   });
   try {
-    for (const id of ['alpha', 'beta']) {
+    for (const id of ['space-alpha', 'space-beta']) {
       const state = await handle.runtime.state();
       const submitted = await handle.runtime.submit({ kind: 'space.start', spaceId: id }, randomUUID(), { serviceEpoch: state.serviceEpoch, expectedRevision: state.revision });
       let job = submitted;
       while (job.status === 'running' || job.status === 'queued') { await sleep(20); job = await handle.runtime.job(job.id); }
       assert.equal(job.status, 'succeeded', JSON.stringify(job));
     }
-    const capabilities = await call(children.get('alpha')!, { test: 'capabilities', target: 'beta' });
+    const capabilities = await call(children.get('space-alpha')!, { test: 'capabilities', target: 'space-beta' });
     assert.deepEqual(capabilities.value, [{ operation: 'echo', description: 'Supervisor integration echo.' }]);
-    assert.deepEqual((await call(children.get('beta')!, { test: 'capabilities', target: 'alpha' })).value, []);
-    const result = await call(children.get('alpha')!, { test: 'request', target: 'beta', operation: 'echo', params: { value: 'actual-supervisor' } });
-    assert.equal(result.ok, true); assert.deepEqual(result.value, { params: { value: 'actual-supervisor' }, caller: 'alpha' });
-    const denied = await call(children.get('beta')!, { test: 'request', target: 'alpha', operation: 'echo', params: null });
+    assert.deepEqual((await call(children.get('space-beta')!, { test: 'capabilities', target: 'space-alpha' })).value, []);
+    const result = await call(children.get('space-alpha')!, { test: 'request', target: 'space-beta', operation: 'echo', params: { value: 'actual-supervisor' } });
+    assert.equal(result.ok, true); assert.deepEqual(result.value, { params: { value: 'actual-supervisor' }, caller: 'space-alpha' });
+    const denied = await call(children.get('space-beta')!, { test: 'request', target: 'space-alpha', operation: 'echo', params: null });
     assert.equal(denied.error, 'unauthorized');
-    await call(children.get('beta')!, { test: 'dispose-operation' });
-    const disposed = await call(children.get('alpha')!, { test: 'request', target: 'beta', operation: 'echo', params: null });
+    await call(children.get('space-beta')!, { test: 'dispose-operation' });
+    const disposed = await call(children.get('space-alpha')!, { test: 'request', target: 'space-beta', operation: 'echo', params: null });
     assert.equal(disposed.error, 'operation-not-found');
-    assert.deepEqual((await call(children.get('alpha')!, { test: 'capabilities', target: 'beta' })).value, []);
+    assert.deepEqual((await call(children.get('space-alpha')!, { test: 'capabilities', target: 'space-beta' })).value, []);
   } finally {
     await handle.close();
     for (const child of children.values()) if (child.exitCode === null && child.signalCode === null) child.kill();

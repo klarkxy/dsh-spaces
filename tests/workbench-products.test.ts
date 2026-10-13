@@ -550,7 +550,7 @@ test("space.import consumes once, binds epoch and TTL, and keeps a partial failu
   assert.deepEqual(created, ["lab"]);
   assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
   const payload = recorded[0] as { spaceId?: string; product?: WorkbenchProductOutcome };
-  assert.equal(payload.spaceId, "lab");
+  assert.equal(payload.spaceId, "space-lab");
   assert.equal(payload.product?.kind, "space.import");
   if (payload.product?.kind !== "space.import") return;
   assert.equal(payload.product.import.definition, "imported");

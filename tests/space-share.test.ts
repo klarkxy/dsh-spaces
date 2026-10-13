@@ -161,7 +161,7 @@ test("import splits definition, plugins, and start and does not start the space"
   assert.equal(created.length, 1);
   assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
   assert.equal(result.pendingManual[0]?.packageName, "custom-git");
-  assert.equal(result.spaceId, created[0]);
+  assert.equal(result.spaceId, `space-${created[0]}`);
 });
 
 test("import keeps the space when a legal plugin combo fails to install", async () => {
@@ -252,7 +252,7 @@ test("invalid manifest field types do not escape the import result", async () =>
 
 test("uniqueSpaceName avoids web and existing ids", () => {
   assert.equal(uniqueSpaceName("Coding", []), "coding");
-  assert.equal(uniqueSpaceName("Coding", ["coding"]), "coding-2");
+  assert.equal(uniqueSpaceName("Coding", ["space-coding"]), "coding-2");
   assert.notEqual(uniqueSpaceName("Web", ["web"]), "web");
 });
 
@@ -515,7 +515,7 @@ test("valid config is isolated in memory then written only after the space exist
     },
     {
       writePatch: (spaceId, patch) => {
-        assert.equal(created.includes(spaceId), true);
+        assert.equal(spaceId, `space-${created[0]}`);
         patches.push(patch);
       },
     },
@@ -523,5 +523,5 @@ test("valid config is isolated in memory then written only after the space exist
   assert.equal(result.definition, "imported");
   assert.equal(created.length, 1);
   assert.equal(patches.length, 1);
-  assert.match(patches[0] ?? "", /hub\/with-config\/sessions/);
+  assert.match(patches[0] ?? "", /hub\/space-with-config\/sessions/);
 });

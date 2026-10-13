@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SNAPSHOT_ID_RE } from "../../../../src/shared/snapshots";
+import { SPACE_NAME_RE } from "../../../../src/shared/types";
 import { isExactRuntimeVersion } from "../../../../src/shared/runtime";
 import { MAX_SPACE_ICON_DATA_URL_CHARS } from "../../../../src/shared/space-icon";
 import {
@@ -38,6 +39,8 @@ const hex64Schema = z.string().regex(/^[a-f0-9]{64}$/);
 export const spaceIdSchema = z
   .string()
   .refine((value) => value === "web" || /^[a-z0-9][a-z0-9-]{0,38}$/.test(value), "invalid space id");
+
+export const spaceNameSchema = z.string().regex(SPACE_NAME_RE, "invalid space name");
 
 export const jobIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
 export const requestIdSchema = jobIdSchema;
@@ -218,7 +221,7 @@ export const workbenchSpaceDetailSchema = z
 
 const createInputSchema = z
   .object({
-    name: spaceIdSchema,
+    name: spaceNameSchema,
     displayName: displayNameSchema.optional(),
     icon: iconSchema.optional(),
     useSharedLlm: z.boolean().optional(),

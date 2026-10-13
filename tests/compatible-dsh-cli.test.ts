@@ -114,7 +114,7 @@ test("src gate admits exact CLI writes; tags stay unbound and read-only", async 
   assert.equal(overview.capabilities.canVerify, true);
   assert.equal(overview.capabilities.dshVersion, "0.1.5-rc.2");
   const created = await admitted.create({ name: "notes" });
-  assert.equal(created.id, "notes");
+  assert.equal(created.id, "space-notes");
 
   const laterHome = tempDir("dsh-cli-gate-later-");
   writeWeb(laterHome);

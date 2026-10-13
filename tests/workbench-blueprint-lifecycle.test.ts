@@ -26,6 +26,7 @@ import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adap
 import { parseBlueprint } from "../src/core/domain/blueprint.ts";
 import type { LlmApiResult } from "../src/shared/llm-api.ts";
 import type { WorkbenchCommand, WorkbenchJob, WorkbenchSpace } from "../src/shared/workbench.ts";
+import { spaceIdFromName } from "../src/shared/types.ts";
 import {
   BLUEPRINT_PLAN_MAX_COUNT,
   BLUEPRINT_PLAN_TTL_MS,
@@ -185,8 +186,8 @@ function openStack(
     createSpace: async (input) => {
       await extra.beforeCreate?.();
       created.push(input.name);
-      writeMinimalProfile(dshHome, input.name);
-      spaces.push(space(input.name));
+      writeMinimalProfile(dshHome, spaceIdFromName(input.name));
+      spaces.push(space(spaceIdFromName(input.name)));
     },
     installPlugin: async () => {
       throw new Error("plugin execution is not part of this fixture");
@@ -351,7 +352,7 @@ test("one plan through JobStore, ProductService, and HomeOperationLock creates a
 
   const original = stack.jobs.job(requestId);
   assert.equal(original.status, "succeeded");
-  assert.equal(original.result?.spaceId, "life-once");
+  assert.equal(original.result?.spaceId, "space-life-once");
   const product = original.result?.product;
   assert.equal(product?.kind, "blueprint.apply");
   if (product?.kind !== "blueprint.apply") {
@@ -362,10 +363,10 @@ test("one plan through JobStore, ProductService, and HomeOperationLock creates a
   assert.equal(product.stages.presets.status, "succeeded");
   assert.equal(product.stages.start.status, "not-run");
   assert.equal(product.writes.find((row) => row.kind === "settings")?.status, "succeeded");
-  assert.equal(existsSync(join(dshHome, "profiles", "life-once", "package.json")), true);
-  const settingsFile = join(dshHome, "profiles", "life-once", "cordis.patch.yml");
+  assert.equal(existsSync(join(dshHome, "profiles", "space-life-once", "package.json")), true);
+  const settingsFile = join(dshHome, "profiles", "space-life-once", "cordis.patch.yml");
   assert.equal(existsSync(settingsFile), true);
-  const settings = readProfileSettings(dshHome, "life-once").toJS() as { demo?: { theme?: unknown } };
+  const settings = readProfileSettings(dshHome, "space-life-once").toJS() as { demo?: { theme?: unknown } };
   assert.equal(settings.demo?.theme, "paper");
 
   const second = stack.jobs.job(otherId);

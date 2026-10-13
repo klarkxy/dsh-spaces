@@ -201,7 +201,7 @@ test("non-secret template config is kept and written back on create", async () =
   });
   assert.equal(result.plugins, "completed");
   assert.equal(patches.length, 1);
-  assert.match(patches[0] ?? "", /hub\/lab\/sessions/);
+  assert.match(patches[0] ?? "", /hub\/space-lab\/sessions/);
   assert.match(patches[0] ?? "", /foo: 1/);
 });
 
@@ -225,7 +225,7 @@ test("template install failure is reported and does not rewrite other spaces", a
       },
     },
   );
-  assert.equal(result.spaceId, "lab");
+  assert.equal(result.spaceId, "space-lab");
   assert.equal(result.plugins, "failed");
   assert.match(result.errors.join("\n"), /template plugin failed/);
 });

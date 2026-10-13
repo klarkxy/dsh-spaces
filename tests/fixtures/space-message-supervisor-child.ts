@@ -6,7 +6,7 @@ const ctx = new Context();
 await ctx.plugin({ name: 'fixture-view', apply: plugin => { apply(plugin); } });
 let disposeOperation: (() => Promise<void>) | undefined;
 const registration = await ctx.plugin({ name: 'fixture-operation', inject: ['spaceMessages'], apply: plugin => {
-  plugin.spaceMessages.handle('echo', ['alpha'], (params, caller) => ({ params, caller: caller.spaceId }), { description: 'Supervisor integration echo.' });
+  plugin.spaceMessages.handle('echo', ['space-alpha'], (params, caller) => ({ params, caller: caller.spaceId }), { description: 'Supervisor integration echo.' });
 } });
 disposeOperation = async () => { await registration.dispose(); };
 process.on('message', async (m: any) => {

@@ -11,6 +11,7 @@ import { composeBlueprintRuntime, inspectBlueprintRuntime } from "../src/adapter
 import type { WorkbenchJobContext } from "../src/adapters/node/workbench-jobs.ts";
 import type { WorkbenchBlueprintApplyOutcome } from "../src/shared/workbench-blueprint.ts";
 import type { WorkbenchSpace } from "../src/shared/workbench.ts";
+import { spaceIdFromName } from "../src/shared/types.ts";
 
 const BUILTIN = "fixture-optional-bundle";
 const HOST = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"];
@@ -53,7 +54,7 @@ function fixture() {
       builtinLayers: available ? [{ name: BUILTIN, version, packageDir: "bound-builtin", patchPath: "bound-patch", patches: [] }] : [],
       builtinCatalog: [BUILTIN],
     } satisfies BlueprintRuntimeInspect),
-    createSpace: async input => { calls.push(`create:${input.name}`); profile(input.name); },
+    createSpace: async input => { calls.push(`create:${input.name}`); profile(spaceIdFromName(input.name)); },
     prepareBlueprintPackage: async (_home, pkg) => {
       calls.push(`prepare:${pkg.name}`);
       if (pkg.name === failPackage) throw new Error("failure token=sk-private-canary-path");
@@ -109,9 +110,9 @@ test("v2 code and JSON preserve raw artifact in inspect, preview and provenance;
   assert.equal(outcome.stages.presets.status, "succeeded");
   assert.equal(outcome.stages.start.status, "not-run");
   assert.deepEqual(f.calls, ["create:target", "prepare:alpha", "install:alpha"]);
-  const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "target", "package.json"), "utf8"));
+  const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "space-target", "package.json"), "utf8"));
   assert.deepEqual(manifest.dsh.profile.bundles, [...HOST, BUILTIN, "alpha"]);
-  const origin = JSON.parse(readFileSync(join(f.home, "hub", "target", "blueprint-origin.json"), "utf8"));
+  const origin = JSON.parse(readFileSync(join(f.home, "hub", "space-target", "blueprint-origin.json"), "utf8"));
   assert.deepEqual(origin.blueprint, raw);
   assert.equal("profile" in origin.blueprint, false);
   assert.equal(existsSync(join(f.home, "profiles", "web")), false);
@@ -122,7 +123,7 @@ test("v2 code and JSON preserve raw artifact in inspect, preview and provenance;
 test("package-only v2 installs identities without enabling optional bundles or removing host/control layers", async () => {
   const f = fixture(); const preview = await f.wb.preview({ content: JSON.stringify(document(undefined, [])), name: "package-only", values: {} });
   assert.ok(preview.planId); await f.wb.apply(preview.planId, context().ctx);
-  const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "package-only", "package.json"), "utf8"));
+  const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "space-package-only", "package.json"), "utf8"));
   assert.deepEqual(manifest.dsh.profile.bundles, HOST);
   assert.deepEqual(f.calls, ["create:package-only", "prepare:alpha", "install:alpha"]);
 });
@@ -205,7 +206,7 @@ test("v2 partial npm failure retains succeeded identities and stops the remainin
   const outcome = outcomes.at(-1)!;
   assert.deepEqual(outcome.packageResults.map(p => p.status), ["succeeded", "succeeded", "failed", "not-run"]);
   assert.equal(outcome.stages["space-create"].status, "succeeded"); assert.equal(outcome.stages.presets.status, "not-run");
-  assert.ok(existsSync(join(f.home, "profiles", "partial", "node_modules", "alpha", "package.json")));
+  assert.ok(existsSync(join(f.home, "profiles", "space-partial", "node_modules", "alpha", "package.json")));
   assert.equal(f.calls.some(call => call.includes("gamma")), false);
   assert.doesNotMatch(JSON.stringify(outcome), /sk-private-canary/);
   await assert.rejects(f.wb.apply(preview.planId, context().ctx), /no longer valid/);
@@ -237,7 +238,7 @@ test("official DSH 0.2 inspection and composition apply a v2 builtin plus exact 
   f.ports.runtimeBin = () => bin;
   f.ports.inspectRuntime = inspectBlueprintRuntime;
   f.ports.composeRuntime = composeBlueprintRuntime;
-  f.ports.createSpace = async input => { f.calls.push(`create:${input.name}`); f.profile(input.name, {}, HOST.slice(0, 2)); };
+  f.ports.createSpace = async input => { f.calls.push(`create:${input.name}`); f.profile(spaceIdFromName(input.name), {}, HOST.slice(0, 2)); };
   f.ports.installPlugin = async id => {
     f.calls.push("install:alpha");
     const dir = join(f.home, "profiles", id, "node_modules", "alpha");
@@ -250,10 +251,10 @@ test("official DSH 0.2 inspection and composition apply a v2 builtin plus exact 
   const outcome = await f.wb.apply(preview.planId, context().ctx);
   assert.equal(outcome.stages.presets.status, "succeeded");
   assert.deepEqual(f.calls, ["create:official", "prepare:alpha", "install:alpha"]);
-  const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "official", "package.json"), "utf8"));
+  const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "space-official", "package.json"), "utf8"));
   assert.deepEqual(manifest.dsh.profile.bundles, [...HOST.slice(0, 2), builtin, "alpha"]);
   assert.equal(outcome.host.dsh, "0.2.0-rc.2"); assert.equal(outcome.stages.start.status, "not-run");
-  const origin = JSON.parse(readFileSync(join(f.home, "hub", "official", "blueprint-origin.json"), "utf8"));
+  const origin = JSON.parse(readFileSync(join(f.home, "hub", "space-official", "blueprint-origin.json"), "utf8"));
   assert.deepEqual(parseStandalone(encodeBlueprintDocument(origin.blueprint)), raw);
   assert.equal(existsSync(join(f.home, "profiles", "web")), false);
   assert.equal(existsSync(join(f.home, "sessions")), false);

@@ -12,7 +12,7 @@ import {
   type SpaceSharePluginSource,
   type SpaceTemplate,
 } from "../../shared/space-share";
-import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES, RESERVED_PROFILE_NAMES } from "../../shared/types";
+import { PROFILE_NAME_RE, PROTECTED_PLUGIN_PACKAGES, RESERVED_PROFILE_NAMES, SPACE_NAME_RE, spaceIdFromName } from "../../shared/types";
 
 const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, FULL_SPACES_PACKAGE]);
 const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i;
@@ -196,6 +196,16 @@ export function assertMutableRecipeSpaceId(spaceId: string, protectedIds: Iterab
   }
 }
 
+/** The user-entered part of a new space; the resulting space id is `space-<name>`. */
+export function assertMutableRecipeSpaceName(name: string): void {
+  if (!SPACE_NAME_RE.test(name)) {
+    throw new Error("That space name is not allowed.");
+  }
+  if ((RESERVED_PROFILE_NAMES as readonly string[]).includes(name)) {
+    throw new Error(`The ${name} space cannot be changed this way.`);
+  }
+}
+
 export async function applySpaceRecipe(
   recipe: SpaceRecipe,
   ports: SpaceRecipePorts,
@@ -203,8 +213,9 @@ export async function applySpaceRecipe(
 ): Promise<SpaceImportResult> {
   const parsed = parseSpaceRecipe(recipe);
   const name = options.name;
+  const spaceId = spaceIdFromName(name);
   try {
-    assertMutableRecipeSpaceId(name);
+    assertMutableRecipeSpaceName(name);
   } catch (error) {
     return definitionFailed(error);
   }
@@ -212,7 +223,7 @@ export async function applySpaceRecipe(
   let isolatedPatch: string | undefined;
   if (parsed.patch) {
     try {
-      isolatedPatch = validateImportedPatch(parsed.patch, name);
+      isolatedPatch = validateImportedPatch(parsed.patch, spaceId);
     } catch (error) {
       return definitionFailed(error);
     }
@@ -230,13 +241,13 @@ export async function applySpaceRecipe(
 
   if (isolatedPatch && ports.writePatch) {
     try {
-      ports.writePatch(name, isolatedPatch);
+      ports.writePatch(spaceId, isolatedPatch);
     } catch (error) {
       return {
         definition: "imported",
         plugins: "not-run",
         start: "not-run",
-        spaceId: name,
+        spaceId,
         errors: [errorMessage(error)],
         pendingManual: [],
         llm: llmImportResult(parsed.llm),
@@ -246,13 +257,13 @@ export async function applySpaceRecipe(
 
   if (parsed.llm && ports.writeLlmShare) {
     try {
-      await ports.writeLlmShare(name, parsed.llm);
+      await ports.writeLlmShare(spaceId, parsed.llm);
     } catch (error) {
       return {
         definition: "imported",
         plugins: "not-run",
         start: "not-run",
-        spaceId: name,
+        spaceId,
         errors: [errorMessage(error)],
         pendingManual: [],
         llm: llmImportResult(parsed.llm),
@@ -274,7 +285,7 @@ export async function applySpaceRecipe(
       : "completed";
   const errors: string[] = [];
   const batch = await runBatch(auto, async (row) => {
-    await ports.installPlugin(name, row.spec);
+    await ports.installPlugin(spaceId, row.spec);
   });
   if (batch.failed) {
     errors.push(batch.failed.error);
@@ -285,7 +296,7 @@ export async function applySpaceRecipe(
     definition: "imported",
     plugins: pluginStatus,
     start: "not-run",
-    spaceId: name,
+    spaceId,
     errors,
     pendingManual,
     llm: llmImportResult(parsed.llm),

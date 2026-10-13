@@ -8,6 +8,7 @@ import {
   BLUEPRINT_SHARE_MAX_BYTES,
 } from "./blueprint";
 import { isExactRuntimeVersion } from "./runtime";
+import { SPACE_NAME_RE } from "./types";
 import { WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT } from "./workbench-blueprint";
 import {
   MAX_WORKBENCH_SHARE_BASE64,
@@ -41,6 +42,7 @@ export const workbenchMutationContextSchema = z
   .strict();
 
 const spaceIdSchema = z.string().regex(SPACE_ID_RE);
+const spaceNameSchema = z.string().regex(SPACE_NAME_RE);
 const entityIdSchema = z.string().regex(ENTITY_ID_RE);
 const isoDateSchema = z.string().regex(ISO_DATE_RE);
 const displayNameSchema = z.string().min(1).max(80);
@@ -440,7 +442,7 @@ const blueprintPreviewRequestSchema = z
   .object({
     method: z.literal("blueprint.preview"),
     content: blueprintContentSchema,
-    name: spaceIdSchema,
+    name: spaceNameSchema,
     displayName: displayNameSchema.optional(),
     values: blueprintInputValuesSchema,
   })
@@ -716,7 +718,7 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
     .object({
       kind: z.literal("template.create"),
       templateId: entityIdSchema,
-      name: z.string().min(1).max(80),
+      name: spaceNameSchema,
       displayName: displayNameSchema.optional(),
     })
     .strict(),
@@ -724,7 +726,7 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
     .object({
       kind: z.literal("space.import"),
       importId: entityIdSchema,
-      name: z.string().min(1).max(80),
+      name: spaceNameSchema,
       displayName: displayNameSchema.optional(),
     })
     .strict(),

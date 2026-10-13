@@ -17,6 +17,7 @@ import {
   type SpacesLoaderView,
 } from "../src/adapters/node/spaces-control";
 import { HomeOperationLock } from "../src/adapters/node/home-operation-lock";
+import { writeRegisteredSpace } from "./fixtures/space.ts";
 import { SpacesHost } from "../packages/plugin/src/host/spaces-service";
 import { SPACES_REMOTE_CODES, WORKBENCH_REMOTE_CODES } from "../packages/plugin/src/host/remote-errors";
 import { TYPERT, workbenchCommandSchema } from "../packages/plugin/src/typert.host";
@@ -158,15 +159,15 @@ test("create uses a real HomeOperationLock and is not denied by its own lock", a
     },
   });
   const created = await spaces.create({ name: "notes", displayName: "Notes" });
-  assert.equal(created.id, "notes");
+  assert.equal(created.id, "space-notes");
   assert.equal(created.status, "unknown");
   assert.equal(created.isHost, false);
-  assert.deepEqual(calls[0], ["--profile", "notes", "--from-default-profile", "web", "--dump-config"]);
+  assert.deepEqual(calls[0], ["--profile", "space-notes", "--from-default-profile", "web", "--dump-config"]);
   const overview = await spaces.overview();
   assert.equal(overview.capabilities.mode, "verified-full");
   assert.equal(overview.capabilities.canCreate, true);
   assert.equal(overview.spaces.find((row) => row.id === "web")?.status, "running");
-  assert.equal(overview.spaces.find((row) => row.id === "notes")?.status, "unknown");
+  assert.equal(overview.spaces.find((row) => row.id === "space-notes")?.status, "unknown");
 });
 
 test("external overview stays busy while a real lock is held", async () => {
@@ -184,7 +185,7 @@ test("external overview stays busy while a real lock is held", async () => {
 
 test("an observer of the same control instance does not inherit an active mutation's authority", async () => {
   const home = tempDir("dsh-spaces-host-observer-");
-  writeWeb(home); writeWorkbench(home, "notes");
+  writeWeb(home); writeRegisteredSpace(home, "space-notes");
   let resolveDump!: (result: BoundCliResult) => void;
   let entered!: () => void;
   const ready = new Promise<void>(resolve => { entered = resolve; });
@@ -192,10 +193,10 @@ test("an observer of the same control instance does not inherit an active mutati
     entered();
     return new Promise<BoundCliResult>(resolve => { resolveDump = resolve; });
   } });
-  const verifying = spaces.verify("notes");
+  const verifying = spaces.verify("space-notes");
   await ready;
   assert.equal((await spaces.overview()).capabilities.canCreate, false);
-  resolveDump({ code: 0, stdout: isolatedDump("notes"), stderr: "" });
+  resolveDump({ code: 0, stdout: isolatedDump("space-notes"), stderr: "" });
   assert.equal((await verifying).valid, true);
   assert.equal((await spaces.overview()).capabilities.canCreate, true);
 });
@@ -293,7 +294,7 @@ test("redirected profiles root is recovery-only and blocks create", async () => 
 test("snapshots require matching home, space membership, and ISO createdAt", async () => {
   const home = tempDir("dsh-spaces-host-snap-");
   writeWeb(home);
-  writeWorkbench(home, "notes");
+  writeRegisteredSpace(home, "space-notes");
   const root = tempDir("dsh-spaces-host-snap-root-");
   const id = "11111111-1111-1111-1111-111111111111";
   mkdirSync(join(root, id));
@@ -303,11 +304,11 @@ test("snapshots require matching home, space membership, and ISO createdAt", asy
       id,
       createdAt: "yesterday",
       home,
-      profiles: ["notes"],
+      profiles: ["space-notes"],
       runtimeVersion: "0.1.5-rc.1",
     })}\n`,
   );
-  const bad = await control(home, { snapshotRoot: root }).detail("notes");
+  const bad = await control(home, { snapshotRoot: root }).detail("space-notes");
   assert.deepEqual(bad.snapshots, []);
 
   writeFileSync(
@@ -316,11 +317,11 @@ test("snapshots require matching home, space membership, and ISO createdAt", asy
       id,
       createdAt: "2026-09-11T12:00:00.000Z",
       home: join(home, "other"),
-      profiles: ["notes"],
+      profiles: ["space-notes"],
       runtimeVersion: "0.1.5-rc.1",
     })}\n`,
   );
-  const otherHome = await control(home, { snapshotRoot: root }).detail("notes");
+  const otherHome = await control(home, { snapshotRoot: root }).detail("space-notes");
   assert.deepEqual(otherHome.snapshots, []);
 
   writeFileSync(
@@ -329,11 +330,11 @@ test("snapshots require matching home, space membership, and ISO createdAt", asy
       id,
       createdAt: "2026-09-11T12:00:00.000Z",
       home,
-      profiles: ["notes"],
+      profiles: ["space-notes"],
       runtimeVersion: "0.1.5-rc.1",
     })}\n`,
   );
-  const ok = await control(home, { snapshotRoot: root }).detail("notes");
+  const ok = await control(home, { snapshotRoot: root }).detail("space-notes");
   assert.deepEqual(ok.snapshots, [{ id, createdAt: "2026-09-11T12:00:00.000Z", runtimeVersion: "0.1.5-rc.1" }]);
   const web = await control(home, { snapshotRoot: root }).detail("web");
   assert.deepEqual(web.snapshots, []);
@@ -342,11 +343,11 @@ test("snapshots require matching home, space membership, and ISO createdAt", asy
 test("known verify failure clears the verify journal; interruption keeps recovery", async () => {
   const home = tempDir("dsh-spaces-host-verify-");
   writeWeb(home);
-  writeWorkbench(home, "notes");
+  writeRegisteredSpace(home, "space-notes");
   const spaces = control(home, {
     runCli: async () => ({ code: 0, stdout: "- id: other\n", stderr: "" }),
   });
-  const result = await spaces.verify("notes");
+  const result = await spaces.verify("space-notes");
   assert.equal(result.valid, false);
   assert.equal(result.message, "Isolation could not be verified.");
   const after = await spaces.overview();
@@ -354,13 +355,13 @@ test("known verify failure clears the verify journal; interruption keeps recover
 
   const home2 = tempDir("dsh-spaces-host-verify-int-");
   writeWeb(home2);
-  writeWorkbench(home2, "notes");
+  writeRegisteredSpace(home2, "space-notes");
   const interrupted = control(home2, {
     runCli: async () => {
       throw new Error("spawn failed");
     },
   });
-  await assert.rejects(() => interrupted.verify("notes"), SpacesPublicError);
+  await assert.rejects(() => interrupted.verify("space-notes"), SpacesPublicError);
   const stuck = await interrupted.overview();
   assert.equal(stuck.capabilities.mode, "recovery-only");
 });
@@ -388,9 +389,9 @@ test("host verify and unknown keys are denied with allowlisted codes", async () 
 test("plugin versions omit path and credential specs", async () => {
   const home = tempDir("dsh-spaces-host-plugins-");
   writeWeb(home);
-  writeWorkbench(home, "notes");
+  writeRegisteredSpace(home, "space-notes");
   writeFileSync(
-    join(home, "profiles", "notes", "package.json"),
+    join(home, "profiles", "space-notes", "package.json"),
     `${JSON.stringify({
       dependencies: {
         "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
@@ -400,7 +401,7 @@ test("plugin versions omit path and credential specs", async () => {
       dsh: { profile: { bundles: ["@deepseek-ai/dsh-web-app"] } },
     })}\n`,
   );
-  const detail = await control(home).detail("notes");
+  const detail = await control(home).detail("space-notes");
   assert.deepEqual(
     detail.plugins.find((row) => row.name === "@deepseek-ai/dsh-web-app"),
     { name: "@deepseek-ai/dsh-web-app", version: "0.1.5-rc.2" },

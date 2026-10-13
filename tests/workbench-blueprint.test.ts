@@ -49,6 +49,7 @@ import type { LlmApiRequest, LlmApiResult, LlmLocalCandidate } from "../src/shar
 import type { LlmShareManifest } from "../src/core/domain/llm-share.ts";
 import { BLUEPRINT_ORIGIN_FILE, type WorkbenchBlueprintApplyOutcome } from "../src/shared/workbench-blueprint.ts";
 import type { WorkbenchSpace } from "../src/shared/workbench.ts";
+import { spaceIdFromName } from "../src/shared/types.ts";
 import {
   parseWorkbenchProductCommand,
   parseWorkbenchProductOutcome,
@@ -270,8 +271,8 @@ function portsOf(
     managerId: () => "manager",
     listSpaces: () => spaces,
     createSpace: async (input) => {
-      writeSpace(dshHome, input.name);
-      spaces.push(space(input.name));
+      writeSpace(dshHome, spaceIdFromName(input.name));
+      spaces.push(space(spaceIdFromName(input.name)));
     },
     installPlugin: async () => {},
     llm: extra.llm ?? llmDescribe(),
@@ -861,7 +862,7 @@ test("bindModel uses space policy revision through admitted LLM and does not re-
   const wb = new BlueprintWorkbench(
     portsOf(dshHome, spaces, {
       createSpace: async (input) => {
-        writeSpace(dshHome, input.name, {
+        writeSpace(dshHome, spaceIdFromName(input.name), {
           deps: {
             "@deepseek-ai/dsh-base": "0.1.5-rc.2",
             "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
@@ -870,7 +871,7 @@ test("bindModel uses space policy revision through admitted LLM and does not re-
           },
           bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"],
         });
-        spaces.push(space(input.name));
+        spaces.push(space(spaceIdFromName(input.name)));
       },
       llm: async () => {
         throw new Error("llm port re-queued the exclusive tail");
@@ -894,15 +895,15 @@ test("bindModel uses space policy revision through admitted LLM and does not re-
   assert.equal(methods.filter((method) => method === "updateSpaceDefault").length, 1);
   assert.ok(methods.includes("spacePolicy"));
   assert.equal(methods.includes("describe"), true);
-  const policy = await policies.read("model-space");
+  const policy = await policies.read("space-model-space");
   assert.equal(policy.revision, 1);
   assert.equal(policy.shared.mode, "selected");
   if (policy.shared.mode === "selected") assert.deepEqual(policy.shared.connectionIds, [CONN]);
-  assert.deepEqual(settings.defaults.get("model-space"), {
+  assert.deepEqual(settings.defaults.get("space-model-space"), {
     provider: compileManagedRouteId(CONN),
     model: "m1",
   });
-  const manifest = JSON.parse(readFileSync(join(dshHome, "profiles", "model-space", "package.json"), "utf8")) as {
+  const manifest = JSON.parse(readFileSync(join(dshHome, "profiles", "space-model-space", "package.json"), "utf8")) as {
     dsh?: { profile?: { bundles?: string[] } };
   };
   assert.equal(manifest.dsh?.profile?.bundles?.includes("@dsh-spaces/llm-bridge"), true);
@@ -916,7 +917,7 @@ test("late model llm-bridge composition is validated before provenance", async (
   const wb = new BlueprintWorkbench(
     portsOf(dshHome, spaces, {
       createSpace: async (input) => {
-        writeSpace(dshHome, input.name, {
+        writeSpace(dshHome, spaceIdFromName(input.name), {
           deps: {
             "@deepseek-ai/dsh-base": "0.1.5-rc.2",
             "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
@@ -924,7 +925,7 @@ test("late model llm-bridge composition is validated before provenance", async (
           },
           bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
         });
-        spaces.push(space(input.name));
+        spaces.push(space(spaceIdFromName(input.name)));
       },
       composeRuntime: async (options, input) => {
         composedBundles.push([...input.bundles]);
@@ -958,7 +959,7 @@ test("late model llm-bridge composition is validated before provenance", async (
   assert.equal(last.product?.writes?.find((row) => row.kind === "settings")?.status, "succeeded");
   assert.equal(last.product?.writes?.find((row) => row.kind === "model")?.status, "succeeded");
   assert.equal(last.product?.writes?.find((row) => row.kind === "provenance")?.status, "not-run");
-  assert.equal(existsSync(join(dshHome, "profiles", "late-bridge-invalid")), true);
+  assert.equal(existsSync(join(dshHome, "profiles", "space-late-bridge-invalid")), true);
 
   const okHome = home();
   const okSpaces: WorkbenchSpace[] = [];
@@ -966,7 +967,7 @@ test("late model llm-bridge composition is validated before provenance", async (
   const ok = new BlueprintWorkbench(
     portsOf(okHome, okSpaces, {
       createSpace: async (input) => {
-        writeSpace(okHome, input.name, {
+        writeSpace(okHome, spaceIdFromName(input.name), {
           deps: {
             "@deepseek-ai/dsh-base": "0.1.5-rc.2",
             "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
@@ -974,7 +975,7 @@ test("late model llm-bridge composition is validated before provenance", async (
           },
           bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
         });
-        okSpaces.push(space(input.name));
+        okSpaces.push(space(spaceIdFromName(input.name)));
       },
       composeRuntime: async (options, input) => {
         okBundles.push([...input.bundles]);
@@ -1001,7 +1002,7 @@ test("late model llm-bridge composition is validated before provenance", async (
   assert.equal(okOutcome.writes.find((row) => row.kind === "provenance")?.status, "succeeded");
   assert.equal(okBundles.length, 1);
   assert.equal(okBundles[0]?.includes("@dsh-spaces/llm-bridge"), true);
-  const okManifest = JSON.parse(readFileSync(join(okHome, "profiles", "late-bridge-ok", "package.json"), "utf8")) as {
+  const okManifest = JSON.parse(readFileSync(join(okHome, "profiles", "space-late-bridge-ok", "package.json"), "utf8")) as {
     dsh?: { profile?: { bundles?: string[] } };
   };
   assert.equal(okManifest.dsh?.profile?.bundles?.includes("@dsh-spaces/llm-bridge"), true);
@@ -1331,9 +1332,9 @@ test("provenance failure keeps skipped model not-run and retains partial setting
   const wb = new BlueprintWorkbench(
     portsOf(dshHome, spaces, {
       createSpace: async (input) => {
-        writeSpace(dshHome, input.name);
-        mkdirSync(join(dshHome, "hub", input.name, BLUEPRINT_ORIGIN_FILE));
-        spaces.push(space(input.name));
+        writeSpace(dshHome, spaceIdFromName(input.name));
+        mkdirSync(join(dshHome, "hub", spaceIdFromName(input.name), BLUEPRINT_ORIGIN_FILE));
+        spaces.push(space(spaceIdFromName(input.name)));
       },
     }),
   );
@@ -1363,7 +1364,7 @@ test("provenance failure keeps skipped model not-run and retains partial setting
   const dumped = JSON.stringify(last);
   assert.equal(dumped.includes(dshHome), false);
   assert.equal(dumped.includes("canary"), false);
-  const settings = readFileSync(join(dshHome, "profiles", "partial-writes", "cordis.patch.yml"), "utf8");
+  const settings = readFileSync(join(dshHome, "profiles", "space-partial-writes", "cordis.patch.yml"), "utf8");
   assert.match(settings, /title: kept/);
 });
 
@@ -1777,15 +1778,15 @@ test("persistent inspector failure after compose publishes packages failed with 
   assert.equal(thrown.outcome.stages.packages.error, "The bound runtime could not be inspected.");
   assert.equal(thrown.outcome.stages.presets.status, "not-run");
   assert.equal(thrown.outcome.stages.start.status, "not-run");
-  assert.equal(thrown.outcome.spaceId, "persist-inspect");
+  assert.equal(thrown.outcome.spaceId, "space-persist-inspect");
   assert.equal(thrown.outcome.installed[0]?.name, "demo-package");
   assert.equal(thrown.outcome.installed[0]?.version, "1.0.0");
   assert.ok(thrown.outcome.writes.every((row) => row.status === "not-run"));
   const last = recorded.at(-1) as { product?: WorkbenchBlueprintApplyOutcome; spaceId?: string };
   assert.equal(last.product?.stages.packages.status, "failed");
   assert.equal(last.product?.stages.packages.error, "The bound runtime could not be inspected.");
-  assert.equal(last.spaceId, "persist-inspect");
-  assert.equal(existsSync(join(dshHome, "profiles", "persist-inspect")), true);
+  assert.equal(last.spaceId, "space-persist-inspect");
+  assert.equal(existsSync(join(dshHome, "profiles", "space-persist-inspect")), true);
   const dumped = JSON.stringify({ last, thrown: thrown.outcome });
   assert.equal(dumped.includes(secret), false);
   assert.equal(dumped.includes(dshHome), false);
@@ -2014,8 +2015,8 @@ test("official runtime rejects managed Home settings overlay, config-only not-fo
       composeRuntime: extra.composeRuntime ?? composeBlueprintRuntime,
       resolveModule: resolveBlueprintModule,
       createSpace: async (input) => {
-        writeSpace(dshHome, input.name, { bundles: hostBundles });
-        spaces.push(space(input.name));
+        writeSpace(dshHome, spaceIdFromName(input.name), { bundles: hostBundles });
+        spaces.push(space(spaceIdFromName(input.name)));
       },
       ...extra,
     });
@@ -2117,7 +2118,7 @@ test("official runtime rejects managed Home settings overlay, config-only not-fo
   assert.match(String(pinLast.product?.stages?.packages?.error), /selected pin/);
   assert.equal(pinLast.product?.stages?.presets?.status, "not-run");
   assert.equal(pinLast.product?.installed?.[0]?.version, selectedVersion);
-  const resolved = await resolveBlueprintModule({ home: pinHome, bin }, { spaceId: "target", specifier: packageName });
+  const resolved = await resolveBlueprintModule({ home: pinHome, bin }, { spaceId: "space-target", specifier: packageName });
   assert.equal(resolved.packageVersion, "0.2.0-rc.2");
   assert.notEqual(resolved.packageVersion, selectedVersion);
 });

@@ -27,8 +27,9 @@ import {
   recipeFromShareParts,
 } from "../../core/application/space-recipe";
 import {
-  PROFILE_NAME_RE,
   PROTECTED_PLUGIN_PACKAGES,
+  SPACE_NAME_RE,
+  spaceIdFromName,
   type InstalledPlugin,
   type PluginLibraryEntry,
 } from "../../shared/types";
@@ -361,12 +362,12 @@ export function uniqueSpaceName(displayName: string, taken: string[]): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 32) || "space";
-  const slug = PROFILE_NAME_RE.test(base) ? base : `space-${base.replace(/[^a-z0-9]/g, "").slice(0, 24) || "import"}`;
+  const slug = SPACE_NAME_RE.test(base) ? base : `import-${base.replace(/[^a-z0-9]/g, "").slice(0, 24) || "space"}`;
   const used = new Set(taken);
-  if (!used.has(slug) && slug !== "web" && slug !== "hub") return slug;
+  if (!used.has(spaceIdFromName(slug)) && slug !== "web" && slug !== "hub") return slug;
   for (let i = 2; i < 1000; i += 1) {
-    const candidate = `${slug.slice(0, 36)}-${i}`.slice(0, 39);
-    if (!used.has(candidate) && PROFILE_NAME_RE.test(candidate)) return candidate;
+    const candidate = `${slug.slice(0, 30)}-${i}`.slice(0, 33);
+    if (!used.has(spaceIdFromName(candidate)) && SPACE_NAME_RE.test(candidate)) return candidate;
   }
   throw new Error("Could not allocate a space name.");
 }

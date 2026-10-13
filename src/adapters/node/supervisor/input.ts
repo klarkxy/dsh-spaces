@@ -1,5 +1,6 @@
 import { parsePublicationPlan } from "../../../core/domain/dashboard/validation";
 import { sanitizeSpaceIcon } from "../../../shared/space-icon";
+import { SPACE_NAME_RE } from "../../../shared/types";
 import type { WorkbenchPlanRequest } from "../../../shared/workbench";
 import { parseSpaceId, SpacesPublicError } from "../spaces-control";
 import { WorkbenchPublicError } from "./errors";
@@ -103,6 +104,14 @@ export function parseSpaceName(value: unknown): string {
     if (error instanceof SpacesPublicError) throw new WorkbenchPublicError("workbench/invalid-input");
     throw error;
   }
+}
+
+/** The user-entered part of a space name; the space id is `space-<name>`. */
+export function parseSpaceUserName(value: unknown): string {
+  if (typeof value !== "string" || !SPACE_NAME_RE.test(value)) {
+    throw new WorkbenchPublicError("workbench/invalid-input");
+  }
+  return value;
 }
 
 export function parseIdList(value: unknown): string[] {

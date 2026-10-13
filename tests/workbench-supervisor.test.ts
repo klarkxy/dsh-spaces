@@ -409,6 +409,36 @@ function writeProfile(home: string, name: string, pkg: unknown = {}): void {
   );
 }
 
+/** A registered space: profile dir `profiles/space-<name>` plus a spaces.json meta entry. */
+function writeSpace(
+  home: string,
+  name: string,
+  pkg: unknown = {},
+  meta: { dshVersion?: string; createdAt?: string } = {},
+): string {
+  const id = `space-${name}`;
+  writeProfile(home, id, pkg);
+  const spacesPath = join(home, "hub", "spaces.json");
+  const spaces = existsSync(spacesPath)
+    ? (JSON.parse(readFileSync(spacesPath, "utf8")) as {
+        version: 1;
+        order: string[];
+        meta: Record<string, Record<string, unknown>>;
+      })
+    : { version: 1 as const, order: [] as string[], meta: {} as Record<string, Record<string, unknown>> };
+  const entry: Record<string, unknown> = {
+    displayName: name,
+    order: spaces.order.length + 1000,
+    createdAt: meta.createdAt ?? "2025-01-01T00:00:00.000Z",
+  };
+  if (meta.dshVersion !== undefined) entry.dshVersion = meta.dshVersion;
+  spaces.meta[id] = entry;
+  if (!spaces.order.includes(id)) spaces.order.push(id);
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(spacesPath, `${JSON.stringify(spaces, null, 2)}\n`);
+  return id;
+}
+
 function dumpText(profile: string): string {
   return `
 - id: session-persistence-jsonl
@@ -706,11 +736,11 @@ test("bootstrap exchanges a one-time token for the authority cookie and a clean 
 
 test("workspace origin cannot call management APIs; host bearer can", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { dependencies: { "@deepseek-ai/dsh-web-app": "0.1.5-rc.1" } });
+  writeSpace(home, "alpha", { dependencies: { "@deepseek-ai/dsh-web-app": "0.1.5-rc.1" } }, { dshVersion: "0.2.0-rc.2" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const started = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "start-alpha",
   });
   assert.equal(started.body.ok, true, JSON.stringify(started.body));
@@ -718,14 +748,14 @@ test("workspace origin cannot call management APIs; host bearer can", async () =
 
   const state = await api(handle.origin, cookie, "state");
   const spaces = (state.body.value as { spaces: Array<{ id: string; generation: number }> }).spaces;
-  const alpha = spaces.find((row) => row.id === "alpha");
+  const alpha = spaces.find((row) => row.id === "space-alpha");
   assert.ok(alpha);
-  const view = await api(handle.origin, cookie, "view", { spaceId: "alpha" });
+  const view = await api(handle.origin, cookie, "view", { spaceId: "space-alpha" });
   assert.equal(view.body.ok, true);
   const issued = view.body.value as { origin: string; entryOrigin: string; entryPath: string };
   assert.equal(issued.entryOrigin, handle.origin);
   assert.notEqual(issued.origin, issued.entryOrigin);
-  assert.match(issued.entryPath, /^\/view\/alpha\/\d+$/);
+  assert.match(issued.entryPath, /^\/view\/space-alpha\/\d+$/);
   const origin = issued.origin;
   const denied = await api(handle.origin, cookie, "state", {}, { origin });
   assert.equal(denied.status, 403);
@@ -766,7 +796,7 @@ test("role/identity guard does not overwrite an ordinary profile reserved as man
 
 test("maintenance polling preserves inventory during a Home swap and reads live job progress", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha");
+  writeSpace(home, "alpha");
   let release!: () => void;
   const paused = new Promise<void>(resolvePause => { release = resolvePause; });
   const handle = await startSupervisor(home, {
@@ -774,11 +804,11 @@ test("maintenance polling preserves inventory during a Home swap and reads live 
       ...fakeMaintenance(),
       execute: async (_plan, ctx) => {
         ports.setMaintenance(true);
-        const original = join(home, "profiles", "alpha");
-        const staged = join(home, "alpha-held-by-restore");
+        const original = join(home, "profiles", "space-alpha");
+        const staged = join(home, "space-alpha-held-by-restore");
         renameSync(original, staged);
         try {
-          writeProfile(home, "beta");
+          writeSpace(home, "beta");
           ctx.phase("stage");
           await paused;
         } finally {
@@ -800,8 +830,8 @@ test("maintenance polling preserves inventory during a Home swap and reads live 
     const state = response.body.value as Awaited<ReturnType<typeof handle.runtime.state>>;
     assert.equal(state.maintenance, true);
     assert.notEqual(state.availability, "unavailable");
-    assert.ok(state.spaces.some(row => row.id === "alpha"));
-    assert.equal(state.spaces.some(row => row.id === "beta"), false);
+    assert.ok(state.spaces.some(row => row.id === "space-alpha"));
+    assert.equal(state.spaces.some(row => row.id === "space-beta"), false);
     assert.equal(state.jobs.find(job => job.id === "inventory-swap")?.phase, "stage");
     const entry = await fetch(handle.origin, { headers: { cookie } });
     assert.equal(entry.status, 200);
@@ -810,12 +840,12 @@ test("maintenance polling preserves inventory during a Home swap and reads live 
   await waitJob(handle.origin, cookie, "inventory-swap");
   const refreshed = await handle.runtime.state();
   assert.equal(refreshed.maintenance, false);
-  assert.ok(refreshed.spaces.some(row => row.id === "beta"));
+  assert.ok(refreshed.spaces.some(row => row.id === "space-beta"));
 });
 
 test("jobs.submit is idempotent and maintenance preview is delegated", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" });
   const delegated: string[] = [];
   const handle = await startSupervisor(home, {
     createMaintenance: () => ({
@@ -828,11 +858,11 @@ test("jobs.submit is idempotent and maintenance preview is delegated", async () 
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const first = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "Alpha" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "Alpha" },
     requestId: "upd-1",
   });
   const second = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "Alpha" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "Alpha" },
     requestId: "upd-1",
   });
   assert.equal(first.body.ok, true, JSON.stringify(first.body));
@@ -849,7 +879,7 @@ test("jobs.submit is idempotent and maintenance preview is delegated", async () 
 
 test("web stop does not force-kill and keeps the instance record", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" }, { dshVersion: "0.2.0-rc.2" });
   const kinds: string[] = [];
   const handle = await startSupervisor(home, {
     processRuntime: {
@@ -867,14 +897,14 @@ test("web stop does not force-kill and keeps the instance record", async () => {
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const started = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "start-live-stop",
   });
   assert.equal(started.body.ok, true, JSON.stringify(started.body));
   await waitJob(handle.origin, cookie, "start-live-stop");
 
   const preview = await mutate(handle.origin, cookie, "preview", {
-    request: { kind: "space.stop", spaceId: "alpha" },
+    request: { kind: "space.stop", spaceId: "space-alpha" },
   });
   assert.equal(preview.body.ok, true);
   const plan = preview.body.value as WorkbenchPlan;
@@ -889,18 +919,18 @@ test("web stop does not force-kill and keeps the instance record", async () => {
   assert.equal(value.status, "failed");
   assert.deepEqual(kinds, ["term"]);
   const state = await api(handle.origin, cookie, "state");
-  const alpha = (state.body.value as { spaces: Array<{ id: string; status: string }> }).spaces.find((row) => row.id === "alpha");
+  const alpha = (state.body.value as { spaces: Array<{ id: string; status: string }> }).spaces.find((row) => row.id === "space-alpha");
   assert.ok(alpha);
   assert.notEqual(alpha.status, "stopped");
 });
 
 test("stable entry still responds after the manager process is gone", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" }, { dshVersion: "0.2.0-rc.2" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const started = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "start-live",
   });
   assert.equal(started.body.ok, true, JSON.stringify(started.body));
@@ -1484,7 +1514,7 @@ test("ROOT: initialization starts the real manager lifecycle before normal entry
 
 test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" }, { dshVersion: "0.2.0-rc.2" });
   const handle = await startSupervisor(home, { processRuntime: {
     spawn: spawnFixture("ok"),
     prepareHome: async () => undefined,
@@ -1494,7 +1524,7 @@ test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
   } });
   const startedState = await handle.runtime.state();
   await handle.runtime.submit(
-    { kind: "space.start", spaceId: "alpha" },
+    { kind: "space.start", spaceId: "space-alpha" },
     "root-start",
     { serviceEpoch: startedState.serviceEpoch, expectedRevision: startedState.revision },
   );
@@ -1505,17 +1535,17 @@ test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
 
 test("submit without context is rejected and old epoch cannot mutate", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const missing = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "no-context" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "no-context" },
     requestId: "no-ctx",
   });
   assert.equal(missing.body.ok, false);
   assert.equal(missing.body.error?.code, "workbench/invalid-input");
   const stale = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "stale" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "stale" },
     requestId: "stale-epoch",
     context: { serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) },
   });
@@ -1530,17 +1560,17 @@ test("submit without context is rejected and old epoch cannot mutate", async () 
 
 test("two clients with the same revision: only one mutating job succeeds", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const context = await mutationContext(handle.origin, cookie);
   const first = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "One" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "One" },
     requestId: "cas-a",
     context,
   });
   const second = await api(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "Two" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "Two" },
     requestId: "cas-b",
     context,
   });
@@ -1562,17 +1592,17 @@ test("two clients with the same revision: only one mutating job succeeds", async
 
 test("same request id with a different command is rejected even after revision moves", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha", { name: "alpha" });
+  writeSpace(home, "alpha", { name: "space-alpha" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const first = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.update", spaceId: "alpha", displayName: "Alpha" },
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "Alpha" },
     requestId: "same-id",
   });
   assert.equal(first.body.ok, true, JSON.stringify(first.body));
   await waitJob(handle.origin, cookie, "same-id");
   const conflict = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.verify", spaceId: "alpha" },
+    command: { kind: "space.verify", spaceId: "space-alpha" },
     requestId: "same-id",
   });
   assert.equal(conflict.body.ok, false);
@@ -1856,39 +1886,38 @@ test("startup blocks and does not start the manager when the align cannot be ver
   assert.equal(state.managerId && spawned.includes(state.managerId), false);
 });
 
-test("existing spaces pin once to the runtime they run; manager and web stay unpinned", async () => {
+test("registered spaces keep their pin; unregistered profiles and stale meta stay unpinned", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha");
+  writeSpace(home, "alpha", {}, { dshVersion: "9.9.9" });
   writeProfile(home, "beta");
-  mkdirSync(join(home, "hub"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "spaces.json"),
-    `${JSON.stringify({
-      version: 1,
-      order: ["alpha", "beta"],
-      meta: {
-        alpha: { displayName: "alpha", order: 1000, dshVersion: "9.9.9" },
-        web: { displayName: "web", order: -1 },
-      },
-    }, null, 2)}\n`,
-  );
+  writeProfile(home, "space-ghost");
+  const spacesPath = join(home, "hub", "spaces.json");
+  const file = JSON.parse(readFileSync(spacesPath, "utf8")) as {
+    order: string[];
+    meta: Record<string, Record<string, unknown>>;
+  };
+  // A meta entry without createdAt is not a registered space, even for a space-* dir.
+  file.meta["space-ghost"] = { displayName: "ghost", order: 1001 };
+  file.meta["web"] = { displayName: "web", order: -1 };
+  writeFileSync(spacesPath, `${JSON.stringify(file, null, 2)}\n`);
   const handle = await startSupervisor(home);
-  const readMeta = () => (JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8")) as {
+  const readMeta = () => (JSON.parse(readFileSync(spacesPath, "utf8")) as {
     meta: Record<string, { dshVersion?: string }>;
   }).meta;
-  assert.equal(readMeta().alpha.dshVersion, "9.9.9");
-  assert.equal(readMeta().beta.dshVersion, "0.2.0-rc.2");
+  assert.equal(readMeta()["space-alpha"].dshVersion, "9.9.9");
+  assert.equal(readMeta()["space-ghost"].dshVersion, undefined);
+  assert.equal(readMeta().beta, undefined);
   assert.equal(readMeta()["spaces-hub"]?.dshVersion, undefined);
   assert.equal(readMeta().web.dshVersion, undefined);
   const state = await handle.runtime.state();
-  assert.equal(state.spaces.find((row) => row.id === "alpha")?.dshVersion, "9.9.9");
-  assert.equal(state.spaces.find((row) => row.id === "beta")?.dshVersion, "0.2.0-rc.2");
+  assert.equal(state.spaces.find((row) => row.id === "space-alpha")?.dshVersion, "9.9.9");
+  assert.equal(state.spaces.some((row) => ["beta", "space-ghost", "web"].includes(row.id)), false);
   assert.ok(state.managerId);
   assert.equal(state.spaces.find((row) => row.id === state.managerId)?.dshVersion, null);
   await handle.close();
   await startSupervisor(home);
-  assert.equal(readMeta().alpha.dshVersion, "9.9.9");
-  assert.equal(readMeta().beta.dshVersion, "0.2.0-rc.2");
+  assert.equal(readMeta()["space-alpha"].dshVersion, "9.9.9");
+  assert.equal(readMeta()["space-ghost"].dshVersion, undefined);
 });
 
 test("a new space pins the host DSH version", async () => {
@@ -1903,14 +1932,20 @@ test("a new space pins the host DSH version", async () => {
   await waitJob(handle.origin, cookie, "create-created");
   const state = await api(handle.origin, cookie, "state");
   const row = (state.body.value as { spaces: Array<{ id: string; dshVersion: string | null }> }).spaces
-    .find((space) => space.id === "created");
+    .find((space) => space.id === "space-created");
   assert.equal(row?.dshVersion, "0.2.0-rc.2");
+  const meta = (JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8")) as {
+    meta: Record<string, { createdAt?: string; dshVersion?: string }>;
+  }).meta["space-created"];
+  assert.equal(typeof meta?.createdAt, "string");
+  assert.ok(!Number.isNaN(Date.parse(meta?.createdAt ?? "")));
+  assert.equal(meta?.dshVersion, "0.2.0-rc.2");
 });
 
 test("spaces pinned to different installed runtimes spawn with their own binaries; the manager uses the host CLI", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha");
-  writeProfile(home, "beta");
+  writeSpace(home, "alpha", {}, { dshVersion: "0.2.0-rc.2" });
+  writeSpace(home, "beta", {}, { dshVersion: "0.9.9" });
   const hostBin = writeFakeCli(home);
   const runtimeRoot = join(home, "runtimes");
   const betaDir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", "dsh");
@@ -1923,18 +1958,6 @@ test("spaces pinned to different installed runtimes spawn with their own binarie
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version: "0.9.9" })}\n`);
   }
-  mkdirSync(join(home, "hub"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "spaces.json"),
-    `${JSON.stringify({
-      version: 1,
-      order: ["alpha", "beta"],
-      meta: {
-        alpha: { displayName: "alpha", order: 1000, dshVersion: "0.2.0-rc.2" },
-        beta: { displayName: "beta", order: 1001, dshVersion: "0.9.9" },
-      },
-    }, null, 2)}\n`,
-  );
   const spawned: Array<{ profile: string; bin: string }> = [];
   const handle = await startSupervisor(home, {
     runtimeRoot,
@@ -1951,35 +1974,26 @@ test("spaces pinned to different installed runtimes spawn with their own binarie
   assert.equal(spawned.find((row) => row.profile === state.managerId)?.bin, hostBin);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "start-a",
   });
   await waitJob(handle.origin, cookie, "start-a");
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "beta" },
+    command: { kind: "space.start", spaceId: "space-beta" },
     requestId: "start-b",
   });
   await waitJob(handle.origin, cookie, "start-b");
-  assert.equal(spawned.find((row) => row.profile === "alpha")?.bin, hostBin);
-  assert.equal(spawned.find((row) => row.profile === "beta")?.bin, betaBin);
+  assert.equal(spawned.find((row) => row.profile === "space-alpha")?.bin, hostBin);
+  assert.equal(spawned.find((row) => row.profile === "space-beta")?.bin, betaBin);
 });
 
 test("a pinned version below the supported minimum rejects at start", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha");
-  mkdirSync(join(home, "hub"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "spaces.json"),
-    `${JSON.stringify({
-      version: 1,
-      order: ["alpha"],
-      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.0.1-rc.1" } },
-    }, null, 2)}\n`,
-  );
+  writeSpace(home, "alpha", {}, { dshVersion: "0.0.1-rc.1" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "start-min",
   });
   const job = await waitJob(handle.origin, cookie, "start-min", "failed");
@@ -1991,20 +2005,11 @@ test("a pinned version below the supported minimum rejects at start", async () =
 
 test("a pinned version that is not installed rejects at start", async () => {
   const home = tempHome();
-  writeProfile(home, "beta");
-  mkdirSync(join(home, "hub"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "spaces.json"),
-    `${JSON.stringify({
-      version: 1,
-      order: ["beta"],
-      meta: { beta: { displayName: "beta", order: 1000, dshVersion: "0.9.9" } },
-    }, null, 2)}\n`,
-  );
+  writeSpace(home, "beta", {}, { dshVersion: "0.9.9" });
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "beta" },
+    command: { kind: "space.start", spaceId: "space-beta" },
     requestId: "start-missing",
   });
   const job = await waitJob(handle.origin, cookie, "start-missing", "failed");
@@ -2017,10 +2022,10 @@ test("a pinned version that is not installed rejects at start", async () => {
 test("an unpinned space is rejected at start instead of falling back to the host CLI", async () => {
   const home = tempHome();
   const handle = await startSupervisor(home);
-  writeProfile(home, "ghost");
+  writeSpace(home, "ghost");
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "ghost" },
+    command: { kind: "space.start", spaceId: "space-ghost" },
     requestId: "start-ghost",
   });
   const job = await waitJob(handle.origin, cookie, "start-ghost", "failed");
@@ -2028,20 +2033,17 @@ test("an unpinned space is rejected at start instead of falling back to the host
     job.error?.message ?? "",
     /This space has no pinned DSH version\. Choose one in the space settings\./,
   );
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-missing" },
+    requestId: "start-missing",
+  });
+  await waitJob(handle.origin, cookie, "start-missing", "failed");
+  assert.equal((await handle.runtime.job("start-missing")).error?.code, "workbench/not-found");
 });
 
 test("space.runtime.set preview rejects protected, unmanaged, and downgrade targets", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha");
-  mkdirSync(join(home, "hub"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "spaces.json"),
-    `${JSON.stringify({
-      version: 1,
-      order: ["alpha"],
-      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.9.9" } },
-    }, null, 2)}\n`,
-  );
+  writeSpace(home, "alpha", {}, { dshVersion: "0.9.9" });
   const handle = await startSupervisor(home, {
     createMaintenance: (ports) =>
       new WorkbenchMaintenanceService(ports, {
@@ -2059,18 +2061,18 @@ test("space.runtime.set preview rejects protected, unmanaged, and downgrade targ
   const hub = await preview({ kind: "space.runtime.set", spaceId: "spaces-hub", version: "0.2.0-rc.2" });
   assert.equal(hub.ok, false);
   assert.equal(hub.error?.code, "workbench/forbidden");
-  const downgrade = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0-rc.2" });
+  const downgrade = await preview({ kind: "space.runtime.set", spaceId: "space-alpha", version: "0.2.0-rc.2" });
   assert.equal(downgrade.ok, false);
   assert.equal(downgrade.error?.code, "workbench/invalid-input");
   assert.match(downgrade.error?.message ?? "", /Downgrading a space's DSH version is not allowed\./);
-  const belowMin = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "0.0.1-rc.1" });
+  const belowMin = await preview({ kind: "space.runtime.set", spaceId: "space-alpha", version: "0.0.1-rc.1" });
   assert.equal(belowMin.error?.code, "workbench/invalid-input");
-  const range = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "latest" });
+  const range = await preview({ kind: "space.runtime.set", spaceId: "space-alpha", version: "latest" });
   assert.equal(range.error?.code, "workbench/invalid-input");
-  const missing = await preview({ kind: "space.runtime.set", spaceId: "missing", version: "0.2.0-rc.2" });
+  const missing = await preview({ kind: "space.runtime.set", spaceId: "space-missing", version: "0.2.0-rc.2" });
   assert.equal(missing.error?.code, "workbench/not-found");
 
-  const bridge = join(home, "profiles", "alpha", "node_modules", "@dsh-spaces", "view-bridge");
+  const bridge = join(home, "profiles", "space-alpha", "node_modules", "@dsh-spaces", "view-bridge");
   mkdirSync(bridge, { recursive: true });
   writeFileSync(
     join(bridge, "package.json"),
@@ -2080,7 +2082,7 @@ test("space.runtime.set preview rejects protected, unmanaged, and downgrade targ
       peerDependencies: { "@deepseek-ai/dsh": "^9.0.0" },
     })}\n`,
   );
-  const peers = await preview({ kind: "space.runtime.set", spaceId: "alpha", version: "0.9.9" });
+  const peers = await preview({ kind: "space.runtime.set", spaceId: "space-alpha", version: "0.9.9" });
   assert.equal(peers.error?.code, "workbench/invalid-input");
   assert.match(
     peers.error?.message ?? "",
@@ -2090,21 +2092,12 @@ test("space.runtime.set preview rejects protected, unmanaged, and downgrade targ
 
 test("space.runtime.set pins the new runtime and restarts a running space without installing official plugins", async () => {
   const home = tempHome();
-  writeProfile(home, "alpha");
+  writeSpace(home, "alpha", {}, { dshVersion: "0.2.0-rc.2" });
   const runtimeRoot = join(home, "runtimes");
   const nextDir = join(runtimeRoot, "versions", "0.9.9", "node_modules", "@deepseek-ai", "dsh");
   mkdirSync(join(nextDir, "lib"), { recursive: true });
   writeFileSync(join(nextDir, "lib", "bin.js"), "console.log('next');\n");
   writeFileSync(join(nextDir, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.9.9" })}\n`);
-  mkdirSync(join(home, "hub"), { recursive: true });
-  writeFileSync(
-    join(home, "hub", "spaces.json"),
-    `${JSON.stringify({
-      version: 1,
-      order: ["alpha"],
-      meta: { alpha: { displayName: "alpha", order: 1000, dshVersion: "0.2.0-rc.2" } },
-    }, null, 2)}\n`,
-  );
   const specs: string[] = [];
   const spawned: string[] = [];
   const handle = await startSupervisor(home, {
@@ -2127,12 +2120,12 @@ test("space.runtime.set pins the new runtime and restarts a running space withou
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.start", spaceId: "alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "start-alpha",
   });
   await waitJob(handle.origin, cookie, "start-alpha");
   const preview = await mutate(handle.origin, cookie, "preview", {
-    request: { kind: "space.runtime.set", spaceId: "alpha", version: "0.9.9" },
+    request: { kind: "space.runtime.set", spaceId: "space-alpha", version: "0.9.9" },
   });
   assert.equal(preview.body.ok, true, JSON.stringify(preview.body));
   const plan = preview.body.value as WorkbenchPlan;
@@ -2147,14 +2140,14 @@ test("space.runtime.set pins the new runtime and restarts a running space withou
   const recorded = JSON.parse(
     readFileSync(join(home, ".dsh-spaces-control", "jobs", "runtime-set.json"), "utf8"),
   ) as { result?: { spaceId?: string; dshVersion?: string } };
-  assert.equal(recorded.result?.spaceId, "alpha");
+  assert.equal(recorded.result?.spaceId, "space-alpha");
   assert.equal(recorded.result?.dshVersion, "0.9.9");
   const meta = JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8")) as {
     meta: Record<string, { dshVersion?: string }>;
   };
-  assert.equal(meta.meta.alpha?.dshVersion, "0.9.9");
+  assert.equal(meta.meta["space-alpha"]?.dshVersion, "0.9.9");
   assert.equal(specs.filter((spec) => spec.startsWith("@deepseek-ai/")).length, 0);
-  assert.equal(spawned.filter((name) => name === "alpha").length, 2);
+  assert.equal(spawned.filter((name) => name === "space-alpha").length, 2);
 });
 
 test("runtime.remove removes an unpinned installed runtime and refuses protected versions", async () => {

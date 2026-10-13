@@ -12,7 +12,6 @@ import {
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  classifyProfile,
   compareScannedProfiles,
   defaultSpaceMeta,
   normalizeSpacesFile,
@@ -44,7 +43,7 @@ import type {
   SpacesOverview,
   VerifySpaceResult,
 } from "../../shared/spaces-control";
-import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, type SpaceMeta } from "../../shared/types";
+import { PROFILE_NAME_RE, SPACE_ID_RE, SPACE_NAME_RE, RESERVED_PROFILE_NAMES, spaceIdFromName, type SpaceMeta } from "../../shared/types";
 import {
   HomeLockBusyError,
   HomeOperationLock,
@@ -257,29 +256,30 @@ export class NodeSpacesControl implements SpacesControlApi {
       return await this.withLock("spaces.create", async () => {
         const capabilities = this.capabilities();
         this.assertCanMutate(capabilities, "create");
-        if (parsed.name === capabilities.hostSpaceId) {
+        const spaceId = spaceIdFromName(parsed.name);
+        if (spaceId === capabilities.hostSpaceId) {
           throw new SpacesPublicError("spaces/host-denied");
         }
-        this.assertCreateLayout(parsed.name);
-        if (this.profileExists(parsed.name)) {
+        this.assertCreateLayout(spaceId);
+        if (this.profileExists(spaceId)) {
           throw new SpacesPublicError("spaces/already-exists");
         }
         const registry = this.registry();
         try {
-          registry.validateNewName(parsed.name);
+          registry.validateNewName(spaceId);
         } catch {
           throw new SpacesPublicError("spaces/invalid-input");
         }
         this.writeJournal({
           version: 1,
           op: "create",
-          spaceId: parsed.name,
+          spaceId,
           phase: "cli",
           startedAt: new Date().toISOString(),
         });
         const created = await this.runCli([
           "--profile",
-          parsed.name,
+          spaceId,
           "--from-default-profile",
           "web",
           "--dump-config",
@@ -288,12 +288,12 @@ export class NodeSpacesControl implements SpacesControlApi {
         this.writeJournal({
           version: 1,
           op: "create",
-          spaceId: parsed.name,
+          spaceId,
           phase: "patch",
           startedAt: new Date().toISOString(),
         });
         try {
-          new PatchWriter(this.homeRoot()).ensureWorkbenchPatch(parsed.name);
+          new PatchWriter(this.homeRoot()).ensureWorkbenchPatch(spaceId);
         } catch (error) {
           if (error instanceof PatchForbiddenError) throw new SpacesPublicError("spaces/host-denied");
           throw new SpacesPublicError("spaces/unavailable");
@@ -301,27 +301,28 @@ export class NodeSpacesControl implements SpacesControlApi {
         this.writeJournal({
           version: 1,
           op: "create",
-          spaceId: parsed.name,
+          spaceId,
           phase: "verify-cli",
           startedAt: new Date().toISOString(),
         });
-        const isolation = await this.checkIsolation(parsed.name);
+        const isolation = await this.checkIsolation(spaceId);
         if (isolation !== "valid") throw new SpacesPublicError("spaces/unavailable");
         this.writeJournal({
           version: 1,
           op: "create",
-          spaceId: parsed.name,
+          spaceId,
           phase: "meta",
           startedAt: new Date().toISOString(),
         });
         this.assertHubWritable();
         registry.ensureHubDir();
-        registry.updateMeta(parsed.name, {
+        registry.updateMeta(spaceId, {
           displayName: parsed.displayName,
           order: 1000,
+          createdAt: new Date().toISOString(),
         });
         this.clearJournal();
-        const summary = this.summarize(parsed.name, this.capabilities());
+        const summary = this.summarize(spaceId, this.capabilities());
         if (!summary) throw new SpacesPublicError("spaces/unavailable");
         return summary;
       });
@@ -754,36 +755,29 @@ export class NodeSpacesControl implements SpacesControlApi {
     const profilesDir = join(home, "profiles");
     if (!lexists(profilesDir)) return [];
     if (!this.isExactChildDir(home, profilesDir, "profiles")) return [];
-    let names: string[] = [];
-    try {
-      names = readdirSync(profilesDir, { withFileTypes: true })
-        .filter((entry) => entry.name !== "node_modules")
-        .map((entry) => entry.name);
-    } catch {
-      return [];
-    }
     const hostReal = hostSpaceId ? this.containedExistingDir(join(profilesDir, hostSpaceId), home) : null;
     const spaces = this.readSpacesFile();
     const rows: SafeProfile[] = [];
-    for (const name of names) {
-      if (name !== "web") {
-        try {
-          parseSpaceId(name);
-        } catch {
-          continue;
-        }
-      }
+    for (const [name, meta] of Object.entries(spaces?.meta ?? {})) {
+      // A space exists only when Spaces registered it at creation.
+      if (!SPACE_ID_RE.test(name) || typeof meta.createdAt !== "string" || !meta.createdAt) continue;
       const dir = this.containedExistingDir(join(profilesDir, name), home);
       if (!dir) continue;
-      if (hostReal && name !== hostSpaceId && samePath(dir, hostReal)) continue;
-      const hasWebApp = this.readHasWebApp(join(dir, "package.json"), home);
-      const kind = classifyProfile(name, hasWebApp);
-      if (kind === "hidden") continue;
+      if (hostReal && samePath(dir, hostReal)) continue;
       rows.push({
         name,
+        hasWebApp: this.readHasWebApp(join(dir, "package.json"), home),
+        kind: "workbench",
+        meta,
+      });
+    }
+    if (hostReal && !rows.some((row) => row.name === hostSpaceId)) {
+      const hasWebApp = this.readHasWebApp(join(hostReal, "package.json"), home);
+      rows.push({
+        name: hostSpaceId!,
         hasWebApp,
-        kind,
-        meta: spaces?.meta[name] ?? defaultSpaceMeta(name),
+        kind: hostSpaceId === "web" ? "root" : "workbench",
+        meta: spaces?.meta[hostSpaceId!] ?? defaultSpaceMeta(hostSpaceId!),
       });
     }
     const order = spaces?.order ?? [];
@@ -987,7 +981,7 @@ export function parseCreateInput(input: CreateSpaceInput): { name: string; displ
   }
   if (typeof input.name !== "string") throw new SpacesPublicError("spaces/invalid-input");
   const name = input.name;
-  if (!PROFILE_NAME_RE.test(name) || name.trim() !== name || UNCREATABLE.has(name) ||
+  if (!SPACE_NAME_RE.test(name) || name.trim() !== name || UNCREATABLE.has(name) ||
     (process.platform === "win32" && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))) {
     throw new SpacesPublicError("spaces/invalid-input");
   }

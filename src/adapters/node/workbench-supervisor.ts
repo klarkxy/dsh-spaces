@@ -28,6 +28,7 @@ import { lt as semverLt } from "semver";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
 import { ProfileRegistry } from "./profile-registry";
+import { compareScannedProfiles, defaultSpaceMeta } from "../../core/domain/registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
 import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile-settings";
@@ -128,6 +129,7 @@ import {
   parsePlanRequest,
   parseRequestId,
   parseSpaceName,
+  parseSpaceUserName,
 } from "./supervisor/input";
 import { SupervisorInstanceRecords } from "./supervisor/instance-records";
 import { SupervisorLifecycle } from "./supervisor/lifecycle";
@@ -810,15 +812,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.lifecycle.reasons.push(`The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim());
       }
     }
-    if (this.cli) {
-      try {
-        await this.pinExistingSpaces();
-      } catch (error) {
-        this.lifecycle.blocked = true;
-        const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
-        this.lifecycle.reasons.push(`The DSH version records of existing spaces could not be written. ${detail}`.trim());
-      }
-    }
     this.refreshAvailability();
 
     if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.runs.unmanaged.has(identity.profileId)) {
@@ -1009,26 +1002,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         throw new Error("The installed manager view bridge does not match the selected component group.");
       }
     }));
-  }
-
-  private async pinExistingSpaces(): Promise<void> {
-    let current: string | undefined;
-    try {
-      current = this.runtimeStore?.current()?.version;
-    } catch {
-      current = undefined;
-    }
-    const recorded = inspectHomeToolchain(this.home);
-    const version = current
-      ?? (recorded.kind === "verified" ? recorded.dshVersion : undefined)
-      ?? this.cli?.version;
-    if (!version) return;
-    const pending = this.registry.scan().filter((row) =>
-      row.name !== "web" && row.name !== this.managerId && !row.meta.dshVersion);
-    if (!pending.length) return;
-    await this.lock.run("runtime.pin-existing", async () => {
-      for (const row of pending) this.registry.updateMeta(row.name, { dshVersion: version });
-    });
   }
 
   private installedManagerPluginLib(profileId: string): string | undefined {
@@ -1410,26 +1383,26 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   ): Promise<WorkbenchJob["result"]> {
     ctx.phase("create");
     ctx.cancellable(false);
-    const name = parseSpaceName(input.name);
-    this.protectSpecial(name, { allowManager: false });
+    const name = parseSpaceUserName(input.name);
     if (input.browser && (!this.options.browserArtifact || !this.options.viewBridgeArtifact)) {
       throw new WorkbenchPublicError("workbench/unavailable", "The bundled Browser or its view bridge is unavailable.");
     }
+    let spaceId = "";
     await this.lock.run("space.create", async () => {
       if (this.spaces) {
-        await this.spaces.create({ name, displayName: input.displayName });
+        spaceId = (await this.spaces.create({ name, displayName: input.displayName })).id;
       } else {
         throw new WorkbenchPublicError("workbench/unavailable");
       }
-      if (this.cli) this.registry.updateMeta(name, { dshVersion: this.cli.version });
+      if (this.cli) this.registry.updateMeta(spaceId, { dshVersion: this.cli.version });
       if (input.icon !== undefined) {
-        this.registry.updateMeta(name, { icon: parseIcon(input.icon) });
+        this.registry.updateMeta(spaceId, { icon: parseIcon(input.icon) });
       }
       if (this.options.viewBridgeArtifact) {
-        await this.ensureViewBridge(name);
+        await this.ensureViewBridge(spaceId);
       }
       if (input.browser) {
-        await this.installArtifact(name, this.options.browserArtifact!, `dsh-spaces-browser-${this.artifactDigest(this.options.browserArtifact!)}`);
+        await this.installArtifact(spaceId, this.options.browserArtifact!, `dsh-spaces-browser-${this.artifactDigest(this.options.browserArtifact!)}`);
       }
     });
     // Spaces inherit shared connections by default; only an explicit choice is persisted.
@@ -1438,13 +1411,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ctx.phase("llm-policy");
       await this.llmHost.dispatch({
         method: "updateSpacePolicy",
-        spaceId: name,
+        spaceId,
         shared: input.useSharedLlm ? { mode: "all" } : { mode: "none" },
         expectedRevision: 0,
       });
-      if (input.useSharedLlm) await this.llmOps.ensureLlmBridge(name);
+      if (input.useSharedLlm) await this.llmOps.ensureLlmBridge(spaceId);
     }
-    return { spaceId: name };
+    return { spaceId };
   }
 
   private async updateSpace(
@@ -1637,11 +1610,25 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     let records: ReturnType<ProfileRegistry["scan"]> = [];
     try {
       records = this.registry.scan();
+      const managerId = this.managerId;
+      if (managerId && this.registry.has(managerId) && !records.some((row) => row.name === managerId)) {
+        const spaces = this.registry.readSpaces();
+        const path = join(this.registry.profilesDir(), managerId);
+        records.push({
+          name: managerId,
+          kind: "workbench",
+          path,
+          hasWebApp: this.registry.hasWebApp(path),
+          needsConversion: false,
+          meta: spaces.meta[managerId] ?? defaultSpaceMeta(managerId),
+          status: "stopped",
+        });
+        records.sort((a, b) => compareScannedProfiles(a, b, spaces.order));
+      }
     } catch {
       return [];
     }
     return records
-      .filter((row) => row.name !== "web")
       .map((row) => {
         const leftover = this.runs.unmanaged.has(row.name);
         const status = leftover ? "unknown" : this.publicStatus(row.name);
@@ -1683,6 +1670,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private homeProfileNames(): string[] {
     const names = this.registry.scan().map((row) => row.name);
+    if (this.managerId && !names.includes(this.managerId)) names.unshift(this.managerId);
     if (existsSync(join(this.home, "profiles", "web")) && !names.includes("web")) names.unshift("web");
     return names;
   }

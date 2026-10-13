@@ -31,6 +31,7 @@ import { listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
 import {
   applySpaceRecipe,
   assertMutableRecipeSpaceId,
+  assertMutableRecipeSpaceName,
   publicSpaceTemplate,
   recipeFromShareParts,
   recipeFromTemplate,
@@ -45,6 +46,7 @@ import type { SpaceImportResult, SpaceSharePreview } from "../../shared/space-sh
 import { assertShareSecretFree } from "../../core/domain/llm-share";
 import {
   DEFAULT_HUB_SETTINGS,
+  spaceIdFromName,
   type LocalePreference,
   type PackageSource,
   type PluginLibraryEntry,
@@ -525,8 +527,8 @@ export class WorkbenchProductService {
   }
 
   private assertNewSpaceName(name: string): void {
-    assertMutableRecipeSpaceId(name, this.protectedIds());
-    if (this.ports.listSpaces().some((row) => row.id === name)) {
+    assertMutableRecipeSpaceName(name);
+    if (this.ports.listSpaces().some((row) => row.id === spaceIdFromName(name))) {
       throw new Error("A space with that name already exists.");
     }
   }

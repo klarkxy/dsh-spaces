@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { t } from "../../shared/i18n";
-import { PROFILE_NAME_RE, type OnboardingProfile, type OnboardingScan, type ProfileKind, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../shared/types";
+import { PROFILE_NAME_RE, SPACE_ID_RE, type OnboardingProfile, type OnboardingScan, type ProfileKind, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../shared/types";
 import {
   applyMetaPatch,
   applyWorkbenchReorder,
@@ -9,7 +9,6 @@ import {
   classifyProfile,
   compareScannedProfiles,
   completeWorkbenchOrder,
-  defaultSpaceMeta,
   emptySpacesFile,
   normalizeSpacesFile,
   onboardingAction,
@@ -49,31 +48,31 @@ export class ProfileRegistry {
     atomicWrite(this.spacesPath(), `${JSON.stringify(file, null, 2)}\n`);
   }
 
+  /** Registered spaces only: a space exists iff hub/spaces.json registered it at creation. */
   scan(): ProfileRecord[] {
     const dir = this.profilesDir();
-    if (!existsSync(dir)) return [];
     const spaces = this.readSpaces();
-    const names = readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && PROFILE_NAME_RE.test(entry.name))
-      .map((entry) => entry.name);
-
-    const records: ProfileRecord[] = names.map((name) => {
+    const records: ProfileRecord[] = [];
+    for (const [name, meta] of Object.entries(spaces.meta)) {
+      if (!SPACE_ID_RE.test(name) || typeof meta.createdAt !== "string" || !meta.createdAt) continue;
       const path = join(dir, name);
-      const kind = this.classify(name, path);
-      const meta = spaces.meta[name] ?? defaultSpaceMeta(name);
-      return {
+      try {
+        if (!lstatSync(path).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      records.push({
         name,
-        kind,
+        kind: "workbench",
         path,
         hasWebApp: this.hasWebApp(path),
-        needsConversion: kind === "workbench" && !this.hasWorkbenchPatch(name),
+        needsConversion: false,
         meta,
         status: "stopped",
-      };
-    });
-
+      });
+    }
     records.sort((a, b) => compareScannedProfiles(a, b, spaces.order));
-    return records.filter((record) => record.kind !== "hidden");
+    return records;
   }
 
   scanOnboarding(): OnboardingScan {

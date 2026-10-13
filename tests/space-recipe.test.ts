@@ -153,7 +153,7 @@ test("imported config is isolated for the new space id before write", async () =
   );
   assert.equal(result.definition, "imported");
   assert.equal(patches.length, 1);
-  assert.match(patches[0] ?? "", /hub\/lab\/sessions/);
+  assert.match(patches[0] ?? "", /hub\/space-lab\/sessions/);
   assert.doesNotMatch(patches[0] ?? "", /hub\/web\//);
 });
 
