@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { t } from "../../shared/i18n";
-import type { OnboardingProfile, OnboardingScan, ProfileKind, ProfileRecord, SpaceMeta, SpacesFile } from "../../shared/types";
+import { PROFILE_NAME_RE, type OnboardingProfile, type OnboardingScan, type ProfileKind, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../shared/types";
 import {
   applyMetaPatch,
   applyWorkbenchReorder,
@@ -54,7 +54,7 @@ export class ProfileRegistry {
     if (!existsSync(dir)) return [];
     const spaces = this.readSpaces();
     const names = readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+      .filter((entry) => entry.isDirectory() && PROFILE_NAME_RE.test(entry.name))
       .map((entry) => entry.name);
 
     const records: ProfileRecord[] = names.map((name) => {
@@ -80,7 +80,7 @@ export class ProfileRegistry {
     const dir = this.profilesDir();
     const names = existsSync(dir)
       ? readdirSync(dir, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+          .filter((entry) => entry.isDirectory() && PROFILE_NAME_RE.test(entry.name))
           .map((entry) => entry.name)
       : [];
     const profiles: OnboardingProfile[] = names.map((name) => {

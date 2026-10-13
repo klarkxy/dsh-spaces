@@ -75,6 +75,29 @@ test("validateNewName rejects reserved and existing", () => {
   registry.validateNewName("notes");
 });
 
+test("scan ignores profile directories whose names cannot be managed", () => {
+  const home = fakeHome();
+  writeProfile(home, "web", ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"]);
+  writeProfile(home, "coding", ["@deepseek-ai/dsh-web-app"]);
+  mkdirSync(join(home, "profiles", "web.before-reset-20260922"), { recursive: true });
+  mkdirSync(join(home, "profiles", "Bad_Name"), { recursive: true });
+  const registry = new ProfileRegistry(home);
+  registry.updateMeta("coding", { displayName: "Code" });
+  const current = JSON.parse(readFileSync(registry.spacesPath(), "utf8")) as { meta: Record<string, unknown> };
+  current.meta["web.before-reset-20260922"] = { displayName: "Stale", order: 5 };
+  writeFileSync(registry.spacesPath(), JSON.stringify(current), "utf8");
+
+  assert.deepEqual(registry.scan().map((p) => p.name), ["web", "coding"]);
+  assert.equal(registry.scan().find((p) => p.name === "web")!.kind, "root");
+  assert.deepEqual(
+    registry.scanOnboarding().profiles.map((p) => p.name).sort(),
+    ["coding", "web"],
+  );
+  // Stale meta for an unmanaged name is kept on disk, not deleted.
+  const file = JSON.parse(readFileSync(registry.spacesPath(), "utf8")) as { meta: Record<string, unknown> };
+  assert.ok(file.meta["web.before-reset-20260922"]);
+});
+
 test("official desktop profile is reserved, hidden and cannot be deleted", () => {
   const home = fakeHome();
   writeProfile(home, "desktop", ["@deepseek-ai/dsh-web-app"]);
