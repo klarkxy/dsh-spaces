@@ -131,3 +131,37 @@ test("committed native request still awaits its acknowledgement when Electron re
   assert.equal(controller.getSnapshot().pending, null);
   controller.stop();
 });
+
+test("native guide shows sanitized initialize reasons after a failed start", async () => {
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: null, unavailable: false, reasons: [] }),
+    presentationSnapshot: async () => { throw Error("unused"); },
+    bootstrap: async () => { throw Error("unused"); },
+    returnTarget: async () => { throw Error("unused"); },
+    initialize: async () => ({ ok: false, connected: false, unavailable: false, origin: null, path: null, managerId: null,
+      reasons: ["manager bootstrap failed Bearer abcdef0123456789abcdef0123456789", "see C:\\Users\\x\\.dsh\\logs\\supervisor.log"] }),
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await controller.start({} as HTMLElement);
+  assert.equal(controller.getSnapshot().phase, "initialize");
+  await controller.initialize();
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.phase, "failed");
+  assert.match(snapshot.error!, /空间服务或页面不可用/);
+  assert.ok(snapshot.detail!.includes("manager bootstrap failed Bearer [redacted]"));
+  assert.ok(snapshot.detail!.includes("[path]"));
+  assert.ok(!snapshot.detail!.includes("C:\\Users"));
+  controller.stop();
+});
+
+test("native directory failure shows the sanitized snapshot error", async () => {
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    presentationSnapshot: async () => { throw Error("snapshot read at C:\\Users\\x\\.dsh\\hub\\spaces.json"); },
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await controller.start({} as HTMLElement);
+  const snapshot = controller.getSnapshot();
+  assert.equal(snapshot.phase, "failed");
+  assert.ok(snapshot.detail!.includes("snapshot read at [path]"));
+  assert.ok(!snapshot.detail!.includes("C:\\Users"));
+  controller.stop();
+});

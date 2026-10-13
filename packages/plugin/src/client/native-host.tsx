@@ -3,6 +3,7 @@ import type { WorkbenchGuideApi, WorkbenchReturnTarget } from "../types";
 import { isNativeSpaceTarget, parseNativeSpaceHash, parsePortalSnapshot, type NativeSpaceTarget, type PortalSnapshot } from "../../../../src/shared/space-host";
 import { attachHostLayout } from "./host-layout";
 import { SpaceGlyph } from "../workbench/space-glyph";
+import { publicGuideDetail } from "./guide-detail";
 
 export interface DesktopBrowserBridge {
   acquire(workspace: string): Promise<{ lease: string; partition: string }>;
@@ -15,11 +16,11 @@ export function desktopBrowserBridge(root: typeof globalThis = globalThis): Desk
     carrier?.protocolVersion === 1 && typeof carrier.browser?.acquire === "function" && typeof carrier.browser.release === "function" ? carrier.browser : null;
 }
 type NativeState = { phase: "loading" | "initialize" | "ready" | "failed"; inventory: PortalSnapshot | null;
-  selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; guide: boolean };
+  selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; detail: string | null; guide: boolean };
 
 /** One native guest, one lifetime. It has no Node API or product script execution channel. */
 export class NativeHostController {
-  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, guide: false };
+  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, guide: false };
   private listeners = new Set<() => void>();
   private stopped = false;
   private lifetime = new AbortController();
@@ -36,34 +37,43 @@ export class NativeHostController {
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   private patch(change: Partial<NativeState>) { this.state = { ...this.state, ...change }; for (const fn of this.listeners) fn(); }
+  private detailOf(error: unknown): string | null {
+    const detail = publicGuideDetail(error instanceof Error ? error.message : String(error ?? ""));
+    return detail || null;
+  }
+  private reasonText(reasons: string[] | undefined): string | null {
+    const detail = (reasons ?? []).map(publicGuideDetail).filter(Boolean).join(" ");
+    return detail || null;
+  }
   async start(container: HTMLElement) {
     this.container = container;
     try {
       const role = await this.guideApi.role(); if (this.stopped) return;
-      if (role.unavailable || !role.profileId || !this.guideApi.presentationSnapshot) throw Error();
+      if (role.unavailable || !role.profileId || !this.guideApi.presentationSnapshot) return this.fail(this.reasonText(role.reasons));
       if (!role.managerId) { this.patch({ phase: "initialize" }); return; }
       await this.readDirectory();
-    } catch { this.fail(); }
+    } catch (error) { this.fail(this.detailOf(error)); }
   }
   initialize = async () => {
     if (this.stopped || this.state.phase !== "initialize") return;
-    this.patch({ phase: "loading", error: null });
+    this.patch({ phase: "loading", error: null, detail: null });
     try {
       const result = await this.guideApi.initialize(); if (this.stopped) return;
-      if (!result.ok) throw Error();
+      if (!result.ok) return this.fail(this.reasonText(result.reasons));
       await this.readDirectory();
       if (!this.stopped) this.select("@settings");
-    } catch { this.fail(); }
+    } catch (error) { this.fail(this.detailOf(error)); }
   };
   private async readDirectory() {
     if (this.stopped) return;
     try {
       const snapshot = parsePortalSnapshot(await this.guideApi.presentationSnapshot!());
       if (this.stopped) return;
-      if (!snapshot || this.state.inventory && snapshot.serviceEpoch !== this.state.inventory.serviceEpoch) throw Error();
+      if (!snapshot) throw Error("presentation snapshot rejected");
+      if (this.state.inventory && snapshot.serviceEpoch !== this.state.inventory.serviceEpoch) throw Error("presentation snapshot epoch changed");
       this.patch({ phase: "ready", inventory: snapshot });
       this.pollTimer = setTimeout(() => { void this.readDirectory(); }, 1500);
-    } catch { this.fail(); }
+    } catch (error) { this.fail(this.detailOf(error)); }
   }
   showCurrent = () => {
     this.sequence++; clearTimeout(this.selectionTimer);
@@ -75,10 +85,10 @@ export class NativeHostController {
     if (this.state.phase !== "ready") { this.patch({ guide: true }); return; }
     const inventory = this.state.inventory;
     if (!target.startsWith("@") && !inventory?.spaces.some(s => s.id === target && s.id !== inventory.managerId && s.status === "running")) {
-      this.patch({ guide: true, error: "该空间尚未运行。请在设置中明确启动。" }); return;
+      this.patch({ guide: true, error: "该空间尚未运行。请在设置中明确启动。", detail: null }); return;
     }
     const requestId = ++this.sequence;
-    this.patch({ pending: target, error: null, guide: false });
+    this.patch({ pending: target, error: null, detail: null, guide: false });
     clearTimeout(this.selectionTimer);
     this.selectionTimer = setTimeout(() => { if (this.sequence === requestId) this.fail(); }, 45000);
     void this.open().then(async () => {
@@ -95,7 +105,7 @@ export class NativeHostController {
         // Keep waiting for its bounded acknowledgement; do not send it again.
         if (!this.stopped && this.state.pending === target &&
           actual !== this.nativeUrl + "#select/" + requestId + "/" + target) this.fail();
-      } catch { this.fail(); }
+      } catch (error) { this.fail(this.detailOf(error)); }
     });
   };
   private open(): Promise<void> {
@@ -107,7 +117,7 @@ export class NativeHostController {
     if (this.stopped) return;
     const origin = new URL(target.origin ?? "about:blank");
     if (!target.available || origin.origin !== target.origin || origin.protocol !== "http:" || origin.hostname !== "127.0.0.1" ||
-      origin.username || origin.password || !/^\/bootstrap\/[A-Za-z0-9_-]{16,128}$/.test(target.path ?? "")) throw Error();
+      origin.username || origin.password || !/^\/bootstrap\/[A-Za-z0-9_-]{16,128}$/.test(target.path ?? "")) throw Error("return target rejected");
     const reservation = await this.bridge.acquire("dsh-spaces:" + target.origin + ":" + this.channel);
     if (this.stopped) { await this.bridge.release(reservation.lease); return; }
     this.lease = reservation.lease;
@@ -131,10 +141,10 @@ export class NativeHostController {
     if (this.stopped) return;
     await element.loadURL(target.origin + target.path);
     if (this.stopped) return;
-    if (element.getURL() !== target.origin + "/") throw Error();
+    if (element.getURL() !== target.origin + "/") throw Error("bootstrap entry rejected");
     this.nativeUrl = target.origin + "/native/" + this.channel;
     await element.loadURL(this.nativeUrl);
-    if (!this.stopped && element.getURL() !== this.nativeUrl) throw Error();
+    if (!this.stopped && element.getURL() !== this.nativeUrl) throw Error("native channel rejected");
     element.addEventListener("did-navigate", () => { if (!this.stopped && !element.getURL().startsWith(this.nativeUrl! + "#") && element.getURL() !== this.nativeUrl) this.fail(); });
   }
   private observed(observedUrl?: string) {
@@ -145,12 +155,12 @@ export class NativeHostController {
     const answer = parseNativeSpaceHash(url.hash);
     if (!answer || answer.kind === "select" || answer.requestId !== this.sequence || answer.target !== this.state.pending) return;
     clearTimeout(this.selectionTimer);
-    if (answer.kind === "rejected") { this.patch({ pending: null, guide: true, error: "空间页面未能打开，该次操作已失败。" }); return; }
+    if (answer.kind === "rejected") { this.patch({ pending: null, guide: true, error: "空间页面未能打开，该次操作已失败。", detail: null }); return; }
     this.patch({ selected: answer.target, pending: null, guide: false }); this.guest.focus();
   }
-  private fail() {
+  private fail(detail: string | null = null) {
     if (this.stopped) return;
-    this.patch({ phase: "failed", pending: null, guide: true, error: "空间服务或页面不可用。该次连接已停止，当前应用仍可使用。" });
+    this.patch({ phase: "failed", pending: null, guide: true, error: "空间服务或页面不可用。该次连接已停止，当前应用仍可使用。", detail });
     this.stop();
   }
   stop = () => {
@@ -182,6 +192,7 @@ export function NativeHostShell({ controller }: { controller: NativeHostControll
     <div ref={container} className="dsh-host-surface dsh-native-container" hidden={ui.selected === "current" || ui.guide} />
     {ui.guide && <section className="dsh-host-surface dsh-host-guide" aria-label="空间状态">
       {ui.error ? <p role="alert">{ui.error}</p> : <p>{ui.phase === "loading" ? "正在连接空间服务…" : "初始化独立的 Spaces 管理服务后，即可在这里切换空间。"}</p>}
+      {ui.detail ? <p>{ui.detail}</p> : null}
       {ui.phase === "initialize" && <button type="button" onClick={() => void controller.initialize()}>初始化 Spaces</button>}
       <button type="button" onClick={controller.showCurrent}>当前应用</button>
     </section>}

@@ -16,6 +16,7 @@ import { desktopBrowserBridge, NativeHostController, NativeHostShell, NATIVE_HOS
 import { PortableHostShell, HostShellPanel, HOST_SHELL_CSS } from "./host-shell";
 import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
+import { publicGuideDetail } from "./guide-detail";
 import { SpacesPanelIcon } from "./icon";
 import { registerSpacesBranding } from "./branding";
 import {
@@ -251,10 +252,4 @@ function guideBody(locale: SpacesLocale, mode: GuidePanelMode): string {
   if (mode === "enter") return guideText(locale, "enterBody");
   if (mode === "loading") return guideText(locale, "loading");
   return guideText(locale, "initBody");
-}
-
-function publicGuideDetail(text: string): string {
-  return text
-    .replace(/\bBearer\s+[A-Za-z0-9._\-+=/]{16,}/g, "Bearer [redacted]")
-    .replace(/(?:[A-Za-z]:\\|\\\\)[^\s"'`<>]+/g, "[path]");
 }
