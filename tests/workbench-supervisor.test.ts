@@ -1602,14 +1602,14 @@ test("same request id with a different command is rejected even after revision m
   assert.equal(first.body.ok, true, JSON.stringify(first.body));
   await waitJob(handle.origin, cookie, "same-id");
   const conflict = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.verify", spaceId: "space-alpha" },
+    command: { kind: "space.start", spaceId: "space-alpha" },
     requestId: "same-id",
   });
   assert.equal(conflict.body.ok, false);
   assert.equal(conflict.body.error?.code, "workbench/conflict");
 });
 
-test("official desktop stays outside management and rejects start, verify, delete and plugin changes", async () => {
+test("official desktop stays outside management and rejects start, update, delete and plugin changes", async () => {
   const home = tempHome();
   writeProfile(home, "desktop", { name: "official-desktop" });
   const path = join(home, "profiles", "desktop", "package.json");
@@ -1617,9 +1617,12 @@ test("official desktop stays outside management and rejects start, verify, delet
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   assert.equal((await handle.runtime.state()).spaces.some(space => space.id === "desktop"), false);
-  for (const kind of ["space.start", "space.verify"] as const) {
-    const requestId = `reserved-${kind}`;
-    const result = await mutate(handle.origin, cookie, "submit", { command: { kind, spaceId: "desktop" }, requestId });
+  for (const command of [
+    { kind: "space.start", spaceId: "desktop" },
+    { kind: "space.update", spaceId: "desktop", displayName: "Renamed" },
+  ] as const) {
+    const requestId = `reserved-${command.kind}`;
+    const result = await mutate(handle.origin, cookie, "submit", { command, requestId });
     if (result.body.ok) await waitJob(handle.origin, cookie, requestId, "failed");
     else assert.ok(result.body.error?.code);
   }

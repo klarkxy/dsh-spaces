@@ -1,5 +1,3 @@
-export type ProfileKind = "root" | "workbench" | "hidden";
-
 export type ProfileStatus = "stopped" | "starting" | "running" | "crashed";
 
 export interface SpaceMeta {
@@ -14,10 +12,8 @@ export interface SpaceMeta {
 
 export interface ProfileRecord {
   name: string;
-  kind: ProfileKind;
   path: string;
   hasWebApp: boolean;
-  needsConversion: boolean;
   meta: SpaceMeta;
   status: ProfileStatus;
   port?: number;
@@ -26,7 +22,6 @@ export interface ProfileRecord {
 
 export interface SpacesFile {
   version: 1;
-  onboarded?: boolean;
   order: string[];
   meta: Record<string, SpaceMeta>;
 }
@@ -140,18 +135,6 @@ export interface PluginDownloadRequest {
 
 export interface PluginInstallResult {
   running: string[];
-}
-
-export interface OnboardingProfile {
-  name: string;
-  kind: ProfileKind;
-  action: "adopt-root" | "convert-workbench" | "already-workbench" | "hide";
-}
-
-export interface OnboardingScan {
-  onboarded: boolean;
-  dshHome: string;
-  profiles: OnboardingProfile[];
 }
 
 export type CreateStep = "validate" | "plugin" | "patch" | "verify" | "meta";

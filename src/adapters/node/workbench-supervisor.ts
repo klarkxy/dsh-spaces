@@ -182,7 +182,7 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "service.shutdown",
   "dashboard.publication.set",
 ]);
-const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume"]);
+const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume", "space.verify"]);
 const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.upgrade"]);
 
 /**
@@ -621,7 +621,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         isHost: space.id === this.managerId,
         hasWebApp: true,
         status: space.status === "running" ? "running" : space.status === "unknown" ? "unknown" : "stopped",
-        isolation: space.needsIsolation ? "unverified" : "verified",
       },
       plugins: this.readPlugins(id).map((row) => ({
         name: row.name,
@@ -1365,8 +1364,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         return this.reorderSpaces(command.spaceIds, ctx);
       case "space.start":
         return this.startSpace(command.spaceId, ctx);
-      case "space.verify":
-        return this.verifySpace(command.spaceId, ctx);
       case "plan.execute":
         return this.supervisorPlans.executePlan(command.planId, ctx);
       case "llm.apply":
@@ -1504,14 +1501,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     };
   }
 
-  private async verifySpace(spaceId: string, ctx: WorkbenchJobContext): Promise<void> {
-    ctx.phase("verify");
-    const id = this.requireSpace(spaceId);
-    this.protectSpecial(id, { allowManager: false });
-    if (!this.spaces) throw new WorkbenchPublicError("workbench/unavailable");
-    await this.spaces.verify(id);
-  }
-
   private observeChildWork<T>(action: () => T): T {
     return withChildObservation(
       () => observeMaintenanceChild(this.home, () => {
@@ -1616,10 +1605,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const path = join(this.registry.profilesDir(), managerId);
         records.push({
           name: managerId,
-          kind: "workbench",
           path,
           hasWebApp: this.registry.hasWebApp(path),
-          needsConversion: false,
           meta: spaces.meta[managerId] ?? defaultSpaceMeta(managerId),
           status: "stopped",
         });
@@ -1638,12 +1625,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           displayName: row.meta.displayName || row.name,
           isHost: row.name === this.managerId,
           hasWebApp: row.hasWebApp,
-          isolation: row.needsConversion ? "unverified" : "verified",
           icon: row.meta.icon ?? "",
           status,
           generation: view?.generation ?? this.runs.generation(row.name),
           managed: Boolean(this.lifecycle.handle) && !leftover,
-          needsIsolation: row.needsConversion,
           dshVersion: row.name === this.managerId ? null : (row.meta.dshVersion ?? null),
         } satisfies WorkbenchSpace;
       });

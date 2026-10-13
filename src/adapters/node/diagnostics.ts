@@ -137,7 +137,7 @@ export class DiagnosticsService {
   }
 
   private assertRestorable(profile: ProfileRecord): void {
-    if (profile.name === "web" || profile.kind === "root") {
+    if (profile.name === "web") {
       throw new Error(t("errors.webSacred"));
     }
   }

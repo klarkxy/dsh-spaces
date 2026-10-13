@@ -122,7 +122,7 @@ test("doctor reports registry, journals, lock, and optional CLI metadata", async
   mkdirSync(join(home, "hub"), { recursive: true });
   writeFileSync(
     join(home, "hub", "spaces.json"),
-    `${JSON.stringify({ version: 1, onboarded: true, order: ["coding"], meta: {} }, null, 2)}\n`,
+    `${JSON.stringify({ version: 1, order: ["coding"], meta: {} }, null, 2)}\n`,
   );
   writeFileSync(
     join(home, MUTATION_JOURNAL_NAME),
@@ -138,7 +138,7 @@ test("doctor reports registry, journals, lock, and optional CLI metadata", async
   assert.equal(result.code, 0);
   const body = jsonOf(result.stdout);
   assert.equal(body.ok, true);
-  assert.deepEqual(body.registry, { status: "ok", version: 1, onboarded: true, order: ["coding"] });
+  assert.deepEqual(body.registry, { status: "ok", version: 1, order: ["coding"] });
   assert.deepEqual(body.journals, {
     mutation: { present: true, op: "create", phase: "patch", spaceId: "coding" },
     restore: { needed: true, phase: "swapping" },
@@ -244,7 +244,7 @@ test("doctor treats a hub junction as unreadable and does not unlock", async () 
   const leaked = tempDir("dsh-doctor-hub-out-");
   writeFileSync(
     join(leaked, "spaces.json"),
-    `${JSON.stringify({ version: 1, onboarded: true, order: ["coding"], meta: {} })}\n`,
+    `${JSON.stringify({ version: 1, order: ["coding"], meta: {} })}\n`,
   );
   if (!linkOrJunction(leaked, join(home, "hub"))) return;
   mkdirSync(join(home, HOME_LOCK_DIR_NAME));

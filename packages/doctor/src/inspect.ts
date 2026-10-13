@@ -70,7 +70,7 @@ export function readRegistry(home: string): Json {
   try {
     const parsed = normalizeSpacesFile(JSON.parse(readFileSync(file, "utf8")) as SpacesFile);
     const order = parsed.order.filter((name) => name === "web" || PROFILE_NAME_RE.test(name));
-    return { status: "ok", version: parsed.version, onboarded: Boolean(parsed.onboarded), order };
+    return { status: "ok", version: parsed.version, order };
   } catch (error) {
     const text = error instanceof Error ? error.message : "";
     return { status: "invalid", code: /version/i.test(text) || /版本/.test(text) ? "UNSUPPORTED_VERSION" : "UNREADABLE" };

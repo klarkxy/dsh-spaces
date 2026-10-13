@@ -24,13 +24,11 @@ import {
   applyMetaPatch,
   applyWorkbenchReorder,
   assertValidProfileName,
-  classifyProfile,
   compareScannedProfiles,
   completeWorkbenchOrder,
   defaultSpaceMeta,
   emptySpacesFile,
   normalizeSpacesFile,
-  onboardingAction,
   packageHasWebApp,
 } from "../src/core/domain/registry.ts";
 import type { OperationLock } from "../src/core/ports/operation-lock.ts";
@@ -119,11 +117,6 @@ test("registry domain validates names and orders workbench records", () => {
   assert.throws(() => assertValidProfileName("Web"), { message: t("errors.nameInvalid") });
   assert.throws(() => assertValidProfileName("web"), { message: t("errors.nameReserved", { name: "web" }) });
   assertValidProfileName("notes");
-  assert.equal(classifyProfile("web", true), "root");
-  assert.equal(classifyProfile("coding", true), "workbench");
-  assert.equal(classifyProfile("headless", false), "hidden");
-  assert.equal(onboardingAction("workbench", false), "convert-workbench");
-  assert.equal(onboardingAction("workbench", true), "already-workbench");
   assert.equal(packageHasWebApp({ dsh: { profile: { bundles: ["@deepseek-ai/dsh-web-app"] } } }), true);
   assert.deepEqual(defaultSpaceMeta("web"), { displayName: "Home", order: -1 });
 
@@ -134,9 +127,9 @@ test("registry domain validates names and orders workbench records", () => {
   assert.deepEqual(spaces.order, ["writing", "coding"]);
 
   const records = [
-    { kind: "workbench" as const, name: "coding", meta: { displayName: "Code", order: 1 } },
-    { kind: "root" as const, name: "web", meta: defaultSpaceMeta("web") },
-    { kind: "workbench" as const, name: "writing", meta: { displayName: "Write", order: 0 } },
+    { name: "coding", meta: { displayName: "Code", order: 1 } },
+    { name: "web", meta: defaultSpaceMeta("web") },
+    { name: "writing", meta: { displayName: "Write", order: 0 } },
   ];
   records.sort((a, b) => compareScannedProfiles(a, b, spaces.order));
   assert.deepEqual(records.map((row) => row.name), ["web", "writing", "coding"]);

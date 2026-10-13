@@ -34,11 +34,9 @@ export type WorkbenchRevisionSpace = Pick<
   | "id"
   | "displayName"
   | "icon"
-  | "isolation"
   | "generation"
   | "status"
   | "managed"
-  | "needsIsolation"
   | "isHost"
   | "hasWebApp"
   | "dshVersion"
@@ -81,9 +79,7 @@ export function computeWorkbenchRevision(input: WorkbenchRevisionInput): string 
     icon: space.icon,
     id: space.id,
     isHost: space.isHost,
-    isolation: space.isolation,
     managed: space.managed,
-    needsIsolation: space.needsIsolation,
     status: space.status,
   }));
   const payload = {

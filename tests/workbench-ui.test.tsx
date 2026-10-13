@@ -77,12 +77,10 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     displayName: partial.displayName ?? partial.id,
     isHost: false,
     hasWebApp: true,
-    isolation: "verified",
     icon: "",
     status: "running",
     generation: 1,
     managed: true,
-    needsIsolation: false,
     dshVersion: null,
     ...partial,
   };
@@ -370,7 +368,7 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
     detail: async (spaceId) => {
       calls.push({ method: "detail", arg: spaceId });
       return {
-        space: { id: spaceId, displayName: spaceId, isHost: spaceId === "hub", hasWebApp: true, status: "running", isolation: "verified" },
+        space: { id: spaceId, displayName: spaceId, isHost: spaceId === "hub", hasWebApp: true, status: "running" },
         plugins: [{ name: "demo", version: "1.0.0" }],
         snapshots: [],
         diagnostics: [{ level: "warning", code: "NEED_CHECK", message: "check" }],

@@ -2,8 +2,6 @@ import { t } from "../../shared/i18n";
 import {
   PROFILE_NAME_RE,
   RESERVED_PROFILE_NAMES,
-  type OnboardingProfile,
-  type ProfileKind,
   type ProfileRecord,
   type SpaceMeta,
   type SpacesFile,
@@ -13,7 +11,7 @@ export const SPACES_VERSION = 1 as const;
 export const WEB_APP_BUNDLE = "@deepseek-ai/dsh-web-app";
 
 export function emptySpacesFile(): SpacesFile {
-  return { version: SPACES_VERSION, onboarded: false, order: [], meta: {} };
+  return { version: SPACES_VERSION, order: [], meta: {} };
 }
 
 export function normalizeSpacesFile(parsed: SpacesFile): SpacesFile {
@@ -34,7 +32,6 @@ export function normalizeSpacesFile(parsed: SpacesFile): SpacesFile {
   }
   return {
     version: 1,
-    onboarded: Boolean(parsed.onboarded),
     order: parsed.order ?? [],
     meta: parsed.meta ?? {},
   };
@@ -45,24 +42,6 @@ export function defaultSpaceMeta(name: string): SpaceMeta {
     displayName: name === "web" ? "Home" : name,
     order: name === "web" ? -1 : 1000,
   };
-}
-
-export function classifyProfile(name: string, hasWebApp: boolean): ProfileKind {
-  if (name === "web") return "root";
-  if (name === "desktop") return "hidden";
-  if (!hasWebApp) return "hidden";
-  return "workbench";
-}
-
-export function onboardingAction(
-  kind: ProfileKind,
-  hasWorkbenchPatch: boolean,
-): OnboardingProfile["action"] {
-  if (kind === "root") return "adopt-root";
-  if (kind === "workbench") {
-    return hasWorkbenchPatch ? "already-workbench" : "convert-workbench";
-  }
-  return "hide";
 }
 
 export function packageHasWebApp(pkg: unknown): boolean {
@@ -82,12 +61,12 @@ export function assertValidProfileName(name: string): void {
 }
 
 export function compareScannedProfiles(
-  a: Pick<ProfileRecord, "kind" | "name" | "meta">,
-  b: Pick<ProfileRecord, "kind" | "name" | "meta">,
+  a: Pick<ProfileRecord, "name" | "meta">,
+  b: Pick<ProfileRecord, "name" | "meta">,
   order: string[],
 ): number {
-  if (a.kind === "root" && b.kind !== "root") return -1;
-  if (b.kind === "root" && a.kind !== "root") return 1;
+  if (a.name === "web" && b.name !== "web") return -1;
+  if (b.name === "web" && a.name !== "web") return 1;
   const ao = order.indexOf(a.name);
   const bo = order.indexOf(b.name);
   if (ao !== -1 || bo !== -1) {

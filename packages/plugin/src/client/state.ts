@@ -4,7 +4,6 @@ import type {
   SpaceSummary,
   SpacesCapabilities,
   SpacesControlApi,
-  VerifySpaceResult,
 } from "../../../../src/shared/spaces-control";
 import { displayMessage } from "./remote";
 
@@ -24,9 +23,6 @@ export interface DetailState {
   status: "loading" | "ready" | "error";
   detail: SpaceDetail | null;
   error: string | null;
-  verifying: boolean;
-  verifyResult: VerifySpaceResult | null;
-  verifyError: string | null;
 }
 
 export interface CreateState {
@@ -171,9 +167,6 @@ export class SpacesPanelStore {
               status: "loading",
               detail: null,
               error: null,
-              verifying: false,
-              verifyResult: null,
-              verifyError: null,
             },
     });
     void this.fetchDetail(id, generation);
@@ -185,17 +178,12 @@ export class SpacesPanelStore {
     try {
       const detail = await this.remote.detail(id);
       if (!isCurrent()) return;
-      const prior = this.snapshot.detail;
-      const keepVerify = prior?.id === id;
       this.emit({
         detail: {
           id,
           status: "ready",
           detail,
           error: null,
-          verifying: keepVerify ? prior.verifying : false,
-          verifyResult: keepVerify ? prior.verifyResult : null,
-          verifyError: keepVerify ? prior.verifyError : null,
         },
       });
     } catch (error) {
@@ -206,9 +194,6 @@ export class SpacesPanelStore {
           status: "error",
           detail: null,
           error: displayMessage(error),
-          verifying: false,
-          verifyResult: null,
-          verifyError: null,
         },
       });
     }
@@ -233,32 +218,6 @@ export class SpacesPanelStore {
       this.select(created.id);
     } catch (error) {
       this.emit({ create: { pending: false, error: displayMessage(error) } });
-    }
-  };
-
-  /**
-   * Verify the selected space. Non-host only and requires
-   * capabilities.canVerify === true; otherwise a no-op.
-   */
-  verifySelected = async (): Promise<void> => {
-    const { detail, overview } = this.snapshot;
-    if (!detail || detail.status !== "ready" || detail.verifying) return;
-    if (!detail.detail || detail.detail.space.isHost) return;
-    if (overview.capabilities?.canVerify !== true) return;
-    const id = detail.id;
-    const generation = this.selectionGeneration;
-    this.emit({ detail: { ...detail, verifying: true, verifyResult: null, verifyError: null } });
-    try {
-      const verifyResult = await this.remote.verify(id);
-      if (generation !== this.selectionGeneration || this.snapshot.selectedId !== id) return;
-      const current = this.snapshot.detail;
-      if (!current || current.id !== id) return;
-      this.emit({ detail: { ...current, verifying: false, verifyResult, verifyError: null } });
-    } catch (error) {
-      if (generation !== this.selectionGeneration || this.snapshot.selectedId !== id) return;
-      const current = this.snapshot.detail;
-      if (!current || current.id !== id) return;
-      this.emit({ detail: { ...current, verifying: false, verifyError: displayMessage(error) } });
     }
   };
 }

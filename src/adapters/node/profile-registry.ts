@@ -1,21 +1,18 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { t } from "../../shared/i18n";
-import { PROFILE_NAME_RE, SPACE_ID_RE, type OnboardingProfile, type OnboardingScan, type ProfileKind, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../shared/types";
+import { SPACE_ID_RE, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../shared/types";
 import {
   applyMetaPatch,
   applyWorkbenchReorder,
   assertValidProfileName,
-  classifyProfile,
   compareScannedProfiles,
   completeWorkbenchOrder,
   emptySpacesFile,
   normalizeSpacesFile,
-  onboardingAction,
   packageHasWebApp,
   removeSpaceMeta,
 } from "../../core/domain/registry";
-import { patchTextLooksIsolated } from "../../core/domain/isolation";
 import { atomicWrite } from "./atomic";
 import { assertNotRealHome } from "./home-guard";
 
@@ -63,41 +60,14 @@ export class ProfileRegistry {
       }
       records.push({
         name,
-        kind: "workbench",
         path,
         hasWebApp: this.hasWebApp(path),
-        needsConversion: false,
         meta,
         status: "stopped",
       });
     }
     records.sort((a, b) => compareScannedProfiles(a, b, spaces.order));
     return records;
-  }
-
-  scanOnboarding(): OnboardingScan {
-    const dir = this.profilesDir();
-    const names = existsSync(dir)
-      ? readdirSync(dir, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory() && PROFILE_NAME_RE.test(entry.name))
-          .map((entry) => entry.name)
-      : [];
-    const profiles: OnboardingProfile[] = names.map((name) => {
-      const path = join(dir, name);
-      const kind = this.classify(name, path);
-      return { name, kind, action: onboardingAction(kind, this.hasWorkbenchPatch(name)) };
-    });
-    return {
-      onboarded: Boolean(this.readSpaces().onboarded),
-      dshHome: this.dshHome,
-      profiles,
-    };
-  }
-
-  markOnboarded(): void {
-    const spaces = this.readSpaces();
-    spaces.onboarded = true;
-    this.writeSpaces(spaces);
   }
 
   updateMeta(name: string, patch: Partial<SpaceMeta>): SpaceMeta {
@@ -109,9 +79,7 @@ export class ProfileRegistry {
 
   reorder(names: string[]): void {
     const spaces = this.readSpaces();
-    const visible = this.scan()
-      .filter((p) => p.kind === "workbench")
-      .map((p) => p.name);
+    const visible = this.scan().map((p) => p.name);
     applyWorkbenchReorder(spaces, completeWorkbenchOrder(visible, names));
     this.writeSpaces(spaces);
   }
@@ -153,17 +121,6 @@ export class ProfileRegistry {
     if (this.has(name)) {
       throw new Error(t("errors.profileExists", { name }));
     }
-  }
-
-  hasWorkbenchPatch(name: string): boolean {
-    if (name === "web") return false;
-    const path = join(this.profilesDir(), name, "cordis.patch.yml");
-    if (!existsSync(path)) return false;
-    return patchTextLooksIsolated(readFileSync(path, "utf8"), name);
-  }
-
-  classify(name: string, path: string): ProfileKind {
-    return classifyProfile(name, this.hasWebApp(path));
   }
 
   hasWebApp(profilePath: string): boolean {

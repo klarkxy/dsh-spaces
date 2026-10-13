@@ -28,7 +28,6 @@ export function SpacesMainPanel({ remote }: { remote: SpacesControlApi }): React
       onRefresh={() => void store.refresh()}
       onSelect={store.select}
       onCreate={(input) => void store.createSpace(input)}
-      onVerify={() => void store.verifySelected()}
     />
   );
 }

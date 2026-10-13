@@ -43,8 +43,7 @@ test("scan lists only spaces registered with createdAt", () => {
   const registry = new ProfileRegistry(home);
   const names = registry.scan().map((p) => p.name);
   assert.deepEqual(names, ["space-coding"]);
-  assert.equal(registry.scan()[0].kind, "workbench");
-  assert.equal(registry.scan()[0].needsConversion, false);
+  assert.equal(typeof registry.scan()[0].meta.createdAt, "string");
 });
 
 test("scan ignores unregistered profile directories and stale meta", () => {

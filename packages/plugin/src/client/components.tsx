@@ -24,7 +24,6 @@ export interface SpacesPanelViewProps {
   onRefresh: () => void;
   onSelect: (id: string | null) => void;
   onCreate: (input: { name: string; displayName?: string }) => void;
-  onVerify: () => void;
 }
 
 const MODE_KEY: Record<SpacesMode, SpacesMessageKey> = {
@@ -46,19 +45,6 @@ function modeLabel(locale: SpacesLocale, mode: SpacesMode): string {
 
 function statusLabel(locale: SpacesLocale, status: SpaceSummary["status"]): string {
   return t(locale, STATUS_KEY[status]);
-}
-
-function isolationLabel(locale: SpacesLocale, isolation: SpaceSummary["isolation"]): string {
-  if (isolation === "verified") return t(locale, "isolation.verified");
-  if (isolation === "unverified") return t(locale, "isolation.unverified");
-  if (isolation === "invalid") return t(locale, "isolation.invalid");
-  return t(locale, "isolation.default");
-}
-
-function isolationTone(isolation: SpaceSummary["isolation"]): string {
-  if (isolation === "verified") return "verified";
-  if (isolation === "invalid") return "invalid";
-  return "neutral";
 }
 
 export function SpacesPanelView(props: SpacesPanelViewProps): ReactElement {
@@ -132,7 +118,6 @@ function ReadyBody({
   locale = "en",
   onSelect,
   onCreate,
-  onVerify,
 }: SpacesPanelViewProps): ReactElement {
   const { overview, selectedId, detail } = snapshot;
   return (
@@ -191,8 +176,6 @@ function ReadyBody({
         <DetailPane
           locale={locale}
           detail={detail}
-          capabilities={overview.capabilities}
-          onVerify={onVerify}
         />
       </section>
     </div>
@@ -292,13 +275,9 @@ function CreateForm({
 function DetailPane({
   locale,
   detail,
-  capabilities,
-  onVerify,
 }: {
   locale: SpacesLocale;
   detail: SpacesPanelSnapshot["detail"];
-  capabilities: SpacesCapabilities | null;
-  onVerify: () => void;
 }): ReactElement {
   if (!detail) {
     return <p className="dsh-spaces-muted">{t(locale, "detail.placeholder")}</p>;
@@ -321,9 +300,6 @@ function DetailPane({
     <DetailContent
       locale={locale}
       detail={detail.detail}
-      state={detail}
-      capabilities={capabilities}
-      onVerify={onVerify}
     />
   );
 }
@@ -331,23 +307,11 @@ function DetailPane({
 function DetailContent({
   locale,
   detail,
-  state,
-  capabilities,
-  onVerify,
 }: {
   locale: SpacesLocale;
   detail: SpaceDetail;
-  state: NonNullable<SpacesPanelSnapshot["detail"]>;
-  capabilities: SpacesCapabilities | null;
-  onVerify: () => void;
 }): ReactElement {
   const { space, plugins, snapshots, diagnostics } = detail;
-  const canVerify = !space.isHost && capabilities?.canVerify === true;
-  const isolationAfterCheck = state.verifyResult
-    ? state.verifyResult.valid
-      ? "verified"
-      : "invalid"
-    : space.isolation;
   return (
     <>
       <div className="dsh-spaces-detail-head">
@@ -357,13 +321,6 @@ function DetailContent({
             {t(locale, "list.host")}
           </span>
         )}
-        <span className="dsh-spaces-badge" data-tone={isolationTone(isolationAfterCheck)}>
-          {state.verifyResult
-            ? state.verifyResult.valid
-              ? t(locale, "isolation.lastPassed")
-              : t(locale, "isolation.lastFailed")
-            : isolationLabel(locale, space.isolation)}
-        </span>
       </div>
       <dl className="dsh-spaces-meta">
         <dt>{t(locale, "detail.id")}</dt>
@@ -443,33 +400,6 @@ function DetailContent({
           </ul>
         </div>
       )}
-      <div>
-        {space.isHost ? (
-          <p className="dsh-spaces-muted">{t(locale, "detail.hostLocked")}</p>
-        ) : capabilities && !capabilities.canVerify ? (
-          <p className="dsh-spaces-muted">{t(locale, "detail.verifyDenied")}</p>
-        ) : (
-          <button
-            type="button"
-            className="dsh-spaces-action"
-            onClick={onVerify}
-            disabled={!canVerify || state.verifying}
-            aria-busy={state.verifying || undefined}
-          >
-            {state.verifying ? t(locale, "detail.verifying") : t(locale, "detail.verify")}
-          </button>
-        )}
-        {state.verifyResult && (
-          <p className="dsh-spaces-notice" data-tone={state.verifyResult.valid ? "ok" : undefined} role="status">
-            {localizeSafeText(locale, state.verifyResult.message)}
-          </p>
-        )}
-        {state.verifyError && (
-          <p className="dsh-spaces-alert" role="alert">
-            {localizeSafeText(locale, state.verifyError)}
-          </p>
-        )}
-      </div>
     </>
   );
 }

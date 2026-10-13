@@ -6,7 +6,6 @@ export interface SpacesCapabilities {
   hostSpaceId: string | null;
   dshVersion: string | null;
   canCreate: boolean;
-  canVerify: boolean;
   reasons: string[];
 }
 
@@ -16,7 +15,6 @@ export interface SpaceSummary {
   isHost: boolean;
   hasWebApp: boolean;
   status: "running" | "stopped" | "unknown";
-  isolation: "verified" | "unverified" | "invalid" | "default";
 }
 
 export interface SpacesOverview {
@@ -36,16 +34,9 @@ export interface CreateSpaceInput {
   displayName?: string;
 }
 
-export interface VerifySpaceResult {
-  id: string;
-  valid: boolean;
-  message: string;
-}
-
 /** Transport adapters wrap these operations in the upstream typed Remote API. */
 export interface SpacesControlApi {
   overview(): Promise<SpacesOverview>;
   detail(id: string): Promise<SpaceDetail>;
   create(input: CreateSpaceInput): Promise<SpaceSummary>;
-  verify(id: string): Promise<VerifySpaceResult>;
 }

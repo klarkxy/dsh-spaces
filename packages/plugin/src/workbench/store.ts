@@ -669,10 +669,6 @@ export class WorkbenchController {
     this.selectSpace(spaceId);
   };
 
-  verifySpace = (spaceId: string): void => {
-    void this.submit({ kind: "space.verify", spaceId });
-  };
-
   preview = (request: WorkbenchPlanRequest): void => {
     if (!this.canMutate()) {
       this.rejectReadonly();

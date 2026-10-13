@@ -111,7 +111,6 @@ test("src gate admits exact CLI writes; tags stay unbound and read-only", async 
   const overview = await admitted.overview();
   assert.equal(overview.capabilities.mode, "verified-full");
   assert.equal(overview.capabilities.canCreate, true);
-  assert.equal(overview.capabilities.canVerify, true);
   assert.equal(overview.capabilities.dshVersion, "0.1.5-rc.2");
   const created = await admitted.create({ name: "notes" });
   assert.equal(created.id, "space-notes");
@@ -154,7 +153,6 @@ test("src gate admits exact CLI writes; tags stay unbound and read-only", async 
   const blocked = await tagged.overview();
   assert.equal(blocked.capabilities.mode, "unknown-readonly");
   assert.equal(blocked.capabilities.canCreate, false);
-  assert.equal(blocked.capabilities.canVerify, false);
   assert.equal(blocked.capabilities.dshVersion, null);
   await assert.rejects(() => tagged.create({ name: "notes" }), (error: unknown) => {
     assert.ok(error instanceof SpacesPublicError);

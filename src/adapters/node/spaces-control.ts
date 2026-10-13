@@ -25,9 +25,7 @@ import {
   SESSION_ROW_ID,
   STORAGE_ROW_ID,
   assertDumpPatched,
-  extractRoot,
   isExpectedIsolationRoot,
-  patchTextLooksIsolated,
 } from "./patch-writer";
 import { ProfileRegistry } from "./profile-registry";
 import { terminateProcessTree } from "./terminate-process";
@@ -41,7 +39,6 @@ import type {
   SpacesControlApi,
   SpacesMode,
   SpacesOverview,
-  VerifySpaceResult,
 } from "../../shared/spaces-control";
 import { PROFILE_NAME_RE, SPACE_ID_RE, SPACE_NAME_RE, RESERVED_PROFILE_NAMES, spaceIdFromName, type SpaceMeta } from "../../shared/types";
 import {
@@ -116,10 +113,6 @@ export const DIAGNOSTIC = {
     code: "SNAPSHOTS_UNREADABLE",
     message: "Configured snapshot root could not be read safely.",
   },
-  isolationFileOnly: {
-    code: "ISOLATION_FILE_ONLY",
-    message: "Isolation is not marked verified without current composed configuration evidence.",
-  },
   registryCorrupt: {
     code: "REGISTRY_CORRUPT",
     message: "The spaces registry could not be read safely.",
@@ -192,7 +185,7 @@ export interface NodeSpacesControlOptions {
 
 interface MutationJournal {
   version: 1;
-  op: "create" | "verify";
+  op: "create";
   spaceId: string;
   phase: "cli" | "patch" | "verify-cli" | "meta";
   startedAt: string;
@@ -214,7 +207,6 @@ interface HostIdentity {
 interface SafeProfile {
   name: string;
   hasWebApp: boolean;
-  kind: "root" | "workbench";
   meta: SpaceMeta;
 }
 
@@ -255,7 +247,7 @@ export class NodeSpacesControl implements SpacesControlApi {
     try {
       return await this.withLock("spaces.create", async () => {
         const capabilities = this.capabilities();
-        this.assertCanMutate(capabilities, "create");
+        this.assertCanMutate(capabilities);
         const spaceId = spaceIdFromName(parsed.name);
         if (spaceId === capabilities.hostSpaceId) {
           throw new SpacesPublicError("spaces/host-denied");
@@ -331,41 +323,6 @@ export class NodeSpacesControl implements SpacesControlApi {
     }
   }
 
-  async verify(id: string): Promise<VerifySpaceResult> {
-    try {
-      return await this.withLock("spaces.verify", async () => {
-        const capabilities = this.capabilities();
-        this.assertCanMutate(capabilities, "verify");
-        const name = this.requireExistingId(id, capabilities);
-        if (name === capabilities.hostSpaceId) {
-          throw new SpacesPublicError("spaces/host-denied");
-        }
-        if (!this.runtimeCompatible()) {
-          throw new SpacesPublicError("spaces/read-only");
-        }
-        this.writeJournal({
-          version: 1,
-          op: "verify",
-          spaceId: name,
-          phase: "verify-cli",
-          startedAt: new Date().toISOString(),
-        });
-        const isolation = await this.checkIsolation(name);
-        if (isolation === "valid") {
-          this.clearJournal();
-          return { id: name, valid: true, message: "Isolation matches the current composed configuration." };
-        }
-        if (isolation === "invalid") {
-          this.clearJournal();
-          return { id: name, valid: false, message: "Isolation could not be verified." };
-        }
-        throw new SpacesPublicError("spaces/unavailable");
-      });
-    } catch (error) {
-      throw toPublic(error, "spaces/unavailable");
-    }
-  }
-
   capabilities(): SpacesCapabilities {
     const reasons: string[] = [];
     const identity = this.identity();
@@ -407,7 +364,6 @@ export class NodeSpacesControl implements SpacesControlApi {
       hostSpaceId: identity.confirmed ? identity.hostSpaceId : null,
       dshVersion: runtime?.version ?? null,
       canCreate: canMutate,
-      canVerify: canMutate,
       reasons,
     };
   }
@@ -422,14 +378,9 @@ export class NodeSpacesControl implements SpacesControlApi {
     });
   }
 
-  private assertCanMutate(capabilities: SpacesCapabilities, kind: "create" | "verify"): void {
+  private assertCanMutate(capabilities: SpacesCapabilities): void {
     if (capabilities.mode === "recovery-only") throw new SpacesPublicError("spaces/unavailable");
-    if (kind === "create" && !capabilities.canCreate) {
-      if (capabilities.mode === "unknown-readonly") throw new SpacesPublicError("spaces/read-only");
-      throw new SpacesPublicError("spaces/read-only");
-    }
-    if (kind === "verify" && !capabilities.canVerify) {
-      if (capabilities.mode === "unknown-readonly") throw new SpacesPublicError("spaces/read-only");
+    if (!capabilities.canCreate) {
       throw new SpacesPublicError("spaces/read-only");
     }
   }
@@ -453,37 +404,7 @@ export class NodeSpacesControl implements SpacesControlApi {
       isHost,
       hasWebApp: profile.hasWebApp,
       status: isHost ? "running" : "unknown",
-      isolation: this.isolationOf(profile.name, isHost),
     };
-  }
-
-  private isolationOf(name: string, isHost: boolean): SpaceSummary["isolation"] {
-    if (isHost) {
-      const live = this.liveRoots();
-      if (!live) return "unverified";
-      if (this.rootsAreDefault(live)) return "default";
-      if (this.rootsAreIsolated(live, name)) return "verified";
-      return "invalid";
-    }
-    const patch = this.readPatchText(name);
-    if (patch === undefined) return "unverified";
-    try {
-      const session = extractRoot(patch, SESSION_ROW_ID);
-      const storage = extractRoot(patch, STORAGE_ROW_ID);
-      if (session && storage) {
-        if (
-          isExpectedIsolationRoot(session, name, "sessions") &&
-          isExpectedIsolationRoot(storage, name, "storages")
-        ) {
-          return "unverified";
-        }
-        return "invalid";
-      }
-    } catch {
-      return "invalid";
-    }
-    if (patchTextLooksIsolated(patch, name)) return "unverified";
-    return "unverified";
   }
 
   private loaderPresent(): boolean {
@@ -601,9 +522,6 @@ export class NodeSpacesControl implements SpacesControlApi {
     }
     const snapshots = this.readSnapshots(name);
     if (snapshots.diagnostic) push("info", snapshots.diagnostic);
-    if (this.isolationOf(name, capabilities.hostSpaceId === name) === "unverified") {
-      push("info", DIAGNOSTIC.isolationFileOnly);
-    }
     return rows;
   }
 
@@ -685,11 +603,6 @@ export class NodeSpacesControl implements SpacesControlApi {
     return bindDshCli(argv1);
   }
 
-  private runtimeCompatible(): boolean {
-    const runtime = this.boundRuntime();
-    return runtime !== null && isCompatibleDshCliVersion(runtime.version);
-  }
-
   private argv(): readonly string[] {
     return this.options.argv ?? process.argv;
   }
@@ -767,7 +680,6 @@ export class NodeSpacesControl implements SpacesControlApi {
       rows.push({
         name,
         hasWebApp: this.readHasWebApp(join(dir, "package.json"), home),
-        kind: "workbench",
         meta,
       });
     }
@@ -776,7 +688,6 @@ export class NodeSpacesControl implements SpacesControlApi {
       rows.push({
         name: hostSpaceId!,
         hasWebApp,
-        kind: hostSpaceId === "web" ? "root" : "workbench",
         meta: spaces?.meta[hostSpaceId!] ?? defaultSpaceMeta(hostSpaceId!),
       });
     }
@@ -859,7 +770,7 @@ export class NodeSpacesControl implements SpacesControlApi {
       const real = realpathSync(path);
       if (!inside(home, real)) return { kind: "blocked" };
       const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<MutationJournal>;
-      if (parsed.version !== 1 || (parsed.op !== "create" && parsed.op !== "verify")) {
+      if (parsed.version !== 1 || parsed.op !== "create") {
         return { kind: "blocked" };
       }
       return {
@@ -898,18 +809,6 @@ export class NodeSpacesControl implements SpacesControlApi {
     }
     const scope = this.operation.getStore();
     if (scope) scope.journal = false;
-  }
-
-  private readPatchText(name: string): string | undefined {
-    const home = this.homeRootOrNull();
-    if (!home) return undefined;
-    const path = this.containedExistingFile(join(home, "profiles", name, "cordis.patch.yml"), home);
-    if (!path) return undefined;
-    try {
-      return readFileSync(path, "utf8");
-    } catch {
-      return undefined;
-    }
   }
 
   private isExactChildDir(home: string, path: string, child: string): boolean {

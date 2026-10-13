@@ -109,7 +109,6 @@ test("a CLI that cannot be bound stays unknown-readonly and cannot mutate", asyn
   const overview = await spaces.overview();
   assert.equal(overview.capabilities.mode, "unknown-readonly");
   assert.equal(overview.capabilities.canCreate, false);
-  assert.equal(overview.capabilities.canVerify, false);
   await assert.rejects(() => spaces.create({ name: "notes" }), (error: unknown) => {
     assert.ok(error instanceof SpacesPublicError);
     assert.equal(error.code, "spaces/read-only");
@@ -188,16 +187,22 @@ test("an observer of the same control instance does not inherit an active mutati
   writeWeb(home); writeRegisteredSpace(home, "space-notes");
   let resolveDump!: (result: BoundCliResult) => void;
   let entered!: () => void;
+  let calls = 0;
   const ready = new Promise<void>(resolve => { entered = resolve; });
   const spaces = control(home, { runCli: async () => {
-    entered();
-    return new Promise<BoundCliResult>(resolve => { resolveDump = resolve; });
+    calls += 1;
+    if (calls === 1) {
+      writeWorkbench(home, "space-x");
+      entered();
+      return new Promise<BoundCliResult>(resolve => { resolveDump = resolve; });
+    }
+    return { code: 0, stdout: isolatedDump("space-x"), stderr: "" };
   } });
-  const verifying = spaces.verify("space-notes");
+  const creating = spaces.create({ name: "x" });
   await ready;
   assert.equal((await spaces.overview()).capabilities.canCreate, false);
-  resolveDump({ code: 0, stdout: isolatedDump("space-notes"), stderr: "" });
-  assert.equal((await verifying).valid, true);
+  resolveDump({ code: 0, stdout: "", stderr: "" });
+  assert.equal((await creating).id, "space-x");
   assert.equal((await spaces.overview()).capabilities.canCreate, true);
 });
 
@@ -340,42 +345,23 @@ test("snapshots require matching home, space membership, and ISO createdAt", asy
   assert.deepEqual(web.snapshots, []);
 });
 
-test("known verify failure clears the verify journal; interruption keeps recovery", async () => {
-  const home = tempDir("dsh-spaces-host-verify-");
-  writeWeb(home);
-  writeRegisteredSpace(home, "space-notes");
-  const spaces = control(home, {
-    runCli: async () => ({ code: 0, stdout: "- id: other\n", stderr: "" }),
-  });
-  const result = await spaces.verify("space-notes");
-  assert.equal(result.valid, false);
-  assert.equal(result.message, "Isolation could not be verified.");
-  const after = await spaces.overview();
-  assert.notEqual(after.capabilities.mode, "recovery-only");
-
+test("an interrupted create keeps the mutation journal and requires recovery", async () => {
   const home2 = tempDir("dsh-spaces-host-verify-int-");
   writeWeb(home2);
-  writeRegisteredSpace(home2, "space-notes");
   const interrupted = control(home2, {
     runCli: async () => {
       throw new Error("spawn failed");
     },
   });
-  await assert.rejects(() => interrupted.verify("space-notes"), SpacesPublicError);
+  await assert.rejects(() => interrupted.create({ name: "notes" }), SpacesPublicError);
   const stuck = await interrupted.overview();
   assert.equal(stuck.capabilities.mode, "recovery-only");
 });
 
-test("host verify and unknown keys are denied with allowlisted codes", async () => {
+test("unknown keys are denied with allowlisted codes", async () => {
   const home = tempDir("dsh-spaces-host-deny-");
   writeWeb(home);
   const spaces = control(home);
-  await assert.rejects(() => spaces.verify("web"), (error: unknown) => {
-    assert.ok(error instanceof SpacesPublicError);
-    assert.equal(error.code, "spaces/host-denied");
-    assert.equal(error.message, PUBLIC_ERROR["spaces/host-denied"]);
-    return true;
-  });
   await assert.rejects(
     () => spaces.create({ name: "notes", extra: true } as never),
     (error: unknown) => {

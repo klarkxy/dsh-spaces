@@ -12,7 +12,7 @@ export interface SpacesHostConfig {
 /**
  * Compatibility read Remote. Never constructs NodeSpacesControl, so it cannot
  * bypass manager-only writes. Overview/detail are supervisor reads with
- * canCreate/canVerify forced false.
+ * canCreate forced false.
  */
 export class SpacesHost extends TypertRemoteService {
   static inject = ["loader"];
@@ -35,7 +35,6 @@ export class SpacesHost extends TypertRemoteService {
           hostSpaceId: state.managerId,
           dshVersion: state.dshVersion,
           canCreate: false,
-          canVerify: false,
           reasons: state.reasons,
         },
         spaces: state.spaces.map(toSummary),
@@ -68,7 +67,6 @@ function toSummary(space: WorkbenchSpace): SpaceSummary {
     isHost: space.isHost,
     hasWebApp: space.hasWebApp,
     status: space.status === "running" || space.status === "stopped" ? space.status : "unknown",
-    isolation: space.isolation,
   };
 }
 

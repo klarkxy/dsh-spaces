@@ -15,7 +15,7 @@ import { afterEach, test } from "node:test";
 import { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
 import { MAX_BACKUP_BYTES, MAX_LOG_BYTES, MAX_LOG_ENTRIES } from "../src/shared/diagnostics.ts";
 import { t } from "../src/shared/i18n/index.ts";
-import type { ProfileKind, ProfileRecord, ProfileStatus } from "../src/shared/types.ts";
+import type { ProfileRecord, ProfileStatus } from "../src/shared/types.ts";
 
 const temps: string[] = [];
 
@@ -113,7 +113,7 @@ test("web can be diagnosed", async () => {
   writeFileSync(join(home, "profiles", "web", "cordis.patch.yml.bak-1"), "[]\n", "utf8");
   const service = new DiagnosticsService({
     home,
-    profiles: () => [profile(home, "web", "root")],
+    profiles: () => [profile(home, "web")],
     statusOf: () => "stopped",
   });
 
@@ -276,13 +276,11 @@ test("multiline private keys and structured text content are omitted from persis
   assert.ok(saved.includes("normal diagnostic after the key"));
 });
 
-function profile(home: string, name: string, kind: ProfileKind = name === "web" ? "root" : "workbench"): ProfileRecord {
+function profile(home: string, name: string): ProfileRecord {
   return {
     name,
-    kind,
     path: join(home, "profiles", name),
     hasWebApp: true,
-    needsConversion: false,
     meta: { displayName: name, order: 0 },
     status: "stopped",
   };

@@ -88,12 +88,10 @@ function space(id: string, extra: Partial<WorkbenchSpace> = {}): WorkbenchSpace 
     displayName: id,
     isHost: false,
     hasWebApp: true,
-    isolation: "verified",
     icon: "box",
     status: "stopped",
     generation: 1,
     managed: true,
-    needsIsolation: false,
     dshVersion: null,
     ...extra,
   };

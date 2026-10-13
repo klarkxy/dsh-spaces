@@ -73,12 +73,10 @@ export const workbenchSpaceSchema = z
     displayName: z.string(),
     isHost: z.boolean(),
     hasWebApp: z.boolean(),
-    isolation: z.enum(["verified", "unverified", "invalid", "default"]),
     icon: z.string(),
     status: z.enum(["running", "starting", "stopping", "stopped", "crashed", "unknown"]),
     generation: z.number().int(),
     managed: z.boolean(),
-    needsIsolation: z.boolean(),
     dshVersion: exactVersionSchema.nullable(),
   })
   .strict();
@@ -177,7 +175,6 @@ export const spaceSummarySchema = z
     isHost: z.boolean(),
     hasWebApp: z.boolean(),
     status: z.enum(["running", "stopped", "unknown"]),
-    isolation: z.enum(["verified", "unverified", "invalid", "default"]),
   })
   .strict();
 
@@ -241,7 +238,6 @@ const coreWorkbenchCommandSchema = z.discriminatedUnion("kind", [
     .strict(),
   z.object({ kind: z.literal("space.reorder"), spaceIds: z.array(spaceIdSchema).min(1).max(256) }).strict(),
   z.object({ kind: z.literal("space.start"), spaceId: spaceIdSchema }).strict(),
-  z.object({ kind: z.literal("space.verify"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("plan.execute"), planId: planIdSchema }).strict(),
   z
     .object({
@@ -440,7 +436,6 @@ export const capabilitiesSchema = z
     hostSpaceId: z.union([z.string(), z.null()]),
     dshVersion: z.union([z.string(), z.null()]),
     canCreate: z.boolean(),
-    canVerify: z.boolean(),
     reasons: z.array(z.string()),
   })
   .strict();

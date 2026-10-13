@@ -912,8 +912,7 @@ function parseCommand(input: unknown): WorkbenchCommand {
       for (const spaceId of spaceIds) parseEntityId(spaceId);
       return { kind, spaceIds };
     }
-    case "space.start":
-    case "space.verify": {
+    case "space.start": {
       expectKeys(input, ["kind", "spaceId"]);
       return { kind, spaceId: parseEntityId(input.spaceId) };
     }
@@ -923,6 +922,7 @@ function parseCommand(input: unknown): WorkbenchCommand {
     }
     case "controller.acquire":
     case "recovery.resume":
+    case "space.verify":
       throw new WorkbenchJobError("workbench/unsupported");
     case "llm.apply": {
       expectKeys(input, ["kind", "spaceIds", "catalogRevision", "observations"]);
@@ -1091,7 +1091,6 @@ function affectedSpaceIds(command: WorkbenchCommand): string[] {
   switch (command.kind) {
     case "space.update":
     case "space.start":
-    case "space.verify":
     case "template.save":
       return [command.spaceId];
     case "space.reorder":

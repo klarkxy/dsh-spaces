@@ -1320,7 +1320,6 @@ function DshVersionSection({ ui, controller, space }: WorkbenchViewProps & { spa
 function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceId: string }): ReactElement {
   const locale = ui.locale;
   const space = controller.space(spaceId);
-  const writable = controller.canMutate();
   const detail = ui.detail;
   return (
     <div className="dsh-wb-overlay">
@@ -1343,8 +1342,6 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
             <dd>{space.generation}</dd>
             <dt>{t(locale, "detail.managed")}</dt>
             <dd>{space.managed ? t(locale, "detail.yes") : t(locale, "detail.no")}</dd>
-            <dt>{t(locale, "detail.isolation")}</dt>
-            <dd>{space.isolation}</dd>
           </dl>
         )}
         {space && space.managed && !controller.isManagerId(space.id) && (
@@ -1387,11 +1384,6 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
           </div>
         ))}
         <div className="dsh-wb-actions">
-          {space && !space.isHost && (
-            <button type="button" className="dsh-wb-btn" disabled={!writable} onClick={() => controller.verifySpace(spaceId)}>
-              {t(locale, "detail.verify")}
-            </button>
-          )}
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
             {t(locale, "app.close")}
           </button>

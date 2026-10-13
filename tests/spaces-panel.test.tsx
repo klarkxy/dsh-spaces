@@ -8,7 +8,6 @@ import type {
   SpacesControlApi,
   SpaceSummary,
   SpacesOverview,
-  VerifySpaceResult,
 } from "../src/shared/spaces-control.ts";
 import {
   createSpacesRemote,
@@ -35,7 +34,6 @@ const hostSpace: SpaceSummary = {
   isHost: true,
   hasWebApp: false,
   status: "running",
-  isolation: "default",
 };
 
 const alpha: SpaceSummary = {
@@ -44,7 +42,6 @@ const alpha: SpaceSummary = {
   isHost: false,
   hasWebApp: true,
   status: "running",
-  isolation: "verified",
 };
 
 const beta: SpaceSummary = {
@@ -53,7 +50,6 @@ const beta: SpaceSummary = {
   isHost: false,
   hasWebApp: false,
   status: "stopped",
-  isolation: "unverified",
 };
 
 function capabilities(overrides: Partial<SpacesCapabilities> = {}): SpacesCapabilities {
@@ -62,7 +58,6 @@ function capabilities(overrides: Partial<SpacesCapabilities> = {}): SpacesCapabi
     hostSpaceId: "host",
     dshVersion: "0.1.5-rc.1",
     canCreate: true,
-    canVerify: true,
     reasons: [],
     ...overrides,
   };
@@ -79,25 +74,11 @@ function detailOf(space: SpaceSummary): SpaceDetail {
     diagnostics: [
       {
         level: "error",
-        code: "ISOLATION_FILE_ONLY",
-        message: "Isolation is not marked verified without current composed configuration evidence.",
+        code: "LIVE_CONFIG_UNVERIFIED",
+        message: "Current host configuration roots could not be verified.",
       },
     ],
   };
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: unknown) => void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -124,10 +105,6 @@ function fakeApi(overrides: Partial<SpacesControlApi> = {}): FakeApi {
       calls.push({ method: "create", arg: input });
       return { ...alpha, id: "created", displayName: input.displayName ?? input.name };
     },
-    verify: async (id: string) => {
-      calls.push({ method: "verify", arg: id });
-      return { id, valid: true, message: "Isolation matches the current composed configuration." };
-    },
     ...overrides,
   };
 }
@@ -152,14 +129,12 @@ test("remote invokes the spaces namespace endpoints with args payload", async ()
   assert.equal(overview.spaces[0]?.id, "alpha");
   await remote.detail("alpha");
   await remote.create({ name: "work" });
-  await remote.verify("alpha");
   assert.deepEqual(
     seen.map((c) => [c.channel, c.endpoint, c.payload]),
     [
       ["/api", "spaces/overview", { args: {} }],
       ["/api", "spaces/detail", { args: { id: "alpha" } }],
       ["/api", "spaces/create", { args: { input: { name: "work" } } }],
-      ["/api", "spaces/verify", { args: { id: "alpha" } }],
     ],
   );
 });
@@ -366,56 +341,6 @@ test("create success refreshes and selects the new space", async () => {
   assert.equal(snapshot.selectedId, "created");
 });
 
-test("verify requires a non-host selection and canVerify === true", async () => {
-  // Host selected: no transport call.
-  const api = fakeApi();
-  const store = new SpacesPanelStore(api);
-  await store.refresh();
-  assert.equal(store.getSnapshot().detail?.detail?.space.isHost, true);
-  await store.verifySelected();
-  assert.equal(api.calls.filter((c) => c.method === "verify").length, 0);
-
-  // canVerify not explicitly true (null capabilities): no transport call.
-  const api2 = fakeApi({
-    overview: async () => ({ capabilities: null as unknown as SpacesCapabilities, spaces: [alpha] }),
-  });
-  const store2 = new SpacesPanelStore(api2);
-  await store2.refresh();
-  assert.equal(store2.getSnapshot().selectedId, "alpha");
-  await store2.verifySelected();
-  assert.equal(api2.calls.filter((c) => c.method === "verify").length, 0);
-
-  // Allowed: verify runs and the result is displayed.
-  const api3 = fakeApi({ overview: async () => ({ capabilities: capabilities(), spaces: [alpha] }) });
-  const store3 = new SpacesPanelStore(api3);
-  await store3.refresh();
-  await store3.verifySelected();
-  const snapshot = store3.getSnapshot();
-  assert.equal(api3.calls.filter((c) => c.method === "verify").length, 1);
-  assert.equal(snapshot.detail?.verifyResult?.valid, true);
-  assert.equal(snapshot.detail?.verifyResult?.message, "Isolation matches the current composed configuration.");
-});
-
-test("stale verify completion is discarded after the selection changes", async () => {
-  const verifyDeferred = deferred<VerifySpaceResult>();
-  const api = fakeApi({
-    overview: async () => ({ capabilities: capabilities(), spaces: [alpha, beta] }),
-    verify: () => verifyDeferred.promise,
-  });
-  const store = new SpacesPanelStore(api);
-  await store.refresh();
-  void store.verifySelected();
-  assert.equal(store.getSnapshot().detail?.verifying, true);
-  store.select("beta");
-  await flush();
-  verifyDeferred.resolve({ id: "alpha", valid: false, message: "stale result" });
-  await flush();
-  const snapshot = store.getSnapshot();
-  assert.equal(snapshot.selectedId, "beta");
-  assert.equal(snapshot.detail?.verifyResult, null);
-  assert.equal(snapshot.detail?.verifying, false);
-});
-
 // ---------- SSR: accessible structure of the presentational views ----------
 
 const noop = (): void => {};
@@ -429,7 +354,6 @@ function render(snapshot: SpacesPanelSnapshot, locale: SpacesLocale = "en"): str
       onRefresh: noop,
       onSelect: noop,
       onCreate: noop,
-      onVerify: noop,
     }),
   );
 }
@@ -449,9 +373,6 @@ function readySnapshot(overrides: Partial<SpacesPanelSnapshot> = {}): SpacesPane
       status: "ready",
       detail: detailOf(alpha),
       error: null,
-      verifying: false,
-      verifyResult: null,
-      verifyError: null,
     },
     create: { pending: false, error: null },
     ...overrides,
@@ -515,7 +436,7 @@ test("SSR: list exposes accessible selection, host badge and status text", () =>
   assert.ok(html.includes(">Host</span>"));
   assert.ok(html.includes("Running"));
   // Capabilities: truthful mode label and version.
-  assert.ok(html.includes("creation and verification available"));
+  assert.ok(html.includes("creation available"));
   assert.ok(html.includes("0.1.5-rc.1"));
 });
 
@@ -527,7 +448,6 @@ test("SSR: restricted capabilities render the reasons and disable creation", () 
         capabilities: capabilities({
           mode: "unknown-readonly",
           canCreate: false,
-          canVerify: false,
           reasons: [
             "The bound DSH CLI is not an exact installed version.",
             "Spaces are read-only until the host identity and runtime are confirmed.",
@@ -542,9 +462,7 @@ test("SSR: restricted capabilities render the reasons and disable creation", () 
   assert.ok(html.includes("The bound DSH CLI is not an exact installed version."));
   assert.ok(html.includes("Spaces are read-only until the host identity and runtime are confirmed."));
   assert.ok(html.includes("Unknown runtime — read-only"));
-  // Create form disabled, and no verify button for a non-verifiable mode.
   assert.ok(html.includes("Creation is not available in the current mode."));
-  assert.ok(!html.includes("Verify isolation"));
 });
 
 test("SSR: empty state and no-selection placeholder", () => {
@@ -558,21 +476,19 @@ test("SSR: empty state and no-selection placeholder", () => {
   assert.ok(html.includes("Select a space"));
 });
 
-test("SSR: detail renders badge, plugins, snapshots, diagnostics and verify action", () => {
+test("SSR: detail renders badge, plugins, snapshots and diagnostics", () => {
   const html = render(readySnapshot());
   assert.ok(html.includes(">Alpha</h3>"));
-  assert.ok(html.includes("Isolation verified"));
   assert.ok(html.includes("<code>alpha</code>"));
   assert.ok(html.includes("dsh-spaces"));
   assert.ok(html.includes("0.2.0"));
   assert.ok(html.includes("unversioned-plugin"));
   assert.ok(html.includes("<code>snap-1</code>"));
-  assert.ok(html.includes("Isolation is not marked verified without current composed configuration evidence."));
+  assert.ok(html.includes("Current host configuration roots could not be verified."));
   assert.ok(html.includes('data-level="error"'));
-  assert.ok(html.includes("Verify isolation"));
 });
 
-test("SSR: host detail shows the badge and never offers verify", () => {
+test("SSR: host detail shows the host badge", () => {
   const html = render(
     readySnapshot({
       selectedId: "host",
@@ -581,34 +497,18 @@ test("SSR: host detail shows the badge and never offers verify", () => {
         status: "ready",
         detail: detailOf(hostSpace),
         error: null,
-        verifying: false,
-        verifyResult: null,
-        verifyError: null,
       },
     }),
   );
   assert.ok(html.includes(">Host</span>"));
-  assert.ok(html.includes("cannot be verified or modified"));
-  assert.ok(!html.includes("Verify isolation"));
 });
 
-test("SSR: verify result and pending states are exposed", () => {
+test("SSR: pending create state is exposed", () => {
   const html = render(
     readySnapshot({
-      detail: {
-        id: "alpha",
-        status: "ready",
-        detail: detailOf(alpha),
-        error: null,
-        verifying: true,
-        verifyResult: null,
-        verifyError: null,
-      },
       create: { pending: true, error: null },
     }),
   );
-  assert.ok(html.includes("Verifying…"));
-  assert.ok(html.includes('aria-busy="true"'));
   assert.ok(html.includes("Creating…"));
 });
 
@@ -667,7 +567,6 @@ test("SSR zh: buttons, empty, host lock, capability limit, diagnostics, names st
         capabilities: capabilities({
           mode: "unknown-readonly",
           canCreate: false,
-          canVerify: false,
           reasons: ["The bound DSH CLI is not an exact installed version."],
         }),
         spaces: [hostSpace, alpha],
@@ -680,22 +579,17 @@ test("SSR zh: buttons, empty, host lock, capability limit, diagnostics, names st
         status: "ready",
         detail: detailOf(hostSpace),
         error: null,
-        verifying: false,
-        verifyResult: null,
-        verifyError: null,
       },
       create: { pending: false, error: "Creation is not available in the current mode." },
     }),
     "zh",
   );
   assert.ok(html.includes(zh.host));
-  assert.ok(html.includes(zh.hostLocked));
   assert.ok(html.includes(zh.createDenied));
   assert.ok(html.includes(zh.hostDenied));
   assert.ok(html.includes(zh.modeReadonly));
   assert.ok(html.includes("已绑定的 DSH CLI 不是精确安装版本。"));
-  assert.ok(html.includes("没有当前组合配置证据时，隔离不会标记为已验证。"));
-  assert.ok(!html.includes(zh.verify));
+  assert.ok(html.includes("无法验证当前宿主配置根目录。"));
   assert.ok(html.includes(">Host Space</h3>"));
   assert.ok(html.includes(">Alpha</span>"));
   assert.ok(html.includes("dsh-spaces"));
@@ -704,27 +598,15 @@ test("SSR zh: buttons, empty, host lock, capability limit, diagnostics, names st
   assert.ok(html.includes("0.1.5-rc.1"));
 });
 
-test("SSR zh: verify pending, last-check result and running status", () => {
+test("SSR zh: pending create and running status", () => {
   const zh = ACCEPTANCE_LABELS.zh;
   const html = render(
     readySnapshot({
-      detail: {
-        id: "alpha",
-        status: "ready",
-        detail: detailOf(alpha),
-        error: null,
-        verifying: true,
-        verifyResult: { id: "alpha", valid: true, message: "Isolation matches the current composed configuration." },
-        verifyError: null,
-      },
       create: { pending: true, error: null },
     }),
     "zh",
   );
-  assert.ok(html.includes("正在验证…"));
   assert.ok(html.includes("正在创建…"));
-  assert.ok(html.includes(zh.lastCheckPassed));
-  assert.ok(html.includes("隔离与当前组合配置一致。"));
   assert.ok(html.includes(zh.running));
   assert.ok(html.includes(">Alpha</h3>"));
 });
@@ -742,9 +624,6 @@ test("SSR zh: unknown diagnostic message is not shown", () => {
           ],
         },
         error: null,
-        verifying: false,
-        verifyResult: null,
-        verifyError: null,
       },
     }),
     "zh",

@@ -24,7 +24,7 @@ test("DOM: in-place rail keeps native DOM/drafts and the authenticated manager o
   const js=bundle.outputFiles[0].text;
   let supervisorOrigin="", managerOrigin="", childOrigin="";
   const calls: string[]=[];
-  const space=(id:string,name:string,isHost=false) => ({ id,displayName:name,isHost,hasWebApp:true,isolation:"verified",icon:"",status:"running",generation:1,managed:true,needsIsolation:false });
+  const space=(id:string,name:string,isHost=false) => ({ id,displayName:name,isHost,hasWebApp:true,icon:"",status:"running",generation:1,managed:true });
   const state={ protocolVersion:2,serviceEpoch:EPOCH,revision:REVISION,role:"manager",managerId:"spaces-hub",availability:"ready",writable:true,maintenance:false,reasons:[],spaces:[space("spaces-hub","Manager",true),space("alpha","Alpha")],jobs:[],cliVersion:"0.1.7-alpha.1" };
   const view=(id:string) => ({serviceEpoch:EPOCH,spaceId:id,generation:1,origin:id==="spaces-hub"?managerOrigin:childOrigin,entryOrigin:supervisorOrigin,entryPath:`/view/${id}/1`,channel:`ch-${id}-1`});
   const hint=(id:string) => ({parentOrigin:id==="spaces-hub"?supervisorOrigin:managerOrigin,spaceId:id,generation:1,channel:`ch-${id}-1`,serviceEpoch:EPOCH});

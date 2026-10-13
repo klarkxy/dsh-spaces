@@ -69,7 +69,6 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   status: 'running' | 'starting' | 'stopping' | 'stopped' | 'crashed' | 'unknown';
   generation: number;
   managed: boolean;
-  needsIsolation: boolean;
   /** Exact pinned DSH runtime version; null for the manager, which follows the host CLI. */
   dshVersion: string | null;
 }
@@ -145,7 +144,6 @@ export type WorkbenchCommand =
   | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string }
   | { kind: 'space.reorder'; spaceIds: string[] }
   | { kind: 'space.start'; spaceId: string }
-  | { kind: 'space.verify'; spaceId: string }
   | { kind: 'plan.execute'; planId: string }
   | { kind: 'llm.apply'; spaceIds: string[]; catalogRevision: number; observations: LlmSpaceObservation[] }
   | WorkbenchProductCommand;

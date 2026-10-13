@@ -65,12 +65,10 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     displayName: partial.displayName ?? partial.id,
     isHost: false,
     hasWebApp: true,
-    isolation: "verified",
     icon: "",
     status: "running",
     generation: 1,
     managed: true,
-    needsIsolation: false,
     dshVersion: null,
     ...partial,
   };
@@ -294,7 +292,7 @@ function fakeApi(
   return {
     state: async () => (stateFn ? stateFn() : state()),
     detail: async (spaceId) => ({
-      space: { id: spaceId, displayName: spaceId, isHost: false, hasWebApp: true, status: "running", isolation: "verified" },
+      space: { id: spaceId, displayName: spaceId, isHost: false, hasWebApp: true, status: "running" },
       plugins: [],
       snapshots: [],
       diagnostics: [],

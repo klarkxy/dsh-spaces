@@ -5,7 +5,6 @@ import type {
   SpaceSummary,
   SpacesControlApi,
   SpacesOverview,
-  VerifySpaceResult,
 } from "../../../../src/shared/spaces-control";
 
 /**
@@ -13,7 +12,7 @@ import type {
  *
  * Wire contract (matches the Host-side Spaces namespace):
  *   channel  "/api"
- *   endpoint "spaces/overview" | "spaces/detail" | "spaces/create" | "spaces/verify"
+ *   endpoint "spaces/overview" | "spaces/detail" | "spaces/create"
  *   payload  { args: {} } | { args: { id } } | { args: { input } }
  *   result   ConnectionRpcResult<DTO> — { ok: true, value } or
  *            { ok: false, error: { code, message, details } }
@@ -29,7 +28,6 @@ const ENDPOINTS = {
   overview: "spaces/overview",
   detail: "spaces/detail",
   create: "spaces/create",
-  verify: "spaces/verify",
 } as const;
 
 /**
@@ -116,7 +114,6 @@ export function createSpacesRemote(connection: SpacesConnection): SpacesControlA
     detail: (id: string) => callSpaces<SpaceDetail>(connection, ENDPOINTS.detail, { id }),
     create: (input: CreateSpaceInput) =>
       callSpaces<SpaceSummary>(connection, ENDPOINTS.create, { input }),
-    verify: (id: string) => callSpaces<VerifySpaceResult>(connection, ENDPOINTS.verify, { id }),
   };
 }
 
