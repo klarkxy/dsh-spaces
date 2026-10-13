@@ -1057,7 +1057,7 @@ test("runtime tab shows pinned users and gates install/remove buttons", async ()
   await flush();
   await flush();
   const html = ready(ctrl);
-  assert.ok(html.includes("被 alpha、beta 使用"));
+  assert.ok(html.includes("被 Alpha、Beta 使用"));
   assert.equal(html.split(t("zh", "runtime.install")).length - 1, 1, "install only for the missing non-host runtime");
   assert.equal(html.split(`>${t("zh", "runtime.remove")}<`).length - 1, 1, "remove only for the removable runtime");
 });

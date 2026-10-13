@@ -20,7 +20,9 @@ DSH Spaces does **not** promise that arbitrary plugin combinations will run. Fai
 
 ## Why
 
-Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces keeps each workbench's sessions, storage and local credentials under `$DSH_HOME/hub/<name>/`; alpha settings persist in `profiles/<name>/cordis.patch.yml` through the native ConfigEditor. Shared LLM connections live in a Home-level catalog. Named Spaces never import the root Home `settings.yaml` or write the default `web` profile. See the [alpha migration and acceptance record](tasks/archive/alpha-migration.md).
+Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces keeps each workbench's sessions, storage and local credentials under `$DSH_HOME/hub/space-<name>/`; alpha settings persist in `profiles/space-<name>/cordis.patch.yml` through the native ConfigEditor. Shared LLM connections live in a Home-level catalog. Named Spaces never import the root Home `settings.yaml` or write the default `web` profile. See the [alpha migration and acceptance record](tasks/archive/alpha-migration.md).
+
+A space exists only when the user creates it in Spaces — directly, or from a template, blueprint, or share import. Its profile directory is always `$DSH_HOME/profiles/space-<name>` and its data lives under `$DSH_HOME/hub/space-<name>`; membership is the entry recorded in `hub/spaces.json`. Spaces never scans, adopts, lists, or modifies other profile directories. Profiles created by older versions or other tools are not migrated — they stay ordinary DSH profiles.
 
 `web` is the unique home profile. Spaces never writes its isolation patch. The manager profile is `spaces-hub` (suffix if taken). Ordinary spaces install `@dsh-spaces/view-bridge`. Putting the full `@dsh-spaces/plugin` on an ordinary space is a misinstall.
 
@@ -39,7 +41,7 @@ One Supervisor per Home. Browser tabs and host windows attach to that process wh
 
 See [docs/let-it-crash.md](docs/let-it-crash.md). Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management. Public restore APIs fail explicitly. Remaining unrun CLI/browser items: [tasks/q-coverage.md](tasks/q-coverage.md).
 
-Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Each space pins an exact DSH version: existing spaces are pinned to the version they run on first start, and new spaces use the host version. Switch a space's runtime from its details — no downgrade, no automatic snapshot; incompatible third-party plugins block the switch and official plugins are built into the selected runtime and change with it; Spaces never installs them into a profile. The manager follows the host CLI.
+Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Each space pins an exact DSH version at creation (the host version). Switch a space's runtime from its details — no downgrade, no automatic snapshot; incompatible third-party plugins block the switch and official plugins are built into the selected runtime and change with it; Spaces never installs them into a profile. The manager follows the host CLI.
 
 ## Current architecture (this branch)
 
@@ -111,7 +113,7 @@ MIT. See `LICENSE`.
 ## 数据规则
 
 - `web` 是唯一根 profile，使用官方默认 `$DSH_HOME/sessions/` 与 `$DSH_HOME/storages/`，**永不打 patch**。
-- 其它工作台的会话、存储、settings 和本地凭据在 `$DSH_HOME/hub/<name>/`。
+- 空间只在 Spaces 中创建（直接创建、模板、蓝图或分享导入），profile 目录固定为 `profiles/space-<name>`，数据在 `hub/space-<name>`；成员资格以 `hub/spaces.json` 注册项为准。Spaces 不扫描、不收养、不修改其他 profile 目录；旧版本或其他途径创建的 profile 不迁移，仍是普通 DSH profile。
 - 共享的是 Home 级 LLM 连接库，不是整份 `settings.yaml`。
 - 管理工作台是专用 profile `spaces-hub`。普通空间只装 `@dsh-spaces/view-bridge`。
 

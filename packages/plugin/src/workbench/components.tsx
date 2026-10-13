@@ -626,7 +626,7 @@ function SnapshotRow({
         {snapshot.createdAt} · DSH {snapshot.runtimeVersion} · {(snapshot.bytes / 1048576).toFixed(1)} MB
         <br />
         <small>
-          {t(locale, "snapshots.spaces")}: {snapshot.spaceIds.join(", ") || "—"}
+          {t(locale, "snapshots.spaces")}: {snapshot.spaceIds.map((id) => controller.space(id)?.displayName ?? id).join(", ") || "—"}
           {snapshot.restorable ? "" : ` · ${t(locale, "snapshots.notRestorable")}`}
         </small>
       </span>
@@ -664,7 +664,7 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
             {runtime.host ? ` · ${t(locale, "runtime.host")}` : ""}
             {runtime.compatible ? ` · ${t(locale, "runtime.compatible")}` : ` · ${t(locale, "runtime.incompatible")}`}
             {runtime.pinnedBy.length
-              ? ` · ${t(locale, "runtime.pinnedBy", { names: runtime.pinnedBy.join(locale === "zh" ? "、" : ", ") })}`
+              ? ` · ${t(locale, "runtime.pinnedBy", { names: runtime.pinnedBy.map((id) => controller.space(id)?.displayName ?? id).join(locale === "zh" ? "、" : ", ") })}`
               : ""}
           </span>
           {!runtime.installed && !runtime.host ? (

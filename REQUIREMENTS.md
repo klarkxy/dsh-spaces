@@ -47,14 +47,17 @@ DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name
 
 ### 2.1 两类 profile（核心数据模型）
 
-| | `web`（根 profile，唯一） | 工作台（其余全部） |
+| | `web`（根 profile，唯一） | 工作台（Spaces 注册空间） |
 |---|---|---|
 | 地位 | 钉在栏顶，相当于 Discord 的 Home 按钮 | 普通栏位 |
-| 数据路径 | 官方默认（`$DSH_HOME/sessions/`、`$DSH_HOME/storages/`），**永不打 patch** | 独立数据根：`$DSH_HOME/hub/<name>/sessions`、`$DSH_HOME/hub/<name>/storages` |
+| profile 目录 | `$DSH_HOME/profiles/web/` | `$DSH_HOME/profiles/space-<name>/`（name 由用户命名，小写字母/数字/连字符，≤33 字符） |
+| 数据路径 | 官方默认（`$DSH_HOME/sessions/`、`$DSH_HOME/storages/`），**永不打 patch** | 独立数据根：`$DSH_HOME/hub/space-<name>/sessions`、`$DSH_HOME/hub/space-<name>/storages` |
 | 历史数据 | **维护所有旧资源**：Hub 安装前的全部聊天记录、工作区分组都归它 | 全新开始，会话/工作区完全隔离 |
-| 来源 | 首次扫描时收养，零写入 | ① Hub 新建；② 用户已有的非 web profile 首启时**自动转换**（补 patch，插件栈原样保留） |
+| 来源 | 官方默认 profile，非空间，永不修改 | **仅在 Spaces 中创建**：① 直接新建；② 模板；③ 蓝图；④ 分享导入。创建即写入 `hub/spaces.json` 注册项（`createdAt`、pin、显示名） |
 
-**明确不做**：数据迁移功能、共享模式、多套 `DSH_HOME` 沙箱。旧聊天永远住在 `web` 里看。
+Spaces 不扫描 `$DSH_HOME/profiles/` 来发现空间：`hub/spaces.json` 里没有带 `createdAt` 注册项的目录都不是空间，不列出、不启动、不修改、不删除。旧版本或其他途径创建的 profile **不迁移**，仍是普通 DSH profile。
+
+**明确不做**：数据迁移功能、profile 收养、共享模式、多套 `DSH_HOME` 沙箱。旧聊天永远住在 `web` 里看。
 
 ### 2.2 隔离语义
 
@@ -65,10 +68,10 @@ DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name
 ## 3. 功能需求
 
 ### FR1 左侧栏（rail）
-1. 展示全部 profile：`web` 钉顶，工作台按用户自定义顺序排列。
+1. 展示全部已注册空间：`web` 钉顶，工作台按用户自定义顺序排列。未注册的 profile 目录不出现。
 2. 每项显示：图标（用户自定义，默认取名字首字母）、显示名（悬停提示）、运行状态（停止/启动中/运行中/异常）。
 3. 点击：已运行 → 右侧切到它的 GUI；未运行 → 启动并切换。
-4. 右键菜单：重启、停止、重命名（仅改显示名）、换图标、打开 profile 目录、删除（需确认，删注册项和 hub 数据目录，官方 profile 目录是否删除让用户勾选）。
+4. 右键菜单：重启、停止、重命名（仅改显示名）、换图标、打开 profile 目录、删除（需确认，删注册项、profile 目录 `profiles/space-<name>`，hub 数据目录可选保留）。删除只作用于已注册空间。
 5. 栏底"＋"按钮：新建工作台向导（输入名字 → 选图标 → 自动执行创建流程）。
 6. 显示名和图标存在 Hub 自己的元数据里（如 `$DSH_HOME/hub/spaces.json`），**永不改动官方 profile 文件夹名**。
 
@@ -80,16 +83,16 @@ DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name
 5. 同一 profile 禁止双开（Hub 内互斥；Hub 外用户手动跑 CLI 不在保证范围）。
 
 ### FR3 新建工作台
-1. 通过官方 CLI 创建：`dsh plugin --profile <name> add @deepseek-ai/dsh-web-app`（自定义名字默认只带 `dsh-base`，必须装 web-app 才有 GUI）。
-2. 创建后写入双 root patch（见 §5 技术契约）。
-3. 名字合法性校验（目录名安全字符），与现有 profile 查重。
+1. 仅在 Spaces 工作台内创建（模板、蓝图、分享导入走同一创建路径）。
+2. 用户输入名字（`a-z`、`0-9`、`-`，≤33 字符），生成的空间 id / profile 目录为 `space-<name>`；与现有 profile 目录和注册项查重。
+3. 创建写入双 root patch（见 §5 技术契约），并在 `hub/spaces.json` 登记 `createdAt`、pin 的宿主 DSH 版本和显示名。
+4. 创建通过受控 CLI 执行：`dsh --profile space-<name> --from-default-profile web`（自定义 profile 默认只带 `dsh-base`，必须装 web-app 才有 GUI）。
 
-### FR4 已有 profile 自动转换
-1. 首次启动扫描 `$DSH_HOME/profiles/`（忽略 `node_modules`）。
-2. `web` → 收养为根，**零写入**。
-3. 其余每个 profile → 自动转换为工作台：备份其 `cordis.patch.yml` 后追加双 root patch，插件栈不动。
-4. 转换时必须向用户明确提示：**"你的历史聊天统一由 web 维护，工作台从全新会话开始"**（被转换的 profile 打开后会话列表是空的，用户可能误以为数据丢了）。
-5. `headless` 等无 GUI profile：栏上显示但标记为"无界面"，点击不启动 Web UI（V1 可以直接不展示，二选一由实现者定，倾向不展示）。
+### FR4 不收养已有 profile
+1. Spaces 不扫描 `$DSH_HOME/profiles/` 来发现空间；成员资格只认 `hub/spaces.json` 中带 `createdAt` 的注册项。
+2. `web` 是官方根 profile，钉在栏顶作为当前应用入口，不是空间，**零写入**。
+3. 其他 profile 目录（包括旧版本 Spaces 创建过的）不收养、不迁移、不列出、不修改，保持普通 DSH profile。
+4. 未注册的 profile 不参与任何按空间 id 进行的操作（启动、删除、插件、运行时切换、蓝图）。
 
 ### FR5 插件安装（Hub 安装器）
 1. 对勾选的一个或多个 profile 执行 `dsh plugin --profile <name> add <spec>` / `remove <pkg>`。
@@ -153,20 +156,20 @@ $DSH_HOME/profiles/<name>/
 - id: session-persistence-jsonl
   name: '@deepseek-ai/dsh-session-persistence-jsonl'
   config:
-    root: !!js dshHomePath('sessions')      # ← 覆盖为 dshHomePath('hub/<name>/sessions')
+    root: !!js dshHomePath('sessions')      # ← 覆盖为 dshHomePath('hub/space-<name>/sessions')
 
 - id: storage-json
   name: '@deepseek-ai/dsh-storage-json'
   config:
-    root: !!js dshHomePath('storages')      # ← 覆盖为 dshHomePath('hub/<name>/storages')
+    root: !!js dshHomePath('storages')      # ← 覆盖为 dshHomePath('hub/space-<name>/storages')
 ```
 另外确认：`session-query-sqlite` 是 `:memory:`，无落盘，不需要处理。
 
 ### 5.4 数据目录实测形态
 - `$DSH_HOME/sessions/`：按工作区路径编码命名的目录（两级结构），内含 `session.jsonl.zstd`（zstd 压缩 JSONL）。
 - `$DSH_HOME/storages/`：`workspace.json`（工作区分组）、`session_projcache.json`（投影缓存，`writeIntervalMs: 5000`）。
-- `web` 的 home 级文件：`.credentials.yaml`、`settings.yaml`、`.anonymous-user-id` 等——**全部不碰**。工作台 Space 的 settings / credentials 改走 `hub/<name>/` 独立路径，不写回 `web`。
-- **工作台覆盖后**：会话落在 `$DSH_HOME/hub/<name>/sessions/`，`workspace.json` 和 `session_projcache.json` 都跟随 `storage-json` 根，落在 `$DSH_HOME/hub/<name>/storages/`。无需额外覆盖 projection-cache。
+- `web` 的 home 级文件：`.credentials.yaml`、`settings.yaml`、`.anonymous-user-id` 等——**全部不碰**。工作台 Space 的 settings / credentials 改走 `hub/space-<name>/` 独立路径，不写回 `web`。
+- **工作台覆盖后**：会话落在 `$DSH_HOME/hub/space-<name>/sessions/`，`workspace.json` 和 `session_projcache.json` 都跟随 `storage-json` 根，落在 `$DSH_HOME/hub/space-<name>/storages/`。无需额外覆盖 projection-cache。
 - 覆盖后的目录由 dsh 在首次写入时自动创建，脚本不必预先 mkdir。
 
 ### 5.5 patch 写法（已固化）
@@ -176,13 +179,13 @@ $DSH_HOME/profiles/<name>/
 ```yaml
 - id: session-persistence-jsonl
   config:
-    root: !!js dshHomePath('hub/<name>/sessions')
+    root: !!js dshHomePath('hub/space-<name>/sessions')
 - id: storage-json
   config:
-    root: !!js dshHomePath('hub/<name>/storages')
+    root: !!js dshHomePath('hub/space-<name>/storages')
 ```
 
-写完后用 `dsh --profile <name> --dump-config` 确认两处 `root` 已变成 hub 路径。`web` 禁止写入此文件。
+写完后用 `dsh --profile space-<name> --dump-config` 确认两处 `root` 已变成 hub 路径。`web` 禁止写入此文件。
 
 ### 5.6 创建 profile 的实测路径
 - `web` / `headless`：首次 `dsh --profile web --dump-config`（或 `dsh web`）即从 CLI 自带模板自动初始化，bundles 为 `dsh-base` + `dsh-web-app`，**不必**再 `plugin add`。
@@ -201,8 +204,8 @@ $DSH_HOME/profiles/<name>/
 
 | # | 场景 | 通过条件 |
 |---|---|---|
-| A1 | 根收养 | 首启后 `web` 在栏顶，旧聊天全部完好；`web` 的任何文件未被修改 |
-| A2 | 自动转换 | 已有非 web profile 以工作台身份启动，插件栈原样、会话视图为空；其旧聊天在 `web` 中仍可见 |
+| A1 | 根保留 | `web` 在栏顶作为当前应用入口，旧聊天全部完好；`web` 的任何文件未被修改 |
+| A2 | 不收养 | 已存在的非 web profile 目录不出现在空间栏、注册表或任何空间操作里，内容不被修改 |
 | A3 | 多开 | `web` + 两个工作台同时在线，栏上三个都亮，右侧 GUI 跟随选中项 |
 | A4 | 插件隔离 | 装进工作台 A 的插件不出现在工作台 B 和 `web` |
 | A5 | 会话隔离 | 工作台 A 新建的聊天在 B 和 `web` 的侧边栏都看不见，反之亦然 |

@@ -1,3 +1,11 @@
+# 2026-10-12 空间改为注册制，不再扫描收养 profile
+
+用户批准的设计变更：空间只在 Spaces 中创建（直接创建、模板、蓝图、分享导入）；profile 目录固定 `profiles/space-<name>`，数据在 `hub/space-<name>`，成员资格以 `hub/spaces.json` 中带 `createdAt` 的注册项为准。Spaces 不扫描、不收养、不修改其他 profile 目录；旧版本或其他途径创建的 profile 不迁移，仍是普通 DSH profile。
+
+- [x] S1：注册制空间跟踪——`SPACE_ID_RE`/`SPACE_NAME_RE`、注册即空间、创建登记 `createdAt`+宿主版本 pin+显示名、删除只作用于已注册空间、删除 `pinExistingSpaces`、蓝图/模板/分享导入走同一创建路径、按空间操作拒绝未注册 id（`39d1af9`）。
+- [x] S2：移除收养——删除 onboarding 扫描与 `onboarded`、profile 分类（`ProfileKind`/`classifyProfile`/`onboardingAction`）、`needsConversion`/`needsIsolation`/`isolation` 字段与 UI、`space.verify`（归入 removed kinds → `workbench/unsupported`）及相关 schema/i18n/测试；Spaces 自建空间的隔离 patch 写入保留（`b849ef9`）。
+- [x] S3：界面对用户显示 displayName（栏、运行时 pinnedBy、快照空间列表、插件与 LLM 空间选择器、蓝图结果），创建对话框给 `SPACE_NAME_RE` 名称提示；文档与 `REQUIREMENTS.md` 改为注册制表述（本条目即该提交记录）。
+
 # 2026-10-12 真实验收缺陷修复（F1–F5）
 
 真实浏览器验收（`.sandbox/e2e-20261012`）暴露的问题修复。DSH 0.2 中官方插件内置于运行时并随之变化，Spaces 从不向 profile 安装它们。

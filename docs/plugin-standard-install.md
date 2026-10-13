@@ -32,6 +32,8 @@ In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click 
 
 Only one existing Web profile needs the full Spaces entry. Spaces created by the workbench receive the lightweight `@dsh-spaces/view-bridge`; repeating the full package installation in every space is unnecessary.
 
+A space exists only when created in Spaces (directly, or from a template, blueprint, or share import): profile directory `profiles/space-<name>`, data `hub/space-<name>`, membership recorded in `hub/spaces.json`. Spaces never scans, adopts, lists, or modifies other profile directories; profiles created by older versions or other tools are not migrated and stay ordinary profiles.
+
 Windows CLI `0.1.5-rc.1` splits tarball paths that contain spaces. `pnpm run pack:plugin` writes to a no-space directory (`%TEMP%\dsh-spaces-pack` unless `DSH_PACK_DEST` is set).
 
 ## Listing vs accepted support

@@ -203,7 +203,7 @@ function UseBlueprintPanel({
       {showApplyChrome && ui.applyStatus === "succeeded" ? (
         <p className="dsh-wb-notice" role="status" data-blueprint-created="true">
           {t(locale, "blueprints.createdNotStarted")}
-          {ui.applyOutcome?.spaceId ? ` · ${ui.applyOutcome.spaceId}` : ""}
+          {ui.applyOutcome?.spaceId ? ` · ${controller.space(ui.applyOutcome.spaceId)?.displayName ?? ui.applyOutcome.spaceId}` : ""}
         </p>
       ) : null}
       {showApplyChrome && ui.applyOutcome ? <BlueprintApplyResult locale={locale} outcome={ui.applyOutcome} /> : null}
