@@ -282,3 +282,73 @@ test("a damaged catalog cache fails instead of becoming seed", () => {
   assert.throws(() => readLocalPluginCatalog(dir), /could not be read|Original bytes/i);
   assert.equal(readFileSync(path, "utf8"), "{not-json");
 });
+
+test("a malformed catalog envelope is not an empty topic cache", async () => {
+  const dir = home();
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", CATALOG_CACHE_FILE);
+  const bytes = JSON.stringify({
+    schemaVersion: 999,
+    plugins: "not-array",
+    meta: "invalid",
+    portStart: "wrong",
+  });
+  writeFileSync(path, bytes);
+  assert.throws(() => parseAnyCatalog(JSON.parse(bytes)), /unsupported plugin catalog/);
+  assert.throws(() => readLocalPluginCatalog(dir), /could not be read|unsupported plugin catalog/);
+  assert.equal(readFileSync(path, "utf8"), bytes);
+  let fetched = false;
+  await assert.rejects(
+    loadPluginCatalog(dir, {
+      fetchImpl: async () => {
+        fetched = true;
+        throw new Error("network");
+      },
+    }),
+    /could not be read|unsupported plugin catalog/,
+  );
+  assert.equal(fetched, false);
+  assert.equal(readFileSync(path, "utf8"), bytes);
+});
+
+test("historical topic dumps and current catalog envelopes stay readable", () => {
+  const dir = home();
+  mkdirSync(join(dir, "hub"), { recursive: true });
+  const path = join(dir, "hub", CATALOG_CACHE_FILE);
+  const dump = {
+    "klarkxy/dsh-plugins": {
+      full_name: "klarkxy/dsh-plugins",
+      html_url: "https://github.com/klarkxy/dsh-plugins",
+      description: "Small plugins.",
+      stars: 1,
+      topics: ["dsh-plugin"],
+    },
+  };
+  const dumpBytes = `${JSON.stringify(dump)}\n`;
+  writeFileSync(path, dumpBytes);
+  const historical = readLocalPluginCatalog(dir);
+  assert.equal(historical.source, "cache");
+  assert.equal(historical.entries[0]?.id, "klarkxy/dsh-plugins");
+  assert.equal(readFileSync(path, "utf8"), dumpBytes);
+
+  const envelope = {
+    meta: { schemaVersion: 1, generatedAt: "t", count: 0, contentHash: "h" },
+    entries: [],
+  };
+  const envelopeBytes = `${JSON.stringify(envelope)}\n`;
+  writeFileSync(path, envelopeBytes);
+  const current = readLocalPluginCatalog(dir);
+  assert.equal(current.source, "cache");
+  assert.equal(current.meta.schemaVersion, 1);
+  assert.deepEqual(current.entries, []);
+  assert.equal(readFileSync(path, "utf8"), envelopeBytes);
+  assert.throws(
+    () => parseAnyCatalog({ meta: { schemaVersion: 1 } }),
+    /unsupported plugin catalog/,
+  );
+  assert.throws(
+    () => parseAnyCatalog({ meta: { schemaVersion: 2 }, entries: [] }),
+    /unsupported plugin catalog schema/,
+  );
+  assert.throws(() => parseAnyCatalog({}), /unsupported plugin catalog/);
+});

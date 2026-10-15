@@ -203,12 +203,21 @@ export function parseTopicDump(value: unknown): { meta: PluginCatalogMeta; entri
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Historical topic dumps are owner/repo maps. Any other object is not an empty cache. */
+function isTopicDump(value: Record<string, unknown>): boolean {
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => OWNER_REPO_RE.test(key));
+}
+
 export function parseAnyCatalog(value: unknown): { meta: PluginCatalogMeta; entries: PluginCatalogEntry[] } {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const row = value as Record<string, unknown>;
-    if (row.meta && Array.isArray(row.entries)) return parseCatalog(value);
-  }
-  return parseTopicDump(value);
+  if (!isRecord(value)) throw new Error("unsupported plugin catalog");
+  if (isRecord(value.meta) && Array.isArray(value.entries)) return parseCatalog(value);
+  if (isTopicDump(value)) return parseTopicDump(value);
+  throw new Error("unsupported plugin catalog");
 }
 
 export function seedCatalog(): { meta: PluginCatalogMeta; entries: PluginCatalogEntry[] } {

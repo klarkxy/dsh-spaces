@@ -16,6 +16,8 @@ import {
 import { PLUGIN_LIBRARY_FILE } from "../src/adapters/node/plugin-library.ts";
 import { packZip } from "../src/adapters/node/space-share-zip.ts";
 import type { InstalledPlugin } from "../src/shared/types.ts";
+import { COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
+import { workbenchProductResultSchema } from "../src/shared/workbench-product-schemas.ts";
 
 const temps: string[] = [];
 
@@ -86,6 +88,79 @@ test("export records plugin composition and omits host packages", () => {
   assert.equal(share.plugins[0].resolvedVersion, "1.2.3");
   assert.equal(share.plugins[1].source, "git");
   assert.equal(share.patch, undefined);
+});
+
+test("export omits bundled components even when they are not marked protected", () => {
+  for (const name of new Set(Object.entries(COMPONENT_PAYLOAD_PACKAGES).filter(([component])=>component!=="browser").map(([,name])=>name))) {
+    assert.equal(pluginToShare({
+      name,
+      requestedSpec: "file:H:/private-home/hub/components/component.tgz",
+      resolvedVersion: "0.4.0",
+      protected: false,
+    }), null, name);
+  }
+});
+
+test("export strips nonportable sources without turning local packages into npm installs", async () => {
+  const sources = [
+    "file:../../private/plugin.tgz",
+    "H:\\private-home\\plugin.tgz",
+    "H:/private-home/plugin.tgz",
+    "/opt/private/plugin.tgz",
+    "../private/plugin",
+    "https://test-user:test-secret@example.test/plugin.tgz",
+    "git+https://test-user:test-secret@example.test/repo.git",
+    "git://example.test/repo.git",
+    "ssh://test-user@example.test/repo.git",
+    "github:example/repo#../../private",
+  ];
+  const share = buildSpaceShare({
+    displayName: "Portable",
+    plugins: sources.map((requestedSpec, index) => ({
+      name: `local-plugin-${index}`,
+      requestedSpec,
+      resolvedVersion: "1.2.3",
+      version: "1.2.3",
+      protected: false,
+    })),
+  });
+  for (const row of share.plugins) {
+    assert.equal(row.requestedSpec, undefined);
+    assert.equal(row.installSpec, undefined);
+    assert.equal(canonicalNpmInstallSpec(row), null);
+  }
+  const archive = packZip([
+    { name: "manifest.json", data: Buffer.from(JSON.stringify(share.manifest)) },
+    { name: "plugins.json", data: Buffer.from(JSON.stringify(share.plugins)) },
+  ]);
+  const preview = previewSpaceShare(archive);
+  assert.deepEqual(preview.unknownSources, share.plugins.map((row) => row.packageName));
+  assert.equal(workbenchProductResultSchema.safeParse({
+    method: "share.export",
+    fileName: "portable.dsh-space.zip",
+    archiveBase64: archive.toString("base64"),
+    preview,
+    observation: { serviceEpoch: "a".repeat(64), expectedRevision: "b".repeat(64) },
+  }).success, true);
+  const installed: string[] = [];
+  const result = await importSpaceArchive(archive, {
+    listSpaceIds: () => [],
+    createSpace: async () => undefined,
+    installPlugin: async (_spaceId, spec) => { installed.push(spec); },
+  });
+  assert.equal(result.definition, "imported");
+  assert.equal(result.plugins, "pending-manual");
+  assert.deepEqual(result.pendingManual, preview.plugins.map(({ requestedSpec: _requestedSpec, installSpec: _installSpec, ...row }) => row));
+  assert.deepEqual(installed, []);
+});
+
+test("public GitHub coordinates remain visible and require manual installation", () => {
+  const spec = "github:example/custom-git#release/v1";
+  const row = pluginToShare({ name: "custom-git", requestedSpec: spec, resolvedVersion: "1.0.0", protected: false });
+  assert.equal(row?.source, "git");
+  assert.equal(row?.requestedSpec, spec);
+  assert.equal(row?.installSpec, spec);
+  assert.equal(canonicalNpmInstallSpec(row!), null);
 });
 
 test("export includes optional config only when requested", () => {
@@ -310,6 +385,7 @@ test("hub file cache specs round-trip only when the library proves an exact npm 
   );
   assert.equal(proved?.source, "npm");
   assert.equal(proved?.installSpec, "dsh-outline@1.2.3");
+  assert.equal(proved?.requestedSpec, undefined);
   const unproved = pluginToShare({
     name: "dsh-outline",
     requestedSpec: fileSpec,
@@ -318,6 +394,8 @@ test("hub file cache specs round-trip only when the library proves an exact npm 
     protected: false,
   });
   assert.equal(unproved?.source, "manual");
+  assert.equal(unproved?.requestedSpec, undefined);
+  assert.equal(unproved?.installSpec, undefined);
   assert.equal(canonicalNpmInstallSpec(unproved!), null);
 });
 
@@ -524,4 +602,9 @@ test("valid config is isolated in memory then written only after the space exist
   assert.equal(created.length, 1);
   assert.equal(patches.length, 1);
   assert.match(patches[0] ?? "", /hub\/space-with-config\/sessions/);
+});
+
+test("Browser sharing retains a visible manual requirement instead of silently exporting plain web",()=>{
+ const row=pluginToShare({name:COMPONENT_PAYLOAD_PACKAGES.browser,requestedSpec:"file:H:/private/browser.tgz",resolvedVersion:"0.4.0",protected:false});
+ assert.ok(row); assert.equal(row.requestedSpec,undefined); assert.equal(row.installSpec,undefined); assert.notEqual(row.source,"npm");
 });

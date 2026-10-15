@@ -36,8 +36,13 @@ import {
 import { listProfilePlugins, parseNpmNameAndVersion } from "./plugin-ops";
 import { isHubPluginArchive, readPluginLibrary } from "./plugin-library";
 import { packZip, unpackZip } from "./space-share-zip";
+import { COMPONENT_PAYLOAD_PACKAGES } from "./component-payload";
 
-const HOST_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, FULL_SPACES_PACKAGE]);
+const HOST_PACKAGES = new Set<string>([
+  ...PROTECTED_PLUGIN_PACKAGES,
+  FULL_SPACES_PACKAGE,
+  ...Object.entries(COMPONENT_PAYLOAD_PACKAGES).filter(([component]) => component !== "browser").map(([, name]) => name),
+]);
 const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "unknown"]);
 
 export { canonicalNpmInstallSpec, isNpmRangeOrExact, isSafeNpmPackageName, validateImportedPatch } from "../../core/application/space-recipe";
@@ -59,8 +64,8 @@ export interface PluginShareContext {
 
 export function classifyPluginSource(spec?: string): SpaceSharePluginSource {
   if (!spec) return "unknown";
-  if (isGitSpec(spec)) return "git";
   const trimmed = spec.trim();
+  if (isGitSpec(trimmed)) return "git";
   if (isExactRuntimeVersion(trimmed) || isNpmRangeOrExact(trimmed) || isSafeNpmPackageName(trimmed)) {
     return "npm";
   }
@@ -74,6 +79,19 @@ export function classifyPluginSource(spec?: string): SpaceSharePluginSource {
   }
   if (spec.startsWith("file:") || spec.startsWith(".") || spec.includes("\\") || spec.includes("/")) return "manual";
   return "unknown";
+}
+
+/** Only public npm/GitHub coordinates belong in a portable recipe. */
+function portableRequestedSpec(spec: string | undefined, source: SpaceSharePluginSource): string | undefined {
+  if (!spec) return undefined;
+  const value = spec.trim();
+  if (value.length > 214 || value.includes("..")) return undefined;
+  if (classifyPluginSource(value) === "npm") return value;
+  if (
+    source === "git" &&
+    /^github:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*(?:#[A-Za-z0-9][A-Za-z0-9._/-]{0,127})?$/.test(value)
+  ) return value;
+  return undefined;
 }
 
 function looksLikeHubCacheSpec(spec: string): boolean {
@@ -127,10 +145,10 @@ export function pluginToShare(
   }
   return {
     packageName: plugin.name,
-    requestedSpec,
-    resolvedVersion: resolved ?? plugin.resolvedVersion ?? null,
+    requestedSpec: portableRequestedSpec(requestedSpec, source),
+    resolvedVersion: resolved,
     source,
-    installSpec,
+    installSpec: portableRequestedSpec(installSpec, source),
   };
 }
 

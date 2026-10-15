@@ -7,6 +7,7 @@ import {
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
 } from "./blueprint";
+import { MAX_SPACE_ICON_DATA_URL_CHARS } from "./space-icon";
 import { isExactRuntimeVersion } from "./runtime";
 import { SPACE_NAME_RE } from "./types";
 import { WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT } from "./workbench-blueprint";
@@ -229,7 +230,7 @@ const shareManifestSchema = z
     space: z
       .object({
         displayName: displayNameSchema,
-        icon: z.string().max(16_384).optional(),
+        icon: z.string().max(MAX_SPACE_ICON_DATA_URL_CHARS).optional(),
       })
       .strict(),
   })
@@ -250,7 +251,7 @@ const spaceRecipeSchema = z
   .object({
     schemaVersion: z.literal(1),
     displayName: displayNameSchema,
-    icon: z.string().max(16_384).optional(),
+    icon: z.string().max(MAX_SPACE_ICON_DATA_URL_CHARS).optional(),
     plugins: z.array(sharePluginSchema).max(256),
     patch: z
       .string()

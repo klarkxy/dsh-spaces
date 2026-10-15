@@ -10,6 +10,7 @@ import {
   saveSpaceTemplate,
   spaceTemplateId,
 } from "../src/adapters/node/space-templates.ts";
+import { workbenchProductResultSchema } from "../src/shared/workbench-product-schemas.ts";
 
 const temps: string[] = [];
 
@@ -53,6 +54,48 @@ test("saving a template copies composition and does not rewrite existing spaces"
     readFileSync(join(dir, "profiles", "coding", "package.json"), "utf8"),
   ) as { dsh: { profile: { bundles: string[] } } };
   assert.ok(manifest.dsh.profile.bundles.includes("dsh-outline"));
+});
+
+test("saved templates omit bundled bridges and keep local plugins pending without local paths", async () => {
+  const dir = home();
+  const profileDir = join(dir, "profiles", "coding");
+  mkdirSync(profileDir, { recursive: true });
+  const original = JSON.stringify({
+    dependencies: {
+      "@dsh-spaces/view-bridge": "file:H:/private-home/view-bridge.tgz",
+      "@dsh-spaces/llm-bridge": "file:H:/private-home/llm-bridge.tgz",
+      "local-plugin": "file:../../private/plugin.tgz",
+      "dsh-outline": "1.2.3",
+    },
+    dsh: { profile: { bundles: ["@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge", "local-plugin", "dsh-outline"] } },
+  });
+  writeFileSync(join(profileDir, "package.json"), original);
+  for (const name of ["local-plugin", "dsh-outline"]) {
+    const pkgDir = join(profileDir, "node_modules", name);
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name, version: "1.2.3" }));
+  }
+  const template = saveSpaceTemplate(dir, "coding", "Portable");
+  assert.deepEqual(template.plugins.map((row) => row.packageName), ["local-plugin", "dsh-outline"]);
+  assert.equal(template.plugins[0]?.source, "manual");
+  assert.equal(template.plugins[0]?.requestedSpec, undefined);
+  assert.equal(template.plugins[0]?.installSpec, undefined);
+  const saved = readFileSync(join(dir, "hub", SPACE_TEMPLATES_FILE), "utf8");
+  assert.equal(saved.includes("private"), false);
+  assert.equal(readFileSync(join(profileDir, "package.json"), "utf8"), original);
+  const listed = listSpaceTemplates(dir);
+  assert.equal(workbenchProductResultSchema.safeParse({
+    method: "templates",
+    templates: listed,
+    observation: { serviceEpoch: "a".repeat(64), expectedRevision: "b".repeat(64) },
+  }).success, true);
+  const installed: string[] = [];
+  const result = await createSpaceFromTemplate(listed[0]!, "portable", {
+    createSpace: async () => undefined,
+    installPlugin: async (_spaceId, spec) => { installed.push(spec); },
+  });
+  assert.equal(result.plugins, "pending-manual");
+  assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
 });
 
 test("creating from a template copies plugins onto a new space only", async () => {
