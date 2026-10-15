@@ -29,7 +29,7 @@ Markdown 校验不是 HTML sanitizer。UI 必须禁用原始 HTML、脚本、外
 
 ## 本次实际验证
 
-运行环境：Linux、Node `22.16.0`、预装 TypeScript `5.8.3`。项目要求的 Node 24、锁定依赖组合和真实官方 `0.1.7-alpha.1` 插件安装，本地未验。
+运行环境：Linux、Node `22.16.0`、预装 TypeScript `5.8.3`。项目要求的 Node 26、锁定依赖组合和真实官方 `0.1.7-alpha.1` 插件安装，本地未验。
 
 `node scripts/test-dashboard-core.mjs` 先 strict 编译核心，再运行 Node test。默认使用项目已安装的 TypeScript；离线环境可明确指定预装编译器：
 
@@ -39,7 +39,7 @@ DSH_DASHBOARD_TSC="$(npm root -g)/typescript/bin/tsc" node scripts/test-dashboar
 
 结果：**52 项通过、0 失败、0 跳过**。包含 500 个确定性合法 JSON 的对照生成检查，以及重复键、非法 UTF-8、越界、同序列异内容、旧 run/grant、回执撤销、超时不重发、终态不再发送与取消竞态。文档 DTO 与运行时 DTO 的同步检查也在同一测试内。
 
-测试目录仅为本仓库 `.sandbox/dashboard-core-*` 的本次临时目录；脚本不安装或运行 DSH，不访问真实 Home，不自动切换编译器。独立 CI 工作流在 Node 24 的 Linux/Windows 上运行相同核心测试；工作流定义不是通过证据，实际结果以对应提交的 Actions 为准。
+测试目录仅为本仓库 `.sandbox/dashboard-core-*` 的本次临时目录；脚本不安装或运行 DSH，不访问真实 Home，不自动切换编译器。独立 CI 工作流在 Node 26 的 Linux/Windows 上运行相同核心测试；工作流定义不是通过证据，实际结果以对应提交的 Actions 为准。
 
 SDK 获取探针执行 `npm view @deepseek-ai/cordis@4.0.3 version --fetch-retries=0 --fetch-timeout=5000`，因执行环境 DNS `EAI_AGAIN` 失败。没有据此判断 SDK 不兼容，也没有换依赖、伪造官方接口或绕过安装。通过连接器读到的官方架构文档只用于源码导航，不作为安装版本的实测证据。
 
@@ -47,4 +47,4 @@ SDK 获取探针执行 `npm view @deepseek-ai/cordis@4.0.3 version --fetch-retri
 
 ## 接续点
 
-先在可安装依赖的隔离 Node 24 环境完成 P0 探针并留下精确版本和命名 profile 证据，再接 local 存储、Host registry/认证适配、固定 renderer 和共享 DashboardView。Home 聚合与管理授权沿既有 Supervisor 接入，不通过模拟数据接管首页。首版发布仍受 [完整施工验收门槛](implementation.md) 约束。
+先在可安装依赖的隔离 Node 26 环境完成 P0 探针并留下精确版本和命名 profile 证据，再接 local 存储、Host registry/认证适配、固定 renderer 和共享 DashboardView。Home 聚合与管理授权沿既有 Supervisor 接入，不通过模拟数据接管首页。首版发布仍受 [完整施工验收门槛](implementation.md) 约束。

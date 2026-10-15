@@ -32,6 +32,7 @@ function PlacementEditor({ placement, disabled, onChange }: { placement: Placeme
   </form></details>;
 }
 export interface DashboardViewProps {
+  mode?: 'home' | 'local';
   frame: DashboardFrame | null;
   error?: DashboardError | null;
   writeError?: DashboardError | null;
@@ -43,15 +44,15 @@ export interface DashboardViewProps {
   /** Host router must query navigation and check the current target before opening it. */
   onOpen?(ref: InstanceRef): void;
 }
-export function DashboardView({ frame, error, writeError, busy = false, onPin, onUnpin, onMove, onBoard, onOpen }: DashboardViewProps): ReactNode {
+export function DashboardView({ frame, mode = 'local', error, writeError, busy = false, onPin, onUnpin, onMove, onBoard, onOpen }: DashboardViewProps): ReactNode {
   const views = new Map(frame?.items.map(item => [refKey(item.ref), item]) ?? []);
   const writable = !!frame?.overview.capabilities.layoutWrite && !busy && !error;
   return <section className="dsh-dashboard" aria-label="工作首页" aria-busy={busy}>
     <style>{DASHBOARD_CSS}</style>
-    <header className="dd-header"><div><small>{frame?.overview.mode === 'home' ? 'HOME · 多空间' : 'LOCAL · 本空间'}</small><h1>工作首页</h1><p>把正在做的事，放到看得见的地方。</p></div>
+    <header className="dd-header"><div><small>{(frame?.overview.mode ?? mode) === 'home' ? 'HOME · 多空间' : 'LOCAL · 本空间'}</small><h1>工作首页</h1><p>把正在做的事，放到看得见的地方。</p></div>
       {!!frame?.overview.boards.length && <label>看板<select value={frame.boardId} onChange={event => onBoard?.(event.currentTarget.value)} disabled={busy}>{frame.overview.boards.map(board => <option key={board.id} value={board.id}>{board.title}</option>)}</select></label>}
     </header>
-    {error && <div className="dd-error" role="alert"><strong>看板读取已停止</strong><p>{frame ? '下方是上次读取的内容，不代表当前状态。' : '当前内容不可用。'}</p><code>{error.code}</code></div>}
+    {error && <div className="dd-error" role="alert"><strong>看板读取已停止</strong><p>{frame ? '下方是上次读取的内容，不代表当前状态。' : '当前内容不可用。'}</p><code>{error.code}</code>{error.details?.field && <small>{error.details.field}{error.details.actual !== undefined ? ` (${error.details.actual})` : ''}{error.details.query ? ` · ${error.details.query}` : ''}{error.details.phase ? ` · ${error.details.phase}` : ''}{error.details.httpStatus !== undefined ? ` · HTTP ${error.details.httpStatus}` : ''}{error.details.elapsedMs !== undefined ? ` · ${error.details.elapsedMs}ms` : ''}</small>}</div>}
     {writeError && <div className="dd-error" role="alert"><strong>{writeError.code === 'dashboard/unavailable' ? '操作结果无法确认，未重新发送。' : '此操作未确认成功。'}</strong><p><code>{writeError.code}</code></p>{writeError.requestId && <small>请求：{writeError.requestId}</small>}</div>}
     {!frame && !error && <p role="status">正在读取看板…</p>}
     {frame && <div className="dd-body"><main className="dd-main">
@@ -76,7 +77,7 @@ export function DashboardView({ frame, error, writeError, busy = false, onPin, o
 }
 
 /** Mount with an authenticated backend supplied by the Host; never creates a manager or discovers a Home. */
-export function DashboardApp({ backend, onOpen }: { backend: DashboardReadBackend; onOpen?(ref: InstanceRef): void }): ReactNode {
+export function DashboardApp({ backend, mode, onOpen }: { backend: DashboardReadBackend; mode?: 'home' | 'local'; onOpen?(ref: InstanceRef): void }): ReactNode {
   const [frame, setFrame] = useState<DashboardFrame | null>(null);
   const [error, setError] = useState<DashboardError | null>(null);
   const [writeError, setWriteError] = useState<DashboardError | null>(null);
@@ -89,9 +90,9 @@ export function DashboardApp({ backend, onOpen }: { backend: DashboardReadBacken
   useEffect(() => {
     generation.current++; writeVersion.current++; setError(null); setWriteError(null); writing.current = false; setBusy(false);
     const session = new DashboardReadSession({
-      read: async (signal) => {
+      read: async (signal, progress) => {
         const version = writeVersion.current;
-        return { value: await readDashboardFrame(backend, signal, boardId), writeVersion: version };
+        return { value: await readDashboardFrame(backend, signal, boardId, progress), writeVersion: version };
       },
       onValue: result => {
         // A poll begun before/during a local write must not replace its newer
@@ -138,7 +139,7 @@ export function DashboardApp({ backend, onOpen }: { backend: DashboardReadBacken
       if (identity === generation.current) { writeVersion.current++; writing.current = false; setBusy(false); }
     }
   }
-  return <DashboardView frame={frame} error={error} writeError={writeError} busy={busy} onBoard={setBoardId} onOpen={onOpen}
+  return <DashboardView frame={frame} mode={mode} error={error} writeError={writeError} busy={busy} onBoard={setBoardId} onOpen={onOpen}
     onPin={entry => { void write(current => pinCommand(current, entry.ref, crypto.randomUUID())); }}
     onUnpin={id => { void write(current => unpinCommand(current, id)); }}
     onMove={(id, position) => { void write(current => moveCommand(current, id, position)); }} />;

@@ -14,7 +14,7 @@
 
 ## 从源码构建
 
-在包含依赖 PR 的本仓库分支、Node 24 环境中执行：
+在包含依赖 PR 的本仓库分支、Node 26 环境中执行：
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund

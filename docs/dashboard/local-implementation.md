@@ -84,7 +84,7 @@ Chromium 流程覆盖：首次打开不隐式创建看板；固定写作进度�
 
 ## 6. 复现
 
-先使用项目要求的 Node 24，在隔离工作目录安装锁定依赖。以下命令只运行测试，不改变实际 DSH Home：
+先使用项目要求的 Node 26，在隔离工作目录安装锁定依赖。以下命令只运行测试，不改变实际 DSH Home：
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund

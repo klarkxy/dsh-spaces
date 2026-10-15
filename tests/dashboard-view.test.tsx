@@ -4,6 +4,20 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LocalDashboard, type LocalDashboardDocument } from '../src/core/domain/dashboard/local-backend.ts';
 import { DashboardView, WidgetContentView } from '../packages/dashboard/src/view.tsx';
+
+test('unavailable Home retains its actual surface identity without a frame', () => {
+  const html = renderToStaticMarkup(<DashboardView frame={null} mode="home"
+    error={{ code: 'dashboard/unavailable', message: 'dashboard/unavailable', details: {
+      field: 'read.deadline', deadline: 'frame', query: 'overview', phase: 'response', httpStatus: 503, elapsedMs: 5001,
+    } }} />);
+  assert.match(html, /HOME/);
+  assert.doesNotMatch(html, /LOCAL/);
+  assert.match(html, /read.deadline/);
+  assert.match(html, /overview/);
+  assert.match(html, /response/);
+  assert.match(html, /5001ms/);
+  assert.match(html, /503/);
+});
 import { moveCommand, pinCommand, readDashboardFrame, unpinCommand, type DashboardReadBackend } from '../packages/dashboard/src/model.ts';
 import type { DashboardQueryResponse, WidgetContent, WidgetInstance } from '../src/shared/dashboard.ts';
 

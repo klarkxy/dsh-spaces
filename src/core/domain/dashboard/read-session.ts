@@ -1,11 +1,11 @@
-import type { DashboardError } from '../../../shared/dashboard.js';
+import type { DashboardError, DashboardReadProgress } from '../../../shared/dashboard.js';
 import { DashboardFault, publicError } from './errors.js';
 import { timers, type TimerPort } from './provider.js';
 
 export type ReadSessionState = 'opening' | 'active' | 'failed' | 'closed';
 export interface ReadSessionOptions<T> {
   /** Must decode and validate the response before resolving. Must honor AbortSignal. */
-  read(signal: AbortSignal): Promise<T>;
+  read(signal: AbortSignal, progress: (value: DashboardReadProgress) => void): Promise<T>;
   onValue(value: T): void;
   onFailure(error: DashboardError): void;
   clearSensitive(): void;
@@ -46,10 +46,23 @@ export class DashboardReadSession<T> {
     if (this.current === 'failed' || this.current === 'closed') return;
     const controller = new AbortController();
     this.controller = controller;
-    this.timeout = this.timer.set(() => this.fail(new DashboardFault('dashboard/unavailable')), 5000);
+    const started = Date.now();
+    let progress: DashboardReadProgress = {};
+    const reportProgress = (value: DashboardReadProgress) => {
+      if (this.controller !== controller || controller.signal.aborted) return;
+      progress = {
+        ...(['overview', 'catalog', 'instances', 'board', 'receipt', 'navigation', 'publications'].includes(value.query ?? '') ? { query: value.query } : {}),
+        ...(['transport', 'response', 'decode'].includes(value.phase ?? '') ? { phase: value.phase } : {}),
+        ...(Number.isInteger(value.httpStatus) && value.httpStatus! >= 100 && value.httpStatus! <= 599 ? { httpStatus: value.httpStatus } : {}),
+      };
+    };
+    this.timeout = this.timer.set(() => this.fail(new DashboardFault('dashboard/unavailable', {
+      field: 'read.deadline', limit: 5000, deadline: 'frame',
+      elapsedMs: Math.max(0, Math.min(3_600_000, Date.now() - started)), ...progress,
+    })), 5000);
     void Promise.resolve().then(() => {
       if (this.controller !== controller || controller.signal.aborted) throw new DashboardFault('dashboard/unavailable');
-      return this.options.read(controller.signal);
+      return this.options.read(controller.signal, reportProgress);
     }).then(value => {
       if (this.controller !== controller || controller.signal.aborted || this.current === 'failed' || this.current === 'closed') return;
       if (this.timeout !== undefined) this.timer.clear(this.timeout);

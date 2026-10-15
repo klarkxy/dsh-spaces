@@ -1,8 +1,8 @@
-import type { PublicationPlanInput, PublicationPolicy, PublicationSelection } from '../../../../src/shared/dashboard';
+import type { DashboardError, PublicationPlanInput, PublicationPolicy, PublicationSelection } from '../../../../src/shared/dashboard';
 import type { WorkbenchApi, WorkbenchView } from '../../../../src/shared/workbench';
 import type { DashboardReadBackend } from '../../../dashboard/src/model';
 import { createDashboardHttpBackend } from '../../../dashboard/src/http-client';
-import { DashboardFault } from '../../../../src/core/domain/dashboard/errors';
+import { DashboardFault, publicError } from '../../../../src/core/domain/dashboard/errors';
 import { copyJson, identifier, object, parseSelection } from '../../../../src/core/domain/dashboard/validation';
 import { authorizedViewSrc } from './view-session';
 
@@ -21,6 +21,17 @@ export function dashboardEndpoint(view: WorkbenchView, expected: { managerId: st
 export async function connectWorkbenchDashboard(api: Pick<WorkbenchApi, 'view'>, expected: Parameters<typeof dashboardEndpoint>[1], request: typeof fetch = fetch): Promise<DashboardReadBackend> {
   const view = await api.view(expected.managerId);
   return createDashboardHttpBackend(dashboardEndpoint(view, expected), request, 'owned-manager');
+}
+
+export function observeDashboardFailures(backend: DashboardReadBackend, onFailure: (error: DashboardError) => void): DashboardReadBackend {
+  async function checked<T>(operation: () => Promise<T>): Promise<T> {
+    try { return await operation(); }
+    catch (error) { onFailure(publicError(error)); throw error; }
+  }
+  return {
+    query: (request, signal, progress) => checked(() => backend.query(request, signal, progress)),
+    mutate: request => checked(() => backend.mutate(request)),
+  };
 }
 
 export function readPublicationPolicies(value: unknown, epoch: string, spaceId: string): PublicationPolicy[] {

@@ -54,7 +54,7 @@
 
 ## 5. 复现
 
-在隔离工作目录使用 Node 24：
+在隔离工作目录使用 Node 26：
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund

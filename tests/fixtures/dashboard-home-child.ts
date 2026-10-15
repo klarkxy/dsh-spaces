@@ -6,7 +6,7 @@ const home = await DashboardHomePublisher.open(path);
 const provider = home.forProvider('provider');
 process.send?.({ kind: 'ready' });
 process.on('message', async (message: { kind: string; value?: number; id?: string }) => {
-  if (message.kind === 'close') { home.close(); process.disconnect(); return; }
+  if (message.kind === 'close') { home.close(); process.disconnect!(); return; }
   if (message.kind !== 'publish') return;
   const result = await provider.publish({ types: [{ typeId: 'metric', version: 1, title: 'Metric', kind: 'metric' }], instances: [{
     instanceId: 'item', typeId: 'metric', typeVersion: 1, title: 'Published from Node', content: { kind: 'metric', value: message.value ?? 0, unit: '' },

@@ -1,4 +1,4 @@
-import type { Board, BoardCommand, CatalogEntry, DashboardBackend, DashboardQuery, DashboardQueryData, InstanceRef, InstanceView, Placement } from '../../../src/shared/dashboard.js';
+import type { Board, BoardCommand, CatalogEntry, DashboardBackend, DashboardQuery, DashboardQueryData, DashboardReadProgress, InstanceRef, InstanceView, Placement } from '../../../src/shared/dashboard.js';
 import { DashboardFault, invalid, limit } from '../../../src/core/domain/dashboard/errors.js';
 import { parseLayoutDocument } from '../../../src/core/domain/dashboard/boards.js';
 import { byteLength, canonicalJson, copyJson, identifier, object, parseQuery, parseSnapshot, refKey, timestampMillis } from '../../../src/core/domain/dashboard/validation.js';
@@ -14,7 +14,7 @@ export interface DashboardFrame {
 }
 /** HTTP adapters should honor the optional signal. In-process adapters cannot cancel a committed operation. */
 export interface DashboardReadBackend extends DashboardBackend {
-  query(request: DashboardQuery, signal?: AbortSignal): ReturnType<DashboardBackend['query']>;
+  query(request: DashboardQuery, signal?: AbortSignal, progress?: (value: DashboardReadProgress) => void): ReturnType<DashboardBackend['query']>;
 }
 function aborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DashboardFault('dashboard/unavailable');
@@ -48,11 +48,13 @@ function checkView(input: unknown, expected: InstanceRef): InstanceView {
 }
 
 /** One bounded read frame. No layout writes, process starts or business actions. */
-export async function readDashboardFrame(backend: DashboardReadBackend, signal?: AbortSignal, selectedBoardId?: string): Promise<DashboardFrame> {
+export async function readDashboardFrame(backend: DashboardReadBackend, signal?: AbortSignal, selectedBoardId?: string, progress?: (value: DashboardReadProgress) => void): Promise<DashboardFrame> {
   let epoch: string | null = null;
   async function query<K extends DashboardQueryData['kind']>(request: DashboardQuery & { kind: K }): Promise<Extract<DashboardQueryData, { kind: K }>> {
     aborted(signal);
-    const response = await backend.query(request, signal);
+    progress?.({ query: request.kind, phase: 'transport' });
+    const response = await backend.query(request, signal, progress);
+    progress?.({ query: request.kind, phase: 'decode' });
     aborted(signal);
     const encoded = canonicalJson(response); limit(byteLength(encoded), 8 * 1024 * 1024, 'response');
     const envelope = object(JSON.parse(encoded) as unknown, ['protocolVersion', 'backendEpoch', 'data']);

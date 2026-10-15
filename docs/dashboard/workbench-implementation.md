@@ -73,7 +73,7 @@ Windows Home 私有文件 ACL 仍未支持，Windows UI/跨端口不可用提示
 
 ## 7. 复现
 
-在本分支的隔离工作目录使用 Node 24：
+在本分支的隔离工作目录使用 Node 26：
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund

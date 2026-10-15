@@ -5,6 +5,62 @@ import { dashboardHttpHandler, QUERY_PATH, COMMAND_PATH, BODY_DRAIN_CAP } from '
 import { DASHBOARD_LIMITS } from '../src/core/domain/dashboard/limits.ts';
 import { createDashboardHttpBackend } from '../packages/dashboard/src/http-client.ts';
 import { LocalDashboard, type LocalDashboardDocument } from '../src/core/domain/dashboard/local-backend.ts';
+import { DashboardReadSession } from '../src/core/domain/dashboard/read-session.ts';
+import { readDashboardFrame } from '../packages/dashboard/src/model.ts';
+import type { DashboardError } from '../src/shared/dashboard.ts';
+import { observeDashboardFailures } from '../packages/plugin/src/workbench/dashboard-client.ts';
+
+test('frame deadline preserves the active response provenance before cancellation without resending', async () => {
+  let deadline!: () => void;
+  let requests = 0;
+  let failure: DashboardError | undefined;
+  const connected = createDashboardHttpBackend('http://127.0.0.1:8080', async (_url, options) => {
+    requests++;
+    return new Response(new ReadableStream({
+      start(controller) {
+        options?.signal?.addEventListener('abort', () => controller.error(new Error('private aborted response')));
+      },
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  });
+  const observed: DashboardError[] = [];
+  const backend = observeDashboardFailures(connected, error => observed.push(error));
+  const session = new DashboardReadSession({
+    timer: { set(callback, milliseconds) { if (milliseconds === 5000) deadline = callback; return {}; }, clear() {} },
+    read: (signal, progress) => readDashboardFrame(backend, signal, undefined, progress),
+    onValue: () => assert.fail('Pending response must not become a completed frame'),
+    onFailure: value => { failure = value; }, clearSensitive() {},
+  });
+  try {
+    session.start();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    deadline();
+    const first = structuredClone(failure);
+    assert.equal(first?.code, 'dashboard/unavailable');
+    assert.equal(first?.details?.deadline, 'frame');
+    assert.equal(first?.details?.query, 'overview');
+    assert.equal(first?.details?.phase, 'response');
+    assert.equal(first?.details?.httpStatus, 503);
+    assert(Number.isFinite(first?.details?.elapsedMs));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.deepEqual(failure, first, 'Abort-generated secondary failure must not replace the first cause');
+    assert.equal(session.state, 'failed');
+    assert.equal(requests, 1);
+    assert.equal(observed.length, 1);
+    assert.throws(() => session.start(), /dashboard\/unavailable/);
+    assert.doesNotMatch(JSON.stringify(failure), /private|http:|8080/);
+  } finally { session.close(); }
+});
+
+test('Home backend preserves authentication loss for reads and commands', async () => {
+  const failures: DashboardError[] = [];
+  const backend = observeDashboardFailures(createDashboardHttpBackend('http://127.0.0.1:8080',
+    async () => new Response('private auth detail', { status: 403 })), error => failures.push(error));
+  await assert.rejects(backend.query({ kind: 'overview' }), /dashboard\/forbidden/);
+  await assert.rejects(backend.mutate({ backendEpoch: 'epoch', requestId: 'auth-command', issuedAt: new Date().toISOString(),
+    command: { kind: 'board.delete', boardId: 'home', expectedRevision: 'revision' } }), /dashboard\/forbidden/);
+  assert.deepEqual(failures.map(error => error.code), ['dashboard/forbidden', 'dashboard/forbidden']);
+  assert.doesNotMatch(JSON.stringify(failures), /private auth detail/);
+});
 
 async function fixture() {
   let document: LocalDashboardDocument | null = null, writes = 0, next = 0, active = true, authenticated = true;

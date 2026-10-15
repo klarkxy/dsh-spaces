@@ -54,7 +54,7 @@ Windows 当前不装配 POSIX Home 文件适配，Dashboard 请求明确返回 u
 
 ## 6. 复现
 
-在隔离工作目录使用 Node 24：
+在隔离工作目录使用 Node 26：
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund

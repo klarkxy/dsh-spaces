@@ -4,7 +4,7 @@ import type { WorkbenchApi } from '../../../../src/shared/workbench';
 import type { DashboardReadBackend } from '../../../dashboard/src/model';
 import { DashboardApp } from '../../../dashboard/src/view';
 import { DashboardFault, publicError } from '../../../../src/core/domain/dashboard/errors';
-import { connectWorkbenchDashboard, publicationInput, readPublicationPolicies } from './dashboard-client';
+import { connectWorkbenchDashboard, observeDashboardFailures, publicationInput, readPublicationPolicies } from './dashboard-client';
 import type { WorkbenchController, WorkbenchUiState } from './store';
 
 type Mode = 'dashboard' | 'chat' | 'publications';
@@ -37,15 +37,9 @@ export function WorkbenchHome({ api, ui, controller, chatAvailable, onChat }: Pr
     ]).then(connected => {
       if (!active) return;
       // Propagate authentication loss across BOTH dashboard and authorization views.
-      async function checked<T>(operation: () => Promise<T>): Promise<T> {
-        try { return await operation(); }
-        catch (caught) {
-          const failure = failureCode(caught);
-          if (active && mounted.current && ['dashboard/unauthenticated', 'dashboard/forbidden', 'dashboard/stale-epoch', 'dashboard/unsupported-operation'].includes(failure.code)) setError(failure);
-          throw caught;
-        }
-      }
-      setBackend({ query: (req, signal) => checked(() => connected.query(req, signal)), mutate: req => checked(() => connected.mutate(req)) });
+      setBackend(observeDashboardFailures(connected, failure => {
+        if (active && mounted.current && ['dashboard/unauthenticated', 'dashboard/forbidden', 'dashboard/stale-epoch', 'dashboard/unsupported-operation'].includes(failure.code)) setError(failure);
+      }));
     }, caught => { if (active) setError(failureCode(caught)); }).finally(() => { if (timeout !== undefined) clearTimeout(timeout); });
     return () => { active = false; if (timeout !== undefined) clearTimeout(timeout); };
   }, [api, managerId, epoch, generation]);
@@ -72,7 +66,7 @@ export function WorkbenchHome({ api, ui, controller, chatAvailable, onChat }: Pr
               <div><strong>{spaces.filter(s => s.status === 'running').length}</strong><span>{en ? 'running' : '正在运行'}</span></div>
               <p>{en ? 'Pin results across spaces. Chat and source tasks stay where they belong.' : '把多个空间的工作结果放在一起。会话和任务仍留在各自的空间。'}</p>
             </div>
-            <DashboardApp backend={backend} />
+            <DashboardApp backend={backend} mode="home" />
           </section>
           <section hidden={mode !== 'publications'}>
             <PublicationEditor backend={backend} ui={ui} controller={controller} />

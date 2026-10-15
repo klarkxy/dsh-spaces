@@ -222,8 +222,11 @@ export interface DashboardError {
   code: ErrorCode;
   message: string;
   requestId?: Id;
-  details?: { field?: string; limit?: number; actual?: number };
+  details?: { field?: string; limit?: number; actual?: number; elapsedMs?: number;
+    deadline?: 'frame' | 'request'; query?: DashboardQuery['kind'];
+    phase?: 'transport' | 'response' | 'decode'; httpStatus?: number };
 }
+export type DashboardReadProgress = Pick<NonNullable<DashboardError['details']>, 'query' | 'phase' | 'httpStatus'>;
 export interface ErrorResponse {
   protocolVersion: 1;
   error: DashboardError;

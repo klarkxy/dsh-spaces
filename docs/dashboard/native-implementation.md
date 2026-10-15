@@ -64,7 +64,7 @@ P2–P5 尚需 Home 聚合/发布授权、真实多空间后台通道、默认�
 
 ## 6. 复现入口
 
-在隔离开发工作目录使用 Node 24：
+在隔离开发工作目录使用 Node 26：
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
