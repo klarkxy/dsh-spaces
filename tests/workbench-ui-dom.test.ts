@@ -339,6 +339,7 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
 
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "运行时" }).click();
+  assert.equal(await page.getByRole("button", { name: "预览安装", exact: true }).count(), 0);
   await page.getByRole("button", { name: "删除" }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
   assert.deepEqual(await previewCalls(), [
@@ -370,4 +371,93 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
     { kind: "space.delete", spaceId: "alpha", removeData: false },
   ]);
   await page.getByRole("button", { name: "取消" }).click();
+});
+
+test("DOM: delayed runtime candidates derive a usable target and keep selections scoped to current space pins", { timeout: 120_000 }, async (t) => {
+  const bundled = await esbuild.build({
+    absWorkingDir: root,
+    entryPoints: [join(audit, "host.tsx")],
+    bundle: true,
+    write: false,
+    format: "iife",
+    platform: "browser",
+    jsx: "automatic",
+  });
+  let supervisorUrl = "";
+  const supervisor = await listen((req, res) => {
+    if (req.url === "/host.js") {
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+      res.end(bundled.outputFiles[0]?.text ?? "");
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><html><body><div id="root"></div>
+      <script>window.__WB = ${JSON.stringify({ supervisor: supervisorUrl, child: supervisorUrl, runtimeControls: true })};</script>
+      <script src="/host.js"></script></body></html>`);
+  });
+  supervisorUrl = supervisor.url;
+  t.after(() => supervisor.close());
+  const require = createRequire(join(playwrightRoot, "index.js"));
+  const { chromium } = require("playwright") as { chromium: Parameters<typeof launchChromium>[0] };
+  const browser = await launchChromium(chromium);
+  t.after(() => browser.close());
+  const runtime = (version: string) => ({ version, installed: true, host: false, pinnedBy: [], removable: false, compatible: true });
+
+  for (const pin of ["0.1.5-rc.1", null]) {
+    await t.test(`initial pin ${pin ?? "unset"}`, async () => {
+      const page = await browser.newPage();
+      try {
+        await page.goto(supervisor.url);
+        await page.waitForFunction(() => Boolean(window.__WB_CONTROLLER));
+        await page.evaluate(async (version) => {
+          window.__WB_SET_PIN!("alpha", version);
+          await window.__WB_CONTROLLER!.poll();
+        }, pin);
+        await page.getByRole("button", { name: "设置", exact: true }).click();
+        await page.getByRole("tab", { name: "空间", exact: true }).click();
+        await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "诊断", exact: true }).click();
+        await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
+        const select = page.locator("select");
+        const preview = page.getByRole("button", { name: "预览切换", exact: true });
+        assert.equal(await select.locator("option").count(), 0);
+        assert.equal(await preview.isDisabled(), true);
+        await page.evaluate((rows) => window.__WB_RESOLVE_RUNTIMES!(rows), [runtime("0.2.0-rc.2")]);
+        await page.waitForFunction(() => document.querySelector<HTMLSelectElement>(".dsh-wb-dialog select")?.disabled === false);
+        assert.equal(await select.inputValue(), "0.2.0-rc.2");
+        assert.equal(await preview.isDisabled(), false, "the displayed single candidate must enable preview without input or reopening");
+        await preview.click();
+        await page.getByRole("button", { name: "取消", exact: true }).waitFor({ state: "visible" });
+        assert.deepEqual(await page.evaluate(() => window.__WB_CALLS?.filter((call) => call.method === "preview").map((call) => call.arg)), [
+          { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0-rc.2" },
+        ]);
+        await page.getByRole("button", { name: "取消", exact: true }).click();
+
+        if (pin === null) return;
+        await page.evaluate(() => window.__WB_CONTROLLER!.openDetail("alpha"));
+        const refresh = async (versions: string[]) => {
+          await page.evaluate(() => { void window.__WB_CONTROLLER!.loadRuntimes(); });
+          await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
+          await page.evaluate((rows) => window.__WB_RESOLVE_RUNTIMES!(rows), versions.map(runtime));
+          await page.waitForFunction(() => document.querySelector<HTMLSelectElement>(".dsh-wb-dialog select")?.disabled === false);
+        };
+        await refresh(["0.2.0-rc.2", "0.3.0"]);
+        await select.selectOption("0.3.0");
+        await refresh(["0.2.0-rc.2", "0.3.0", "0.4.0"]);
+        assert.equal(await select.inputValue(), "0.3.0", "an explicit choice survives a candidate refresh while valid");
+        await refresh(["0.2.0-rc.2", "0.4.0"]);
+        assert.equal(await select.inputValue(), "0.2.0-rc.2", "a removed choice derives a current valid target");
+        await select.selectOption("0.4.0");
+        await page.evaluate(() => window.__WB_CONTROLLER!.openDetail("beta"));
+        assert.equal(await select.inputValue(), "0.2.0-rc.2", "the previous space's choice does not carry into another detail");
+        await select.selectOption("0.4.0");
+        await page.evaluate(async () => {
+          window.__WB_SET_PIN!("beta", "0.2.0-rc.2");
+          await window.__WB_CONTROLLER!.poll();
+        });
+        assert.equal(await select.inputValue(), "0.2.0-rc.2", "a changed pin resets the explicit choice");
+      } finally {
+        await page.close();
+      }
+    });
+  }
 });

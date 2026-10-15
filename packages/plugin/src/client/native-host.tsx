@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import type { WorkbenchGuideApi, WorkbenchReturnTarget } from "../types";
-import { isNativeSpaceTarget, parseNativeSpaceHash, parsePortalSnapshot, type NativeSpaceTarget, type PortalSnapshot } from "../../../../src/shared/space-host";
+import { isNativeSpaceTarget, parseNativeSpaceHash, parseNativePortalFailureHash, portalFailureDetail,
+  parsePortalSnapshot, type NativeSpaceTarget, type PortalSnapshot, type PortalFailure } from "../../../../src/shared/space-host";
 import { attachHostLayout } from "./host-layout";
 import { SpaceGlyph } from "../workbench/space-glyph";
 import { publicGuideDetail } from "./guide-detail";
@@ -16,11 +17,12 @@ export function desktopBrowserBridge(root: typeof globalThis = globalThis): Desk
     carrier?.protocolVersion === 1 && typeof carrier.browser?.acquire === "function" && typeof carrier.browser.release === "function" ? carrier.browser : null;
 }
 type NativeState = { phase: "loading" | "initialize" | "ready" | "failed"; inventory: PortalSnapshot | null;
-  selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; detail: string | null; guide: boolean };
+  selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; detail: string | null;
+  portalFailure: PortalFailure | null; guide: boolean };
 
 /** One native guest, one lifetime. It has no Node API or product script execution channel. */
 export class NativeHostController {
-  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, guide: false };
+  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, portalFailure: null, guide: false };
   private listeners = new Set<() => void>();
   private stopped = false;
   private lifetime = new AbortController();
@@ -149,18 +151,26 @@ export class NativeHostController {
   }
   private observed(observedUrl?: string) {
     if (this.stopped || !this.guest || !this.nativeUrl) return;
-    const url = new URL(observedUrl ?? this.guest.getURL());
-    if (url.origin + url.pathname !== this.nativeUrl) { this.fail(); return; }
+    let url: URL;
+    try { url = new URL(observedUrl ?? this.guest.getURL()); }
+    catch { this.fail(); return; }
+    if (url.origin + url.pathname !== this.nativeUrl || url.search || url.username || url["password"]) { this.fail(); return; }
     if (url.hash === "#failed") { this.fail(); return; }
+    if (url.hash.startsWith("#failed")) {
+      const failure = parseNativePortalFailureHash(url.hash);
+      this.fail(failure ? portalFailureDetail(failure) : null, failure);
+      return;
+    }
     const answer = parseNativeSpaceHash(url.hash);
     if (!answer || answer.kind === "select" || answer.requestId !== this.sequence || answer.target !== this.state.pending) return;
     clearTimeout(this.selectionTimer);
     if (answer.kind === "rejected") { this.patch({ pending: null, guide: true, error: "空间页面未能打开，该次操作已失败。", detail: null }); return; }
     this.patch({ selected: answer.target, pending: null, guide: false }); this.guest.focus();
   }
-  private fail(detail: string | null = null) {
+  private fail(detail: string | null = null, portalFailure: PortalFailure | null = null) {
     if (this.stopped) return;
-    this.patch({ phase: "failed", pending: null, guide: true, error: "空间服务或页面不可用。该次连接已停止，当前应用仍可使用。", detail });
+    this.patch({ phase: "failed", pending: null, inventory: null, selected: "current", guide: true,
+      error: "空间服务或页面不可用。该次连接已停止，当前应用仍可使用。", detail, portalFailure });
     this.stop();
   }
   stop = () => {

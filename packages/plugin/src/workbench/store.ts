@@ -282,9 +282,11 @@ export class WorkbenchController {
   private unsubVisibility: (() => void) | null = null;
   private unsubMessages: (() => void) | null = null;
   private running = false;
+  private shutdownRequested = false;
   private stateGeneration = 0;
   private cycle = 0;
   private wrapDepth = 0;
+  private requestSurface = 0;
   private handledProductJobs = new Set<string>();
   private primedProductJobs = false;
   private submittedSettingsJson: string | null = null;
@@ -431,6 +433,7 @@ export class WorkbenchController {
   };
 
   setHomeTab = (homeTab: HomeTab): void => {
+    this.clearRequestError();
     this.patch({ homeTab, settingsTab: homeTab, overlay: { type: "settings" } });
     if (homeTab === "plugins") {
       if (this.ui.pluginsStatus === "idle") void this.searchPlugins(this.ui.pluginQuery);
@@ -455,6 +458,7 @@ export class WorkbenchController {
   };
 
   selectHome = (): void => {
+    this.clearRequestError();
     this.clearWait();
     this.views.commitHome();
     this.patch({
@@ -547,20 +551,24 @@ export class WorkbenchController {
       this.patch({ commandError: localizeError(this.ui.locale, "workbench/read-only") });
       return;
     }
-    this.patch({ overlay: { type: "create" }, commandError: null });
+    this.clearRequestError();
+    this.patch({ overlay: { type: "create" } });
   };
 
   openRename = (spaceId: string): void => {
     if (!this.canMutate()) return this.rejectReadonly();
+    this.clearRequestError();
     this.patch({ overlay: { type: "rename", spaceId } });
   };
 
   openIcon = (spaceId: string): void => {
     if (!this.canMutate()) return this.rejectReadonly();
+    this.clearRequestError();
     this.patch({ overlay: { type: "icon", spaceId } });
   };
 
   openSettings = (): void => {
+    this.clearRequestError();
     this.patch({ overlay: { type: "settings" }, settingsTab: "general" });
     void this.loadSettings();
   };
@@ -570,6 +578,7 @@ export class WorkbenchController {
       this.setHomeTab(settingsTab);
       return;
     }
+    this.clearRequestError();
     this.patch({ settingsTab });
   };
 
@@ -592,6 +601,7 @@ export class WorkbenchController {
   };
 
   openDetail = (spaceId: string): void => {
+    this.clearRequestError();
     this.patch({ overlay: { type: "detail", spaceId } });
     void this.loadDetail(spaceId);
     if (this.ui.runtimesStatus === "idle") void this.loadRuntimes();
@@ -601,11 +611,17 @@ export class WorkbenchController {
     this.patch({ overlay: { type: "menu", spaceId, x, y } });
   };
 
-  closeOverlay = (): void => this.patch({ overlay: null, planError: null });
+  closeOverlay = (): void => {
+    this.clearRequestError();
+    this.patch({ overlay: null, planError: null });
+  };
 
   closePlan = (): void => this.patch({ pendingPlan: null, planError: null });
 
-  closeImport = (): void => this.patch({ overlay: null, importPreview: null, planError: null });
+  closeImport = (): void => {
+    this.clearRequestError();
+    this.patch({ overlay: null, importPreview: null, planError: null });
+  };
 
   reportFailure = (error: unknown): void => {
     this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
@@ -695,6 +711,10 @@ export class WorkbenchController {
       return;
     }
     this.patch({ pendingPlan: null, overlay: null });
+    if (pending.request.kind === "service.shutdown") {
+      void this.submitShutdown(pending.plan.id);
+      return;
+    }
     void this.submit({ kind: "plan.execute", planId: pending.plan.id });
   };
 
@@ -1151,6 +1171,7 @@ export class WorkbenchController {
   };
 
   poll = async (): Promise<void> => {
+    if (this.shutdownRequested) return;
     const cycle = this.cycle;
     const generation = ++this.stateGeneration;
     try {
@@ -1169,6 +1190,7 @@ export class WorkbenchController {
   };
 
   canMutate(): boolean {
+    if (this.shutdownRequested) return false;
     const state = this.ui.state;
     if (!state) return false;
     if (state.protocolVersion !== 2) return false;
@@ -1284,12 +1306,14 @@ export class WorkbenchController {
         this.rejectReadonly();
         return;
       }
+      this.clearRequestError();
       const decision = options.force ? this.views.retry(space) : this.views.requestSpace(space);
       this.syncSelection();
       void this.submit({ kind: "space.start", spaceId: space.id });
       this.armWait(decision.token, this.env.startTimeoutMs, space.id, "start");
       return;
     }
+    this.clearRequestError();
     if (options.force) {
       for (const key of [...this.iframeWindows.keys()]) {
         if (key.startsWith(`${space.id}:`)) this.iframeWindows.delete(key);
@@ -1436,6 +1460,7 @@ export class WorkbenchController {
     this.intentInflight.add(key);
     this.blueprint.trackApplyRequest(planId, requestId);
     const cycle = this.cycle;
+    const requestSurface = this.requestSurface;
     try {
       const job = await this.api.submit(command, requestId, observation);
       if (!this.stillOpen(cycle)) return;
@@ -1446,7 +1471,9 @@ export class WorkbenchController {
       await this.poll();
     } catch (error) {
       if (!this.stillOpen(cycle)) return;
-      this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
+      if (requestSurface === this.requestSurface) {
+        this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
+      }
       throw error;
     } finally {
       this.intentInflight.delete(key);
@@ -1481,6 +1508,41 @@ export class WorkbenchController {
       });
     } finally {
       this.intentInflight.delete(key);
+    }
+  }
+
+  private async submitShutdown(planId: string): Promise<void> {
+    const context = this.mutationContext();
+    if (!context || !this.canMutate()) { this.rejectReadonly(); return; }
+    const requestId = this.env.uuid(), cycle = this.cycle;
+    this.shutdownRequested = true;
+    this.stateGeneration++;
+    if (this.pollTimer !== null) this.env.clearTimeout(this.pollTimer);
+    this.pollTimer = null;
+    const unconfirmed = this.ui.locale === "en"
+      ? "Shutdown was requested. This view may close before the result is confirmed. The request has not been resent."
+      : "已请求停止服务。此页面可能在结果确认前关闭；当前结果尚未确认，没有重新发送请求。";
+    this.patch({ commandPending: true, commandError: unconfirmed, error: null });
+    try {
+      const job = await this.api.submit({ kind: "plan.execute", planId }, requestId, context);
+      if (!this.stillOpen(cycle)) return;
+      this.mergeJob(job);
+      if (job.status === "failed" || job.status === "cancelled") {
+        this.shutdownRequested = false;
+        this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }) });
+        this.schedulePoll();
+      } else if (job.status === "succeeded") {
+        this.patch({ commandError: null });
+      }
+    } catch (error) {
+      if (!this.stillOpen(cycle)) return;
+      if (errorCode(error).code) {
+        this.shutdownRequested = false;
+        this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
+        this.schedulePoll();
+      }
+    } finally {
+      if (this.stillOpen(cycle)) this.patch({ commandPending: false });
     }
   }
 
@@ -1562,7 +1624,7 @@ export class WorkbenchController {
   }
 
   private schedulePoll(): void {
-    if (!this.running) return;
+    if (!this.running || this.shutdownRequested) return;
     if (this.pollTimer !== null) this.env.clearTimeout(this.pollTimer);
     const active = (this.ui.state?.jobs ?? []).some((job) => ACTIVE_JOB.has(job.status));
     const delay = pollDelayMs(active, this.env.hidden());
@@ -1580,6 +1642,7 @@ export class WorkbenchController {
 
   private async wrap(action: () => Promise<void>, onError?: (message: string) => void): Promise<void> {
     const cycle = this.cycle;
+    const requestSurface = this.requestSurface;
     if (!this.stillOpen(cycle)) return;
     this.wrapDepth += 1;
     this.patch({ commandPending: true, commandError: this.wrapDepth === 1 ? null : this.ui.commandError });
@@ -1595,11 +1658,16 @@ export class WorkbenchController {
       if (local) this.persistLocalLog(local);
       this.patch({
         commandPending: this.wrapDepth - 1 > 0,
-        commandError: onError ? this.ui.commandError : message,
+        commandError: onError || requestSurface !== this.requestSurface ? this.ui.commandError : message,
       });
     } finally {
       this.wrapDepth = Math.max(0, this.wrapDepth - 1);
     }
+  }
+
+  private clearRequestError(): void {
+    ++this.requestSurface;
+    this.patch({ commandError: null });
   }
 
   private rejectReadonly(): void {

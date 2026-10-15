@@ -723,16 +723,6 @@ function RuntimeTab({ ui, controller }: WorkbenchViewProps): ReactElement {
               ? ` · ${t(locale, "runtime.pinnedBy", { names: runtime.pinnedBy.map((id) => controller.space(id)?.displayName ?? id).join(locale === "zh" ? "、" : ", ") })}`
               : ""}
           </span>
-          {!runtime.installed && !runtime.host ? (
-            <button
-              type="button"
-              className="dsh-wb-btn"
-              disabled={!writable}
-              onClick={() => controller.preview({ kind: "runtime.install", version: runtime.version })}
-            >
-              {t(locale, "runtime.install")}
-            </button>
-          ) : null}
           {runtime.removable ? (
             <button
               type="button"
@@ -1335,13 +1325,14 @@ function DshVersionSection({ ui, controller, space }: WorkbenchViewProps & { spa
   const versions = [
     ...new Set([...(pin && semverGte(pin, SPACES_MIN_DSH_VERSION) ? [pin] : []), ...candidates]),
   ];
-  const [target, setTarget] = useState(
-    pin && versions.includes(pin)
+  const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
+  const target = selectedTarget && versions.includes(selectedTarget)
+    ? selectedTarget
+    : pin && versions.includes(pin)
       ? pin
       : host && versions.includes(host)
         ? host
-        : (versions[0] ?? ""),
-  );
+        : (versions[0] ?? "");
   const ready = ui.runtimesStatus === "ready";
   const disabled = !controller.canMutate() || controller.isBusy() || !ready || !target;
   return (
@@ -1354,7 +1345,7 @@ function DshVersionSection({ ui, controller, space }: WorkbenchViewProps & { spa
       ) : null}
       <label className="dsh-wb-field">
         {t(locale, "detail.dshTarget")}
-        <select value={target} disabled={!ready} onChange={(event) => setTarget(event.target.value)}>
+        <select value={target} disabled={!ready} onChange={(event) => setSelectedTarget(event.target.value)}>
           {versions.map((version) => (
             <option key={version} value={version}>{version}</option>
           ))}
@@ -1401,7 +1392,7 @@ function DetailDialog({ ui, controller, spaceId }: WorkbenchViewProps & { spaceI
           </dl>
         )}
         {space && space.managed && !controller.isManagerId(space.id) && (
-          <DshVersionSection ui={ui} controller={controller} space={space} />
+          <DshVersionSection key={`${space.id}:${space.dshVersion ?? ""}`} ui={ui} controller={controller} space={space} />
         )}
         {detail && (
           <>

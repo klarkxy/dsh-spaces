@@ -32,6 +32,7 @@ export function HostShellPanel({ controller }: { controller: HostShellController
   return <section className="dsh-host-guide" data-spaces-host-guide={ui.phase} data-dsh-spaces-guide={ui.phase}>
     <h2>{t.title}</h2>
     {ui.error ? <p role="alert" data-dsh-spaces-error={ui.error}>{t[ui.error]}</p> : <p>{ui.phase === "start" ? t.startBody : ui.phase === "loading" || ui.phase === "connecting" ? t.connecting : t.initBody}</p>}
+    {ui.detail && <p data-dsh-spaces-detail="true">{ui.detail}</p>}
     {ui.phase === "initialize" && <button type="button" data-dsh-spaces-action="initialize" onClick={() => void controller.initialize()}>{t.initialize}</button>}
     {ui.phase === "start" && <button type="button" data-dsh-spaces-action="initialize" onClick={() => void controller.initialize()}>{t.start}</button>}
     {ui.phase === "ready" && <button type="button" data-dsh-spaces-action="enter" onClick={() => controller.select(null)}>{t.manage}</button>}

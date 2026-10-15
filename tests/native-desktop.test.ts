@@ -5,7 +5,8 @@ import { setImmediate as tick } from "node:timers/promises";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseNativeSpaceHash } from "../src/shared/space-host.ts";
+import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailureHash, portalFailureDetail,
+  PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT, type PortalFailure } from "../src/shared/space-host.ts";
 import { renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
 import { bindDshCli, invocationProfile } from "../src/adapters/node/spaces-control.ts";
 import { NativeHostController } from "../packages/plugin/src/client/native-host.tsx";
@@ -164,4 +165,125 @@ test("native directory failure shows the sanitized snapshot error", async () => 
   assert.ok(snapshot.detail!.includes("snapshot read at [path]"));
   assert.ok(!snapshot.detail!.includes("C:\\Users"));
   controller.stop();
+});
+
+test("native failure fragments carry only canonical bounded closed diagnostic fields", () => {
+  for (const reason of PORTAL_FAILURE_REASONS) {
+    for (const code of PORTAL_FAILURE_CODES) {
+      const failure = { reason, code, status: 503 };
+      const hash = nativePortalFailureHash(failure)!;
+      assert.ok(hash.length <= NATIVE_PORTAL_FAILURE_HASH_LIMIT);
+      assert.deepEqual(parseNativePortalFailureHash(hash), failure);
+    }
+    assert.deepEqual(parseNativePortalFailureHash(nativePortalFailureHash({ reason })!), { reason });
+  }
+  const encoded = (value: unknown) => "#failed/" + encodeURIComponent(JSON.stringify(value));
+  for (const hash of ["#failed", "#failed/", "#failed/%", "#failed/%FF", "#failed/null", "#failed/" + "a".repeat(513),
+    encoded({}), encoded([]), encoded({ reason: "unknown" }),
+    encoded({ reason: "state-request", code: "workbench/private-token" }),
+    encoded({ reason: "state-request", status: "503" }), encoded({ reason: "state-request", status: 600 }),
+    encoded({ reason: "state-request", status: 503.5 }),
+    encoded({ reason: "state-request", message: "private" }), encoded({ reason: "state-request", grant: "private" }),
+    "#failed/" + encodeURIComponent('{"reason":"manager-stopped","reason":"state-request"}'),
+    "#failed/" + encodeURIComponent('{ "reason": "state-request" }'),
+    "#failed/" + encodeURIComponent(encodeURIComponent('{"reason":"state-request"}'))]) {
+    assert.equal(parseNativePortalFailureHash(hash), null, hash);
+  }
+  assert.equal(nativePortalFailureHash({ reason: "state-request", token: "private" }), null);
+});
+
+async function nativeFailureFixture() {
+  const calls: string[] = [];
+  const controller = new NativeHostController({
+    role: async () => { calls.push("role"); return { role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }; },
+    presentationSnapshot: async () => { calls.push("directory"); return { serviceEpoch: "a".repeat(64), managerId: "hub",
+      spaces: [{ id: "hub", displayName: "Manager", generation: 1, status: "running" }] }; },
+    initialize: async () => { calls.push("initialize"); throw Error("must not relaunch"); },
+  } as never, {
+    acquire: async () => { calls.push("acquire"); throw Error("must not reconnect"); },
+    release: async () => { calls.push("release"); },
+  });
+  await controller.start({} as HTMLElement);
+  const nativeUrl = "http://127.0.0.1:3333/native/" + "a".repeat(32);
+  let actual = nativeUrl;
+  Object.assign(controller, { opening: Promise.resolve(), nativeUrl, lease: "synthetic-native-lease",
+    guest: { loadURL: async (url: string) => { calls.push("loadURL"); actual = url; },
+      getURL: () => actual, remove: () => calls.push("remove"), focus() {} } });
+  return { controller, calls, nativeUrl, observe: (url: string) => {
+    actual = url;
+    (controller as unknown as { observed(): void }).observed();
+  } };
+}
+
+test("native failure causes use the shared fixed text and remain terminal without reconnect", async () => {
+  for (const reason of PORTAL_FAILURE_REASONS) {
+    const f = await nativeFailureFixture();
+    const failure: PortalFailure = { reason, code: "workbench/unavailable", status: 503 };
+    f.observe(f.nativeUrl + nativePortalFailureHash(failure));
+    const snapshot = f.controller.getSnapshot();
+    assert.equal(snapshot.phase, "failed");
+    assert.deepEqual(snapshot.portalFailure, failure);
+    assert.equal(snapshot.detail, portalFailureDetail(failure));
+    assert.equal(snapshot.inventory, null);
+    f.controller.select("@settings"); await f.controller.initialize();
+    f.observe(f.nativeUrl + "#selected/1/@settings"); await tick();
+    assert.strictEqual(f.controller.getSnapshot(), snapshot);
+    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+  }
+});
+
+test("native failure parsing follows exact trusted native origin/path and rejects query or credentials", async () => {
+  const fragment = nativePortalFailureHash({ reason: "manager-disconnected" })!;
+  for (const suffix of ["#failed", "#failed/%", "#failed/" + encodeURIComponent(JSON.stringify({ reason: "manager-stopped", token: "private" }))]) {
+    const f = await nativeFailureFixture();
+    f.observe(f.nativeUrl + suffix);
+    assert.equal(f.controller.getSnapshot().phase, "failed");
+    assert.equal(f.controller.getSnapshot().portalFailure, null);
+    assert.equal(f.controller.getSnapshot().detail, null);
+    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+  }
+  for (const url of ["http://127.0.0.1:3334/native/" + "a".repeat(32),
+    "http://127.0.0.1:3333/native/" + "b".repeat(32),
+    "http://127.0.0.1:3333/native/" + "a".repeat(32) + "/extra",
+    "http://127.0.0.1:3333/native/" + "a".repeat(32) + "?grant=private",
+    "http://user:private@127.0.0.1:3333/native/" + "a".repeat(32), "not a URL"]) {
+    const f = await nativeFailureFixture();
+    f.observe(url + fragment);
+    assert.equal(f.controller.getSnapshot().phase, "failed");
+    assert.equal(f.controller.getSnapshot().portalFailure, null);
+    assert.equal(f.controller.getSnapshot().detail, null);
+    assert.doesNotMatch(JSON.stringify(f.controller.getSnapshot()), /private|grant|user:/);
+    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+  }
+});
+
+test("actual native portal HTTP failure emits a safe fragment consumed by the trusted guest", async () => {
+  const source = renderPortalPage({ parentOrigin: "http://127.0.0.1:3333", channel: "a".repeat(32) },
+    "http://127.0.0.1:3334", true).split("<script>")[1].split("</script>")[0];
+  for (const status of [401, 503]) {
+    const writes: string[] = [], timers = new Set<number>();
+    let requests = 0;
+    const location = { origin: "http://127.0.0.1:3333", hash: "", replace(hash: string) { writes.push(hash); this.hash = hash; } };
+    new Script(source).runInNewContext({
+      location, AbortController, AbortSignal, TextDecoder,
+      fetch: async () => {
+        requests++;
+        return Response.json({ ok: false, error: { code: status === 401 ? "workbench/unauthorized" : "workbench/unavailable",
+          message: "http://private/?token=synthetic-native-secret", grant: "synthetic-native-grant" } }, { status });
+      },
+      setInterval: () => { timers.add(1); return 1; }, clearInterval: (id: number) => timers.delete(id),
+      setTimeout: () => 2, clearTimeout() {}, window: { addEventListener() {} },
+    });
+    await tick();
+    assert.equal(writes.length, 1); assert.equal(requests, 1); assert.equal(timers.size, 0);
+    const failure = parseNativePortalFailureHash(writes[0])!;
+    assert.deepEqual(failure, { reason: "state-request", code: status === 401 ? "workbench/unauthorized" : "workbench/unavailable", status });
+    assert.doesNotMatch(decodeURIComponent(writes[0]), /private|secret|grant|token|http:/);
+    const f = await nativeFailureFixture();
+    f.observe(f.nativeUrl + writes[0]);
+    assert.equal(f.controller.getSnapshot().detail, portalFailureDetail(failure));
+    assert.deepEqual(f.controller.getSnapshot().portalFailure, failure);
+    f.controller.select("@settings"); await tick();
+    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+  }
 });

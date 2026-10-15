@@ -5,12 +5,13 @@ import { readFile } from "node:fs/promises";
 import { setImmediate as tick } from "node:timers/promises";
 import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
 import { Script } from "node:vm";
-import { parseSpaceHostAudience, parsePortalSnapshot, portalMessage } from "../src/shared/space-host.ts";
+import { parseSpaceHostAudience, parsePortalSnapshot, parsePortalFailure, PORTAL_FAILURE_REASONS, portalMessage } from "../src/shared/space-host.ts";
 import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
 import { HostShellController, type HostShellEnvironment } from "../packages/plugin/src/client/host-shell-state.ts";
 import type { WorkbenchGuideApi } from "../packages/plugin/src/types.ts";
 import { parseSurfaceSelection, attachSurfaceBridge } from "../packages/plugin/src/workbench/surface-bridge.ts";
 import { mintSupervisorPortal } from "../packages/plugin/src/host/workbench-http.ts";
+import { startViewBridge, type ViewConnectionState } from "../packages/view-bridge/src/client.ts";
 
 const channel = "ab".repeat(16), epoch = "cd".repeat(32), parentOrigin = "http://127.0.0.1:3090";
 const audience = { parentOrigin, channel };
@@ -19,6 +20,29 @@ const inventory = { serviceEpoch: epoch, managerId: "spaces-hub", spaces: [
   { id: "alpha", displayName: "Alpha", generation: 1, status: "running" },
   { id: "beta", displayName: "Beta", generation: 2, status: "stopped" },
 ] };
+
+test("repeated manager readiness does not resend a pending selection or extend its deadline", () => {
+  const html = renderPortalPage(audience, "http://127.0.0.1:3091");
+  const source = html.match(/<script>([\s\S]*)<\/script>/)![1]!;
+  const startup = source.lastIndexOf("\nvoid refresh();");
+  assert(startup > 0);
+  const sent: unknown[] = [];
+  let timers = 0;
+  new Script(source.slice(0, startup) + `
+    managerReady = true;
+    frame = { contentWindow: { postMessage: value => received.push(value) } };
+    managerView = { serviceEpoch: "${epoch}", spaceId: "spaces-hub", generation: 1, channel: "manager-view" };
+    pending = { requestId: 1, spaceId: "alpha" };
+    forwardSelection(); forwardSelection(); forwardSelection();
+    pending = { requestId: 2, spaceId: "beta" };
+    forwardSelection(); forwardSelection();
+  `).runInNewContext({ received: sent, AbortController,
+    window: { addEventListener() {} },
+    setTimeout: () => ++timers, clearTimeout() {},
+  });
+  assert.deepEqual(sent.map(value => (value as { requestId: number }).requestId), [1, 2]);
+  assert.equal(timers, 2);
+});
 
 test("host transport requires exact same-site origin, bounded channel, and closed fields", () => {
   assert.deepEqual(parseSpaceHostAudience(audience), audience);
@@ -323,4 +347,307 @@ test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () =>
   }
   for (const [token, files] of used)
     assert.ok(sdkTokens.has(token), `${token} is not a DSH 0.2 theme token (used in ${[...new Set(files)].join(", ")})`);
+});
+
+test("failed portal reads its failure once without reconnect or launch", async () => {
+  const f = fixture();
+  f.guide.presentationSnapshot = async () => { f.calls.push("presentationSnapshot"); throw new Error("Snapshot failed EACCES lstat C:\\private\\file"); };
+  f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
+  f.controller.handleMessage(f.event({type:"failed"})); await tick();
+  assert.match(f.controller.getSnapshot().detail!, /EACCES lstat \[path\]/);
+  assert.deepEqual(f.calls, ["role", "portalTarget", "presentationSnapshot"]);
+  assert.equal(f.controller.getSnapshot().portal, null); f.controller.stop();
+});
+
+test("failed initialization preserves sanitized reported reasons instead of a generic snapshot error", async () => {
+  const f = fixture(parentOrigin, false);
+  f.guide.initialize = async () => {
+    f.calls.push("initialize");
+    return { ok: false, connected: false, unavailable: true, origin: null, path: null, managerId: null,
+      reasons: ["Selected component payload digest mismatch.", "EACCES lstat C:\\private\\payload; token=synthetic-private-token"] };
+  };
+  f.guide.presentationSnapshot = async () => { f.calls.push("presentationSnapshot"); throw new Error("The workbench entry is not available yet."); };
+  f.controller.start(); await tick(); await f.controller.initialize(); await tick();
+  const ui = f.controller.getSnapshot();
+  assert.equal(ui.phase, "failed"); assert.equal(ui.error, "unavailable");
+  assert.match(ui.detail!, /^Selected component payload digest mismatch\.\nEACCES lstat \[path\]/);
+  assert.doesNotMatch(ui.detail!, /synthetic-private|C:\\private|not available yet/);
+  await f.controller.initialize();
+  assert.deepEqual(f.calls, ["role", "initialize"]); f.controller.stop();
+});
+
+test("thrown initialization and portal causes are sanitized and retained without another read or launch", async () => {
+  for (const stage of ["initialize", "portalTarget"] as const) {
+    const f = fixture(parentOrigin, stage === "portalTarget");
+    f.guide[stage] = async () => {
+      f.calls.push(stage);
+      throw new Error("Plugin load failed EACCES open C:\\private\\plugin; Authorization: Bearer synthetic-private-token");
+    };
+    f.guide.presentationSnapshot = async () => { f.calls.push("presentationSnapshot"); throw new Error("Generic unavailable"); };
+    f.controller.start(); await tick();
+    if (stage === "initialize") await f.controller.initialize();
+    await tick();
+    assert.equal(f.controller.getSnapshot().phase, "failed");
+    assert.match(f.controller.getSnapshot().detail!, /Plugin load failed EACCES open \[path\]/);
+    assert.doesNotMatch(f.controller.getSnapshot().detail!, /synthetic-private|C:\\private|Generic unavailable/);
+    assert.deepEqual(f.calls, ["role", stage]); f.controller.stop();
+  }
+});
+
+test("unavailable role and portal retain their reported reason", async () => {
+  for (const stage of ["role", "portalTarget"] as const) {
+    const f = fixture();
+    if (stage === "role") f.guide.role = async () => {
+      f.calls.push("role");
+      return { role: "workspace", profileId: "entry", managerId: "spaces-hub", unavailable: true, reasons: ["Host ownership is ambiguous."] };
+    };
+    else f.guide.portalTarget = async () => {
+      f.calls.push("portalTarget");
+      return { available: false, unavailable: true, origin: null, path: null, reasons: ["Host ownership is ambiguous."] };
+    };
+    f.controller.start(); await tick();
+    assert.equal(f.controller.getSnapshot().phase, "failed");
+    assert.equal(f.controller.getSnapshot().detail, "Host ownership is ambiguous.");
+    assert.deepEqual(f.calls, stage === "role" ? ["role"] : ["role", "portalTarget"]); f.controller.stop();
+  }
+});
+
+test("late initialization and portal errors cannot cross controller lifetimes", async () => {
+  for (const stage of ["initialize", "portalTarget"] as const) {
+    const f = fixture(parentOrigin, stage === "portalTarget");
+    const pending = Promise.withResolvers<never>();
+    const originalInitialize = f.guide.initialize, originalPortalTarget = f.guide.portalTarget;
+    f.guide[stage] = () => { f.calls.push(stage); return pending.promise; };
+    f.controller.start(); await tick();
+    const initializing = stage === "initialize" ? f.controller.initialize() : Promise.resolve();
+    f.controller.stop();
+    f.guide.initialize = originalInitialize; f.guide.portalTarget = originalPortalTarget;
+    f.controller.start(); await tick();
+    const current = f.controller.getSnapshot();
+    pending.reject(new Error("Obsolete lifetime failure")); await initializing; await tick();
+    assert.strictEqual(f.controller.getSnapshot(), current);
+    assert.equal(current.detail, null); f.controller.stop();
+  }
+});
+
+test("late failure observation cannot replace a newer cause or keep old detail on a new launch", async () => {
+  const f = fixture(); const observed = Promise.withResolvers<never>();
+  f.guide.presentationSnapshot = () => { f.calls.push("presentationSnapshot"); return observed.promise; };
+  f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
+  f.controller.handleMessage(f.event({ type: "failed" }));
+  f.controller.stop();
+  f.guide.portalTarget = async () => {
+    f.calls.push("portalTarget");
+    return { available: false, unavailable: true, origin: null, path: null, reasons: ["New lifetime cause"] };
+  };
+  f.controller.start(); await tick();
+  observed.reject(new Error("Obsolete snapshot failure")); await tick();
+  assert.equal(f.controller.getSnapshot().detail, "New lifetime cause");
+  assert.equal(f.calls.filter(name => name === "presentationSnapshot").length, 1);
+  f.controller.stop(); f.controller.start();
+  assert.equal(f.controller.getSnapshot().detail, null); await tick(); f.controller.stop();
+});
+
+test("a queued entry timeout from an old lifetime cannot fail the new portal", async () => {
+  const f = fixture(); f.controller.start(); await tick();
+  const oldTimeout = [...f.timers.values()][0];
+  f.controller.stop(); f.controller.start(); await tick();
+  const current = f.controller.getSnapshot(); oldTimeout();
+  assert.strictEqual(f.controller.getSnapshot(), current);
+  assert.equal(current.phase, "connecting"); f.controller.stop();
+});
+
+test("guide details redact complete authentication headers",async()=>{
+ const {publicGuideDetail}=await import("../packages/plugin/src/client/guide-detail.ts");
+ assert.doesNotMatch(publicGuideDetail("Authorization: Basic c3ludGhldGljOm9ubHk="),/c3ludGhldGlj/);
+ assert.doesNotMatch(publicGuideDetail("Cookie: sid=synthetic-one; remember=synthetic-two"),/synthetic-/);
+});
+
+function portalFixture() {
+  const origin = "http://127.0.0.1:3088", managerOrigin = "http://127.0.0.1:3091";
+  let state: unknown = { ...inventory, protocolVersion: 2, availability: "ready",
+    spaces: inventory.spaces.map(row => ({ ...row, hasWebApp: true })) };
+  const view = { spaceId: "spaces-hub", generation: 1, serviceEpoch: epoch, origin: managerOrigin,
+    entryOrigin: origin, entryPath: "/view/spaces-hub/1", channel: "manager-channel" };
+  const sent: any[] = [], forwarded: any[] = [], requests: string[] = [];
+  const timers = new Map<number, { fn: () => void; ms: number }>();
+  const listeners = new Map<string, (event: any) => void>();
+  let clock = 0, removed = 0, response: (() => Response | Promise<Response>) | null = null;
+  const frame = { contentWindow: { postMessage: (message: unknown) => forwarded.push(message) },
+    addEventListener() {}, remove: () => removed++ };
+  const parent = { postMessage: (message: unknown) => sent.push(message) };
+  const deadline = new AbortController();
+  const script = renderPortalPage(audience, managerOrigin).match(/<script>([\s\S]*)<\/script>/)![1];
+  new Script(script).runInNewContext({
+    parent, window: { addEventListener: (name: string, fn: (event: any) => void) => listeners.set(name, fn) },
+    location: { origin }, document: { createElement: () => frame, body: { append() {} }, getElementById: () => ({ remove() {} }) },
+    AbortController, AbortSignal: { any: AbortSignal.any, timeout: () => deadline.signal }, TextDecoder,
+    fetch: async (path: string, options: RequestInit) => {
+      requests.push(path);
+      if (response) return response();
+      if (options.signal?.aborted) throw new Error("private aborted request");
+      return Response.json({ ok: true, value: path.endsWith("/state") ? state : view });
+    },
+    setInterval: (fn: () => void, ms: number) => { timers.set(++clock, { fn, ms }); return clock; },
+    clearInterval: (id: number) => timers.delete(id),
+    setTimeout: (fn: () => void, ms: number) => { timers.set(++clock, { fn, ms }); return clock; },
+    clearTimeout: (id: number) => timers.delete(id),
+  });
+  const message = (data: object, overrides: object = {}) => listeners.get("message")!({
+    source: frame.contentWindow, origin: managerOrigin,
+    data: { serviceEpoch: view.serviceEpoch, spaceId: view.spaceId, generation: view.generation, channel: view.channel, source: "dsh-spaces-view", ...data }, ...overrides,
+  });
+  const select = () => listeners.get("message")!({ source: parent, origin: parentOrigin,
+    data: { source: "dsh-spaces-portal-parent", channel, type: "select", requestId: 1, spaceId: "alpha" } });
+  const refresh = async () => { [...timers.values()].find(timer => timer.ms === 1500)?.fn(); await tick(); };
+  return { sent, forwarded, requests, timers, frame, view, message, select, refresh, deadline,
+    removed: () => removed, setState: (next: unknown) => { state = next; }, state: () => state as any,
+    setResponse: (next: (() => Response | Promise<Response>) | null) => { response = next; } };
+}
+
+test("portal failure DTO rejects arbitrary codes, credentials, URLs and unbounded status", () => {
+  assert.deepEqual(parsePortalFailure({ reason: "state-request", status: 503, code: "workbench/unavailable" }),
+    { reason: "state-request", status: 503, code: "workbench/unavailable" });
+  for (const value of [null, [], {}, { reason: "https://private/token" },
+    { reason: "state-request", code: "workbench/private-token" }, { reason: "state-request", status: NaN },
+    { reason: "state-request", status: Infinity }, { reason: "state-request", status: 503.5 },
+    { reason: "state-request", status: 600 }, { reason: "state-request", status: 99 },
+    { reason: "state-request", status: "401" }, { reason: "state-request", code: undefined },
+    { reason: "state-request", message: "private error" }, { reason: "state-request", grant: "private" },
+    { reason: "state-request", url: "http://private" }]) assert.equal(parsePortalFailure(value), null);
+  assert.deepEqual(parsePortalFailure(Object.assign(Object.create({ code: "private", status: "private" }), { reason: "state-request" })),
+    { reason: "state-request" });
+});
+
+test("host keeps each terminal portal cause and rejects malicious authenticated envelopes", async () => {
+  for (const reason of PORTAL_FAILURE_REASONS) {
+    const f = fixture(); f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
+    const failure = { reason, code: "workbench/unavailable", status: 503 };
+    const valid = f.event({ type: "failed", failure });
+    for (const event of [{ ...valid, source: {} }, { ...valid, origin: "http://127.0.0.1:1" },
+      f.event({ ...valid.data, channel: "ff".repeat(16) }), f.event({ ...valid.data, source: "other" }),
+      f.event({ ...valid.data, token: "private" }), f.event({ type: "failed", failure: { reason, code: "workbench/secret" } }),
+      f.event({ type: "failed", failure: { reason, error: "private error" } })]) {
+      f.controller.handleMessage(event);
+      assert.equal(f.controller.getSnapshot().phase, "connecting");
+    }
+    f.guide.presentationSnapshot = async () => { throw Error("Generic private error must not replace a known cause"); };
+    f.controller.handleMessage(valid);
+    const failed = f.controller.getSnapshot();
+    assert.deepEqual(failed.portalFailure, failure);
+    assert.equal(failed.phase, "failed"); assert.equal(failed.portal, null); assert.equal(failed.inventory, null);
+    assert.match(failed.detail!, /HTTP 503.*workbench\/unavailable/);
+    if (reason === "state-request" || reason === "manager-disconnected") assert.equal(failed.error, "unavailable");
+    f.controller.handleMessage(f.event({ type: "failed", failure: { reason: "manager-stopped" } }));
+    f.controller.select(null); await f.controller.initialize(); await tick();
+    assert.strictEqual(f.controller.getSnapshot().portalFailure, failed.portalFailure);
+    assert.deepEqual(f.calls, ["role", "portalTarget"]); f.controller.stop();
+  }
+});
+
+test("rendered portal distinguishes state HTTP, transport, deadline, malformed and invalid data", async () => {
+  const cases = [
+    { name: "401", reason: "state-request", response: () => Response.json({ ok: false, error: { code: "workbench/unauthorized", message: "private token" } }, { status: 401 }), code: "workbench/unauthorized", status: 401 },
+    { name: "503", reason: "state-request", response: () => Response.json({ ok: false, error: { code: "workbench/unavailable" } }, { status: 503 }), code: "workbench/unavailable", status: 503 },
+    { name: "unknown code", reason: "state-request", response: () => Response.json({ ok: false, error: { code: "workbench/private-token", url: "http://private/grant" } }, { status: 403 }), status: 403 },
+    { name: "HTTP non-JSON", reason: "state-request", response: () => new Response("private failure", { status: 503 }), status: 503 },
+    { name: "transport", reason: "state-request", response: () => { throw Error("http://private/?token=private"); }, code: "portal/transport-failed" },
+    { name: "deadline", reason: "state-request", response: () => { throw Error("private deadline"); }, code: "portal/request-deadline" },
+    { name: "malformed", reason: "state-invalid", response: () => new Response("private not JSON"), code: "portal/response-invalid", status: 200 },
+    { name: "invalid envelope", reason: "state-invalid", response: () => Response.json({ token: "private" }), code: "portal/response-invalid", status: 200 },
+    { name: "invalid data", reason: "state-invalid", response: () => Response.json({ ok: true, value: { protocolVersion: 2 } }) },
+  ];
+  for (const item of cases) {
+    const p = portalFixture(); await tick();
+    if (item.name === "deadline") p.deadline.abort();
+    p.setResponse(item.response); await p.refresh();
+    const failures = p.sent.filter(message => message.type === "failed");
+    assert.equal(failures.length, 1, item.name);
+    assert.deepEqual(JSON.parse(JSON.stringify(failures[0].failure)), { reason: item.reason,
+      ...(item.code ? { code: item.code } : {}), ...(item.status ? { status: item.status } : {}) });
+    assert.doesNotMatch(JSON.stringify(failures), /private|http:|token|grant/);
+    const count = p.requests.length; await p.refresh(); p.select();
+    assert.equal(p.requests.length, count); assert.equal(p.timers.size, 0);
+  }
+});
+
+test("rendered portal distinguishes epoch, generation, manager stop, view errors and readiness deadline", async () => {
+  for (const reason of ["service-changed", "manager-generation-changed", "manager-stopped", "manager-disconnected", "manager-view-failed", "view-ready-timeout",
+    "manager-view-request", "manager-view-invalid"]) {
+    const p = portalFixture(); await tick();
+    if (reason === "manager-view-request") p.setResponse(() => Response.json({ ok: false, error: { code: "workbench/forbidden" } }, { status: 403 }));
+    if (reason === "manager-view-invalid") p.setResponse(() => Response.json({ ok: true, value: { ...p.view, origin: "http://private" } }));
+    p.select(); await tick();
+    if (reason === "service-changed") { p.setState({ ...p.state(), serviceEpoch: "ff".repeat(32) }); await p.refresh(); }
+    if (reason === "manager-generation-changed" || reason === "manager-stopped") {
+      p.setState({ ...p.state(), spaces: p.state().spaces.map((row: any) => row.id === "spaces-hub"
+        ? { ...row, ...(reason === "manager-stopped" ? { status: "stopped" } : { generation: 2 }) } : row) });
+      await p.refresh();
+    }
+    if (reason === "manager-disconnected" || reason === "manager-view-failed") p.message({ state: reason === "manager-disconnected" ? "disconnected" : "failed", message: "http://private/token" });
+    if (reason === "view-ready-timeout") [...p.timers.values()].find(timer => timer.ms === 35000)!.fn();
+    const failures = p.sent.filter(message => message.type === "failed");
+    assert.equal(failures.length, 1, reason); assert.equal(failures[0].failure.reason, reason);
+    assert.doesNotMatch(JSON.stringify(failures), /private|http:|token/);
+    const count = p.requests.length;
+    p.message({ state: "ready" }); p.select(); await p.refresh();
+    assert.equal(p.requests.length, count); assert.equal(p.timers.size, 0);
+    assert.equal(p.removed(), reason.startsWith("manager-view-") && reason !== "manager-view-failed" ? 0 : 1);
+  }
+});
+
+test("portal detects manager stop and generation change before a manager iframe is opened", async () => {
+  for (const reason of ["manager-stopped", "manager-generation-changed"]) {
+    const p = portalFixture(); await tick();
+    p.setState({ ...p.state(), spaces: p.state().spaces.map((row: any) => row.id === "spaces-hub"
+      ? { ...row, ...(reason === "manager-stopped" ? { status: "stopped" } : { generation: 2 }) } : row) });
+    await p.refresh();
+    assert.equal(p.sent.at(-1).failure.reason, reason);
+    assert.equal(p.requests.some(path => path.endsWith("/view")), false);
+  }
+});
+
+test("portal entry deadline has its own terminal cause and cannot be replaced by later state", async () => {
+  const f = fixture(); f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
+  [...f.timers.values()][0]();
+  assert.deepEqual(f.controller.getSnapshot().portalFailure, { reason: "portal-entry-timeout" });
+  assert.equal(f.controller.getSnapshot().error, "unavailable");
+  assert.match(f.controller.getSnapshot().detail!, /entry deadline/);
+  f.controller.handleMessage(f.event({ type: "state", snapshot: inventory }));
+  assert.equal(f.controller.getSnapshot().phase, "failed");
+  assert.deepEqual(f.calls, ["role", "portalTarget"]); f.controller.stop();
+});
+
+test("portal uses exact manager origin/source/identity and both readiness signals before forwarding", async () => {
+  const p = portalFixture(); await tick(); p.select(); await tick();
+  for (const overrides of [{ source: {} }, { origin: parentOrigin }]) p.message({ state: "disconnected" }, overrides);
+  for (const identity of [{ channel: "wrong" }, { serviceEpoch: "ff".repeat(32) }, { generation: 2 }, { spaceId: "alpha" }, { source: "other" }, { token: "private" }])
+    p.message({ state: "disconnected", ...identity });
+  assert.equal(p.sent.some(message => message.type === "failed"), false);
+  p.message({ source: "dsh-spaces-surface", type: "ready" });
+  assert.equal(p.forwarded.length, 0);
+  // Exercise the real bridge through initial SDK connecting/disconnected, then boot handoff.
+  let connectionState: ReturnType<ViewConnectionState["getSnapshot"]> = undefined, subscriber = () => {};
+  let boot: { parentElement: ParentNode } | null = { parentElement: {} as ParentNode };
+  const bridge = startViewBridge({ slots: { inject: (_name, effect) => effect() } },
+    { ...p.view, parentOrigin: "http://127.0.0.1:3088" }, {
+      parent: { postMessage: (data: unknown) => p.message(data as object) },
+      connection: { state: { getSnapshot: () => connectionState, subscribe: fn => { subscriber = fn; return () => {}; } } },
+      bootWatch: { findBoot: () => boot, hasAppDom: () => true, observe: () => () => {} },
+      addMessageListener: () => () => {}, delay: () => 1, cancelDelay() {},
+    });
+  connectionState = "connecting"; subscriber();
+  connectionState = "disconnected"; subscriber();
+  assert.equal(p.sent.some(message => message.type === "failed"), false);
+  boot = null; connectionState = "connected"; subscriber();
+  assert.equal(p.forwarded.length, 1);
+  p.message({ source: "dsh-spaces-surface", type: "selection-failed", requestId: 1, target: "alpha" });
+  assert.equal(p.sent.at(-1).type, "selection-failed");
+  assert.equal(p.sent.some(message => message.type === "failed"), false);
+  connectionState = "disconnected"; subscriber();
+  assert.equal(p.sent.at(-1).failure.reason, "manager-disconnected");
+  const count = p.requests.length;
+  connectionState = "connected"; subscriber(); p.select(); await p.refresh();
+  assert.equal(p.requests.length, count); assert.equal(p.sent.filter(message => message.type === "failed").length, 1);
+  bridge();
 });

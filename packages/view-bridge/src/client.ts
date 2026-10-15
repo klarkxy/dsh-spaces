@@ -25,8 +25,9 @@ export interface BootWatch {
 }
 
 export type ViewMessageListen = (listener: (event: MessageEvent) => void) => () => void;
-export type ViewDelay = (handler: () => void, ms: number) => ReturnType<typeof setTimeout>;
-export type ViewCancelDelay = (id: ReturnType<typeof setTimeout>) => void;
+type ViewTimer = ReturnType<typeof setTimeout> | number;
+export type ViewDelay = (handler: () => void, ms: number) => ViewTimer;
+export type ViewCancelDelay = (id: ViewTimer) => void;
 
 export interface ViewBridgeOptions {
   parent?: { postMessage(message: unknown, targetOrigin: string): void } | null;
@@ -70,7 +71,7 @@ export function startViewBridge(
   let failed = false;
   let last: ViewHandshakeState | null = null;
   let disposed = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ViewTimer | undefined;
   let container: ParentNode | null = null;
   const stoppers: Array<() => void> = [];
 

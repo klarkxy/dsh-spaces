@@ -28,7 +28,7 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   @Remote("presentationSnapshot")
   async presentationSnapshot(): Promise<import("../../../../src/shared/space-host").PortalSnapshot> {
     try { return await this.runtime.presentationSnapshot(); }
-    catch { throw new RemoteError("workbench/unavailable", "The space directory is unavailable.", {}); }
+    catch (error) { throw new RemoteError("workbench/unavailable", reportedOrFallback(error instanceof Error ? error.message : undefined, "The space directory is unavailable."), {}); }
   }
 
   @Remote("bootstrap")
@@ -63,7 +63,7 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   async portalTarget(audience: SpaceHostAudience): Promise<WorkbenchReturnTarget> {
     if (!parseSpaceHostAudience(audience)) throw new RemoteError("workbench/unsupported", "This host needs a compatible presentation adapter.", {});
     try { return await this.runtime.portalTarget(audience); }
-    catch { throw new RemoteError("workbench/unavailable", "The in-app workbench entry could not be opened.", {}); }
+    catch (error) { throw new RemoteError("workbench/unavailable", reportedOrFallback(error instanceof Error ? error.message : undefined, "The in-app workbench entry could not be opened."), {}); }
   }
 
   @Remote("initialize")

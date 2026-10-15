@@ -1,5 +1,6 @@
+import { publicGuideDetail } from "./guide-detail";
 import type { WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
-import { parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalSnapshot } from "../../../../src/shared/space-host";
+import { parsePortalFailure, portalFailureDetail, parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalFailure, type PortalSnapshot } from "../../../../src/shared/space-host";
 
 export interface HostShellSnapshot {
   phase: "loading" | "initialize" | "start" | "connecting" | "ready" | "failed";
@@ -9,6 +10,8 @@ export interface HostShellSnapshot {
   visible: "current" | "guide" | "portal";
   selected: string | null;
   pending: number | null;
+  detail: string | null;
+  portalFailure: PortalFailure | null;
   error: "unavailable" | "unsupported" | "stopped" | "entry" | null;
 }
 export interface HostShellWindow { postMessage(value: unknown, origin: string): void }
@@ -28,7 +31,7 @@ const browserEnv: HostShellEnvironment = {
 /** Presentation client only. It cannot submit a management command, stop a Host or change its profile. */
 export class HostShellController {
   private ui: HostShellSnapshot = { phase: "loading", role: null, inventory: null, portal: null,
-    visible: "current", selected: null, pending: null, error: null };
+    visible: "current", selected: null, pending: null, error: null, detail: null, portalFailure: null };
   private listeners = new Set<() => void>();
   private frame: HostShellWindow | null = null;
   private epoch = 0;
@@ -51,25 +54,43 @@ export class HostShellController {
     if (this.running) return;
     this.running = true;
     const epoch = ++this.epoch;
-    this.patch({ phase: "loading", error: null });
+    this.patch({ phase: "loading", error: null, detail: null, portalFailure: null });
     void this.guide.role().then(async role => {
       if (!this.running || epoch !== this.epoch) return;
       this.patch({ role });
-      if (role.unavailable || !role.profileId) { this.fail("unavailable"); return; }
+      if (role.unavailable || !role.profileId) { this.fail("unavailable", role.reasons); return; }
       if (!this.supportsTransport()) { this.fail("unsupported"); return; }
       if (role.managerId) await this.connect(epoch);
       else this.patch({ phase: "initialize" });
-    }).catch(() => { if (this.running && epoch === this.epoch) this.fail("unavailable"); });
+    }).catch(cause => { if (this.running && epoch === this.epoch) this.fail("unavailable", cause); });
   };
   stop = (): void => { this.running = false; this.epoch++; this.clearTimers(); this.frame = null; };
   registerFrame = (frame: HostShellWindow | null): void => { this.frame = frame; };
   private supportsTransport(): boolean {
     return !!this.guide.portalTarget && !!parseSpaceHostAudience({ parentOrigin: this.env.origin(), channel: "0".repeat(32) });
   }
-  private fail(error: HostShellSnapshot["error"]): void {
+  private fail(error: HostShellSnapshot["error"], cause?: unknown): void {
+    const epoch = this.epoch;
+    const text = Array.isArray(cause) ? cause.filter(reason => typeof reason === "string").join("\n")
+      : cause instanceof Error ? cause.message : typeof cause === "string" ? cause
+      : cause && typeof cause === "object" && "message" in cause && typeof cause.message === "string" ? cause.message : "";
+    const detail = publicGuideDetail(text) || null;
     this.clearTimers(); this.frame = null;
     this.patch({ phase: "failed", error, portal: null, inventory: null, pending: null,
-      visible: this.ui.visible === "current" ? "current" : "guide", selected: null });
+      visible: this.ui.visible === "current" ? "current" : "guide", selected: null, detail });
+    // A reported cause is authoritative; a generic directory error must not replace it.
+    if (detail) return;
+    // One read-only observation of the failure, never a new connection or launch.
+    if (this.guide.presentationSnapshot) void this.guide.presentationSnapshot().catch(cause => {
+      if (!this.running || epoch !== this.epoch || this.ui.phase !== "failed") return;
+      const detail = publicGuideDetail(cause instanceof Error ? cause.message : String(cause));
+      this.patch({ detail: detail.slice(0, 2000) || null });
+    });
+  }
+  private failPortal(failure: PortalFailure): void {
+    this.patch({ portalFailure: failure });
+    this.fail(["manager-view-invalid", "manager-view-failed", "view-ready-timeout"].includes(failure.reason) ? "entry" : "unavailable",
+      portalFailureDetail(failure));
   }
   private async connect(epoch: number): Promise<void> {
     if (!this.supportsTransport()) { this.fail("unsupported"); return; }
@@ -85,10 +106,12 @@ export class HostShellController {
     if (!target.available || target.unavailable || typeof target.origin !== "string" ||
         !parseSpaceHostAudience({ parentOrigin: target.origin, channel }) ||
         typeof target.path !== "string" || !/^\/portal-bootstrap\/[A-Za-z0-9_-]{32}$/.test(target.path)) {
-      this.fail("entry"); return;
+      this.fail("entry", target.reasons); return;
     }
     this.patch({ portal: { src: target.origin + target.path, origin: target.origin, channel } });
-    this.entryTimer = this.env.setTimeout(() => { this.fail("entry"); }, 30000);
+    this.entryTimer = this.env.setTimeout(() => {
+      if (this.running && epoch === this.epoch && this.ui.phase === "connecting") this.failPortal({ reason: "portal-entry-timeout" });
+    }, 30000);
   }
   initialize = async (): Promise<void> => {
     if (!this.running || (this.ui.phase !== "initialize" && this.ui.phase !== "start")) return;
@@ -96,14 +119,14 @@ export class HostShellController {
     if (!this.supportsTransport()) { this.fail("unsupported"); return; }
     const epoch = this.epoch;
     this.openAfterConnect = true;
-    this.patch({ phase: "connecting", error: null });
+    this.patch({ phase: "connecting", error: null, detail: null });
     try {
       const result = await this.guide.initialize();
       if (!this.running || epoch !== this.epoch) return;
-      if (!result.ok || result.unavailable) { this.fail("unavailable"); return; }
+      if (!result.ok || result.unavailable) { this.fail("unavailable", result.reasons); return; }
       // The legacy top-level handoff URL is never navigated to or sent to another frame.
       await this.connect(epoch);
-    } catch { if (this.running && epoch === this.epoch) this.fail("unavailable"); }
+    } catch (cause) { if (this.running && epoch === this.epoch) this.fail("unavailable", cause); }
   };
   showCurrent = (): void => {
     if (this.selectionTimer !== null) this.env.clearTimeout(this.selectionTimer);
@@ -134,12 +157,18 @@ export class HostShellController {
     const keys = Object.keys(message).sort().join(",");
     if (message.type === "state" && keys === "channel,snapshot,source,type") {
       const inventory = parsePortalSnapshot(message.snapshot);
-      if (!inventory || this.ui.inventory && inventory.serviceEpoch !== this.ui.inventory.serviceEpoch) { this.fail("unavailable"); return; }
+      if (!inventory) { this.failPortal({ reason: "state-invalid" }); return; }
+      if (this.ui.inventory && inventory.serviceEpoch !== this.ui.inventory.serviceEpoch) { this.failPortal({ reason: "service-changed" }); return; }
       if (this.entryTimer !== null) this.env.clearTimeout(this.entryTimer);
       this.entryTimer = null;
       this.patch({ inventory, phase: "ready" });
       if (this.openAfterConnect) { this.openAfterConnect = false; this.select(null); }
-    } else if (message.type === "failed" && keys === "channel,source,type") this.fail("entry");
+    } else if (message.type === "failed" && keys === "channel,failure,source,type") {
+      const failure = parsePortalFailure(message.failure);
+      if (failure) this.failPortal(failure);
+    }
+    // Older portal packages do not report a cause; do not infer authentication.
+    else if (message.type === "failed" && keys === "channel,source,type") this.fail("unavailable");
     else if (message.requestId === this.ui.pending && this.ui.pending !== null) {
       if (message.type === "selected" && keys === "channel,requestId,source,spaceId,type" && message.spaceId === this.target) {
         if (this.selectionTimer !== null) this.env.clearTimeout(this.selectionTimer);

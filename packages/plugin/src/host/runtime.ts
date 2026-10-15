@@ -2,7 +2,6 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Context } from "@deepseek-ai/cordis";
-import { HomeController } from "../../../../src/adapters/node/home-controller";
 import { bindDshCli, isCompatibleDshCliVersion } from "../../../../src/adapters/node/spaces-control";
 import type { WorkbenchApi } from "../../../../src/shared/workbench";
 import type {
@@ -14,7 +13,7 @@ import type {
 } from "../types";
 import { resolveHostIdentity, type HostIdentity, type HostIdentityInput } from "./identity";
 import { createWorkbenchHttpClient, mintSupervisorHandoff, mintSupervisorPortal, type WorkbenchHttpClientOptions } from "./workbench-http";
-import { attachExistingSupervisor, pingSupervisorState } from "./supervisor-attach";
+import { attachExistingSupervisor, pingSupervisorState, type SupervisorAttachResult } from "./supervisor-attach";
 import {
   bootstrapSupervisor,
   defaultPayloadRoot,
@@ -29,8 +28,6 @@ const inflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 
 const IDENTITY_DAMAGED = "Manager identity is damaged or ambiguous and cannot be guessed.";
-const HOME_UNAVAILABLE = "The DSH home could not be opened safely.";
-const MANAGER_LOCKED = "Another workbench operation is already running.";
 const HANDOFF_FAILED = "The workbench entry handoff could not be minted.";
 const ENTRY_UNAVAILABLE = "The workbench entry is not available yet.";
 
@@ -96,6 +93,10 @@ export class WorkbenchHostRuntime {
       this.remember(attached.endpoint);
     }
     const state = await this.api!.state();
+    const failure = [...state.jobs].reverse().find(job => job.kind === "plan.execute");
+    if (state.maintenance && failure?.status === "failed") {
+      throw new Error([failure?.error?.message, ...state.reasons].filter(Boolean).join(" ") || "Maintenance has stopped the manager. The owning service remains blocked.");
+    }
     const snapshot = parsePortalSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
       spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) });
     if (!snapshot) throw new Error(ENTRY_UNAVAILABLE);
@@ -210,7 +211,7 @@ export class WorkbenchHostRuntime {
         const state = await this.api!.state();
         if (state.reasons.length) reasons = state.reasons;
         const manager = state.spaces.find(space => space.id === state.managerId);
-        if (state.availability === "unavailable" || state.serviceEpoch !== this.endpoint?.serviceEpoch || manager?.status === "crashed") {
+        if ((state.maintenance && [...state.jobs].reverse().find(job => job.kind === "plan.execute")?.status === "failed") || state.availability === "unavailable" || state.serviceEpoch !== this.endpoint?.serviceEpoch || manager?.status === "crashed") {
           return this.initializeFailure(state.reasons.length ? reasons : ["The manager launch or its owning service is unavailable."]);
         }
         if (state.role === "manager" && manager?.status === "running") return null;
@@ -258,21 +259,14 @@ export class WorkbenchHostRuntime {
       this.remember(attached.endpoint);
       return { ok: true, connected: true, unavailable: false, origin: attached.endpoint.origin, reasons: [] };
     }
-    if ("blocked" in attached) {
+    if ("blocked" in attached || "stale" in attached) {
       return this.initializeFailure(attached.reasons);
-    }
-
-    try {
-      const controller = new HomeController(home, { allowRealHome: this.options.allowRealHome === true });
-      if (controller.inspect().held) return this.initializeFailure([MANAGER_LOCKED]);
-    } catch {
-      return this.initializeFailure([HOME_UNAVAILABLE], true);
     }
     // The supervisor owns manager allocation under its existing control protocol.
     // Do not leave a manager record behind when runtime/payload preflight fails.
     const denied = this.deniedInitialize();
     if (denied) return denied;
-    return this.connectSupervisor(true);
+    return this.connectSupervisor(true, attached);
   }
 
   private deniedInitialize(): WorkbenchInitializeResult | null {
@@ -365,7 +359,7 @@ export class WorkbenchHostRuntime {
     };
   }
 
-  private async connectSupervisor(allowColdStart: boolean): Promise<WorkbenchBootstrapResult> {
+  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult): Promise<WorkbenchBootstrapResult> {
     const home = this.identity.home;
     if (!home) {
       return {
@@ -376,7 +370,7 @@ export class WorkbenchHostRuntime {
         reasons: ["Host identity could not be confirmed."],
       };
     }
-    const attached = await attachExistingSupervisor({
+    const attached = priorDiscovery ?? await attachExistingSupervisor({
       home,
       allowRealHome: this.options.allowRealHome === true,
       fetch: this.options.fetch,
@@ -391,7 +385,7 @@ export class WorkbenchHostRuntime {
         reasons: [],
       };
     }
-    if ("blocked" in attached) {
+    if ("blocked" in attached || "stale" in attached) {
       return {
         ok: false,
         connected: false,
@@ -411,6 +405,7 @@ export class WorkbenchHostRuntime {
       snapshotRoot: this.snapshotRoot,
       allowRealHome: this.options.allowRealHome === true,
       allowColdStart,
+      priorDiscovery: attached,
       timeoutMs: this.options.supervisorTimeoutMs,
       fetch: this.options.fetch,
     });

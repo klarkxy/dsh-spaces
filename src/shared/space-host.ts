@@ -19,6 +19,73 @@ export interface SpaceHostAudience { parentOrigin: string; channel: string }
 export interface PortalSpace { id: string; displayName: string; status: string; generation: number; icon?: string }
 export interface PortalSnapshot { serviceEpoch: string; managerId: string | null; spaces: PortalSpace[] }
 
+export const PORTAL_FAILURE_REASONS = [
+  "state-request", "state-invalid", "service-changed", "manager-generation-changed",
+  "manager-stopped", "manager-view-request", "manager-view-invalid", "manager-view-failed",
+  "manager-disconnected", "view-ready-timeout", "portal-entry-timeout",
+] as const;
+export const PORTAL_FAILURE_CODES = [
+  "workbench/unauthorized", "workbench/forbidden", "workbench/unavailable",
+  "workbench/invalid-input", "workbench/not-found", "workbench/failed",
+  "workbench/unsupported", "workbench/busy", "workbench/conflict", "workbench/incompatible",
+  "workbench/locked", "workbench/maintenance", "workbench/protected", "workbench/read-only",
+  "workbench/recovery-required", "workbench/unmanaged",
+  "portal/request-deadline", "portal/transport-failed", "portal/response-invalid",
+] as const;
+/** Closed presentation diagnostics. Never forward an exception, URL or server message. */
+export interface PortalFailure {
+  reason: typeof PORTAL_FAILURE_REASONS[number];
+  code?: typeof PORTAL_FAILURE_CODES[number];
+  status?: number;
+}
+export function parsePortalFailure(value: unknown): PortalFailure | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (!Object.hasOwn(row, "reason") || Object.keys(row).some(key => !["reason", "code", "status"].includes(key)) ||
+      !PORTAL_FAILURE_REASONS.includes(row.reason as PortalFailure["reason"]) ||
+      (Object.hasOwn(row, "code") && !PORTAL_FAILURE_CODES.includes(row.code as NonNullable<PortalFailure["code"]>)) ||
+      (Object.hasOwn(row, "status") && (!Number.isInteger(row.status) || (row.status as number) < 100 || (row.status as number) > 599))) return null;
+  return { reason: row.reason as PortalFailure["reason"],
+    ...(Object.hasOwn(row, "code") ? { code: row.code as PortalFailure["code"] } : {}),
+    ...(Object.hasOwn(row, "status") ? { status: row.status as number } : {}) };
+}
+
+const portalFailureCauses: Record<PortalFailure["reason"], string> = {
+  "state-request": "The portal could not read the space service state.",
+  "state-invalid": "The space service returned invalid portal state data.",
+  "service-changed": "The space service epoch changed during this portal lifetime.",
+  "manager-generation-changed": "The manager generation changed during this portal lifetime.",
+  "manager-stopped": "The manager is no longer running.",
+  "manager-view-request": "The portal could not request the manager view.",
+  "manager-view-invalid": "The manager view identity or entry data was invalid.",
+  "manager-view-failed": "The manager view reported that its UI did not become ready.",
+  "manager-disconnected": "The manager view connection disconnected.",
+  "view-ready-timeout": "The manager view did not complete readiness before the deadline.",
+  "portal-entry-timeout": "The portal did not report space service state before the entry deadline.",
+};
+/** Fixed presentation text shared by the portable and native controllers. */
+export function portalFailureDetail(failure: PortalFailure): string {
+  return portalFailureCauses[failure.reason] +
+    (failure.status === undefined ? "" : ` HTTP ${failure.status}.`) +
+    (failure.code === undefined ? "" : ` Code: ${failure.code}.`);
+}
+
+export const NATIVE_PORTAL_FAILURE_HASH_LIMIT = 512;
+export function nativePortalFailureHash(value: unknown): string | null {
+  const failure = parsePortalFailure(value);
+  if (!failure) return null;
+  const hash = "#failed/" + encodeURIComponent(JSON.stringify(failure));
+  return hash.length <= NATIVE_PORTAL_FAILURE_HASH_LIMIT ? hash : null;
+}
+/** Only canonical encoded DTOs are accepted, including closed fields and bounded bytes. */
+export function parseNativePortalFailureHash(hash: string): PortalFailure | null {
+  if (hash.length > NATIVE_PORTAL_FAILURE_HASH_LIMIT || !hash.startsWith("#failed/")) return null;
+  try {
+    const failure = parsePortalFailure(JSON.parse(decodeURIComponent(hash.slice(8))));
+    return failure && nativePortalFailureHash(failure) === hash ? failure : null;
+  } catch { return null; }
+}
+
 /** The bundled iframe transport requires same-site loopback cookies. Native/remote transports need an adapter. */
 export function parseSpaceHostAudience(value: unknown): SpaceHostAudience | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -35,11 +102,13 @@ export function parseSpaceHostAudience(value: unknown): SpaceHostAudience | null
 }
 
 export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
+  // Self-contained: the portal embeds this validator in its browser script.
+  const spacePattern = /^[a-z0-9][a-z0-9-]{0,38}$/;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (Object.keys(row).sort().join(",") !== "managerId,serviceEpoch,spaces" ||
       typeof row.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(row.serviceEpoch) ||
-      !(row.managerId === null || typeof row.managerId === "string" && PORTAL_SPACE_RE.test(row.managerId)) ||
+      !(row.managerId === null || typeof row.managerId === "string" && spacePattern.test(row.managerId)) ||
       !Array.isArray(row.spaces) || row.spaces.length > 1000) return null;
   const ids = new Set<string>();
   const spaces: PortalSpace[] = [];
@@ -49,7 +118,7 @@ export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
     if (!["displayName,generation,id,status", "displayName,generation,icon,id,status"].includes(Object.keys(space).sort().join(",")) ||
         (space.icon !== undefined && (typeof space.icon !== "string" || space.icon.length > 240_000 ||
           !/^(?:|whale|hash|code|chat|lab|book|data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2})$/.test(space.icon))) ||
-        typeof space.id !== "string" || !PORTAL_SPACE_RE.test(space.id) || ids.has(space.id) ||
+        typeof space.id !== "string" || !spacePattern.test(space.id) || ids.has(space.id) ||
         typeof space.displayName !== "string" || space.displayName.length > 200 ||
         typeof space.status !== "string" || !["running", "starting", "stopping", "stopped", "crashed", "unknown"].includes(space.status) ||
         !Number.isSafeInteger(space.generation) || (space.generation as number) < 0) return null;

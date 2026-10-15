@@ -957,7 +957,7 @@ test("SSR ready home shows management actions and plugin install wording", async
   await flush();
   const runtime = ready(ctrl);
   assert.ok(runtime.includes(t("zh", "runtime.installed")));
-  assert.ok(!runtime.includes(`>${t("zh", "runtime.install")}<`), "installed host runtime has no install button");
+  assert.ok(!runtime.includes("预览安装"), "the runtime inventory has no global installation action");
 });
 
 function runtimeEntry(partial: Partial<WorkbenchRuntime> & Pick<WorkbenchRuntime, "version">): WorkbenchRuntime {
@@ -1156,7 +1156,7 @@ test("space actions render in contained mode and are disabled without mutation r
   await flush();
 });
 
-test("runtime tab shows pinned users and gates install/remove buttons", async () => {
+test("runtime tab shows pinned users and only offers removal for unused runtimes", async () => {
   const ctrl = controller(fakeApi({
     runtimes: async () => [
       runtimeEntry({ version: "0.2.0-rc.2", installed: true, host: true, pinnedBy: ["alpha", "beta"] }),
@@ -1170,7 +1170,7 @@ test("runtime tab shows pinned users and gates install/remove buttons", async ()
   await flush();
   const html = ready(ctrl);
   assert.ok(html.includes("被 Alpha、Beta 使用"));
-  assert.equal(html.split(t("zh", "runtime.install")).length - 1, 1, "install only for the missing non-host runtime");
+  assert.ok(!html.includes("预览安装"), "missing runtimes are installed only through a space version change");
   assert.equal(html.split(`>${t("zh", "runtime.remove")}<`).length - 1, 1, "remove only for the removable runtime");
 });
 
@@ -1708,6 +1708,23 @@ test("service shutdown is a preview, not acquire", async () => {
     kind: "plan.execute",
     planId: "plan-1",
   });
+});
+
+test("shutdown transport loss retains an unconfirmed result and never polls or resubmits through the stopped manager", async () => {
+  let submissions = 0;
+  const api = fakeApi({ submit: async () => { submissions++; throw new Error("transport closed"); } });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.preview({ kind: "service.shutdown" });
+  await flush();
+  const reads = api.calls.filter(item => item.method === "state").length;
+  ctrl.confirmPlan();
+  await flush();
+  await ctrl.poll();
+  assert.match(ctrl.getSnapshot().commandError ?? "", /尚未确认/);
+  assert.equal(ctrl.canMutate(), false);
+  assert.equal(api.calls.filter(item => item.method === "state").length, reads);
+  assert.equal(submissions, 1);
 });
 
 test("applyView rejects missing or non-hex serviceEpoch before minting src", () => {

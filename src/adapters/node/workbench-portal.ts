@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { parseSpaceHostAudience, type SpaceHostAudience } from "../../shared/space-host";
+import { parseSpaceHostAudience, parsePortalSnapshot, parsePortalFailure, nativePortalFailureHash,
+  PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT, type SpaceHostAudience } from "../../shared/space-host";
 
 /** Bounded, process-local, audience-bound entry grants. No disk state or cross-restart replay. */
 export class WorkbenchPortalGrants {
@@ -60,28 +61,48 @@ export function renderPortalPage(audience: SpaceHostAudience, managerOrigin: str
 "use strict";
 const audience = ${config};
 const native = ${JSON.stringify(native)};
+const failureCodes = ${JSON.stringify(PORTAL_FAILURE_CODES)};
+const PORTAL_FAILURE_REASONS = ${JSON.stringify(PORTAL_FAILURE_REASONS)};
+const PORTAL_FAILURE_CODES = failureCodes;
+const NATIVE_PORTAL_FAILURE_HASH_LIMIT = ${NATIVE_PORTAL_FAILURE_HASH_LIMIT};
+const parsePortalFailure = ${parsePortalFailure.toString()};
+const nativePortalFailureHash = ${nativePortalFailureHash.toString()};
+const parseSnapshot = ${parsePortalSnapshot.toString()};
 let lastNativeRequest = 0;
 let stopped = false, reading = false, preparing = false, timer, selectionTimer, readyTimer;
-let snapshot = null, managerView = null, frame = null, managerReady = false, viewReady = false, surfaceReady = false, pending = null;
+let snapshot = null, managerView = null, frame = null, managerReady = false, viewReady = false, surfaceReady = false, pending = null, forwarded = null;
 const lifetime = new AbortController();
 const send = (type, extra = {}) => {
   if (stopped) return;
   if (native) {
-    if (type === "failed") location.replace("#failed");
+    if (type === "failed") location.replace(nativePortalFailureHash(extra.failure) || "#failed");
     else if (type === "selected" || type === "selection-failed") {
       const target = extra.spaceId ?? pending?.spaceId;
       if (target && location.hash === "#select/" + extra.requestId + "/" + target) location.replace("#" + (type === "selected" ? "selected" : "rejected") + "/" + extra.requestId + "/" + target);
     }
   } else parent.postMessage({ source: "dsh-spaces-portal", channel: audience.channel, type, ...extra }, audience.parentOrigin);
 };
-const fail = () => { send("failed"); stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove(); };
+const fail = (reason, diagnostic = {}) => {
+  if (stopped) return;
+  send("failed", { failure: { reason,
+    ...(failureCodes.includes(diagnostic.code) ? { code: diagnostic.code } : {}),
+    ...(Number.isInteger(diagnostic.status) && diagnostic.status >= 100 && diagnostic.status <= 599 ? { status: diagnostic.status } : {}) } });
+  stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove();
+};
+class RequestFailure extends Error {
+  constructor(diagnostic) { super("Portal request failed"); this.diagnostic = diagnostic; }
+}
 async function api(method, payload) {
+  const deadline = AbortSignal.timeout(10000);
+  let status;
+  try {
   const response = await fetch("/api/workbench/" + method, {
     method: "POST", credentials: "include", redirect: "error",
     headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
-    signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)])
+    signal: AbortSignal.any([lifetime.signal, deadline])
   });
-  if (!response.ok || !response.body) throw new Error("Request failed");
+  status = response.status;
+  if (!response.body) throw new RequestFailure({ status, ...(response.ok ? { code: "portal/response-invalid" } : {}) });
   const reader = response.body.getReader(), decoder = new TextDecoder("utf-8", { fatal: true });
   let text = "", bytes = 0;
   try {
@@ -89,14 +110,26 @@ async function api(method, payload) {
       const chunk = await reader.read();
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
-      if (bytes > 4 * 1024 * 1024) throw new Error("Response too large");
-      text += decoder.decode(chunk.value, { stream: true });
+      if (bytes > 4 * 1024 * 1024) throw new RequestFailure({ status, code: "portal/response-invalid" });
+      try { text += decoder.decode(chunk.value, { stream: true }); }
+      catch { throw new RequestFailure({ status, code: "portal/response-invalid" }); }
     }
-    text += decoder.decode();
+    try { text += decoder.decode(); }
+    catch { throw new RequestFailure({ status, code: "portal/response-invalid" }); }
   } finally { await reader.cancel().catch(() => {}); }
-  const data = JSON.parse(text);
-  if (!data || data.ok !== true) throw new Error("Request failed");
+  let data;
+  try { data = JSON.parse(text); }
+  catch { throw new RequestFailure({ status, ...(response.ok ? { code: "portal/response-invalid" } : {}) }); }
+  if (!response.ok || data?.ok === false) {
+    throw new RequestFailure({ status, ...(failureCodes.includes(data?.error?.code) ? { code: data.error.code } : {}) });
+  }
+  if (!data || data.ok !== true || !Object.hasOwn(data, "value")) throw new RequestFailure({ status, code: "portal/response-invalid" });
   return data.value;
+  } catch (error) {
+    if (error instanceof RequestFailure) throw error;
+    throw new RequestFailure({ ...(status === undefined ? {} : { status }),
+      code: deadline.aborted ? "portal/request-deadline" : "portal/transport-failed" });
+  }
 }
 async function refresh() {
   if (stopped || reading) return;
@@ -104,20 +137,35 @@ async function refresh() {
   try {
     const state = await api("state", {});
     if (stopped) return;
-    if (!state || state.protocolVersion !== 2 || state.availability === "unavailable" ||
-        !Array.isArray(state.spaces) || state.spaces.length > 1000) throw new Error("Unavailable");
-    if (snapshot && snapshot.serviceEpoch !== state.serviceEpoch) throw new Error("Service changed");
-    if (managerView && !state.spaces.some(row => row.id === managerView.spaceId && row.generation === managerView.generation && row.status === "running")) throw new Error("Manager stopped");
-    snapshot = { serviceEpoch: state.serviceEpoch, managerId: state.managerId,
-      spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) };
+    if (!state || state.protocolVersion !== 2 || !["ready", "limited", "unavailable"].includes(state.availability) ||
+        !Array.isArray(state.spaces) || state.spaces.length > 1000 ||
+        state.spaces.some(row => !row || typeof row !== "object" || Array.isArray(row) || typeof row.hasWebApp !== "boolean")) {
+      fail("state-invalid"); return;
+    }
+    // Validate every projected row before publishing presentation data to the host.
+    const all = parseSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
+      spaces: state.spaces.map(row => ({ id: row.id, displayName: row.displayName, status: row.status,
+        generation: row.generation, ...(row.icon === undefined ? {} : { icon: row.icon }) })) });
+    if (!all) { fail("state-invalid"); return; }
+    if (snapshot && snapshot.serviceEpoch !== state.serviceEpoch) { fail("service-changed"); return; }
+    const previousManager = managerView || snapshot?.spaces.find(row => row.id === snapshot.managerId);
+    const manager = all.spaces.find(row => row.id === state.managerId);
+    if (!manager) { fail("manager-stopped"); return; }
+    if (previousManager && (state.managerId !== (managerView?.spaceId || previousManager.id) ||
+        manager.generation !== previousManager.generation)) { fail("manager-generation-changed"); return; }
+    if (manager.status !== "running") { fail("manager-stopped"); return; }
+    if (state.availability === "unavailable") { fail("state-request", { code: "workbench/unavailable" }); return; }
+    snapshot = { ...all, spaces: all.spaces.filter(row => state.spaces.find(item => item.id === row.id).hasWebApp) };
     send("state", { snapshot });
     if (native) nativeSelection();
-  } catch { fail(); } finally { reading = false; }
+  } catch (error) { fail(error instanceof RequestFailure && error.diagnostic.code !== "portal/response-invalid" ? "state-request" : "state-invalid",
+    error instanceof RequestFailure ? error.diagnostic : {}); } finally { reading = false; }
 }
 const rejected = (requestId, spaceId = pending?.spaceId) => send("selection-failed", { requestId, ...(native ? { spaceId } : {}) });
 function forwardSelection() {
-  if (!managerReady || !frame || !pending || stopped) return;
+  if (!managerReady || !frame || !pending || stopped || forwarded === pending) return;
   const request = pending;
+  forwarded = request;
   frame.contentWindow.postMessage({ source: "dsh-spaces-surface-parent", type: "select", requestId: request.requestId,
     serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
     channel: managerView.channel, target: request.spaceId }, audience.managerOrigin);
@@ -132,10 +180,10 @@ async function ensureManager() {
   try {
     const view = await api("view", { spaceId: row.id });
     if (stopped) return;
-    if (view.spaceId !== row.id || view.generation !== row.generation || view.serviceEpoch !== snapshot.serviceEpoch ||
+    if (!view || view.spaceId !== row.id || view.generation !== row.generation || view.serviceEpoch !== snapshot.serviceEpoch ||
         view.entryOrigin !== location.origin || view.origin !== audience.managerOrigin ||
         view.entryPath !== "/view/" + row.id + "/" + row.generation ||
-        typeof view.channel !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(view.channel)) throw new Error("Invalid manager view");
+        typeof view.channel !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(view.channel)) { fail("manager-view-invalid"); return; }
     managerView = view;
     frame = document.createElement("iframe");
     frame.title = "Spaces workbench";
@@ -150,8 +198,9 @@ async function ensureManager() {
         spaceId: view.spaceId, generation: view.generation, channel: view.channel }, view.origin);
     });
     document.getElementById("status").remove(); document.body.append(frame);
-    readyTimer = setTimeout(() => { if (!managerReady) fail(); }, 35000);
-  } catch { fail(); } finally { preparing = false; }
+    readyTimer = setTimeout(() => { if (!managerReady) fail("view-ready-timeout"); }, 35000);
+  } catch (error) { fail(error instanceof RequestFailure && error.diagnostic.code !== "portal/response-invalid" ? "manager-view-request" : "manager-view-invalid",
+    error instanceof RequestFailure ? error.diagnostic : {}); } finally { preparing = false; }
 }
 window.addEventListener("message", event => {
   if (stopped) return;
@@ -161,12 +210,18 @@ window.addEventListener("message", event => {
       message.serviceEpoch === managerView.serviceEpoch && message.spaceId === managerView.spaceId &&
       message.generation === managerView.generation && message.channel === managerView.channel) {
     if (message.source === "dsh-spaces-view") {
+      const keys = Object.keys(message).sort().join(",");
+      if (!["channel,generation,serviceEpoch,source,spaceId,state", "channel,generation,message,serviceEpoch,source,spaceId,state"].includes(keys) ||
+          ("message" in message && typeof message.message !== "string")) return;
       if (message.state === "ready") { viewReady = true; managerReady = surfaceReady; if (managerReady) { clearTimeout(readyTimer); forwardSelection(); } }
-      else if (message.state === "failed" || message.state === "disconnected") fail();
+      else if (message.state === "failed") fail("manager-view-failed");
+      else if (message.state === "disconnected") fail("manager-disconnected");
     } else if (message.source === "dsh-spaces-surface" && message.type === "ready") {
+      if (Object.keys(message).sort().join(",") !== "channel,generation,serviceEpoch,source,spaceId,type") return;
       surfaceReady = true; managerReady = viewReady;
       if (managerReady) { clearTimeout(readyTimer); forwardSelection(); }
     } else if (message.source === "dsh-spaces-surface" && pending && message.requestId === pending.requestId) {
+      if (Object.keys(message).sort().join(",") !== "channel,generation,requestId,serviceEpoch,source,spaceId,target,type") return;
       if (message.type === "selected" && message.target === pending.spaceId) {
         send("selected", { requestId: pending.requestId, spaceId: pending.spaceId }); pending = null; clearTimeout(selectionTimer);
       } else if (message.type === "selection-failed") { rejected(pending.requestId); pending = null; clearTimeout(selectionTimer); }

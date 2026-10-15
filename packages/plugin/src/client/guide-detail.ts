@@ -1,6 +1,5 @@
-/** Sanitize an internal reason for the guide: redact bearer tokens and absolute paths. */
+import { redactPublicReason } from "../../../../src/shared/public-reason";
+/** Presentation errors use the same bounded secret/path redaction as public server reasons. */
 export function publicGuideDetail(text: string): string {
-  return text
-    .replace(/\bBearer\s+[A-Za-z0-9._\-+=/]{16,}/g, "Bearer [redacted]")
-    .replace(/(?:[A-Za-z]:\\|\\\\)[^\s"'`<>]+/g, "[path]");
+  return redactPublicReason(text, 2000);
 }

@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useMemo, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import type {
   WorkbenchApi,
   WorkbenchJob,
+  WorkbenchRuntime,
   WorkbenchSpace,
   WorkbenchState,
   WorkbenchView,
@@ -11,13 +12,18 @@ import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../s
 import type { SpaceSharePreview } from "../../../src/shared/space-share";
 import type { Blueprint } from "../../../src/shared/blueprint";
 import { WorkbenchApp } from "../../../packages/plugin/src/workbench/app";
+import { WorkbenchView as WorkbenchRoot } from "../../../packages/plugin/src/workbench/components";
+import { WorkbenchController } from "../../../packages/plugin/src/workbench/store";
 
 declare global {
   interface Window {
-    __WB?: { supervisor: string; child: string };
+    __WB?: { supervisor: string; child: string; runtimeControls?: boolean };
     __iframe?: Element | null;
     __WB_CALLS?: Array<{ method: string; arg?: unknown }>;
     __WB_DOWNLOADS?: Array<{ fileName: string }>;
+    __WB_CONTROLLER?: WorkbenchController;
+    __WB_RESOLVE_RUNTIMES?: (runtimes: WorkbenchRuntime[]) => void;
+    __WB_SET_PIN?: (spaceId: string, version: string | null) => void;
   }
 }
 
@@ -258,6 +264,11 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
     spaces,
     jobs: [],
   };
+  if (window.__WB?.runtimeControls) {
+    window.__WB_SET_PIN = (spaceId, version) => {
+      state.spaces = state.spaces.map((row) => row.id === spaceId ? { ...row, dshVersion: version } : row);
+    };
+  }
   const view = (spaceId: string): WorkbenchView => ({
     serviceEpoch: EPOCH,
     spaceId,
@@ -331,7 +342,14 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
       bytes: 0,
       restorable: false,
     }),
-    runtimes: async () => [
+    runtimes: async () => window.__WB?.runtimeControls
+      ? new Promise<WorkbenchRuntime[]>((resolve) => {
+          window.__WB_RESOLVE_RUNTIMES = (runtimes) => {
+            delete window.__WB_RESOLVE_RUNTIMES;
+            resolve(runtimes);
+          };
+        })
+      : [
       { version: "0.1.5-rc.1", installed: true, host: true, pinnedBy: ["alpha"], removable: false, compatible: true },
       { version: "0.2.0", installed: false, host: false, pinnedBy: [], removable: false, compatible: true },
       { version: "0.3.0", installed: true, host: false, pinnedBy: [], removable: true, compatible: true },
@@ -340,12 +358,24 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
   };
 }
 
+function RuntimeTestHost({ api }: { api: WorkbenchApi }): React.ReactElement {
+  const controller = useMemo(() => new WorkbenchController(api), [api]);
+  const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  useEffect(() => {
+    window.__WB_CONTROLLER = controller;
+    controller.start();
+    return () => controller.stop();
+  }, [controller]);
+  return <WorkbenchRoot ui={ui} controller={controller} />;
+}
+
 const cfg = window.__WB;
 if (!cfg) throw new Error("missing __WB");
 const root = document.getElementById("root");
 if (!root) throw new Error("missing root");
-createRoot(root).render(
-  React.createElement(WorkbenchApp, {
+createRoot(root).render(cfg.runtimeControls
+  ? <RuntimeTestHost api={makeApi(cfg.supervisor, cfg.child)} />
+  : React.createElement(WorkbenchApp, {
     api: makeApi(cfg.supervisor, cfg.child),
     homeUrl: `${cfg.child}/home`,
     env: {

@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
 import { expectedAuthCookieName } from "../src/adapters/node/workbench-http.ts";
 import { mintSupervisorPortal } from "../packages/plugin/src/host/workbench-http.ts";
+import { renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
 
 const EPOCH = "aa".repeat(32), REVISION = "bb".repeat(32);
 async function serve(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) {
@@ -104,5 +105,104 @@ test("DOM: in-place rail keeps native DOM/drafts and the authenticated manager o
     mkdirSync(".sandbox/portable-host-evidence", { recursive: true });
     await page.screenshot({ path: ".sandbox/portable-host-evidence/failed.png" }).catch(() => undefined);
     throw error;
+  }
+});
+
+test("DOM: terminal portal causes retain exact iframe authentication and never reconnect", { timeout: 90000 }, async t => {
+  const bundle = await build({ entryPoints: [resolve("tests/fixtures/portable-host/client.tsx")], bundle: true,
+    write: false, format: "iife", platform: "browser", jsx: "automatic" });
+  const js = bundle.outputFiles[0].text;
+  let channel = "";
+  let parentOrigin = "", portalOrigin = "", managerOrigin = "", cause = "", stateReads = 0, viewReads = 0, portalMints = 0;
+  const state = { protocolVersion: 2, serviceEpoch: EPOCH, managerId: "spaces-hub", availability: "ready",
+    spaces: [{ id: "spaces-hub", displayName: "Manager", generation: 1, status: "running", hasWebApp: true },
+      { id: "alpha", displayName: "Alpha", generation: 1, status: "running", hasWebApp: true }] };
+  const view = () => ({ serviceEpoch: EPOCH, spaceId: "spaces-hub", generation: 1, channel: "manager-channel",
+    origin: managerOrigin, entryOrigin: portalOrigin, entryPath: "/view/spaces-hub/1" });
+  const manager = await serve((_req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<script>
+      const identity = ${JSON.stringify({ serviceEpoch: EPOCH, spaceId: "spaces-hub", generation: 1, channel: "manager-channel" })};
+      const origin = ${JSON.stringify(portalOrigin)};
+      window.report = (state, extra = {}) => parent.postMessage({ ...identity, source: "dsh-spaces-view", state, ...extra }, origin);
+      report("ready");
+      parent.postMessage({ ...identity, source: "dsh-spaces-surface", type: "ready" }, origin);
+      addEventListener("message", event => {
+        const message = event.data;
+        if (event.source !== parent || event.origin !== origin || message.source !== "dsh-spaces-surface-parent") return;
+        parent.postMessage({ ...identity, source: "dsh-spaces-surface", type: "selected",
+          requestId: message.requestId, target: message.target }, origin);
+      });
+    </script>`);
+  });
+  managerOrigin = manager.origin; t.after(() => manager.close());
+  const portal = await serve(async (req, res) => {
+    if (req.url?.startsWith("/api/workbench/")) {
+      if (req.url.endsWith("/view")) { viewReads++; json(res, { ok: true, value: view() }); return; }
+      stateReads++;
+      if (cause === "state-request") {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: { code: "workbench/unavailable", message: "private token must not be exposed" } })); return;
+      }
+      const value = cause === "state-invalid" ? { ...state, spaces: [{}] }
+        : cause === "service-changed" ? { ...state, serviceEpoch: "ff".repeat(32) }
+        : cause === "manager-generation-changed" ? { ...state, spaces: state.spaces.map(row => ({ ...row, generation: 2 })) }
+        : cause === "manager-stopped" ? { ...state, spaces: state.spaces.map(row => ({ ...row, status: "stopped" })) } : state;
+      json(res, { ok: true, value }); return;
+    }
+    if (req.url?.startsWith("/view/")) { res.writeHead(303, { location: managerOrigin }); res.end(); return; }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(renderPortalPage({ parentOrigin, channel }, managerOrigin));
+  });
+  portalOrigin = portal.origin; t.after(() => portal.close());
+  const parent = await serve(async (req, res) => {
+    if (req.url === "/client.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(js); return; }
+    if (req.url === "/guide/role") {
+      json(res, { role: "workspace", profileId: "entry", managerId: "spaces-hub", unavailable: false, reasons: [] }); return;
+    }
+    if (req.url === "/guide/portal") {
+      portalMints++; const audience = await body(req);
+      assert.equal(audience.parentOrigin, parentOrigin);
+      channel = audience.channel;
+      json(res, { available: true, unavailable: false, origin: portalOrigin,
+        path: "/portal-bootstrap/" + "a".repeat(32), reasons: [] }); return;
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<div id="root"><main id="native">Original application</main><div data-shell-overlay></div></div>
+      <script>window.__PORTABLE_FIXTURE__={role:"parent"};</script><script src="/client.js"></script>`);
+  });
+  parentOrigin = parent.origin; t.after(() => parent.close());
+  const browser = await chromium.launch({ headless: true,
+    ...process.env.DSH_TEST_CHROMIUM ? { executablePath: process.env.DSH_TEST_CHROMIUM } : {} });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ locale: "en-US" });
+  for (const reason of ["state-request", "state-invalid", "service-changed", "manager-generation-changed", "manager-stopped", "manager-disconnected"]) {
+    cause = ""; stateReads = viewReads = portalMints = 0;
+    await page.goto(parentOrigin);
+    await page.getByRole("button", { name: "Alpha", exact: true }).waitFor();
+    const entry = page.frames().find(frame => frame.url().startsWith(portalOrigin))!;
+    // The actual controller channel is generated by the production host.
+    await entry.evaluate(origin => {
+      window.parent.postMessage({ source: "dsh-spaces-portal", channel: "ff".repeat(16), type: "failed",
+        failure: { reason: "manager-disconnected" } }, origin);
+    }, parentOrigin);
+    assert.equal(await page.evaluate(() => (window as any).__portableController.getSnapshot().phase), "ready");
+    await page.getByRole("button", { name: "Alpha", exact: true }).click();
+    await page.waitForFunction(() => (window as any).__portableController.getSnapshot().visible === "portal");
+    const managerFrame = page.frames().find(frame => frame.url().startsWith(managerOrigin))!;
+    await managerFrame.evaluate(() => (window as any).report("disconnected", { token: "private unknown field" }));
+    assert.equal(await page.evaluate(() => (window as any).__portableController.getSnapshot().phase), "ready");
+    if (reason === "manager-disconnected") await managerFrame.evaluate(() => (window as any).report("disconnected"));
+    else cause = reason;
+    await page.waitForFunction(expected => (window as any).__portableController.getSnapshot().portalFailure?.reason === expected, reason);
+    await page.getByRole("button", { name: "Open space management", exact: true }).click();
+    const detail = await page.locator("[data-dsh-spaces-detail]").innerText();
+    assert.doesNotMatch(detail, /private|token|http:/);
+    assert.equal(await page.locator("[data-spaces-host-surface]").count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Alpha", exact: true }).count(), 0);
+    assert.equal(portalMints, 1); assert.equal(viewReads, 1);
+    const reads = stateReads;
+    await page.getByRole("button", { name: "Spaces Home", exact: true }).click();
+    assert.equal(stateReads, reads); assert.equal(portalMints, 1); assert.equal(viewReads, 1);
   }
 });
