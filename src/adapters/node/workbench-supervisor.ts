@@ -1,14 +1,8 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
+import { managedCliPrefix } from "./dsh-cli";
+import { assertSupportedNode } from "../../shared/node-version";
 import { createHash, randomBytes } from "node:crypto";
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  unlinkSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { SupervisorDashboard, DASHBOARD_LAUNCH_ENV } from "./dashboard/supervisor";
@@ -16,7 +10,7 @@ import { atomicWrite } from "./atomic";
 import { SpaceMessageRouter } from "./message-bus/router";
 import { CooperativeChildren } from "./cooperative-children";
 import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
-import { inspectHomeToolchain } from "./control-residue";
+import { hasUnfinishedMaintenance, inspectHomeToolchain } from "./control-residue";
 import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
 import { WorkbenchLog } from "./workbench-log";
 import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "./dsh-cli";
@@ -33,7 +27,7 @@ import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
 import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile-settings";
 import { installedComponentMatches, migrateProfileToAlpha } from "./profile-alpha-migration";
-import { cliLoadError, dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
+import { alignmentArchiveId, cliLoadError, dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
 import { SnapshotExecutor } from "./snapshot-executor";
 import { setPackageSource, setToolchainRoot } from "./toolchain";
 import type { ProfileStatus } from "../../shared/types";
@@ -183,7 +177,7 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "dashboard.publication.set",
 ]);
 const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume", "space.verify"]);
-const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.upgrade"]);
+const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.install", "runtime.upgrade"]);
 
 /**
  * Independent web supervisor: stable 127.0.0.1 entry, HomeController run
@@ -214,7 +208,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly patchWriter: PatchWriter;
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
-  private readonly lifecycle = new SupervisorLifecycle();
+  private readonly lifecycle = new SupervisorLifecycle(() => this.assertRegistryReadable());
   private jobs: WorkbenchJobStore | undefined;
   private processes: ProcessManager | undefined;
   private spaces: NodeSpacesControl | undefined;
@@ -238,6 +232,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly llmOps: SupervisorLlm;
   private readonly dashboardHost: SupervisorDashboardHost;
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
+    assertSupportedNode();
     this.options = { ...options };
     this.home = canonicalHome(options.home, { allowRealHome: options.allowRealHome });
     if (options.allowRealHome) authorizeProductHome(this.home);
@@ -418,6 +413,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     this.writeHostBearer();
     this.writeEndpointFile();
+    this.lifecycle.initializing = true;
     try {
       await this.initWritable();
     } catch {
@@ -426,6 +422,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         ...this.lifecycle.reasons,
         WRITABLE_STARTUP_FAILED_REASON,
       ];
+    } finally {
+      this.lifecycle.initializing = false;
     }
   }
 
@@ -580,6 +578,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async state(): Promise<WorkbenchState> {
+    if (this.lifecycle.registryFailure) throw new WorkbenchPublicError("workbench/unavailable", this.lifecycle.registryFailure);
     this.refreshAvailability(false);
     const owner = this.lifecycle.maintenanceFlag && this.lifecycle.handle
       ? { kind: this.lifecycle.handle.owner.kind, since: this.lifecycle.handle.owner.startedAt }
@@ -643,6 +642,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.lifecycle.activeJobId = requestId;
       return this.observeChildWork(async () => {
         try {
+          this.lifecycle.assertWritable();
           this.assertLiveContext(parsedContext);
           return await this.runCommand(parsedCommand, ctx);
         } finally {
@@ -743,6 +743,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async initWritable(): Promise<void> {
+    this.assertRegistryReadable();
+    this.assertManagerBootstrapNotInterrupted();
     this.bindToolchain();
     mkdirSync(this.controlDir, { recursive: true });
     const identity = await this.controller.ensureManager();
@@ -758,8 +760,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.refreshAvailability();
       return;
     }
-    const bootstrapPending = this.ownsBootstrap(identity.profileId);
-    if (this.managerInstall === "ordinary" && !bootstrapPending) {
+    if (this.managerInstall === "ordinary") {
       this.lifecycle.blocked = true;
       this.lifecycle.reasons = [
         "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
@@ -774,7 +775,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       return;
     }
     let managerDump: string | undefined;
-    if (this.managerInstall === "missing" || bootstrapPending) {
+    if (this.managerInstall === "missing") {
       if (!this.cli) {
         this.lifecycle.blocked = true;
         this.lifecycle.reasons = ["A compatible DSH CLI is required before the manager profile can be created."];
@@ -786,11 +787,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
         this.lifecycle.blocked = true;
-        this.lifecycle.reasons = ["Manager initialization did not complete. Its local diagnostic record is available."];
+        this.lifecycle.managerBootstrapFailure = "Manager initialization did not complete. Its local diagnostic record is available.";
+        this.lifecycle.reasons = [this.lifecycle.managerBootstrapFailure];
         atomicWrite(join(this.controlDir, "manager-bootstrap-error.json"), `${JSON.stringify({
           version: 1, at: this.now().toISOString(),
           detail: sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 4000),
         })}\n`);
+        return;
       }
     }
     const loader = this.managerId
@@ -808,9 +811,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       } catch (error) {
         this.lifecycle.blocked = true;
         const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
-        this.lifecycle.reasons.push(`The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim());
+        this.lifecycle.managerStartFailure = `The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim();
+        this.lifecycle.reasons.push(this.lifecycle.managerStartFailure);
       }
     }
+    // Initialization and alignment have settled before admitting normal work,
+    // including the initial manager start through the same writable boundary.
+    this.lifecycle.initializing = false;
     this.refreshAvailability();
 
     if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.runs.unmanaged.has(identity.profileId)) {
@@ -920,17 +927,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
    */
   private async bootstrapManager(profileId: string, lockHeld = false): Promise<string | undefined> {
     const initialize = async () => this.observeChildWork(async (): Promise<string | undefined> => {
+      this.assertManagerBootstrapNotInterrupted();
       const existing = inspectManagerInstall(this.home, profileId);
-      const pending = this.ownsBootstrap(profileId);
-      if ((existing === "ordinary" && !pending) || existing === "damaged") {
+      if (existing === "ordinary" || existing === "damaged") {
         throw new WorkbenchPublicError(
           "workbench/protected",
           "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
         );
       }
-      if (existing === "manager" && !pending) return undefined;
+      if (existing === "manager") return undefined;
       const marker = join(this.controlDir, "manager-bootstrap.json");
-      if (!pending) atomicWrite(marker, `${JSON.stringify({ version: 1, profileId })}\n`);
+      atomicWrite(marker, `${JSON.stringify({ version: 1, profileId })}\n`);
       // Clone the shipped preset directly into the dedicated manager. Reading
       // the shipped web profile through the CLI would materialize user defaults.
       if (existing === "missing") {
@@ -1022,14 +1029,17 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
-  private ownsBootstrap(profileId: string): boolean {
+  private assertManagerBootstrapNotInterrupted(): void {
     const marker = join(this.controlDir, "manager-bootstrap.json");
-    if (!existsSync(marker)) return false;
     try {
-      const record = JSON.parse(readFileSync(marker, "utf8"));
-      if (record.version === 1 && record.profileId === profileId) return true;
-    } catch { /* Keep unreadable evidence and fail closed. */ }
-    throw new WorkbenchPublicError("workbench/unavailable", "The manager bootstrap record requires offline inspection.");
+      lstatSync(marker);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    }
+    const reason = "Manager initialization was interrupted. Its evidence was retained and the installation was not replayed.";
+    this.lifecycle.managerBootstrapFailure = reason;
+    this.lifecycle.addReason(reason);
+    throw new WorkbenchPublicError("workbench/unavailable", reason);
   }
 
   private artifactDigest(artifact: string): string {
@@ -1037,7 +1047,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async installArtifact(profileId: string, artifact: string, id: string): Promise<void> {
-    const dest = archiveAbsPath(this.home, id);
+    const profileDir = join(this.home, "profiles", profileId);
+    const canonicalDest = archiveAbsPath(this.home, id);
+    // A malformed profile manifest fails before the copy and the one add.
+    // The dependency path may be the canonical archive or the same source digest with -r1.
+    // Installed content is the alignment coordinate, not that path.
+    const chosen = alignmentArchiveId(profileDir, id, canonicalDest);
+    const dest = archiveAbsPath(this.home, chosen);
     assertOwnedProfilePath(this.home, dest);
     mkdirSync(dirname(dest), { recursive: true });
     copyFileSync(resolve(artifact), dest);
@@ -1076,6 +1092,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         try { child = spawnFn(args, { ...options, env }); }
         catch (error) { this.instances.removeInstanceRecord(profile); throw error; }
         if (child.pid) {
+          this.llmOps.attachChild(profile, child, this.runs.generation(profile), this.currentServiceEpoch());
           if (profile !== this.managerId) this.messageBus.attach(profile, child);
           this.runs.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
           try { this.instances.writeInstanceRecord(profile, port, this.runs.generation(profile)); }
@@ -1283,7 +1300,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const ref = selected
       ? { bin: selected.bin, version: selected.version }
       : readRuntimeRef(this.cli?.bin) ?? (this.cli ? { bin: this.cli.bin, version: this.cli.version } : undefined);
-    return describeRuntime(ref);
+    return describeRuntime(ref, selected?.origin === "store" ? join(this.runtimeRoot(), "versions", selected.version) : selected?.origin === "managed" ? managedCliPrefix() : undefined);
   }
 
   private pinnedDshVersion(spaceId: string): string | undefined {
@@ -1444,6 +1461,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     ctx.phase("start");
     ctx.cancellable(true);
     const id = this.requireSpace(spaceId);
+    if (id === this.managerId && this.lifecycle.managerStartFailure) {
+      throw new WorkbenchPublicError("workbench/unavailable", this.lifecycle.managerStartFailure);
+    }
     if (id === "web" || id === "desktop") throw new WorkbenchPublicError("workbench/protected");
     if (this.runs.unmanaged.has(id)) throw new WorkbenchPublicError("workbench/unmanaged");
     if (this.statusOf(id) === "running") {
@@ -1582,7 +1602,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   private async stopOwnedAll(): Promise<void> {
     if (!this.processes) return;
-    const names = this.ownedSpaceIds().filter((id) => !this.runs.unmanaged.has(id));
+    const names = [...new Set([...this.runs.spawned.keys(), ...this.runs.views.keys()])]
+      .filter((id) => !this.runs.unmanaged.has(id));
     for (const name of names) {
       try {
         await this.stopOwned(name);
@@ -1612,8 +1633,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         });
         records.sort((a, b) => compareScannedProfiles(a, b, spaces.order));
       }
-    } catch {
-      return [];
+    } catch (error) {
+      throw this.registryReadFailure(error);
     }
     return records
       .map((row) => {
@@ -1632,6 +1653,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           dshVersion: row.name === this.managerId ? null : (row.meta.dshVersion ?? null),
         } satisfies WorkbenchSpace;
       });
+  }
+
+  private assertRegistryReadable(): void {
+    try {
+      this.registry.readSpaces();
+    } catch (error) {
+      throw this.registryReadFailure(error);
+    }
+  }
+
+  private registryReadFailure(error: unknown): WorkbenchPublicError {
+    const detail = error instanceof Error ? error.message : "Unknown read failure.";
+    this.lifecycle.registryFailure ??= `Space registry could not be read: ${redactPublicReason(sanitizeLogText(detail))} Further changes are blocked.`;
+    this.lifecycle.blocked = true;
+    this.lifecycle.addReason(this.lifecycle.registryFailure);
+    return new WorkbenchPublicError("workbench/unavailable", this.lifecycle.registryFailure);
   }
 
   private publicStatus(name: string): WorkbenchSpace["status"] {
@@ -1847,21 +1884,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       extra.push("The manager profile cannot be used.");
     }
     if (this.runs.unmanaged.size) extra.push("Leftover processes were not adopted.");
-    if (this.lifecycle.maintenanceBlocked) extra.push(STOP_KEPT_REASON);
+    if (this.lifecycle.maintenanceBlocked && !this.lifecycle.shutdownFailure) extra.push(STOP_KEPT_REASON);
     this.lifecycle.applyDerivedReasons(extra, latchBlock);
   }
 
   private hasMaintenanceEvidence(): boolean {
-    return [
-        join(this.home, ".dsh-spaces-restore", "journal.json"),
-        join(this.home, ".dsh-spaces-upgrade", "journal.json"),
-        join(this.home, ".dsh-spaces-mutation.json"),
-        join(this.controlDir, "plugin-mutation.json"),
-        join(this.controlDir, "workbench-upgrade.json"),
-    ].some(path => {
-        try { lstatSync(path); return true; }
-        catch (error) { return (error as NodeJS.ErrnoException).code !== "ENOENT"; }
-    });
+    return hasUnfinishedMaintenance(this.home, this.snapshotRoot());
   }
 
   private heldReasons(inspection: ReturnType<HomeController["inspect"]>): string[] {

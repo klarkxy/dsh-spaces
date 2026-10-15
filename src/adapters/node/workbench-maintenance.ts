@@ -1,15 +1,7 @@
+import { lstatSync } from "../../shared/node/filesystem";
 import { createHash, randomUUID } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import {
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { atomicWrite } from "./atomic";
 import { applyXpEmbedCompatibility, XP_EMBED_COMPATIBILITY_NOTE, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from "./xp-compatibility";
@@ -39,7 +31,7 @@ import { sanitizeJobText, WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
 import { isExactRuntimeVersion, SPACES_MIN_DSH_VERSION } from "../../shared/runtime";
 import { lt as semverLt } from "semver";
-import { dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
+import { dshPeerRangesFromProfile, unmetDshPeers, unmetInstalledThirdPartyDshPeers } from "./component-cli";
 import { runBatch } from "../../shared/batch";
 import { type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
@@ -164,7 +156,6 @@ type ResolvedCommand =
   | { kind: "snapshot.delete"; snapshotId: string }
   | { kind: "config.restore"; spaceId: string; backupId: string }
   | { kind: "space.runtime.set"; spaceId: string; version: string }
-  | { kind: "runtime.install"; version: string }
   | { kind: "runtime.remove"; version: string };
 
 type PlanStatus = "previewed" | "running" | "succeeded" | "failed" | "cancelled";
@@ -477,10 +468,6 @@ export class WorkbenchMaintenance {
         }
         case "config.restore":
           throw new WorkbenchMaintenanceError("workbench/unsupported");
-        case "runtime.install": {
-          const version = stored.command.version;
-          return await this.finishPlan(stored, () => withIrreversible(() => this.runRuntimeInstall(version, ctx)));
-        }
         case "space.runtime.set": {
           const command = stored.command;
           return await this.finishPlan(stored, () =>
@@ -529,8 +516,6 @@ export class WorkbenchMaintenance {
         return this.planSnapshotDelete(id, createdAt, expiresAt, request.snapshotId);
       case "space.runtime.set":
         return this.planSpaceRuntimeSet(id, createdAt, expiresAt, request);
-      case "runtime.install":
-        return this.planRuntimeInstall(id, createdAt, expiresAt, request.version);
       case "runtime.remove":
         return this.planRuntimeRemove(id, createdAt, expiresAt, request.version);
       default:
@@ -713,25 +698,24 @@ export class WorkbenchMaintenance {
     });
   }
 
-  private planRuntimeInstall(id: string, createdAt: string, expiresAt: string, version: string): StoredPlan {
-    const exact = requireExactVersion(version);
-    const command: ResolvedCommand = { kind: "runtime.install", version: exact };
-    const compatible = this.ports.isCompatibleRuntime(exact);
-    return this.storeable(id, createdAt, expiresAt, command, {
-      kind: "runtime.install",
-      title: `Install runtime ${exact}`,
-      scope: "home",
-      affectedSpaceIds: this.owned(),
-      runningSpaceIds: [],
-      changes: [
-        `Install runtime ${exact} without switching the current runtime.`,
-        compatible
-          ? "This version is marked compatible."
-          : "This version is not marked compatible and remains an unverified candidate.",
-      ],
-      destructive: false,
-      expiresAt,
-    });
+
+  private rejectUnsupportedRuntimePeers(spaceId: string, version: string): void {
+    const profileDir = join(this.ports.home, "profiles", spaceId);
+    let unmet: string[];
+    try {
+      unmet = [
+        ...unmetDshPeers(version, dshPeerRangesFromProfile(profileDir)),
+        ...unmetInstalledThirdPartyDshPeers(profileDir, version),
+      ];
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new WorkbenchMaintenanceError("workbench/invalid-input", detail);
+    }
+    if (unmet.length === 0) return;
+    throw new WorkbenchMaintenanceError(
+      "workbench/invalid-input",
+      `These plugins do not support DSH ${version}: ${unmet.join(", ")}. Remove or upgrade them first.`,
+    );
   }
 
   private async planSpaceRuntimeSet(
@@ -752,13 +736,7 @@ export class WorkbenchMaintenance {
     if (pin && semverLt(version, pin)) {
       throw new WorkbenchMaintenanceError("workbench/invalid-input", "Downgrading a space's DSH version is not allowed.");
     }
-    const unmet = unmetDshPeers(version, dshPeerRangesFromProfile(join(this.ports.home, "profiles", spaceId)));
-    if (unmet.length) {
-      throw new WorkbenchMaintenanceError(
-        "workbench/invalid-input",
-        `These plugins do not support DSH ${version}: ${unmet.join(", ")}. Remove or upgrade them first.`,
-      );
-    }
+    this.rejectUnsupportedRuntimePeers(spaceId, version);
     const runningSpaceIds = this.runningOf([spaceId]);
     const command: ResolvedCommand = { kind: "space.runtime.set", spaceId, version };
     const willDownload = !this.runtimeBinFor(version);
@@ -985,6 +963,7 @@ export class WorkbenchMaintenance {
   }
 
   private async runSnapshotCreate(ctx: WorkbenchJobContext): Promise<WorkbenchJobResult> {
+    const runtime = this.ports.currentRuntime();
     return this.withMaintenance(ctx, async () => {
       ctx.phase("stop");
       ctx.cancellable(true);
@@ -995,7 +974,7 @@ export class WorkbenchMaintenance {
       ctx.cancellable(false);
       ctx.phase("snapshot");
       ctx.message("Creating a whole-home snapshot.");
-      const meta = await this.ports.snapshots.create(this.ports.currentRuntime(), "workbench");
+      const meta = await this.ports.snapshots.create(runtime, "workbench");
       ctx.result({ snapshotId: meta.id });
       return { snapshotId: meta.id };
     });
@@ -1008,22 +987,12 @@ export class WorkbenchMaintenance {
     await this.ports.snapshots.delete(snapshotId);
   }
 
-  private async runRuntimeInstall(version: string, ctx: WorkbenchJobContext): Promise<WorkbenchJobResult> {
-    ctx.phase("install");
-    ctx.cancellable(true);
-    this.throwIfAborted(ctx);
-    ctx.cancellable(false);
-    ctx.message(`Installing runtime ${version}.`);
-    const installed = await this.ports.runtimes.install(version);
-    ctx.result({ runtimeVersion: installed.version });
-    return { runtimeVersion: installed.version };
-  }
-
   private async runSpaceRuntimeSet(
     command: Extract<ResolvedCommand, { kind: "space.runtime.set" }>,
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchJobResult> {
     const { spaceId, version } = command;
+    this.rejectUnsupportedRuntimePeers(spaceId, version);
     const wasRunning = this.runningOf([spaceId]).length > 0;
     if (wasRunning) {
       ctx.phase("stop");
@@ -1411,6 +1380,9 @@ export class WorkbenchMaintenance {
       if (parsed.schemaVersion !== PLAN_SCHEMA || parsed.id !== id || !parsed.public || !parsed.command) {
         throw new WorkbenchMaintenanceError("workbench/invalid-input");
       }
+      if ((parsed.command as { kind?: unknown }).kind === "runtime.install") {
+        throw new WorkbenchMaintenanceError("workbench/unsupported");
+      }
       if (!isPlanStatus(parsed.status)) throw new WorkbenchMaintenanceError("workbench/invalid-input");
       if (typeof parsed.createdAt !== "string" || !ISO_DATE_RE.test(parsed.createdAt)) {
         throw new WorkbenchMaintenanceError("workbench/invalid-input");
@@ -1671,10 +1643,6 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(input, ["kind", "snapshotId"]);
       return { kind, snapshotId: parseSnapshotId(input.snapshotId) };
     }
-    case "runtime.install": {
-      expectKeys(input, ["kind", "version"]);
-      return { kind, version: requireExactVersion(input.version) };
-    }
     case "space.runtime.set": {
       expectKeys(input, ["kind", "spaceId", "version"]);
       return { kind, spaceId: parseSpaceId(input.spaceId), version: requireExactVersion(input.version) };
@@ -1684,6 +1652,7 @@ function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       return { kind, version: requireExactVersion(input.version) };
     }
     case "runtime.upgrade":
+    case "runtime.install":
       throw new WorkbenchMaintenanceError("workbench/unsupported");
     case "controller.release":
     case "controller.shutdown":
@@ -1714,8 +1683,6 @@ function requestFromCommand(command: ResolvedCommand): WorkbenchPlanRequest {
       throw new WorkbenchMaintenanceError("workbench/unsupported");
     case "snapshot.delete":
       return { kind: command.kind, snapshotId: command.snapshotId };
-    case "runtime.install":
-      return { kind: command.kind, version: command.version };
     case "space.runtime.set":
       return { kind: command.kind, spaceId: command.spaceId, version: command.version };
     case "runtime.remove":

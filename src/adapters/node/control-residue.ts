@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { lstatSync } from "../../shared/node/filesystem";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { defaultPidAlive, HOME_CONTROL_DIR_NAME, type PidAliveFn } from "./home-controller";
 import { readRuntimeRef } from "./runtime-descriptor";
 
@@ -27,6 +28,32 @@ export type HomeToolchainInspect =
   | { kind: "absent" }
   | { kind: "invalid"; reason: string }
   | VerifiedHomeToolchain;
+
+/** Any interrupted Home maintenance evidence blocks a new writer, even when unreadable. */
+export function hasUnfinishedMaintenance(home: string, snapshotRoot?: string): boolean {
+  const toolchain = inspectHomeToolchain(home);
+  if (toolchain.kind === "invalid") return true;
+  const root = (toolchain.kind === "verified" ? toolchain.snapshotRoot : undefined) ??
+    snapshotRoot ?? join(resolve(home, ".."), `${basename(home)}-snapshots`);
+  try {
+    const stat = lstatSync(root);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+  }
+  return [
+    join(root, "pending-restore.json"),
+    join(home, ".dsh-spaces-restore", "journal.json"),
+    join(home, HOME_UPGRADE_STAGE_DIR, HOME_UPGRADE_JOURNAL_FILE),
+    join(home, HOME_MUTATION_JOURNAL),
+    join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json"),
+    join(home, HOME_CONTROL_DIR_NAME, "workbench-upgrade.json"),
+    join(home, HOME_CONTROL_DIR_NAME, "manager-bootstrap.json"),
+  ].some(path => {
+    try { lstatSync(path); return true; }
+    catch (error) { return (error as NodeJS.ErrnoException).code !== "ENOENT"; }
+  });
+}
 
 /** Read-only scan of leftover control-dir work. Never writes or kills. */
 export function inspectControlResidue(

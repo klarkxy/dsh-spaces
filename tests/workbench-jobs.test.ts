@@ -1,4 +1,7 @@
+import { sanitizeJobText } from "../src/adapters/node/workbench-jobs.ts";
 import assert from "node:assert/strict";
+import { LLM_ERROR, LlmConfigError } from "../src/core/domain/llm-connections.ts";
+import { WorkbenchPublicError } from "../src/adapters/node/supervisor/errors.ts";
 import {
   existsSync,
   mkdirSync,
@@ -129,6 +132,118 @@ test("handler failure is a failed job and does not block later work", async () =
   assert.equal(store.job("later").status, "succeeded");
 });
 
+test("structured failure reasons survive public projection, persistence and reload", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  const failures = [
+    { id: "stale-epoch", code: "workbench/conflict", message: "The service epoch or state revision does not match." },
+    { id: "missing-space", code: "workbench/not-found", message: "That item was not found." },
+    { id: "upstream-code", code: "DSH_BUNDLE_MISSING", message: "Cannot resolve the profile bundle.", expectedCode: "workbench/failed" },
+    { id: "permission", code: "workbench/failed", message: "EACCES: permission denied, lstat 'C:\\private\\snapshot' token=test-token password=test-password", expected: "EACCES: permission denied, lstat '[path]' token=[redacted] password=[redacted]" },
+  ];
+  for (const failure of failures) {
+    await store.submit(startCmd(), failure.id, async () => { throw { code: failure.code, message: failure.message }; });
+  }
+  await store.whenIdle();
+  const reloaded = new WorkbenchJobStore({ home });
+  for (const failure of failures) {
+    const expected = failure.expected ?? failure.message;
+    for (const current of [store, reloaded]) {
+      const job = current.job(failure.id);
+      assert.equal(job.status, "failed");
+      assert.equal(job.error?.code, failure.expectedCode ?? failure.code);
+      assert.equal(job.error?.message, expected);
+      assert.equal(job.message, expected);
+      assert.equal(current.list().find(item => item.id === failure.id)?.error?.message, expected);
+    }
+    const stored = JSON.parse(readFileSync(jobFile(home, failure.id), "utf8"));
+    assert.equal(stored.error.message, expected);
+  }
+});
+
+test("DSH bundle failures keep the reason without upstream install advice", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "missing-bundle", async () => {
+    throw new Error('dsh: cannot resolve profile bundle "@dsh-spaces/qa-missing-dependency" from the dsh installation or C:\\private\\profile; run \'dsh plugin --profile space-qa-failure install\' if its dependency is not installed');
+  });
+  await store.whenIdle();
+  const expected = 'dsh: cannot resolve profile bundle "@dsh-spaces/qa-missing-dependency" from the dsh installation or [path]';
+  for (const current of [store, new WorkbenchJobStore({ home })]) {
+    assert.equal(current.job("missing-bundle").message, expected);
+    assert.equal(current.job("missing-bundle").error?.message, expected);
+  }
+});
+
+test("quoted and serialized credentials are redacted before persistence and on historical readback", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  const messages = [
+    'upstream rejected {"password":"synthetic-private-password","token":"synthetic-private-token"}',
+    String.raw`upstream rejected {"access_token":"synthetic-private-escaped\"tail","apiKey":"synthetic-private-api"}`,
+    "upstream rejected {'password':'synthetic-private-single','accessKey':'synthetic-private-key'}",
+    String.raw`upstream rejected {\"token\":\"synthetic-private-serialized\"}`,
+    String.raw`upstream rejected {"to\u006ben":"synthetic-private-unicode"}`,
+    '{"reason":"password=synthetic-private-nested"}',
+    "{'reason':'password=synthetic-private-single-nested'}",
+    'upstream rejected {"authorization":"Basic synthetic-private-basic","cookie":"a=synthetic-private-cookie; b=value"}',
+    '{"headers":{"set-cookie":["sid=synthetic-private-array; HttpOnly"]}}',
+    '{"token":{"value":"synthetic-private-object"}}',
+    String.raw`{"to\u006ben":["synthetic-private-unicode-array"]}`,
+    "apiKey: |\n  synthetic-private-yaml-block",
+    "password: >-\n  synthetic-private-yaml-folded",
+    "token: first-line\n  synthetic-private-yaml-continuation",
+    JSON.stringify({ diagnostic: "apiKey: |\n  synthetic-private-nested-yaml-block" }),
+    JSON.stringify({ diagnostic: "password: >-\n  synthetic-private-nested-yaml-folded" }),
+    JSON.stringify({ diagnostic: "token: first-line\n  synthetic-private-nested-yaml-continuation" }),
+    JSON.stringify({ diagnostic: '{"token":["synthetic-private-nested-array"]}' }),
+    JSON.stringify("apiKey: |\n  synthetic-private-standalone-yaml"),
+    JSON.stringify(["apiKey: |\n  synthetic-private-array-yaml"]),
+    JSON.stringify({ diagnostics: ["apiKey: |\n  synthetic-private-field-array-yaml"] }),
+  ];
+  for (const [index, message] of messages.entries()) {
+    await store.submit(startCmd(), `secret-form-${index}`, async () => { throw { code: "NPM_FAILURE", message }; });
+  }
+  await store.whenIdle();
+  for (const [index, message] of messages.entries()) {
+    const id = `secret-form-${index}`;
+    const file = jobFile(home, id);
+    assert.doesNotMatch(readFileSync(file, "utf8"), /synthetic-private/);
+    for (const current of [store, new WorkbenchJobStore({ home })]) {
+      assert.doesNotMatch(JSON.stringify(current.job(id)), /synthetic-private/);
+      assert.doesNotMatch(JSON.stringify(current.list()), /synthetic-private/);
+    }
+    // Existing records are evidence, not a migration target. Public projection
+    // must still be safe when opening an older unredacted terminal record.
+    const record = JSON.parse(readFileSync(file, "utf8"));
+    record.error.message = message; record.message = message;
+    const bytes = JSON.stringify(record);
+    writeFileSync(file, bytes);
+    assert.doesNotMatch(JSON.stringify(new WorkbenchJobStore({ home }).job(id)), /synthetic-private/);
+    assert.equal(readFileSync(file, "utf8"), bytes);
+  }
+});
+
+test("reported failure text remains bounded and chat payloads do not become reasons", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "long-reason", async () => {
+    throw { code: "workbench/conflict", message: `State changed: ${"x".repeat(800)}` };
+  });
+  await store.submit(startCmd(), "chat-payload", async () => {
+    throw { code: "workbench/failed", message: '{"role":"user","content":"private-chat-sentinel"}' };
+  });
+  await store.submit(startCmd(), "empty-reason", async () => { throw { code: "workbench/not-found" }; });
+  await store.whenIdle();
+  for (const current of [store, new WorkbenchJobStore({ home })]) {
+    assert.equal(current.job("long-reason").error?.message.length, 500);
+    assert.match(current.job("long-reason").error?.message ?? "", /^State changed:/);
+    assert.equal(current.job("chat-payload").error?.message, WORKBENCH_JOB_ERROR["workbench/failed"]);
+    assert.equal(current.job("empty-reason").error?.message, WORKBENCH_JOB_ERROR["workbench/not-found"]);
+  }
+  assert.equal(readFileSync(jobFile(home, "chat-payload"), "utf8").includes("private-chat-sentinel"), false);
+});
+
 test("same request id with a different payload is rejected", async () => {
   const store = new WorkbenchJobStore({ home: tempHome() });
   const gate = latch();
@@ -166,6 +281,32 @@ test("extra command fields are rejected instead of being ignored", async () => {
     },
   );
   assert.deepEqual(store.list(), []);
+});
+
+test("known LLM errors retain their code through public projection and reload", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "llm-busy-error", async () => {
+    throw new LlmConfigError(LLM_ERROR.SPACE_BUSY, "space is busy; it was not force-stopped", { spaceId: "alpha" });
+  });
+  await store.whenIdle();
+  assert.equal(store.job("llm-busy-error").error?.code, LLM_ERROR.SPACE_BUSY);
+  const reloaded = new WorkbenchJobStore({ home });
+  assert.equal(reloaded.job("llm-busy-error").error?.code, LLM_ERROR.SPACE_BUSY);
+});
+
+test("an unavailable alignment barrier retains its code and sanitized cause through reload", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "alignment-unavailable", async () => {
+    throw new WorkbenchPublicError("workbench/unavailable", "Manager alignment failed at H:\\private\\artifact.tgz token=synthetic");
+  });
+  await store.whenIdle();
+  for (const observed of [store, new WorkbenchJobStore({ home })]) {
+    assert.equal(observed.job("alignment-unavailable").error?.code, "workbench/unavailable");
+    assert.match(observed.job("alignment-unavailable").error?.message ?? "", /Manager alignment failed/);
+    assert.doesNotMatch(observed.job("alignment-unavailable").error?.message ?? "", /private|artifact\.tgz|synthetic/);
+  }
 });
 
 test("a persist failure before enqueue does not run the handler", async () => {
@@ -887,4 +1028,10 @@ test("detached descendant from a finished exclusive waits for a later exclusive"
     "second-end",
     "detached-admitted",
   ]);
+});
+
+test("public reasons omit complete Basic authorization and cookie headers",()=>{
+ for(const header of ["Authorization: Basic c3ludGhldGljOm9ubHk=","Cookie: sid=synthetic-one; remember=synthetic-two"]){
+ const out=sanitizeJobText(header); assert.doesNotMatch(out,/c3ludGhldGlj|synthetic-one|synthetic-two/); assert.match(out,/redacted/);
+ }
 });

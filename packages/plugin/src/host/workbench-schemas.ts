@@ -296,7 +296,6 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshot.create") }).strict(),
   z.object({ kind: z.literal("snapshot.delete"), snapshotId: snapshotIdSchema }).strict(),
   z.object({ kind: z.literal("space.runtime.set"), spaceId: spaceIdSchema, version: exactVersionSchema }).strict(),
-  z.object({ kind: z.literal("runtime.install"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("runtime.remove"), version: exactVersionSchema }).strict(),
   z.object({ kind: z.literal("service.shutdown") }).strict(),
 ]);
@@ -316,7 +315,6 @@ export const workbenchPlanSchema = z
       "snapshot.create",
       "snapshot.delete",
       "space.runtime.set",
-      "runtime.install",
       "runtime.remove",
       "service.shutdown",
     ]),

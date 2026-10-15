@@ -38,6 +38,7 @@ import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
 import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
 import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
+import type { WorkbenchPlanRequest } from "../src/shared/workbench.ts";
 import type { ProfileStatus } from "../src/shared/types.ts";
 
 const BASE = "@deepseek-ai/dsh-base";
@@ -333,12 +334,22 @@ test("snapshot create is whole-home, stops owned spaces, and public DTO strips h
   assert.ok(existsSync(join(home, "profiles", "space-coding")));
 });
 
-test("runtime install of an incompatible version remains a candidate", async () => {
-  const { maintenance } = harness({ compatible: () => false });
-  const plan = await maintenance.preview({ kind: "runtime.install", version: "0.1.5-rc.2" });
-  assert.ok(plan.changes.some((line) => /unverified candidate/i.test(line)));
-  const result = await maintenance.execute(plan.id, jobCtx());
-  assert.equal(result?.runtimeVersion, "0.1.5-rc.2");
+test("global runtime install requests and saved legacy plans are unsupported without writes", async () => {
+  let installs = 0;
+  const { maintenance, home, state } = harness({ install: async () => { installs += 1; throw new Error("must not install"); } });
+  const removed = { kind: "runtime.install", version: "0.2.0-rc.2" };
+  await assert.rejects(() => maintenance.preview(removed as unknown as WorkbenchPlanRequest), matchCode("workbench/unsupported"));
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version: "0.2.0-rc.2" });
+  const path = join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`);
+  const legacy = JSON.parse(readFileSync(path, "utf8"));
+  legacy.command = removed;
+  legacy.public.kind = removed.kind;
+  const bytes = JSON.stringify(legacy);
+  writeFileSync(path, bytes);
+  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/unsupported"));
+  assert.equal(readFileSync(path, "utf8"), bytes);
+  assert.equal(installs, 0);
+  assert.deepEqual(state.stopped, []);
 });
 
 function writeRuntimeTree(version: string): { bin: string; root: string } {
@@ -390,6 +401,194 @@ test("space.runtime.set preview rejects invalid versions, protected targets, and
     "workbench/invalid-input",
     /These plugins do not support DSH 0\.9\.9: @deepseek-ai\/dsh@\^9\.9\.0\. Remove or upgrade them first\./,
   );
+});
+
+test("space.runtime.set rejects an installed third-party DSH peer before switch effects", async () => {
+  let installs = 0;
+  const { maintenance, home, state } = harness({
+    install: async () => {
+      installs += 1;
+      throw new Error("must not install");
+    },
+  });
+  const profile = join(home, "profiles", "space-coding");
+  const manifestPath = join(profile, "package.json");
+  const original = readFileSync(manifestPath, "utf8");
+  const plans = join(home, ".dsh-spaces-control", "plans");
+  const version = "0.2.1-alpha.2";
+  const reset = () => {
+    writeFileSync(manifestPath, original);
+    rmSync(join(profile, "node_modules"), { recursive: true, force: true });
+  };
+  const place = (name: string, options: { enabled?: boolean; declared?: boolean; peers?: Record<string, unknown>; extra?: Record<string, unknown>; raw?: string; omitManifest?: boolean }) => {
+    reset();
+    const manifest = JSON.parse(original) as { dependencies: Record<string, string>; dsh: { profile: { bundles: string[] } } };
+    if (options.declared !== false) manifest.dependencies[name] = "1.0.0";
+    const bundles = new Set(manifest.dsh.profile.bundles);
+    if (options.enabled) bundles.add(name);
+    manifest.dsh.profile.bundles = [...bundles];
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    if (options.omitManifest) return;
+    const dir = join(profile, "node_modules", ...name.split("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "index.js"), "export default {};\n");
+    writeFileSync(
+      join(dir, "package.json"),
+      options.raw ?? `${JSON.stringify({
+        name,
+        version: "1.0.0",
+        type: "module",
+        main: "index.js",
+        peerDependencies: options.peers ?? {},
+        ...options.extra,
+      })}\n`,
+    );
+  };
+  const rejectSwitch = async (pattern: RegExp) => {
+    await assert.rejects(() => maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version }), (error: unknown) => {
+      assert.ok(error instanceof WorkbenchMaintenanceError);
+      assert.equal(error.code, "workbench/invalid-input");
+      assert.match(error.message, pattern);
+      return true;
+    });
+    assert.equal(existsSync(plans), false);
+    assert.equal(installs, 0);
+    assert.deepEqual(state.stopped, []);
+    assert.deepEqual(state.started, []);
+    assert.equal(new ProfileRegistry(home).scan().find((row) => row.name === "space-coding")?.meta?.dshVersion, undefined);
+  };
+
+  place("acceptance-peer-fixture", {
+    peers: { "@deepseek-ai/dsh": "<0.1.0" },
+  });
+  await rejectSwitch(/acceptance-peer-fixture \(@deepseek-ai\/dsh@<0\.1\.0\)/);
+  assert.equal(
+    readFileSync(join(profile, "node_modules", "acceptance-peer-fixture", "package.json"), "utf8").includes('"<0.1.0"'),
+    true,
+  );
+
+  place("acceptance-peer-fixture", {
+    peers: { "@deepseek-ai/dsh": "<0.1.0" },
+    extra: { peerDependenciesMeta: { "@deepseek-ai/dsh": { optional: true } } },
+  });
+  await rejectSwitch(/acceptance-peer-fixture \(@deepseek-ai\/dsh@<0\.1\.0\)/);
+
+  place("acceptance-peer-fixture", {
+    enabled: true,
+    peers: { "@deepseek-ai/dsh": ">=0.2.1-alpha.2", "@deepseek-ai/dsh-client-connection": "<0.1.0" },
+  });
+  await rejectSwitch(/acceptance-peer-fixture \(@deepseek-ai\/dsh-client-connection@<0\.1\.0\)/);
+
+  place("../outside", { omitManifest: true });
+  await rejectSwitch(/not a package name/);
+  assert.equal(existsSync(join(profile, "outside", "package.json")), false);
+});
+
+test("space.runtime.set still accepts a compatible installed third-party plugin", async () => {
+  let installs = 0;
+  const { maintenance, home, state } = harness({
+    install: async () => {
+      installs += 1;
+      throw new Error("must not install");
+    },
+  });
+  const profile = join(home, "profiles", "space-coding");
+  const manifestPath = join(profile, "package.json");
+  const original = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    dependencies: Record<string, string>;
+    dsh: { profile: { bundles: string[] } };
+  };
+  const version = "0.2.1-alpha.2";
+  const place = (name: string, options: { enabled?: boolean; peers?: Record<string, string>; omitManifest?: boolean }) => {
+    rmSync(join(profile, "node_modules"), { recursive: true, force: true });
+    const manifest = structuredClone(original);
+    manifest.dependencies[name] = "1.0.0";
+    if (options.enabled) manifest.dsh.profile.bundles = [...manifest.dsh.profile.bundles, name];
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    if (options.omitManifest) return;
+    const dir = join(profile, "node_modules", ...name.split("/"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({
+      name,
+      version: "1.0.0",
+      peerDependencies: options.peers ?? {},
+    })}\n`);
+  };
+  const allow = async () => {
+    const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version });
+    assert.equal(plan.kind, "space.runtime.set");
+    assert.equal(installs, 0);
+    assert.deepEqual(state.stopped, []);
+    assert.equal(new ProfileRegistry(home).scan().find((row) => row.name === "space-coding")?.meta?.dshVersion, undefined);
+  };
+
+  place("acceptance-peer-fixture", { enabled: true, peers: { "@deepseek-ai/dsh": ">=0.2.1-alpha.2" } });
+  await allow();
+  place("acceptance-peer-fixture", { peers: { "@deepseek-ai/dsh": ">=0.2.1-alpha.2", react: "^19.0.0" } });
+  await allow();
+  place("acceptance-peer-fixture", { enabled: true, omitManifest: true });
+  await allow();
+  place("@deepseek-ai/dsh-base", { enabled: true, peers: { "@deepseek-ai/dsh": "<0.1.0" } });
+  await allow();
+});
+
+test("space.runtime.set execute rechecks a manifest changed after preview before stop or pin", async () => {
+  let installs = 0;
+  const { maintenance, home, state } = harness({
+    install: async () => {
+      installs += 1;
+      throw new Error("must not install");
+    },
+    installedBin: (version) => (version === "0.2.1-alpha.2" || version === "0.1.5-rc.1" ? "bin.js" : undefined),
+  });
+  const profile = join(home, "profiles", "space-coding");
+  const manifestPath = join(profile, "package.json");
+  const original = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+    dependencies: Record<string, string>;
+    dsh: { profile: { bundles: string[] } };
+  };
+  const version = "0.2.1-alpha.2";
+  const pluginDir = join(profile, "node_modules", "acceptance-peer-fixture");
+  const pluginManifest = join(pluginDir, "package.json");
+  const writePlugin = (range: string, enabled: boolean) => {
+    const manifest = structuredClone(original);
+    manifest.dependencies["acceptance-peer-fixture"] = "1.0.0";
+    manifest.dsh.profile.bundles = manifest.dsh.profile.bundles.filter((name) => name !== "acceptance-peer-fixture");
+    if (enabled) manifest.dsh.profile.bundles.push("acceptance-peer-fixture");
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(pluginManifest, `${JSON.stringify({
+      name: "acceptance-peer-fixture",
+      version: "1.0.0",
+      peerDependencies: { "@deepseek-ai/dsh": range },
+    })}\n`);
+  };
+
+  writePlugin(">=0.2.1-alpha.2", true);
+  assert.equal(state.status["space-coding"], "running");
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version });
+  writePlugin("<0.1.0", false);
+  await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), (error: unknown) => {
+    assert.ok(error instanceof WorkbenchMaintenanceError);
+    assert.equal(error.code, "workbench/invalid-input");
+    assert.match(error.message, /acceptance-peer-fixture \(@deepseek-ai\/dsh@<0\.1\.0\)/);
+    return true;
+  });
+  assert.equal(installs, 0);
+  assert.deepEqual(state.stopped, []);
+  assert.deepEqual(state.started, []);
+  assert.equal(state.status["space-coding"], "running");
+  assert.equal(new ProfileRegistry(home).scan().find((row) => row.name === "space-coding")?.meta?.dshVersion, undefined);
+  assert.match(readFileSync(pluginManifest, "utf8"), /<0\.1\.0/);
+  assert.equal(JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`), "utf8")).status, "previewed");
+
+  state.status["space-coding"] = "stopped";
+  writePlugin("workspace:*", true);
+  const again = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version });
+  assert.deepEqual(await maintenance.execute(again.id, jobCtx()), { spaceId: "space-coding", dshVersion: version });
+  assert.equal(installs, 0);
+  assert.deepEqual(state.stopped, []);
+  assert.equal(new ProfileRegistry(home).scan().find((row) => row.name === "space-coding")?.meta?.dshVersion, version);
 });
 
 test("space.runtime.set pins the version for a stopped space without installing official plugins", async () => {
@@ -513,10 +712,10 @@ test("runtime inventory reports host, pinnedBy, and removable flags", async () =
 test("lost progress persistence or uncertain child termination keeps the plan open as unfinished evidence", async () => {
   for (const failure of [new WorkbenchJobError("workbench/persist-failed"), new ProcessTerminationError("unknown child")]) {
     const { maintenance, home, state } = harness();
-    const plan = await maintenance.preview({ kind: "runtime.install", version: "0.1.5-rc.1" });
+    const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version: "0.2.0-rc.2" });
     const ctx = jobCtx();
     const phase = ctx.phase;
-    ctx.phase = value => { if (value === "install") throw failure; phase(value); };
+    ctx.phase = value => { if (value === "runtime") throw failure; phase(value); };
     await assert.rejects(() => maintenance.execute(plan.id, ctx), (error: unknown) =>
       error instanceof WorkbenchJobError && ["workbench/persist-failed", "workbench/failed"].includes(error.code));
     assert.equal(JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`), "utf8")).status, "running");
@@ -1208,3 +1407,11 @@ function packumentFetch(packuments: Record<string, object>): MaintenanceFetcher 
     };
   };
 }
+
+test("unsupported snapshot runtime fails before stopping spaces", async()=>{
+ const {maintenance,state}=snapshotHarness();
+ (maintenance as any).ports.currentRuntime=()=>{throw new Error("unsupported snapshot runtime layout");};
+ const plan=await maintenance.preview({kind:"snapshot.create"});
+ await assert.rejects(()=>maintenance.execute(plan.id,jobCtx()),/unsupported snapshot runtime layout/);
+ assert.equal(state.stopAll,0); assert.deepEqual(state.maintenance,[]);
+});

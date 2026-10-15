@@ -202,14 +202,14 @@ function archiveAddArgument(dshHome: string, profile: string, target: string): s
   return `"file:${spec}"`;
 }
 
-export async function pluginAdd(dshHome: string, name: string, spec: string): Promise<void> {
+export async function pluginAdd(dshHome: string, name: string, spec: string, options: { force?: boolean } = {}): Promise<void> {
   assertProfile(dshHome, name);
   const target = addableSpec(dshHome, spec);
   const cliTarget = archiveAddArgument(dshHome, name, target);
   await enqueuePlugin(t("queue.pluginAddSpec", { name, spec: target }), async () => {
     const { stdout, stderr, code } = await runDsh(
       dshHome,
-      ["plugin", "--profile", name, "add", cliTarget],
+      ["plugin", "--profile", name, "add", cliTarget, ...(options.force ? ["--force"] : [])],
       { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
     if (code !== 0) throw pluginError(name, target, code, stdout, stderr);

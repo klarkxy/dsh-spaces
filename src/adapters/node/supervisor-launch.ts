@@ -1,13 +1,16 @@
-import { lstatSync, unlinkSync, mkdirSync, realpathSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
+import { unlinkSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readSupervisorDiagnostics } from "./supervisor-diagnostics";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic";
 import { HomeController, sameControlOwner, validLaunchOwner, parseControlEndpoint, type HomeControlOwner } from "./home-controller";
+import { HomeOperationLock } from "./home-operation-lock";
+import { hasUnfinishedMaintenance } from "./control-residue";
 import { endpointHomeId, endpointServiceEpoch, readEndpointFile, SUPERVISOR_ENDPOINT_FILE } from "../../../packages/plugin/src/host/supervisor-endpoint";
 
 /** Called only by a new launch, with the owner observed when that launch began. */
-export function retirePreviousSupervisor(home: string, previousOwner: HomeControlOwner | undefined, allowRealHome: boolean): void {
+export function retirePreviousSupervisor(home: string, previousOwner: HomeControlOwner | undefined, allowRealHome: boolean, snapshotRoot?: string): void {
   const controller = new HomeController(home, { allowRealHome });
   const inspection = controller.inspect();
   if (!inspection.held && !previousOwner) return;
@@ -21,6 +24,9 @@ export function retirePreviousSupervisor(home: string, previousOwner: HomeContro
   const retired = controller.reclaimDead({
     expectedOwner: previousOwner,
     beforeRelease: (owner) => {
+      if (new HomeOperationLock(home, { allowRealHome }).inspect().held || hasUnfinishedMaintenance(home, snapshotRoot)) {
+        throw new Error("Unfinished Home maintenance evidence was retained. The previous controller lease was not retired.");
+      }
       const endpointPath = join(controller.controlDir, SUPERVISOR_ENDPOINT_FILE);
       const recorded = readEndpointFile(endpointPath);
       if ("invalid" in recorded) throw new Error(recorded.reasons.join(" "));
@@ -51,7 +57,7 @@ export function retirePreviousSupervisor(home: string, previousOwner: HomeContro
     },
   });
   if (!retired.reclaimed) {
-    throw new Error(`The previous controller could not be retired for this launch: ${retired.reason}.`);
+    throw new Error(`The previous controller could not be retired for this launch: ${retired.reason}.${"detail" in retired ? ` ${retired.detail}` : ""}`);
   }
 }
 

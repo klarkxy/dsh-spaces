@@ -55,7 +55,7 @@ export interface WorkbenchSupervisorOptions {
   processRuntime?: Partial<ProcessRuntime>;
   createMaintenance?: (ports: WorkbenchMaintenancePorts) => WorkbenchMaintenance;
   runCli?: BoundCliRunner;
-  pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
+  pluginAdd?: (home: string, profile: string, spec: string, options?: { force?: boolean }) => Promise<void>;
   dumpConfig?: (profile: string) => Promise<string>;
   patchWriter?: PatchWriter;
 }

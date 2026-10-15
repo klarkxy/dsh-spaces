@@ -168,7 +168,8 @@ export async function startWorkbenchHttp(
 ): Promise<WorkbenchHttpServer> {
   const bound = await bindInitialLoopbackHttp(
     () =>
-      createServer((req, res) => {
+      // Authority-bound cookies from other local DSH ports share this host's Cookie header.
+      createServer({ maxHeaderSize: 64 * 1024 }, (req, res) => {
         void handleRequest(host, req, res);
       }),
     port,
@@ -395,8 +396,7 @@ async function handleView(
     deny(res, 401, "workbench/unauthorized", "Authentication is required.");
     return;
   }
-  const requestOrigin = headerOrigin(req);
-  if (requestOrigin && !originAllowed(req, host, { allowMissing: true })) {
+  if (req.headers.origin !== undefined && !originAllowed(req, host, { allowMissing: true })) {
     deny(res, 403, "workbench/forbidden", "Origin is not allowed.");
     return;
   }
@@ -478,6 +478,7 @@ function authenticate(
   if (hostBearerOk(host, req)) return "ok";
   if (!sessionOk(host, req)) return "unauthorized";
   const origin = headerOrigin(req);
+  if (!origin && req.headers.origin !== undefined) return "foreign";
   if (!origin) {
     if (req.headers["sec-fetch-site"] === "cross-site") return "foreign";
     return "ok";
@@ -493,7 +494,7 @@ function originAllowed(
   options: { allowMissing: boolean },
 ): boolean {
   const origin = headerOrigin(hostReq);
-  if (!origin) return options.allowMissing;
+  if (!origin) return hostReq.headers.origin === undefined && options.allowMissing;
   return origin === host.supervisorOrigin() || origin === host.managerOrigin();
 }
 

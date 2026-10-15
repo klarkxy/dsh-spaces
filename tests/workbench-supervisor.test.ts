@@ -16,6 +16,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { Script } from "node:vm";
 import { basename, dirname, join } from "node:path";
+import { archiveAbsPath } from "../src/adapters/node/plugin-library.ts";
 import { afterEach, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -23,6 +24,7 @@ import { HomeController } from "../src/adapters/node/home-controller.ts";
 import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home-operation-lock.ts";
 import {
   createWorkbenchSupervisor,
+  WorkbenchSupervisorRuntime,
   parseSupervisorArgs,
   supervisorCliArgs,
   type WorkbenchMaintenance,
@@ -122,14 +124,17 @@ test("default entry origin survives clean cold restart while explicit port zero 
   assert.equal(saved.port, Number(new URL(origin).port));
 });
 
-test("ROOT: interrupted owned manager install resumes without claiming an existing ordinary profile", async () => {
+test("ROOT: failed manager installation blocks writes and a later launch keeps its evidence without replay", async () => {
   const home = tempHome();
   const artifact = join(home, "plugin.tgz");
   writeFileSync(artifact, "test archive");
   let fail = true;
+  let installs = 0;
+  let cliCalls = 0;
   const extra = {
     pluginArtifact: artifact,
     runCli: async (args: readonly string[]) => {
+      cliCalls += 1;
       const profile = args[args.indexOf("--profile") + 1] || "web";
       if (profile === "web" && args.includes("--from-default-profile")) {
         return {
@@ -144,19 +149,102 @@ test("ROOT: interrupted owned manager install resumes without claiming an existi
       return { code: 0, stdout: dumpText(profile), stderr: "" };
     },
     pluginAdd: async (_home: string, profile: string) => {
+      installs += 1;
       if (fail) throw new Error("install interrupted");
       writeProfile(home, profile, { dependencies: { "@dsh-spaces/plugin": "0.2.0" } });
     },
   };
   const first = await startSupervisor(home, extra);
-  assert.equal((await first.runtime.state()).availability, "limited");
-  assert.equal((await first.runtime.state()).availability, "limited");
+  const state = await first.runtime.state();
+  assert.equal(state.availability, "limited");
+  assert.ok(state.managerId);
+  await assert.rejects(() => first.runtime.submit({ kind: "space.start", spaceId: state.managerId! }, "retry-incomplete-manager", {
+    serviceEpoch: state.serviceEpoch, expectedRevision: state.revision,
+  }), /Manager initialization did not complete/);
+  const marker = join(home, ".dsh-spaces-control", "manager-bootstrap.json");
+  const evidence = readFileSync(marker, "utf8");
+  const profilePath = join(home, "profiles", state.managerId!, "package.json");
+  const profile = readFileSync(profilePath, "utf8");
+  const before = { installs, cliCalls };
   await first.close();
   fail = false;
   const second = await startSupervisor(home, extra);
-  assert.equal((await second.runtime.state()).role, "manager");
-  assert.notEqual((await second.runtime.state()).availability, "unavailable");
-  assert.equal(existsSync(join(home, ".dsh-spaces-control", "manager-bootstrap.json")), false);
+  const next = await second.runtime.state();
+  assert.equal(next.availability, "limited");
+  assert.ok(next.reasons.some(reason => reason.includes("installation was not replayed")));
+  assert.deepEqual({ installs, cliCalls }, before);
+  assert.equal(readFileSync(marker, "utf8"), evidence);
+  assert.equal(readFileSync(profilePath, "utf8"), profile);
+  await assert.rejects(() => second.runtime.submit({ kind: "space.create", input: { name: "unrelated" } }, "blocked-create", {
+    serviceEpoch: next.serviceEpoch, expectedRevision: next.revision,
+  }), /installation was not replayed/);
+});
+
+test("damaged manager bootstrap evidence is preserved before manager identity allocation", async () => {
+  const home = tempHome();
+  const control = join(home, ".dsh-spaces-control");
+  mkdirSync(control, { recursive: true });
+  const marker = join(control, "manager-bootstrap.json");
+  writeFileSync(marker, "{interrupted");
+  let calls = 0;
+  const handle = await startSupervisor(home, {
+    runCli: async () => { calls += 1; throw new Error("must not run"); },
+    pluginAdd: async () => { calls += 1; throw new Error("must not install"); },
+  });
+  assert.equal(calls, 0);
+  assert.equal(readFileSync(marker, "utf8"), "{interrupted");
+  assert.equal(existsSync(join(control, "manager.json")), false);
+  assert.ok((await handle.runtime.state()).reasons.some(reason => reason.includes("installation was not replayed")));
+});
+
+test("manager bootstrap admits no concurrent mutation before its failure is known", async () => {
+  const home = tempHome();
+  writeProfile(home, "space-healthy");
+  const registryFile = join(home, "hub", "spaces.json");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(registryFile, JSON.stringify({ version: 1, order: ["space-healthy"], meta: {
+    "space-healthy": { displayName: "before", order: 0, createdAt: "2026-10-13T00:00:00.000Z", dshVersion: "0.2.0-rc.2" },
+  } }));
+  const before = readFileSync(registryFile);
+  const artifact = join(home, "plugin.tgz");
+  writeFileSync(artifact, "test archive");
+  let entered!: () => void, release!: () => void;
+  const installing = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const runtime = new WorkbenchSupervisorRuntime({
+    home, bin: writeFakeCli(home), port: 0, pluginArtifact: artifact,
+    patchWriter: fakePatchWriter(home),
+    runCli: async args => {
+      const id = args[args.indexOf("--profile") + 1]!;
+      if (args.includes("--from-default-profile")) writeProfile(home, id);
+      return { code: 0, stdout: dumpText(id), stderr: "" };
+    },
+    dumpConfig: async id => dumpText(id),
+    pluginAdd: async () => { entered(); await held; throw new Error("concurrent bootstrap failure"); },
+    createMaintenance: () => fakeMaintenance(),
+  });
+  runtime.attachHttp("http://127.0.0.1:45111", async () => {});
+  const starting = runtime.tryOwn();
+  try {
+    await installing;
+    const state = await runtime.state();
+    for (const requestId of ["during-bootstrap-1", "during-bootstrap-2"]) {
+      await assert.rejects(() => runtime.submit({ kind: "space.update", spaceId: "space-healthy", displayName: "changed" }, requestId, {
+        serviceEpoch: state.serviceEpoch, expectedRevision: state.revision,
+      }), /still initializing/);
+    }
+    release();
+    await starting;
+    const failed = await runtime.state();
+    await assert.rejects(() => runtime.submit({ kind: "space.update", spaceId: "space-healthy", displayName: "changed" }, "after-bootstrap-failure", {
+      serviceEpoch: failed.serviceEpoch, expectedRevision: failed.revision,
+    }), /Manager initialization did not complete/);
+    assert.deepEqual(readFileSync(registryFile), before);
+  } finally {
+    release();
+    await starting;
+    await runtime.close();
+  }
 });
 
 test("HTTP state during owned manager bootstrap stays limited without latching blocked", async () => {
@@ -1386,6 +1474,52 @@ test("recovery resume does not follow a junctioned plans directory", async () =>
   assert.equal(existsSync(join(outside, "plan-restore-a.json")), true);
 });
 
+test("damaged registry reports failure and blocks mutations without replacing its bytes", async () => {
+  for (const damaged of ["{", JSON.stringify({ version: 1, meta: [] })]) {
+    const home = tempHome();
+    const handle = await startSupervisor(home);
+    const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+    const context = await handle.runtime.state();
+    const registryPath = join(home, "hub", "spaces.json");
+    writeFileSync(registryPath, damaged);
+
+    const observed = await api(handle.origin, cookie, "state", {});
+    assert.equal(observed.body.ok, false);
+    assert.equal(observed.body.error?.code, "workbench/unavailable");
+    assert.match(observed.body.error?.message ?? "", /Space registry could not be read/);
+    const changed = await api(handle.origin, cookie, "submit", {
+      command: { kind: "space.create", input: { name: "unaccepted" } },
+      requestId: `damaged-${damaged.length}`,
+      context: { serviceEpoch: context.serviceEpoch, expectedRevision: context.revision },
+    });
+    assert.equal(changed.body.ok, false);
+    assert.equal(changed.body.error?.code, "workbench/unavailable");
+    assert.equal(readFileSync(registryPath, "utf8"), damaged);
+    assert.equal(existsSync(join(home, "profiles", "space-unaccepted")), false);
+
+    // Close normally for test cleanup after checking that no mutation was admitted.
+    writeFileSync(registryPath, JSON.stringify({ version: 1, order: [], meta: {} }));
+    await assert.rejects(handle.runtime.submit(
+      { kind: "space.create", input: { name: "unaccepted" } }, "after-observation",
+      { serviceEpoch: context.serviceEpoch, expectedRevision: context.revision },
+    ), /Space registry could not be read/);
+  }
+});
+
+test("registry corruption is rejected before mutation even without a preceding state read", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home);
+  const context = await handle.runtime.state();
+  const registryPath = join(home, "hub", "spaces.json");
+  writeFileSync(registryPath, "{");
+  await assert.rejects(handle.runtime.submit(
+    { kind: "space.create", input: { name: "unaccepted" } }, "first-read-is-submit",
+    { serviceEpoch: context.serviceEpoch, expectedRevision: context.revision },
+  ), /Space registry could not be read/);
+  assert.equal(readFileSync(registryPath, "utf8"), "{");
+  writeFileSync(registryPath, JSON.stringify({ version: 1, order: [], meta: {} }));
+});
+
 test("entry cookie helper names match the A0 authority digest", () => {
   assert.equal(
     expectedAuthCookieName("127.0.0.1:9"),
@@ -1421,6 +1555,12 @@ test("shutdown with unconfirmed final persistence keeps ownership and never anno
   const record = JSON.parse(readFileSync(jobFile, "utf8"));
   assert.equal(record.status, "running");
   assert.equal(record.phase, "finalizing");
+  const state = await handle.runtime.state();
+  assert.match(state.reasons.join(" "), /Owned processes stopped/);
+  assert.doesNotMatch(state.reasons.join(" "), /could not be stopped/);
+  const observedJob = await handle.runtime.job("unconfirmed-stop");
+  assert.match(observedJob.error?.message ?? "", /operation ran.*result could not be saved/i);
+  assert.doesNotMatch(observedJob.error?.message ?? "", /operation was not accepted/i);
 });
 
 test("first startup clones the shipped preset into the manager without materializing web", async () => {
@@ -1887,6 +2027,99 @@ test("startup blocks and does not start the manager when the align cannot be ver
   assert.ok(state.reasons.some((reason) => reason.includes("manager plugin could not be aligned")));
   assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
   assert.equal(state.managerId && spawned.includes(state.managerId), false);
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const submitted = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: state.managerId! },
+    requestId: "start-unaligned-manager",
+  });
+  assert.equal(submitted.body.ok, true);
+  const job = await waitJob(handle.origin, cookie, (submitted.body.value as { id: string }).id, "failed");
+  assert.equal(job.status, "failed");
+  assert.match(job.error?.message ?? job.message ?? "", /manager plugin could not be aligned/);
+  assert.equal(installs, 1, "a rejected start does not repeat the alignment attempt");
+  assert.equal(spawned.includes(state.managerId!), false);
+});
+
+test("same-coordinate drift adds the alternate archive once and keeps the drifted tree", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-r1-")), "fresh");
+  const stale = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-r1-stale-")), "stale");
+  installManagerModules(home, payload, stale.packageRoot);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const digest = createHash("sha256").update(readFileSync(artifacts.pluginArtifact)).digest("hex").slice(0, 20);
+  const id = `dsh-spaces-plugin-${digest}`;
+  const canonical = archiveAbsPath(home, id);
+  mkdirSync(dirname(canonical), { recursive: true });
+  writeFileSync(canonical, readFileSync(artifacts.pluginArtifact));
+  const canonicalBytes = readFileSync(canonical);
+  const drifted = join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
+  const driftedBytes = Buffer.from("drifted-bytes;\n");
+  writeFileSync(drifted, driftedBytes);
+  const pkgPath = join(home, "profiles", "spaces-hub", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { dependencies: Record<string, string> };
+  pkg.dependencies["@dsh-spaces/plugin"] = `file:${canonical.replaceAll("\\", "/")}`;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  writeManagerRecord(home);
+  const added: Array<{ spec: string; force?: boolean }> = [];
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    pluginAdd: async (_addedHome, _profile, spec, options) => {
+      added.push({ spec, force: options?.force });
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.deepEqual(added.map((item) => basename(item.spec)), [`${id}-r1.tgz`]);
+  assert.equal(added[0]?.force, undefined);
+  assert.equal(readFileSync(drifted).equals(driftedBytes), true);
+  assert.equal(readFileSync(canonical).equals(canonicalBytes), true);
+  assert.equal(existsSync(archiveAbsPath(home, `${id}-r1`)), true);
+  const installed = JSON.parse(readFileSync(join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin", "package.json"), "utf8")) as { name: string; version: string };
+  assert.equal(installed.name, "@dsh-spaces/plugin");
+  assert.equal(installed.version, "0.2.0");
+  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+  assert.ok(state.reasons.some((reason) => reason.includes("manager plugin could not be aligned")));
+});
+
+test("a malformed manager manifest fails alignment before plugin add", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  });
+  writeManagerRecord(home);
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-bad-manifest-")), "bad");
+  const stale = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-bad-manifest-stale-")), "stale");
+  installManagerModules(home, payload, stale.packageRoot);
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const pkgPath = join(home, "profiles", "spaces-hub", "package.json");
+  const drifted = join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
+  const driftedBytes = readFileSync(drifted);
+  writeFileSync(pkgPath, `${JSON.stringify({
+    dependencies: null,
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+  })}\n`);
+  let installs = 0;
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    pluginAdd: async () => {
+      installs += 1;
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(installs, 0);
+  assert.equal(readFileSync(drifted).equals(driftedBytes), true);
+  assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
+  assert.ok(state.reasons.some((reason) => reason.includes("could not be read")));
 });
 
 test("registered spaces keep their pin; unregistered profiles and stale meta stay unpinned", async () => {
@@ -2059,6 +2292,7 @@ test("space.runtime.set preview rejects protected, unmanaged, and downgrade targ
   const preview = async (request: unknown) =>
     (await mutate(handle.origin, cookie, "preview", { request })).body;
 
+  assert.equal((await preview({ kind: "runtime.install", version: "0.2.0-rc.2" })).error?.code, "workbench/unsupported");
   assert.equal((await preview({ kind: "space.runtime.set", spaceId: "web", version: "0.2.0-rc.2" })).error?.code, "workbench/not-found");
   assert.equal((await preview({ kind: "space.runtime.set", spaceId: "desktop", version: "0.2.0-rc.2" })).error?.code, "workbench/protected");
   const hub = await preview({ kind: "space.runtime.set", spaceId: "spaces-hub", version: "0.2.0-rc.2" });

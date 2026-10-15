@@ -21,6 +21,8 @@ import {
   type WorkbenchRevisionSpace,
 } from "../src/adapters/node/workbench-protocol.ts";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../src/shared/workbench-product.ts";
+import { parsePlanRequest } from "../src/adapters/node/supervisor/input.ts";
+import { workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 
 const settings: WorkbenchHomeSettings = {
   portStart: 3100,
@@ -46,6 +48,15 @@ const otherDigest = "b".repeat(64);
 
 test("protocol version is 2", () => {
   assert.equal(WORKBENCH_PROTOCOL_VERSION, 2);
+});
+
+test("global runtime installation is removed from HTTP and native plan inputs", () => {
+  const removed = { kind: "runtime.install", version: "0.2.0-rc.2" };
+  assert.throws(() => parsePlanRequest(removed), (error: unknown) =>
+    error instanceof Error && "code" in error && error.code === "workbench/unsupported");
+  assert.equal(workbenchPlanRequestSchema.safeParse(removed).success, false);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "space.runtime.set", spaceId: "space-demo", version: "0.2.0-rc.2" }).success, true);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "runtime.remove", version: "0.2.0-rc.2" }).success, true);
 });
 
 test("home digest is deterministic and does not leak the canonical path", () => {
@@ -220,4 +231,14 @@ test("product result requires an observation and a closed method payload", () =>
       leakedPath: "/home/user/.dsh",
     }),
   );
+});
+
+test("share and template results accept stored avatar size and keep its limit", () => {
+  const icon="data:image/png;base64,"+"A".repeat(20000);
+  const preview={manifest:{formatVersion:1,kind:"dsh-space",exportedAt:"2026-10-13T00:00:00.000Z",source:{},space:{displayName:"Avatar",icon}},plugins:[],hasConfig:false,unknownSources:[],llmMappingRequired:false,llmRequirements:[]};
+  const observation={serviceEpoch:digest,expectedRevision:otherDigest};
+  const result={method:"share.export",fileName:"avatar.dsh-space",archiveBase64:"AAAA",preview,observation};
+  parseWorkbenchProductResult(result);
+  parseWorkbenchProductResult({method:"templates",observation,templates:[{id:"avatar",name:"Avatar",displayName:"Avatar",plugins:[],createdAt:"2026-10-13T00:00:00.000Z",recipe:{schemaVersion:1,displayName:"Avatar",icon,plugins:[]}}]});
+  assert.throws(()=>parseWorkbenchProductResult({...result,preview:{...preview,manifest:{...preview.manifest,space:{displayName:"Avatar",icon:"A".repeat(240001)}}}}));
 });

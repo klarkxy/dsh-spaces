@@ -18,6 +18,8 @@
 
 当前实现已拒绝公开恢复命令：`snapshot.restore`、`config.restore`、`controller.shutdown` 以及 Doctor `unlock` / `recover` / `rollback` 均为 unsupported。中断任务失败留证、不重放。Doctor 只诊断。
 
+管理器初始化和插件对齐完成前，Supervisor 不接受并发变更；初始化失败后，当前 Supervisor 拒绝继续写入。遗留的 `manager-bootstrap.json`（包括损坏或归属不明的记录）在下一次启动时仍保留，不继续安装、不重新应用隔离 patch，也不清除该标记。管理插件对齐失败则阻止该管理器的后续启动请求，并保留原始诊断，不连带停止其他健康空间。
+
 源码侧恢复编排已删：`RestoreSession`、`SnapshotStore.restore` / `recover` / `completeRestore`、snapshot-worker 的同名操作以及 Doctor 恢复编译桩均已移除。历史 `pending-restore.json` 与 restore journal 仍可读作未完成证据并挡住后续写入，不重放、不修补。
 
 运行时安装 IO 已抽到 `src/adapters/node/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及安装过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。

@@ -217,6 +217,8 @@ test("owned archive paths with spaces reach alpha CLI as one absolute unquoted a
   try {
     await pluginAdd(dir, "coding", archive);
     assert.deepEqual(JSON.parse(readFileSync(capture, "utf8")), ["plugin", "--profile", "coding", "add", archive]);
+    await pluginAdd(dir, "coding", archive, { force: true });
+    assert.deepEqual(JSON.parse(readFileSync(capture, "utf8")), ["plugin", "--profile", "coding", "add", archive, "--force"]);
   } finally { setSelectedDshResolver(() => undefined); resetDshBinCache(); }
 });
 

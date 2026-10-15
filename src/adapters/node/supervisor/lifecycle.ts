@@ -3,11 +3,18 @@ import type { HomeControlHandle } from "../home-controller";
 import { WorkbenchPublicError } from "./errors";
 
 export class SupervisorLifecycle {
+  constructor(private readonly validateRegistry?: () => void) {}
+
   handle: HomeControlHandle | undefined;
   closed = false;
   sealing = false;
   blocked = false;
+  initializing = false;
+  managerStartFailure: string | undefined;
+  managerBootstrapFailure: string | undefined;
+  registryFailure: string | undefined;
   maintenanceBlocked = false;
+  shutdownFailure: "before-stop" | "final-save" | undefined;
   maintenanceFlag = false;
   // Inventory is a display snapshot while maintenance swaps its backing tree.
   // Admission still uses the live controller and transaction locks.
@@ -24,8 +31,19 @@ export class SupervisorLifecycle {
 
   assertWritable(): void {
     if (!this.handle) throw new WorkbenchPublicError("workbench/read-only");
+    if (this.registryFailure) throw new WorkbenchPublicError("workbench/unavailable", this.registryFailure);
+    this.validateRegistry?.();
+    if (this.managerBootstrapFailure) {
+      throw new WorkbenchPublicError("workbench/unavailable", this.managerBootstrapFailure);
+    }
+    if (this.initializing) throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is still initializing.");
     if (this.maintenanceBlocked) {
-      throw new WorkbenchPublicError("workbench/unavailable", "Stop failed; new maintenance is refused.");
+      const message = this.shutdownFailure === "final-save"
+        ? "Owned processes stopped, but shutdown completion could not be saved. Further changes are blocked."
+        : this.shutdownFailure === "before-stop"
+          ? "Shutdown failed before stopping began. Further changes are blocked."
+          : "Stop failed; new maintenance is refused.";
+      throw new WorkbenchPublicError("workbench/unavailable", message);
     }
     if (this.sealing && !this.relinquishKind) throw new WorkbenchPublicError("workbench/unavailable");
   }

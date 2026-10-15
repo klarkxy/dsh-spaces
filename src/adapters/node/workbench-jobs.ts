@@ -1,13 +1,11 @@
+import { lstatSync } from "../../shared/node/filesystem";
 /** Job records never persist local paths, credentials, blueprint content or raw config. Transient blueprint product responses are not jobs. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import {
-  lstatSync,
-  readdirSync,
-  readFileSync,
-} from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic";
 import { isExactRuntimeVersion } from "../../shared/runtime";
+import { redactPublicReason } from "../../shared/public-reason";
 import type {
   JobStatus,
   WorkbenchCommand,
@@ -18,7 +16,7 @@ import type {
 } from "../../shared/workbench";
 import { isWorkbenchProductCommand } from "../../shared/workbench-product";
 import { parseWorkbenchProductCommand, parseWorkbenchProductOutcome } from "../../shared/workbench-product-schemas";
-import { LlmConfigError } from "../../core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError, type LlmErrorCode } from "../../core/domain/llm-connections";
 import { canonicalHome } from "./home-operation-lock";
 
 type ExclusiveAdmission = { store: WorkbenchJobStore; active: boolean };
@@ -37,6 +35,7 @@ export const WORKBENCH_JOB_ERROR = {
   "workbench/failed": "The job failed.",
   "workbench/unreadable": "The job record could not be read. Original bytes were left unchanged.",
   "workbench/unsupported": "That command is not supported.",
+  "workbench/unavailable": "The workbench cannot accept this request.",
 } as const;
 
 export const INTERRUPTED_JOB_MESSAGE =
@@ -84,8 +83,8 @@ export class WorkbenchJobError extends Error {
   }
 }
 
-function visibleJobMessage(code: WorkbenchJobErrorCode, message: string): string {
-  const fallback = WORKBENCH_JOB_ERROR[code] || "The job failed.";
+function visibleJobMessage(code: WorkbenchJobErrorCode | LlmErrorCode, message: string): string {
+  const fallback = isJobErrorCode(code) ? WORKBENCH_JOB_ERROR[code] : "The job failed.";
   const cleaned = sanitizeJobText(message).trim().slice(0, 500);
   return cleaned || fallback;
 }
@@ -389,7 +388,10 @@ export class WorkbenchJobStore {
         try {
           this.write(current);
         } catch {
-          this.markFailed(id, "workbench/persist-failed");
+          this.markFailed(id, "workbench/persist-failed", {
+            code: "workbench/persist-failed",
+            message: "The operation ran, but its result could not be saved. Changes may already have happened; the result is unconfirmed.",
+          });
         }
       } catch (error) {
         const current = this.records.get(id);
@@ -416,7 +418,10 @@ export class WorkbenchJobStore {
         try {
           this.write(current);
         } catch {
-          this.markFailed(id, "workbench/persist-failed", current.error);
+          this.markFailed(id, "workbench/persist-failed", {
+            ...current.error,
+            message: `${current.error.message} The operation ran, but its failure record could not be saved. Changes may already have happened.`,
+          });
         }
       } finally {
         this.aborts.delete(id);
@@ -655,9 +660,6 @@ function publicJob(record: StoredJob): WorkbenchJob {
     if (record.error.pluginAttribution) job.error.pluginAttribution = record.error.pluginAttribution;
     if (record.error.exitCode !== undefined) job.error.exitCode = record.error.exitCode;
     if (record.error.signal !== undefined) job.error.signal = record.error.signal;
-    if (record.error.message && record.error.code === "workbench/failed" && record.error.message !== WORKBENCH_JOB_ERROR["workbench/failed"]) {
-      job.error.message = sanitizeJobText(record.error.message);
-    }
   }
   return job;
 }
@@ -762,21 +764,15 @@ function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
     }
     return info;
   }
-  if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string") {
-    const code = (error as { code: string }).code;
-    if (isJobErrorCode(code)) {
-      const reported = (error as { message?: unknown }).message;
-      const message = typeof reported === "string" ? sanitizeJobText(reported).trim().slice(0, 500) : "";
+  if (error && typeof error === "object") {
+    const reported = error as { code?: unknown; message?: unknown };
+    const code = typeof reported.code === "string" && isJobErrorCode(reported.code) ? reported.code : "workbench/failed";
+    if (typeof reported.message === "string" || (typeof reported.code === "string" && isJobErrorCode(reported.code))) {
       return {
         code,
-        message: message && message !== WORKBENCH_JOB_ERROR[code] ? message : WORKBENCH_JOB_ERROR[code],
+        message: visibleJobMessage(code, typeof reported.message === "string" ? reported.message : ""),
+        ...(code === "workbench/failed" ? { pluginAttribution: "unknown" as const } : {}),
       };
-    }
-  }
-  if (error instanceof Error) {
-    const message = sanitizeJobText(error.message).trim().slice(0, 500);
-    if (message) {
-      return { code: "workbench/failed", message, pluginAttribution: "unknown" };
     }
   }
   return {
@@ -845,10 +841,11 @@ function parseStoredJob(value: unknown, filenameId: string): StoredJob | null {
 }
 
 function publicErrorFromStored(value: Record<string, unknown>): WorkbenchJobErrorInfo {
-  const code = typeof value.code === "string" && isJobErrorCode(value.code) ? value.code : "workbench/failed";
+  const code = typeof value.code === "string" && (isJobErrorCode(value.code) || isLlmErrorCode(value.code))
+    ? value.code : "workbench/failed";
   const info: WorkbenchJobErrorInfo = {
     code,
-    message: WORKBENCH_JOB_ERROR[code],
+    message: typeof value.message === "string" ? visibleJobMessage(code, value.message) : "The job failed.",
   };
   if (typeof value.spaceId === "string" && ENTITY_ID_RE.test(value.spaceId)) info.spaceId = value.spaceId;
   if (typeof value.stage === "string" && value.stage.trim()) info.stage = value.stage.slice(0, 120);
@@ -1139,6 +1136,10 @@ function isJobErrorCode(value: string): value is WorkbenchJobErrorCode {
   return Object.prototype.hasOwnProperty.call(WORKBENCH_JOB_ERROR, value);
 }
 
+function isLlmErrorCode(value: string): value is LlmErrorCode {
+  return Object.values(LLM_ERROR).some(code => code === value);
+}
+
 function isLoopbackOrigin(value: string): boolean {
   let url: URL;
   try {
@@ -1175,7 +1176,12 @@ function stableRecordJson(record: StoredJob): string {
 
 export function sanitizeJobText(text: string): string {
   if (!text) return "";
-  return text
+  // DSH appends an install suggestion to this diagnostic. Keep the failure,
+  // without presenting the upstream suggestion as a Spaces recovery workflow.
+  if (/^dsh: cannot resolve profile bundle\b/.test(text)) {
+    text = text.replace(/\s*;?\s+run ['"]dsh plugin --profile [^'"\r\n]+ install['"] if its dependency is not installed\.?\s*$/i, "");
+  }
+  return redactPublicReason(text, 2000)
     .replace(/\b(authorization|cookie|set-cookie|token)\s*[:=]\s*[^\s;]+/gi, "$1=[redacted]")
     .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
     .replace(/file:\/+[^\s"'\\]+/gi, "[path]")

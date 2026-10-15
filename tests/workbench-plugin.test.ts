@@ -1350,7 +1350,7 @@ test("portal entry waits for the already-running startup before minting a one-us
   } finally { await fixture.close(); }
 });
 
-for (const failure of ["transport", "unavailable", "epoch", "crashed"] as const) {
+for (const failure of ["transport", "unavailable", "epoch", "crashed", "maintenance"] as const) {
   test(`portal startup observation stops after ${failure} failure without mint or replay`, async () => {
     const home = tempDir("dsh-wb-portal-failed-");
     writeProfile(home, "notes");
@@ -1371,7 +1371,7 @@ for (const failure of ["transport", "unavailable", "epoch", "crashed"] as const)
           observed++;
           if (failure === "transport") throw new Error("fixture disconnected");
           const state = v2State(epochRef.value);
-          return { ...state, reasons: ["fixture launch failed"],
+          return { ...state, maintenance: failure === "maintenance", jobs: failure === "maintenance" ? [{id:"failure",kind:"plan.execute",status:"failed"}] : state.jobs, reasons: ["fixture launch failed"],
             availability: failure === "unavailable" ? "unavailable" : state.availability,
             serviceEpoch: failure === "epoch" ? HEX64_B : state.serviceEpoch,
             spaces: state.spaces.map(row => ({ ...row, status: failure === "crashed" ? "crashed" : row.status })),
@@ -1431,6 +1431,78 @@ test("initialize refuses a desktop lease without an endpoint and preserves owner
   assert.equal(readFileSync(ownerFile, "utf8"), owner);
   assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE)), false);
 });
+
+for (const changed of [false, true]) {
+  test(`explicit initialize ${changed ? "rejects changed ownership" : "launches after a real exited owner"} using its first discovery`, async () => {
+    const home = tempDir("dsh-init-exited-");
+    writeProfile(home, "web");
+    writeProfile(home, "spaces-hub");
+    writeManager(home, "spaces-hub");
+    const script = join(home, "exited-owner.mts");
+    writeFileSync(script, `import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home-controller.ts", import.meta.url).href)};
+new HomeController(process.argv[2]).acquire("web", "http://127.0.0.1:9/");
+process.exit(17);`);
+    await new Promise<void>((resolve, reject) => {
+      const child = spawnChild(process.execPath, ["--import", "tsx", script, home], { cwd: process.cwd(), stdio: "ignore", windowsHide: true });
+      child.once("error", reject);
+      child.once("exit", code => code === 17 ? resolve() : reject(new Error(`owner exited ${code}`)));
+    });
+    const controller = new HomeController(home);
+    const inspection = controller.inspect();
+    assert.ok("owner" in inspection && inspection.liveness === "dead");
+    const ownerFile = join(controller.runDir, HOME_CONTROL_OWNER_FILE);
+    const endpointFile = join(controller.controlDir, SUPERVISOR_ENDPOINT_FILE);
+    const originalOwner = inspection.owner;
+    writeEndpointFile(endpointFile, v2Endpoint(home, "http://127.0.0.1:9", "O".repeat(32), originalOwner.nonce));
+    let ownerBytes = readFileSync(ownerFile), endpointBytes = readFileSync(endpointFile);
+    const epochRef = { value: HEX64_A };
+    const bearer = "N".repeat(32);
+    const fixture = await startFixture({ bearer, epochRef });
+    let starts = 0;
+    const runtime = new WorkbenchHostRuntime({
+      ...identityInput(home, "web"),
+      payloadRoot: writePayload(tempDir("dsh-init-exited-payload-")),
+      toolsRoot: tempDir("dsh-init-exited-tools-"), supervisorTimeoutMs: 3000,
+      bootstrap: async options => {
+        assert.ok(options.priorDiscovery && "missing" in options.priorDiscovery);
+        assert.deepEqual(options.priorDiscovery.previousOwner, originalOwner);
+        if (changed) {
+          const replacement = { ...originalOwner, nonce: "ef".repeat(16) };
+          writeFileSync(ownerFile, JSON.stringify(replacement));
+          writeEndpointFile(endpointFile, v2Endpoint(home, "http://127.0.0.1:9", "O".repeat(32), replacement.nonce));
+          ownerBytes = readFileSync(ownerFile); endpointBytes = readFileSync(endpointFile);
+        }
+        return bootstrapSupervisor({ ...options, pack: stubPack, pollMs: 20, spawn: () => {
+          starts++;
+          assert.equal(controller.inspect().held, false);
+          assert.equal(existsSync(endpointFile), false);
+          const next = leaseWeb(home, fixture.origin);
+          epochRef.value = deriveServiceEpoch(next.owner.nonce);
+          writeEndpointFile(endpointFile, v2Endpoint(home, fixture.origin, bearer, next.owner.nonce));
+        } });
+      },
+    });
+    try {
+      await assert.rejects(() => runtime.presentationSnapshot(), /not available/);
+      assert.deepEqual(readFileSync(ownerFile), ownerBytes);
+      assert.deepEqual(readFileSync(endpointFile), endpointBytes);
+      assert.equal(starts, 0);
+      const result = await runtime.initialize();
+      assert.equal(result.ok, !changed, result.reasons.join(" | "));
+      assert.equal(starts, changed ? 0 : 1);
+      const evidence = join(controller.controlDir, "previous-controller-exit.json");
+      if (changed) {
+        assert.match(result.reasons.join(" "), /ownership changed/);
+        assert.deepEqual(readFileSync(ownerFile), ownerBytes);
+        assert.deepEqual(readFileSync(endpointFile), endpointBytes);
+        assert.equal(existsSync(evidence), false);
+      } else {
+        assert.ok(result.path?.startsWith("/bootstrap/"));
+        assert.match(readFileSync(evidence, "utf8"), /exited-without-releasing-lease/);
+      }
+    } finally { await fixture.close(); }
+  });
+}
 
 test("initialize rechecks identity damage that appears after the page loads", async () => {
   const home = tempDir("dsh-init-damaged-");
@@ -1540,4 +1612,27 @@ test("native home keeps the manager origin and skips the Spaces root registratio
     if (priorHint) Object.defineProperty(globalThis, "__DSH_SPACES_HOST__", priorHint);
     else Reflect.deleteProperty(globalThis, "__DSH_SPACES_HOST__");
   }
+});
+
+test("guide Remote preserves bounded maintenance failure details", async () => {
+ const home=tempDir("dsh-guide-failure-reason-"); writeProfile(home,"notes");
+ const runtime=new WorkbenchHostRuntime(identityInput(home,"notes"));
+ runtime.presentationSnapshot=async()=>{throw new Error("EACCES lstat H:/private/file token=fixture-secret-value");};
+ const plugin=new SpacesPlugin(pluginContext(),{},runtime);
+ await assert.rejects(()=>plugin.guide.presentationSnapshot(),(error:unknown)=>{
+  assert.match((error as Error).message,/EACCES lstat \[path\]/);
+  assert.doesNotMatch((error as Error).message,/fixture-secret-value/); return true;
+ });
+});
+
+test("portal Remote preserves the actual entry failure and redacts structured credentials", async () => {
+  const home = tempDir("dsh-guide-portal-failure-"); writeProfile(home, "notes");
+  const runtime = new WorkbenchHostRuntime(identityInput(home, "notes"));
+  runtime.portalTarget = async () => { throw new Error('Selected component payload digest mismatch. {"token":"synthetic-portal-secret"}'); };
+  const plugin = new SpacesPlugin(pluginContext(), {}, runtime);
+  await assert.rejects(() => plugin.guide.portalTarget({ parentOrigin: "http://127.0.0.1:3090", channel: "ab".repeat(16) }), (error: unknown) => {
+    assert.match((error as Error).message, /Selected component payload digest mismatch/);
+    assert.doesNotMatch((error as Error).message, /synthetic-portal-secret/);
+    return true;
+  });
 });

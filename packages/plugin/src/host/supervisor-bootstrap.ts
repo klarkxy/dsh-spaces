@@ -1,10 +1,6 @@
+import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
 import { spawn, type ChildProcess } from "node:child_process";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  realpathSync,
-} from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -244,7 +240,7 @@ export async function bootstrapSupervisor(
       }
       options.progress?.("prepare");
       diagnosticFile = beginLaunchDiagnostics(home, toolsRoot);
-      retirePreviousSupervisor(home, "missing" in attached ? attached.previousOwner : undefined, access.allowRealHome);
+      retirePreviousSupervisor(home, "missing" in attached ? attached.previousOwner : undefined, access.allowRealHome, snapshotRoot ?? undefined);
       let bundled: ValidatedComponentPayload;
       try {
         bundled = validateComponentPayload(payloadRoot);

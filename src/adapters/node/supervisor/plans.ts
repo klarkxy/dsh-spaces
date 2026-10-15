@@ -1,5 +1,6 @@
+import { lstatSync } from "../../../shared/node/filesystem";
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProfileStatus } from "../../../shared/types";
 import type {
@@ -54,6 +55,7 @@ export interface SupervisorPlansHost {
 
 export class SupervisorPlans {
   readonly plans = new Map<string, StoredPlan>();
+  private stoppedShutdownJobId: string | null = null;
 
   constructor(private readonly host: SupervisorPlansHost) {}
 
@@ -119,6 +121,7 @@ export class SupervisorPlans {
         if (!this.host.lifecycle.activeJobId) throw new WorkbenchPublicError("workbench/invalid-input", "Shutdown requires an active job.");
         this.host.lifecycle.relinquishKind = stored.request.kind;
         this.host.lifecycle.relinquishJobId = this.host.lifecycle.activeJobId;
+        this.stoppedShutdownJobId = null;
       }
       return this.executeLocal(stored, ctx);
     }
@@ -197,6 +200,7 @@ export class SupervisorPlans {
           this.host.lifecycle.maintenanceBlocked = true;
           throw error;
         }
+        this.stoppedShutdownJobId = this.host.lifecycle.relinquishJobId;
         ctx.phase("finalizing");
         return;
       }
@@ -234,7 +238,11 @@ export class SupervisorPlans {
         this.host.lifecycle.endRelinquish();
         this.host.lifecycle.maintenanceBlocked = true;
         this.host.lifecycle.blocked = true;
-        this.host.lifecycle.reasons.push("Shutdown completion could not be saved. Run rights were kept.");
+        const stopped = this.stoppedShutdownJobId === jobId;
+        this.host.lifecycle.shutdownFailure = stopped ? "final-save" : "before-stop";
+        this.host.lifecycle.reasons.push(stopped
+          ? "Shutdown completion could not be saved. Owned processes stopped; run rights were kept."
+          : "Shutdown failed before owned-process stopping began; run rights were kept.");
         return;
       }
       await this.finishRelinquish();

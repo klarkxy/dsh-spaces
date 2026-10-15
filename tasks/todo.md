@@ -1,3 +1,60 @@
+# 2026-10-15 全新 Home 持续 UI 验收（Playwright 干净上下文）
+
+在 Devin 中延续 10-14 的未关闭项。全新隔离 Home、Node 26.10.0、未修改的官方 rc.2 SDK、上一轮包 `a313325d…`（源码冻结校验未变）、Playwright Chromium 全新上下文（无累积 Cookie），每步截图 + ARIA + Supervisor 状态快照，`requestfailed` 经 CDP 逐条特征化。验收驱动与证据在 `.sandbox/ui-accept-devin-20261015/`（`REPORT.md`、`RESULT.json`、`host-playwright-7/`）。
+
+- [x] 初始化、创建 Browser 空间、进入、重启（generation 1→3，manager PID/generation/epoch 不变）、首页、停止服务（endpoint 释放、作业 succeeded）、显式一次重开（新 epoch，看板加载）、神圣树检查：run 7 共 8/9 通过；run 5 曾 9/9 但驱动把事件计了两遍且漏计 Supervisor 事件，数字已在报告中更正，不作为结论。
+- [ ] 持续 12 分钟窗口 FAIL（run 7）：04:05:21Z 两条同时发往 Supervisor 的请求在浏览器内停滞约 5.2 s 才开始 DNS/连接（CDP timing `domainLookupStart=5240ms`，服务端耗时约 220 ms）；dashboard `overview` 查询在未发出时被 5 s frame deadline 中止，首次失败即终态，切回首页后看板持续显示 `看板读取已停止 · dashboard/unavailable · read.deadline · overview · transport · 5012ms` 直至窗口结束（探针 14–48）。这与 10-14 未归因的 U01 `read.deadline` / 无状态 `board.transport` 同类，而且发生在干净 Cookie、未打补丁 SDK 下，排除了 Cookie 累积和 header 上限作为唯一原因。停滞发生在浏览器侧请求发出之前，发起方未定；候选为 Chromium 对该 origin 的 socket 池/调度排队，需 `--log-net-log` 复跑才能判定。run 5 同窗口未见该失败，复现率 1/2。
+- [ ] 观测但未判定：显式重开后 manager 页仍渲染上一纪元的 `已创建 / 进入空间` 提示（10 s 后仍在）；`localStorage` 键名两纪元一致。停止服务时两次运行呈现不同面：run 5 为 `结果尚未确认，没有重新发送请求` 提示，run 7 为宿主页 `workbench/unavailable` alert、管理帧消失。
+- [x] 未提交、推送、发布；未访问真实 `~/.dsh`；10-14 两轮证据目录未改动。
+
+# 2026-10-14 实机确认问题修复与 Node 26 隔离复验
+
+- [x] P1 活动模型 Apply：绑定实际子进程身份和空闲预留，忙碌或未知状态拒绝；维护任务也计入活动。最终安装包真实受控流验证忙时拒绝、generation 不变、原流完成、空闲后 Apply 成功，供应商请求只有一次。
+- [x] P1 损坏空间登记：保留实际失败，启动和写入准入校验，不伪造空列表；停止依照实际自有运行记录。schema 和截断 JSON 两个新 Home 反例均通过，坏字节不变。
+- [x] 其余确认源码问题：Browser 保护 Supervisor 来源、同坐标组件漂移实际对齐并严格读回、非法目录缓存拒绝、停机保存的 before-stop/final-save 阶段区分、第三方 peer 预检，以及已知作业错误码投影完成。最终包针对原生案例 14/14 通过。
+- [x] Home 身份、首次失败进度和诊断转发、Portal/原生失败分类及停止结果未确认提示完成；不重发变更、不新增恢复路径。公开诊断修复不能代替原停顿根因验收。
+- [x] 独立官方 rc.2 聊天客户端补丁：受控普通 Web 中，断流前、失败后、刷新历史后均保留部分文字和 TRANSPORT；一次 prompt、一次断流、一次供应商请求，历史字节不变。该补丁不在 Spaces tgz 中，未替换真实 SDK，也未上游发布。
+- [x] Node 26.10.0、新隔离 Home 下规定检查及额外交互/包预检共 15 个组最终有通过记录。最后 unavailable 白名单小修后重新运行受影响的清单、三组类型、构建及 workbench；其他未受影响组继承前次通过，机器索引注明边界。
+- [x] 最终包 bb06ac5e… 已在新隔离官方 Web 宿主安装并核对组件/客户端；358 个构建输入保持冻结。原 1,991 份证据和 24 份关键失败状态文件最终哈希不变；17 个受检 Home 未写 sacred trees。未提交、推送、发布或迁移真实 Home。
+- [ ] 持续官方 UI 验收尚未关闭：最终宿主页实见 portal/transport-failed，原 U01 read.deadline 停顿及 Browser 标签调用失败仍未归因。正常重启、停机、显式新启动成功不抵消这些失败。嵌入控件操作受工具限制；独立打开 3103 管理页被自动审批拒绝，拒绝后没有绕过。
+
+2026-10-14 后续：用户已允许独立隔离管理页访问。Supervisor 64 KiB 请求头上限、Portal 同一 selection 只转发一次及 Browser 有限错误分类已通过受影响检查并重新打包。全新 Node 26 Home `host-mux-native` 实际创建、启动、正常重启 Browser（generation 1 → 3）并读取首页与重启后的 Browser 页面；manager PID 和 epoch 未变。06:42:11 UTC 观察到外层宿主和管理器同时 `ECONNRESET` / WebSocket 1006，断开前 Pong 正常，无 heartbeat 主动终止证据；发起方仍未知。Dashboard fetch 与 SDK generation 取消没有直接信号绑定，不能将旧 board.transport 一概归因于 mux。完整持续 UI 仍为 REVISE；359 个构建输入、原 1,991 份静态证据和 24 份关键失败状态哈希不变。详见 [后续界面报告](../.sandbox/ui-fixes-node26-20261014/REPORT-UI-CONTINUATION.md)。
+
+详见 [本轮报告](../.sandbox/live-fixes-node26-20261014/REPORT-FINAL.md)、[机器证据索引](../.sandbox/live-fixes-node26-20261014/DELIVERY.json) 和 [独立复核](../.sandbox/live-fixes-node26-20261014/final-review/REVIEW.md)。独立审查接受限定的源码/包/原生修复范围；完整持续 UI 结果仍为 REVISE。
+
+# 2026-10-13 审查四项修复与 Node 26 统一
+
+- [x] Windows Global DOS junction 通过共享 native 路径检查识别；Diagnostics 外写、Snapshot 外部复制和无法解析的既有链接明确拒绝，合法内部链接仍通过。
+- [x] 作业公开理由在写盘和读取投影时覆盖 quoted/serialized JSON、Unicode key、数组/对象和嵌套 YAML 凭据；旧记录原字节保留，普通多行失败原因保留。
+- [x] HostShell/portal 保留脱敏的初始化、角色与实际调用失败原因，迟到响应、旧计时器和泛化 snapshot 错误不覆盖当前原因。
+- [x] 快照依赖按真实包位置检查，补齐实际入口、同名文件和 entryless 包校验；一次独立 Node 进程批量解析，避免长期 Supervisor 的模块缓存接受旧入口，不执行依赖代码或 preload。
+- [x] 按用户决定仅支持 Node 26.x：默认工具链 26.10.0，engines、入口检查、CI、类型定义和有效说明同步；不再维护 Node 24，不自动修复旧工具链。下文 Node 24 记录保留为历史事实。
+- [x] 最终 Node 26.10.0 下清单检查、三组类型检查、build、全部八个规定测试组均通过；额外 Chromium 交互 10/10，打包预检通过。Dashboard 使用隔离 rc.2 SDK，测试使用隔离 Home/TMP，保留既有跳过项。
+
+详细证据：[修复验收报告](C:/Users/27837/.codex/state/plugins/codex-security/scans/dsh-spaces/artifacts-9e2f67813588fc12355310567a8174bd6acfbfe217fa74c764678d45634fcd4b/artifacts/fix-summary.md)。本轮没有提交、推送、发布或替换已安装宿主；未重新跑完整实机场景或长期运行验收。
+
+# 2026-10-13 实机缺陷修复与新隔离 Home 复验
+
+- [x] 分享头像上限、自带/本地组件坐标、Browser待手动信息修复；模板/分享/蓝图真实创建与显式启动通过。
+- [x] 快照运行时复制范围收窄、可信前缀与依赖闭包校验前置；新无密钥 Home 正常快照和只读 Doctor 通过。
+- [x] 真实失败理由经 Host/Remote/UI/作业存储保留并脱敏，迟到旧错误不串页；Cookie无效Origin在派发前拒绝，15个真实请求403。
+- [x] Windows Archive模块解压失败修复；另一个全新 Home 真实安装alpha.2，停止/运行空间升级和实际启动通过。
+- [x] 原失败现场23个关键文件哈希不变；本轮失败Home和脚本原文继续保留，没有恢复/重放。
+- [x] 最终Home用户指定MiMo连接经UI保存与显式应用，真实两轮42→43成功；另一个新工作区的pwsh输出437，真实todo闭环通过。
+- [x] 规定全部检查已运行，类型/构建/LLM/Browser/浏览器DOM通过；未提交、推送、发布或迁移真实Home。
+- [ ] Node24链接边界尚未验收：最终全套23次junction相关失败，Node26只作诊断对照，没有削弱安全断言。完整生产故障注入、Browser总线UI、raw流delta、在位宿主包替换和完整嵌入交互等仍有覆盖缺口。
+
+详细结果、46案例矩阵及原始误判审计：`.sandbox/live-web-fix-20261013/REPORT.md`。最后测试宿主 `http://127.0.0.1:2262/`，最终 Home `upgrade-verified/home`。这是本地实机修复记录，不是全矩阵通过声明。
+
+# 2026-10-13 重构审查修复
+
+- [x] 显式启动沿用首次发现的控制所有者，交给既有串行启动流程退休可证明死亡的普通租约；只读发现不清理，活、模糊、外来与交接所有者仍受保护。维护锁、Home 内标记，以及绑定、显式和默认快照目录中的 `pending-restore.json` 均阻止退休，原租约、端点和证据保留。
+- [x] 管理插件对齐失败后，认证 `space.start` 同样被拒绝并保留原诊断，不再次安装或启动管理器。
+- [x] 取消管理器初始化中断后的续装；初始化期间拒绝并发变更，任务执行再次检查写权限，当前失败阻止后续写入。遗留 `manager-bootstrap.json` 在重开时保留，损坏记录也不猜测或重建。
+- [x] 空间详情的目标 DSH 版本随候选加载派生，保留仍有效的用户选择，并在空间或固定版本改变时重置。
+- [x] 删除全局 `runtime.install` 的 UI、公开类型、schema、计划生成和执行入口；旧请求与旧保存计划明确 unsupported，按空间安装与未使用运行时删除保留。
+- [x] 独立复核结论 READY，无未关闭问题。Node 24.19.0 下，测试清单检查、三组类型检查、最终构建、全部八个规定测试组及额外 Chromium 交互组均通过（交互组 10/10，其他组保留既有跳过项）。Dashboard 使用隔离安装的 DSH 0.2.0-rc.2；所有运行测试使用隔离 Home 和临时目录。结果与日志索引见 `.sandbox/fix-review-20261013/verification-summary.json`。未执行已安装官方宿主验收，未提交、推送或发布。
+
 # 2026-10-12 空间改为注册制，不再扫描收养 profile
 
 用户批准的设计变更：空间只在 Spaces 中创建（直接创建、模板、蓝图、分享导入）；profile 目录固定 `profiles/space-<name>`，数据在 `hub/space-<name>`，成员资格以 `hub/spaces.json` 中带 `createdAt` 的注册项为准。Spaces 不扫描、不收养、不修改其他 profile 目录；旧版本或其他途径创建的 profile 不迁移，仍是普通 DSH profile。
@@ -23,7 +80,7 @@
 - [x] P1a：冷启动总是选择宿主插件自带的组件组；仅当选中指针摘要一致才复用旧选择，旧 payload 不再按新清单校验（`7c39c07`）。
 - [x] P1b：Supervisor 可写启动时在管理器启动前对齐管理插件与绑定组件组；对齐失败即阻止启动并报告原因（`0bae5f9`）。
 - [x] P1c：删除自我更新与组件交接：`workbench.upgrade`、`workbench.prepare`、`component-handoff`、一次性 launcher、`--accept-handoff`、管理界面更新面板与对应 RPC。旧式更新遗留证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻断写入；旧客户端的 `workbench.upgrade` 返回 `workbench/unsupported`（`4f0a551`）。
-- [x] P2 按空间固定版本（已定决策，未实现）：每个空间固定精确的 DSH 运行时版本，官方基础插件（dsh-base / dsh-web-app）内置于运行时并随之变化，Spaces 不向 profile 安装；第三方插件安装与升级只接受精确版本。升级在空间设置中由用户发起，版本来源为插件库与 npm。已有空间首次启动时固定为当前实际使用的版本；新空间默认宿主的 DSH 版本。切换前不自动建快照，禁止降级。管理空间（spaces-hub）跟随宿主 CLI。Spaces 声明支持的 DSH 最低版本，桥接必须兼容整个范围；低于最低版本的空间启动失败并提示到空间设置升级。删除全局 runtime.install / runtime.upgrade 与协调升级。提供用户触发的删除未使用运行时（`f1e8a90`、`74ea256`、`cddabe9`、`86d51bf`）。
+- [x] P2 按空间固定版本：每个空间固定精确的 DSH 运行时版本，官方基础插件（dsh-base / dsh-web-app）内置于运行时并随之变化，Spaces 不向 profile 安装；第三方插件安装与升级只接受精确版本。升级在空间设置中由用户发起，版本来源为插件库与 npm。已有空间首次启动时固定为当前实际使用的版本；新空间默认宿主的 DSH 版本。切换前不自动建快照，禁止降级。管理空间（spaces-hub）跟随宿主 CLI。Spaces 声明支持的 DSH 最低版本，桥接必须兼容整个范围；低于最低版本的空间启动失败并提示到空间设置升级。删除全局 runtime.install / runtime.upgrade 与协调升级。提供用户触发的删除未使用运行时（`f1e8a90`、`74ea256`、`cddabe9`、`86d51bf`）。
 - [x] `validate:plugin` / `validate:distribution` 仍假定普通 profile 提供 `spaces/*`（专用 manager 之前的设计），已过时：已删除两个校验入口与 `scripts/verify-spaces-plugin.mjs`、`scripts/verify-spaces-distribution.mjs`；共享 harness 移至 `scripts/lib/distribution-harness.mjs`（本条目即该提交记录）。
 - [ ] `packages/*/README.md` 中残留 `0.1.7-alpha.1` 等旧版本说明，待统一。
 

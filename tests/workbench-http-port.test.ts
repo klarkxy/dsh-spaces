@@ -82,6 +82,34 @@ async function fetchState(origin: string): Promise<Response> {
   });
 }
 
+test("local profile cookie headers remain bounded without bypassing authentication or Origin", async () => {
+  let origin = "";
+  let dispatched = 0;
+  const host = runtime(() => origin);
+  host.dispatch = async () => { dispatched++; return { accepted: true }; };
+  const started = await startWorkbenchHttp(host);
+  origin = started.origin;
+  closers.push(started.close);
+  const filler = `other-profile=${"a".repeat(24 * 1024)}`;
+  const send = (cookie: string, requestOrigin = origin) => fetch(`${origin}/api/workbench/state`, {
+    method: "POST", headers: { "content-type": "application/json", origin: requestOrigin, cookie }, body: "{}",
+  });
+  const accepted = await send(`dsh-auth-test=session; ${filler}`);
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).ok, true);
+  assert.equal(dispatched, 1);
+  const unauthenticated = await send(filler);
+  assert.equal(unauthenticated.status, 401);
+  await unauthenticated.arrayBuffer();
+  const foreign = await send(`dsh-auth-test=session; ${filler}`, "http://foreign.example");
+  assert.equal(foreign.status, 403);
+  await foreign.arrayBuffer();
+  const oversized = await send(`dsh-auth-test=session; other-profile=${"a".repeat(70 * 1024)}`);
+  assert.equal(oversized.status, 431);
+  await oversized.arrayBuffer();
+  assert.equal(dispatched, 1);
+});
+
 async function freeBlockedPort(): Promise<number> {
   for (const port of BLOCKED_PROBE_PORTS) {
     const probe = createServer();
@@ -304,4 +332,14 @@ describe("workbench-http ports", { concurrency: 1 }, () => {
     );
     assert.equal(opens, 1);
   });
+});
+
+test("cookie requests reject present invalid Origin before dispatch",async()=>{
+ let origin="";const rt=runtime(()=>origin);let dispatched=0;rt.dispatch=async()=>{dispatched++;return{};};
+ const started=await startWorkbenchHttp(rt);origin=started.origin;closers.push(started.close);
+ for(const o of ["https://foreign.example","null","http://localhost:1234","http://user:pass@127.0.0.1:1234","http://127.0.0.1:1234/path"]){
+  const r=await fetch(origin+"/api/workbench/state",{method:"POST",headers:{Cookie:"dsh-auth-test=session",Origin:o,"Content-Type":"application/json"},body:"{}"});
+  assert.equal(r.status,403,o);
+ }assert.equal(dispatched,0);
+ const accepted=await fetch(origin+"/api/workbench/state",{method:"POST",headers:{Cookie:"dsh-auth-test=session",Origin:origin,"Content-Type":"application/json"},body:"{}"});assert.equal(accepted.status,200);assert.equal(dispatched,1);
 });

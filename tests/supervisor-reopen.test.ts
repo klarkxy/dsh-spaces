@@ -84,6 +84,66 @@ test("dead web owner without an endpoint permits a new launch", async () => {
   assert.equal(new HomeController(home).inspect().held, false);
 });
 
+test("a dead owner with unfinished maintenance retains its lease, endpoint and evidence", async () => {
+  const home = tempHome();
+  const owner = await exitedHolder(home);
+  const controller = new HomeController(home);
+  const ownerFile = join(controller.runDir, "owner.json");
+  const endpointFile = join(controller.controlDir, "endpoint.json");
+  const ownerBytes = readFileSync(ownerFile), endpointBytes = readFileSync(endpointFile);
+  for (const relative of [
+    ".dsh-spaces-restore/journal.json", ".dsh-spaces-upgrade/journal.json",
+    ".dsh-spaces-mutation.json", ".dsh-spaces-control/plugin-mutation.json",
+    ".dsh-spaces-control/workbench-upgrade.json", ".dsh-spaces-control/manager-bootstrap.json",
+    ".dsh-spaces-lock/owner.json",
+  ]) {
+    const marker = join(home, relative);
+    mkdirSync(join(marker, ".."), { recursive: true });
+    writeFileSync(marker, "{unfinished");
+    assert.throws(() => retirePreviousSupervisor(home, owner, false), /Unfinished Home maintenance/);
+    assert.deepEqual(readFileSync(ownerFile), ownerBytes);
+    assert.deepEqual(readFileSync(endpointFile), endpointBytes);
+    assert.equal(readFileSync(marker, "utf8"), "{unfinished");
+    assert.equal(existsSync(join(controller.controlDir, "previous-controller-exit.json")), false);
+    rmSync(marker);
+  }
+});
+
+test("pending restore evidence in bound, explicit and default snapshot roots prevents lease retirement", async () => {
+  const home = tempHome();
+  const owner = await exitedHolder(home);
+  const controller = new HomeController(home);
+  const ownerFile = join(controller.runDir, "owner.json");
+  const endpointFile = join(controller.controlDir, "endpoint.json");
+  const ownerBytes = readFileSync(ownerFile), endpointBytes = readFileSync(endpointFile);
+  const toolchain = join(controller.controlDir, "toolchain.json");
+  const cliRoot = join(home, "cli");
+  mkdirSync(join(cliRoot, "lib"), { recursive: true });
+  writeFileSync(join(cliRoot, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2" }));
+  const bin = join(cliRoot, "lib", "bin.js");
+  writeFileSync(bin, "export {};");
+  for (const mode of ["bound", "explicit", "default"]) {
+    const root = mode === "default" ? home + "-snapshots" : tempHome();
+    if (mode === "default") { mkdirSync(root); homes.push(root); }
+    const pending = join(root, "pending-restore.json");
+    writeFileSync(pending, "{unfinished");
+    if (mode === "bound") writeFileSync(toolchain, JSON.stringify({
+      version: 1, bin, nodeExe: process.execPath, dshVersion: "0.2.0-rc.2", snapshotRoot: root,
+    }));
+    assert.throws(() => retirePreviousSupervisor(home, owner, false, mode === "explicit" ? root : undefined), /Unfinished Home maintenance/);
+    assert.deepEqual(readFileSync(ownerFile), ownerBytes);
+    assert.deepEqual(readFileSync(endpointFile), endpointBytes);
+    assert.equal(readFileSync(pending, "utf8"), "{unfinished");
+    assert.equal(existsSync(join(controller.controlDir, "previous-controller-exit.json")), false);
+    rmSync(pending);
+    if (mode === "bound") rmSync(toolchain);
+  }
+  writeFileSync(toolchain, "{unknown snapshot binding");
+  assert.throws(() => retirePreviousSupervisor(home, owner, false), /Unfinished Home maintenance/);
+  assert.deepEqual(readFileSync(ownerFile), ownerBytes);
+  assert.deepEqual(readFileSync(endpointFile), endpointBytes);
+});
+
 test("legacy desktop owner without an endpoint permits a new user launch only after its process exits", async () => {
   const home = tempHome();
   const controller = new HomeController(home);
@@ -241,5 +301,63 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     const saved = JSON.parse(readFileSync(join(controller.controlDir, "jobs", "shutdown-job.json"), "utf8"));
     assert.equal(saved.status, failPersistence ? "running" : "succeeded");
     if (failPersistence) lease.release();
+  }
+});
+
+test("shutdown persistence diagnostics distinguish failure before stopping from failure after stopping", async () => {
+  for (const beforeStop of [true, false]) {
+    const home = tempHome();
+    const controller = new HomeController(home);
+    const lease = controller.acquire("web");
+    const ownerBefore = readFileSync(join(controller.controlDir, "run", "owner.json"));
+    const lifecycle = new SupervisorLifecycle();
+    lifecycle.handle = lease;
+    let writes = 0;
+    let stopCalls = 0;
+    let normalExit = false;
+    const jobs = new WorkbenchJobStore({
+      home,
+      inject: (operation) => {
+        // Queue admission and running state precede the first stopping phase.
+        if (operation === "write" && ++writes === (beforeStop ? 3 : 4)) {
+          throw new Error("controlled shutdown phase persistence failure");
+        }
+      },
+    });
+    const epoch = "a".repeat(64);
+    const plans = new SupervisorPlans({
+      home, lifecycle, runs: new SpaceRunRegistry(), messageBus: new SpaceMessageRouter(),
+      options: { home, bin: "", onNormalExit: () => { normalExit = true; } },
+      lock: new HomeOperationLock(home), registry: new ProfileRegistry(home),
+      now: () => new Date(), jobs: () => jobs,
+      instances: () => ({ writeLifecyclePlan() {}, consumeLifecyclePlan() {} }) as never,
+      dashboard: () => null, dashboardHost: () => { throw new Error("not used"); },
+      maintenance: () => null, closeHttp: async () => { throw new Error("must retain HTTP"); },
+      dropWritable: () => { throw new Error("must retain ownership"); },
+      requireSpace: id => id, requireManaged: id => id, protectSpecial: () => {},
+      statusOf: () => "running", ownedSpaceIds: () => ["spaces-hub"],
+      stopOwned: async () => {}, stopOwnedAll: async () => { stopCalls++; },
+      startSpace: async () => undefined, currentServiceEpoch: () => epoch,
+      stateRevision: () => "revision",
+      productObservation: () => ({ serviceEpoch: epoch, expectedRevision: "revision" }),
+      assertLiveContext: () => {},
+    });
+    const plan = plans.previewLocal({ kind: "service.shutdown" });
+    await jobs.submit({ kind: "plan.execute", planId: plan.id }, "phase-write-failure", async ctx => {
+      lifecycle.activeJobId = "phase-write-failure";
+      try { await plans.executePlan(plan.id, ctx); }
+      finally { lifecycle.activeJobId = undefined; }
+    });
+    await jobs.whenIdle();
+    await plans.afterPlanJobSettled("phase-write-failure");
+    assert.equal(stopCalls, beforeStop ? 0 : 1);
+    assert.equal(jobs.job("phase-write-failure").status, "failed");
+    assert.equal(lifecycle.shutdownFailure, beforeStop ? "before-stop" : "final-save");
+    assert.equal(normalExit, false);
+    assert.deepEqual(readFileSync(join(controller.controlDir, "run", "owner.json")), ownerBefore);
+    assert.throws(() => lifecycle.assertWritable(), beforeStop ? /before stopping began/ : /Owned processes stopped/);
+    if (beforeStop) assert.doesNotMatch(lifecycle.reasons.join(" "), /Owned processes stopped/);
+    else assert.match(lifecycle.reasons.join(" "), /Owned processes stopped/);
+    lease.release();
   }
 });

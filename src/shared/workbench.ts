@@ -159,7 +159,6 @@ export type WorkbenchPlanRequest =
   | { kind: 'snapshot.create' }
   | { kind: 'snapshot.delete'; snapshotId: string }
   | { kind: 'space.runtime.set'; spaceId: string; version: string }
-  | { kind: 'runtime.install'; version: string }
   | { kind: 'runtime.remove'; version: string }
   | { kind: 'service.shutdown' };
 
