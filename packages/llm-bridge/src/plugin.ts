@@ -16,6 +16,7 @@ import type { LlmSharedSnapshot } from "../../../src/core/domain/llm-connections
 import { LLM_SNAPSHOT_ENV, readLaunchSnapshotFile } from "../../../src/adapters/node/llm-snapshot";
 import { SpacesCredentialsProvider } from "./credentials-provider";
 import { installManagedRequestGuard } from "./request-guard";
+import { installLlmActivity } from "./activity";
 import {
   AGENT_DEFAULT_MODEL_NAMESPACE,
   LLM_PI_AI_NAMESPACE,
@@ -119,6 +120,7 @@ export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = 
     else delete settings.bridgeStatus;
   });
   installManagedRequestGuard(ctx, { bridgeStatus: status });
+  installLlmActivity(ctx, env);
   const home = env[LLM_SNAPSHOT_ENV.home] ?? env.DSH_HOME;
   const credentials = ctx.credentials as CredentialService | undefined;
   if (snapshot && home && credentials) {

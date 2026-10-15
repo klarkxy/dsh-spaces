@@ -77,7 +77,7 @@ function runBridgeFixture(script: string): Record<string, unknown> {
     timeout: 120_000,
     windowsHide: true,
   });
-  assert.equal(child.status, 0, child.stderr || child.stdout || child.error?.message);
+  assert.equal(child.status, 0, child.stderr || child.stdout || child.error?.message || "Bridge fixture failed.");
   const result = parseResultJson(child.stdout);
   assert.equal(result.failure, undefined);
   assert.equal(result.sourceStable, true);

@@ -18,6 +18,7 @@
     "src/adapters/**/*",
     "packages/plugin/src/host/**/*",
     "packages/plugin/src/types.ts",
+    "packages/llm-bridge/src/activity-protocol.ts",
     "src/shared/**/*"
   ]
 }
