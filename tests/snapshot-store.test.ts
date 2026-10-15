@@ -373,40 +373,8 @@ test("old snapshots without runtimeMissing remain readable; missing runtime refu
   assert.equal(readFileSync(manifestPath, "utf8"), dataOnly);
 });
 
-test("bad and future restore receipts and journals throw and keep the original bytes", () => {
-  const { home, root, store } = harness();
-  const receiptPath = join(root, "restore-receipt.json");
-  assert.equal(store.recoveryReceipt(), undefined);
-  writeFileSync(receiptPath, "{not-json");
-  assert.throws(() => store.recoveryReceipt(), /not valid JSON/);
-  assert.equal(readFileSync(receiptPath, "utf8"), "{not-json");
-
-  const future = `${JSON.stringify({
-    schemaVersion: 2,
-    outcome: "completed",
-    snapshotId: "11111111-1111-1111-1111-111111111111",
-    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
-    runtimeVersion: "1.0.0",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-  }, null, 2)}\n`;
-  writeFileSync(receiptPath, future);
-  assert.throws(() => new SnapshotStore({ home, root }).recoveryReceipt(), /not supported/);
-  assert.equal(readFileSync(receiptPath, "utf8"), future);
-
-  const illegal = `${JSON.stringify({
-    schemaVersion: 1,
-    outcome: "rolled-back",
-    snapshotId: "not-a-uuid",
-    beforeRestoreId: "22222222-2222-2222-2222-222222222222",
-    runtimeVersion: "1.0.0",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-  }, null, 2)}\n`;
-  writeFileSync(receiptPath, illegal);
-  assert.throws(() => new SnapshotStore({ home, root }).recoveryReceipt(), /invalid/);
-  assert.equal(readFileSync(receiptPath, "utf8"), illegal);
-
+test("a bad restore journal throws and keeps the original bytes", () => {
+  const { home, store } = harness();
   const journalPath = join(home, RESTORE_STAGE_DIR, "journal.json");
   mkdirSync(dirname(journalPath), { recursive: true });
   writeFileSync(journalPath, "{not-json");

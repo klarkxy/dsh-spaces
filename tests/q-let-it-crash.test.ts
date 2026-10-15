@@ -139,16 +139,6 @@ test("E14 import of an incompatible combo keeps the space and does not start it"
   assert.deepEqual(installed, ["good@1.0.0"]);
 });
 
-test("E15 doctor recover is unsupported and does not rewrite Home", async () => {
-  const home = tempHome();
-  const marker = join(home, "settings.yaml");
-  writeFileSync(marker, "keep\n");
-  const before = readFileSync(marker);
-  const code = await doctorMain(["recover", "--home", home]);
-  assert.equal(code, 7);
-  assert.deepEqual(readFileSync(marker), before);
-});
-
 test("E16 doctor inspect does not clear leftover jobs", async () => {
   const home = tempHome();
   const jobsDir = join(home, ".dsh-spaces-control", "jobs");

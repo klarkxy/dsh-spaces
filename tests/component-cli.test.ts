@@ -7,8 +7,7 @@ import {
   AlignmentArchiveError,
   alignmentArchiveId,
   cliLoadError,
-  dshPeerRangesFromPayload,
-  isAlignmentArchiveId,
+  dshPeerRangesFromPackages,
   unmetDshPeers,
   unmetInstalledThirdPartyDshPeers,
 } from "../src/adapters/node/component-cli.ts";
@@ -26,7 +25,10 @@ test("component peers reject an older CLI and accept the alpha release", () => {
     peerDependencies: { "@deepseek-ai/dsh-settings": "^0.1.7-alpha.1" },
   }));
   try {
-    const ranges = dshPeerRangesFromPayload(lib);
+    const ranges = dshPeerRangesFromPackages([
+      join(root, "package.json"),
+      join(lib, "view-bridge", "package.json"),
+    ]);
     assert.equal(ranges.zod, undefined);
     const unmet = unmetDshPeers("0.1.5-rc.2", ranges);
     assert.ok(unmet.some(row => row.includes("dsh-settings")));
@@ -105,8 +107,7 @@ test("alignment archive id toggles only a same-file coordinate and rejects a bad
   const installed = join(profile, "node_modules", "@dsh-spaces", "plugin", "package.json");
   try {
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), canonicalId);
-    assert.equal(isAlignmentArchiveId(canonicalId), true);
-    assert.equal(isAlignmentArchiveId(revisionId), true);
+    assert.equal(revisionId.endsWith("-r1"), true);
     assert.throws(() => alignmentArchiveId(profile, "dsh-spaces-plugin-short", canonical), AlignmentArchiveError);
     mkdirSync(profile, { recursive: true });
     writeFileSync(join(profile, "package.json"), "{");

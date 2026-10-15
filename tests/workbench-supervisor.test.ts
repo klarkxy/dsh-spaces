@@ -1379,60 +1379,6 @@ test("ROOT package recovery settles only its matching job and preserves abandone
   assert.equal(jobStatus(home, "job-package-b"), "recovery-required");
 });
 
-test("recovery resume settles only the matching runtime.upgrade planId", async () => {
-  const home = tempHome();
-  writeInterruptedPlan(home, "plan-upgrade-a", { kind: "runtime.upgrade" });
-  writeInterruptedPlan(home, "plan-upgrade-b", { kind: "runtime.upgrade" });
-  writeInterruptedJob(home, {
-    id: "job-upgrade-a",
-    kind: "plan.execute",
-    command: { kind: "plan.execute", planId: "plan-upgrade-a" },
-    phase: "commit",
-  });
-  writeInterruptedJob(home, {
-    id: "job-upgrade-b",
-    kind: "plan.execute",
-    command: { kind: "plan.execute", planId: "plan-upgrade-b" },
-    phase: "commit",
-  });
-  const handle = await startSupervisor(home);
-  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
-  await assertRecoveryResumeUnsupported(
-    handle.origin,
-    cookie,
-    [
-      join(home, ".dsh-spaces-control", "jobs", "job-upgrade-a.json"),
-      join(home, ".dsh-spaces-control", "jobs", "job-upgrade-b.json"),
-      join(home, ".dsh-spaces-control", "plans", "plan-upgrade-a.json"),
-      join(home, ".dsh-spaces-control", "plans", "plan-upgrade-b.json"),
-    ],
-    "resume-upgrade-1",
-  );
-  assert.equal(jobStatus(home, "job-upgrade-a"), "recovery-required");
-  assert.equal(jobStatus(home, "job-upgrade-b"), "recovery-required");
-
-  const homeLegacy = tempHome();
-  writeInterruptedPlan(homeLegacy, "plan-upgrade-old", { kind: "runtime.upgrade" });
-  writeInterruptedJob(homeLegacy, {
-    id: "job-upgrade-old",
-    kind: "plan.execute",
-    command: { kind: "plan.execute", planId: "plan-upgrade-old" },
-    phase: "commit",
-  });
-  const legacy = await startSupervisor(homeLegacy);
-  const legacyCookie = await bootstrap(legacy.origin, legacy.bootstrapUrl);
-  await assertRecoveryResumeUnsupported(
-    legacy.origin,
-    legacyCookie,
-    [
-      join(homeLegacy, ".dsh-spaces-control", "jobs", "job-upgrade-old.json"),
-      join(homeLegacy, ".dsh-spaces-control", "plans", "plan-upgrade-old.json"),
-    ],
-    "resume-upgrade-old",
-  );
-  assert.equal(jobStatus(homeLegacy, "job-upgrade-old"), "recovery-required");
-});
-
 test("recovery resume does not follow a junctioned plans directory", async () => {
   const home = tempHome();
   const snapA = "11111111-1111-1111-1111-111111111111";

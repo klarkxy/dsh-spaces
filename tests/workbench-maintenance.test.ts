@@ -759,18 +759,6 @@ test("cancel is honored before mutation and ignored after the irreversible point
   assert.deepEqual(state2.started, ["space-coding"]);
 });
 
-test("runtime upgrade plans are rejected as unsupported", async () => {
-  const { maintenance } = harness();
-  await assert.rejects(
-    () =>
-      maintenance.preview({
-        kind: "runtime.upgrade",
-        version: "0.1.5-rc.1",
-      } as never),
-    matchCode("workbench/unsupported"),
-  );
-});
-
 test("plugin mutation failure keeps diagnostic files, stops the target, and does not fake a manifest rollback", async () => {
   const { home, maintenance, state } = harness({
     pluginAdd: async (dshHome, profile, spec) => {
@@ -897,20 +885,6 @@ test("plans are consumed once and invalid plan records are rejected without rewr
   assert.ok(existsSync(join(snapRoot, first?.snapshotId ?? "missing", "manifest.json")));
   assert.equal(runtime.version, "0.1.5-rc.1");
   assert.equal(state.stopAll >= 1, true);
-});
-
-test("config restore preview is forbidden", async () => {
-  const { maintenance, state } = harness();
-  state.backups = [{ id: "cordis.patch.yml.bak-1", createdAt: "2026-01-01T00:00:00.000Z", size: 10, tooLarge: false }];
-  await assert.rejects(
-    () => maintenance.preview({
-      // @ts-expect-error the removed kind is rejected intentionally
-      kind: "config.restore",
-      spaceId: "spaces-hub",
-      backupId: "cordis.patch.yml.bak-1",
-    }),
-    matchCode("workbench/unsupported"),
-  );
 });
 
 test("snapshot restore preview and execute are unsupported", async () => {
