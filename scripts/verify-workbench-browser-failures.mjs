@@ -333,7 +333,6 @@ function scriptImportsUnsafe(source) {
     product: /from\s+['"]\.\/verify-workbench-product\.mjs['"]/.test(source),
     interactions: /from\s+['"]\.\/verify-workbench-interactions\.mjs['"]/.test(source),
     desktop: /from\s+['"]\.\/verify-spaces-desktop\.mjs['"]/.test(source),
-    maintenance: /from\s+['"]\.\/verify-workbench-maintenance-product\.mjs['"]/.test(source),
     fulfill: /route\.fulfill\s*\(/.test(source),
   };
 }
@@ -376,7 +375,7 @@ export async function runSelfCheck(outputDir = DEFAULT_OUTPUT) {
   try {
     const source = readFileSync(script, 'utf8');
     const unsafe = scriptImportsUnsafe(source);
-    if (unsafe.product || unsafe.interactions || unsafe.desktop || unsafe.maintenance) {
+    if (unsafe.product || unsafe.interactions || unsafe.desktop) {
       fail('no-unsafe-imports', unsafe);
     } else pass('no-unsafe-imports');
     if (unsafe.fulfill) fail('no-route-fulfill', 'script contains route.fulfill');

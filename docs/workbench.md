@@ -145,7 +145,7 @@ Runtime **预览安装** follows official **`latest`**, resolved to an exact ver
 
 **Upgrading Spaces:** install the new host plugin with `dsh plugin --profile web add <new tarball>`, shut the service down from the manager UI, and reopen Spaces. The Supervisor selects the host plugin's component group and aligns the manager plugin before it starts; each space's bridges align at space start. Leftover `workbench-upgrade.json` / `.dsh-spaces-upgrade/journal.json` evidence from an interrupted older update still blocks writes.
 
-**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs` and `scripts/verify-workbench-maintenance-product.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows and platform limits. Retired crash/faults scripts fail closed on invocation; they are not current evidence.
+**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows and platform limits. Global `runtime.install` / `runtime.upgrade` acceptance is not a current product path.
 
 ### Logs and doctor
 
