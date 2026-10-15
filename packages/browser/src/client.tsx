@@ -4,8 +4,8 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import { readViewHint } from '../../view-bridge/src/env';
 import { BROWSER_HIDE, BROWSER_PRESENT, BROWSER_RESULT, type BrowserChildRequest, type BrowserGuestResult } from '../../../src/shared/browser-guest';
+import { displayBrowserFailure, listTabs, openURL, observe, type Tab } from './remote-client';
 
-interface Tab { id: string; requestedUrl: string | null; url: string | null; title: string }
 type BrowserConnection = Pick<ConnectionHandle, 'rpc'>;
 
 /** Tabs are append-only for this process; an older RPC snapshot must not unmount a newer tab. */
@@ -94,8 +94,8 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
         const arrived = seenCount.current > 0 && next.length > seenCount.current;
         seenCount.current = Math.max(seenCount.current, next.length);
         setSelected(previous => arrived ? next.at(-1)?.id ?? null : previous ?? next[0]?.id ?? null);
-      } catch {
-        if (!disposed) { failed = true; setError('Browser tabs are unavailable.'); }
+      } catch (error) {
+        if (!disposed) { failed = true; setError(displayBrowserFailure(error, 'Browser tabs are unavailable.')); }
       } finally { pending = false; }
     };
     void load();
@@ -110,7 +110,7 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
       setTabs(previous => mergeTabSnapshots(previous, [tab]));
       setSelected(tab.id);
       setDraft(''); setError(null);
-    } catch { setError('That URL could not be opened.'); }
+    } catch (error) { setError(displayBrowserFailure(error, 'That URL could not be opened.')); }
   };
   return <div style={appStyle} data-spaces-browser-root="true">
     <nav aria-label="Browser tabs" style={tabsStyle}>
@@ -152,37 +152,6 @@ function postBrowserRequest(request: BrowserChildRequest, parentOrigin: string):
     window.addEventListener('message', receive);
     window.parent.postMessage(request, parentOrigin);
   });
-}
-
-async function call(connection: BrowserConnection, method: string, args: Record<string, unknown>): Promise<unknown> {
-  const result = await connection.rpc.call('/api', `spacesBrowser/${method}`, { args });
-  if (!result.ok) throw new Error('Browser request failed');
-  return result.value;
-}
-
-function parseTab(value: unknown): Tab {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Browser tab');
-  const row = value as Record<string, unknown>;
-  if (typeof row.id !== 'string' || (row.requestedUrl !== null && typeof row.requestedUrl !== 'string') ||
-    (row.url !== null && typeof row.url !== 'string') || typeof row.title !== 'string') throw new Error('Invalid Browser tab');
-  return { id: row.id, requestedUrl: row.requestedUrl, url: row.url, title: row.title } as Tab;
-}
-
-async function listTabs(connection: BrowserConnection): Promise<Tab[]> {
-  const value = await call(connection, 'listTabs', {});
-  if (!Array.isArray(value) || value.length > 16) throw new Error('Invalid Browser tabs');
-  return value.map(parseTab);
-}
-
-async function openURL(connection: BrowserConnection, url: string): Promise<Tab> {
-  return parseTab(await call(connection, 'openURL', { url }));
-}
-
-async function observe(connection: BrowserConnection, observations: unknown): Promise<Tab[]> {
-  if (!Array.isArray(observations) || observations.length > 16) throw new Error('Invalid Browser observations');
-  const value = await call(connection, 'observe', { observations });
-  if (!Array.isArray(value) || value.length > 16) throw new Error('Invalid Browser tabs');
-  return value.map(parseTab);
 }
 
 const appStyle: CSSProperties = { display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', background: '#f6f7f9', color: '#20242a', font: '14px system-ui,sans-serif' };

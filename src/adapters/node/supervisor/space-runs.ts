@@ -51,6 +51,7 @@ export class SpaceRunRegistry {
     const parent =
       profile === ctx.managerId ? ctx.origin : ctx.managerOrigin ?? ctx.origin;
     return {
+      DSH_SPACES_SUPERVISOR_ORIGIN: ctx.origin,
       [VIEW_ENV.parent]: parent,
       [VIEW_ENV.id]: profile,
       [VIEW_ENV.generation]: generation,

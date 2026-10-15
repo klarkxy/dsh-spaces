@@ -10,6 +10,43 @@ import { apply as applyBrowserClient } from '../packages/browser/src/client';
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { BrowserRequestFailure, displayBrowserFailure, listTabs } from '../packages/browser/src/remote-client';
+
+test('Browser preserves a known HTTP authentication failure without replay or raw exception text', async () => {
+  let calls = 0;
+  const connection = { rpc: { call: async () => {
+    calls++;
+    throw new Error('transport failure for /api/spacesBrowser/listTabs: HTTP 401');
+  } } };
+  await assert.rejects(listTabs(connection as never), error => {
+    assert(error instanceof BrowserRequestFailure);
+    assert.equal(error.status, 401);
+    assert.equal(error.code, 'browser/unauthenticated');
+    assert.match(displayBrowserFailure(error, 'Browser tabs are unavailable.'), /HTTP 401/);
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.equal(displayBrowserFailure(new Error('secret=private-value https://private.example'),
+    'Browser tabs are unavailable.'), 'Browser tabs are unavailable.');
+});
+
+test('Browser keeps known Remote codes and distinguishes malformed data without exposing remote details', async () => {
+  for (const [result, phase, code] of [
+    [{ ok: false, error: { code: 'gateway/cancelled', message: 'secret=private-value', details: {} } }, 'remote', 'gateway/cancelled'],
+    [{ ok: false, error: { code: 'private-secret-code', message: 'secret=private-value', details: {} } }, 'remote', 'browser/remote-failed'],
+    [{ ok: true, value: [{ id: 'x' }] }, 'decode', 'browser/response-invalid'],
+  ] as const) {
+    let calls = 0;
+    await assert.rejects(listTabs({ rpc: { call: async () => { calls++; return result; } } } as never), error => {
+      assert(error instanceof BrowserRequestFailure);
+      assert.equal(error.phase, phase);
+      assert.equal(error.code, code);
+      assert.doesNotMatch(error.message, /private-value|private-secret/);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
 
 test('official DSH root slot elects Browser-only UI ahead of the Web layout', () => {
   const slots = new SlotCore();

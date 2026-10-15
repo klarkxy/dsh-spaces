@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '../../view-bridge/src/message-service';
-import { parseViewEnv } from '../../view-bridge/src/env';
+import { parseLoopbackOrigin, parseViewEnv } from '../../view-bridge/src/env';
 import { BrowserTabs } from './tabs';
 import { BrowserRemote } from './remote';
 
@@ -16,10 +16,15 @@ export function apply(ctx: Context, config: BrowserConfig = {}): BrowserTabs {
     throw new Error('Invalid Browser allowedSpaces');
   }
   const parentOrigin = parseViewEnv(process.env)?.parentOrigin;
+  const supervisorEnv = process.env.DSH_SPACES_SUPERVISOR_ORIGIN;
+  const supervisorOrigin = supervisorEnv === undefined ? null : parseLoopbackOrigin(supervisorEnv);
+  if (supervisorEnv !== undefined && !supervisorOrigin) throw new Error('Invalid Supervisor application origin');
   const webServer = ctx.get('webServer') as { port?: number };
   const tabs = new BrowserTabs(() => {
     if (!Number.isInteger(webServer.port) || !webServer.port) throw new Error('Browser Host origin is unavailable');
-    return new Set([String(webServer.port), ...(parentOrigin ? [new URL(parentOrigin).port] : [])]);
+    return new Set([String(webServer.port),
+      ...(parentOrigin ? [new URL(parentOrigin).port] : []),
+      ...(supervisorOrigin ? [new URL(supervisorOrigin).port] : [])]);
   });
   new BrowserRemote(ctx, tabs);
   ctx.spaceMessages.handle('browser.openURL', allowed, params => {

@@ -46,7 +46,8 @@ test('real Browser Host denies by default then exposes only authorized operation
     const denied = await launch(browserChild); children.push(denied); router.attach('browser', denied);
     assert.deepEqual((await query(caller, { test: 'capabilities' })).value, []);
     assert.equal((await query(caller, { operation: 'browser.openURL', params: { url: 'https://example.com' } })).error, 'unauthorized');
-    const allowed = await launch(browserChild, { BROWSER_ALLOWED: 'coding' }); children.push(allowed); router.attach('browser', allowed);
+    const allowed = await launch(browserChild, { BROWSER_ALLOWED: 'coding',
+      DSH_SPACES_SUPERVISOR_ORIGIN: 'http://127.0.0.1:6821' }); children.push(allowed); router.attach('browser', allowed);
     const capabilities = await query(caller, { test: 'capabilities' });
     assert.deepEqual(capabilities.value.map((item: { operation: string }) => item.operation), ['browser.listTabs', 'browser.openURL']);
     assert.deepEqual((await query(outsider, { test: 'capabilities' })).value, []);
@@ -56,6 +57,10 @@ test('real Browser Host denies by default then exposes only authorized operation
     const listed = await query(caller, { operation: 'browser.listTabs', params: null });
     assert.deepEqual(listed.value.map((tab: { url: string | null }) => tab.url), [null, 'https://example.com/']);
     assert.equal((await query(caller, { operation: 'browser.openURL', params: { url: 'file:///etc/passwd' } })).error, 'operation-failed');
+    for (const origin of ['http://127.0.0.1:6821', 'http://localhost:6821', 'http://127.0.0.1:4100']) {
+      assert.equal((await query(caller, { operation: 'browser.openURL', params: { url: origin } })).error, 'operation-failed');
+    }
+    assert.equal((await query(caller, { operation: 'browser.openURL', params: { url: 'http://127.0.0.1:6822' } })).ok, true);
   } finally {
     router.close();
     await Promise.all(children.map(async child => { if (child.exitCode === null && child.signalCode === null) { const finished = once(child, 'exit'); child.kill(); await finished; } }));

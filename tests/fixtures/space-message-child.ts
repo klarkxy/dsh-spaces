@@ -18,7 +18,7 @@ process.on('message', async (m: any) => {
     try { process.send!({ test: 'result', id: m.id, ok: true, value: await bus.request(m.target, m.operation, m.params, m.timeoutMs) }); }
     catch (error: any) { process.send!({ test: 'result', id: m.id, ok: false, error: error.code }); }
   } else if (m?.test === 'counts') process.send!({ test: 'result', id: m.id, pending: bus.pendingCount, active: bus.activeCount });
-  else if (m?.test === 'disconnect') process.disconnect();
+  else if (m?.test === 'disconnect') process.disconnect!();
   else if (m?.test === 'exit') process.exit(0);
   else if (m?.test === 'raw') process.send!(m.value);
 });
