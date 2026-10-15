@@ -30,14 +30,6 @@ export function dshPeerRangesFromPackages(packageJsonPaths: readonly string[]): 
   return ranges;
 }
 
-export function dshPeerRangesFromPayload(payloadRootLib: string): Record<string, string> {
-  return dshPeerRangesFromPackages([
-    join(payloadRootLib, "..", "package.json"),
-    join(payloadRootLib, "view-bridge", "package.json"),
-    join(payloadRootLib, "llm-bridge", "package.json"),
-  ]);
-}
-
 export function dshPeerRangesFromProfile(profileDir: string): Record<string, string> {
   const modules = join(profileDir, "node_modules", "@dsh-spaces");
   return dshPeerRangesFromPackages([
@@ -200,8 +192,6 @@ export function payloadBridgeFiles(payloadRoot: string, bridge: string): string[
  * the selected component; do not require one exact archive path. Package name,
  * version, and source digest stay the same.
  */
-export const ALIGNMENT_ARCHIVE_ID =
-  /^dsh-spaces-(plugin|view-bridge|llm-bridge|browser)-[a-f0-9]{20}(?:-r1)?$/;
 const CANONICAL_ALIGNMENT_ARCHIVE_ID =
   /^dsh-spaces-(plugin|view-bridge|llm-bridge|browser)-[a-f0-9]{20}$/;
 
@@ -217,10 +207,6 @@ export class AlignmentArchiveError extends Error {
     super(message);
     this.name = "AlignmentArchiveError";
   }
-}
-
-export function isAlignmentArchiveId(id: string): boolean {
-  return ALIGNMENT_ARCHIVE_ID.test(id);
 }
 
 /** One archive id for the single alignment add. Does not write or delete. */

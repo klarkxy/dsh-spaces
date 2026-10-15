@@ -54,8 +54,6 @@ export function readSettings(dshHome: string): HubSettings {
     return {
       portStart,
       portEnd: portEnd >= portStart ? portEnd : portStart,
-      quitBehavior: parsed.quitBehavior === "keep" ? "keep" : "stop",
-      quitKeepHintDismissed: Boolean(parsed.quitKeepHintDismissed),
       packageSource: parsePackageSource(parsed.packageSource),
       locale: parseLocale(parsed.locale),
       theme: parseTheme(parsed.theme),
@@ -77,8 +75,6 @@ export function writeSettings(dshHome: string, settings: HubSettings): HubSettin
   const next: HubSettings = {
     portStart: Math.floor(settings.portStart),
     portEnd: Math.floor(settings.portEnd),
-    quitBehavior: settings.quitBehavior === "keep" ? "keep" : "stop",
-    quitKeepHintDismissed: Boolean(settings.quitKeepHintDismissed),
     packageSource: parsePackageSource(settings.packageSource),
     locale: parseLocale(settings.locale),
     theme: parseTheme(settings.theme),

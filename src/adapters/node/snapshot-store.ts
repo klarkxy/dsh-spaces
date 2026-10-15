@@ -11,7 +11,6 @@ import {
   SNAPSHOT_ID_RE,
   type PendingRestore,
   type RestoreJournal,
-  type RestoreRecoveryReceipt,
   type SnapshotMeta,
   type SnapshotPresence,
   type SnapshotRuntime,
@@ -20,7 +19,6 @@ import {
 const MANIFEST = "manifest.json";
 const PENDING_FILE = "pending-restore.json";
 const JOURNAL_FILE = "journal.json";
-const RECEIPT_FILE = "restore-receipt.json";
 const DATA_DIR = "data";
 const RUNTIME_DIR = "runtime";
 
@@ -183,13 +181,6 @@ export class SnapshotStore {
     if (!lexists(path)) return undefined;
     this.assertInsideHome(path);
     return parseJournal(readFileSync(path, "utf8"), path);
-  }
-
-  recoveryReceipt(): RestoreRecoveryReceipt | undefined {
-    const path = join(this.root, RECEIPT_FILE);
-    if (!lexists(path)) return undefined;
-    this.assertInsideStore(path);
-    return parseReceipt(readFileSync(path, "utf8"), path);
   }
 
   private writeSnapshot(input: {
@@ -672,40 +663,6 @@ function parseJournal(raw: string, path: string): RestoreJournal {
     snapshotId: parsed.snapshotId,
     beforeRestoreId: parsed.beforeRestoreId,
     originalPresence: parsePresence(parsed.originalPresence, path),
-    runtimeVersion: parsed.runtimeVersion,
-    binRelative: normalizeRel(parsed.binRelative),
-    startedAt: parsed.startedAt,
-    ...optionalPlanIdField(parsed.planId, path),
-  };
-}
-
-function parseReceipt(raw: string, path: string): RestoreRecoveryReceipt {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    throw new Error(`Restore receipt is not valid JSON: ${path}`);
-  }
-  if (!isRecord(parsed) || parsed.schemaVersion !== 1) {
-    throw new Error(`Restore receipt schema is not supported: ${path}`);
-  }
-  if (
-    (parsed.outcome !== "completed" && parsed.outcome !== "rolled-back") ||
-    typeof parsed.snapshotId !== "string" ||
-    !SNAPSHOT_ID_RE.test(parsed.snapshotId) ||
-    typeof parsed.beforeRestoreId !== "string" ||
-    !SNAPSHOT_ID_RE.test(parsed.beforeRestoreId) ||
-    typeof parsed.runtimeVersion !== "string" ||
-    typeof parsed.binRelative !== "string" ||
-    typeof parsed.startedAt !== "string"
-  ) {
-    throw new Error(`Restore receipt is invalid: ${path}`);
-  }
-  return {
-    schemaVersion: 1,
-    outcome: parsed.outcome,
-    snapshotId: parsed.snapshotId,
-    beforeRestoreId: parsed.beforeRestoreId,
     runtimeVersion: parsed.runtimeVersion,
     binRelative: normalizeRel(parsed.binRelative),
     startedAt: parsed.startedAt,

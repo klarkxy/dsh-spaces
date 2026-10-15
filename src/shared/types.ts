@@ -26,8 +26,6 @@ export interface SpacesFile {
   meta: Record<string, SpaceMeta>;
 }
 
-export type QuitBehavior = "stop" | "keep";
-
 /** npm/Node download origin. China uses npmmirror; official uses npmjs + nodejs.org. */
 export type PackageSource = "china" | "official";
 
@@ -40,10 +38,6 @@ export type ThemePreference = "system" | "light" | "dark";
 export interface HubSettings {
   portStart: number;
   portEnd: number;
-  /** Read for compatibility. Quit always stops owned spaces; keep is no longer applied. */
-  quitBehavior: QuitBehavior;
-  /** One-time notice after migrating away from quitBehavior=keep. */
-  quitKeepHintDismissed?: boolean;
   packageSource: PackageSource;
   locale: LocalePreference;
   theme: ThemePreference;
@@ -137,28 +131,6 @@ export interface PluginInstallResult {
   running: string[];
 }
 
-export type CreateStep = "validate" | "plugin" | "patch" | "verify" | "meta";
-
-export interface CreateProgress {
-  step: CreateStep;
-  message: string;
-}
-
-export interface PluginQueueSnapshot {
-  pending: number;
-  current?: string;
-}
-
-export type CliEnsureState = "idle" | "checking" | "installing" | "ready" | "error";
-
-export type CliEnsureStep = "node" | "pnpm" | "cli";
-
-export interface CliEnsureStatus {
-  state: CliEnsureState;
-  message: string;
-  step?: CliEnsureStep;
-}
-
 export const RESERVED_PROFILE_NAMES = ["web", "desktop", "hub", "headless", "node_modules"] as const;
 
 export const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
@@ -176,7 +148,6 @@ export function spaceIdFromName(name: string): string {
 export const DEFAULT_HUB_SETTINGS: HubSettings = {
   portStart: 3100,
   portEnd: 3199,
-  quitBehavior: "stop",
   packageSource: inferPackageSource(),
   locale: "system",
   theme: "system",

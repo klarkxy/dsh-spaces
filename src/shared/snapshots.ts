@@ -46,11 +46,6 @@ export interface PendingRestore {
   planId?: string;
 }
 
-export interface RestoreRecoveryReceipt extends PendingRestore {
-  schemaVersion: 1;
-  outcome: "completed" | "rolled-back";
-}
-
 export type RestorePhase = "copying" | "swapping" | "swapped";
 
 export interface RestoreJournal {
