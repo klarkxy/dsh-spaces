@@ -21,8 +21,6 @@ const REAL_HOME = join(homedir(), ".dsh");
 const HOST = "127.0.0.1";
 const DEFAULT_BIN =
   "C:/Users/admin/AppData/Local/Temp/spaces-runtime-install-fIEaas/versions/0.1.5-rc.1/node_modules/@deepseek-ai/dsh/lib/bin.js";
-const FALLBACK_NODE =
-  "C:/Users/admin/AppData/Local/Temp/spaces-node-upgrade-cSfOOr/node/node-v22.23.2-win-x64/node.exe";
 const TOOLCHAIN_PNPM =
   "C:/Users/admin/AppData/Roaming/dsh-spaces/toolchain/pnpm/node_modules/pnpm/bin/pnpm.cjs";
 const REGISTRY = "https://registry.npmmirror.com";
@@ -66,32 +64,10 @@ function sha256File(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-function nodeSupportsImportMetaMain(exe) {
-  const dir = mkdtempSync(join(tmpdir(), "spaces-node-main-"));
-  const script = join(dir, "probe.mjs");
-  try {
-    writeFileSync(script, "console.log(import.meta.main === true ? 'yes' : 'no');\n", "utf8");
-    const result = spawnSync(exe, [script], {
-      encoding: "utf8",
-      timeout: 10_000,
-      windowsHide: true,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "" },
-    });
-    return result.status === 0 && (result.stdout || "").trim() === "yes";
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
 function resolveNode() {
-  const candidates = [process.execPath, FALLBACK_NODE].filter((exe) => existsSync(exe));
-  for (const exe of candidates) {
-    if (nodeSupportsImportMetaMain(exe)) {
-      info(`node ${exe}`);
-      return exe;
-    }
-  }
-  throw new Error("no Node binary with import.meta.main; expected current execPath or 22.23.2 fallback");
+  if (!/^26\./.test(process.versions.node)) throw new Error("DSH Spaces acceptance requires Node.js 26.x.");
+  info(`node ${process.execPath}`);
+  return process.execPath;
 }
 
 function resolveNpmCli(nodeExe) {

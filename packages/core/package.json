@@ -3,11 +3,24 @@
   "version": "0.4.0",
   "description": "Shared DSH Spaces domain and application logic",
   "license": "MIT",
-  "dependencies": { "@klarkxy/dsh-blueprint": "^0.2.0-alpha.1" },
+  "dependencies": {
+    "@klarkxy/dsh-blueprint": "^0.2.0-alpha.1"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "exports": { ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" } },
-  "files": ["lib", "README.md", "LICENSE"],
-  "engines": { "node": ">=22.23.0" }
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=26.0.0 <27.0.0"
+  }
 }

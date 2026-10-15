@@ -6,6 +6,7 @@ import { WorkbenchManagerHost } from "./workbench-manager";
 import { SpacesHost, type SpacesHostConfig } from "./spaces-service";
 import { runtimeFromContext, WorkbenchHostRuntime } from "./runtime";
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "./loopback";
+import { assertSupportedNode } from "../../../../src/shared/node-version";
 
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 const HANDOFF_PATH = "/dsh-spaces/handoff";
@@ -26,6 +27,7 @@ export class SpacesPlugin {
   readonly spaces: SpacesHost | null;
 
   constructor(ctx: Context, config: SpacesHostConfig = {}, runtime?: WorkbenchHostRuntime) {
+    assertSupportedNode();
     this.runtime = runtime ?? runtimeFromContext(ctx, config);
     this.guide = new WorkbenchGuideHost(ctx, this.runtime);
     if (this.runtime.shouldRegisterManager) {

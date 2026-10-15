@@ -1,6 +1,6 @@
 import type { PackageSource } from "../../shared/types";
 
-export const NODE_VERSION = "22.23.2";
+export const NODE_VERSION = "26.10.0";
 export const PNPM_VERSION = "10.29.2";
 
 export function nodeArchiveName(platform = process.platform, arch = process.arch): string {

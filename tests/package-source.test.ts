@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inferPackageSource } from "../src/shared/types.ts";
+import { assertSupportedNode } from "../src/shared/node-version.ts";
+
+test("only Node 26 is supported", () => {
+  assert.doesNotThrow(() => assertSupportedNode("26.10.0"));
+  for (const version of ["22.23.2", "24.21.0", "25.0.0", "27.0.0", "unknown"]) {
+    assert.throws(() => assertSupportedNode(version), /requires Node.js 26.x/);
+  }
+});
 import {
   NODE_VERSION,
   electronMirror,

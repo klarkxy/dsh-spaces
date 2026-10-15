@@ -31,4 +31,4 @@ Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces`,
 `@deepseek-ai/dsh@0.2.0-rc.2` tree (see the CI dashboard workflows).
 `test:workbench:browser` needs Playwright Chromium. In sandboxed shells where
 child processes cannot write the system temp dir, set `TMP`/`TEMP`/`TMPDIR` to
-`.sandbox/tmp`. Node 24 is the supported version.
+`.sandbox/tmp`. Node 26 is the supported version.

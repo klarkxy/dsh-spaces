@@ -9,6 +9,7 @@ import { extract as extractTarArchive } from "tar";
 import { t } from "../../shared/i18n";
 import type { PackageSource } from "../../shared/types";
 import { inferPackageSource } from "../../shared/types";
+import { isSupportedNodeVersion } from "../../shared/node-version";
 import { atomicWrite, renameDirectoryAsync } from "./atomic";
 import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
 import {
@@ -109,6 +110,7 @@ export function findNodeDir(root = toolchainRoot()): string | undefined {
   const nested = join(root, "node");
   if (!existsSync(nested)) return undefined;
   for (const name of readdirSync(nested)) {
+    if (!/^node-v26\.\d+\.\d+-/.test(name)) continue;
     const dir = join(nested, name);
     if (existsSync(join(dir, "node.exe")) || existsSync(join(dir, "bin", "node"))) return dir;
   }
@@ -242,14 +244,25 @@ export async function extractArchiveAsync(archive: string, dest: string): Promis
   mkdirSync(dest, { recursive: true });
   // Windows node distributions are .zip; the npm tar package only reads tar archives.
   if (archive.toLowerCase().endsWith(".zip")) {
+    const systemRoot = process.env.SystemRoot;
+    if (!systemRoot || !/^[a-z]:\\[^:]+$/i.test(systemRoot)) {
+      throw new Error("Windows system directory is unavailable for ZIP extraction");
+    }
     const quoted = (path: string) => `'${path.replaceAll("'", "''")}'`;
+    // Load the Windows .NET Framework assembly directly: inherited PowerShell 7
+    // module paths can make Windows PowerShell's Archive module unloadable.
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      "[void][System.Reflection.Assembly]::Load('System.IO.Compression.FileSystem, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089')",
+      `[System.IO.Compression.ZipFile]::ExtractToDirectory(${quoted(resolve(archive))}, ${quoted(resolve(dest))})`,
+    ].join("\n");
     const result = await runProcess(
-      "powershell",
+      join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
       [
-        "-NoProfile", "-NonInteractive", "-Command",
-        `Expand-Archive -LiteralPath ${quoted(archive)} -DestinationPath ${quoted(dest)} -Force`,
+        "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
       ],
-      { timeoutMs: 120_000, env: process.env },
+      { timeoutMs: 120_000, env: process.env, shell: false },
     );
     if (result.code !== 0) {
       throw new Error(
@@ -303,7 +316,10 @@ function writePnpmShim(nodePath: string, pnpmJs: string): void {
 
 export async function ensureNode(onLine?: (line: string) => void): Promise<string> {
   const existing = nodeExecutable();
-  if (existing && await supportsCliEntry(existing)) return existing;
+  if (existing) {
+    if (!await supportsCliEntry(existing)) throw new Error("The managed runtime is unavailable or unsupported. DSH Spaces requires Node.js 26.x.");
+    return existing;
+  }
   const source = currentPackageSource();
   const root = toolchainRoot();
   const archive = nodeArchiveName();
@@ -341,12 +357,12 @@ export async function ensureNode(onLine?: (line: string) => void): Promise<strin
   return node;
 }
 
-/** New DSH entry points use import.meta.main; old managed Node 22.16 silently exits. */
+/** Validate the selected distribution; unsupported installations are not repaired. */
 async function supportsCliEntry(node: string): Promise<boolean> {
   if (!existsSync(node)) return false;
   try {
-    const result = await runProcess(node, ["--input-type=module", "-e", "process.stdout.write(typeof import.meta.main)"], { timeoutMs: 10_000 });
-    return result.code === 0 && result.stdout.trim() === "boolean";
+    const result = await runProcess(node, ["--version"], { timeoutMs: 10_000 });
+    return result.code === 0 && isSupportedNodeVersion(result.stdout.trim());
   } catch (error) {
     if (error instanceof ProcessTerminationError) throw error;
     return false;

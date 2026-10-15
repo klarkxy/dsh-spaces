@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { assertSupportedNode } from "../../../src/shared/node-version.ts";
 import {
   bindSupervisorDiagnostics,
   type SupervisorDiagnosticsReporter,
@@ -37,6 +38,7 @@ export async function main(
   argv: string[] = process.argv.slice(2),
   diagnostics?: SupervisorDiagnosticsReporter,
 ): Promise<number> {
+  assertSupportedNode();
   const options = parseSupervisorArgs(argv);
   // Validate the selected component payload once per launch and thread the
   // conclusion through bind/preflight/runtime construction. Every non-hash

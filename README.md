@@ -2,6 +2,8 @@
 
 **A multi-space plugin installed into compatible DSH applications (official Web and Desktop). There is no standalone client.**
 
+DSH Spaces requires **Node.js 26.x** for its host, Supervisor, managed runtime, development and CI. Other major versions are rejected; existing toolchains are not upgraded automatically.
+
 Current positioning and supported adapters: [Host embedding contract](docs/host/embedding.md). This branch adds an in-place rail to ordinary loopback Web hosts; official Desktop custom-scheme and third-party native adapters remain unverified.
 
 **Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md). The independently installable [`@klarkxy/dsh-blueprint`](packages/blueprint/README.md) lives in this repository; Spaces consumes its protocol for creating and sharing spaces. DSHBP2 shares plugin compositions; DSHBP1 retains configuration presets. Current migration and DSH 0.2 acceptance: [migration record](tasks/archive/blueprint-migration-0.2.md).
@@ -59,7 +61,7 @@ To upgrade Spaces, install the new host plugin with `dsh plugin --profile web ad
 
 ## Requirements
 
-- Node 24 for contributing
+- Node 26.x only for contributing
 - Package source: China (npmmirror) or official (npmjs / nodejs.org)
 - First install uses `@deepseek-ai/dsh@0.2.0-rc.2`. Every space pins an exact DSH version — `0.2.0-rc.2` is the minimum, spaces below it refuse to start — and unused runtimes can be removed in settings
 - Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. Plugin peers on SDK `0.2.0-rc.2` for this repo's build; that is not a CLI allowlist
@@ -95,6 +97,8 @@ MIT. See `LICENSE`.
 ---
 
 # DSH Spaces (中文)
+
+当前仅支持 **Node.js 26.x**，宿主、Supervisor、托管运行时、开发和 CI 使用同一主版本。其它主版本会明确拒绝启动，不自动升级已有工具链。
 
 **安装在兼容 DSH 应用内的多空间插件：左侧切空间，右侧使用 WebUI，不要求打开专属客户端。**
 
