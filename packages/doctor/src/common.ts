@@ -1,4 +1,5 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "../../../src/shared/node/filesystem";
+
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,8 +49,9 @@ export function lexists(path: string): boolean {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

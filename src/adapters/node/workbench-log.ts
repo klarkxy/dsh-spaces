@@ -1,4 +1,5 @@
-import { appendFileSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
+import { lstatSync } from "../../shared/node/filesystem";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { atomicWrite } from "./atomic";
 import { sanitizeLogText } from "./diagnostics";

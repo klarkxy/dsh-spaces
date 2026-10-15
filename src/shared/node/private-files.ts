@@ -1,4 +1,5 @@
-import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, type BigIntStats } from 'node:fs';
+import { lstatSync } from "./filesystem";
+import { constants, closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, type BigIntStats } from "node:fs";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 

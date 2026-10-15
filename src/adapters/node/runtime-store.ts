@@ -1,13 +1,5 @@
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { t } from "../../shared/i18n";
@@ -345,13 +337,7 @@ export class RuntimeStore {
       env: toolchainEnv(),
       shell: false,
     });
-    let result = await probe(initialNode);
-    // Node 22.16 silently skips import.meta.main. Upgrade only when the CLI
-    // cannot report a version; working older snapshots remain offline-capable.
-    if (!this.customRun && result.code === 0 && !result.stdout.trim() && !result.stderr.trim()) {
-      await ensureNode();
-      if (this.nodeBin() !== initialNode) result = await probe(this.nodeBin());
-    }
+    const result = await probe(initialNode);
     const detail = `${result.stdout}\n${result.stderr}`;
     const parsed = parseVersionText(detail);
     if (result.code !== 0 || !parsed) {

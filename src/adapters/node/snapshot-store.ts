@@ -1,16 +1,5 @@
-import {
-  copyFileSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  rmdirSync,
-  statSync,
-  symlinkSync,
-  unlinkSync,
-} from "node:fs";
+import { createDirectoryLink, lstatSync, readlinkSync, realpathSync } from "../../shared/node/filesystem";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync, symlinkSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { parseDocument } from "yaml";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -511,17 +500,13 @@ export function clearRuntimeFallback(profiles: string, runtimeRoot: string): voi
 }
 
 function recreateLink(linkPath: string, destTarget: string, dir: boolean): void {
+  if (dir) {
+    createDirectoryLink(destTarget, linkPath);
+    return;
+  }
   const rel = relative(dirname(linkPath), destTarget);
   const relTarget = rel.length === 0 ? "." : rel;
-  try {
-    symlinkSync(relTarget, linkPath, dir ? "dir" : "file");
-  } catch (err) {
-    if (process.platform === "win32" && dir) {
-      symlinkSync(resolve(destTarget), linkPath, "junction");
-      return;
-    }
-    throw err;
-  }
+  symlinkSync(relTarget, linkPath, "file");
 }
 
 function retargetLink(linkPath: string, oldRoot: string, newRoot: string): void {
@@ -776,8 +761,9 @@ function lexists(path: string): boolean {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

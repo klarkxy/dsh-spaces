@@ -1,10 +1,6 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { createHash } from "node:crypto";
-import {
-  lstatSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-} from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";

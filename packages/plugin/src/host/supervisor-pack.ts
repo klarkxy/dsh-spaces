@@ -1,5 +1,6 @@
+import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
 import { spawn } from "node:child_process";
-import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { MANAGED_HOME_ENTRIES, RESTORE_STAGE_DIR } from "../../../../src/shared/snapshots";
 import { ensureNode, npmCliJs, setToolchainRoot } from "../../../../src/adapters/node/toolchain";

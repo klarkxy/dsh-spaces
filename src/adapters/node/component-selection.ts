@@ -1,5 +1,6 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 /** Node-only selected component pointer. Owned with the launcher/lock worker; bootstrap only consumes it. */
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { atomicWrite } from "./atomic";
 import { isAuthorizedProductHome, isInsideRealHome } from "./home-guard";

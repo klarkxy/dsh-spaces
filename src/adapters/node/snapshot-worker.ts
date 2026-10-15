@@ -1,4 +1,5 @@
-import { lstatSync, readdirSync, rmdirSync, realpathSync, unlinkSync } from "node:fs";
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
+import { readdirSync, rmdirSync, unlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { runRuntimeInstallation } from "./runtime-installation";
@@ -126,8 +127,9 @@ function lexists(path: string): boolean {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

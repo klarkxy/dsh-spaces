@@ -1,5 +1,6 @@
+import { lstatSync } from "../../shared/node/filesystem";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { isAlias, isMap, isScalar, isSeq, parseDocument, visit, YAMLMap, type Document, type Node } from "yaml";

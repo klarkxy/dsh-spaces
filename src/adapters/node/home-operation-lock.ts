@@ -1,14 +1,7 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
-import {
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmdirSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { OperationLock } from "../../core/ports/operation-lock";
 import { assertNotRealHome } from "./home-guard";

@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";

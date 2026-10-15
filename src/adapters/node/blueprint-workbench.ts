@@ -1,11 +1,6 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument, stringify as stringifyYaml, isMap, isScalar, isSeq, Scalar } from "yaml";
 import {

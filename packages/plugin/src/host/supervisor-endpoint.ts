@@ -1,4 +1,5 @@
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
+import { mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { atomicWrite } from "../../../../src/adapters/node/atomic";
 import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";

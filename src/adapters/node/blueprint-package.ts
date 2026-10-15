@@ -1,5 +1,6 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { createGunzip } from "node:zlib";
 import { Parser } from "tar/parse";

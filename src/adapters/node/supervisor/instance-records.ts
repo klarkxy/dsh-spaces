@@ -1,4 +1,5 @@
-import { lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { lstatSync } from "../../../shared/node/filesystem";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "../atomic";
 import type { PidAliveFn } from "../home-controller";

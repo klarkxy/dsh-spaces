@@ -1,5 +1,6 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { atomicWrite } from "./atomic";
 import { PROFILE_NAME_RE } from "../../shared/types";

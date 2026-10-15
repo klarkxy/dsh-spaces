@@ -70,7 +70,7 @@ export function runSnapshotWorker<T>(
     let reply: { ok: boolean; result?: T; error?: string; errorName?: string } | undefined;
     worker.once("message", value => { reply = value; });
     worker.once("error", error => reject(workerData.operation === "runtimeInstall"
-      ? new ProcessTerminationError(`Runtime maintenance worker failed: ${error.message}`) : error));
+      ? new ProcessTerminationError(`Runtime maintenance worker failed: ${error instanceof Error ? error.message : String(error)}`) : error));
     worker.once("exit", code => {
       if (code !== 0 || !reply) {
         const Failure = workerData.operation === "runtimeInstall" ? ProcessTerminationError : Error;

@@ -1,16 +1,5 @@
-import {
-  appendFileSync,
-  closeSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  realpathSync,
-  type Stats,
-} from "node:fs";
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, type Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { t } from "../../shared/i18n";
 import {

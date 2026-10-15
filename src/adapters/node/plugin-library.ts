@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { realpathSync } from "../../shared/node/filesystem";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { InstalledPlugin, PluginLibraryEntry } from "../../shared/types";

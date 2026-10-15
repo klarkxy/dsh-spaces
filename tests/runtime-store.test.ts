@@ -1,3 +1,6 @@
+import { describeRuntime } from "../src/adapters/node/runtime-descriptor.ts";
+import { createDirectoryLink } from "../src/shared/node/filesystem.ts";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -352,4 +355,150 @@ test("remove deletes an installed runtime directory and refuses invalid or linke
   symlinkSync(outside, join(root, "versions", "0.8.8"), "junction");
   assert.throws(() => runtime.remove("0.8.8"), /not a real installed directory/);
   assert.equal(existsSync(outside), true);
+});
+
+test("system snapshot scope includes only the self-contained DSH package", () => {
+ const prefix=tempDir("dsh-runtime-system-scope-"); const bin=writeFakeCli(prefix,"0.2.0-rc.2");
+ mkdirSync(join(prefix,"unrelated-global-tool")); writeFileSync(join(prefix,"unrelated-global-tool","config"),"unrelated");
+ const descriptor=describeRuntime({bin,version:"0.2.0-rc.2"});
+ assert.equal(descriptor.root,join(prefix,"node_modules","@deepseek-ai","dsh"));
+ assert.equal(descriptor.binRelative,"lib/bin.js");
+});
+test("managed snapshot preserves its dependency prefix, system snapshot rejects external dependencies", () => {
+ const prefix=tempDir("dsh-runtime-prefix-scope-"); const bin=writeFakeCli(prefix,"0.2.0-rc.2"); const pkg=join(prefix,"node_modules","@deepseek-ai","dsh");
+ writeFileSync(join(pkg,"package.json"),JSON.stringify({name:"@deepseek-ai/dsh",version:"0.2.0-rc.2",dependencies:{dependency:"1.0.0"}}));
+ mkdirSync(join(prefix,"node_modules","dependency")); writeFileSync(join(prefix,"node_modules","dependency","package.json"),JSON.stringify({name:"dependency",version:"1.0.0"}));
+ assert.throws(()=>describeRuntime({bin,version:"0.2.0-rc.2"}),/outside.*scope|escape.*scope|missing/);
+ writeFileSync(join(prefix,"package.json"),JSON.stringify({name:"dsh-spaces-runtime",private:true}));
+ assert.throws(()=>describeRuntime({bin,version:"0.2.0-rc.2"}),/outside.*scope|escape.*scope|missing/);
+ assert.equal(describeRuntime({bin,version:"0.2.0-rc.2"},prefix).root,prefix);
+});
+
+test("snapshot dependency closure follows a linked package's actual Node resolution", () => {
+  const prefix = tempDir("dsh-runtime-linked-");
+  const bin = writeFakeCli(prefix, "0.2.0-rc.2");
+  const modules = join(prefix, "node_modules");
+  const dsh = join(modules, "@deepseek-ai", "dsh");
+  const physicalModules = join(modules, ".pnpm", "a@1.0.0", "node_modules");
+  const actualA = join(physicalModules, "a"), actualB = join(physicalModules, "b");
+  for (const dir of [actualA, actualB]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dsh, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2", dependencies: { a: "1.0.0" } }));
+  writeFileSync(join(actualA, "package.json"), JSON.stringify({ name: "a", version: "1.0.0", main: "index.cjs", dependencies: { b: "1.0.0" } }));
+  writeFileSync(join(actualA, "index.cjs"), "module.exports = require('b');");
+  writeFileSync(join(actualB, "package.json"), JSON.stringify({ name: "b", version: "1.0.0", main: "index.cjs" }));
+  writeFileSync(join(actualB, "index.cjs"), "module.exports = 'internal-b';");
+  writeFileSync(bin, "console.log(require('a'));");
+  createDirectoryLink(actualA, join(modules, "a"));
+  const run = spawnSync(process.execPath, [bin], { encoding: "utf8", windowsHide: true });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), "internal-b");
+  assert.equal(describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix).root, prefix);
+
+  const outside = tempDir("dsh-runtime-outside-dependency-");
+  writeFileSync(join(outside, "package.json"), JSON.stringify({ name: "b", version: "1.0.0", main: "index.cjs" }));
+  writeFileSync(join(outside, "index.cjs"), "module.exports = 'outside-b';");
+  // A valid hoisted package must not hide the different package that Node uses.
+  mkdirSync(join(modules, "b"));
+  writeFileSync(join(modules, "b", "package.json"), JSON.stringify({ name: "b", version: "1.0.0" }));
+  rmSync(actualB, { recursive: true });
+  createDirectoryLink(outside, actualB);
+  const external = spawnSync(process.execPath, [bin], { encoding: "utf8", windowsHide: true });
+  assert.equal(external.status, 0, external.stderr);
+  assert.equal(external.stdout.trim(), "outside-b");
+  assert.throws(() => describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix), /dependencies escape/);
+});
+
+test("a phantom node_modules ancestor cannot hide a dependency outside the snapshot", () => {
+  const root = tempDir("dsh-runtime-ghost-");
+  const prefix = join(root, "managed");
+  const bin = writeFakeCli(prefix, "0.2.0-rc.2");
+  const dsh = join(prefix, "node_modules", "@deepseek-ai", "dsh");
+  const a = join(prefix, "node_modules", "a");
+  const phantom = join(prefix, "node_modules", "node_modules", "b");
+  const actual = join(root, "node_modules", "b");
+  for (const dir of [a, phantom, actual]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dsh, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2", dependencies: { a: "1.0.0" } }));
+  writeFileSync(join(a, "package.json"), JSON.stringify({ name: "a", version: "1.0.0", main: "index.cjs", dependencies: { b: "1.0.0" } }));
+  writeFileSync(join(a, "index.cjs"), "module.exports = require('b');");
+  for (const dir of [phantom, actual]) {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "b", version: "1.0.0", main: "index.cjs" }));
+    writeFileSync(join(dir, "index.cjs"), `module.exports = ${JSON.stringify(dir === actual ? "actual-outside-b" : "phantom-b")};`);
+  }
+  writeFileSync(bin, "console.log(require('a'));");
+  const run = spawnSync(process.execPath, [bin], { encoding: "utf8", windowsHide: true });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), "actual-outside-b");
+  assert.throws(() => describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix), /dependencies escape/);
+});
+
+for (const shadow of ["entryless-package", "sibling-file"]) {
+  test(`snapshot closure rejects Node's ${shadow} resolution outside the declared package`, () => {
+    const root = tempDir("dsh-runtime-entry-resolution-");
+    const prefix = join(root, "managed");
+    const bin = writeFakeCli(prefix, "0.2.0-rc.2");
+    const dsh = join(prefix, "node_modules", "@deepseek-ai", "dsh");
+    const b = join(prefix, "node_modules", "b");
+    const external = join(root, "node_modules", "b");
+    for (const dir of [b, external]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dsh, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", dependencies: { b: "1.0.0" } }));
+    writeFileSync(join(b, "package.json"), JSON.stringify({ name: "b", version: "1.0.0" }));
+    writeFileSync(join(b, "index.js"), "module.exports = 'internal-b';");
+    writeFileSync(bin, "console.log(require('b'));");
+    writeFileSync(join(external, "package.json"), JSON.stringify({ name: "b", main: "index.js" }));
+    writeFileSync(join(external, "index.js"), "module.exports = 'external-b';");
+    if (shadow === "entryless-package") rmSync(join(b, "index.js"));
+    else writeFileSync(join(prefix, "node_modules", "b.js"), `module.exports = require(${JSON.stringify(external)});`);
+    const live = spawnSync(process.execPath, [bin], { encoding: "utf8", windowsHide: true });
+    assert.equal(live.status, 0, live.stderr);
+    assert.equal(live.stdout.trim(), "external-b");
+    assert.throws(() => describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix), /dependencies escape|entry is outside/);
+  });
+}
+
+test("snapshot closure accepts import-only and subpath-only packages", () => {
+  const prefix = tempDir("dsh-runtime-export-forms-");
+  const bin = writeFakeCli(prefix, "0.2.0-rc.2");
+  const dsh = join(prefix, "node_modules", "@deepseek-ai", "dsh");
+  writeFileSync(join(dsh, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", dependencies: { imported: "1", subpath: "1" } }));
+  for (const [name, exports] of [["imported", { import: "./index.mjs" }], ["subpath", { "./data": "./index.mjs" }]] as const) {
+    const dir = join(prefix, "node_modules", name);
+    mkdirSync(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name, exports }));
+    writeFileSync(join(dir, "index.mjs"), "export default 1;");
+  }
+  assert.equal(describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix).root, prefix);
+});
+
+test("snapshot closure rereads changed package entries without executing them or preload hooks", () => {
+  const root = tempDir("dsh-runtime-entry-cache-");
+  const prefix = join(root, "managed");
+  const bin = writeFakeCli(prefix, "0.2.0-rc.2");
+  const dsh = join(prefix, "node_modules", "@deepseek-ai", "dsh");
+  const b = join(prefix, "node_modules", "b");
+  const external = join(root, "node_modules", "b");
+  for (const dir of [b, external]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dsh, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", dependencies: { b: "1" } }));
+  writeFileSync(join(b, "package.json"), JSON.stringify({ name: "b", main: "index.cjs" }));
+  writeFileSync(join(b, "index.cjs"), "throw new Error('dependency must not execute');");
+  writeFileSync(join(b, "changed.cjs"), "throw new Error('changed dependency must not execute');");
+  const preload = join(root, "preload.cjs");
+  writeFileSync(preload, "throw new Error('preload must not execute');");
+  const previousOptions = process.env.NODE_OPTIONS;
+  try {
+    process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`;
+    assert.equal(describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix).root, prefix);
+    writeFileSync(join(b, "package.json"), JSON.stringify({ name: "b", main: "changed.cjs" }));
+    assert.equal(describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix).root, prefix);
+    writeFileSync(join(b, "package.json"), JSON.stringify({ name: "b" }));
+    writeFileSync(join(external, "package.json"), JSON.stringify({ name: "b", main: "index.cjs" }));
+    writeFileSync(join(external, "index.cjs"), "module.exports = 'external-b';");
+    assert.throws(() => describeRuntime({ bin, version: "0.2.0-rc.2" }, prefix), /dependencies escape/);
+  } finally {
+    if (previousOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = previousOptions;
+  }
+  writeFileSync(bin, "console.log(require('b'));");
+  const live = spawnSync(process.execPath, [bin], { encoding: "utf8", windowsHide: true });
+  assert.equal(live.status, 0, live.stderr);
+  assert.equal(live.stdout.trim(), "external-b");
 });

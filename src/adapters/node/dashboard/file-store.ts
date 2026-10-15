@@ -1,4 +1,5 @@
-import { closeSync, fsyncSync, lstatSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync } from "../../../shared/node/filesystem";
+import { closeSync, fsyncSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, join, parse, resolve } from 'node:path';
 import { flushPrivateDirectory, inspectPrivatePathStructure, PrivateFileAccess, PrivateFileError, verifyPrivateIdentity } from '../../../shared/node/private-files.js';

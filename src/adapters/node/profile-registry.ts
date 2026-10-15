@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync } from "../../shared/node/filesystem";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { t } from "../../shared/i18n";
 import { SPACE_ID_RE, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../shared/types";

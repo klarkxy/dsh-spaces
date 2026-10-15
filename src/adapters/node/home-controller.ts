@@ -1,14 +1,6 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { randomBytes } from "node:crypto";
-import {
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmdirSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic";
 import { samePath } from "./home-guard";

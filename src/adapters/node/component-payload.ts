@@ -1,13 +1,7 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 /** Node-only v2 component payload. Do not import this from browser shared contracts. */
 import { createHash } from "node:crypto";
-import {
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { list as listTarArchive } from "tar";
 import { atomicWrite } from "./atomic";

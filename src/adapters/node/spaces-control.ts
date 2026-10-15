@@ -1,14 +1,8 @@
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { type ChildProcess } from "node:child_process";
 import { spawnObserved } from "./owned-process-record";
 import { AsyncLocalStorage } from "node:async_hooks";
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -1090,8 +1084,9 @@ function lexists(path: string): boolean {
   try {
     lstatSync(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

@@ -1,7 +1,9 @@
+import { realpathSync } from "../../../src/shared/node/filesystem";
 import { spawn, type ChildProcess } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { realpathSync } from "node:fs";
+import { assertSupportedNode } from "../../../src/shared/node-version.ts";
+
 import { HomeLockBusyError, HomeOperationLock } from "../../../src/adapters/node/home-operation-lock.ts";
 import { assertDumpPatched } from "../../../src/core/domain/isolation.ts";
 import { terminateProcessTree } from "../../../src/adapters/node/terminate-process.ts";
@@ -22,6 +24,7 @@ import { bindCli, resolveResources } from "./resources.ts";
 
 export async function main(argv: string[]): Promise<number> {
   try {
+    assertSupportedNode();
     const { command, flags } = parseArgv(argv);
     if (!command) throw fail(EXIT.usage, "USAGE", "Commands: doctor, verify. unlock, recover, and rollback are not supported.");
     const homeFlag = requireFlag(flags, "home", "Explicit --home is required; this CLI never uses ~/.dsh.");
