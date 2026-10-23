@@ -63,7 +63,7 @@ test("engine precedence starts at alpha.4 and component constraints cannot overw
 });
 
 test("distributed components admit the default prerelease with npm's normal peer semantics", () => {
-  for (const component of ["plugin", "blueprint", "browser", "dashboard", "llm-bridge", "view-bridge"]) {
+  for (const component of ["plugin", "blueprint", "browser", "llm-bridge", "view-bridge"]) {
     const manifest = JSON.parse(readFileSync(new URL(`../packages/${component}/package.json`, import.meta.url), "utf8"));
     for (const [name, range] of Object.entries(manifest.peerDependencies) as [string, string][]) {
       if (!name.startsWith("@deepseek-ai/dsh-")) continue;

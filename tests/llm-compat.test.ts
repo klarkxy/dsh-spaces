@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { PINNED_LLM_PI_AI_PROTOCOLS } from "../src/core/domain/llm-connections.ts";
+import { PINNED_LLM_PI_AI_PROTOCOLS } from "../src/shared/llm-connections.ts";
 import { PINNED_DSH_PACKAGE_VERSION } from "./helpers/llm-official.ts";
 import { LLM_ADAPTER_VERSION } from "../src/shared/llm-api.ts";
 

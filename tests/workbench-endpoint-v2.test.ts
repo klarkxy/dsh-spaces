@@ -32,7 +32,7 @@ import {
   readEndpointFile,
   writeEndpointFile,
   type SupervisorEndpoint,
-} from "../packages/plugin/src/host/supervisor-endpoint.ts";
+} from "../src/adapters/node/supervisor-endpoint.ts";
 import {
   mutationContextSchema,
   workbenchCommandSchema,

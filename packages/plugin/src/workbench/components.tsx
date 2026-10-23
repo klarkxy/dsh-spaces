@@ -29,7 +29,7 @@ export { Overlays } from "./view/dialogs";
 export { SettingsDialog } from "./view/settings";
 export { SpaceMenu } from "./view/menu";
 
-export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive = false, contained = false, nativeSurface = false, systemPage }: WorkbenchViewProps): ReactElement {
+export function WorkbenchView({ ui, controller, homeUrl, contained = false, nativeSurface = false, systemPage }: WorkbenchViewProps): ReactElement {
   useEffect(() => installBrowserRelay(controller), [controller]);
   const locale = ui.locale;
   const visibleSystemPage = ui.selected === "home" ? systemPage : null;
@@ -43,8 +43,7 @@ export function WorkbenchView({ ui, controller, homeUrl, homeContent, chatActive
           <button type="button" className="dsh-wb-btn" onClick={controller.openSettings}>{t(locale, "app.settings")}</button>
         </nav> : <Rail ui={ui} controller={controller} />}
         <div className="dsh-wb-main" inert={ui.overlay?.type === "settings" || undefined}>
-          {homeUrl && <iframe className="dsh-wb-frame dsh-wb-home-frame" title="DSH" src={homeUrl} data-home-view="true" allow="clipboard-write" hidden={ui.selected !== "home" || (homeContent != null && !chatActive)} style={homeContent != null ? { top: 52, height: "calc(100% - 52px)" } : undefined} referrerPolicy="no-referrer" />}
-          {homeContent != null && <div className="dsh-wb-home-surface" hidden={ui.selected !== "home"}>{homeContent}</div>}
+          {homeUrl && <iframe className="dsh-wb-frame dsh-wb-home-frame" title="DSH" src={homeUrl} data-home-view="true" allow="clipboard-write" hidden={ui.selected !== "home"} referrerPolicy="no-referrer" />}
           <WorkspaceFrames ui={ui} controller={controller} />
           {ui.boot === "loading" && (
             <div className="dsh-wb-boot" role="status">

@@ -5,7 +5,7 @@ import {
   LLM_ERROR,
   LlmConfigError,
   parseManagedRecordKey,
-} from "../../core/domain/llm-connections";
+} from "../../shared/llm-connections";
 import type { LlmCredentialRecordInfo, LlmCredentialStore, LlmCredentialWrite } from "../../core/ports/llm-store";
 import { llmControlDir, llmCredentialsPath } from "./llm-paths";
 

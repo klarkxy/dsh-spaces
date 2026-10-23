@@ -1,7 +1,7 @@
 # Shared UI foundation
 
 Browser-only building blocks shared by the Workbench, the host Spaces panel,
-the Dashboard view and the Browser space client.
+the host Spaces panel and the Browser space client.
 
 ```ts
 import { UI_TOKENS_CSS, MotionRoot, FadeIn, spring } from "../../shared/ui";

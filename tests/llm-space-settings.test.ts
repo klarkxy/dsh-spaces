@@ -9,7 +9,7 @@ import {
   readSpaceDefaultModel,
   writeSpaceDefaultModel,
 } from "../src/adapters/node/llm-space-settings.ts";
-import { redactEndpoint } from "../src/core/domain/llm-connections.ts";
+import { redactEndpoint } from "../src/shared/llm-connections.ts";
 
 const temps: string[] = [];
 afterEach(() => {

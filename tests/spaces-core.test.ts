@@ -35,16 +35,20 @@ import type { OperationLock } from "../src/core/ports/operation-lock.ts";
 import { t } from "../src/shared/i18n/index.ts";
 
 const coreRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "core");
+const sharedRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "shared");
 
 function coreSource(relative: string): string {
   return readFileSync(join(coreRoot, relative), "utf8");
+}
+
+function sharedSource(relative: string): string {
+  return readFileSync(join(sharedRoot, relative), "utf8");
 }
 
 test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
   const files = [
     "domain/isolation.ts",
     "domain/registry.ts",
-    "domain/llm-connections.ts",
     "domain/llm-resolution.ts",
     "application/maintenance-gate.ts",
     "application/global-llm-service.ts",
@@ -54,6 +58,9 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
   const forbidden = /from ["'](?:node:fs|node:process|electron|react|react\/jsx-runtime|cordis)/;
   for (const file of files) {
     assert.equal(forbidden.test(coreSource(file)), false, file);
+  }
+  for (const file of ["llm-connections.ts", "llm-share.ts"]) {
+    assert.equal(forbidden.test(sharedSource(file)), false, file);
   }
 });
 

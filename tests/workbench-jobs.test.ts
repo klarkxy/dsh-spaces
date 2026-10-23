@@ -1,6 +1,6 @@
 import { sanitizeJobText } from "../src/adapters/node/workbench-jobs.ts";
 import assert from "node:assert/strict";
-import { LLM_ERROR, LlmConfigError } from "../src/core/domain/llm-connections.ts";
+import { LLM_ERROR, LlmConfigError } from "../src/shared/llm-connections.ts";
 import { WorkbenchPublicError } from "../src/adapters/node/supervisor/errors.ts";
 import {
   existsSync,

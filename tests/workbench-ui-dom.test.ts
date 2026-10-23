@@ -155,8 +155,6 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
   const browserPage = page;
   await browserPage.setViewportSize({ width: 1280, height: 800 });
-  // Home now opens the dashboard; chat is a separate, lazy and persistent view.
-  await browserPage.getByRole('button', { name: '聊天', exact: true }).click();
   const home = browserPage.frameLocator('[data-home-view]');
   await home.locator('textarea').fill('home draft');
   assert.equal(await browserPage.getByRole('tab').count(), 0, 'management is absent from the home');

@@ -37,9 +37,9 @@ export function parseSurfaceIntent(event: { source: unknown; origin: string; dat
 /** Navigation only, authorized by the existing manager parent handshake. No start/stop/submit relay. */
 export function attachSurfaceBridge(controller: WorkbenchController, view: ViewHandshakeConfig,
   parent: Pick<Window, "postMessage">, listen: (fn: (event: MessageEvent) => void) => () => void,
-  systemPage?: (page: "dashboard" | "settings" | null) => void): () => void {
+  systemPage?: (page: "settings" | null) => void): () => void {
   let pending: SurfaceSelection | null = null, stopped = false, lastRequest = 0, lastIntent = 0;
-  let page: "dashboard" | "settings" | null = null;
+  let page: "settings" | null = null;
   const answer = (request: SurfaceSelection, type: "selected" | "selection-failed") => {
     if (stopped) return;
     parent.postMessage({ source: "dsh-spaces-surface", type, requestId: request.requestId, target: request.target,
@@ -57,12 +57,12 @@ export function attachSurfaceBridge(controller: WorkbenchController, view: ViewH
     if (selecting) return;
     if (!initiated) {
       initiated = true;
-      if (request.target === "@settings" || request.target === "@dashboard") {
+      if (request.target === "@settings") {
         if (!systemPage) { pending = null; answer(request, "selection-failed"); return; }
-        page = request.target === "@settings" ? "settings" : "dashboard";
+        page = "settings";
         systemPage(page);
         controller.closeOverlay(); controller.selectHome();
-        if (request.target === "@settings") controller.openSettings();
+        controller.openSettings();
       } else if (request.target === null) { page = null; if (systemPage) { systemPage(null); controller.closeOverlay(); } controller.selectHome(); }
       else {
         selecting = true;
@@ -82,7 +82,7 @@ export function attachSurfaceBridge(controller: WorkbenchController, view: ViewH
       if (pending) check();
       return;
     }
-    if (ui.selected === (request.target === "@dashboard" || request.target === "@settings" ? "home" : request.target ?? "home") &&
+    if (ui.selected === (request.target === "@settings" ? "home" : request.target ?? "home") &&
         (request.target !== "@settings" || ui.overlay?.type === "settings") && ui.pendingId === null) {
       pending = null; answer(request, "selected");
     }

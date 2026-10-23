@@ -30,9 +30,7 @@ Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces`,
 `npm run typecheck:tests` and
 `npm run build`, then the test groups: `npm test`, `npm run test:spaces`,
 `npm run test:workbench`, `npm run test:workbench:recovery`, `npm run test:llm`,
-`npm run test:blueprints`, `npm run test:browser` and `npm run test:dashboard`.
-`test:dashboard` needs `DSH_DASHBOARD_SDK_ROOT` pointing at an installed
-`@deepseek-ai/dsh@0.2.1-rc.2` tree (see the CI dashboard workflows).
+`npm run test:blueprints` and `npm run test:browser`.
 `test:workbench:browser` needs Playwright Chromium. `npm run check:all` runs the
 checks above plus browser tests and package preflight, with logs and an isolated
 Home. Windows rename checks require a writable temporary directory outside the

@@ -32,8 +32,8 @@ import {
   PINNED_LLM_PI_AI_PROTOCOLS,
   type ConnectionId,
   type SharedModelRef,
-} from "../domain/llm-connections";
-import { applyLlmShareMapping, buildLlmShareManifest, type LlmShareMapping } from "../domain/llm-share";
+} from "../../shared/llm-connections";
+import { applyLlmShareMapping, buildLlmShareManifest, type LlmShareMapping } from "../../shared/llm-share";
 import { policyBindsConnection } from "../domain/llm-resolution";
 import type { LlmInstanceStatusPort, LlmOperationStore, LlmProbePort, LlmSpaceSettingsPort } from "../ports/llm-runtime";
 import {

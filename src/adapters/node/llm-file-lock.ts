@@ -1,6 +1,6 @@
 import { mkdirSync, rmdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { LLM_ERROR, LlmConfigError } from "../../core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError } from "../../shared/llm-connections";
 
 const LOCK_WAIT_MS = 2000;
 

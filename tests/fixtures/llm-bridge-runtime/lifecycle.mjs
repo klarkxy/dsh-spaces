@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { compileManagedCredentialRef, compileManagedRecordKey, compileManagedRouteId } from '../../../src/core/domain/llm-connections.ts';
+import { compileManagedCredentialRef, compileManagedRecordKey, compileManagedRouteId } from '../../../src/shared/llm-connections.ts';
 import { openSpaceLlmBridge } from '../../helpers/llm-official.ts';
 
 const testRoot = process.env.DSH_BRIDGE_TEST_ROOT;

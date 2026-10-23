@@ -49,7 +49,7 @@ function dump() {
   return result.stdout;
 }
 
-const { assertDumpPatched, PatchVerifyError } = await import(pathToFileURL(join(REPO, "packages/core/lib/index.js")).href);
+const { assertDumpPatched, PatchVerifyError } = await import(pathToFileURL(join(REPO, "src", "core", "domain", "isolation.ts")).href);
 const original = readFileSync(PATCH, "utf8");
 const brokenPatch = original.replaceAll("session-persistence-jsonl", "session-persistence-jsonl-BROKEN");
 assert.notEqual(brokenPatch, original, "A8 fixture must contain the session persistence row");

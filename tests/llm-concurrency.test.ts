@@ -18,12 +18,12 @@ import type { WorkbenchSpace } from "../src/shared/workbench.ts";
 import { LlmActivity, installLlmActivity } from "../packages/llm-bridge/src/activity.ts";
 import {
   LLM_ACTIVITY_CHANNEL, LLM_ACTIVITY_TIMEOUT_MS, parseActivityReport, type LlmActivityIdentity,
-} from "../packages/llm-bridge/src/activity-protocol.ts";
+} from "../src/shared/llm-activity.ts";
 import { FileLlmCatalogStore } from "../src/adapters/node/llm-catalog-store.ts";
 import { FileLlmCredentialStore } from "../src/adapters/node/llm-credential-store.ts";
 import { FileLlmPolicyStore } from "../src/adapters/node/llm-policy-store.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
-import { LLM_ERROR } from "../src/core/domain/llm-connections.ts";
+import { LLM_ERROR } from "../src/shared/llm-connections.ts";
 
 const temps: string[] = [];
 

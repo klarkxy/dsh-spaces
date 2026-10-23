@@ -9,7 +9,7 @@ import {
   emptyCatalog,
   emptyPolicy,
   LLM_ERROR,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import {
   applyLlmShareMapping,
   assertShareSecretFree,
@@ -17,7 +17,7 @@ import {
   LLM_SHARE_FILENAME,
   parseLlmShareManifest,
   scanShareEntries,
-} from "../src/core/domain/llm-share.ts";
+} from "../src/shared/llm-share.ts";
 import { FileLlmCatalogStore } from "../src/adapters/node/llm-catalog-store.ts";
 import { FileLlmPolicyStore } from "../src/adapters/node/llm-policy-store.ts";
 import {

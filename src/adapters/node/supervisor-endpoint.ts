@@ -1,11 +1,11 @@
-import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
+import { lstatSync, realpathSync } from "../../shared/node/filesystem";
 import { mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { atomicWrite } from "../../../../src/adapters/node/atomic";
-import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
-import { canonicalHome } from "../../../../src/adapters/node/home-operation-lock";
-import { deriveServiceEpoch, digestHomeIdentity } from "../../../../src/adapters/node/workbench-protocol";
-import { parseLoopbackOrigin, parsePrivateBearer } from "./loopback";
+import { atomicWrite } from "./atomic";
+import { parseControlEndpoint } from "./home-controller";
+import { canonicalHome } from "./home-operation-lock";
+import { deriveServiceEpoch, digestHomeIdentity } from "./workbench-protocol";
+import { parseLoopbackOrigin, parsePrivateBearer } from "../../shared/loopback";
 
 export const SUPERVISOR_ENDPOINT_FILE = "endpoint.json";
 export const SUPERVISOR_PROTOCOL_VERSION = 2 as const;

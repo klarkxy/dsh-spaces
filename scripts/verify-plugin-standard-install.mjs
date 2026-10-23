@@ -8,9 +8,9 @@
  * No model calls. Disposable Home only (refuses ~/.dsh). No machine-path
  * defaults. Does not import verify-workbench-product.mjs (that file runs at load).
  *
- *   node scripts/verify-plugin-standard-install.mjs --syntax
- *   node scripts/verify-plugin-standard-install.mjs --preflight
- *   node scripts/verify-plugin-standard-install.mjs
+ *   node --import tsx scripts/verify-plugin-standard-install.mjs --syntax
+ *   node --import tsx scripts/verify-plugin-standard-install.mjs --preflight
+ *   node --import tsx scripts/verify-plugin-standard-install.mjs
  *
  * Env: DSH_TEST_BIN, DSH_TEST_CLI_BIN, DSH_TEST_OUTPUT, DSH_TEST_PLAYWRIGHT,
  * DSH_TEST_PNPM_CJS, DSH_PACK_DEST.
@@ -696,7 +696,7 @@ function assertRegisteredSpace(home) {
 
 async function assertProductionIsolation(nodeExe, bin, home, tooling) {
   const { assertDumpPatched, PatchVerifyError } = await import(
-    pathToFileURL(join(REPO, "packages", "core", "lib", "index.js")).href
+    pathToFileURL(join(REPO, "src", "core", "domain", "isolation.ts")).href
   );
   const dump = runDsh(
     nodeExe,

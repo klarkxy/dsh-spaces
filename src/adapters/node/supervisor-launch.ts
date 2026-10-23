@@ -7,7 +7,7 @@ import { atomicWrite } from "./atomic";
 import { HomeController, sameControlOwner, validLaunchOwner, parseControlEndpoint, type HomeControlOwner } from "./home-controller";
 import { HomeOperationLock } from "./home-operation-lock";
 import { hasUnfinishedMaintenance } from "./control-residue";
-import { endpointHomeId, endpointServiceEpoch, readEndpointFile, SUPERVISOR_ENDPOINT_FILE } from "../../../packages/plugin/src/host/supervisor-endpoint";
+import { endpointHomeId, endpointServiceEpoch, readEndpointFile, SUPERVISOR_ENDPOINT_FILE } from "./supervisor-endpoint";
 
 /** Called only by a new launch, with the owner observed when that launch began. */
 export function retirePreviousSupervisor(home: string, previousOwner: HomeControlOwner | undefined, allowRealHome: boolean, snapshotRoot?: string): void {

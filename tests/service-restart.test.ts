@@ -8,7 +8,7 @@ import { HomeController } from "../src/adapters/node/home-controller.ts";
 import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
 import { canonicalHome } from "../src/adapters/node/home-operation-lock.ts";
 import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/spaces-control.ts";
-import { writeEndpointFile } from "../packages/plugin/src/host/supervisor-endpoint.ts";
+import { writeEndpointFile } from "../src/adapters/node/supervisor-endpoint.ts";
 import { DesktopServiceRestart } from "../packages/plugin/src/host/service-restart.ts";
 import { WorkbenchHostRuntime } from "../packages/plugin/src/host/runtime.ts";
 import type { WorkbenchApi, WorkbenchState, WorkbenchPlan } from "../src/shared/workbench.ts";

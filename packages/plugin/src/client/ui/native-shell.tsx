@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, useSyncExternalStore, type ReactEle
 import { motion } from "motion/react";
 import { FadeIn, Presence, fade } from "../../../../../src/shared/ui/motion";
 import { SpaceGlyph } from "../../workbench/space-glyph";
-import { HOME_DASHBOARD_SEALED } from "../../workbench/dashboard-sealed";
 import { attachHostLayout } from "../host-layout";
 import type { NativeHostController } from "./native-controller";
 import { HostLoadingPill } from "./host-guide";
@@ -93,7 +92,6 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
           <span aria-hidden="true">＋</span>
         </HostRailButton>
       </HostRailList>
-      {HOME_DASHBOARD_SEALED ? null : button("@dashboard", "看板", "▦")}
       {button("@settings", ui.phase === "failed" ? "设置 · 空间服务不可用（查看详情）" : "设置",
         <><span aria-hidden="true">⚙</span>{ui.phase === "failed" && <span className="dsh-native-service-error" aria-hidden="true">!</span>}</>)}
     </HostRail>

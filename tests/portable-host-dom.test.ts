@@ -182,7 +182,8 @@ test("DOM: stale rail and adjacent clicks enter once while preserving native DOM
   await page.getByRole("button",{name:"Alpha",exact:true}).click();
   assert.equal(await workspace.getByRole("textbox",{name:"Space draft"}).inputValue(),"space draft is retained");
   await page.getByRole("button",{name:"Spaces Home",exact:true}).click();
-  await management.locator(".dsh-wb-home-surface").waitFor({state:"visible"});
+  // The manager Home is the native Home view: the space frame is released and no space stays visible.
+  await management.locator('iframe[data-space-id="alpha"]').waitFor({state:"hidden"});
   await page.setViewportSize({width:450,height:800});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   mkdirSync(".sandbox/portable-host-evidence",{recursive:true});await page.screenshot({path:".sandbox/portable-host-evidence/in-place-rail.png"});

@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm";
-import { isManagedRouteId } from "../../../src/core/domain/llm-connections";
+import { isManagedRouteId } from "../../../src/shared/llm-connections";
 import { refuseManagedCall, type LlmBridgeStatus } from "./settings-provider";
 
 export type BridgeStatusReader = { bridgeStatus(): LlmBridgeStatus };

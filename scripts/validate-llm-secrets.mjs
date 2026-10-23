@@ -16,9 +16,9 @@ function fail(message) {
 }
 
 const SECRET_SCAN = [
-  "src/core/domain/llm-connections.ts",
+  "src/shared/llm-connections.ts",
   "src/core/domain/llm-resolution.ts",
-  "src/core/domain/llm-share.ts",
+  "src/shared/llm-share.ts",
   "src/core/application/global-llm-host.ts",
   "src/core/application/global-llm-service.ts",
   "src/adapters/node/llm-catalog-store.ts",
@@ -82,7 +82,7 @@ if (!credentials.includes("readSecret") || !credentials.includes("writeRecord"))
   fail("credential store must keep writeRecord/readSecret off the public catalog");
 }
 
-const share = readFileSync(join(REPO, "src/core/domain/llm-share.ts"), "utf8");
+const share = readFileSync(join(REPO, "src/shared/llm-share.ts"), "utf8");
 if (!share.includes("SPACES_LLM_")) fail("share scanner must refuse managed credential refs");
 if (!share.includes("sk-")) fail("share scanner must refuse key-like tokens");
 

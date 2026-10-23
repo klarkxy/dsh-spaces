@@ -374,7 +374,7 @@ test("host surfaces take background and text color from DSH 0.2 theme tokens", a
 });
 
 test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () => {
-  // Verified against @deepseek-ai/dsh 0.2.0-rc.2 (.sandbox/dashboard-sdk).
+  // Verified against @deepseek-ai/dsh 0.2.0-rc.2 (local SDK fixture).
   const sdkTokens = new Set([
     "--dsw-alias-bg-base",
     "--dsw-alias-bg-layer-1",

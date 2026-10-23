@@ -4,7 +4,7 @@ import {
   compileManagedRouteId,
   createConnectionId,
   LLM_ERROR,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import { resolveDefaultModel } from "../src/core/domain/llm-resolution.ts";
 
 const connectionId = createConnectionId();

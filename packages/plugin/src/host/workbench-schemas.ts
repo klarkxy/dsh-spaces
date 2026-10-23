@@ -11,21 +11,7 @@ import {
   workbenchProductRequestSchema,
   workbenchProductResultSchema,
 } from "../../../../src/shared/workbench-product-schemas";
-import { parseLoopbackOrigin, parseRelativeEntryPath } from "./loopback";
-import { identifier, parseSelection } from "../../../../src/core/domain/dashboard/validation";
-
-// Keep native Remote validation aligned with the same strict dashboard contract
-// used by the Supervisor. Accepting a plan here never grants execution rights.
-const dashboardIdentifierSchema = z.string().refine((value) => {
-  try { identifier(value); return true; } catch { return false; }
-}, "invalid dashboard identifier");
-const dashboardSelectionSchema = z.union([
-  z.null(),
-  z.object({ kind: z.literal("all") }).strict(),
-  z.object({ kind: z.literal("selected"), instanceIds: z.array(dashboardIdentifierSchema).min(1).max(100) }).strict(),
-]).refine((value) => {
-  try { parseSelection(value); return true; } catch { return false; }
-}, "invalid dashboard selection");
+import { parseLoopbackOrigin, parseRelativeEntryPath } from "../../../../src/shared/loopback";
 
 export {
   workbenchMutationContextSchema as mutationContextSchema,
@@ -274,13 +260,6 @@ const coreWorkbenchCommandSchema = z.discriminatedUnion("kind", [
 export const workbenchCommandSchema = z.union([coreWorkbenchCommandSchema, workbenchProductCommandSchema]);
 
 export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("dashboard.publication.set"),
-    spaceId: spaceIdSchema,
-    providerId: dashboardIdentifierSchema,
-    expectedGrantRevision: dashboardIdentifierSchema,
-    selection: dashboardSelectionSchema,
-  }).strict(),
   z.object({ kind: z.literal("space.stop"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("space.restart"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("space.delete"), spaceId: spaceIdSchema, removeData: z.boolean() }).strict(),
@@ -313,7 +292,6 @@ export const workbenchPlanSchema = z
   .object({
     id: planIdSchema,
     kind: z.enum([
-      "dashboard.publication.set",
       "space.stop",
       "space.restart",
       "space.delete",

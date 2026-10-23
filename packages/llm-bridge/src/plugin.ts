@@ -6,13 +6,13 @@ import {
   LLM_ERROR,
   LlmConfigError,
   isManagedRouteId,
-} from "../../../src/core/domain/llm-connections";
+} from "../../../src/shared/llm-connections";
 import {
   collectManagedWritePaths,
   mergeGlobalDefaultIntoBase,
   mergeSharedProvidersIntoBase,
 } from "../../../src/core/domain/llm-resolution";
-import type { LlmSharedSnapshot } from "../../../src/core/domain/llm-connections";
+import type { LlmSharedSnapshot } from "../../../src/shared/llm-connections";
 import { LLM_SNAPSHOT_ENV, readLaunchSnapshotFile } from "../../../src/adapters/node/llm-snapshot";
 import { SpacesCredentialsProvider } from "./credentials-provider";
 import { installManagedRequestGuard } from "./request-guard";

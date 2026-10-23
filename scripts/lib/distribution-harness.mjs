@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { isSupportedNodeVersion } from "../../src/shared/node-version.ts";
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const CORE_LIB = join(REPO, "packages", "core", "lib", "index.js");
+const ISOLATION_MODULE = join(REPO, "src", "core", "domain", "isolation.ts");
 const REAL_HOME = join(homedir(), ".dsh");
 const HOST = "127.0.0.1";
 const DEFAULT_BIN =
@@ -192,11 +192,8 @@ function runDshRetry(nodeExe, bin, home, tooling, args, timeoutMs, label, logPat
   }
 }
 
-async function importCore() {
-  if (!existsSync(CORE_LIB)) {
-    throw new Error("packages/core/lib/index.js missing; run npm run build:spaces");
-  }
-  return import(pathToFileURL(CORE_LIB).href);
+async function importIsolation() {
+  return import(pathToFileURL(ISOLATION_MODULE).href);
 }
 
 function ephemeralPort() {
@@ -389,7 +386,7 @@ export {
   isolatedEnv,
   runDsh,
   runDshRetry,
-  importCore,
+  importIsolation,
   ephemeralPort,
   portClosed,
   waitPortClosed,

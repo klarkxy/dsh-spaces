@@ -54,8 +54,8 @@ import {
 import { isBareNpmPackageName, isGitSpec } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, SPACE_NAME_RE, spaceIdFromName } from "../../shared/types";
-import { scanShareEntries } from "../../core/domain/llm-share";
-import { LLM_ERROR, LlmConfigError } from "../../core/domain/llm-connections";
+import { scanShareEntries } from "../../shared/llm-share";
+import { LLM_ERROR, LlmConfigError } from "../../shared/llm-connections";
 import type { LlmApiRequest, LlmApiResult, LlmDescribeResult, LlmSpacePolicyResult } from "../../shared/llm-api";
 import type { WorkbenchJobResult, WorkbenchSpace } from "../../shared/workbench";
 import type { WorkbenchProductObservation } from "../../shared/workbench-product";

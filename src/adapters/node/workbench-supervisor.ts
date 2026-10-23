@@ -5,7 +5,6 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { SupervisorDashboard, DASHBOARD_LAUNCH_ENV } from "./dashboard/supervisor";
 import { atomicWrite } from "./atomic";
 import { SpaceMessageRouter } from "./message-bus/router";
 import { CooperativeChildren } from "./cooperative-children";
@@ -22,7 +21,7 @@ import { lt as semverLt } from "semver";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
 import { FileLlmPolicyStore, llmPolicyPath } from "./llm-policy-store";
-import { parsePolicy } from "../../core/domain/llm-connections";
+import { parsePolicy } from "../../shared/llm-connections";
 import { ProfileRegistry } from "./profile-registry";
 import { compareScannedProfiles, defaultSpaceMeta } from "../../core/domain/registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
@@ -115,7 +114,6 @@ import {
 import { createHomeLlmHost } from "./llm-host";
 import { GlobalLlmHost } from "../../core/application/global-llm-host";
 import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
-import { SupervisorDashboardHost } from "./supervisor/dashboard-host";
 import { STOP_KEPT_REASON, WORKBENCH_ERROR, WorkbenchPublicError, WRITABLE_STARTUP_FAILED_REASON } from "./supervisor/errors";
 import {
   expectKeys,
@@ -177,7 +175,6 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.restart",
   "space.delete",
   "service.shutdown",
-  "dashboard.publication.set",
 ]);
 const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume", "space.verify"]);
 const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.install", "runtime.upgrade"]);
@@ -217,7 +214,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private spaces: NodeSpacesControl | undefined;
   private maintenance: WorkbenchMaintenance | null = null;
   private products: WorkbenchProductService | null = null;
-  private dashboard: SupervisorDashboard | null = null;
   private diagnostics: DiagnosticsService | undefined;
   private homeSettings: WorkbenchHomeSettings | undefined;
   private cli: BoundCli | null = null;
@@ -234,7 +230,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly instances: SupervisorInstanceRecords;
   private readonly llmOps: SupervisorLlm;
   private readonly llmDelegation: SupervisorLlmDelegation;
-  private readonly dashboardHost: SupervisorDashboardHost;
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
     assertSupportedNode();
     this.options = { ...options };
@@ -267,8 +262,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       now: this.now,
       messageBus: this.messageBus,
       options: this.options,
-      dashboard: () => this.dashboard,
-      dashboardHost: () => this.dashboardHost,
       jobs: () => this.jobs,
       maintenance: () => this.maintenance,
       closeHttp: async () => { await this.httpClose?.(); },
@@ -310,23 +303,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       homeProfileNames: () => this.homeProfileNames(),
       publicStatus: (id) => this.publicStatus(id),
       currentServiceEpoch: () => this.currentServiceEpoch(),
-    });
-    this.dashboardHost = new SupervisorDashboardHost({
-      home: this.home,
-      controller: this.controller,
-      lock: this.lock,
-      now: this.now,
-      origin: () => this.origin,
-      dashboard: () => this.dashboard,
-      setDashboard: (dashboard) => { this.dashboard = dashboard; },
-      lifecycle: this.lifecycle,
-      hasMaintenanceEvidence: () => this.hasMaintenanceEvidence(),
-      requireServiceEpoch: () => this.requireServiceEpoch(),
-      managerOrigin: () => this.managerOrigin(),
-      listSpaces: () => this.listSpaces(),
-      runs: this.runs,
-      cookieName: () => this.cookieName(),
-      sessionEquals: (value) => this.sessionEquals(value),
     });
     this.llmHost = createHomeLlmHost(this.home, {
       listSpaceIds: async () => this.homeProfileNames(),
@@ -416,10 +392,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.bootstrap.set(randomBytes(24).toString("base64url"), this.now().getTime() + 600_000);
   }
 
-  async handleDashboardRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    if (!req.url?.startsWith("/api/dashboard/") && !req.url?.startsWith("/internal/dashboard/")) return false;
-    return this.dashboardHost.handle(req, res);
-  }
   handleLlmDelegationRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     return this.llmDelegation.handle(req, res);
   }
@@ -481,7 +453,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (this.jobs) await this.jobs.whenIdle();
       await this.stopOwnedAll();
       this.messageBus.close();
-      await this.dashboard?.close();
     } catch (error) {
       this.lifecycle.maintenanceBlocked = true;
       this.lifecycle.blocked = true;
@@ -747,17 +718,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ("spaceIds" in parsed && parsed.spaceIds.includes("desktop"))) {
       throw new WorkbenchPublicError("workbench/protected");
     }
-    if (parsed.kind === "dashboard.publication.set") {
-      return this.lock.run("dashboard.publication.preview", async () => {
-        const dashboard = this.dashboardHost.requireDashboard();
-        this.assertLiveContext(parsedContext);
-        this.protectSpecial(this.requireManaged(parsed.spaceId), { allowManager: false });
-        if (this.runs.unmanaged.has(parsed.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
-        await dashboard.validatePreview(parsed);
-        this.assertLiveContext(parsedContext);
-        return this.supervisorPlans.previewLocal(parsed);
-      });
-    }
     if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) return this.supervisorPlans.previewLocal(parsed);
     if (!this.maintenance) throw new WorkbenchPublicError("workbench/maintenance");
     return this.maintenance.preview(parsed);
@@ -799,7 +759,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
     this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
     this.processes = this.createProcessManager();
-    this.dashboardHost.initDashboard();
     this.bindProductService();
     this.instances.reconcileInstanceRecords();
     if (this.hasMaintenanceEvidence() || this.lock.inspect().held || this.runs.unmanaged.size) {
@@ -1129,9 +1088,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           ...writeSpaceLlmLaunchSnapshot(this.home, profile),
         };
         if(!existsSync(llmPolicyPath(this.home,profile))||!parsePolicy(JSON.parse(readFileSync(llmPolicyPath(this.home,profile),'utf8'))).inheritMain)delete env.DSH_SPACES_LLM_INHERIT_MAIN;
-        delete env[DASHBOARD_LAUNCH_ENV]; // never inherit another Host's private handoff
-        Object.assign(env, this.dashboard?.environment(profile, this.runs.generation(profile)));
-        const dashboardGeneration = this.runs.generation(profile);
         const spawnFn = injected.spawn ?? children.spawn;
         const port = Number(args[args.indexOf("--port") + 1]);
         mkdirSync(this.instances.instancesDir(), { recursive: true });
@@ -1155,13 +1111,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
             const recorded = this.runs.spawned.get(profile);
             if (recorded?.pid === child.pid) {
               void this.llmDelegation.retire(profile).catch(() => {}); // broker has already recorded the cleanup failure
-              this.dashboardHost.retireDashboardRun(profile, dashboardGeneration);
               this.runs.spawned.delete(profile);
               this.instances.removeInstanceRecord(profile);
             }
           });
         } else child.once("error", () => {
-          this.dashboardHost.retireDashboardRun(profile, dashboardGeneration);
           this.instances.removeInstanceRecord(profile);
         });
         return child;
@@ -1538,18 +1492,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       serviceEpoch: epoch,
       issued: false,
     });
-    try {
-      if (id !== this.managerId && this.dashboard) {
-        const pkg = JSON.parse(readFileSync(join(this.home, "profiles", id, "package.json"), "utf8"));
-        const installed = typeof pkg.dependencies?.["@dsh-spaces/dashboard"] === "string" &&
-          Array.isArray(pkg.dsh?.profile?.bundles) && pkg.dsh.profile.bundles.includes("@dsh-spaces/dashboard");
-        await this.dashboard.prepare(id, gen, installed);
-      }
-      await this.startOwned(id);
-    } catch (error) {
-      this.dashboardHost.retireDashboardRun(id, gen);
-      throw error;
-    }
+    await this.startOwned(id);
     if (this.lifecycle.maintenanceBlocked) throw new WorkbenchPublicError("workbench/unavailable");
     const port = this.processes?.portOf(id);
     if (!port) throw new WorkbenchPublicError("workbench/failed");
@@ -1593,7 +1536,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.spaces = undefined;
     this.maintenance = null;
     this.products = null;
-    this.dashboard = null;
   }
 
   private async startOwned(spaceId: string): Promise<void> {
@@ -1648,12 +1590,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!this.processes) return;
     if (this.runs.unmanaged.has(spaceId)) return;
     await this.llmDelegation.retire(spaceId);
-    const dashboardError = this.dashboardHost.retireDashboardRun(spaceId);
     await this.processes.stop(spaceId);
     this.runs.nextGeneration(spaceId);
     this.runs.views.delete(spaceId);
     this.instances.removeInstanceRecord(spaceId);
-    if (dashboardError) throw dashboardError;
   }
 
   private async stopOwnedAll(): Promise<void> {

@@ -246,6 +246,27 @@ export function defaultPolicyFor(spaceId: string): SpaceLlmPolicy {
   return emptyPolicy();
 }
 
+/** Enabled connections a space policy selects, in policy order. */
+export function selectSharedConnections(
+  catalog: GlobalLlmCatalog,
+  policy: SpaceLlmPolicy,
+): SharedConnection[] {
+  if (policy.shared.mode === "none") return [];
+  const selected =
+    policy.shared.mode === "all"
+      ? Object.values(catalog.connections)
+      : policy.shared.connectionIds.map((id) => {
+          const connection = catalog.connections[id];
+          if (!connection) {
+            throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "policy references an unknown connection", {
+              connectionId: id,
+            });
+          }
+          return connection;
+        });
+  return selected.filter((connection) => connection.enabled);
+}
+
 export function parseCatalog(value: unknown): GlobalLlmCatalog {
   if (!isRecord(value)) {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "catalog must be an object");

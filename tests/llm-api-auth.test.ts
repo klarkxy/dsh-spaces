@@ -18,12 +18,12 @@ import {
   parseCatalog,
   type GlobalLlmCatalog,
   type SpaceLlmPolicy,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import type { LlmInstanceRecord, LlmOperationRecord, LlmOperationStore, LlmProbePort, LlmSpaceSettingsPort, SpaceDefaultModel } from "../src/core/ports/llm-runtime.ts";
 import type { LlmLocalCandidate } from "../src/shared/llm-api.ts";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../src/core/ports/llm-store.ts";
-import { emptyPolicy } from "../src/core/domain/llm-connections.ts";
-import type { LlmShareManifest } from "../src/core/domain/llm-share.ts";
+import { emptyPolicy } from "../src/shared/llm-connections.ts";
+import type { LlmShareManifest } from "../src/shared/llm-share.ts";
 import { LLM_ADAPTER_VERSION } from "../src/shared/llm-api.ts";
 import { workbenchPost } from "../packages/plugin/src/host/workbench-http.ts";
 import { llmApiResultSchema } from "../packages/plugin/src/host/workbench-schemas.ts";

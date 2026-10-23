@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { FileLlmCredentialStore } from "../src/adapters/node/llm-credential-store.ts";
 import { llmControlDir, llmCredentialsPath } from "../src/adapters/node/llm-paths.ts";
-import { compileManagedRecordKey, createConnectionId, LLM_ERROR } from "../src/core/domain/llm-connections.ts";
+import { compileManagedRecordKey, createConnectionId, LLM_ERROR } from "../src/shared/llm-connections.ts";
 
 const temps: string[] = [];
 

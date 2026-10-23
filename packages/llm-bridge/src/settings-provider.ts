@@ -1,5 +1,5 @@
-import type { LlmSharedSnapshot } from "../../../src/core/domain/llm-connections";
-import { LLM_ERROR, isManagedRouteId } from "../../../src/core/domain/llm-connections";
+import type { LlmSharedSnapshot } from "../../../src/shared/llm-connections";
+import { LLM_ERROR, isManagedRouteId } from "../../../src/shared/llm-connections";
 import {
   collectManagedWritePaths,
   userSectionHasManagedRoutes,

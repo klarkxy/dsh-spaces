@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 import { LLM_CAPABILITIES } from "../src/core/application/global-llm-host.ts";
-import { LLM_ERROR, parseCatalog } from "../src/core/domain/llm-connections.ts";
+import { LLM_ERROR, parseCatalog } from "../src/shared/llm-connections.ts";
 import { readLaunchSnapshotFile } from "../src/adapters/node/llm-snapshot.ts";
 import { requireOfficialLlmAdapter } from "../packages/llm-bridge/src/official-host.ts";
 import { LLM_REQUIRED, listTarEntries, normalizePacked } from "../scripts/pack-spaces-plugin.mjs";
@@ -18,9 +18,9 @@ afterEach(() => {
 });
 
 const LLM_FEATURE_GLOBS = [
-  "src/core/domain/llm-connections.ts",
+  "src/shared/llm-connections.ts",
   "src/core/domain/llm-resolution.ts",
-  "src/core/domain/llm-share.ts",
+  "src/shared/llm-share.ts",
   "src/core/application/global-llm-host.ts",
   "src/core/application/global-llm-service.ts",
   "src/adapters/node/llm-catalog-store.ts",

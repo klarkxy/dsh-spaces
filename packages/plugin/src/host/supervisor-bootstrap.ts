@@ -28,11 +28,11 @@ import {
   diagnoseEndpointResidue,
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
-} from "./supervisor-endpoint";
+} from "../../../../src/adapters/node/supervisor-endpoint";
 import type { WorkbenchHttpFetch } from "./workbench-http";
 
-export { SUPERVISOR_ENDPOINT_FILE, readEndpointFile, writeEndpointFile } from "./supervisor-endpoint";
-export type { SupervisorEndpoint } from "./supervisor-endpoint";
+export { SUPERVISOR_ENDPOINT_FILE, readEndpointFile, writeEndpointFile } from "../../../../src/adapters/node/supervisor-endpoint";
+export type { SupervisorEndpoint } from "../../../../src/adapters/node/supervisor-endpoint";
 export { readLastSupervisorDiagnostics } from "../../../../src/adapters/node/supervisor-launch";
 
 export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";

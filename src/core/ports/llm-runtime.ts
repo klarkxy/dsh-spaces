@@ -1,5 +1,5 @@
-import type { ConnectionId } from "../domain/llm-connections";
-import type { LlmShareManifest } from "../domain/llm-share";
+import type { ConnectionId } from "../../shared/llm-connections";
+import type { LlmShareManifest } from "../../shared/llm-share";
 import type { LlmLocalCandidate, LlmSpaceObservation } from "../../shared/llm-api";
 
 export type LlmInstanceRecord = LlmSpaceObservation & {

@@ -264,12 +264,15 @@ test("superseded native navigation rejection does not close the latest selection
   let calls = 0;
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
-    presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
+    presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [{ id: "alpha", displayName: "Alpha", status: "running", generation: 1 }] }),
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
   Object.assign(controller, { opening: Promise.resolve(), nativeUrl: "http://127.0.0.1:3333/native/" + "a".repeat(32),
     guest: { loadURL: () => ++calls === 1 ? new Promise<void>((_resolve, reject) => { rejectFirst = reject; }) : Promise.resolve(), remove() {} } });
+  // The dashboard target is gone: it is not a native space target any more, so the rail cannot select it.
   controller.select("@dashboard"); await tick();
+  assert.equal(controller.getSnapshot().pending, null);
+  controller.select("alpha"); await tick();
   controller.select("@settings"); await tick();
   rejectFirst(Error("ERR_ABORTED")); await tick();
   assert.equal(controller.getSnapshot().phase, "ready");

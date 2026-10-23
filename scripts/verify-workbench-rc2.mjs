@@ -24,7 +24,7 @@
  * spaces/workbench write remotes must stay unregistered. That is the new
  * role contract, not a relaxation of management rights.
  *
- *   node scripts/verify-workbench-rc2.mjs [--output DIR] [--home DIR]
+ *   node --import tsx scripts/verify-workbench-rc2.mjs [--output DIR] [--home DIR]
  *
  * Env: DSH_TEST_BIN or DSH_TEST_RC2_BIN override an official 0.1.5-rc.2
  * lib/bin.js. If unset, the default is the repo isolation tree
@@ -61,7 +61,7 @@ import {
   captureLaunchUrl,
   cliVersion,
   ephemeralPort,
-  importCore,
+  importIsolation,
   isolatedEnv,
   refuseRealHome,
   resolveNpmCli,
@@ -890,7 +890,7 @@ async function main() {
     gaps.push('packed supervisor did not start a dedicated rc.2 manager; product write support is not granted');
   }
 
-  const { applyIsolationPatch, assertDumpPatched } = await importCore();
+  const { applyIsolationPatch, assertDumpPatched } = await importIsolation();
   for (const name of [SPACE_A, SPACE_B, PLUGIN_HOST]) {
     ensureProfile(node, bin, home, tooling, name, applyIsolationPatch, assertDumpPatched);
   }

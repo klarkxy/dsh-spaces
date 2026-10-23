@@ -19,7 +19,7 @@ import {
   parseSpaceRecipe,
   recipeFromTemplate,
 } from "../../core/application/space-recipe";
-import type { LlmShareManifest } from "../../core/domain/llm-share";
+import type { LlmShareManifest } from "../../shared/llm-share";
 
 export const SPACE_TEMPLATES_FILE = "space-templates.json";
 

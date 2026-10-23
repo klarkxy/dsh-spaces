@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { createUserMessage, type StreamChunk } from "@deepseek-ai/dsh-llm";
 import { openSpaceLlmBridge, type OpenedNativeSpace } from "./llm-official.ts";
-import { compileManagedRouteId, LLM_ERROR, type LlmSharedSnapshot } from "../../src/core/domain/llm-connections.ts";
+import { compileManagedRouteId, LLM_ERROR, type LlmSharedSnapshot } from "../../src/shared/llm-connections.ts";
 import { snapshotCredentialRef } from "../../src/core/domain/llm-resolution.ts";
 
 type WorkerConfig = {

@@ -1,3 +1,12 @@
+# 2026-10-23 架构梳理与第一波重构
+
+- [x] 全仓只读架构测绘：包边界双向依赖（src↔packages）、shared 上指 core/domain、god 文件、supervisor/spaces-control 一词多义、WorkbenchApi 三处手写为主要别扭点；六边形分层在 src 内部成立、在包边界断裂。
+- [x] 既有 2026-10-20→22 工作流先落本地基线 `a213321`（用户授权本地提交；不推送）。
+- [x] 用户决定整包移除已封存看板：删除 packages/dashboard、core/domain/dashboard、adapters/node/dashboard、门户 `@dashboard` 目标与发布计划、工作台视图与封存开关、private-files、docs/dashboard 与 DASHBOARD.md、18 测试、9 脚本、6 工作流、3 tsconfig；Home 回到纯聊天面，Home overlay 随看板一并移除。历史文档（tasks/**、docs/plans/**、host/implementation.md、message-bus/phase-one.md）原样冻结，能力可从 git 历史找回。
+- [x] 分层 DAG 修复：supervisor 端点格式移入 src/adapters/node、loopback 解析移入 src/shared，LLM activity 协议移入 src/shared（llm-bridge 再导出），llm-share/llm-connections 下移 src/shared（selectSharedConnections 经 core/domain/llm-resolution 再导出），孤儿 @dsh-spaces/core 整包删除，客户端构建守卫由失效的 src/main 改拦 src/adapters 与 src/shared/node。
+- [x] 合并树验证：check:test-lists、typecheck（node/web/spaces/tests）、build 与 test／spaces／workbench／workbench:recovery／llm／blueprints／browser 全绿。仅本地提交，不推送。
+- [ ] 第二波：src/adapters/node 按领域拆目录（home／llm／blueprint／maintenance／products／runtime／snapshots／server／diagnostics／payload／profile），进行中。
+
 # 2026-10-22 Desktop UI 链接安装与手动服务操作
 
 - [x] 用户明确授权错误页“确认受影响空间后手动重启服务”。已实现认证预览、一次性确认、正常停机完成后单次启动；只对确认的 Desktop 开放，不自动重试、不强杀、不清证据、不重启子空间或续跑任务。同步有限政策例外。

@@ -19,7 +19,7 @@ import {
   assertShareSecretFree,
   parseLlmShareManifest,
   type LlmShareManifest,
-} from "../../core/domain/llm-share";
+} from "../../shared/llm-share";
 import {
   applySpaceRecipe,
   isNpmRangeOrExact,

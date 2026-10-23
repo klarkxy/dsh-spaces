@@ -7,9 +7,7 @@ import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import { MotionRoot } from "../../../../src/shared/ui/motion";
 import { WorkbenchApp } from "../workbench";
 import { WORKBENCH_CSS } from "../workbench/styles";
-import { HOME_CSS } from "../workbench/dashboard-home";
-import { DASHBOARD_CSS } from "../../../dashboard/src/view";
-import { mountStaticClientStyle } from "../../../dashboard/src/client-style";
+import { mountStaticClientStyle } from "./client-style";
 import { readViewHint } from "../../../view-bridge/src/env";
 import { CONTAINED_MANAGEMENT_PARAM } from "../../../../src/shared/space-host";
 import { HostShellController } from "./host-shell-state";
@@ -54,7 +52,7 @@ export function apply(ctx: Context): void {
     // Native plugin styles have an explicit owner and lifetime. Do not depend
     // on resource tags rendered inside the replaceable root slot.
     if (typeof document !== "undefined") {
-      for (const [name, css] of [["workbench.css", WORKBENCH_CSS], ["home.css", HOME_CSS], ["dashboard.css", DASHBOARD_CSS]] as const) {
+      for (const [name, css] of [["workbench.css", WORKBENCH_CSS]] as const) {
         ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", name, css));
       }
     }

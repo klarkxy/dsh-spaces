@@ -5,11 +5,11 @@ import type {
   SharedModelRef,
   SharedSelection,
   SpaceLlmPolicy,
-} from "../core/domain/llm-connections";
-import type { LlmShareManifest, LlmShareMapping } from "../core/domain/llm-share";
+} from "./llm-connections";
+import type { LlmShareManifest, LlmShareMapping } from "./llm-share";
 
 export type { SharedAuth, SharedModelRef, SharedSelection, SpaceLlmPolicy };
-export type { LlmShareManifest, LlmShareMapping, LlmShareRequirement } from "../core/domain/llm-share";
+export type { LlmShareManifest, LlmShareMapping, LlmShareRequirement } from "./llm-share";
 import type { WorkbenchJob, WorkbenchSpace } from "./workbench";
 
 export const LLM_ADAPTER_VERSION = "0.2.1-rc.2";

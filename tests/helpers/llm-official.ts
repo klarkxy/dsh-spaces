@@ -7,7 +7,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { boot, initProfile, readProfilePatches, type ProfileContext } from "@deepseek-ai/dsh-app-boot";
 import { LocalCredentialProvider } from "@deepseek-ai/dsh-credentials-local";
 import type { PatchOptions } from "@deepseek-ai/cordis-plugin-include";
-import type { LlmSharedSnapshot } from "../../src/core/domain/llm-connections.ts";
+import type { LlmSharedSnapshot } from "../../src/shared/llm-connections.ts";
 import { LLM_SNAPSHOT_ENV } from "../../src/adapters/node/llm-snapshot.ts";
 import { freezeSpaceSnapshot } from "../../packages/llm-bridge/src/space-bridge.ts";
 import { SNAPSHOT_SERVICE, name as BRIDGE_ID } from "../../packages/llm-bridge/src/plugin.ts";

@@ -12,7 +12,7 @@ import {
   compileManagedRouteId,
   createConnectionId,
   type LlmSharedSnapshot,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import { startLocalCredentials } from "./helpers/llm-official.ts";
 
 const temps: string[] = [];

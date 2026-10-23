@@ -5,7 +5,7 @@ import { WorkbenchGuideHost } from "./workbench-guide";
 import { WorkbenchManagerHost } from "./workbench-manager";
 import { SpacesHost, type SpacesHostConfig } from "./spaces-service";
 import { runtimeFromContext, WorkbenchHostRuntime } from "./runtime";
-import { parseLoopbackOrigin, parseRelativeEntryPath } from "./loopback";
+import { parseLoopbackOrigin, parseRelativeEntryPath } from "../../../../src/shared/loopback";
 import { assertSupportedNode } from "../../../../src/shared/node-version";
 import {MainLlmService} from './llm-main';
 

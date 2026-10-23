@@ -4,7 +4,7 @@ export const PORTAL_PARENT_SOURCE = "dsh-spaces-portal-parent";
 export const CONTAINED_MANAGEMENT_PARAM = "dsh-spaces-contained";
 export const PORTAL_CHANNEL_RE = /^[a-f0-9]{32}$/;
 export const PORTAL_SPACE_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
-export type NativeSpaceTarget = "@dashboard" | "@settings" | string;
+export type NativeSpaceTarget = "@settings" | string;
 /**
  * The closed fragment the desktop shell writes into the portal page after it
  * has opened the settings page. The portal page forwards it to the manager
@@ -26,12 +26,12 @@ export function parseNativeCreateIntent(hash: string): number | null {
   return Number.isSafeInteger(requestId) ? requestId : null;
 }
 export function isNativeSpaceTarget(value: unknown): value is NativeSpaceTarget {
-  return value === "@dashboard" || value === "@settings" || typeof value === "string" && PORTAL_SPACE_RE.test(value);
+  return value === "@settings" || typeof value === "string" && PORTAL_SPACE_RE.test(value);
 }
 export interface NativeSpaceNavigation { kind: "select" | "selected" | "rejected"; requestId: number; target: NativeSpaceTarget }
 /** A fragment carries presentation only. The document still needs its operator session. */
 export function parseNativeSpaceHash(hash: string): NativeSpaceNavigation | null {
-  const match = /^#(select|selected|rejected)\/([1-9][0-9]{0,9})\/(@dashboard|@settings|[a-z0-9][a-z0-9-]{0,38})$/.exec(hash);
+  const match = /^#(select|selected|rejected)\/([1-9][0-9]{0,9})\/(@settings|[a-z0-9][a-z0-9-]{0,38})$/.exec(hash);
   if (!match) return null;
   return { kind: match[1] as NativeSpaceNavigation["kind"], requestId: Number(match[2]), target: match[3] };
 }

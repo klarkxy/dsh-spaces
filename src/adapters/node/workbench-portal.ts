@@ -284,10 +284,10 @@ function nativeSelection() {
   if (intent !== null) { forwardCreateIntent(intent); return; }
   const match = location.hash.split("/");
   if (match.length !== 3 || match[0] !== "#select" || !/^[1-9][0-9]{0,9}$/.test(match[1]) ||
-      !/^(@dashboard|@settings|[a-z0-9][a-z0-9-]{0,38})$/.test(match[2]) || Number(match[1]) <= lastNativeRequest) return;
+      !/^(@settings|[a-z0-9][a-z0-9-]{0,38})$/.test(match[2]) || Number(match[1]) <= lastNativeRequest) return;
   const requestId = Number(match[1]), target = match[2]; lastNativeRequest = requestId;
   browserRequest = null;
-  const allowed = target === "@dashboard" || target === "@settings" || snapshot.spaces.some(row => row.id === target && row.id !== snapshot.managerId);
+  const allowed = target === "@settings" || snapshot.spaces.some(row => row.id === target && row.id !== snapshot.managerId);
   if (!allowed) { send("selection-failed", {requestId, spaceId: target}); return; }
   pending = {requestId, spaceId: target};
   if (managerReady) forwardSelection(); else void ensureManager();

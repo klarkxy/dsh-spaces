@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {parsePolicy} from '../src/core/domain/llm-connections.ts';
+import {parsePolicy} from '../src/shared/llm-connections.ts';
 import { test } from "node:test";
 import {
   LLM_ERROR,
@@ -15,7 +15,7 @@ import {
   parseManagedCredentialRef,
   parseManagedRouteId,
   sanitizeProviderConfig,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import {
   boundConnectionIds,
   compileSharedProviderProfile,

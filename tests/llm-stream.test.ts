@@ -16,7 +16,7 @@ import {
   compileManagedRouteId,
   compileManagedRecordKey,
   createConnectionId,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import { freezeSpaceSnapshot } from "../packages/llm-bridge/src/space-bridge.ts";
 import { openSpaceLlmBridge, PINNED_DSH_PACKAGE_VERSION } from "./helpers/llm-official.ts";
 

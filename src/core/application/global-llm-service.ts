@@ -17,7 +17,7 @@ import {
   type SharedModelRef,
   type SharedSelection,
   type SpaceLlmPolicy,
-} from "../domain/llm-connections";
+} from "../../shared/llm-connections";
 import { boundConnectionIds, policyBindsConnection } from "../domain/llm-resolution";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore, SpaceBindingRef } from "../ports/llm-store";
 import type { RedactedConnection } from "../../shared/llm-api";

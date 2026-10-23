@@ -24,9 +24,9 @@ DSH Spaces 是兼容宿主内的多空间插件。安装在官方 Web、官方 D
 
 普通被嵌入空间带合法 view-bridge 身份时不再挂完整空间栏。manager 被嵌入时使用 contained 布局：隐藏第二排空间按钮，保留 Home、创建、设置操作。查询参数只控制展示；它不改变身份、RPC 注册、单写者或授权。
 
-Home 聚合看板仍由管理工作台提供，保留 PR #16 的默认首页、发布授权和显式聊天入口。外层宿主默认显示当前应用；初始化成功在当前界面生命周期内进入 Home。原生宿主若在安装期间重载插件，会回到当前应用，服务就绪后由用户点击「Spaces 首页」打开工作台；不持久化或重放初始化请求。已存在的服务只连接，不在安装入口的页面加载中创建管理服务。
+Home 仍由管理工作台提供，保留 PR #16 的默认首页（原生 Home）。外层宿主默认显示当前应用；初始化成功在当前界面生命周期内进入 Home。原生宿主若在安装期间重载插件，会回到当前应用，服务就绪后由用户点击「Spaces 首页」打开工作台；不持久化或重放初始化请求。已存在的服务只连接，不在安装入口的页面加载中创建管理服务。
 
-官方 Desktop 实验的外层默认显示当前应用，首次显式初始化后进入设置系统空间。看板和设置固定在可滚动的普通空间列表之外，看板不再占用官方应用的默认主页；两者共用既有管理服务，不是可删除、可启停的普通 profile。Web 首批实现的默认 Home 行为不由本实验改变。
+官方 Desktop 实验的外层默认显示当前应用，首次显式初始化后进入设置系统空间。设置固定在可滚动的普通空间列表之外，不再占用官方应用的默认主页；它共用既有管理服务，不是可删除、可启停的普通 profile。Web 首批实现的默认 Home 行为不由本实验改变。
 
 Supervisor 的监听器可能先于管理器就绪。Guide 只读观察该次启动完成后才领取一次性入口；状态读取失败、运行代次变化、服务不可用或管理器崩溃立即结束，不重试、不重启。
 
@@ -45,7 +45,7 @@ Supervisor 签发有界、单次、60 秒 entry ticket，绑定父来源和随�
             -> 普通空间来源的 WebUI
 ```
 
-这条链保留既有 view-bridge 的精确 parentOrigin，避免把受保护的子页面直接搬到任意父来源。展示页向外发送裁剪的空间目录、切换结果和错误状态。外层只可选择目录中运行中的空间或 Home（官方 Desktop 另有固定的看板/设置系统目标）；没有 submit、preview、start、stop、安装或脚本转发。
+这条链保留既有 view-bridge 的精确 parentOrigin，避免把受保护的子页面直接搬到任意父来源。展示页向外发送裁剪的空间目录、切换结果和错误状态。外层只可选择目录中运行中的空间或 Home（官方 Desktop 另有固定的设置系统目标）；没有 submit、preview、start、stop、安装或脚本转发。
 
 官方 Desktop 的 Browser Space 使用额外的封闭展示消息：manager 先确认当前可见、已注册的 child Window/origin/channel/epoch/generation，并裁剪视口；native portal 只接收该 manager Window 和 origin，校验当前运行空间，再通过有界 fragment 交给最外层插件。插件以官方 browser lease 创建 HTTP(S) 网页 guest，回复匹配 requestId 的 URL/title 观察。新标签请求取代旧的在途展示，旧回复不覆盖新选择。外部网页不获得 preload、Node、嵌套 webview 或 Desktop API；宿主切换/退出立即隐藏，短租约到期释放网页 guest。该专用展示通道不授予管理权限。
 
@@ -59,7 +59,7 @@ The default adapter occupies the additive `shell.overlay` seat and requires its 
 
 Display role and management authority are independent. Only the actual manager exposes management Remotes. The in-place rail receives a bounded inventory through an audience-bound relay and can select already-running views; explicit management stays inside the authenticated manager. The original application is not adopted as a managed profile.
 
-A contained manager preserves the existing origin chain to its children and suppresses a duplicate space rail. The Home dashboard and blueprint editor remain the same implementation. A blueprint neither installs the outer shell nor selects iframe versus a native view.
+A contained manager preserves the existing origin chain to its children and suppresses a duplicate space rail. The Home surface and blueprint editor remain the same implementation. A blueprint neither installs the outer shell nor selects iframe versus a native view.
 
 The Web transport requires same-site HTTP loopback cookies. The official Desktop experiment uses its authenticated native guest carrier and two fixed system destinations; its tested version and limits are recorded separately. Remote deployments and arbitrary third-party layouts remain uncertified. A new adapter must prove authentication, embedding policies, layout cleanup, exact-source messaging and runtime ownership without broadening the core management API. Lack of an adapter must be visible before initialization writes.
 

@@ -22,7 +22,7 @@ import {
   type GlobalLlmCatalog,
   type SharedConnection,
   type SpaceLlmPolicy,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../src/core/ports/llm-store.ts";
 
 const temps: string[] = [];

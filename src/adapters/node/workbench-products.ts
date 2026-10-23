@@ -38,14 +38,14 @@ import {
   recipeFromShareParts,
   recipeFromTemplate,
 } from "../../core/application/space-recipe";
-import { parseLlmShareManifest, type LlmShareManifest } from "../../core/domain/llm-share";
+import { parseLlmShareManifest, type LlmShareManifest } from "../../shared/llm-share";
 import { isUnresolvedPluginAlias } from "../../shared/plugin-spec";
 import { t } from "../../shared/i18n";
 import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
 import { isBareNpmPackageName, isGitSpec, isSafeSpec, matchesPluginQuery } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
 import type { SpaceImportResult, SpaceSharePreview } from "../../shared/space-share";
-import { assertShareSecretFree } from "../../core/domain/llm-share";
+import { assertShareSecretFree } from "../../shared/llm-share";
 import {
   DEFAULT_HUB_SETTINGS,
   spaceIdFromName,

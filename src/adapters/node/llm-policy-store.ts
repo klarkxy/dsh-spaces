@@ -8,7 +8,7 @@ import {
   emptyPolicy,
   parsePolicy,
   type SpaceLlmPolicy,
-} from "../../core/domain/llm-connections";
+} from "../../shared/llm-connections";
 import type { LlmPolicyStore } from "../../core/ports/llm-store";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../shared/types";
 import { withExclusiveDir } from "./llm-file-lock";

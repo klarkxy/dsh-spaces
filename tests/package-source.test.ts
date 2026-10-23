@@ -14,7 +14,7 @@ test("official Desktop Node 24.21 and Node 26 are supported", () => {
 });
 
 test("distributed package engines admit exactly the supported runtime range", () => {
-  for (const path of ["package.json", ...["core", "plugin", "supervisor", "doctor", "browser", "view-bridge", "llm-bridge", "dashboard", "blueprint"].map(name => `packages/${name}/package.json`)]) {
+  for (const path of ["package.json", ...["plugin", "supervisor", "doctor", "browser", "view-bridge", "llm-bridge", "blueprint"].map(name => `packages/${name}/package.json`)]) {
     const manifest = JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"));
     assert.equal(manifest.engines.node, SUPPORTED_NODE_RANGE, path);
   }

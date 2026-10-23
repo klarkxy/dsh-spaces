@@ -1,4 +1,3 @@
-import { parsePublicationPlan } from "../../../core/domain/dashboard/validation";
 import { sanitizeSpaceIcon } from "../../../shared/space-icon";
 import { SPACE_NAME_RE } from "../../../shared/types";
 import type { WorkbenchPlanRequest } from "../../../shared/workbench";
@@ -13,8 +12,6 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
   const kind = body.kind;
   if (typeof kind !== "string") throw new WorkbenchPublicError("workbench/invalid-input");
   switch (kind) {
-    case "dashboard.publication.set":
-      return parsePublicationPlan(input);
     case "space.stop":
     case "space.restart":
       expectKeys(body, ["kind", "spaceId"]);

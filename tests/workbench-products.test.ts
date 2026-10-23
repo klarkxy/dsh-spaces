@@ -11,8 +11,8 @@ import { CATALOG_CACHE_FILE } from "../src/adapters/node/plugin-catalog.ts";
 import { packSpaceShare, pluginToShare } from "../src/adapters/node/space-share.ts";
 import { packZip } from "../src/adapters/node/space-share-zip.ts";
 import { SPACE_TEMPLATES_FILE } from "../src/adapters/node/space-templates.ts";
-import { emptyCatalog, emptyPolicy } from "../src/core/domain/llm-connections.ts";
-import { buildLlmShareManifest } from "../src/core/domain/llm-share.ts";
+import { emptyCatalog, emptyPolicy } from "../src/shared/llm-connections.ts";
+import { buildLlmShareManifest } from "../src/shared/llm-share.ts";
 import {
   parseWorkbenchProductRequest,
   parseWorkbenchProductResult,

@@ -10,7 +10,7 @@ import {
   parseCatalog,
   parsePolicy,
   type LlmSharedSnapshot,
-} from "../../core/domain/llm-connections";
+} from "../../shared/llm-connections";
 import { snapshotForSpace } from "../../core/domain/llm-resolution";
 import { llmCatalogPath, llmControlDir } from "./llm-paths";
 import { llmPolicyPath } from "./llm-policy-store";

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { compileManagedRouteId, LLM_ERROR } from '../../../src/core/domain/llm-connections.ts';
+import { compileManagedRouteId, LLM_ERROR } from '../../../src/shared/llm-connections.ts';
 import { openSpaceLlmBridge } from '../../helpers/llm-official.ts';
 
 const testRoot = process.env.DSH_BRIDGE_TEST_ROOT;

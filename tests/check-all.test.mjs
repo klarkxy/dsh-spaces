@@ -36,7 +36,7 @@ test('Windows temp validation follows directory aliases into the watched reposit
 });
 
 test('external temp creates fresh isolated Home and temp variables without mutating caller environment', () => {
-  const { base, repo } = fixture(), env = { DSH_DASHBOARD_SDK_ROOT: 'explicit-sdk', DSH_HOME: 'caller-home' };
+  const { base, repo } = fixture(), env = { DSH_TEST_CALLER_ENV: 'caller-value', DSH_HOME: 'caller-home' };
   const first = createCheckEnvironment({ tempRoot: base, repo, platform: 'win32', env });
   const second = createCheckEnvironment({ tempRoot: base, repo, platform: 'win32', env });
   assert.notEqual(first.directory, second.directory);
@@ -47,6 +47,6 @@ test('external temp creates fresh isolated Home and temp variables without mutat
   assert.equal(first.env.DSH_HOME, join(first.directory, 'home'));
   assert.equal(first.env.DSH_SPACES_HOME, first.env.DSH_HOME);
   assert.equal(first.env.DSH_SPACES_WEB_HOME, first.env.DSH_HOME);
-  assert.equal(first.env.DSH_DASHBOARD_SDK_ROOT, 'explicit-sdk');
-  assert.deepEqual(env, { DSH_DASHBOARD_SDK_ROOT: 'explicit-sdk', DSH_HOME: 'caller-home' });
+  assert.equal(first.env.DSH_TEST_CALLER_ENV, 'caller-value');
+  assert.deepEqual(env, { DSH_TEST_CALLER_ENV: 'caller-value', DSH_HOME: 'caller-home' });
 });

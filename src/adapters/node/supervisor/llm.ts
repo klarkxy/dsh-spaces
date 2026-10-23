@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { GlobalLlmHost, LlmApplyCommand } from "../../../core/application/global-llm-host";
-import { LLM_ERROR, LlmConfigError } from "../../../core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError } from "../../../shared/llm-connections";
 import type { LlmInstanceRecord } from "../../../core/ports/llm-runtime";
 import { isLlmWriteMethod, type LlmApiResult } from "../../../shared/llm-api";
 import type { WorkbenchJob, WorkbenchSpace } from "../../../shared/workbench";
@@ -19,7 +19,7 @@ import {
   type LlmActivityReport,
   type LlmActivityStatus,
   type LlmActivityTransport,
-} from "../../../../packages/llm-bridge/src/activity-protocol";
+} from "../../../shared/llm-activity";
 
 type ActivitySession = {
   identity: LlmActivityIdentity;

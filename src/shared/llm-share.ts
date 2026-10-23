@@ -9,12 +9,12 @@ import {
   normalizeConnectionId,
   parseCatalog,
   redactEndpoint,
+  selectSharedConnections,
   type GlobalLlmCatalog,
   type SharedModelRef,
   type SharedSelection,
   type SpaceLlmPolicy,
 } from "./llm-connections";
-import { selectSharedConnections } from "./llm-resolution";
 
 export const LLM_SHARE_KIND = "dsh-space-llm-requirements" as const;
 export const LLM_SHARE_SCHEMA_VERSION = 1 as const;

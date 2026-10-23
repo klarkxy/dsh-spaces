@@ -1,6 +1,6 @@
 /** Browser-safe space share types. Archives stay in the main process. */
 
-import type { LlmShareManifest, LlmShareRequirement } from "../core/domain/llm-share";
+import type { LlmShareManifest, LlmShareRequirement } from "./llm-share";
 
 export const SPACE_SHARE_KIND = "dsh-space" as const;
 export const SPACE_SHARE_FORMAT_VERSION = 1 as const;

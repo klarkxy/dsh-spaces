@@ -7,13 +7,16 @@ import {
   LlmConfigError,
   normalizeConnectionId,
   parseManagedRecordKey,
+  selectSharedConnections,
   type ConnectionId,
   type GlobalLlmCatalog,
   type LlmSharedSnapshot,
   type SharedConnection,
   type SharedModelRef,
   type SpaceLlmPolicy,
-} from "./llm-connections";
+} from "../../shared/llm-connections";
+
+export { selectSharedConnections } from "../../shared/llm-connections";
 
 export type ModelChoice = {
   provider: string;
@@ -23,26 +26,6 @@ export type ModelChoice = {
 export type ResolvedDefaultModel = ModelChoice & {
   source: "session" | "space" | "global" | "composition";
 };
-
-export function selectSharedConnections(
-  catalog: GlobalLlmCatalog,
-  policy: SpaceLlmPolicy,
-): SharedConnection[] {
-  if (policy.shared.mode === "none") return [];
-  const selected =
-    policy.shared.mode === "all"
-      ? Object.values(catalog.connections)
-      : policy.shared.connectionIds.map((id) => {
-          const connection = catalog.connections[id];
-          if (!connection) {
-            throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "policy references an unknown connection", {
-              connectionId: id,
-            });
-          }
-          return connection;
-        });
-  return selected.filter((connection) => connection.enabled);
-}
 
 export function policyBindsConnection(policy: SpaceLlmPolicy, connectionId: ConnectionId): boolean {
   const id = normalizeConnectionId(connectionId);

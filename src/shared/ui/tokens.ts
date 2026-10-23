@@ -2,7 +2,7 @@
  * Shared UI design tokens.
  *
  * Browser-only: this module produces CSS text and imports nothing from Node
- * adapters, so any surface (workbench, host shell, dashboard, browser space)
+ * adapters, so any surface (workbench, host shell, browser space)
  * can inline it into its own stylesheet.
  *
  * The token layer is scoped to `.dsh-ui`. A surface root carries that class

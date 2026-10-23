@@ -7,7 +7,7 @@
  * cycle).
  */
 
-import React, { type ReactElement, type ReactNode } from "react";
+import React, { type ReactElement } from "react";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { t } from "../i18n";
 import type { WorkbenchController, WorkbenchUiState } from "../store";
@@ -15,13 +15,11 @@ import type { WorkbenchController, WorkbenchUiState } from "../store";
 export interface WorkbenchViewProps {
   ui: WorkbenchUiState;
   controller: WorkbenchController;
-  /** Native chat URL, retained separately from the composable Home surface. */
+  /** Native Home URL, shown in the workbench Home stage. */
   homeUrl?: string;
-  homeContent?: ReactNode;
-  chatActive?: boolean;
   contained?: boolean;
   nativeSurface?: boolean;
-  systemPage?: "dashboard" | "settings" | null;
+  systemPage?: "settings" | null;
 }
 
 /** Copy text to the clipboard without leaking anything the caller did not pass in. */

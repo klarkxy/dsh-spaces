@@ -15,7 +15,7 @@ import {
   readEndpointFile,
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
-} from "./supervisor-endpoint";
+} from "../../../../src/adapters/node/supervisor-endpoint";
 
 export type LeaseVerdict = "ok" | "free" | "foreign" | "ambiguous" | "dead" | "unbound" | "mismatch";
 

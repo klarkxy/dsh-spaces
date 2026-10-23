@@ -1,7 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import LlmRuntime from "@deepseek-ai/dsh-llm";
 import * as llmPiAi from "@deepseek-ai/dsh-llm-pi-ai";
-import { LLM_ERROR, LlmConfigError } from "../../../src/core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError } from "../../../src/shared/llm-connections";
 import { installManagedRequestGuard, type BridgeStatusReader } from "./request-guard";
 
 export function requireOfficialLlmAdapter(mod: { supportedProtocols?: unknown } | null | undefined): typeof llmPiAi {

@@ -34,7 +34,7 @@ To link manually, set `DSH_HOME` to a separate development Home, create a custom
 
 ## Full local checks
 
-Set `DSH_DASHBOARD_SDK_ROOT` to an installed `@deepseek-ai/dsh@0.2.1-rc.2` tree containing `node_modules/@deepseek-ai/dsh`, as in the dashboard CI workflows, then run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain still defaults to Node 26.10.0. This runs the required list/type/build checks and eight test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
+Run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain still defaults to Node 26.10.0. This runs the required list/type/build checks and seven test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
 
 The runner gives child processes a fresh temporary directory and non-real DSH Home. On Windows that directory must be outside the checkout. A workspace reader can briefly open a staging child and make the single atomic directory rename fail with `EPERM`, even when the reader permits delete sharing. `.gitignore` alone does not stop every external reader. The runner rejects an inherited repository-local TMP, including a directory alias into it, before starting checks. If needed, choose an existing external directory explicitly:
 

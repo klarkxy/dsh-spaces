@@ -1,4 +1,4 @@
-import type { ConnectionId, GlobalLlmCatalog, SpaceLlmPolicy } from "../domain/llm-connections";
+import type { ConnectionId, GlobalLlmCatalog, SpaceLlmPolicy } from "../../shared/llm-connections";
 
 export interface LlmCatalogStore {
   read(): Promise<GlobalLlmCatalog>;

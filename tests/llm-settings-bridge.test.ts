@@ -10,7 +10,7 @@ import {
   compileManagedRecordKey,
   compileManagedRouteId,
   createConnectionId,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import {
   openSpaceLlmBridge,
   startBridgedCredentials,

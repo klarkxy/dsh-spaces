@@ -1,4 +1,0 @@
-- insert:
-    - id: dsh-dashboard
-      name: '@dsh-spaces/dashboard'
-      config: {}

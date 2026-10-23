@@ -9,12 +9,10 @@ import type {
   WorkbenchPlan,
   WorkbenchPlanRequest,
 } from "../../../shared/workbench";
-import type { SupervisorDashboard } from "../dashboard/supervisor";
 import type { HomeOperationLock } from "../home-operation-lock";
 import type { SpaceMessageRouter } from "../message-bus/router";
 import type { ProfileRegistry } from "../profile-registry";
 import { WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, type WorkbenchJobContext, type WorkbenchJobStore } from "../workbench-jobs";
-import type { SupervisorDashboardHost } from "./dashboard-host";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorInstanceRecords } from "./instance-records";
 import type { SupervisorLifecycle } from "./lifecycle";
@@ -33,8 +31,6 @@ export interface SupervisorPlansHost {
   now: () => Date;
   messageBus: SpaceMessageRouter;
   options: WorkbenchSupervisorOptions;
-  dashboard: () => SupervisorDashboard | null;
-  dashboardHost: () => SupervisorDashboardHost;
   jobs: () => WorkbenchJobStore | undefined;
   maintenance: () => WorkbenchMaintenance | null;
   closeHttp: () => Promise<void>;
@@ -77,13 +73,7 @@ export class SupervisorPlans {
       runningSpaceIds: request.kind === "service.shutdown"
         ? this.host.ownedSpaceIds().filter((name) => this.host.statusOf(name) === "running")
         : running,
-      changes: request.kind === "dashboard.publication.set" ? [
-        `Publish provider ${request.providerId} from ${request.spaceId} to this Home only.`,
-        request.selection === null ? "Revoke publication and hide the cached projection immediately." :
-          request.selection.kind === "all" ? "Allow all instances of this provider on the next normal start." :
-            `Allow ${request.selection.instanceIds.length} selected instance(s) on the next normal start.`,
-        "No plugin installation, process restart or business task is performed by this plan.",
-      ] : request.kind === "space.delete" ? [
+      changes: request.kind === "space.delete" ? [
         "Remove this space's profile and installed plugins.",
         request.removeData ? "Delete this space's isolated sessions and storage." : "Keep this space's isolated sessions and storage on disk.",
       ] : [request.kind],
@@ -133,22 +123,6 @@ export class SupervisorPlans {
   private async executeLocal(stored: StoredPlan, ctx: WorkbenchJobContext): Promise<void> {
     const request = stored.request;
     switch (request.kind) {
-      case "dashboard.publication.set": {
-        ctx.phase("dashboard-publication");
-        ctx.cancellable(false);
-        await this.host.lock.run("dashboard.publication.set", async () => {
-          const dashboard = this.host.dashboardHost().requireDashboard();
-          const assertPlan = () => {
-            this.host.dashboardHost().requireDashboard();
-            this.host.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
-            if (this.fingerprint(request) !== stored.fingerprint) throw new WorkbenchPublicError("workbench/conflict");
-            this.host.protectSpecial(this.host.requireManaged(request.spaceId), { allowManager: false });
-            if (this.host.runs.unmanaged.has(request.spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
-          };
-          await dashboard.apply(request, assertPlan);
-        });
-        return;
-      }
       case "space.stop": {
         ctx.phase("stop");
         const id = this.host.requireManaged(request.spaceId);
@@ -167,10 +141,6 @@ export class SupervisorPlans {
         const id = this.host.requireManaged(request.spaceId);
         this.host.protectSpecial(id, { allowManager: false });
         await this.host.lock.run("space.delete", async () => {
-          await this.host.dashboard()?.revokeSpace(id, () => {
-            this.host.dashboardHost().requireDashboard();
-            this.host.assertLiveContext({ serviceEpoch: stored.plan.serviceEpoch, expectedRevision: stored.plan.stateRevision });
-          });
           await this.host.stopOwned(id);
           const profileDir = join(this.host.home, "profiles", id);
           const profileStat = lstatSync(profileDir);
@@ -222,7 +192,6 @@ export class SupervisorPlans {
     if (!kind) return;
     this.host.lifecycle.endRelinquish();
     this.host.messageBus.close();
-    await this.host.dashboard()?.close();
     this.host.dropWritable();
     if (kind === "service.shutdown") {
       this.host.lifecycle.sealing = true;

@@ -7,7 +7,7 @@ import {
   emptyCatalog,
   parseCatalog,
   type GlobalLlmCatalog,
-} from "../../core/domain/llm-connections";
+} from "../../shared/llm-connections";
 import type { LlmCatalogStore } from "../../core/ports/llm-store";
 import { withExclusiveDir } from "./llm-file-lock";
 import { LLM_CATALOG_FILENAME, llmCatalogPath, llmControlDir } from "./llm-paths";

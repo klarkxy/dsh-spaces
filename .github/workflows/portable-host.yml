@@ -33,7 +33,7 @@ jobs:
 
       - run: npm run build:blueprint
       - run: npm run typecheck:spaces && npm run typecheck
-      - run: node --import tsx --test tests/portable-host.test.ts tests/workbench-plugin.test.ts tests/spaces-host.test.ts tests/workbench-ui.test.tsx tests/workbench-http-port.test.ts tests/dashboard-workbench.test.ts
+      - run: node --import tsx --test tests/portable-host.test.ts tests/workbench-plugin.test.ts tests/spaces-host.test.ts tests/workbench-ui.test.tsx tests/workbench-http-port.test.ts
       - run: npm run build:spaces
       - run: npx --no-install playwright install --with-deps chromium
       - name: Actual browser DOM, origin-bound portal and preserved native application

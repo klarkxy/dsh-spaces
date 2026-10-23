@@ -42,11 +42,11 @@ import {
   parseCatalog,
   type GlobalLlmCatalog,
   type SpaceLlmPolicy,
-} from "../src/core/domain/llm-connections.ts";
+} from "../src/shared/llm-connections.ts";
 import type { LlmInstanceRecord, LlmOperationRecord, LlmOperationStore, LlmSpaceSettingsPort, SpaceDefaultModel } from "../src/core/ports/llm-runtime.ts";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../src/core/ports/llm-store.ts";
 import type { LlmApiRequest, LlmApiResult, LlmLocalCandidate } from "../src/shared/llm-api.ts";
-import type { LlmShareManifest } from "../src/core/domain/llm-share.ts";
+import type { LlmShareManifest } from "../src/shared/llm-share.ts";
 import { BLUEPRINT_ORIGIN_FILE, type WorkbenchBlueprintApplyOutcome } from "../src/shared/workbench-blueprint.ts";
 import type { WorkbenchSpace } from "../src/shared/workbench.ts";
 import { spaceIdFromName } from "../src/shared/types.ts";

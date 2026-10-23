@@ -2,7 +2,7 @@ import {
   LLM_ERROR,
   LlmConfigError,
   isPinnedProtocol,
-} from "../../core/domain/llm-connections";
+} from "../../shared/llm-connections";
 import type { LlmProbeDiscoverInput, LlmProbePort, LlmProbeTestInput } from "../../core/ports/llm-runtime";
 
 export const LLM_DISCOVERY_TIMEOUT_MS = 15_000;

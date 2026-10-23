@@ -11,7 +11,7 @@ import { FileLlmCatalogStore } from "../src/adapters/node/llm-catalog-store.ts";
 import { FileLlmCredentialStore } from "../src/adapters/node/llm-credential-store.ts";
 import { FileLlmPolicyStore } from "../src/adapters/node/llm-policy-store.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
-import { compileManagedRouteId, createConnectionId, type LlmSharedSnapshot } from "../src/core/domain/llm-connections.ts";
+import { compileManagedRouteId, createConnectionId, type LlmSharedSnapshot } from "../src/shared/llm-connections.ts";
 import { freezeSpaceSnapshot } from "../packages/llm-bridge/src/space-bridge.ts";
 import { PINNED_DSH_PACKAGE_VERSION } from "./helpers/llm-official.ts";
 

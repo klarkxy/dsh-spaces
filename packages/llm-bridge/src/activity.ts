@@ -1,7 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm";
 import type { Agent } from "@deepseek-ai/dsh-agent";
-import { LLM_ERROR, LlmConfigError } from "../../../src/core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError } from "../../../src/shared/llm-connections";
 import {
   LLM_ACTIVITY_CHANNEL,
   activityIdentityFromEnv,
@@ -10,7 +10,7 @@ import {
   type LlmActivityReport,
   type LlmActivityStatus,
   type LlmActivityTransport,
-} from "./activity-protocol";
+} from "../../../src/shared/llm-activity";
 
 type ActivityAgent = Pick<Agent, "status"> & Partial<Pick<Agent, "whenIdle" | "runMaintenance">>;
 type AgentActivity = {

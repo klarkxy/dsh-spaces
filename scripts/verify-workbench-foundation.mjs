@@ -8,7 +8,7 @@
  * UI must be official DSH. Failures exit 1; this module does not start Hosts
  * when imported.
  *
- * node scripts/verify-workbench-foundation.mjs
+ * node --import tsx scripts/verify-workbench-foundation.mjs
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -45,7 +45,7 @@ import {
   run,
   writePnpmShim,
   isolatedEnv,
-  importCore,
+  importIsolation,
   ephemeralPort,
   portClosed,
   waitPortClosed,
@@ -1213,7 +1213,7 @@ async function main() {
     throw new Error("Requested reuse but the owned test home has no web baseline");
   }
 
-  const { applyIsolationPatch, assertDumpPatched } = await importCore();
+  const { applyIsolationPatch, assertDumpPatched } = await importIsolation();
   const seedLog = join(ARTIFACT, "seed.log");
   if (!REUSE_HOME) {
     info("seed web --dump-config");

@@ -43,8 +43,8 @@ import {
   llmApiResultSchema,
   llmCredentialRequestSchema,
 } from "./workbench-schemas";
-import { parseSupervisorHandoffPath } from "./loopback";
-import type { SupervisorEndpoint } from "./supervisor-endpoint";
+import { parseSupervisorHandoffPath } from "../../../../src/shared/loopback";
+import type { SupervisorEndpoint } from "../../../../src/adapters/node/supervisor-endpoint";
 
 export const WORKBENCH_HTTP_METHODS = [
   "state",

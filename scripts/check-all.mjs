@@ -9,7 +9,7 @@ import { refuseRealHome } from './lib/distribution-harness.mjs';
 const REPO = resolve(import.meta.dirname, '..');
 const CHECKS = ['check:test-lists', 'typecheck', 'typecheck:spaces', 'typecheck:tests', 'build',
   'test', 'test:spaces', 'test:workbench', 'test:workbench:recovery', 'test:llm',
-  'test:blueprints', 'test:browser', 'test:dashboard', 'check:plugin-package', 'test:workbench:browser'];
+  'test:blueprints', 'test:browser', 'check:plugin-package', 'test:workbench:browser'];
 
 export function assertCheckTempRoot(tempRoot, repo = REPO, platform = process.platform) {
   refuseRealHome(tempRoot);
@@ -38,7 +38,6 @@ export async function main(argv = process.argv.slice(2)) {
     const flag = argv[i++], value = resolve(argv[i]);
     if (flag === '--output') output = value; else tempRoot = value;
   }
-  if (!process.env.DSH_DASHBOARD_SDK_ROOT) throw new Error('Set DSH_DASHBOARD_SDK_ROOT to an installed @deepseek-ai/dsh@0.2.1-rc.2 tree before running the full checks.');
   // Validate before creating output or starting any child. Never silently change a caller's temp root.
   assertCheckTempRoot(tempRoot);
   if (output) { refuseRealHome(output); mkdirSync(output); } else {

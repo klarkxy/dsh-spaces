@@ -1,7 +1,7 @@
 /** Strict product DTO validators. Shape/format/limits only. Durable fields reject local paths and URL credentials; transient blueprint input values may include receiver-local directories. */
 import { z } from "zod";
 import { parseBlueprintDocument as parseBlueprint, type BlueprintDocument as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import { LLM_SHARE_NOTE } from "../core/domain/llm-share";
+import { LLM_SHARE_NOTE } from "./llm-share";
 import {
   BLUEPRINT_INPUT_ID_RE,
   BLUEPRINT_JSON_MAX_BYTES,

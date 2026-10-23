@@ -343,7 +343,7 @@ test("the first state failure stays terminal for this controller", async () => {
   const ctrl = controller(fakeApi({
     state: async () => {
       reads += 1;
-      if (fail) throw Object.assign(new Error("dashboard overview timed out"), { code: "workbench/unavailable" });
+      if (fail) throw Object.assign(new Error("workbench overview timed out"), { code: "workbench/unavailable" });
       return state();
     },
   }), {
@@ -354,9 +354,9 @@ test("the first state failure stays terminal for this controller", async () => {
   ctrl.start();
   await flush();
   assert.equal(reads, 1);
-  assert.match(ctrl.getSnapshot().error ?? "", /dashboard overview timed out/);
+  assert.match(ctrl.getSnapshot().error ?? "", /workbench overview timed out/);
   assert.equal(ctrl.canMutate(), false);
-  assert.equal(ready(ctrl).includes("dashboard overview timed out"), true);
+  assert.equal(ready(ctrl).includes("workbench overview timed out"), true);
   const frozen = reads;
   for (const fire of [...timers]) fire();
   onVisible?.();
@@ -365,7 +365,7 @@ test("the first state failure stays terminal for this controller", async () => {
   await ctrl.selectRunningSpace("alpha");
   await flush();
   assert.equal(reads, frozen);
-  assert.match(ctrl.getSnapshot().error ?? "", /dashboard overview timed out/);
+  assert.match(ctrl.getSnapshot().error ?? "", /workbench overview timed out/);
   assert.equal(ctrl.getSnapshot().pendingId, null);
 });
 

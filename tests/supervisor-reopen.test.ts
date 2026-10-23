@@ -26,7 +26,7 @@ async function exitedHolder(home: string, kind = "web", endpoint = true, bindOri
   const script = join(home, "holder.mts");
   writeFileSync(script, `
 import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home-controller.ts", import.meta.url).href)};
-import { writeEndpointFile, endpointHomeId, endpointServiceEpoch } from ${JSON.stringify(new URL("../packages/plugin/src/host/supervisor-endpoint.ts", import.meta.url).href)};
+import { writeEndpointFile, endpointHomeId, endpointServiceEpoch } from ${JSON.stringify(new URL("../src/adapters/node/supervisor-endpoint.ts", import.meta.url).href)};
 import { join } from 'node:path';
 const home = process.argv[2];
 const controller = new HomeController(home);
@@ -298,8 +298,6 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
       instances: () => { throw new Error("not used"); },
       lock: new HomeOperationLock(home), registry: new ProfileRegistry(home),
       now: () => new Date(),
-      dashboard: () => null,
-      dashboardHost: () => { throw new Error("not used"); },
       maintenance: () => null,
       closeHttp: async () => {},
       dropWritable: () => {
@@ -364,7 +362,6 @@ test("shutdown persistence diagnostics distinguish failure before stopping from 
       lock: new HomeOperationLock(home), registry: new ProfileRegistry(home),
       now: () => new Date(), jobs: () => jobs,
       instances: () => ({ writeLifecyclePlan() {}, consumeLifecyclePlan() {} }) as never,
-      dashboard: () => null, dashboardHost: () => { throw new Error("not used"); },
       maintenance: () => null, closeHttp: async () => { throw new Error("must retain HTTP"); },
       dropWritable: () => { throw new Error("must retain ownership"); },
       requireSpace: id => id, requireManaged: id => id, protectSpecial: () => {},

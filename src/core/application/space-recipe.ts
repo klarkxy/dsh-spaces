@@ -1,5 +1,5 @@
 import { applyIsolationPatch, patchTextLooksIsolated } from "../domain/isolation";
-import { assertShareSecretFree, parseLlmShareManifest, type LlmShareManifest } from "../domain/llm-share";
+import { assertShareSecretFree, parseLlmShareManifest, type LlmShareManifest } from "../../shared/llm-share";
 import { FULL_SPACES_PACKAGE, isFullSpacesManagerSpec, isUnresolvedPluginAlias } from "../../shared/plugin-spec";
 import { isGitSpec } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";

@@ -8,11 +8,11 @@ import {
   isManagedRouteId,
   redactEndpoint,
   sanitizeProviderConfig,
-} from "../../core/domain/llm-connections";
+} from "../../shared/llm-connections";
 import { atomicWrite } from "./atomic";
 import type { LlmLocalCandidate } from "../../shared/llm-api";
 import type { LlmSpaceSettingsPort } from "../../core/ports/llm-runtime";
-import { parseLlmShareManifest, type LlmShareManifest } from "../../core/domain/llm-share";
+import { parseLlmShareManifest, type LlmShareManifest } from "../../shared/llm-share";
 import { assertSafeSpaceId, spaceDataRoot } from "./llm-policy-store";
 import { profileSettingsPath, readProfileSettings, writeProfileSettings } from "./profile-settings";
 

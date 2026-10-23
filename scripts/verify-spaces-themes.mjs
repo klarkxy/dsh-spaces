@@ -15,7 +15,7 @@
  * Does not prove: visual difference (orchestrator audits screenshots),
  * model calls, production ~/.dsh, Electron, handwritten CSS.
  *
- * Run with Node 26.x: node scripts/verify-spaces-themes.mjs
+ * Run with Node 26.x: node --import tsx scripts/verify-spaces-themes.mjs
  * DSH_TEST_PLAYWRIGHT_MODULE names the Playwright package directory.
  * DSH_TEST_THEMES_REUSE=1 preserves this script's existing test Home;
  * DSH_TEST_THEME_IDS selects comma-separated ids and writes results-selected.json.
@@ -48,7 +48,7 @@ import {
   run,
   writePnpmShim,
   isolatedEnv,
-  importCore,
+  importIsolation,
   ephemeralPort,
   waitPortClosed,
   stopOwned,
@@ -611,7 +611,7 @@ async function main() {
   writeJson(join(ARTIFACT, "tarball.json"), spacesTarball);
   info(`Spaces tarball ${spacesTarball.used} sha256=${spacesTarball.sha256}`);
 
-  const { applyIsolationPatch, assertDumpPatched } = await importCore();
+  const { applyIsolationPatch, assertDumpPatched } = await importIsolation();
   if (!REUSE_HOME) {
   info("seed web --dump-config");
   runThemeDsh(nodeExe, bin, home, tooling, ["--profile", WEB_PROFILE, "--dump-config"], DUMP_MS, "web dump-config", join(ARTIFACT, "seed.log"));

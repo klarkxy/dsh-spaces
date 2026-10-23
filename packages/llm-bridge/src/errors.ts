@@ -1,4 +1,4 @@
-import { LLM_ERROR, LlmConfigError, type LlmErrorCode } from "../../../src/core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError, type LlmErrorCode } from "../../../src/shared/llm-connections";
 
 export { LLM_ERROR, LlmConfigError, type LlmErrorCode };
 

@@ -16,7 +16,7 @@ import type {
 } from "../../shared/workbench";
 import { isWorkbenchProductCommand } from "../../shared/workbench-product";
 import { parseWorkbenchProductCommand, parseWorkbenchProductOutcome } from "../../shared/workbench-product-schemas";
-import { LLM_ERROR, LlmConfigError, type LlmErrorCode } from "../../core/domain/llm-connections";
+import { LLM_ERROR, LlmConfigError, type LlmErrorCode } from "../../shared/llm-connections";
 import { canonicalHome } from "./home-operation-lock";
 
 type ExclusiveAdmission = { store: WorkbenchJobStore; active: boolean };

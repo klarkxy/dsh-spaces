@@ -7,7 +7,7 @@ import { HomeController, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/
 import type { WorkbenchApi, WorkbenchPlan } from "../../../../src/shared/workbench";
 import type { WorkbenchBootstrapResult, WorkbenchServiceRestartPreview } from "../types";
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
-import { SUPERVISOR_ENDPOINT_FILE, type SupervisorEndpoint } from "./supervisor-endpoint";
+import { SUPERVISOR_ENDPOINT_FILE, type SupervisorEndpoint } from "../../../../src/adapters/node/supervisor-endpoint";
 import { createWorkbenchHttpClient, type WorkbenchHttpClientOptions } from "./workbench-http";
 
 type Missing = Extract<SupervisorAttachResult, { missing: true }>;

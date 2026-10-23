@@ -9,8 +9,8 @@ import {
   type CredentialRef,
   type ResolvedCredential,
 } from "@deepseek-ai/dsh-credentials";
-import type { LlmSharedSnapshot } from "../../../src/core/domain/llm-connections";
-import { isManagedCredentialRef, parseManagedCredentialRef } from "../../../src/core/domain/llm-connections";
+import type { LlmSharedSnapshot } from "../../../src/shared/llm-connections";
+import { isManagedCredentialRef, parseManagedCredentialRef } from "../../../src/shared/llm-connections";
 import { snapshotCredentialRef } from "../../../src/core/domain/llm-resolution";
 import { missingSharedCredentialError, sharedReadOnlyError } from "./errors";
 
