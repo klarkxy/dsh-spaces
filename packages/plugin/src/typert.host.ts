@@ -1,35 +1,17 @@
 /* Host FaceModel descriptors for guide, manager, and compatibility-read Remotes. */
 import { z } from "zod";
 import { parseSpaceHostAudience } from "../../../src/shared/space-host";
+import { WORKBENCH_API, WORKBENCH_API_METHODS, type WorkbenchApiMethod } from "../../../src/shared/workbench";
+import { WORKBENCH_API_CODECS } from "./host/workbench-api";
 import {
-  backupsResultSchema,
-  jobIdSchema,
   overviewSchema,
-  pluginsQuerySchema,
-  requestIdSchema,
-  snapshotIdSchema,
   spaceIdSchema,
   workbenchBootstrapResultSchema,
   serviceRestartPreviewSchema,
-  workbenchCommandSchema,
   workbenchGuideRoleSchema,
   workbenchInitializeResultSchema,
-  workbenchJobSchema,
-  mutationContextSchema,
-  workbenchPlanRequestSchema,
-  workbenchPlanSchema,
-  workbenchPluginListSchema,
-  workbenchProductRequestSchema,
-  workbenchProductResultSchema,
   workbenchReturnTargetSchema,
-  workbenchRuntimeListSchema,
-  workbenchSnapshotSchema,
   workbenchSpaceDetailSchema,
-  workbenchStateSchema,
-  workbenchViewSchema,
-  llmApiRequestSchema,
-  llmApiResultSchema,
-  llmCredentialRequestSchema,
 } from "./host/workbench-schemas";
 
 export {
@@ -103,6 +85,32 @@ const guideFile = "packages/plugin/src/host/workbench-guide.ts";
 const managerFile = "packages/plugin/src/host/workbench-manager.ts";
 const spacesFile = "packages/plugin/src/host/spaces-service.ts";
 
+/**
+ * One descriptor row per canonical management method.
+ *
+ * The method name, the wire argument names and their order come from the
+ * canonical definition; only the codec and the type symbol are added here.
+ */
+function workbenchInvocation(method: WorkbenchApiMethod) {
+  const spec: { args: readonly { name: string }[] } = WORKBENCH_API[method];
+  const codecs: {
+    params: Record<string, { schema: z.ZodType; typeSymbol: string }>;
+    result: { schema: z.ZodType; typeSymbol: string };
+  } = WORKBENCH_API_CODECS[method];
+  return invocation(
+    "workbench",
+    method,
+    managerFile,
+    spec.args.map((arg) => {
+      const codec = codecs.params[arg.name];
+      return param(arg.name, codec.schema, codec.typeSymbol);
+    }),
+    result(codecs.result.typeSymbol, codecs.result.schema),
+  );
+}
+
+const workbenchInvocations = WORKBENCH_API_METHODS.map(workbenchInvocation);
+
 export const TYPERT = {
   package: "@dsh-spaces/plugin",
   face: "host",
@@ -123,100 +131,7 @@ export const TYPERT = {
       [param("id", spaceIdSchema, "@dsh-spaces/plugin#spaces/detail:id")],
       result("@dsh-spaces/plugin/types#SpaceDetail", workbenchSpaceDetailSchema),
     ),
-    invocation("workbench", "state", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchState", workbenchStateSchema)),
-    invocation(
-      "workbench",
-      "detail",
-      managerFile,
-      [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/detail:spaceId")],
-      result("@dsh-spaces/plugin/types#SpaceDetail", workbenchSpaceDetailSchema),
-    ),
-    invocation(
-      "workbench",
-      "submit",
-      managerFile,
-      [
-        param("command", workbenchCommandSchema, "@dsh-spaces/plugin/types#WorkbenchCommand"),
-        param("requestId", requestIdSchema, "@dsh-spaces/plugin#workbench/submit:requestId"),
-        param("context", mutationContextSchema, "@dsh-spaces/plugin/types#WorkbenchMutationContext"),
-      ],
-      result("@dsh-spaces/plugin/types#WorkbenchJob", workbenchJobSchema),
-    ),
-    invocation(
-      "workbench",
-      "job",
-      managerFile,
-      [param("id", jobIdSchema, "@dsh-spaces/plugin#workbench/job:id")],
-      result("@dsh-spaces/plugin/types#WorkbenchJob", workbenchJobSchema),
-    ),
-    invocation(
-      "workbench",
-      "cancel",
-      managerFile,
-      [param("id", jobIdSchema, "@dsh-spaces/plugin#workbench/cancel:id")],
-      result("@dsh-spaces/plugin/types#WorkbenchJob", workbenchJobSchema),
-    ),
-    invocation(
-      "workbench",
-      "view",
-      managerFile,
-      [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/view:spaceId")],
-      result("@dsh-spaces/plugin/types#WorkbenchView", workbenchViewSchema),
-    ),
-    invocation(
-      "workbench",
-      "preview",
-      managerFile,
-      [
-        param("request", workbenchPlanRequestSchema, "@dsh-spaces/plugin/types#WorkbenchPlanRequest"),
-        param("context", mutationContextSchema, "@dsh-spaces/plugin/types#WorkbenchMutationContext"),
-      ],
-      result("@dsh-spaces/plugin/types#WorkbenchPlan", workbenchPlanSchema),
-    ),
-    invocation(
-      "workbench",
-      "product",
-      managerFile,
-      [param("request", workbenchProductRequestSchema, "@dsh-spaces/plugin/types#WorkbenchProductRequest")],
-      result("@dsh-spaces/plugin/types#WorkbenchProductResult", workbenchProductResultSchema),
-    ),
-    invocation(
-      "workbench",
-      "plugins",
-      managerFile,
-      [param("query", pluginsQuerySchema, "@dsh-spaces/plugin#workbench/plugins:query")],
-      result("@dsh-spaces/plugin/types#WorkbenchPlugin[]", workbenchPluginListSchema),
-    ),
-    invocation("workbench", "snapshots", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchSnapshot[]", workbenchSnapshotSchema.array())),
-    invocation(
-      "workbench",
-      "snapshot",
-      managerFile,
-      [param("id", snapshotIdSchema, "@dsh-spaces/plugin#workbench/snapshot:id")],
-      result("@dsh-spaces/plugin/types#WorkbenchSnapshot", workbenchSnapshotSchema),
-    ),
-    invocation("workbench", "runtimes", managerFile, [], result("@dsh-spaces/plugin/types#WorkbenchRuntime[]", workbenchRuntimeListSchema)),
-    invocation(
-      "workbench",
-      "backups",
-      managerFile,
-      [param("spaceId", spaceIdSchema, "@dsh-spaces/plugin#workbench/backups:spaceId")],
-      result("@dsh-spaces/plugin/types#WorkbenchBackup[]", backupsResultSchema),
-    ),
-    invocation(
-      "workbench",
-      "llm",
-      managerFile,
-      [param("request", llmApiRequestSchema, "@dsh-spaces/plugin/types#LlmApiRequest")],
-      result("@dsh-spaces/plugin/types#LlmApiResult", llmApiResultSchema),
-    ),
-    invocation(
-      "workbench",
-      "llmCredential",
-      managerFile,
-      [param("request", llmCredentialRequestSchema, "@dsh-spaces/plugin/types#LlmCredentialRequest")],
-      result("@dsh-spaces/plugin/types#LlmApiResult", llmApiResultSchema),
-    ),
+    ...workbenchInvocations,
   ],
   model: {
     services: [],
@@ -226,21 +141,6 @@ export const TYPERT = {
 };
 
 export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget", "portalTarget", "initialize", "previewServiceRestart", "restartService"] as const;
-export const MANAGER_METHODS = [
-  "state",
-  "detail",
-  "submit",
-  "job",
-  "cancel",
-  "view",
-  "preview",
-  "product",
-  "plugins",
-  "snapshots",
-  "snapshot",
-  "runtimes",
-  "backups",
-  "llm",
-  "llmCredential",
-] as const;
+/** The manager Remote's method names, in registration order. */
+export const MANAGER_METHODS = WORKBENCH_API_METHODS;
 export const SPACES_READ_METHODS = ["overview", "detail"] as const;

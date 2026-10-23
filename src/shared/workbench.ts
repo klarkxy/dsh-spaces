@@ -205,25 +205,141 @@ export interface WorkbenchRuntime {
 
 export interface WorkbenchBackup { id: string; createdAt: string; reason: string }
 
-export interface WorkbenchApi {
-  state(): Promise<WorkbenchState>;
-  detail(spaceId: string): Promise<SpaceDetail>;
-  submit(command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext): Promise<WorkbenchJob>;
-  job(id: string): Promise<WorkbenchJob>;
-  cancel(id: string): Promise<WorkbenchJob>;
-  view(spaceId: string): Promise<WorkbenchView>;
-  preview(request: WorkbenchPlanRequest, context: WorkbenchMutationContext): Promise<WorkbenchPlan>;
-  product(request: WorkbenchProductRequest): Promise<WorkbenchProductResult>;
-  plugins(query: string): Promise<WorkbenchPlugin[]>;
-  snapshots(): Promise<WorkbenchSnapshot[]>;
-  snapshot(id: string): Promise<WorkbenchSnapshot>;
-  runtimes(): Promise<WorkbenchRuntime[]>;
-  backups(spaceId: string): Promise<WorkbenchBackup[]>;
+/**
+ * The one authoritative description of the management API surface.
+ *
+ * Every consumer is derived from this table: the `WorkbenchApi` contract, the
+ * Host Remote registration, the Typert Client declarations, the wire schema
+ * table and the Supervisor dispatch table. A method can therefore no longer be
+ * added to one of them and forgotten in another.
+ *
+ * `args` lists the wire arguments in wire order. `name` is the wire argument
+ * name; `value` is a type witness that is `undefined` at runtime and only pins
+ * the argument's DTO type.
+ */
+export const WORKBENCH_API = {
+  state: {
+    args: [] as const,
+    result: undefined as unknown as WorkbenchState,
+  },
+  detail: {
+    args: [{ name: "spaceId", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as SpaceDetail,
+  },
+  submit: {
+    args: [
+      { name: "command", value: undefined as unknown as WorkbenchCommand },
+      { name: "requestId", value: undefined as unknown as string },
+      { name: "context", value: undefined as unknown as WorkbenchMutationContext },
+    ] as const,
+    result: undefined as unknown as WorkbenchJob,
+  },
+  job: {
+    args: [{ name: "id", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as WorkbenchJob,
+  },
+  cancel: {
+    args: [{ name: "id", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as WorkbenchJob,
+  },
+  view: {
+    args: [{ name: "spaceId", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as WorkbenchView,
+  },
+  preview: {
+    args: [
+      { name: "request", value: undefined as unknown as WorkbenchPlanRequest },
+      { name: "context", value: undefined as unknown as WorkbenchMutationContext },
+    ] as const,
+    result: undefined as unknown as WorkbenchPlan,
+  },
+  product: {
+    args: [{ name: "request", value: undefined as unknown as WorkbenchProductRequest }] as const,
+    result: undefined as unknown as WorkbenchProductResult,
+  },
+  plugins: {
+    args: [{ name: "query", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as WorkbenchPlugin[],
+  },
+  snapshots: {
+    args: [] as const,
+    result: undefined as unknown as WorkbenchSnapshot[],
+  },
+  snapshot: {
+    args: [{ name: "id", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as WorkbenchSnapshot,
+  },
+  runtimes: {
+    args: [] as const,
+    result: undefined as unknown as WorkbenchRuntime[],
+  },
+  backups: {
+    args: [{ name: "spaceId", value: undefined as unknown as string }] as const,
+    result: undefined as unknown as WorkbenchBackup[],
+  },
   /** Redacted global LLM management. Secrets use the Host-only llmCredential HTTP method. */
-  llm?(request: LlmApiRequest): Promise<LlmApiResult>;
+  llm: {
+    args: [{ name: "request", value: undefined as unknown as LlmApiRequest }] as const,
+    result: undefined as unknown as LlmApiResult,
+    optional: true,
+  },
   /**
    * Manager-Host-only secret writes. The payload lives for the request only:
    * it is not a StoredJob, not logged, and not returned to workspace profiles.
    */
-  llmCredential?(request: LlmCredentialRequest): Promise<LlmApiResult>;
+  llmCredential: {
+    args: [{ name: "request", value: undefined as unknown as LlmCredentialRequest }] as const,
+    result: undefined as unknown as LlmApiResult,
+    optional: true,
+  },
+} as const;
+
+/** One management API method name. */
+export type WorkbenchApiMethod = keyof typeof WORKBENCH_API;
+
+/** The canonical management API method names, in wire order. */
+export const WORKBENCH_API_METHODS: readonly WorkbenchApiMethod[] = Object.keys(
+  WORKBENCH_API,
+) as WorkbenchApiMethod[];
+
+/** The DTO arguments of one management API method, in wire order. */
+export type WorkbenchApiArgs<K extends WorkbenchApiMethod> = (typeof WORKBENCH_API)[K] extends {
+  args: infer A extends readonly unknown[];
 }
+  ? { -readonly [I in keyof A]: A[I] extends { value: infer V } ? V : never }
+  : never;
+
+/** The DTO result of one management API method. */
+export type WorkbenchApiResult<K extends WorkbenchApiMethod> = (typeof WORKBENCH_API)[K] extends {
+  result: infer R;
+}
+  ? R
+  : never;
+
+/** The wire argument names of one management API method. */
+export type WorkbenchApiArgNames<K extends WorkbenchApiMethod> = (typeof WORKBENCH_API)[K] extends {
+  args: infer A extends readonly unknown[];
+}
+  ? (A[number] extends { name: infer N } ? (N extends string ? N : never) : never)
+  : never;
+
+/** The methods a Host may leave unimplemented. */
+export type WorkbenchApiOptionalMethod = {
+  [K in WorkbenchApiMethod]: (typeof WORKBENCH_API)[K] extends { optional: true } ? K : never;
+}[WorkbenchApiMethod];
+
+/** The methods every Host must implement. */
+export type WorkbenchApiRequiredMethod = Exclude<WorkbenchApiMethod, WorkbenchApiOptionalMethod>;
+
+/**
+ * The management API contract, derived from {@link WORKBENCH_API}.
+ *
+ * The interface, the Host Remote registration and the Client declarations all
+ * read the same table, so they cannot disagree about which methods exist or
+ * what they carry.
+ */
+export type WorkbenchApi = {
+  [K in WorkbenchApiRequiredMethod]: (...args: WorkbenchApiArgs<K>) => Promise<WorkbenchApiResult<K>>;
+} & {
+  [K in WorkbenchApiOptionalMethod]?: (...args: WorkbenchApiArgs<K>) => Promise<WorkbenchApiResult<K>>;
+};

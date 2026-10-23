@@ -10,26 +10,11 @@ import {
   WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT,
 } from "../../../shared/workbench-blueprint";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../shared/workbench-product";
+import { WORKBENCH_API_METHODS, type WorkbenchApiMethod } from "../../../shared/workbench";
 
 export const WORKBENCH_API_PREFIX = "/api/workbench/";
-export const WORKBENCH_API_METHODS = [
-  "state",
-  "detail",
-  "submit",
-  "job",
-  "cancel",
-  "view",
-  "preview",
-  "plugins",
-  "snapshots",
-  "snapshot",
-  "runtimes",
-  "backups",
-  "llm",
-  "llmCredential",
-  "product",
-] as const;
-export type WorkbenchApiMethod = (typeof WORKBENCH_API_METHODS)[number];
+export { WORKBENCH_API_METHODS };
+export type { WorkbenchApiMethod };
 
 /** Ordinary JSON methods stay at the icon-file bound. */
 export const WORKBENCH_HTTP_BODY_LIMIT = MAX_SPACE_ICON_FILE_BYTES;

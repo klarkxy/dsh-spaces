@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
-import { Remote, RemoteError, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+import { Remote, RemoteError, remoteMethods, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+import { WORKBENCH_API_METHODS, type WorkbenchApi } from "../../../../src/shared/workbench";
 import type {
   WorkbenchBackup,
   WorkbenchCommand,
@@ -31,81 +32,68 @@ import type { WorkbenchHostRuntime } from "./runtime";
  * Manager-only WorkbenchApi Remote. Proxies the supervisor over a Node bearer.
  * Browser callers never receive the bearer, disk paths, commands, or launch tokens.
  */
-export class WorkbenchManagerHost extends TypertRemoteService {
+export class WorkbenchManagerHost extends TypertRemoteService implements WorkbenchApi {
   constructor(
     ctx: Context,
     private readonly runtime: WorkbenchHostRuntime,
   ) {
     super(ctx, "workbench");
+    registerWorkbenchRemoteMethods(this);
   }
 
-  @Remote("state")
   async state(): Promise<WorkbenchState> {
     return this.guard((api) => api.state());
   }
 
-  @Remote("detail")
   async detail(spaceId: string): Promise<SpaceDetail> {
     return this.guard((api) => api.detail(spaceId));
   }
 
-  @Remote("submit")
   async submit(command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext): Promise<WorkbenchJob> {
     return this.guard((api) => api.submit(command, requestId, context));
   }
 
-  @Remote("job")
   async job(id: string): Promise<WorkbenchJob> {
     return this.guard((api) => api.job(id));
   }
 
-  @Remote("cancel")
   async cancel(id: string): Promise<WorkbenchJob> {
     return this.guard((api) => api.cancel(id));
   }
 
-  @Remote("view")
   async view(spaceId: string): Promise<WorkbenchView> {
     return this.guard((api) => api.view(spaceId));
   }
 
-  @Remote("preview")
   async preview(request: WorkbenchPlanRequest, context: WorkbenchMutationContext): Promise<WorkbenchPlan> {
     return this.guard((api) => api.preview(request, context));
   }
 
-  @Remote("product")
   async product(request: WorkbenchProductRequest): Promise<WorkbenchProductResult> {
     return this.guard((api) => api.product(request));
   }
 
-  @Remote("plugins")
   async plugins(query: string): Promise<WorkbenchPlugin[]> {
     return this.guard((api) => api.plugins(query));
   }
 
-  @Remote("snapshots")
   async snapshots(): Promise<WorkbenchSnapshot[]> {
     return this.guard((api) => api.snapshots());
   }
 
-  @Remote("snapshot")
   async snapshot(id: string): Promise<WorkbenchSnapshot> {
     return this.guard((api) => api.snapshot(id));
   }
 
-  @Remote("runtimes")
   async runtimes(): Promise<WorkbenchRuntime[]> {
     return this.guard((api) => api.runtimes());
   }
 
-  @Remote("backups")
   async backups(spaceId: string): Promise<WorkbenchBackup[]> {
     return this.guard((api) => api.backups(spaceId));
   }
 
 
-  @Remote("llm")
   async llm(request: LlmApiRequest): Promise<LlmApiResult> {
     return this.guard((api) => {
       if (!api.llm) throw new Error("workbench/unsupported");
@@ -113,7 +101,6 @@ export class WorkbenchManagerHost extends TypertRemoteService {
     });
   }
 
-  @Remote("llmCredential")
   async llmCredential(request: LlmCredentialRequest): Promise<LlmApiResult> {
     return this.guard((api) => {
       if (!api.llmCredential) throw new Error("workbench/unsupported");
@@ -149,5 +136,41 @@ export class WorkbenchManagerHost extends TypertRemoteService {
         {},
       );
     }
+  }
+}
+
+/**
+ * Mark every canonical management method as a Typert Remote.
+ *
+ * `Remote` records its marker through the standard decorator context, so
+ * driving that contract directly records the same marker a `@Remote`
+ * decorator would. The registered set is therefore the canonical definition
+ * itself, never a second hand-written list, and the recorded markers are
+ * verified against it before the service is used.
+ */
+function registerWorkbenchRemoteMethods(host: WorkbenchManagerHost): void {
+  for (const method of WORKBENCH_API_METHODS) {
+    const implementation = Reflect.get(host, method);
+    if (typeof implementation !== "function") {
+      throw new Error(`workbench/unsupported: the manager Remote does not implement ${method}.`);
+    }
+    const decorator = Remote(method) as unknown as (
+      target: unknown,
+      context: ClassMethodDecoratorContext,
+    ) => void;
+    decorator(implementation, {
+      kind: "method",
+      name: method,
+      private: false,
+      static: false,
+      addInitializer(initializer: () => void) {
+        initializer.call(host);
+      },
+    } as unknown as ClassMethodDecoratorContext);
+  }
+  const registered = remoteMethods(host).map((row) => row.exportName ?? row.method);
+  const expected = WORKBENCH_API_METHODS as readonly string[];
+  if (registered.length !== expected.length || expected.some((name, index) => registered[index] !== name)) {
+    throw new Error("workbench/unsupported: the manager Remote does not match the canonical API surface.");
   }
 }

@@ -1,21 +1,11 @@
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client";
-import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
-import type { SpaceDetail } from "../../../../src/shared/spaces-control";
-import type {
-  WorkbenchApi,
-  WorkbenchBackup,
-  WorkbenchCommand,
-  WorkbenchJob,
-  WorkbenchMutationContext,
-  WorkbenchPlan,
-  WorkbenchPlanRequest,
-  WorkbenchPlugin,
-  WorkbenchRuntime,
-  WorkbenchSnapshot,
-  WorkbenchState,
-  WorkbenchView,
+import {
+  WORKBENCH_API,
+  type WorkbenchApi,
+  type WorkbenchApiArgs,
+  type WorkbenchApiMethod,
+  type WorkbenchApiResult,
 } from "../../../../src/shared/workbench";
-import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../../src/shared/workbench-product";
 import {
   KNOWN_WORKBENCH_ERROR_CODES,
   publicWorkbenchErrorMessage,
@@ -85,27 +75,43 @@ async function callRemote<T>(
   return requireObject(result.value) as T;
 }
 
+/** The named wire payload of one management API call. */
+function workbenchPayload<K extends WorkbenchApiMethod>(method: K, args: WorkbenchApiArgs<K>): Record<string, unknown> {
+  const spec: { args: readonly { name: string }[] } = WORKBENCH_API[method];
+  const values = args as unknown as readonly unknown[];
+  const payload: Record<string, unknown> = {};
+  spec.args.forEach((arg, index) => {
+    payload[arg.name] = values[index];
+  });
+  return payload;
+}
+
+/** One management API call over the shared RPC carrier. */
+function callWorkbench<K extends WorkbenchApiMethod>(
+  connection: WorkbenchConnection,
+  method: K,
+  args: WorkbenchApiArgs<K>,
+): Promise<WorkbenchApiResult<K>> {
+  return callRemote<WorkbenchApiResult<K>>(connection, `workbench/${method}`, workbenchPayload(method, args));
+}
+
 export function createWorkbenchRemote(connection: WorkbenchConnection): WorkbenchApi {
   return {
-    state: () => callRemote<WorkbenchState>(connection, "workbench/state", {}),
-    detail: (spaceId) => callRemote<SpaceDetail>(connection, "workbench/detail", { spaceId }),
-    submit: (command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext) =>
-      callRemote<WorkbenchJob>(connection, "workbench/submit", { command, requestId, context }),
-    job: (id) => callRemote<WorkbenchJob>(connection, "workbench/job", { id }),
-    cancel: (id) => callRemote<WorkbenchJob>(connection, "workbench/cancel", { id }),
-    view: (spaceId) => callRemote<WorkbenchView>(connection, "workbench/view", { spaceId }),
-    preview: (request: WorkbenchPlanRequest, context: WorkbenchMutationContext) =>
-      callRemote<WorkbenchPlan>(connection, "workbench/preview", { request, context }),
-    product: (request: WorkbenchProductRequest) =>
-      callRemote<WorkbenchProductResult>(connection, "workbench/product", { request }),
-    plugins: (query) => callRemote<WorkbenchPlugin[]>(connection, "workbench/plugins", { query }),
-    snapshots: () => callRemote<WorkbenchSnapshot[]>(connection, "workbench/snapshots", {}),
-    snapshot: (id) => callRemote<WorkbenchSnapshot>(connection, "workbench/snapshot", { id }),
-    runtimes: () => callRemote<WorkbenchRuntime[]>(connection, "workbench/runtimes", {}),
-    backups: (spaceId) => callRemote<WorkbenchBackup[]>(connection, "workbench/backups", { spaceId }),
-    llm: (request: LlmApiRequest) => callRemote<LlmApiResult>(connection, "workbench/llm", { request }),
-    llmCredential: (request: LlmCredentialRequest) =>
-      callRemote<LlmApiResult>(connection, "workbench/llmCredential", { request }),
+    state: () => callWorkbench(connection, "state", []),
+    detail: (spaceId) => callWorkbench(connection, "detail", [spaceId]),
+    submit: (command, requestId, context) => callWorkbench(connection, "submit", [command, requestId, context]),
+    job: (id) => callWorkbench(connection, "job", [id]),
+    cancel: (id) => callWorkbench(connection, "cancel", [id]),
+    view: (spaceId) => callWorkbench(connection, "view", [spaceId]),
+    preview: (request, context) => callWorkbench(connection, "preview", [request, context]),
+    product: (request) => callWorkbench(connection, "product", [request]),
+    plugins: (query) => callWorkbench(connection, "plugins", [query]),
+    snapshots: () => callWorkbench(connection, "snapshots", []),
+    snapshot: (id) => callWorkbench(connection, "snapshot", [id]),
+    runtimes: () => callWorkbench(connection, "runtimes", []),
+    backups: (spaceId) => callWorkbench(connection, "backups", [spaceId]),
+    llm: (request) => callWorkbench(connection, "llm", [request]),
+    llmCredential: (request) => callWorkbench(connection, "llmCredential", [request]),
   };
 }
 

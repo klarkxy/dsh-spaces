@@ -523,6 +523,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "product":
         expectKeys(body, ["request"]);
         return this.product(parseWorkbenchProductRequest(body.request));
+      default: {
+        // The canonical API surface is the only source of method names, so an
+        // unhandled method is a compile error rather than a silent hole.
+        const unhandled: never = method;
+        return unhandled;
+      }
     }
   }
 

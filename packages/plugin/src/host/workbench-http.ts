@@ -9,8 +9,14 @@ import {
   WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT,
 } from "../../../../src/shared/workbench-blueprint";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../../src/shared/workbench-product";
-import type { WorkbenchApi, WorkbenchMutationContext } from "../../../../src/shared/workbench";
-import type { LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
+import {
+  WORKBENCH_API,
+  WORKBENCH_API_METHODS,
+  type WorkbenchApi,
+  type WorkbenchApiArgs,
+  type WorkbenchApiMethod,
+  type WorkbenchApiResult,
+} from "../../../../src/shared/workbench";
 import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import {
   LLM_PUBLIC_ERROR,
@@ -20,52 +26,20 @@ import {
   type SpacesRemoteCode,
   type WorkbenchRemoteCode,
 } from "./remote-errors";
-import {
-  backupsResultSchema,
-  jobIdSchema,
-  mutationContextSchema,
-  pluginsQuerySchema,
-  snapshotIdSchema,
-  spaceIdSchema,
-  workbenchCommandSchema,
-  workbenchJobSchema,
-  workbenchPlanRequestSchema,
-  workbenchPlanSchema,
-  workbenchPluginListSchema,
-  workbenchProductRequestSchema,
-  workbenchProductResultSchema,
-  workbenchRuntimeListSchema,
-  workbenchSnapshotSchema,
-  workbenchStateSchema,
-  workbenchViewSchema,
-  workbenchSpaceDetailSchema,
-  llmApiRequestSchema,
-  llmApiResultSchema,
-  llmCredentialRequestSchema,
-} from "./workbench-schemas";
+import { WORKBENCH_API_CODECS } from "./workbench-api";
 import { parseSupervisorHandoffPath } from "../../../../src/shared/loopback";
 import type { SupervisorEndpoint } from "../../../../src/adapters/node/home/supervisor-endpoint";
 
-export const WORKBENCH_HTTP_METHODS = [
-  "state",
-  "detail",
-  "submit",
-  "job",
-  "cancel",
-  "view",
-  "preview",
-  "product",
-  "plugins",
-  "snapshots",
-  "snapshot",
-  "runtimes",
-  "backups",
-  "llm",
-  "llmCredential",
-] as const;
+export const WORKBENCH_HTTP_METHODS = WORKBENCH_API_METHODS;
 
-export type WorkbenchHttpMethod = (typeof WORKBENCH_HTTP_METHODS)[number];
-export const WORKBENCH_API_METHODS = WORKBENCH_HTTP_METHODS;
+export type WorkbenchHttpMethod = WorkbenchApiMethod;
+export { WORKBENCH_API_METHODS };
+
+/**
+ * The two LLM methods carry their request as the whole request body instead of
+ * as a named field. Every other method sends its arguments by name.
+ */
+const BARE_BODY_METHODS: ReadonlySet<WorkbenchApiMethod> = new Set<WorkbenchApiMethod>(["llm", "llmCredential"]);
 
 /** Ordinary JSON methods stay at the icon-file bound. */
 export const WORKBENCH_HTTP_BODY_LIMIT = MAX_SPACE_ICON_FILE_BYTES;
@@ -84,6 +58,28 @@ export interface WorkbenchHttpClientOptions {
 }
 
 /**
+ * The request body of one management API call.
+ *
+ * Every argument is validated with its canonical codec and sent under its
+ * canonical wire name, except for the two LLM methods whose single argument is
+ * the whole body.
+ */
+function workbenchBody<K extends WorkbenchApiMethod>(method: K, args: WorkbenchApiArgs<K>): unknown {
+  const spec: { args: readonly { name: string }[] } = WORKBENCH_API[method];
+  const codecs: {
+    params: Record<string, { schema: { parse(value: unknown): unknown } }>;
+  } = WORKBENCH_API_CODECS[method];
+  const values = args as unknown as readonly unknown[];
+  const parsed = spec.args.map((arg, index) => parseOrInvalid(codecs.params[arg.name].schema, values[index]));
+  if (BARE_BODY_METHODS.has(method)) return parsed[0];
+  const body: Record<string, unknown> = {};
+  spec.args.forEach((arg, index) => {
+    body[arg.name] = parsed[index];
+  });
+  return body;
+}
+
+/**
  * Node-only WorkbenchApi over POST /api/workbench/<method>.
  * Bearer is attached here and never returned to the browser Remote face.
  * Extra fields, paths, commands and original tokens are rejected by schema.
@@ -91,47 +87,34 @@ export interface WorkbenchHttpClientOptions {
 export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): WorkbenchApi {
   const origin = originOf(options.endpoint.origin);
   const doFetch = options.fetch ?? fetch;
-  const call = <T>(
-    method: WorkbenchHttpMethod,
-    body: unknown,
-    resultSchema: { parse(value: unknown): T },
-  ): Promise<T> => workbenchPost(doFetch, origin, options.endpoint.bearer, method, body, resultSchema);
+  const call = <K extends WorkbenchApiMethod>(
+    method: K,
+    args: WorkbenchApiArgs<K>,
+  ): Promise<WorkbenchApiResult<K>> => workbenchPost(
+    doFetch,
+    origin,
+    options.endpoint.bearer,
+    method,
+    workbenchBody(method, args),
+    WORKBENCH_API_CODECS[method].result.schema,
+  ) as Promise<WorkbenchApiResult<K>>;
 
   return {
-    state: async () => call("state", {}, workbenchStateSchema),
-    detail: async (spaceId) => call("detail", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, workbenchSpaceDetailSchema),
-    submit: async (command, requestId, context) =>
-      call(
-        "submit",
-        {
-          command: parseOrInvalid(workbenchCommandSchema, command),
-          requestId: requireRequestId(requestId),
-          context: parseContext(context),
-        },
-        workbenchJobSchema,
-      ),
-    job: async (id) => call("job", { id: parseOrInvalid(jobIdSchema, id) }, workbenchJobSchema),
-    cancel: async (id) => call("cancel", { id: parseOrInvalid(jobIdSchema, id) }, workbenchJobSchema),
-    view: async (spaceId) => call("view", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, workbenchViewSchema),
-    preview: async (request, context) =>
-      call(
-        "preview",
-        {
-          request: parseOrInvalid(workbenchPlanRequestSchema, request),
-          context: parseContext(context),
-        },
-        workbenchPlanSchema,
-      ),
-    product: async (request) =>
-      call("product", { request: parseOrInvalid(workbenchProductRequestSchema, request) }, workbenchProductResultSchema),
-    plugins: async (query) => call("plugins", { query: parseOrInvalid(pluginsQuerySchema, query) }, workbenchPluginListSchema),
-    snapshots: async () => call("snapshots", {}, workbenchSnapshotSchema.array()),
-    snapshot: async (id) => call("snapshot", { id: parseOrInvalid(snapshotIdSchema, id) }, workbenchSnapshotSchema),
-    runtimes: async () => call("runtimes", {}, workbenchRuntimeListSchema),
-    backups: async (spaceId) => call("backups", { spaceId: parseOrInvalid(spaceIdSchema, spaceId) }, backupsResultSchema),
-    llm: async (request) => call("llm", parseOrInvalid(llmApiRequestSchema, request), llmApiResultSchema) as Promise<LlmApiResult>,
-    llmCredential: async (request: LlmCredentialRequest) =>
-      call("llmCredential", parseOrInvalid(llmCredentialRequestSchema, request), llmApiResultSchema) as Promise<LlmApiResult>,
+    state: async () => call("state", []),
+    detail: async (spaceId) => call("detail", [spaceId]),
+    submit: async (command, requestId, context) => call("submit", [command, requestId, context]),
+    job: async (id) => call("job", [id]),
+    cancel: async (id) => call("cancel", [id]),
+    view: async (spaceId) => call("view", [spaceId]),
+    preview: async (request, context) => call("preview", [request, context]),
+    product: async (request) => call("product", [request]),
+    plugins: async (query) => call("plugins", [query]),
+    snapshots: async () => call("snapshots", []),
+    snapshot: async (id) => call("snapshot", [id]),
+    runtimes: async () => call("runtimes", []),
+    backups: async (spaceId) => call("backups", [spaceId]),
+    llm: async (request) => call("llm", [request]),
+    llmCredential: async (request) => call("llmCredential", [request]),
   };
 }
 
@@ -201,17 +184,6 @@ function originOf(raw: string): string {
   } catch {
     throw publicError("workbench/unavailable", "The workbench endpoint is not a valid loopback origin.");
   }
-}
-
-function requireRequestId(requestId: string): string {
-  if (typeof requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)) {
-    throw publicError("workbench/invalid-input");
-  }
-  return requestId;
-}
-
-function parseContext(context: WorkbenchMutationContext | undefined): WorkbenchMutationContext {
-  return parseOrInvalid(mutationContextSchema, context);
 }
 
 function parseOrInvalid<T>(schema: { parse(value: unknown): T }, value: unknown): T {
