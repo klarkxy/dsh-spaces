@@ -2,7 +2,7 @@
 
 - [x] 全仓只读架构测绘：包边界双向依赖（src↔packages）、shared 上指 core/domain、god 文件、supervisor/spaces-control 一词多义、WorkbenchApi 三处手写为主要别扭点；六边形分层在 src 内部成立、在包边界断裂。
 - [x] 既有 2026-10-20→22 工作流先落本地基线 `a213321`（用户授权本地提交；不推送）。
-- [x] 用户决定整包移除已封存看板：删除 packages/dashboard、core/domain/dashboard、adapters/node/dashboard、门户 `@dashboard` 目标与发布计划、工作台视图与封存开关、private-files、docs/dashboard 与 DASHBOARD.md、18 测试、9 脚本、6 工作流、3 tsconfig；Home 回到纯聊天面，Home overlay 随看板一并移除。历史文档（tasks/**、docs/plans/**、host/implementation.md、message-bus/phase-one.md）原样冻结，能力可从 git 历史找回。
+- [x] 用户决定整包移除已封存看板：删除 packages/dashboard、core/domain/dashboard、adapters/node/dashboard、门户 `@dashboard` 目标与发布计划、工作台视图与封存开关、private-files、docs/dashboard 与 DASHBOARD.md、18 测试、9 脚本、6 工作流、3 tsconfig；Home 回到纯聊天面，Home overlay 随看板一并移除。历史文档（tasks/**、docs/plans/**、docs/host/implementation.md、docs/message-bus/phase-one.md、根目录 dsh-spaces-let-it-crash-plan.md）原样冻结，能力可从 git 历史找回。
 - [x] 分层 DAG 修复：supervisor 端点格式移入 src/adapters/node、loopback 解析移入 src/shared，LLM activity 协议移入 src/shared（llm-bridge 再导出），llm-share/llm-connections 下移 src/shared（selectSharedConnections 经 core/domain/llm-resolution 再导出），孤儿 @dsh-spaces/core 整包删除，客户端构建守卫由失效的 src/main 改拦 src/adapters 与 src/shared/node。
 - [x] 合并树验证：check:test-lists、typecheck（node/web/spaces/tests）、build 与 test／spaces／workbench／workbench:recovery／llm／blueprints／browser 全绿。仅本地提交，不推送。
 - [x] 第二波：src/adapters/node 按领域拆成 11 个目录（home／llm／blueprint／maintenance／products／runtime／snapshots／server／diagnostics／payload／profile），63 个文件 git mv 纯移动、160 文件 635 处导入与路径字面量重写；字节级对照证明零逻辑变化。全量检查组与包预检通过；中央抽查 typecheck×3／build／npm test 通过（npm test 中 process-manager 端口等待超时按惯例单独复查 25/25 通过，并发负载下抖动的既有现象）。仅本地提交，不推送。

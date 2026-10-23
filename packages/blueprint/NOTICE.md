@@ -3,7 +3,7 @@
 The JSON/share-code blueprint concept and the raw-DEFLATE, Base64url, UTF-8 and bounded-decompression codec in `codec.mjs` are extracted/adapted from:
 
 - Repository: https://github.com/klarkxy/dsh-spaces
-- Source path: `src/adapters/node/blueprint-codec.ts`
+- Source path: `src/adapters/node/blueprint-codec.ts` (its location at the referenced blob; since 2026-10-23 the current tree keeps it at `src/adapters/node/blueprint/blueprint-codec.ts`)
 - Source blob: `c3e9a717dcf00ce1a7bab68dd53e7675c59712d2`
 - Source license: MIT, copyright (c) 2026 DSH Spaces contributors.
 

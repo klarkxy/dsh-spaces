@@ -63,7 +63,7 @@ export function parseActivityReport(value: unknown, identity: LlmActivityIdentit
   return undefined;
 }
 
-export function activityIdentityFromEnv(env: NodeJS.ProcessEnv): LlmActivityIdentity | undefined {
+export function activityIdentityFromEnv(env: Record<string, string | undefined>): LlmActivityIdentity | undefined {
   const spaceId = env.DSH_SPACES_VIEW_ID;
   const generation = env.DSH_SPACES_VIEW_GENERATION;
   const serviceEpoch = env.DSH_SPACES_VIEW_SERVICE_EPOCH;
