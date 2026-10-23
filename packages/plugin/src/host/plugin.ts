@@ -7,13 +7,14 @@ import { SpacesHost, type SpacesHostConfig } from "./spaces-service";
 import { runtimeFromContext, WorkbenchHostRuntime } from "./runtime";
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "./loopback";
 import { assertSupportedNode } from "../../../../src/shared/node-version";
+import {MainLlmService} from './llm-main';
 
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 const HANDOFF_PATH = "/dsh-spaces/handoff";
 
 /**
- * Package default plugin. Always registers the read-only guide Remote
- * (role/bootstrap/returnTarget/initialize). Manager write remotes and
+ * Package default plugin. Registers the guide Remote with presentation and
+ * explicit launch operations (manual service restart is Desktop-only). Manager write remotes and
  * compatibility spaces reads register only when HomeController.roleOf(current
  * profile) is manager. Ordinary profiles never auto-bootstrap a supervisor.
  */
@@ -40,6 +41,13 @@ export class SpacesPlugin {
     }
     installHostHint(ctx, this.runtime);
     installHandoffRoute(ctx, this.runtime);
+    if(!this.runtime.shouldRegisterManager && process.env.DSH_SPACES_LLM_INHERIT_MAIN!=='1' && typeof ctx.inject==='function') {
+      ctx.inject(['llm','agentDefaultModel','attachments','fs'],ready=>{
+        const service=new MainLlmService(ready);
+        const dispose=this.runtime.onSupervisorAttached(endpoint=>service.attach(endpoint), epoch=>service.afterSupervisorStopped(epoch));
+        ready.effect(()=>async()=>{dispose();await service.close();});
+      });
+    }
   }
 }
 

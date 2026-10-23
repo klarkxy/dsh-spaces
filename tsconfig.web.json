@@ -34,6 +34,7 @@
     "src/core/domain/dashboard/**/*.ts",
     "packages/dashboard/src/view.tsx",
     "packages/dashboard/src/model.ts",
-    "packages/dashboard/src/http-client.ts"
+    "packages/dashboard/src/http-client.ts",
+    "packages/dashboard/src/ui/**/*"
   ]
 }

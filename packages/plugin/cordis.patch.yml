@@ -6,3 +6,17 @@
     - id: dsh-spaces
       name: '@dsh-spaces/plugin'
       config: {}
+- insert:
+    - id: dsh-spaces-main-images
+      name: '@dsh-spaces/plugin/llm-images'
+      isolate:
+        attachments: spaces-main-images
+        fs: spaces-main-images
+- id: llm-pi-ai
+  isolate:
+    attachments: spaces-main-images
+    fs: spaces-main-images
+- id: llm-deepseek
+  isolate:
+    attachments: spaces-main-images
+    fs: spaces-main-images

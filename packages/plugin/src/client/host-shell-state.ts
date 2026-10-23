@@ -137,7 +137,8 @@ export class HostShellController {
   select = (spaceId: string | null): void => {
     const { portal, inventory } = this.ui;
     if (this.ui.phase !== "ready" || !portal || !inventory || !this.frame) { this.showGuide(); return; }
-    if (spaceId !== null && !inventory.spaces.some(s => s.id === spaceId && s.id !== inventory.managerId && s.status === "running")) {
+    // Inventory is presentation data; the manager checks current running authority on each click.
+    if (spaceId !== null && !inventory.spaces.some(s => s.id === spaceId && s.id !== inventory.managerId)) {
       this.patch({ error: "stopped", visible: "guide" }); return;
     }
     const requestId = ++this.sequence;

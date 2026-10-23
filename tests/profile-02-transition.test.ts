@@ -5,12 +5,14 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { gte } from "semver";
 import { assertAlphaSettingsIsolation, migrateProfileToAlpha } from "../src/adapters/node/profile-alpha-migration.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
 
 type Bridge = "view-bridge" | "llm-bridge" | "browser";
 type Row = { id?: string; name?: string; disabled?: unknown };
 type OfficialBoot = {
+  getDshRuntimeVersion: () => string;
   loadProfileDirectory: (prefix: string, profile: string, anchor: string) => {
     layers: { patches: unknown[] }[]; patches: unknown[]; skippedBundles: { packageName: string }[];
   };
@@ -19,8 +21,9 @@ type OfficialBoot = {
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 const require = createRequire(import.meta.url);
-const officialPath = require.resolve("@deepseek-ai/dsh-app-boot");
+const officialPath = process.env.DSH_COMPAT_APP_BOOT ?? require.resolve("@deepseek-ai/dsh-app-boot");
 const boot = await import(pathToFileURL(officialPath).href) as OfficialBoot;
+const officialVersion = boot.getDshRuntimeVersion();
 
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "dsh-profile-02-")); roots.push(home);
@@ -30,7 +33,7 @@ function fixture() {
   const bin = join(runtime, "lib", "bin.js");
   const anchor = join(runtime, "package.json");
   mkdirSync(join(runtime, "lib"), { recursive: true });
-  writeFileSync(anchor, JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2", type: "module" }));
+  writeFileSync(anchor, JSON.stringify({ name: "@deepseek-ai/dsh", version: officialVersion, type: "module" }));
   writeFileSync(bin, "export {};\n");
   // Bind the actual installed 0.2 composer, without booting a DSH host.
   const bootFacade = join(runtime, "node_modules", "@deepseek-ai", "dsh-app-boot");
@@ -66,7 +69,7 @@ function fixture() {
   const calls: string[] = [];
   const dumps: { skipped: string[]; rows: Row[] }[] = [];
   const input = {
-    home, profileId: "writing", payloadRoot, bin, cliVersion: "0.2.0-rc.2",
+    home, profileId: "writing", payloadRoot, bin, cliVersion: officialVersion,
     install: async (bridge: Bridge) => { calls.push(bridge); cpSync(join(payloadRoot, bridge), installed(`@dsh-spaces/${bridge}`), { recursive: true }); },
     dump: async () => {
       const loaded = boot.loadProfileDirectory("dsh", profile, anchor);
@@ -85,6 +88,33 @@ function fixture() {
   };
   return { input, home, profile, patch, manifestPath, installed, calls, dumps, add, marker: join(profile, ".dsh-spaces-alpha-migration.json") };
 }
+
+for (const engineAccepts of [true, false]) {
+  test(`bound host applies its own engine precedence before migration: engine accepts=${engineAccepts}`, async () => {
+    const f = fixture();
+    f.add("engine-fixture", engineAccepts ? "<0.1.0" : ">=0.2.0-0");
+    const manifestPath = join(f.installed("engine-fixture"), "package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.engines = { dsh: engineAccepts ? ">=0.2.0-0" : "<0.1.0" };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    const before = readFileSync(f.patch, "utf8");
+    const accepts = gte(officialVersion, "0.2.1-alpha.4") ? engineAccepts : !engineAccepts;
+    if (accepts) await migrateProfileToAlpha(f.input);
+    else {
+      await assert.rejects(migrateProfileToAlpha(f.input), /engine-fixture.*cannot load/);
+      assert.deepEqual(f.calls, []);
+      assert.equal(existsSync(f.marker), false);
+      assert.equal(readFileSync(f.patch, "utf8"), before);
+    }
+  });
+}
+
+test("omitted CLI version is derived from the selected official app-boot", async () => {
+  const f = fixture();
+  f.add("exact-host-fixture", officialVersion);
+  const { cliVersion: _version, ...input } = f.input;
+  await migrateProfileToAlpha(input);
+});
 
 for (const state of ["!!js (() => { throw new Error('ancestor must not execute') })()", "true"]) {
   test(`literal native settings inactivity dominates ${state} parent intent`, () => {
@@ -184,13 +214,14 @@ test("a disabled ordinary group does not admit its inactive incompatible child",
 const officialBin = process.env.DSH_PROFILE_TRANSITION_OFFICIAL_BIN ?? join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
 test("actual official 0.2 web profile dynamic defaults admit current managed bridge bytes", { skip: !existsSync(officialBin) }, async () => {
   const f = fixture(); const anchor = join(dirname(dirname(officialBin)), "package.json");
-  assert.equal(JSON.parse(readFileSync(anchor, "utf8")).version, "0.2.0-rc.2");
   const boundBoot = await import(pathToFileURL(createRequire(officialBin).resolve("@deepseek-ai/dsh-app-boot")).href) as OfficialBoot;
+  assert.equal(JSON.parse(readFileSync(anchor, "utf8")).version, boundBoot.getDshRuntimeVersion());
   const pkg = JSON.parse(readFileSync(f.manifestPath, "utf8"));
   pkg.dsh.profile.bundles = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"];
   writeFileSync(f.manifestPath, JSON.stringify(pkg));
   for (const bridge of ["view-bridge", "llm-bridge"] as Bridge[]) cpSync(join(f.input.payloadRoot, bridge), f.installed(`@dsh-spaces/${bridge}`), { recursive: true });
   f.input.bin = officialBin;
+  f.input.cliVersion = boundBoot.getDshRuntimeVersion();
   let dynamicRows = 0;
   f.input.dump = async () => {
     const loaded = boundBoot.loadProfileDirectory("dsh", f.profile, anchor);
@@ -304,7 +335,7 @@ test("a target host denying the migrated LLM row leaves failure evidence and pre
   const f = fixture(); const dump = f.input.dump;
   f.input.dump = async () => JSON.stringify(JSON.parse(await dump()).map((row: Row) => row.id === "dsh-spaces-llm-bridge" ? { ...row, disabled: true } : row));
   await assert.rejects(migrateProfileToAlpha(f.input), /denied by the target host/);
-  assert.equal(JSON.parse(readFileSync(f.marker, "utf8")).target, "0.2.0-rc.2");
+  assert.equal(JSON.parse(readFileSync(f.marker, "utf8")).target, officialVersion);
   await assert.rejects(migrateProfileToAlpha(f.input), /Interrupted alpha/);
   assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
 });

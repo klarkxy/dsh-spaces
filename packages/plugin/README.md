@@ -4,7 +4,7 @@ DSH-native Spaces workbench, with a dedicated manager and an independent local s
 
 Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment.
 
-当前为本地预构建包，尚未发布到 npm。新安装默认固定官方 CLI **`0.1.7-alpha.1`**；已有运行时通过正常升级操作更新。本仓库 SDK peer 为 `0.1.7-alpha.1`，那不是 CLI 白名单。
+当前为本地预构建包，尚未发布到 npm。新安装默认固定官方 CLI **`0.2.1-rc.2`**；已有运行时通过正常升级操作更新。本仓库使用 `0.2.1-rc.2` SDK 构建；peer 保留原有下限，并显式接纳这个预发布版本，不构成 CLI 白名单。
 
 ## Install from this checkout
 
@@ -12,11 +12,11 @@ Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations ma
 pnpm run pack:plugin
 ```
 
-From this checkout, `pnpm run dev:web` packs the plugin, installs it into a disposable Home at `.sandbox/dsh-web-home`, and starts official `dsh web`.
+From the repository root, `npm run dev:web` builds and links the checkout into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. Existing development data stays; `npm run dev:link` only prepares the link. See [local linked development](../../docs/plugin-standard-install.md#local-linked-development).
 
 Run the printed `dsh plugin --profile web add <tarball>` command, then `dsh web`. In the ordinary DSH sidebar choose **工作台 / Workbench**, then **初始化 Spaces / Initialize Spaces**.
 
-No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1` in place of `dsh`. Package output defaults to `%TEMP%/dsh-spaces-pack`, outside package trees. Pass local archives as one absolute path argument, quoted by your shell if needed. Keep the alpha CLI's default `autoInstallPeers: false`: its shared SDK is supplied by the runtime, and installing another copy can split Cordis service identity.
+No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2` in place of `dsh`. Package output defaults to `%TEMP%/dsh-spaces-pack`, outside package trees. Pass local archives as one absolute path argument, quoted by your shell if needed. Keep the CLI's default `autoInstallPeers: false`: its shared SDK is supplied by the runtime, and installing another copy can split Cordis service identity.
 
 初始化使用当前 DSH Home。普通页面保持原有界面，只有用户点击初始化后才创建管理空间和启动监督程序；失败会显示原因，该次请求结束，下次打开不会自动补装或续接。再次进入时点击“进入工作台”。只需在一个已有 Web profile 安装完整入口，工作台新建的空间自动使用轻量 view-bridge。
 
@@ -24,7 +24,8 @@ No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.1.7-alpha.1` i
 
 - Standard `dsh.bundle.patch` and `cordis.patch.yml` let the official CLI maintain the profile's bundle list.
 - `dsh.client` and `./client` supply the Web client through DSH's module loader and shared React.
-- The tarball carries the component group: supervisor, manager plugin, view-bridge, browser, llm-bridge, and the installation worker (`snapshot-worker.mjs`). Users do not need a second package or this source checkout at runtime. `llm-bridge` is installed only when a Space explicitly joins shared connections.
+- The tarball carries the component group: supervisor, manager plugin, view-bridge, browser, llm-bridge, and the installation worker (`snapshot-worker.mjs`). Users do not need a second package or this source checkout at runtime. `llm-bridge` supplies new spaces' main-model inheritance and retains legacy shared/local behavior.
+- The ordinary host registers its public LLM services with its owning Supervisor. New ordinary spaces default to the main model; the create dialog also offers global connections or local configuration. Existing spaces keep their policy. Main credentials remain in that host.
 - The supervisor allocates the manager under the existing Home locks; ordinary profiles never gain manager write remotes.
 - Unknown CLI versions, damaged identity, and another controller's lease are refused before initialization writes. Concurrent callers share startup but receive separate one-time handoffs.
 
@@ -38,7 +39,7 @@ Closing a browser tab does not stop the supervisor or spaces. Use the workbench'
 
 ## Distribution
 
-The repository root is a monorepo, not an installable plugin directory. Distribute a built npm package or this tarball. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
+The private repository root also exposes `@dsh-spaces/plugin` for local linked development, forwarding its entries to this package's build output. Build first, then link the root with `dsh plugin --profile spaces-dev add .` in a separate development Home. Distribute the built package from `packages/plugin` or its tarball. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
 
 Metadata includes `repository.directory`, `keywords` (`dsh-plugin`, `deepseek-harness`), public publish configuration and MIT license. npm publication and community catalog listing still require completion; local pack success is not a public release.
 

@@ -7,7 +7,7 @@ export const LLM_MANAGED_CREDENTIAL_REF_PREFIX = "SPACES_LLM_";
 export const LLM_MANAGED_RECORD_SCOPE = "spaces-llm";
 export const LLM_SHARED_BACKEND = "llm-pi-ai";
 
-/** Protocols `llm-pi-ai@0.2.0-rc.2` `supportedProtocols()` actually constructs. */
+/** Protocols `llm-pi-ai@0.2.1-rc.2` `supportedProtocols()` actually constructs. */
 export const PINNED_LLM_PI_AI_PROTOCOLS = [
   "openai-completions",
   "openai-responses",
@@ -85,9 +85,10 @@ export type SharedSelection =
   | { mode: "selected"; connectionIds: ConnectionId[] };
 
 export interface SpaceLlmPolicy {
-  schemaVersion: typeof LLM_POLICY_SCHEMA_VERSION;
+  schemaVersion: typeof LLM_POLICY_SCHEMA_VERSION | 2;
   revision: number;
   shared: SharedSelection;
+  inheritMain?: boolean;
 }
 
 export interface LlmSharedSnapshot {
@@ -290,7 +291,7 @@ export function parsePolicy(value: unknown): SpaceLlmPolicy {
   if (!isRecord(value)) {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "policy must be an object");
   }
-  if (value.schemaVersion !== LLM_POLICY_SCHEMA_VERSION) {
+  if (value.schemaVersion !== LLM_POLICY_SCHEMA_VERSION && value.schemaVersion !== 2) {
     throw new LlmConfigError(LLM_ERROR.UNSUPPORTED_RUNTIME, "unknown policy schemaVersion", {
       schemaVersion: typeof value.schemaVersion === "number" ? value.schemaVersion : String(value.schemaVersion),
     });
@@ -299,10 +300,16 @@ export function parsePolicy(value: unknown): SpaceLlmPolicy {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "policy revision must be a non-negative integer");
   }
   return {
-    schemaVersion: LLM_POLICY_SCHEMA_VERSION,
+    schemaVersion: value.schemaVersion,
     revision: Number(value.revision),
     shared: parseSelection(value.shared),
+    ...(value.schemaVersion===2 ? {inheritMain: requireMainPolicy(value.inheritMain)} : {}),
   };
+}
+
+function requireMainPolicy(value: unknown): boolean {
+  if(typeof value!=='boolean')throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID,'v2 policy requires inheritMain');
+  return value;
 }
 
 export function parseConnection(value: unknown): SharedConnection {

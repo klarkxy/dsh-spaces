@@ -200,12 +200,13 @@ test("presentation attaches once without management or top-level handoff; source
   f.controller.stop(); assert.equal(f.timers.size, 0);
 });
 
-test("stopped spaces do not start, latest click wins, stale lifetime and failed channels do not reconnect", async () => {
+test("cached stopped rows reach manager authority, latest click wins, and failed channels do not reconnect", async () => {
   const f = fixture(); f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
   f.controller.handleMessage(f.event({ type: "state", snapshot: inventory }));
-  f.controller.select("beta"); assert.equal(f.messages.length, 0); assert.equal(f.controller.getSnapshot().error, "stopped");
-  f.controller.select("alpha"); const old = f.messages[0].requestId;
-  f.controller.select(null); const current = f.messages[1].requestId;
+  f.controller.select("beta"); assert.equal(f.messages.length, 1); assert.equal(f.controller.getSnapshot().error, null);
+  assert.equal(f.messages[0].spaceId, "beta");
+  f.controller.select("alpha"); const old = f.messages[1].requestId;
+  f.controller.select(null); const current = f.messages[2].requestId;
   f.controller.handleMessage(f.event({ type: "selected", requestId: old, spaceId: "alpha" }));
   assert.equal(f.controller.getSnapshot().pending, current);
   f.controller.showCurrent();
@@ -295,6 +296,64 @@ test("manager surface validates existing parent generation and cannot navigate t
   assert.equal((replies[1] as { type: string }).type, "selected");
   listener!(event(null, 1) as never); assert.equal(replies.length, 2);
   dispose(); assert.equal(listener, null);
+});
+
+test("the native surface opens the create dialog only for a valid create intent", async () => {
+  const appSource = readFileSync(new URL("../packages/plugin/src/workbench/app.tsx", import.meta.url), "utf8");
+  assert.ok(!appSource.includes("parent.location"), "the guest must not read the cross-origin parent location");
+  assert.ok(!appSource.includes("isNativeCreateIntent"), "the guest must not read the create intent from the parent");
+  const replies: unknown[] = [];
+  const parent = { postMessage: (data: unknown) => replies.push(data) };
+  const view = { parentOrigin, spaceId: "spaces-hub", generation: 1, serviceEpoch: epoch, channel: "manager-channel" };
+  const opened: string[] = [];
+  let ui: any = { boot: "ready", state: { ...inventory, availability: "available" }, selected: "home", pendingId: null, viewError: null, overlay: null };
+  const subscribers = new Set<() => void>();
+  const notify = () => { for (const fn of subscribers) fn(); };
+  const controller = {
+    subscribe(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; },
+    getSnapshot: () => ui,
+    selectHome() { ui = { ...ui, selected: "home" }; notify(); },
+    closeOverlay() { ui = { ...ui, overlay: null }; notify(); },
+    openSettings() { ui = { ...ui, overlay: { type: "settings" } }; notify(); },
+    openCreate() { opened.push("create"); ui = { ...ui, overlay: { type: "create" } }; notify(); },
+    selectRunningSpace() { return false; },
+  };
+  let listener: ((e: MessageEvent) => void) | null = null;
+  const pages: (string | null)[] = [];
+  const dispose = attachSurfaceBridge(controller as never, view, parent, fn => { listener = fn; return () => { listener = null; }; },
+    page => { pages.push(page); });
+  assert.equal((replies[0] as { type: string }).type, "ready"); replies.length = 0;
+  const event = (data: object, overrides: object = {}) => ({ source: parent, origin: parentOrigin, data, ...overrides });
+  const selection = (requestId: number) => event({ source: "dsh-spaces-surface-parent", type: "select", requestId,
+    serviceEpoch: epoch, spaceId: "spaces-hub", generation: 1, channel: view.channel, target: "@settings" });
+  const intent = (requestId: number, data: object = {}, overrides: object = {}) => event({ source: "dsh-spaces-surface-parent",
+    type: "intent", intent: "create", requestId, serviceEpoch: epoch, spaceId: "spaces-hub", generation: 1, channel: view.channel, ...data }, overrides);
+  // The intent only counts on the settings page of the native surface.
+  listener!(intent(1) as never); await tick();
+  assert.deepEqual(opened, [], "an intent before the settings page is ignored");
+  listener!(selection(1) as never); await tick();
+  assert.deepEqual(pages, ["settings"]);
+  assert.equal((replies.at(-1) as { type: string }).type, "selected");
+  listener!(intent(2) as never); await tick();
+  assert.deepEqual(opened, ["create"], "a valid create intent opens the dialog once");
+  listener!(intent(2) as never); await tick();
+  assert.deepEqual(opened, ["create"], "a repeated create intent is ignored");
+  for (const broken of [intent(3, { intent: "delete" }), intent(4, { type: "select" }), intent(5, { source: "other" }),
+    intent(6, { serviceEpoch: "ff".repeat(32) }), intent(7, { channel: "other" }), intent(8, { spaceId: "alpha" }),
+    intent(9, { generation: 2 }), intent(10, { requestId: 0 }), intent(11, { requestId: 1.5 }), intent(12, { token: "private" }),
+    intent(13, {}, { origin: "http://127.0.0.1:1" }), intent(14, {}, { source: {} })]) {
+    listener!(broken as never); await tick();
+  }
+  assert.deepEqual(opened, ["create"], "an invalid create intent is ignored");
+  dispose();
+  // A portable surface has no create intent at all.
+  const portable: string[] = [];
+  let portableListener: ((e: MessageEvent) => void) | null = null;
+  const disposePortable = attachSurfaceBridge({ ...controller, openCreate() { portable.push("create"); } } as never, view, parent,
+    fn => { portableListener = fn; return () => { portableListener = null; }; });
+  portableListener!(intent(20) as never); await tick();
+  assert.deepEqual(portable, [], "a portable surface ignores the create intent");
+  disposePortable();
 });
 
 test("host surfaces take background and text color from DSH 0.2 theme tokens", async () => {
@@ -497,13 +556,26 @@ function portalFixture() {
     source: frame.contentWindow, origin: managerOrigin,
     data: { serviceEpoch: view.serviceEpoch, spaceId: view.spaceId, generation: view.generation, channel: view.channel, source: "dsh-spaces-view", ...data }, ...overrides,
   });
-  const select = () => listeners.get("message")!({ source: parent, origin: parentOrigin,
-    data: { source: "dsh-spaces-portal-parent", channel, type: "select", requestId: 1, spaceId: "alpha" } });
+  const select = (spaceId = "alpha", requestId = 1) => listeners.get("message")!({ source: parent, origin: parentOrigin,
+    data: { source: "dsh-spaces-portal-parent", channel, type: "select", requestId, spaceId } });
   const refresh = async () => { [...timers.values()].find(timer => timer.ms === 1500)?.fn(); await tick(); };
   return { sent, forwarded, requests, timers, frame, view, message, select, refresh, deadline,
     removed: () => removed, setState: (next: unknown) => { state = next; }, state: () => state as any,
     setResponse: (next: (() => Response | Promise<Response>) | null) => { response = next; } };
 }
+
+test("portal forwards a cached stopped member once for current manager authorization", async () => {
+  const p = portalFixture(); await tick();
+  p.select("beta"); await tick();
+  p.message({ state: "ready" });
+  p.message({ source: "dsh-spaces-surface", type: "ready" });
+  assert.equal(p.forwarded.length, 1);
+  assert.equal(p.forwarded[0].target, "beta");
+  assert.equal(p.requests.filter(path => path.endsWith("/view")).length, 1);
+  p.select("spaces-hub", 2); p.select("unknown", 3);
+  assert.equal(p.forwarded.length, 1);
+  assert.equal(p.sent.filter(message => message.type === "selection-failed").length, 2);
+});
 
 test("portal failure DTO rejects arbitrary codes, credentials, URLs and unbounded status", () => {
   assert.deepEqual(parsePortalFailure({ reason: "state-request", status: 503, code: "workbench/unavailable" }),

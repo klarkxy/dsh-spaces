@@ -1,6 +1,8 @@
 import { describeRuntime } from "../src/adapters/node/runtime-descriptor.ts";
 import { createDirectoryLink } from "../src/shared/node/filesystem.ts";
 import { spawnSync } from "node:child_process";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -103,6 +105,33 @@ function store(options: {
     }),
   };
 }
+
+test("runtime publication reports the first rename failure without retry or publishing a result", async (t) => {
+  const failure = Object.assign(new Error("runtime destination busy"), { code: "EBUSY" });
+  let attempts = 0;
+  const installs: string[] = [];
+  const { runtime, root } = store({ run: mockRun({ installs }) });
+  const previousPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  // Exercise the platform on which the retired retry loop used to run.
+  Object.defineProperty(process, "platform", { ...previousPlatform, value: "win32" });
+  const renameMock = t.mock.method(fsPromises, "rename", async () => {
+    attempts += 1;
+    throw failure;
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(() => runtime.install("1.2.3"), error => error === failure);
+    assert.equal(attempts, 1);
+    assert.deepEqual(installs, ["1.2.3"]);
+    assert.equal(runtime.inventory().installed.length, 0);
+    assert.equal(existsSync(join(root, "versions", "1.2.3", "meta.json")), false);
+    assert.deepEqual(leftoverStaging(root), []);
+  } finally {
+    renameMock.mock.restore();
+    syncBuiltinESMExports();
+    Object.defineProperty(process, "platform", previousPlatform);
+  }
+});
 
 test("rejects tags, paths, and shell fragments as install versions", () => {
   assert.equal(isExactRuntimeVersion("0.1.1-rc.2"), true);

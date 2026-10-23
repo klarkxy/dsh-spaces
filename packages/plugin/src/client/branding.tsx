@@ -16,7 +16,7 @@ declare module "@deepseek-ai/dsh-client-ui-slots" {
 }
 
 export function SpacesBrandMark({ size, className }: { size: number; className?: string }): ReactElement {
-  return <img src={BRAND_IMAGE_URL} width={size} height={size} className={className}
+  return <img src={BRAND_IMAGE_URL} width={size} height={size} className={className ? `dsh-spaces-brand-mark ${className}` : "dsh-spaces-brand-mark"}
     alt="" aria-hidden="true" draggable={false}
     style={{ objectFit: "contain", borderRadius: "22%" }} />;
 }

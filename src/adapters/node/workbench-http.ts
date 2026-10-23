@@ -76,6 +76,8 @@ export interface WorkbenchHttpRuntime {
   mintHandoff(): string;
   /** Optional additive Dashboard v1 routes on the same authenticated listener. */
   handleDashboardRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
+  /** Private LLM delegation registration and per-owned-run transport. */
+  handleLlmDelegationRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
 }
 
 const portalGrants = new WeakMap<WorkbenchHttpRuntime, WorkbenchPortalGrants>();
@@ -198,6 +200,7 @@ async function handleRequest(
       deny(res, 403, "workbench/forbidden", "Host is not the supervisor loopback entry.");
       return;
     }
+    if (await host.handleLlmDelegationRequest?.(req, res)) return;
     if (await host.handleDashboardRequest?.(req, res)) return;
     if (req.method === "OPTIONS") {
       if (!originAllowed(req, host, { allowMissing: false })) {

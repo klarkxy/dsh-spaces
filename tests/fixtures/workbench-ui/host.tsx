@@ -17,7 +17,7 @@ import { WorkbenchController } from "../../../packages/plugin/src/workbench/stor
 
 declare global {
   interface Window {
-    __WB?: { supervisor: string; child: string; runtimeControls?: boolean };
+    __WB?: { supervisor: string; child: string; runtimeControls?: boolean; nativeSettingsControls?: boolean; failPluginVersions?: boolean; emptySpaces?: boolean; emptyPlugins?: boolean; emptyTemplates?: boolean; failCreate?: boolean; failPluginPreview?: boolean };
     __iframe?: Element | null;
     __WB_CALLS?: Array<{ method: string; arg?: unknown }>;
     __WB_DOWNLOADS?: Array<{ fileName: string }>;
@@ -67,7 +67,7 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
     return {
       method: "settings",
       settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
-      clientDefaults: { locale: "zh", theme: "dark" },
+      clientDefaults: { locale: "zh", theme: "system" },
       observation: OBSERVATION,
     };
   }
@@ -120,6 +120,18 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
       observation: OBSERVATION,
     };
   }
+  if (request.method === "plugin.versions") {
+    if (window.__WB?.failPluginVersions) {
+      throw Object.assign(new Error("The plugin registry could not be read."), { code: "workbench/failed" });
+    }
+    return {
+      method: "plugin.versions",
+      versions: ["2.0.0", "1.2.3"],
+      latest: "2.0.0",
+      packageName: "demo",
+      observation: OBSERVATION,
+    };
+  }
   if (request.method === "diagnostics") {
     return {
       method: "diagnostics",
@@ -135,15 +147,17 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
   if (request.method === "templates") {
     return {
       method: "templates",
-      templates: [
-        {
-          id: "dev",
-          name: "dev",
-          displayName: "Development",
-          plugins: [],
-          createdAt: "2026-09-12T00:00:00.000Z",
-        },
-      ],
+      templates: window.__WB?.emptyTemplates
+        ? []
+        : [
+          {
+            id: "dev",
+            name: "dev",
+            displayName: "Development",
+            plugins: [],
+            createdAt: "2026-09-12T00:00:00.000Z",
+          },
+        ],
       observation: OBSERVATION,
     };
   }
@@ -233,7 +247,21 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
 }
 
 function makeApi(supervisor: string, child: string): WorkbenchApi {
-  const spaces: WorkbenchSpace[] = [
+  const spaces: WorkbenchSpace[] = window.__WB?.emptySpaces
+    ? [
+      {
+        id: "hub",
+        displayName: "Hub",
+        isHost: true,
+        hasWebApp: true,
+        icon: "",
+        status: "running",
+        generation: 1,
+        managed: true,
+        dshVersion: null,
+      },
+    ]
+    : [
     {
       id: "hub",
       displayName: "Hub",
@@ -307,13 +335,19 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
     }),
     submit: async (command, requestId) => {
       calls.push({ method: "submit", arg: command });
-      return job(command.kind, requestId);
+      if (window.__WB?.failCreate && command.kind === "space.create") {
+        throw Object.assign(new Error("The space name is already in use."), { code: "workbench/conflict" });
+      }
+      return { ...job(command.kind, requestId), ...(window.__WB?.nativeSettingsControls && command.kind === "space.create" ? { result: { spaceId: "alpha" } } : {}) };
     },
     job: async (id) => job("job", id),
     cancel: async (id) => job("cancel", id),
     view: async (spaceId) => view(spaceId),
     preview: async (request) => {
       calls.push({ method: "preview", arg: request });
+      if (window.__WB?.failPluginPreview) {
+        throw Object.assign(new Error("The plugin registry refused this plan."), { code: "workbench/invalid-input" });
+      }
       return {
         id: "plan-1",
         kind: request.kind,
@@ -332,7 +366,19 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
       calls.push({ method: "product", arg: request });
       return productResult(request);
     },
-    plugins: async () => [],
+    plugins: async () => window.__WB?.emptyPlugins
+      ? []
+      : [
+        {
+          id: "catalog.demo",
+          title: "Demo",
+          packageName: "demo",
+          description: "A plugin",
+          version: "1.2.3",
+          installedIn: ["alpha"],
+          protected: false,
+        },
+      ],
     snapshots: async () => [],
     snapshot: async (id) => ({
       id,
@@ -364,16 +410,17 @@ function RuntimeTestHost({ api }: { api: WorkbenchApi }): React.ReactElement {
   useEffect(() => {
     window.__WB_CONTROLLER = controller;
     controller.start();
+    if (window.__WB?.nativeSettingsControls) controller.setSettingsTab("spaces");
     return () => controller.stop();
   }, [controller]);
-  return <WorkbenchRoot ui={ui} controller={controller} />;
+  return <WorkbenchRoot ui={ui} controller={controller} contained={window.__WB?.nativeSettingsControls} nativeSurface={window.__WB?.nativeSettingsControls} systemPage={window.__WB?.nativeSettingsControls ? "settings" : undefined} />;
 }
 
 const cfg = window.__WB;
 if (!cfg) throw new Error("missing __WB");
 const root = document.getElementById("root");
 if (!root) throw new Error("missing root");
-createRoot(root).render(cfg.runtimeControls
+createRoot(root).render(cfg.runtimeControls || cfg.nativeSettingsControls
   ? <RuntimeTestHost api={makeApi(cfg.supervisor, cfg.child)} />
   : React.createElement(WorkbenchApp, {
     api: makeApi(cfg.supervisor, cfg.child),

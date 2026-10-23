@@ -22,7 +22,6 @@ import type {
 import type { WorkbenchProductRequest, WorkbenchProductResult } from "../src/shared/workbench-product.ts";
 import type { PackageSource } from "../src/shared/types.ts";
 import { WorkbenchApp } from "../packages/plugin/src/workbench/app.tsx";
-import { RecoverySurface } from "../packages/plugin/src/workbench/recovery.tsx";
 import { JobsList, WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
 import { INTERRUPTED_JOB_MESSAGE } from "../src/adapters/node/workbench-jobs.ts";
 import {
@@ -236,6 +235,15 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
       observation: OBSERVATION,
     };
   }
+  if (request.method === "plugin.versions") {
+    return {
+      method: "plugin.versions",
+      versions: ["2.0.0", "1.2.3"],
+      latest: "2.0.0",
+      packageName: "demo",
+      observation: OBSERVATION,
+    };
+  }
   if (request.method === "diagnostics") {
     return {
       method: "diagnostics",
@@ -299,6 +307,105 @@ test("temporary disconnection preserves the visited frame and recovers without s
   assert.equal(views.committedSpaceId, null);
   assert.equal(views.get("alpha"), original);
   assert.equal(views.requestSpace(alpha).reuseReady, true);
+});
+
+test("a view failure keeps the public reason, and a late failure does not replace the newer selection", async () => {
+  const gates = new Map<string, ReturnType<typeof deferred<WorkbenchViewInfo>>>();
+  const ctrl = controller(fakeApi({
+    state: async () => state({ spaces: [manager, space({ id: "alpha" }), space({ id: "beta" })] }),
+    view: spaceId => {
+      const gate = deferred<WorkbenchViewInfo>();
+      gates.set(spaceId, gate);
+      return gate.promise;
+    },
+  }));
+  await ctrl.poll();
+  ctrl.selectSpace("alpha");
+  ctrl.selectSpace("beta");
+  gates.get("beta")!.reject(Object.assign(new Error("plugin example is missing\nC:\\secret\\home"), { code: "workbench/incompatible" }));
+  await flush();
+  assert.match(ctrl.getSnapshot().viewError?.message ?? "", /plugin example is missing/);
+  assert.doesNotMatch(ctrl.getSnapshot().viewError?.message ?? "", /C:\\secret/);
+  assert.equal(ctrl.getSnapshot().frames.find(frame => frame.spaceId === "beta")?.status, "failed");
+  gates.get("alpha")!.reject(Object.assign(new Error("stale alpha failure"), { code: "workbench/unavailable" }));
+  await flush();
+  assert.equal(ctrl.getSnapshot().viewError?.spaceId, "beta");
+  assert.match(ctrl.getSnapshot().viewError?.message ?? "", /plugin example is missing/);
+  assert.equal(ctrl.getSnapshot().frames.find(frame => frame.spaceId === "alpha")?.status, "failed");
+  assert.equal(ctrl.getSnapshot().selected, "home");
+});
+
+test("the first state failure stays terminal for this controller", async () => {
+  let reads = 0;
+  let fail = true;
+  const timers: Array<() => void> = [];
+  let onVisible: (() => void) | undefined;
+  const ctrl = controller(fakeApi({
+    state: async () => {
+      reads += 1;
+      if (fail) throw Object.assign(new Error("dashboard overview timed out"), { code: "workbench/unavailable" });
+      return state();
+    },
+  }), {
+    setTimeout: callback => { timers.push(callback); return timers.length; },
+    clearTimeout: () => undefined,
+    onVisibilityChange: listener => { onVisible = listener; return () => undefined; },
+  });
+  ctrl.start();
+  await flush();
+  assert.equal(reads, 1);
+  assert.match(ctrl.getSnapshot().error ?? "", /dashboard overview timed out/);
+  assert.equal(ctrl.canMutate(), false);
+  assert.equal(ready(ctrl).includes("dashboard overview timed out"), true);
+  const frozen = reads;
+  for (const fire of [...timers]) fire();
+  onVisible?.();
+  await ctrl.poll();
+  fail = false;
+  await ctrl.selectRunningSpace("alpha");
+  await flush();
+  assert.equal(reads, frozen);
+  assert.match(ctrl.getSnapshot().error ?? "", /dashboard overview timed out/);
+  assert.equal(ctrl.getSnapshot().pendingId, null);
+});
+
+test("a late state failure cannot freeze a newer successful read", async () => {
+  const first = deferred<WorkbenchState>();
+  let calls = 0;
+  const ctrl = controller(fakeApi({
+    state: async () => {
+      calls += 1;
+      if (calls === 1) return first.promise;
+      return state({ spaces: [manager, space({ id: "alpha" })] });
+    },
+  }));
+  const early = ctrl.poll();
+  await ctrl.poll();
+  first.reject(Object.assign(new Error("old overview"), { code: "workbench/unavailable" }));
+  await early;
+  await flush();
+  assert.equal(ctrl.getSnapshot().error, null);
+  assert.equal(ctrl.getSnapshot().state?.spaces.some(item => item.id === "alpha"), true);
+  assert.equal(ctrl.canMutate(), true);
+});
+
+test("a state failure after a healthy frame stays visible without unloading that frame", async () => {
+  let fail = false;
+  const ctrl = controller(fakeApi({
+    state: async () => {
+      if (fail) throw Object.assign(new Error("later overview stopped"), { code: "workbench/unavailable" });
+      return state({ spaces: [manager, space({ id: "alpha" })] });
+    },
+  }));
+  await ctrl.poll();
+  await becomeReady(ctrl, "alpha");
+  fail = true;
+  await ctrl.poll();
+  const html = ready(ctrl);
+  assert.match(ctrl.getSnapshot().error ?? "", /later overview stopped/);
+  assert.equal(html.includes("later overview stopped"), true);
+  assert.equal(html.includes('data-space-id="alpha"'), true);
+  assert.equal(ctrl.getSnapshot().selected, "alpha");
 });
 
 test("polling does not duplicate a hanging view request or postpone its timeout", async () => {
@@ -490,6 +597,18 @@ test("native settings stays a page while creating a space and after cancelling t
   ctrl.openCreate(); assert.match(renderPage(), /class="dsh-wb-settings-page"/);
   ctrl.closeOverlay(); assert.match(renderPage(), /class="dsh-wb-settings-page"/);
   assert.doesNotMatch(renderPage(), /data-settings-close/);
+});
+
+test("native settings owns its creation notice and stops covering a selected space", async () => {
+  const ctrl = controller(); await ctrl.poll();
+  const ui = { ...ctrl.getSnapshot(), createdNotice: { spaceId: "alpha" } };
+  const render = (selected: string) => renderToStaticMarkup(React.createElement(WorkbenchView, {
+    ui: { ...ui, selected }, controller: ctrl, contained: true, nativeSurface: true, systemPage: "settings",
+  }));
+  const settings = render("home");
+  assert.equal(settings.match(/data-created="alpha"/g)?.length, 1);
+  assert.match(settings, /class="dsh-wb-notice dsh-wb-row" role="status" data-created="alpha"/);
+  assert.doesNotMatch(render("alpha"), /class="dsh-wb-settings-page"/);
 });
 
 test("authorized view src is origin+entryPath and rejects remote or token-like paths", () => {
@@ -760,6 +879,99 @@ test("preview confirmation is required; preview errors do not look like success"
   assert.equal(api3.calls.filter((item) => item.method === "submit").length, 0);
 });
 
+test("D1: a stop or a restart runs from its preview, a destructive plan of the same kind still asks", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.preview({ kind: "space.stop", spaceId: "alpha" });
+  await flush();
+  assert.equal(ctrl.getSnapshot().pendingPlan, null, "a plain stop does not open the confirmation dialog");
+  const executed = api.calls.find((item) => item.method === "submit");
+  assert.deepEqual((executed?.arg as { command: WorkbenchCommand }).command, { kind: "plan.execute", planId: "plan-1" });
+  assert.ok(!ready(ctrl).includes(t("zh", "plan.title")));
+
+  const restart = fakeApi();
+  const ctrl2 = controller(restart);
+  await ctrl2.poll();
+  ctrl2.preview({ kind: "space.restart", spaceId: "alpha" });
+  await flush();
+  assert.equal(ctrl2.getSnapshot().pendingPlan, null, "a plain restart does not open the confirmation dialog");
+  assert.equal(restart.calls.filter((item) => item.method === "submit").length, 1);
+
+  const destructive = fakeApi({
+    preview: async (request: WorkbenchPlanRequest) => planOf(request, { id: "plan-destructive", destructive: true }),
+  });
+  const ctrl3 = controller(destructive);
+  await ctrl3.poll();
+  ctrl3.preview({ kind: "space.stop", spaceId: "alpha" });
+  await flush();
+  assert.ok(ctrl3.getSnapshot().pendingPlan, "a destructive stop still asks for a confirmation");
+  assert.equal(destructive.calls.filter((item) => item.method === "submit").length, 0);
+  assert.ok(ready(ctrl3).includes(t("zh", "plan.destructive")));
+});
+
+test("D1: a delete, a version switch and a service shutdown still ask for a confirmation", async () => {
+  for (const request of [
+    { kind: "space.delete", spaceId: "alpha", removeData: false },
+    { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
+    { kind: "service.shutdown" },
+    { kind: "snapshot.create" },
+    { kind: "runtime.remove", version: "0.2.0" },
+  ] as WorkbenchPlanRequest[]) {
+    const api = fakeApi();
+    const ctrl = controller(api);
+    await ctrl.poll();
+    ctrl.preview(request);
+    await flush();
+    assert.ok(ctrl.getSnapshot().pendingPlan, `${request.kind} keeps its confirmation`);
+    assert.equal(api.calls.filter((item) => item.method === "submit").length, 0);
+  }
+});
+
+test("the settings navigation groups the everyday tabs and keeps plugins and blueprints out of the top level", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openSettings();
+  const ids = (segment: string): string[] => [...segment.matchAll(/role="tab" id="settings-tab-([^"]+)"/g)].map((match) => match[1]);
+  const visibleTabIds = (html: string): string[] => {
+    const at = html.indexOf('id="dsh-wb-settings-maintenance"');
+    if (at === -1) return ids(html);
+    const main = ids(html.slice(0, at));
+    const rest = html.slice(at);
+    const tag = rest.slice(0, rest.indexOf(">"));
+    return /hidden/.test(tag) ? main : [...main, ...ids(rest)];
+  };
+  const collapsed = ready(ctrl);
+  assert.deepEqual(visibleTabIds(collapsed), ["spaces", "templates", "llm", "general"]);
+  assert.ok(!collapsed.includes('id="settings-tab-plugins"'));
+  assert.ok(!collapsed.includes('id="settings-tab-blueprints"'));
+  ctrl.toggleMaintenance();
+  const expanded = ready(ctrl);
+  assert.deepEqual(visibleTabIds(expanded), ["spaces", "templates", "llm", "general", "overview", "snapshots", "runtime", "advanced"]);
+});
+
+test("the maintenance group stays visible, remembers its state and expands around its active tab", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openSettings();
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "settings.nav.maintenance")), "the maintenance group is always visible");
+  assert.match(html, /aria-expanded="false"/, "the maintenance group starts collapsed");
+  assert.match(html, /id="dsh-wb-settings-maintenance"[^>]*hidden/, "its tabs are hidden while it is collapsed");
+  ctrl.toggleMaintenance();
+  const expanded = ready(ctrl);
+  assert.match(expanded, /aria-expanded="true"/);
+  assert.doesNotMatch(expanded, /id="dsh-wb-settings-maintenance"[^>]*hidden/);
+  ctrl.toggleMaintenance();
+  assert.match(ready(ctrl), /aria-expanded="false"/, "the group remembers the state for this session");
+  // A tab inside the group opens the group.
+  ctrl.setSettingsTab("runtime");
+  const active = ready(ctrl);
+  assert.match(active, /aria-expanded="true"/);
+  assert.ok(active.includes('id="settings-tab-runtime"'));
+  assert.match(active, /id="settings-tab-runtime"[^>]*aria-selected="true"/);
+});
+
 test("manager cannot be deleted and cannot take ordinary plugin installs", async () => {
   const api = fakeApi();
   const ctrl = controller(api);
@@ -944,7 +1156,9 @@ test("SSR ready home shows management actions and plugin install wording", async
   await flush();
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "app.home")));
-  assert.ok(html.includes(t("zh", "plugins.installToSpace")) || html.includes(t("zh", "plugins.removeFromSpace")));
+  // The plugin tab is the plugin section of the space detail page now.
+  assert.ok(html.includes('data-space-detail="true"'));
+  assert.ok(html.includes(t("zh", "plugins.previewInstall")) || html.includes(t("zh", "plugins.removeFromSpace")));
   assert.ok(html.includes(t("zh", "plugins.toggleHint")));
   assert.ok(html.includes(t("zh", "plugins.cleanup")));
   ctrl.setHomeTab("snapshots");
@@ -1009,7 +1223,9 @@ test("detail dialog offers nothing below the supported minimum when the pin is o
   await flush();
   await flush();
   const html = ready(ctrl);
-  const select = html.match(/<select[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+  // The plugin section has its own version list; the DSH section owns this one.
+  const select = html.match(/<select[^>]*data-dsh-target="true"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+  assert.notEqual(select, "", "the DSH version select is rendered");
   assert.ok(!select.includes('value="0.1.5-rc.1"'), "a pin below the minimum is not offered");
   assert.ok(!select.includes('value="0.2.0-rc.1"'), "versions below the minimum are not offered");
   assert.ok(select.includes('value="0.2.0-rc.2"'));
@@ -1041,7 +1257,115 @@ test("detail DSH section is hidden for the manager", async () => {
   ctrl.openDetail("hub");
   await flush();
   await flush();
-  assert.ok(!ready(ctrl).includes(t("zh", "detail.dshVersion")));
+  const html = ready(ctrl);
+  const detail = html.slice(html.indexOf('data-space-detail="true"'));
+  assert.notEqual(detail, "", "the detail page is rendered");
+  assert.ok(!detail.includes(t("zh", "detail.dshVersion")));
+});
+
+function pluginSelect(html: string): string {
+  return html.match(/<select[^>]*data-space-plugin-versions="true"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+}
+
+test("the plugin section fills the version list and previews the exact version", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  assert.ok(
+    api.calls.some((item) => item.method === "product" && (item.arg as { method?: string })?.method === "plugin.versions"),
+    "the installed plugin's published versions are read",
+  );
+  ctrl.setPluginCatalog("catalog.demo");
+  await flush();
+  await flush();
+  const html = ready(ctrl);
+  const select = pluginSelect(html);
+  assert.notEqual(select, "", "the version list is rendered");
+  assert.ok(select.includes('value="2.0.0"'));
+  assert.ok(select.includes('value="1.2.3"'));
+  assert.match(
+    select,
+    /<option(?=[^>]*selected)(?=[^>]*value="2\.0\.0")[^>]*>/,
+    "the newest published version is preselected",
+  );
+  assert.equal(ctrl.getSnapshot().pluginVersion, "2.0.0");
+  ctrl.previewInstallSelected("alpha");
+  await flush();
+  assert.deepEqual(api.calls.filter((item) => item.method === "preview").map((item) => item.arg), [
+    { kind: "plugin.install", spaceIds: ["alpha"], catalogId: "catalog.demo", version: "2.0.0" },
+  ]);
+});
+
+test("a plugin row offers an upgrade only when a newer version exists", async () => {
+  const api = fakeApi({
+    plugins: async () => [
+      {
+        id: "catalog.demo",
+        title: "Demo",
+        packageName: "demo",
+        description: "A plugin",
+        version: "2.0.0",
+        installedIn: ["alpha"],
+        protected: false,
+      },
+    ],
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  const current = ready(ctrl);
+  assert.ok(!current.includes('data-space-plugin-upgrade="catalog.demo"'), "the newest version needs no upgrade");
+
+  const older = controller(fakeApi({
+    plugins: async () => [
+      {
+        id: "catalog.demo",
+        title: "Demo",
+        packageName: "demo",
+        description: "A plugin",
+        version: "1.2.3",
+        installedIn: ["alpha"],
+        protected: false,
+      },
+    ],
+  }));
+  await older.poll();
+  older.openDetail("alpha");
+  await flush();
+  await flush();
+  const html = ready(older);
+  assert.ok(html.includes('data-space-plugin-upgrade="catalog.demo"'), "an older version can be upgraded");
+  assert.ok(html.includes(t("zh", "plugins.upgradeTo", { version: "2.0.0" })));
+});
+
+test("a failed version read keeps its reason next to the version list", async () => {
+  const api = fakeApi({
+    product: async (request) => {
+      if (request.method === "plugin.versions") {
+        throw Object.assign(new Error("The registry could not be read."), { code: "workbench/failed" });
+      }
+      return productResult(request);
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  ctrl.setPluginCatalog("catalog.demo");
+  await flush();
+  await flush();
+  const html = ready(ctrl);
+  const error = html.match(/<p[^>]*data-space-plugin-versions-error="true"[^>]*>[\s\S]*?<\/p>/)?.[0] ?? "";
+  assert.notEqual(error, "", "the failed read is rendered");
+  assert.ok(error.includes("The registry could not be read."));
+  assert.doesNotMatch(error, /opacity\s*:\s*0/, "the failure is visible from the first frame");
+  assert.equal(ctrl.getSnapshot().pluginVersion, "", "no version is guessed");
 });
 
 function rowButtons(html: string, spaceId: string): string[] {
@@ -1052,14 +1376,7 @@ function rowButtons(html: string, spaceId: string): string[] {
   return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
 }
 
-function dialogActionButtons(html: string): string[] {
-  const start = html.lastIndexOf('class="dsh-wb-actions"');
-  assert.notEqual(start, -1);
-  const segment = html.slice(start, html.indexOf("</div>", start));
-  return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
-}
-
-test("settings space rows offer per-status start, stop, restart and delete actions", async () => {
+test("settings space rows offer open, ordering and manage actions; lifecycle actions live on the detail page", async () => {
   const ctrl = controller(fakeApi({
     state: async () =>
       state({
@@ -1076,19 +1393,18 @@ test("settings space rows offer per-status start, stop, restart and delete actio
   await ctrl.poll();
   ctrl.setHomeTab("spaces");
   const html = ready(ctrl);
-  const [start, stop, restart, del, diagnose, up, down] = [
-    t("zh", "app.start"), t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete"),
-    t("zh", "app.diagnose"), t("zh", "app.moveUp"), t("zh", "app.moveDown"),
+  const [start, manage, up, down] = [
+    t("zh", "app.start"), t("zh", "detail.manage"), t("zh", "app.moveUp"), t("zh", "app.moveDown"),
   ];
   assert.ok(!html.includes('data-space-id="hub"'), "the manager has no settings row");
-  assert.deepEqual(rowButtons(html, "alpha"), ["Alpha", stop, restart, del, up, down, diagnose]);
-  assert.deepEqual(rowButtons(html, "beta"), [start, del, up, down, diagnose]);
-  assert.deepEqual(rowButtons(html, "gamma"), [start, del, up, down, diagnose]);
-  assert.deepEqual(rowButtons(html, "delta"), [start, stop, restart, del, up, down, diagnose]);
-  assert.deepEqual(rowButtons(html, "rogue"), ["rogue", up, down, diagnose]);
+  assert.deepEqual(rowButtons(html, "alpha"), ["Alpha", up, down, manage]);
+  assert.deepEqual(rowButtons(html, "beta"), [start, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "gamma"), [start, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "delta"), [start, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "rogue"), ["rogue", up, down, manage]);
 });
 
-test("detail dialog offers the same per-status actions and hides them for the manager and unmanaged spaces", async () => {
+test("the space detail page offers the per-status actions and hides them for the manager and unmanaged spaces", async () => {
   const ctrl = controller(fakeApi({
     state: async () =>
       state({
@@ -1096,62 +1412,76 @@ test("detail dialog offers the same per-status actions and hides them for the ma
       }),
   }));
   await ctrl.poll();
-  const [start, stop, restart, del, close] = [
-    t("zh", "app.start"), t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete"), t("zh", "app.close"),
+  const [enter, start, stop, restart, del] = [
+    t("zh", "detail.enter"), t("zh", "app.start"), t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete"),
   ];
+  const detailButtons = (spaceId: string, section: string): string[] => {
+    const html = ready(ctrl);
+    const detail = html.indexOf(`data-space-detail="true" data-space-id="${spaceId}"`);
+    assert.notEqual(detail, -1, `detail page for ${spaceId}`);
+    const from = html.indexOf(`data-space-section="${section}"`, detail);
+    assert.notEqual(from, -1, `section ${section} of ${spaceId}`);
+    const to = html.indexOf('data-space-section="', from + 10);
+    const segment = html.slice(from, to === -1 ? html.length : to);
+    return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
+  };
   ctrl.openDetail("alpha");
   await flush();
   await flush();
-  assert.deepEqual(dialogActionButtons(ready(ctrl)), [stop, restart, del, close]);
+  assert.deepEqual(detailButtons("alpha", "overview"), [enter, stop, restart]);
+  assert.deepEqual(detailButtons("alpha", "danger"), [del]);
   ctrl.openDetail("beta");
   await flush();
   await flush();
-  assert.deepEqual(dialogActionButtons(ready(ctrl)), [start, del, close]);
+  assert.deepEqual(detailButtons("beta", "overview"), [enter, start]);
+  assert.deepEqual(detailButtons("beta", "danger"), [del]);
   ctrl.openDetail("rogue");
   await flush();
   await flush();
-  assert.deepEqual(dialogActionButtons(ready(ctrl)), [close]);
+  assert.deepEqual(detailButtons("rogue", "overview"), []);
+  assert.deepEqual(detailButtons("rogue", "danger"), []);
   ctrl.openDetail("hub");
   await flush();
   await flush();
-  assert.deepEqual(dialogActionButtons(ready(ctrl)), [close]);
+  assert.deepEqual(detailButtons("hub", "overview"), []);
+  assert.deepEqual(detailButtons("hub", "danger"), []);
 });
 
-test("space actions render in contained mode and are disabled without mutation rights or while busy", async () => {
-  // The row's open button also reads 启动 for stopped spaces; SpaceActions on rows is stop/restart/delete.
-  const actionLabels = new Set([t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete")]);
-  const actionTags = (html: string, spaceId: string): Array<{ tag: string; label: string }> => {
-    const marker = `data-space-id="${spaceId}"`;
-    const start = html.indexOf(marker);
-    assert.notEqual(start, -1, `row for ${spaceId}`);
-    const segment = html.slice(start, html.indexOf("</div>", start));
+test("detail page actions are disabled without mutation rights or while busy", async () => {
+  const overviewButtons = (html: string, spaceId: string): Array<{ tag: string; label: string }> => {
+    const detail = html.indexOf(`data-space-detail="true" data-space-id="${spaceId}"`);
+    assert.notEqual(detail, -1, `detail page for ${spaceId}`);
+    const from = html.indexOf(`data-space-section="overview"`, detail);
+    assert.notEqual(from, -1, `overview section of ${spaceId}`);
+    const to = html.indexOf('data-space-section="', from + 10);
+    const segment = html.slice(from, to === -1 ? html.length : to);
     return [...segment.matchAll(/<button[^>]*>([^<]*)<\/button>/g)]
-      .map((match) => ({ tag: match[0], label: match[1] }))
-      .filter((button) => actionLabels.has(button.label));
+      .map((match) => ({ tag: match[0], label: match[1] }));
   };
 
   const readonly = controller(fakeApi({
-    state: async () => state({ writable: false, spaces: [manager, alpha, space({ id: "beta", status: "stopped" })] }),
+    state: async () => state({ writable: false, spaces: [manager, alpha] }),
   }));
   await readonly.poll();
-  readonly.setHomeTab("spaces");
-  const contained = renderToStaticMarkup(
-    React.createElement(WorkbenchView, { ui: readonly.getSnapshot(), controller: readonly, contained: true }),
-  );
-  assert.deepEqual(actionTags(contained, "alpha").map((button) => button.label), [t("zh", "app.stop"), t("zh", "app.restart"), t("zh", "app.delete")]);
-  assert.deepEqual(actionTags(contained, "beta").map((button) => button.label), [t("zh", "app.delete")]);
-  for (const button of [...actionTags(contained, "alpha"), ...actionTags(contained, "beta")]) {
+  readonly.openDetail("alpha");
+  await flush();
+  await flush();
+  const readonlyButtons = overviewButtons(ready(readonly), "alpha");
+  assert.deepEqual(readonlyButtons.map((button) => button.label), [t("zh", "detail.enter"), t("zh", "app.stop"), t("zh", "app.restart")]);
+  for (const button of readonlyButtons) {
     assert.ok(button.tag.includes("disabled"), button.tag);
   }
 
   const gate = deferred<WorkbenchPlan>();
   const busy = controller(fakeApi({ preview: () => gate.promise }));
   await busy.poll();
-  busy.setHomeTab("spaces");
   void busy.preview({ kind: "space.stop", spaceId: "alpha" });
-  const buttons = actionTags(ready(busy), "alpha");
-  assert.equal(buttons.length, 3);
-  assert.ok(buttons.every((button) => button.tag.includes("disabled")));
+  busy.openDetail("alpha");
+  await flush();
+  await flush();
+  const busyButtons = overviewButtons(ready(busy), "alpha");
+  assert.ok(busyButtons.length > 0);
+  assert.ok(busyButtons.every((button) => button.tag.includes("disabled")), JSON.stringify(busyButtons));
   gate.resolve(planOf({ kind: "space.stop", spaceId: "alpha" }));
   await flush();
 });
@@ -1197,7 +1527,7 @@ test("workspace iframe src is only the authorized view and pending stays hidden"
   assert.ok(html.includes('hidden=""') || html.includes("hidden"));
 });
 
-test("RecoverySurface shows reasons and jobs without acquire or a manager iframe", async () => {
+test("overview keeps failed jobs and reasons without a recovery page", async () => {
   const api = fakeApi({
     state: async () =>
       state({
@@ -1208,23 +1538,12 @@ test("RecoverySurface shows reasons and jobs without acquire or a manager iframe
   });
   const ctrl = controller(api);
   await ctrl.poll();
-  const html = renderToStaticMarkup(
-    React.createElement(RecoverySurface, { api, env: env({ storage: memoryStorage() }) }),
-  );
-  assert.ok(html.includes(t("zh", "recovery.title")));
-  assert.ok(!html.includes("Take write control"));
-  assert.ok(!html.includes("接管写控制权"));
-  assert.ok(html.includes(t("zh", "app.copyLogs")));
-  assert.ok(html.includes(t("zh", "app.errorDetails")));
-  assert.ok(!html.includes("<iframe"));
   ctrl.setHomeTab("overview");
-  const readyHtml = renderToStaticMarkup(
-    React.createElement(WorkbenchView, {
-      ui: { ...ctrl.getSnapshot(), boot: "ready" },
-      controller: ctrl,
-    }),
-  );
+  const readyHtml = ready(ctrl);
   assert.ok(readyHtml.includes("desktop holds write access"));
+  assert.ok(readyHtml.includes("needs resume"));
+  assert.ok(!readyHtml.includes(t("zh", "recovery.title")));
+  assert.ok(!readyHtml.includes(t("zh", "app.retry")));
 });
 
 test("create validates name and does not submit reserved ids", async () => {
@@ -1263,6 +1582,59 @@ test("host selection of a now-stopped space never starts it or loads a view", as
   assert.equal(await ctrl.selectRunningSpace('alpha'), false); await flush();
   assert.equal(api.calls.some(call => call.method === 'submit' || call.method === 'view'), false);
   assert.equal(ctrl.getSnapshot().pendingId, null);
+});
+
+test("adjacent host selection during first start advances the view without rejecting its own intent", async () => {
+  let current = state({ spaces: [manager, space({ id: "alpha", status: "stopped", generation: 0 })] });
+  let reads = 0, views = 0;
+  const api = fakeApi({ state: async () => { reads++; return current; },
+    view: async () => { views++; return viewOf("alpha"); } });
+  const ctrl = controller(api); await ctrl.poll();
+  ctrl.selectSpace("alpha"); await flush();
+  const readsBeforeSelection = reads;
+  current = state({ spaces: [manager, alpha] });
+  assert.equal(await ctrl.selectRunningSpace("alpha"), true); await flush();
+  assert.equal(reads, readsBeforeSelection + 1); assert.equal(views, 1);
+  assert.equal(api.calls.filter(call => call.method === "submit").length, 1);
+  const child = {}; ctrl.registerIframeWindow("alpha", 1, child);
+  ctrl.handleMessage({ source: child, origin: CHILD_ORIGIN, data: readyMessage("alpha") });
+  assert.equal(ctrl.getSnapshot().selected, "alpha");
+  assert.equal(ctrl.getSnapshot().pendingId, null);
+  assert.equal(ctrl.getSnapshot().viewError, null);
+});
+
+test("same-target selection shares its in-flight authorized view and handshake", async () => {
+  const gate = deferred<WorkbenchViewInfo>(); let views = 0;
+  const api = fakeApi({ view: () => { views++; return gate.promise; } });
+  const ctrl = controller(api); await ctrl.poll();
+  ctrl.selectSpace("alpha");
+  assert.equal(await ctrl.selectRunningSpace("alpha"), true);
+  assert.equal(views, 1);
+  gate.resolve(viewOf("alpha")); await flush();
+  const child = {}; ctrl.registerIframeWindow("alpha", 1, child);
+  ctrl.handleMessage({ source: child, origin: CHILD_ORIGIN, data: readyMessage("alpha") });
+  assert.equal(ctrl.getSnapshot().selected, "alpha");
+  assert.equal(ctrl.getSnapshot().viewError, null);
+});
+
+test("a poll completing first start during the host authority read does not supersede the user choice", async () => {
+  let current = state({ spaces: [manager, space({ id: "alpha", status: "stopped", generation: 0 })] });
+  const api = fakeApi({ state: async () => current });
+  const ctrl = controller(api); await ctrl.poll();
+  ctrl.selectSpace("alpha"); await flush();
+  const gate = deferred<WorkbenchState>();
+  api.state = () => gate.promise;
+  const selecting = ctrl.selectRunningSpace("alpha");
+  current = state({ spaces: [manager, alpha] });
+  api.state = async () => current;
+  await ctrl.poll(); await flush();
+  gate.resolve(current);
+  assert.equal(await selecting, true); await flush();
+  assert.equal(api.calls.filter(call => call.method === "view").length, 1);
+  const child = {}; ctrl.registerIframeWindow("alpha", 1, child);
+  ctrl.handleMessage({ source: child, origin: CHILD_ORIGIN, data: readyMessage("alpha") });
+  assert.equal(ctrl.getSnapshot().selected, "alpha");
+  assert.equal(ctrl.getSnapshot().viewError, null);
 });
 
 test("late host selection state cannot navigate after a newer choice", async () => {
@@ -1371,25 +1743,108 @@ test("create success does not auto-switch; enter is explicit for immediate and a
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "create.done")));
   assert.ok(html.includes(t("zh", "create.enter")));
-  const ctrl2 = controller(
-    fakeApi({
-      state: async () =>
-        state({
-          jobs: [
-            job({
-              kind: "space.create",
-              status: "succeeded",
-              canCancel: false,
-              result: { spaceId: "later" },
-            }),
-          ],
-          spaces: [manager, space({ id: "later", status: "stopped" })],
-        }),
-    }),
-  );
-  await ctrl2.poll();
-  assert.equal(ctrl2.getSnapshot().selected, "home");
-  assert.equal(ctrl2.getSnapshot().createdNotice?.spaceId, "later");
+});
+
+test("a space created from this client is entered directly", async () => {
+  let current = state();
+  const api = fakeApi({
+    state: async () => current,
+    submit: async (command, requestId) => {
+      if (command.kind === "space.create") {
+        const done = job({ id: "create-1", requestId, kind: "space.create", status: "succeeded", canCancel: false, result: { spaceId: "made" } });
+        current = state({ spaces: [manager, alpha, space({ id: "made" })], jobs: [done] });
+        return done;
+      }
+      return job({ id: `job-${requestId}`, requestId, kind: command.kind, status: "succeeded", canCancel: false });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.createSpace({ name: "made" });
+  await flush();
+  await flush();
+  const ui = ctrl.getSnapshot();
+  assert.equal(ui.createdNotice?.spaceId, "made", "the creation is still reported");
+  assert.equal(ui.pendingId, "made", "the created space is opened directly");
+  await becomeReady(ctrl, "made");
+  assert.equal(ctrl.getSnapshot().selected, "made");
+});
+
+test("a create does not take the selection back when the user has moved on", async () => {
+  let current = state();
+  const api = fakeApi({
+    state: async () => current,
+    submit: async (command, requestId) => {
+      if (command.kind === "space.create") {
+        const running = job({ id: "create-1", requestId, kind: "space.create", status: "running", canCancel: true });
+        current = state({ spaces: [manager, alpha, space({ id: "made" })], jobs: [running] });
+        return running;
+      }
+      return job({ id: `job-${requestId}`, requestId, kind: command.kind, status: "succeeded", canCancel: false });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.createSpace({ name: "made" });
+  await flush();
+  // The user goes somewhere else while the create is still running.
+  ctrl.selectHome();
+  current = state({
+    spaces: [manager, alpha, space({ id: "made" })],
+    jobs: [job({ id: "create-1", requestId: "uuid-1", kind: "space.create", status: "succeeded", canCancel: false, result: { spaceId: "made" } })],
+  });
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().selected, "home", "the client does not take the selection back");
+  assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "made");
+});
+
+test("a historical terminal create is recorded without a banner; this page's active job can finish into one", async () => {
+  const historical = job({ id: "old", kind: "space.create", status: "succeeded", canCancel: false, result: { spaceId: "later" } });
+  const live = job({ id: "live", kind: "space.create", status: "running", canCancel: true, result: { spaceId: "watched" } });
+  let current = state({ jobs: [historical, live], spaces: [manager, space({ id: "later", status: "stopped" }), space({ id: "watched", status: "stopped" })] });
+  const ctrl = controller(fakeApi({ state: async () => current }));
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().selected, "home");
+  assert.equal(ctrl.getSnapshot().createdNotice, null);
+  current = state({
+    jobs: [historical, job({ ...live, status: "succeeded", canCancel: false })],
+    spaces: [manager, space({ id: "later", status: "stopped" }), space({ id: "watched", status: "stopped" })],
+  });
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().selected, "home");
+  assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "watched");
+});
+
+test("a submitted active create is watched even when the first following poll is already terminal", async () => {
+  let current = state();
+  const api = fakeApi({
+    state: async () => current,
+    submit: async (_command, requestId) => {
+      const active = job({ id: "fast-create", requestId, kind: "space.create", status: "running" });
+      current = state({ jobs: [job({ ...active, status: "succeeded", result: { spaceId: "fast" } })], spaces: [manager, space({ id: "fast" })] });
+      return active;
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.createSpace({ name: "fast" });
+  await flush();
+  assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "fast");
+  assert.equal(ctrl.getSnapshot().selected, "home");
+});
+
+test("a new service epoch treats already finished creates as history", async () => {
+  const finished = job({ id: "old", kind: "space.create", status: "succeeded", canCancel: false, result: { spaceId: "later" } });
+  let current = state({ jobs: [], spaces: [manager] });
+  const ctrl = controller(fakeApi({ state: async () => current }));
+  await ctrl.poll();
+  ctrl.createSpace({ name: "ok-space", displayName: "Ok" });
+  await flush();
+  assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "created");
+  current = state({ serviceEpoch: "b".repeat(64), jobs: [finished], spaces: [manager, space({ id: "later", status: "stopped" })] });
+  await ctrl.poll();
+  assert.equal(ctrl.getSnapshot().createdNotice, null);
+  assert.equal(ctrl.getSnapshot().selected, "home");
 });
 
 test("deleted spaces do not regain an enter notice from historical creation jobs", async () => {
@@ -1399,9 +1854,6 @@ test("deleted spaces do not regain an enter notice from historical creation jobs
   await ctrl.poll();
   assert.equal(ctrl.getSnapshot().createdNotice, null);
   current = state({ jobs: [completed], spaces: [manager, space({ id: "gone" })] });
-  await ctrl.poll();
-  assert.equal(ctrl.getSnapshot().createdNotice?.spaceId, "gone");
-  current = state({ jobs: [completed] });
   await ctrl.poll();
   assert.equal(ctrl.getSnapshot().createdNotice, null);
 });
@@ -1515,9 +1967,14 @@ test("templates tab lists templates and export without storing archives", async 
   ctrl.setHomeTab("templates");
   await flush();
   const html = ready(ctrl);
+  assert.ok(html.includes('data-templates="true"'), "the templates tab renders the space template page");
   assert.ok(html.includes("Development"));
-  assert.ok(html.includes(t("zh", "share.includeConfig")));
-  assert.ok(html.includes(t("zh", "share.export")));
+  // The export section of the template page carries the share export.
+  ctrl.openBlueprintGenerate("alpha");
+  await flush();
+  const exportHtml = ready(ctrl);
+  assert.ok(exportHtml.includes(t("zh", "share.includeConfig")));
+  assert.ok(exportHtml.includes(t("zh", "share.export")));
   ctrl.exportShare();
   await flush();
   assert.deepEqual(downloads, [{ fileName: "alpha.dshspace", archiveBase64: "YQ==" }]);
@@ -1694,7 +2151,8 @@ test("service shutdown is a preview, not acquire", async () => {
   await flush();
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "settings.shutdown")));
-  assert.ok(html.includes(t("zh", "settings.exit")));
+  assert.ok(html.includes(t("zh", "settings.service.stop")));
+  assert.ok(html.includes(t("zh", "settings.service.danger")));
   assert.ok(!html.includes("controller.acquire"));
   assert.ok(!html.includes("controller.release"));
   ctrl.preview({ kind: "service.shutdown" });
@@ -1734,10 +2192,12 @@ test("applyView rejects missing or non-hex serviceEpoch before minting src", () 
   assert.equal(session.get("alpha")?.status, "failed");
   assert.equal(session.get("alpha")?.error, "unauthorized-view");
   assert.equal(session.get("alpha")?.src, null);
-  const second = session.retry(space({ id: "alpha" }));
+  session.destroy("alpha");
+  const second = session.requestSpace(space({ id: "alpha" }));
   session.applyView("alpha", second.token, { ...viewOf("alpha"), serviceEpoch: "" });
   assert.equal(session.get("alpha")?.status, "failed");
-  const third = session.retry(space({ id: "alpha" }));
+  session.destroy("alpha");
+  const third = session.requestSpace(space({ id: "alpha" }));
   session.applyView("alpha", third.token, viewOf("alpha"));
   assert.equal(session.get("alpha")?.src, viewSrc("alpha"));
 });
@@ -1889,4 +2349,201 @@ test("stop() drops in-flight state and product responses", async () => {
   assert.equal(ctrl.getSnapshot().state, null);
   assert.equal(ctrl.getSnapshot().boot, "loading");
   assert.equal(ctrl.getSnapshot().settingsDraft, null);
+});
+
+test("a failed create keeps the dialog open and shows the reason inside it", async () => {
+  const api = fakeApi({
+    submit: async () => {
+      throw Object.assign(new Error("denied"), { code: "workbench/read-only" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openCreate();
+  ctrl.createSpace({ name: "ok-space" });
+  await flush();
+  const ui = ctrl.getSnapshot();
+  assert.equal(ui.overlay?.type, "create", "the create dialog stays open after a failed submit");
+  assert.equal(ui.requestOrigin, "create");
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-create-error="true"'), "the reason is shown inside the dialog");
+  const reason = t("zh", "app.readOnlyError");
+  assert.ok(html.includes(reason));
+  assert.equal(html.split(reason).length - 1, 1, "the banner at the top does not repeat the reason");
+});
+
+test("a failed create job keeps the dialog open with the reason of the job", async () => {
+  const api = fakeApi({
+    submit: async (command, requestId) =>
+      job({
+        id: `job-${requestId}`,
+        requestId,
+        kind: command.kind,
+        status: "failed",
+        phase: "done",
+        message: "the space could not be created",
+        canCancel: false,
+        error: { code: "workbench/conflict", message: "name in use" },
+      }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openCreate();
+  ctrl.createSpace({ name: "ok-space" });
+  await flush();
+  const ui = ctrl.getSnapshot();
+  assert.equal(ui.overlay?.type, "create", "a failed job keeps the dialog open");
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-create-error="true"'));
+  assert.ok(html.includes(t("zh", "app.conflict")));
+});
+
+test("a failed plugin preview stays in the plugin section of the space detail", async () => {
+  const api = fakeApi({
+    preview: async () => {
+      throw Object.assign(new Error("nope"), { code: "workbench/invalid-input" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.openDetail("alpha");
+  await flush();
+  ctrl.setPluginCatalog("demo", "1.0.0");
+  await flush();
+  ctrl.previewInstallSelected("alpha");
+  await flush();
+  const ui = ctrl.getSnapshot();
+  assert.equal(ui.requestOrigin, "detail:alpha:plugins", "the plugin section owns the failure");
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-inline-error="detail:alpha:plugins"'), "the reason is shown in the plugin section");
+  assert.ok(html.includes(t("zh", "app.invalidInput")));
+  assert.equal(html.split(t("zh", "app.invalidInput")).length - 1, 1, "the banner does not repeat the reason");
+});
+
+test("a failed rename keeps the rename dialog open with the reason inside it", async () => {
+  const api = fakeApi({
+    submit: async () => {
+      throw Object.assign(new Error("denied"), { code: "workbench/conflict" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openRename("alpha");
+  ctrl.updateSpace("alpha", { displayName: "New name" });
+  await flush();
+  const ui = ctrl.getSnapshot();
+  assert.equal(ui.overlay?.type, "rename", "the rename dialog stays open after a failed submit");
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-rename-error="true"'), "the reason is shown inside the dialog");
+  assert.equal(html.split(t("zh", "app.conflict")).length - 1, 1, "shown exactly once");
+});
+
+test("a failure whose owning surface is no longer on screen falls back to the banner", async () => {
+  let reject!: (error: Error) => void;
+  const api = fakeApi({
+    preview: () => new Promise((_resolve, fail) => { reject = fail; }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.openDetail("alpha");
+  await flush();
+  ctrl.preview({ kind: "space.delete", spaceId: "alpha", removeData: false });
+  await flush();
+  assert.equal(ctrl.getSnapshot().requestOrigin, "detail:alpha");
+  // The user moves to another tab while the preview is still in flight.
+  ctrl.setSettingsTab("general");
+  reject(Object.assign(new Error("nope"), { code: "workbench/invalid-input" }));
+  await flush();
+  const html = ready(ctrl);
+  const reason = t("zh", "app.invalidInput");
+  assert.ok(html.includes(reason), "the reason is never dropped");
+  assert.equal(html.split(reason).length - 1, 1, "shown exactly once, in the banner");
+  assert.ok(!html.includes('data-inline-error="detail:alpha"'), "the detail surface is not on screen");
+});
+
+test("a failure from a surface without an inline host stays visible in the banner", async () => {
+  const api = fakeApi({
+    preview: async () => {
+      throw Object.assign(new Error("nope"), { code: "workbench/invalid-input" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.setSettingsTab("snapshots");
+  await flush();
+  ctrl.preview({ kind: "snapshot.create" });
+  await flush();
+  assert.equal(ctrl.getSnapshot().requestOrigin, "backups");
+  const html = ready(ctrl);
+  assert.equal(html.split(t("zh", "app.invalidInput")).length - 1, 1, "the backups failure is shown in the banner");
+});
+
+test("a failed preview keeps the settings surface open so the reason stays in place", async () => {
+  const api = fakeApi({
+    preview: async () => {
+      throw Object.assign(new Error("nope"), { code: "workbench/invalid-input" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.setSettingsTab("spaces");
+  await flush();
+  ctrl.preview({ kind: "space.delete", spaceId: "alpha", removeData: false });
+  await flush();
+  const ui = ctrl.getSnapshot();
+  assert.equal(ui.pendingPlan, null, "the failed preview asks for nothing");
+  assert.equal(ui.overlay?.type, "settings", "the settings surface stays open after a failed preview");
+  assert.equal(ui.requestOrigin, "spaces");
+  const html = ready(ctrl);
+  assert.ok(html.includes(t("zh", "app.invalidInput")));
+});
+
+test("an empty list offers the next step", async () => {
+  const api = fakeApi({
+    state: async () => state({ spaces: [manager] }),
+    snapshots: async () => [],
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.setSettingsTab("spaces");
+  await flush();
+  const spaces = ready(ctrl);
+  assert.ok(spaces.includes('data-empty="spaces"'), "the space list says what is missing");
+  assert.ok(spaces.includes(t("zh", "app.newSpace")), "and offers the next step");
+
+  ctrl.setSettingsTab("snapshots");
+  await flush();
+  const backups = ready(ctrl);
+  assert.ok(backups.includes('data-empty="backups"'));
+  assert.ok(backups.includes(t("zh", "snapshots.create")));
+});
+
+test("a space without plugins points at the plugin search", async () => {
+  const api = fakeApi({ plugins: async () => [] });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.openDetail("alpha");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-empty="plugins"'), "the plugin list says what is missing");
+  assert.ok(html.includes('data-space-plugin-search-focus="true"'), "and points at the search field");
+  assert.ok(html.includes(t("zh", "plugins.search")));
+});
+
+test("the space detail does not show the internal generation and managed rows", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.openDetail("alpha");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-space-detail="true"'));
+  assert.equal(html.includes(t("zh", "detail.id")), true);
+  assert.equal(html.includes(t("zh", "detail.status")), true);
 });

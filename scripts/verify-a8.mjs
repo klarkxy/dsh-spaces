@@ -5,7 +5,8 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 
@@ -48,23 +49,17 @@ function dump() {
   return result.stdout;
 }
 
-function extractRoot(text, id) {
-  const block = text.split(`- id: ${id}`)[1];
-  if (!block) return null;
-  return block.match(/root:\s*(.+)/)?.[1]?.trim() ?? null;
-}
-
+const { assertDumpPatched, PatchVerifyError } = await import(pathToFileURL(join(REPO, "packages/core/lib/index.js")).href);
 const original = readFileSync(PATCH, "utf8");
+const brokenPatch = original.replaceAll("session-persistence-jsonl", "session-persistence-jsonl-BROKEN");
+assert.notEqual(brokenPatch, original, "A8 fixture must contain the session persistence row");
+// Establish the positive control before changing this isolated fixture.
+assertDumpPatched(dump(), "coding");
 try {
-  writeFileSync(PATCH, original.replaceAll("session-persistence-jsonl", "session-persistence-jsonl-BROKEN"));
-  const broken = dump();
-  const sessionRoot = extractRoot(broken, "session-persistence-jsonl") || "";
-  if (sessionRoot.includes("hub/coding/sessions")) {
-    console.error("FAIL  mutated patch still overlays hub/coding/sessions");
-    process.exit(1);
-  }
-  console.log(`PASS  dump-config session root after mutation: ${sessionRoot || "(missing row)"}`);
-  console.log("INFO  ProcessManager.verify would refuse to start coding (NFR2 / A8)");
+  writeFileSync(PATCH, brokenPatch);
+  assert.throws(() => assertDumpPatched(dump(), "coding"), PatchVerifyError,
+    "The production verifier must reject the malformed isolation row");
+  console.log("PASS  production assertDumpPatched rejected the malformed row id");
   console.log("A8 GATE: PASS");
 } finally {
   writeFileSync(PATCH, original);

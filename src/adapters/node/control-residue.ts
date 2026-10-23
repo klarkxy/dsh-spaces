@@ -27,13 +27,28 @@ export interface VerifiedHomeToolchain {
 export type HomeToolchainInspect =
   | { kind: "absent" }
   | { kind: "invalid"; reason: string }
+  | StaleHomeToolchain
   | VerifiedHomeToolchain;
+
+/**
+ * A complete record whose bound DSH binary was replaced by a host update (or
+ * whose recorded Node executable moved). This is a superseded host binding,
+ * not interrupted maintenance: its directories are still authoritative and the
+ * next Supervisor start binds the current host CLI and rewrites the record.
+ */
+export interface StaleHomeToolchain {
+  kind: "stale";
+  reason: string;
+  runtimeRoot?: string;
+  snapshotRoot?: string;
+  toolchainRoot?: string;
+}
 
 /** Any interrupted Home maintenance evidence blocks a new writer, even when unreadable. */
 export function hasUnfinishedMaintenance(home: string, snapshotRoot?: string): boolean {
   const toolchain = inspectHomeToolchain(home);
   if (toolchain.kind === "invalid") return true;
-  const root = (toolchain.kind === "verified" ? toolchain.snapshotRoot : undefined) ??
+  const root = (toolchain.kind === "verified" || toolchain.kind === "stale" ? toolchain.snapshotRoot : undefined) ??
     snapshotRoot ?? join(resolve(home, ".."), `${basename(home)}-snapshots`);
   try {
     const stat = lstatSync(root);
@@ -104,35 +119,34 @@ export function inspectHomeToolchain(home: string): HomeToolchainInspect {
   if (typeof row.dshVersion !== "string" || !row.dshVersion.trim()) {
     return { kind: "invalid", reason: "The Home toolchain record is missing a verified DSH version." };
   }
-  const probed = readRuntimeRef(row.bin);
-  if (!probed) {
-    return {
-      kind: "invalid",
-      reason: "The Home toolchain binary could not be verified from files next to it.",
-    };
-  }
-  if (probed.version !== row.dshVersion) {
-    return {
-      kind: "invalid",
-      reason: "The Home toolchain binary version does not match the recorded DSH version.",
-    };
-  }
-  if (!existsSync(row.nodeExe)) {
-    return { kind: "invalid", reason: "The Home toolchain Node executable is missing." };
-  }
   for (const key of ["runtimeRoot", "snapshotRoot", "toolchainRoot"]) {
     if (row[key] !== undefined && (typeof row[key] !== "string" || !isAbsolute(row[key] as string))) {
       return { kind: "invalid", reason: "The Home resource record contains an invalid directory." };
     }
+  }
+  const roots = {
+    runtimeRoot: row.runtimeRoot as string | undefined,
+    snapshotRoot: row.snapshotRoot as string | undefined,
+    toolchainRoot: row.toolchainRoot as string | undefined,
+  };
+  // The record is complete. A binary or Node executable that no longer matches
+  // means a host update superseded the binding; that is not maintenance.
+  const probed = readRuntimeRef(row.bin);
+  if (!probed) {
+    return { kind: "stale", reason: "The bound DSH binary is no longer present; a host update replaced it.", ...roots };
+  }
+  if (probed.version !== row.dshVersion) {
+    return { kind: "stale", reason: "The bound DSH binary version changed after a host update.", ...roots };
+  }
+  if (!existsSync(row.nodeExe)) {
+    return { kind: "stale", reason: "The bound Node executable is no longer present.", ...roots };
   }
   return {
     kind: "verified",
     bin: probed.bin,
     nodeExe: row.nodeExe,
     dshVersion: probed.version,
-    runtimeRoot: row.runtimeRoot as string | undefined,
-    snapshotRoot: row.snapshotRoot as string | undefined,
-    toolchainRoot: row.toolchainRoot as string | undefined,
+    ...roots,
   };
 }
 

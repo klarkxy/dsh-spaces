@@ -67,6 +67,41 @@ function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): P
   });
 }
 
+test("DOM: native settings creation entry is clickable and reveals its space", { timeout: 120_000 }, async (t) => {
+  const bundled = await esbuild.build({
+    absWorkingDir: root, entryPoints: [join(audit, "host.tsx")], bundle: true,
+    write: false, format: "iife", platform: "browser", jsx: "automatic",
+  });
+  const childHtml = readFileSync(join(audit, "child.html"), "utf8");
+  const child = await listen((_req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end(childHtml); });
+  t.after(() => child.close());
+  let supervisorUrl = "";
+  const supervisor = await listen((req, res) => {
+    const url = new URL(req.url ?? "/", supervisorUrl || "http://127.0.0.1");
+    if (routeView(url, child.url, res)) return;
+    if (url.pathname === "/host.js") {
+      res.writeHead(200, { "content-type": "text/javascript" }); res.end(bundled.outputFiles[0]?.text ?? ""); return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><html><head><style>html,body,#root{height:100%;margin:0}</style></head><body><div id="root"></div><script>window.__WB = ${JSON.stringify({ supervisor: supervisorUrl, child: child.url, nativeSettingsControls: true })};</script><script src="/host.js"></script></body></html>`);
+  });
+  supervisorUrl = supervisor.url;
+  t.after(() => supervisor.close());
+  const require = createRequire(join(playwrightRoot, "index.js"));
+  const { chromium } = require("playwright") as { chromium: Parameters<typeof launchChromium>[0] };
+  const browser = await launchChromium(chromium); t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.goto(supervisor.url);
+  await page.getByRole("button", { name: "新建空间", exact: true }).click();
+  const form = page.getByRole("form", { name: "创建空间", exact: true });
+  await form.getByRole("textbox", { name: "名称", exact: true }).fill("native-created");
+  await form.getByRole("button", { name: "创建", exact: true }).click();
+  // The created space is entered directly; the settings page releases it.
+  await page.locator('iframe[data-space-id="alpha"][data-visible="true"]').waitFor({ state: "visible" });
+  assert.equal(await page.locator(".dsh-wb-settings-page").count(), 0, "the settings page must release the selected space surface");
+  assert.equal(await page.frameLocator('iframe[data-space-id="alpha"]').locator("textarea").isVisible(), true);
+});
+
 test("DOM: home navigation keeps the same iframe node and textarea draft", { timeout: 120_000 }, async (t) => {
   const bundled = await esbuild.build({
     absWorkingDir: root,
@@ -135,7 +170,8 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   await browserPage.getByRole('button', { name: 'Light', exact: true }).click();
   assert.equal(await browserPage.locator('[data-settings-dialog]').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
   await browserPage.getByRole('button', { name: '中文', exact: true }).click();
-  await browserPage.getByRole('tab', { name: '高级', exact: true }).click();
+  await browserPage.getByRole('button', { name: '维护', exact: true }).click();
+  await browserPage.getByRole('tab', { name: '服务', exact: true }).click();
   await browserPage.setViewportSize({ width: 390, height: 520 });
   await browserPage.locator('[data-settings-home]').waitFor({ state: 'visible' });
   await browserPage.locator('.dsh-wb-settings-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
@@ -231,7 +267,8 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "高级" }).click();
+  await page.getByRole("button", { name: "维护", exact: true }).click();
+  await page.getByRole("tab", { name: "服务" }).click();
   await page.locator("[data-settings-home]").waitFor({ state: "visible", timeout: 15_000 });
   const port = await page.locator("[data-settings-home] input[type=\"number\"]").first().inputValue();
   assert.equal(port, "3100");
@@ -243,25 +280,58 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   });
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "模板" }).click();
+  await page.getByRole("tab", { name: "空间模板" }).click();
   await page.locator("[data-templates]").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByRole("tab", { name: "导出", exact: true }).click();
   await page.getByRole("button", { name: "导出分享" }).click();
   const downloads = await page.evaluate(
     () => (window as Window & { __WB_DOWNLOADS?: Array<{ fileName: string }> }).__WB_DOWNLOADS ?? [],
   );
   assert.deepEqual(downloads, [{ fileName: "alpha.dshspace" }]);
 
-  await page.getByRole("tab", { name: "插件" }).click();
-  await page.locator("[data-catalog]").waitFor({ state: "visible", timeout: 15_000 });
-  await page.locator("[data-library]").waitFor({ state: "visible", timeout: 15_000 });
+  // The plugin catalogue, the published versions and the upgrade belong to the
+  // plugin section of the space detail page now.
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator("[data-space-section=\"plugins\"]").waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator("[data-space-plugin-entry=\"catalog.demo\"]").click();
+  await page.waitForFunction(() => {
+    const select = document.querySelector<HTMLSelectElement>("[data-space-plugin-versions=\"true\"]");
+    return Boolean(select && select.options.length > 0);
+  });
+  assert.equal(
+    await page.locator("[data-space-plugin-versions=\"true\"]").inputValue(),
+    "2.0.0",
+    "the version list defaults to the newest published version",
+  );
   await page.getByRole("button", { name: "刷新目录" }).click();
+  await page.locator("[data-space-plugin-upgrade=\"catalog.demo\"]").waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator("[data-space-plugin-upgrade=\"catalog.demo\"]").click();
+  await page.waitForFunction(() =>
+    (window as Window & { __WB_CALLS?: Array<{ method: string; arg?: { kind?: string } }> }).__WB_CALLS?.some(
+      (call) => call.method === "preview" && (call.arg as { kind?: string } | undefined)?.kind === "plugin.install",
+    ) === true,
+  );
+  const upgrade = (await page.evaluate(
+    () => (window as Window & { __WB_CALLS?: Array<{ method: string; arg?: unknown }> }).__WB_CALLS ?? [],
+  )).find((call) => call.method === "preview" && (call.arg as { kind?: string })?.kind === "plugin.install");
+  assert.deepEqual(upgrade?.arg, {
+    kind: "plugin.install",
+    spaceIds: ["alpha"],
+    catalogId: "demo",
+    version: "2.0.0",
+  });
   const calls = (await page.evaluate(
     () => (window as Window & { __WB_CALLS?: Array<{ method: string; arg?: { method?: string; kind?: string } }> }).__WB_CALLS ?? [],
   )) as Array<{ method: string; arg?: { method?: string; kind?: string } }>;
   assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "settings"));
+  assert.ok(calls.some((item) => item.method === "submit" && item.arg?.kind === "settings.update"),
+    "clicking 保存服务设置 must submit settings.update through the form handler");
   assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "templates"));
   assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "catalog"));
   assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "library"));
+  assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "plugin.versions"),
+    "the plugin section reads the published versions");
   assert.ok(calls.some((item) => item.method === "submit" && item.arg?.kind === "catalog.refresh"));
   assert.ok(calls.some((item) => item.method === "product" && item.arg?.method === "share.export"));
 });
@@ -327,9 +397,9 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
     );
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "空间" }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "诊断" }).click();
-  const select = page.locator("select");
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  const select = page.locator("[data-dsh-target=\"true\"]");
   await select.waitFor({ state: "visible", timeout: 15_000 });
   await select.selectOption("0.2.0");
   await page.getByRole("button", { name: "预览切换" }).click();
@@ -338,7 +408,8 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   await page.getByRole("button", { name: "取消" }).click();
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "运行时" }).click();
+  await page.getByRole("button", { name: "维护", exact: true }).click();
+  await page.getByRole("tab", { name: "DSH 版本" }).click();
   assert.equal(await page.getByRole("button", { name: "预览安装", exact: true }).count(), 0);
   await page.getByRole("button", { name: "删除" }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
@@ -348,21 +419,29 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   ]);
   await page.getByRole("button", { name: "取消" }).click();
 
+  // D1: a stop runs from its preview, so no confirmation dialog appears.
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "空间" }).click();
-  const alphaRow = page.locator(".dsh-wb-space-row", { hasText: "Alpha" });
-  await alphaRow.getByRole("button", { name: "停止" }).click();
-  await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  const detail = page.locator("[data-space-detail=\"true\"]");
+  await detail.waitFor({ state: "visible", timeout: 15_000 });
+  await detail.getByRole("button", { name: "停止", exact: true }).click();
+  await page.waitForTimeout(500);
   assert.deepEqual(await previewCalls(), [
     { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
     { kind: "runtime.remove", version: "0.3.0" },
     { kind: "space.stop", spaceId: "alpha" },
   ]);
-  await page.getByRole("button", { name: "取消" }).click();
+  assert.equal(await page.getByRole("button", { name: "取消", exact: true }).count(), 0, "a plain stop does not ask again");
 
+  // A deletion still asks. The auto-confirmed stop closed the settings
+  // surface, so open it again and wait for the leaving copy of the detail
+  // page to unmount before aiming at the danger zone.
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "空间" }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "删除" }).click();
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.waitForFunction(() => document.querySelectorAll("[data-space-detail=\"true\"]").length === 1);
+  await page.locator("[data-space-section=\"danger\"]").getByRole("button", { name: "删除", exact: true }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
   assert.deepEqual(await previewCalls(), [
     { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
@@ -415,14 +494,14 @@ test("DOM: delayed runtime candidates derive a usable target and keep selections
         }, pin);
         await page.getByRole("button", { name: "设置", exact: true }).click();
         await page.getByRole("tab", { name: "空间", exact: true }).click();
-        await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "诊断", exact: true }).click();
+        await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…", exact: true }).click();
         await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
-        const select = page.locator("select");
+        const select = page.locator("[data-dsh-target=\"true\"]");
         const preview = page.getByRole("button", { name: "预览切换", exact: true });
         assert.equal(await select.locator("option").count(), 0);
         assert.equal(await preview.isDisabled(), true);
         await page.evaluate((rows) => window.__WB_RESOLVE_RUNTIMES!(rows), [runtime("0.2.0-rc.2")]);
-        await page.waitForFunction(() => document.querySelector<HTMLSelectElement>(".dsh-wb-dialog select")?.disabled === false);
+        await page.waitForFunction(() => document.querySelector<HTMLSelectElement>("[data-dsh-target=\"true\"]")?.disabled === false);
         assert.equal(await select.inputValue(), "0.2.0-rc.2");
         assert.equal(await preview.isDisabled(), false, "the displayed single candidate must enable preview without input or reopening");
         await preview.click();
@@ -438,7 +517,7 @@ test("DOM: delayed runtime candidates derive a usable target and keep selections
           await page.evaluate(() => { void window.__WB_CONTROLLER!.loadRuntimes(); });
           await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
           await page.evaluate((rows) => window.__WB_RESOLVE_RUNTIMES!(rows), versions.map(runtime));
-          await page.waitForFunction(() => document.querySelector<HTMLSelectElement>(".dsh-wb-dialog select")?.disabled === false);
+          await page.waitForFunction(() => document.querySelector<HTMLSelectElement>("[data-dsh-target=\"true\"]")?.disabled === false);
         };
         await refresh(["0.2.0-rc.2", "0.3.0"]);
         await select.selectOption("0.3.0");

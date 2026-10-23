@@ -110,7 +110,8 @@ export function findNodeDir(root = toolchainRoot()): string | undefined {
   const nested = join(root, "node");
   if (!existsSync(nested)) return undefined;
   for (const name of readdirSync(nested)) {
-    if (!/^node-v26\.\d+\.\d+-/.test(name)) continue;
+    const version = /^node-v(\d+\.\d+\.\d+)-/.exec(name)?.[1];
+    if (!version || !isSupportedNodeVersion(version)) continue;
     const dir = join(nested, name);
     if (existsSync(join(dir, "node.exe")) || existsSync(join(dir, "bin", "node"))) return dir;
   }
@@ -317,7 +318,7 @@ function writePnpmShim(nodePath: string, pnpmJs: string): void {
 export async function ensureNode(onLine?: (line: string) => void): Promise<string> {
   const existing = nodeExecutable();
   if (existing) {
-    if (!await supportsCliEntry(existing)) throw new Error("The managed runtime is unavailable or unsupported. DSH Spaces requires Node.js 26.x.");
+    if (!await supportsCliEntry(existing)) throw new Error("The managed runtime is unavailable or unsupported. DSH Spaces requires Node.js 24.21+ (24.x) or 26.x.");
     return existing;
   }
   const source = currentPackageSource();

@@ -15,7 +15,7 @@ import { SpacesCredentialsProvider, type SharedCredentialLookup } from "../../pa
 import type { LlmBridgeStatus } from "../../packages/llm-bridge/src/settings-provider.ts";
 import { AGENT_DEFAULT_MODEL_NAMESPACE, LLM_PI_AI_NAMESPACE } from "../../packages/llm-bridge/src/settings-provider.ts";
 
-export const PINNED_DSH_PACKAGE_VERSION = "0.2.0-rc.2";
+export const PINNED_DSH_PACKAGE_VERSION = "0.2.1-rc.2";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const themePlugin = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "llm-theme-plugin.ts")).href;

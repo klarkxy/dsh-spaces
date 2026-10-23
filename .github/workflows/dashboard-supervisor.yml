@@ -42,7 +42,7 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
 
       - run: npm run build:blueprint
-      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.2.0-rc.2 pnpm@10.15.0
+      - run: npm install --prefix .sandbox/dashboard-sdk --ignore-scripts --no-audit --no-fund --fetch-retries=0 @deepseek-ai/dsh@0.2.1-rc.2 pnpm@10.15.0
       - run: node scripts/build-spaces.mjs && node scripts/build-dashboard-plugin.mjs
       - run: npx --no-install playwright install --with-deps chromium
       - name: Real Supervisor plans, run ownership and two installed DSH Hosts

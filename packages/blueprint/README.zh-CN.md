@@ -1,6 +1,6 @@
 # 蓝图
 
-本插件现由 [dsh-spaces/packages/blueprint](https://github.com/klarkxy/dsh-spaces/tree/main/packages/blueprint) 维护，面向 DSH **0.2.0-rc.2 及以后版本**，仍可独立安装。Spaces 依赖蓝图协议；蓝图插件无需安装 Spaces。
+本插件现由 [dsh-spaces/packages/blueprint](https://github.com/klarkxy/dsh-spaces/tree/main/packages/blueprint) 维护，面向 DSH **0.2.0-rc.2 及以后版本**，当前使用 **0.2.1-rc.2** 构建，仍可独立安装。Spaces 依赖蓝图协议；蓝图插件无需安装 Spaces。
 
 [English](README.md)
 
@@ -80,7 +80,7 @@ npm pack
 dsh plugin --profile <目标profile> add <归档绝对路径>
 ```
 
-官方包由宿主运行时提供：本插件只把它们声明为可选 peer 并使用开放下界，不捆绑自己的副本。当前源码对齐本机官方 CLI `0.2.0-rc.2`；此前 `0.1.7-rc.2` 的历史证据单独保留在 [ACCEPTANCE.md](ACCEPTANCE.md)。测试使用隔离目录，不会碰真实 profile；语法和离线契约检查不等于真实宿主验收。
+官方包由宿主运行时提供：本插件只把它们声明为可选 peer 并使用开放下界，不捆绑自己的副本。当前源码对齐本机官方 CLI `0.2.1-rc.2`；此前 `0.1.7-rc.2` 的历史证据单独保留在 [ACCEPTANCE.md](ACCEPTANCE.md)。测试使用隔离目录，不会碰真实 profile；语法和离线契约检查不等于真实宿主验收。
 
 ## 供 Spaces 与其它工具使用的协议接口
 

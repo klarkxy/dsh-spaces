@@ -285,13 +285,17 @@ function assertShareManifest(value: unknown): SpaceShareManifest {
 }
 
 export function assertSafeShareArchive(archive: Buffer, maxBytes = MAX_WORKBENCH_SHARE_BYTES): void {
+  readSafeShareArchive(archive, maxBytes);
+}
+
+function readSafeShareArchive(archive: Buffer, maxBytes = MAX_WORKBENCH_SHARE_BYTES) {
   if (!Buffer.isBuffer(archive) || archive.length === 0) {
     throw new Error("The space share archive is not a zip.");
   }
   if (archive.length > maxBytes) {
     throw new Error("The space share archive is too large.");
   }
-  const unpacked = unpackZip(archive);
+  const unpacked = unpackZip(archive, maxBytes);
   let total = 0;
   for (const entry of unpacked) {
     const name = entry.name.replaceAll("\\", "/");
@@ -313,6 +317,7 @@ export function assertSafeShareArchive(archive: Buffer, maxBytes = MAX_WORKBENCH
       throw new Error("The space share archive is too large.");
     }
   }
+  return unpacked;
 }
 
 export function parseSpaceShare(archive: Buffer): {
@@ -321,8 +326,7 @@ export function parseSpaceShare(archive: Buffer): {
   patch?: string;
   llm?: LlmShareManifest;
 } {
-  assertSafeShareArchive(archive);
-  const unpacked = unpackZip(archive);
+  const unpacked = readSafeShareArchive(archive);
   assertShareSecretFree(unpacked);
   const files = new Map(unpacked.map((entry) => [entry.name, entry.data]));
   const manifestRaw = files.get("manifest.json");

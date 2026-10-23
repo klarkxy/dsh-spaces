@@ -6,18 +6,32 @@ import type {
   WorkbenchGuideRole,
   WorkbenchInitializeResult,
   WorkbenchReturnTarget,
+  WorkbenchServiceRestartPreview,
 } from "../types";
 import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import { WORKBENCH_PUBLIC_ERROR } from "./remote-errors";
 import type { WorkbenchHostRuntime } from "./runtime";
 
-/** Read-only bootstrap / return-to-workbench Remote. Registered for every profile. */
+/** Presentation and launch Remote; manual service restart is restricted to the confirmed Desktop. */
 export class WorkbenchGuideHost extends TypertRemoteService {
   constructor(
     ctx: Context,
     private readonly runtime: WorkbenchHostRuntime,
   ) {
     super(ctx, "workbenchGuide");
+  }
+
+  @Remote("previewServiceRestart")
+  async previewServiceRestart(): Promise<WorkbenchServiceRestartPreview> {
+    try { return await this.runtime.previewServiceRestart(); }
+    catch (error) { throw new RemoteError("workbench/unavailable", reportedOrFallback(error instanceof Error ? error.message : undefined, "The restart preview is unavailable."), {}); }
+  }
+
+  @Remote("restartService")
+  async restartService(confirmationId: string): Promise<WorkbenchBootstrapResult> {
+    if (typeof confirmationId !== "string" || !/^[a-f0-9]{64}$/.test(confirmationId)) throw new RemoteError("workbench/invalid-input", "A valid restart confirmation is required.", {});
+    try { return await this.runtime.restartService(confirmationId); }
+    catch (error) { throw new RemoteError("workbench/unavailable", reportedOrFallback(error instanceof Error ? error.message : undefined, "The manual service restart failed."), {}); }
   }
 
   @Remote("role")

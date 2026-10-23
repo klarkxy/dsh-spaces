@@ -71,6 +71,8 @@ export function applyIsolationPatch(original: string, name: string, source: stri
   const storageRows = rowsWithId(seq, STORAGE_ROW_ID);
   const settingsRows = rowsWithId(seq, SETTINGS_ROW_ID);
   const credentialsRows = rowsWithId(seq, CREDENTIALS_ROW_ID);
+  const attachmentRows = rowsWithId(seq, 'attachment-local');
+  if(attachmentRows.length>1)throw new PatchVerifyError(duplicateRowMessage('attachment-local',source));
   if (sessionRows.length > 1) {
     throw new PatchVerifyError(duplicateRowMessage(SESSION_ROW_ID, source));
   }
@@ -86,6 +88,7 @@ export function applyIsolationPatch(original: string, name: string, source: stri
 
   upsertJsConfigField(seq, sessionRows[0], SESSION_ROW_ID, "root", isolationExpr(name, "sessions"));
   upsertJsConfigField(seq, storageRows[0], STORAGE_ROW_ID, "root", isolationExpr(name, "storages"));
+  upsertJsConfigField(seq,attachmentRows[0],'attachment-local','dshHome',`dshHomePath('hub/${name}')`);
   // Alpha settings persist in the active profile patch through ConfigEditor.
   // The removed file provider's path must not remain as a false isolation claim.
   const settingsConfig = settingsRows[0]?.get("config", true);

@@ -1,10 +1,15 @@
-import React, { createElement, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import React, { createElement, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { Context } from '@deepseek-ai/cordis';
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client';
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import { readViewHint } from '../../view-bridge/src/env';
 import { BROWSER_HIDE, BROWSER_PRESENT, BROWSER_RESULT, type BrowserChildRequest, type BrowserGuestResult } from '../../../src/shared/browser-guest';
+import { MotionRoot } from '../../../src/shared/ui/index.js';
 import { displayBrowserFailure, listTabs, openURL, observe, type Tab } from './remote-client';
+import { BrowserAddressBar } from './ui/address-bar.js';
+import { BrowserFailurePanel } from './ui/failure-panel.js';
+import { BrowserTabStrip } from './ui/tab-strip.js';
+import { BROWSER_CSS } from './ui/styles.js';
 
 type BrowserConnection = Pick<ConnectionHandle, 'rpc'>;
 
@@ -29,6 +34,8 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [booting, setBooting] = useState(true);
   const pageRef = useRef<HTMLElement>(null);
   const seenCount = useRef(0);
   const localVersion = useRef(0);
@@ -40,13 +47,13 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
     if (!nativeDesktop || !view || !active?.requestedUrl) return;
     const pageUrl = active.requestedUrl;
     let disposed = false;
-    let pending = false;
+    let inFlight = false;
     let stopped = false;
     const present = async (): Promise<void> => {
-      if (disposed || pending || stopped || !pageRef.current) return;
+      if (disposed || inFlight || stopped || !pageRef.current) return;
       const rect = pageRef.current.getBoundingClientRect();
       if (rect.width < 1 || rect.height < 1) return;
-      pending = true;
+      inFlight = true;
       try {
         const result = await postBrowserRequest({ source: BROWSER_PRESENT, requestId: crypto.randomUUID(),
           spaceId: view.spaceId, generation: view.generation, channel: view.channel,
@@ -58,7 +65,7 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
         const next = await observe(connection, result.observations);
         if (!disposed) { localVersion.current++; setTabs(previous => mergeTabSnapshots(previous, next)); setError(null); }
       } catch { if (!disposed) { stopped = true; setError('Native Browser navigation is unavailable.'); } }
-      finally { pending = false; }
+      finally { inFlight = false; }
     };
     void present();
     const timer = window.setInterval(() => { void present(); }, 750);
@@ -81,11 +88,11 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
 
   useEffect(() => {
     let disposed = false;
-    let pending = false;
+    let inFlight = false;
     let failed = false;
     const load = async (): Promise<void> => {
-      if (pending || failed) return;
-      pending = true;
+      if (inFlight || failed) return;
+      inFlight = true;
       const version = localVersion.current;
       try {
         const next = await listTabs(connection);
@@ -96,7 +103,7 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
         setSelected(previous => arrived ? next.at(-1)?.id ?? null : previous ?? next[0]?.id ?? null);
       } catch (error) {
         if (!disposed) { failed = true; setError(displayBrowserFailure(error, 'Browser tabs are unavailable.')); }
-      } finally { pending = false; }
+      } finally { inFlight = false; setBooting(false); }
     };
     void load();
     const timer = window.setInterval(() => { void load(); }, 1000);
@@ -104,6 +111,7 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
   }, [connection]);
 
   const open = async (value: string): Promise<void> => {
+    setPending(true);
     try {
       const tab = await openURL(connection, value);
       localVersion.current++;
@@ -111,30 +119,26 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
       setSelected(tab.id);
       setDraft(''); setError(null);
     } catch (error) { setError(displayBrowserFailure(error, 'That URL could not be opened.')); }
+    finally { setPending(false); }
   };
-  return <div style={appStyle} data-spaces-browser-root="true">
-    <nav aria-label="Browser tabs" style={tabsStyle}>
-      {tabs.map(tab => <button type="button" key={tab.id} onClick={() => setSelected(tab.id)}
-        aria-current={tab.id === selected ? 'page' : undefined} style={tabStyle(tab.id === selected)}>
-        {tab.title || (tab.url ? new URL(tab.url).hostname : 'Home')}
-      </button>)}
-    </nav>
-    <form style={addressStyle} onSubmit={event => { event.preventDefault(); void open(draft); }}>
-      <input aria-label="Address" value={draft} onChange={event => setDraft(event.currentTarget.value)}
-        placeholder={active?.url ?? 'Enter a website address'} style={inputStyle} />
-      <button type="submit" style={buttonStyle}>Open new tab</button>
-      {active?.url && <a href={active.url} target="_blank" rel="noopener noreferrer" style={linkStyle}>Open externally</a>}
-    </form>
-    {!nativeDesktop && active?.requestedUrl && <p role="note" style={hintStyle}>Web preview: some sites do not allow embedded pages. If the page is blank or shows a refusal, use Open externally. The Browser cannot determine the cause or track links and redirects inside a cross-origin page.</p>}
-    {error && <p role="alert" style={errorStyle}>{error}</p>}
-    <main ref={pageRef} style={pageStyle}>
-      {!nativeDesktop && tabs.map(tab => tab.requestedUrl && <iframe key={tab.id} title={tab.title || tab.url || tab.requestedUrl} src={tab.requestedUrl}
-        hidden={tab.id !== selected} style={frameStyle} referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox" />)}
-      {nativeDesktop && active?.requestedUrl && !error && <div style={homeStyle}>Opening native Browser page…</div>}
-      {!active?.requestedUrl && <div style={homeStyle}>Enter an address to open a Browser tab.</div>}
-    </main>
-  </div>;
+  return <MotionRoot>
+    <div className="dsh-spaces-browser dsh-ui" data-spaces-browser-root="true">
+      <style>{BROWSER_CSS}</style>
+      <BrowserTabStrip tabs={tabs} selected={selected} onSelect={setSelected} />
+      <BrowserAddressBar value={draft} placeholder={active?.url ?? 'Enter a website address'}
+        externalUrl={active?.url ?? null} pending={pending || booting}
+        onChange={setDraft} onSubmit={() => { void open(draft); }} />
+      {!nativeDesktop && active?.requestedUrl && <p role="note" className="dsh-browser-hint">Web preview: some sites do not allow embedded pages. If the page is blank or shows a refusal, use Open externally. The Browser cannot determine the cause or track links and redirects inside a cross-origin page.</p>}
+      {error && <BrowserFailurePanel message={error} />}
+      <main ref={pageRef} className="dsh-browser-page">
+        {!nativeDesktop && tabs.map(tab => tab.requestedUrl && <iframe key={tab.id} title={tab.title || tab.url || tab.requestedUrl} src={tab.requestedUrl}
+          hidden={tab.id !== selected} className="dsh-browser-frame" referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox" />)}
+        {nativeDesktop && active?.requestedUrl && !error && <div className="dsh-browser-home">Opening native Browser page…</div>}
+        {!active?.requestedUrl && <div className="dsh-browser-home">Enter an address to open a Browser tab.</div>}
+      </main>
+    </div>
+  </MotionRoot>;
 }
 
 function postBrowserRequest(request: BrowserChildRequest, parentOrigin: string): Promise<BrowserGuestResult | null> {
@@ -153,16 +157,3 @@ function postBrowserRequest(request: BrowserChildRequest, parentOrigin: string):
     window.parent.postMessage(request, parentOrigin);
   });
 }
-
-const appStyle: CSSProperties = { display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', background: '#f6f7f9', color: '#20242a', font: '14px system-ui,sans-serif' };
-const tabsStyle: CSSProperties = { display: 'flex', gap: 4, padding: '8px 10px 0', overflowX: 'auto', flexShrink: 0 };
-const tabStyle = (active: boolean): CSSProperties => ({ border: '1px solid #d9dce2', background: active ? '#fff' : '#e9ebef', color: '#20242a', font: 'inherit', borderBottom: 0, borderRadius: '8px 8px 0 0', padding: '8px 12px', whiteSpace: 'nowrap', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' });
-const addressStyle: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 10, background: '#fff', borderBottom: '1px solid #d9dce2', flexShrink: 0 };
-const buttonStyle: CSSProperties = { color: '#20242a', background: '#fff', border: '1px solid #d9dce2', padding: '8px 12px', font: 'inherit' };
-const linkStyle: CSSProperties = { color: '#2458a6' };
-const inputStyle: CSSProperties = { flex: 1, minWidth: 0, padding: '8px 10px', color: '#20242a', background: '#fff', border: '1px solid #d9dce2', font: 'inherit' };
-const errorStyle: CSSProperties = { color: '#a00', margin: '6px 10px' };
-const hintStyle: CSSProperties = { color: '#5f6874', fontSize: 12, margin: '6px 10px', lineHeight: 1.5, flexShrink: 0 };
-const pageStyle: CSSProperties = { position: 'relative', flex: 1, minHeight: 0 };
-const frameStyle: CSSProperties = { border: 0, width: '100%', height: '100%', background: '#fff' };
-const homeStyle: CSSProperties = { padding: 32, textAlign: 'center' };

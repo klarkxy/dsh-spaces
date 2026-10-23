@@ -1,40 +1,38 @@
 #!/usr/bin/env node
 /**
- * Developer runtime: recreate a disposable Home, pack this checkout's plugin,
- * install it into official `web` with `dsh plugin add`, then start `dsh web`.
+ * Developer runtime: build and link this checkout into an isolated custom
+ * profile, then start its official Web app. Existing development data stays.
  *
  * Does not write the real ~/.dsh. Does not click 初始化 Spaces — that stays
  * an explicit action in the browser.
  *
- *   node scripts/dev-dsh-web.mjs
+ *   node scripts/dev-dsh-web.mjs [--link-only]
  *
  * Env: DSH_TEST_BIN / DSH_TEST_CLI_BIN, DSH_TEST_PNPM_CJS,
- * DSH_SPACES_WEB_HOME, DSH_PACK_DEST.
+ * DSH_SPACES_WEB_HOME.
  */
 
 import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
-  rmSync,
+  realpathSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertNoSpaces, defaultPackDest } from "./pack-spaces-plugin.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHARED_SANDBOX_HOME = join(REPO, ".sandbox", "dsh-home");
-const DEFAULT_HOME = join(REPO, ".sandbox", "dsh-web-home");
+const DEFAULT_HOME = join(REPO, ".sandbox", "dsh-link-home");
 const REAL_HOME = join(homedir(), ".dsh");
-const WEB_PROFILE = "web";
+export const DEV_PROFILE = "spaces-dev";
 const CANONICAL_NAME = "@dsh-spaces/plugin";
 const BUILD_SCRIPT = join(REPO, "scripts", "build-spaces.mjs");
-const PACK_SCRIPT = join(REPO, "scripts", "pack-spaces-plugin.mjs");
-const DSH_DLX_SPEC = "@deepseek-ai/dsh@0.2.0-rc.2";
+const DSH_DLX_SPEC = "@deepseek-ai/dsh@0.2.1-rc.2";
 const BUILD_MS = 180_000;
-const PACK_MS = 120_000;
 const DUMP_MS = 300_000;
 const PLUGIN_MS = 300_000;
 
@@ -52,6 +50,13 @@ function refuseRealHome(home) {
   if (samePath(resolved, real) || resolved.toLowerCase().startsWith(real.toLowerCase() + sep)) {
     throw new Error("refusing real ~/.dsh");
   }
+  // Do not allow an existing junction/alias to redirect development writes.
+  for (let path = resolved; ; path = dirname(path)) {
+    if (existsSync(path) && (lstatSync(path).isSymbolicLink() || !samePath(realpathSync(path), path))) {
+      throw new Error(`dev Home must not traverse a symlink or junction: ${path}`);
+    }
+    if (dirname(path) === path) break;
+  }
 }
 
 function resolveHome() {
@@ -63,11 +68,16 @@ function resolveHome() {
       "dev:web Home must not be the shared sandbox (.sandbox/dsh-home). Unset DSH_SPACES_WEB_HOME or point it at a separate directory.",
     );
   }
+  refuseRealHome(join(home, "profiles", DEV_PROFILE));
   return home;
 }
 
 function npmGlobalRoot() {
-  const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["root", "-g"], {
+  // Windows .cmd shims cannot be passed directly to spawnSync without a shell.
+  const npmCli = [process.env.npm_execpath, join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+    .find(path => path && existsSync(path));
+  if (!npmCli && process.platform === "win32") return "";
+  const result = spawnSync(npmCli ? process.execPath : "npm", npmCli ? [npmCli, "root", "-g"] : ["root", "-g"], {
     encoding: "utf8",
     timeout: 15_000,
     windowsHide: true,
@@ -162,16 +172,19 @@ function run(exe, args, { cwd, env, timeoutMs, label, inherit }) {
   return output;
 }
 
-function pluginState(home) {
-  const pkgPath = join(home, "profiles", WEB_PROFILE, "package.json");
+export function pluginState(home) {
+  const pkgPath = join(home, "profiles", DEV_PROFILE, "package.json");
   const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, "utf8")) : null;
   const deps = pkg?.dependencies ?? {};
   const bundles = Array.isArray(pkg?.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : [];
-  const installDir = join(home, "profiles", WEB_PROFILE, "node_modules", ...CANONICAL_NAME.split("/"));
+  const installDir = join(home, "profiles", DEV_PROFILE, "node_modules", ...CANONICAL_NAME.split("/"));
+  const installedOnDisk = existsSync(join(installDir, "package.json"));
   return {
     dependency: Object.prototype.hasOwnProperty.call(deps, CANONICAL_NAME) ? String(deps[CANONICAL_NAME]) : null,
     inBundles: bundles.includes(CANONICAL_NAME),
-    installedOnDisk: existsSync(join(installDir, "package.json")),
+    installedOnDisk,
+    linkedToCheckout: installedOnDisk && lstatSync(installDir).isSymbolicLink()
+      && samePath(realpathSync(installDir), realpathSync(REPO)),
   };
 }
 
@@ -179,35 +192,14 @@ function dumpHasPlugin(dump) {
   return /^- id:\s*dsh-spaces\b/m.test(dump) && dump.includes(CANONICAL_NAME);
 }
 
-function recreateHome(home) {
-  if (existsSync(home)) {
-    info(`removing previous Home ${home}`);
-    rmSync(home, { recursive: true, force: true });
-  }
-  mkdirSync(home, { recursive: true });
-}
-
-function packedPluginPath() {
-  const dest = defaultPackDest();
-  const reportPath = join(dest, "pack-report.json");
-  if (!existsSync(reportPath)) throw new Error(`pack report missing: ${reportPath}`);
-  const report = JSON.parse(readFileSync(reportPath, "utf8"));
-  const pluginTgz = report?.plugin?.path;
-  if (!pluginTgz || !existsSync(pluginTgz)) {
-    throw new Error(`packed plugin missing at ${pluginTgz || "(unset)"}`);
-  }
-  assertNoSpaces(pluginTgz, "plugin tarball path");
-  return pluginTgz;
-}
-
 function startWeb(cli, home) {
-  info(`starting dsh web (DSH_HOME=${home})`);
+  info(`starting dsh --profile ${DEV_PROFILE} (DSH_HOME=${home})`);
   info("in the browser: 工作台 / Workbench → 初始化 Spaces / Initialize Spaces");
-  const child = spawn(process.execPath, cliArgv(cli, ["web"]), {
+  const child = spawn(process.execPath, cliArgv(cli, ["--profile", DEV_PROFILE]), {
     cwd: REPO,
     env: dshEnv(home, { ci: false }),
     stdio: "inherit",
-    windowsHide: false,
+    windowsHide: true,
   });
   if (!child.pid) throw new Error("failed to spawn dsh web");
   child.on("error", (error) => {
@@ -220,8 +212,8 @@ function startWeb(cli, home) {
   });
 }
 
-function main() {
-  info("runtime: official dsh web with this plugin preinstalled");
+export function main({ linkOnly = false } = {}) {
+  info("runtime: official DSH Web with this checkout linked");
 
   const home = resolveHome();
   const cli = resolveCli();
@@ -236,48 +228,46 @@ function main() {
     inherit: true,
   });
 
-  info("packing plugin");
-  run(process.execPath, [PACK_SCRIPT], {
-    cwd: REPO,
-    env: { ...process.env, npm_config_offline: "true" },
-    timeoutMs: PACK_MS,
-    label: "pack:plugin",
-    inherit: true,
-  });
-  const pluginTgz = packedPluginPath();
-  info(`plugin tarball ${pluginTgz}`);
-
-  recreateHome(home);
+  mkdirSync(home, { recursive: true });
   info(`Home ${home}`);
 
   const env = dshEnv(home, { ci: true });
-  info("seeding official web profile");
-  run(process.execPath, cliArgv(cli, ["--profile", WEB_PROFILE, "--dump-config"]), {
-    cwd: REPO,
-    env,
-    timeoutMs: DUMP_MS,
-    label: "dsh --profile web --dump-config",
-    inherit: true,
-  });
-
-  info(`installing ${CANONICAL_NAME} into web`);
-  run(
-    process.execPath,
-    cliArgv(cli, ["plugin", "--profile", WEB_PROFILE, "add", pluginTgz]),
-    {
+  const profileManifest = join(home, "profiles", DEV_PROFILE, "package.json");
+  if (!existsSync(profileManifest)) {
+    info(`creating ${DEV_PROFILE} from the official web template`);
+    run(process.execPath, cliArgv(cli, ["--profile", DEV_PROFILE, "--from-default-profile", "web", "--dump-config"]), {
       cwd: REPO,
       env,
-      timeoutMs: PLUGIN_MS,
-      label: "dsh plugin --profile web add",
+      timeoutMs: DUMP_MS,
+      label: "create development profile",
       inherit: true,
-    },
-  );
+    });
+  }
+
+  const beforeAdd = pluginState(home);
+  if (beforeAdd.dependency && (!beforeAdd.linkedToCheckout || !beforeAdd.inBundles)) {
+    throw new Error(`${DEV_PROFILE} already has a different or unregistered ${CANONICAL_NAME}; choose a separate DSH_SPACES_WEB_HOME.`);
+  }
+  if (!beforeAdd.dependency) {
+    info(`linking ${CANONICAL_NAME} from the repository root`);
+    run(
+      process.execPath,
+      cliArgv(cli, ["plugin", "--profile", DEV_PROFILE, "add", REPO]),
+      {
+        cwd: REPO,
+        env,
+        timeoutMs: PLUGIN_MS,
+        label: "link checkout into development profile",
+        inherit: true,
+      },
+    );
+  }
 
   const afterAdd = pluginState(home);
-  if (!afterAdd.dependency || !afterAdd.inBundles || !afterAdd.installedOnDisk) {
-    throw new Error(`web add did not install bundle: ${JSON.stringify(afterAdd)}`);
+  if (!afterAdd.dependency?.startsWith("link:") || !afterAdd.inBundles || !afterAdd.linkedToCheckout) {
+    throw new Error(`development profile did not link the checkout: ${JSON.stringify(afterAdd)}`);
   }
-  const dumpAfterAdd = run(process.execPath, cliArgv(cli, ["--profile", WEB_PROFILE, "--dump-config"]), {
+  const dumpAfterAdd = run(process.execPath, cliArgv(cli, ["--profile", DEV_PROFILE, "--dump-config"]), {
     cwd: REPO,
     env,
     timeoutMs: DUMP_MS,
@@ -285,16 +275,19 @@ function main() {
     inherit: false,
   });
   if (!dumpHasPlugin(dumpAfterAdd)) {
-    throw new Error("web dump-config missing id: dsh-spaces after plugin add");
+    throw new Error("development dump-config missing id: dsh-spaces after plugin add");
   }
-  info("plugin registered on official web");
+  info(`checkout linked and registered in ${DEV_PROFILE}`);
 
-  startWeb(cli, home);
+  if (!linkOnly) startWeb(cli, home);
+  return { home, profile: DEV_PROFILE, ...afterAdd };
 }
 
 if (import.meta.main) {
   try {
-    main();
+    const args = process.argv.slice(2);
+    if (args.some(arg => arg !== "--link-only")) throw new Error("Usage: node scripts/dev-dsh-web.mjs [--link-only]");
+    main({ linkOnly: args.includes("--link-only") });
   } catch (error) {
     console.error(`FAIL  ${error instanceof Error ? error.stack || error.message : String(error)}`);
     process.exitCode = 1;

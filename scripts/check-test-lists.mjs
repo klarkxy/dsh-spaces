@@ -48,5 +48,5 @@ if (unlisted.length || missing.length) {
   }
   process.exitCode = 1;
 } else {
-  console.log(`check:test-lists: ${testFiles.length} test files covered, ${referenced.size} references resolve`);
+  console.log(`check:test-lists: ${testFiles.length} test files referenced, ${referenced.size} references resolve (not a CI reachability check)`);
 }

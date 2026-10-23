@@ -19,7 +19,9 @@ type AppBoot = {
   loadOverlayPatches: (bin: string, path: string) => unknown[];
   loadOptionalPatches: (bin: string, path: string) => unknown[] | undefined;
   composeEntries: (layers: unknown[][]) => Entry[];
-  evaluatePluginCompatibility: (manifest: unknown, exemptions: Record<string, string[]>, runtimeVersion: string) => { peers: Record<string, string> } | undefined;
+  getDshRuntimeVersion: () => string;
+  evaluatePluginCompatibility: (manifest: unknown, exemptions: Record<string, string[]>, runtimeVersion: string) =>
+    { requirements: Record<string, string> } | { peers: Record<string, string> } | undefined;
 };
 
 function entryRows(entries: Entry[], ancestry: "enabled" | "disabled" | "dynamic" = "enabled"): ObservedEntry[] {
@@ -219,13 +221,21 @@ export async function migrateProfileToAlpha(input: {
   };
   for (const bridge of active) pendingCandidates(bridge);
   if (existsSync(join(profile, "node_modules", "@dsh-spaces", "browser"))) pendingCandidates("browser");
-  const cliVersion = input.cliVersion ?? "0.2.0-rc.2";
+  const cliVersion = input.cliVersion ?? declared.appBoot.getDshRuntimeVersion();
   const compatible = (appBoot: AppBoot, pkg: { name?: string }, exempt = false): void => {
     // Validate the same complete manifest contract the bound host evaluates,
     // including bare dsh peers, workspace tokens, and malformed peer fields.
     const issue = appBoot.evaluatePluginCompatibility(pkg, {}, cliVersion);
-    if (!issue || exempt) return;
-    const unmet = Object.entries(issue.peers).map(([name, range]) => `${name}@${range}`);
+    if (issue === undefined) return;
+    const requirements = Object.hasOwn(issue, "requirements")
+      ? (issue as { requirements: unknown }).requirements
+      : Object.hasOwn(issue, "peers") ? (issue as { peers: unknown }).peers : undefined;
+    if (!requirements || typeof requirements !== "object" || Array.isArray(requirements)
+      || !Object.keys(requirements).length || Object.values(requirements).some(range => typeof range !== "string")) {
+      throw new Error("The bound DSH host returned an invalid plugin compatibility result.");
+    }
+    if (exempt) return;
+    const unmet = Object.entries(requirements).map(([name, range]) => `${name}@${range}`);
     throw new Error(`${pkg.name}: ${cliLoadError(cliVersion, unmet)}`);
   };
   const admission = (inspection: Awaited<ReturnType<typeof declaredProfile>>, transitioning: SpacesComponent[]): void => {

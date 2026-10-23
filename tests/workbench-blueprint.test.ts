@@ -202,7 +202,7 @@ function describePayload(enabled = true, modelId = "m1", revision = 1): LlmApiRe
     defaultModel: null,
     capabilities: {
       adapter: "llm-pi-ai",
-      adapterVersion: "0.2.0-rc.2",
+      adapterVersion: "0.2.1-rc.2",
       protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
       keyless: false,
     },
@@ -1484,7 +1484,7 @@ function officialRc2Bin(): string | null {
       name?: unknown;
       version?: unknown;
     };
-    if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.2.0-rc.2") return bin;
+    if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.2.1-rc.2") return bin;
   } catch {
     return null;
   }
@@ -2002,7 +2002,7 @@ test("profile-relative hub plugin file spec is npm when library and identity mat
 test("official runtime rejects managed Home settings overlay, config-only not-found, and accepts host agent overlay", async (t) => {
   const bin = officialRc2Bin();
   if (!bin) {
-    t.skip("official DSH 0.2.0-rc.2 bin is not installed");
+    t.skip("official DSH 0.2.1-rc.2 bin is not installed");
     return;
   }
   const hostBundles = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"];
@@ -2117,6 +2117,6 @@ test("official runtime rejects managed Home settings overlay, config-only not-fo
   assert.equal(pinLast.product?.stages?.presets?.status, "not-run");
   assert.equal(pinLast.product?.installed?.[0]?.version, selectedVersion);
   const resolved = await resolveBlueprintModule({ home: pinHome, bin }, { spaceId: "space-target", specifier: packageName });
-  assert.equal(resolved.packageVersion, "0.2.0-rc.2");
+  assert.equal(resolved.packageVersion, "0.2.1-rc.2");
   assert.notEqual(resolved.packageVersion, selectedVersion);
 });

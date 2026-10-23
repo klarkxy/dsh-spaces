@@ -23,7 +23,7 @@ function describeResult(): LlmDescribeResult {
     defaultModel: { connectionId: CONNECTION_ID, modelId: "demo-large" },
     capabilities: {
       adapter: "llm-pi-ai",
-      adapterVersion: "0.2.0-rc.2",
+      adapterVersion: "0.2.1-rc.2",
       protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
       keyless: false,
     },

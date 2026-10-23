@@ -49,6 +49,17 @@ import {
   readHostHint,
   WorkbenchRemoteError,
 } from "../packages/plugin/src/client/workbench-remote.ts";
+import {
+  WORKBENCH_PUBLIC_ERROR as HOST_WORKBENCH_PUBLIC_ERROR,
+  WORKBENCH_REMOTE_CODES as HOST_WORKBENCH_REMOTE_CODES,
+} from "../packages/plugin/src/host/remote-errors.ts";
+import {
+  KNOWN_WORKBENCH_ERROR_CODES,
+  LLM_PUBLIC_ERROR,
+  SPACES_PUBLIC_ERROR,
+  WORKBENCH_PUBLIC_ERROR,
+  WORKBENCH_REMOTE_CODES,
+} from "../src/shared/workbench-errors.ts";
 import { apply as applyClient, GuidePanelView, ReturnToWorkbenchPanel } from "../packages/plugin/src/client/index.tsx";
 import { homeViewUrl, isHomeView } from "../packages/plugin/src/client/home-view.ts";
 import { GUIDE_COPY } from "../packages/plugin/src/client/i18n.ts";
@@ -228,6 +239,9 @@ function startFixture(options: {
 }): Promise<{ origin: string; close: () => Promise<void>; tokens: string[] }> {
   const tokens: string[] = [];
   const server = createServer((req, res) => {
+    // Each fixture owns a fresh listener, even if Windows reuses its loopback port.
+    // Do not let the shared fetch pool carry a socket into the next fixture.
+    res.setHeader("connection", "close");
     const auth = String(req.headers.authorization ?? "");
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/api/workbench/state") {
@@ -342,7 +356,7 @@ test("ordinary and corrupt profiles register only the guide Remote", () => {
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.equal(plugin.manager, null);
   assert.equal(plugin.spaces, null);
-  assert.deepEqual(methodsOf(plugin.guide), ["role", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "restartService", "role", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
   assert.equal(plugin.guide.typertRemote.namespace, "workbenchGuide");
 });
 
@@ -363,7 +377,7 @@ test("manager profile registers manager WorkbenchApi and compatibility reads, no
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.ok(plugin.manager);
   assert.ok(plugin.spaces);
-  assert.deepEqual(methodsOf(plugin.guide), ["role", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "restartService", "role", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
   assert.ok(methodsOf(plugin.manager!).includes("state"));
   assert.ok(methodsOf(plugin.manager!).includes("submit"));
   assert.ok(methodsOf(plugin.manager!).includes("product"));
@@ -1001,6 +1015,88 @@ test("client remotes sanitize unknown errors and refuse non-loopback return URLs
   assert.match(html, /__DSH_SPACES_HOST__/);
 });
 
+test("known public workbench codes round-trip a redacted reason; unknown errors stay generic", async () => {
+  const known: Record<string, string> = {
+    ...WORKBENCH_PUBLIC_ERROR,
+    ...SPACES_PUBLIC_ERROR,
+    ...LLM_PUBLIC_ERROR,
+  };
+  assert.equal(HOST_WORKBENCH_PUBLIC_ERROR, WORKBENCH_PUBLIC_ERROR);
+  assert.equal(HOST_WORKBENCH_REMOTE_CODES, WORKBENCH_REMOTE_CODES);
+  assert.deepEqual([...KNOWN_WORKBENCH_ERROR_CODES].sort(), Object.keys(known).sort());
+  const sensitive = "C:\\\\Users\\\\admin\\\\.dsh token=live-secret Bearer abcdefghijkl";
+  const rejectKnown = async (code: string, message: string, check: (error: WorkbenchRemoteError) => void) => {
+    const remote = createWorkbenchRemote({
+      rpc: { call: async () => ({ ok: false as const, error: { code, message, details: { token: "live-secret" } } }) },
+    });
+    await assert.rejects(() => remote.view("notes"), (error: unknown) => {
+      assert.ok(error instanceof WorkbenchRemoteError);
+      check(error);
+      assert.equal(error.message.includes("Try again later"), false);
+      assert.equal(error.message.includes(".dsh"), false);
+      assert.equal(error.message.includes("live-secret"), false);
+      assert.equal(error.message.includes("abcdefghijkl"), false);
+      return true;
+    });
+  };
+  for (const code of KNOWN_WORKBENCH_ERROR_CODES) {
+    await rejectKnown(code, `bound version mismatch ${sensitive}`, (error) => {
+      assert.equal(error.code, code);
+      assert.match(error.message, /bound version mismatch/);
+      assert.match(error.message, /\[path\]/);
+      assert.match(error.message, /token=\[redacted\]/);
+      assert.match(error.message, /Bearer \[redacted\]/);
+      assert.equal(displayWorkbenchMessage(error), error.message);
+    });
+    await rejectKnown(code, code, (error) => {
+      assert.equal(error.code, code);
+      assert.equal(error.message, known[code]);
+    });
+  }
+  await rejectKnown("workbench/incompatible", "{\"role\":\"user\",\"content\":\"private-chat\"}", (error) => {
+    assert.equal(error.code, "workbench/incompatible");
+    assert.equal(error.message, known["workbench/incompatible"]);
+    assert.equal(error.message.includes("private-chat"), false);
+  });
+  await rejectKnown("workbench/failed", "", (error) => {
+    assert.equal(error.code, "workbench/failed");
+    assert.equal(error.message, known["workbench/failed"]);
+  });
+  await rejectKnown("constructor", sensitive, (error) => {
+    assert.equal(error.code, null);
+    assert.equal(error.message, "The workbench request failed.");
+  });
+  const unknown = createWorkbenchRemote({
+    rpc: {
+      call: async () => ({
+        ok: false as const,
+        error: { code: "internal", message: sensitive, details: { authorization: "Bearer abcdefghijkl" } },
+      }),
+    },
+  });
+  await assert.rejects(() => unknown.view("notes"), (error: unknown) => {
+    assert.ok(error instanceof WorkbenchRemoteError);
+    assert.equal(error.code, null);
+    assert.equal(error.message, "The workbench request failed.");
+    assert.equal(error.message.includes(".dsh"), false);
+    assert.equal(error.message.includes("live-secret"), false);
+    assert.equal(error.message.includes("abcdefghijkl"), false);
+    return true;
+  });
+  const thrown = createWorkbenchGuideRemote({
+    rpc: { call: async () => { throw new Error(sensitive); } },
+  });
+  await assert.rejects(() => thrown.role(), (error: unknown) => {
+    assert.ok(error instanceof WorkbenchRemoteError);
+    assert.equal(error.code, null);
+    assert.equal(error.message, "The workbench request failed.");
+    assert.equal(error.message.includes(".dsh"), false);
+    assert.equal(error.message.includes("live-secret"), false);
+    assert.equal(error.message.includes("abcdefghijkl"), false);
+    return true;
+  });
+});
+
 test("client apply keeps root ownership and adds a portable overlay for non-manager hosts", () => {
   const registrations: Array<{ name: string; id?: string; key?: string }> = [];
   const ctx = {
@@ -1314,6 +1410,51 @@ test("returnTarget mints a one-time /bootstrap path and cookie exchange 303s to 
     await fixture.close();
   }
 });
+
+for (const outcome of ["ready", "startup-failed", "registration-refused"] as const) {
+  test(`main attachment observes manager startup before registration: ${outcome}`, async () => {
+    const home = tempDir("dsh-wb-main-startup-");
+    writeProfile(home, "notes");
+    const bearer = "a".repeat(64), epochRef = { value: HEX64_A };
+    const fixture = await startFixture({ bearer, epochRef });
+    const handle = leaseWeb(home, fixture.origin);
+    epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+    writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE),
+      v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+    let reads = 0, registrations = 0;
+    try {
+      const runtime = new WorkbenchHostRuntime({
+        ...identityInput(home, "notes"), supervisorTimeoutMs: 3000,
+        connect: () => ({ state: async () => {
+          const state = v2State(epochRef.value);
+          reads++;
+          if (outcome === "startup-failed") {
+            state.spaces[0].status = "crashed";
+            return { ...state, reasons: ["manager launch failed"] };
+          } else if (reads < 3) state.spaces[0].status = "starting";
+          return state;
+        } }) as never,
+      });
+      runtime.onSupervisorAttached(async () => {
+        registrations++;
+        assert.ok(reads >= 3, "registration must not be sent while startup is pending");
+        if (outcome === "registration-refused") throw Error("MAIN_REGISTRATION_REFUSED:404");
+      });
+      if (outcome === "ready") {
+        const snapshot = await runtime.presentationSnapshot();
+        assert.equal(snapshot.managerId, "spaces-hub");
+        await runtime.presentationSnapshot();
+        assert.equal(registrations, 1, "directory polling does not register again");
+      } else {
+        await assert.rejects(runtime.presentationSnapshot(), outcome === "startup-failed" ? /manager launch failed/ : /MAIN_REGISTRATION_REFUSED:404/);
+        assert.equal(registrations, outcome === "startup-failed" ? 0 : 1);
+        const count = reads;
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.equal(reads, count, "failure stops the readiness observation");
+      }
+    } finally { await fixture.close(); }
+  });
+}
 
 test("portal entry waits for the already-running startup before minting a one-use ticket", async () => {
   const home = tempDir("dsh-wb-portal-starting-");

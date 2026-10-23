@@ -110,3 +110,33 @@ test('unknown result kinds fail rather than being treated as a valid empty resul
   const backend: DashboardReadBackend = { mutate: async () => { throw new Error('not used'); }, query: async () => ({ protocolVersion: 1, backendEpoch: 'epoch', data: { kind: 'invented' } } as unknown as DashboardQueryResponse) };
   await assert.rejects(readDashboardFrame(backend), /dashboard\/invalid-input/);
 });
+test('a failed read shows the failure and the retained board at once, never behind an entrance', async () => {
+  const f = await fixture(); await f.pin(); const frame = await readDashboardFrame(f.client);
+  const html = renderToStaticMarkup(<DashboardView frame={frame} error={{ code: 'dashboard/unavailable', message: 'hidden' }} onPin={() => {}} onUnpin={() => {}} />);
+  const notice = html.match(/<div class="dd-error"[^>]*>/)?.[0] ?? '';
+  const card = html.match(/<article class="dd-card"[^>]*>/)?.[0] ?? '';
+  assert.ok(notice, 'the failure notice is missing');
+  assert.ok(card, 'the retained board is missing');
+  assert.doesNotMatch(notice, /opacity:0/, 'a failure notice must not start hidden');
+  assert.doesNotMatch(card, /opacity:0/, 'stale content must not wait for an entrance animation');
+  assert.doesNotMatch(html, /重试|retry/i, 'a failed read must not offer a retry');
+  await f.service.close();
+});
+test('the first read shows a status line and a skeleton placeholder', () => {
+  const html = renderToStaticMarkup(<DashboardView frame={null} />);
+  assert.match(html, /role="status"/);
+  assert.match(html, /正在读取看板/);
+  assert.match(html, /dd-skeleton/);
+});
+test('the surface keeps its region name, the catalog name and the pin control label', async () => {
+  const f = await fixture(); const frame = await readDashboardFrame(f.client);
+  const html = renderToStaticMarkup(<DashboardView frame={frame} onPin={() => {}} />);
+  assert.match(html, /aria-label="工作首页"/);
+  assert.match(html, /aria-label="组件目录"/);
+  assert.match(html, /aria-label="固定 Task 0"/);
+  await f.service.close();
+});
+test('an explicit theme is published on the surface root', () => {
+  const html = renderToStaticMarkup(<DashboardView frame={null} theme="light" />);
+  assert.match(html, /data-theme="light"/);
+});

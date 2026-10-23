@@ -31,7 +31,7 @@ import { sanitizeJobText, WorkbenchJobError } from "./workbench-jobs";
 import { isGitSpec, isInstallableEntry, isSafeSpec, matchesPluginQuery, pluginAliases, pluginDisplayName } from "../../shared/plugin";
 import { isExactRuntimeVersion, SPACES_MIN_DSH_VERSION } from "../../shared/runtime";
 import { lt as semverLt } from "semver";
-import { dshPeerRangesFromProfile, unmetDshPeers, unmetInstalledThirdPartyDshPeers } from "./component-cli";
+import { unmetProfileDshRequirements, unmetInstalledThirdPartyDshPeers } from "./component-cli";
 import { runBatch } from "../../shared/batch";
 import { type ConfigBackupMeta } from "../../shared/diagnostics";
 import type { PackageSource, PluginCatalogEntry, PluginLibraryEntry } from "../../shared/types";
@@ -89,6 +89,15 @@ const HANDOFF_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
 ]);
 const PLAN_SCHEMA = 1;
 const PLAN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const REMOVED_DISK_COMMANDS = new Set([
+  "snapshot.restore",
+  "config.restore",
+  "runtime.install",
+  "runtime.upgrade",
+  "workbench.upgrade",
+  "controller.release",
+  "controller.shutdown",
+]);
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const NPM_NAME_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 const CATALOG_ID_RE = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$|^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
@@ -152,9 +161,7 @@ type ResolvedCommand =
   | { kind: "plugin.toggle"; spaceId: string; pluginId: string; packageName: string; enabled: boolean }
   | { kind: "plugin.cleanup-manager"; spaceId: string; packageName: string }
   | { kind: "snapshot.create" }
-  | { kind: "snapshot.restore"; snapshotId: string }
   | { kind: "snapshot.delete"; snapshotId: string }
-  | { kind: "config.restore"; spaceId: string; backupId: string }
   | { kind: "space.runtime.set"; spaceId: string; version: string }
   | { kind: "runtime.remove"; version: string };
 
@@ -458,16 +465,12 @@ export class WorkbenchMaintenance {
           return;
         case "snapshot.create":
           return await this.finishPlan(stored, () => withIrreversible(() => this.runSnapshotCreate(ctx)));
-        case "snapshot.restore":
-          throw new WorkbenchMaintenanceError("workbench/unsupported");
         case "snapshot.delete": {
           const snapshotId = stored.command.snapshotId;
           await withIrreversible(() => this.runSnapshotDelete(snapshotId, ctx));
           this.markPlan(stored, "succeeded");
           return;
         }
-        case "config.restore":
-          throw new WorkbenchMaintenanceError("workbench/unsupported");
         case "space.runtime.set": {
           const command = stored.command;
           return await this.finishPlan(stored, () =>
@@ -704,7 +707,7 @@ export class WorkbenchMaintenance {
     let unmet: string[];
     try {
       unmet = [
-        ...unmetDshPeers(version, dshPeerRangesFromProfile(profileDir)),
+        ...unmetProfileDshRequirements(profileDir, version),
         ...unmetInstalledThirdPartyDshPeers(profileDir, version),
       ];
     } catch (error) {
@@ -1380,7 +1383,8 @@ export class WorkbenchMaintenance {
       if (parsed.schemaVersion !== PLAN_SCHEMA || parsed.id !== id || !parsed.public || !parsed.command) {
         throw new WorkbenchMaintenanceError("workbench/invalid-input");
       }
-      if ((parsed.command as { kind?: unknown }).kind === "runtime.install") {
+      const commandKind = (parsed.command as { kind?: unknown }).kind;
+      if (typeof commandKind === "string" && REMOVED_DISK_COMMANDS.has(commandKind)) {
         throw new WorkbenchMaintenanceError("workbench/unsupported");
       }
       if (!isPlanStatus(parsed.status)) throw new WorkbenchMaintenanceError("workbench/invalid-input");
@@ -1678,9 +1682,6 @@ function requestFromCommand(command: ResolvedCommand): WorkbenchPlanRequest {
       return { kind: command.kind, spaceId: command.spaceId };
     case "snapshot.create":
       return { kind: command.kind };
-    case "snapshot.restore":
-    case "config.restore":
-      throw new WorkbenchMaintenanceError("workbench/unsupported");
     case "snapshot.delete":
       return { kind: command.kind, snapshotId: command.snapshotId };
     case "space.runtime.set":
@@ -1697,7 +1698,6 @@ function affectedFromCommand(command: ResolvedCommand): string[] {
     case "plugin.remove":
     case "plugin.toggle":
     case "plugin.cleanup-manager":
-    case "config.restore":
     case "space.runtime.set":
       return [command.spaceId];
     default:

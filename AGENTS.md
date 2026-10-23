@@ -4,12 +4,16 @@ Read [docs/let-it-crash.md](docs/let-it-crash.md) and [tasks/todo.md](tasks/todo
 
 DSH Spaces follows let it crash: report the actual failure, do not recover it.
 Do not add automatic retries, restarts, rollback, restore, repair, fallback,
-or interrupted-job replay. Do not add manual recovery workflows either.
+or interrupted-job replay. The only manual exception is the explicitly authorized
+Desktop error-page service start/restart: preview affected spaces, require
+confirmation, perform one normal owned shutdown, then one guarded launch.
+Do not replay tasks or restart child spaces. Failed shutdown, ambiguous ownership
+and interrupted maintenance remain protected; never force-kill or clear evidence.
 Keep authentication, isolation, single-writer constraints and atomic writes.
 Opening the application is a new user-requested launch. That launch may retire
 the exact, provably dead Supervisor lease and its matching endpoint under the
 ownership guard, preserving failure evidence. Read-only discovery never clears
-records; an in-session failure never triggers another launch. Live, ambiguous,
+records; an in-session failure never automatically triggers another launch. Live, ambiguous,
 foreign and handoff ownership, and interrupted maintenance, remain protected.
 An intact dead legacy desktop lease is also eligible only when both its bound
 endpoint and the endpoint file are absent.
@@ -28,7 +32,12 @@ Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces`,
 `npm run test:workbench`, `npm run test:workbench:recovery`, `npm run test:llm`,
 `npm run test:blueprints`, `npm run test:browser` and `npm run test:dashboard`.
 `test:dashboard` needs `DSH_DASHBOARD_SDK_ROOT` pointing at an installed
-`@deepseek-ai/dsh@0.2.0-rc.2` tree (see the CI dashboard workflows).
-`test:workbench:browser` needs Playwright Chromium. In sandboxed shells where
-child processes cannot write the system temp dir, set `TMP`/`TEMP`/`TMPDIR` to
-`.sandbox/tmp`. Node 26 is the supported version.
+`@deepseek-ai/dsh@0.2.1-rc.2` tree (see the CI dashboard workflows).
+`test:workbench:browser` needs Playwright Chromium. `npm run check:all` runs the
+checks above plus browser tests and package preflight, with logs and an isolated
+Home. Windows rename checks require a writable temporary directory outside the
+checkout: workspace readers can hold staging children open and cause `EPERM`.
+Do not redirect Windows checks to `.sandbox/tmp`; use `--temp-root` with an
+existing external directory and an authorized ordinary process when the sandbox
+cannot write there. The runner rejects repository-local temp roots before
+starting checks and never retries a failed command. Node 24.21+ (24.x) and Node 26 are supported.

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LLM_ADAPTER_VERSION } from "../../../../src/shared/llm-api";
 import { SNAPSHOT_ID_RE } from "../../../../src/shared/snapshots";
 import { SPACE_NAME_RE } from "../../../../src/shared/types";
 import { isExactRuntimeVersion } from "../../../../src/shared/runtime";
@@ -64,6 +65,13 @@ export const isoDateSchema = z
 const iconSchema = z.string().max(MAX_SPACE_ICON_DATA_URL_CHARS);
 const displayNameSchema = z.string().min(1).max(80);
 const reasonsSchema = z.array(z.string().max(500)).max(32);
+
+export const serviceRestartPreviewSchema = z.object({
+  confirmationId: hex64Schema,
+  expiresAt: isoDateSchema,
+  action: z.enum(["start", "restart"]),
+  spaces: z.array(z.object({ id: spaceIdSchema, displayName: z.string().max(500), running: z.boolean() }).strict()).max(1000),
+}).strict();
 
 export const workbenchRoleSchema = z.enum(["manager", "workspace", "uninitialized"]);
 
@@ -222,6 +230,7 @@ const createInputSchema = z
     displayName: displayNameSchema.optional(),
     icon: iconSchema.optional(),
     useSharedLlm: z.boolean().optional(),
+    modelSource: z.enum(['main','shared','local']).optional(),
     browser: z.boolean().optional(),
   })
   .strict();
@@ -559,7 +568,7 @@ export const llmApiResultSchema = z.union([
       capabilities: z
         .object({
           adapter: z.literal("llm-pi-ai"),
-          adapterVersion: z.literal("0.2.0-rc.2"),
+          adapterVersion: z.literal(LLM_ADAPTER_VERSION),
           protocols: z.tuple([z.literal("openai-completions"), z.literal("openai-responses"), z.literal("anthropic-messages")]),
           keyless: z.literal(false),
         })

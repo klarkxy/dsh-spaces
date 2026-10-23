@@ -17,6 +17,7 @@ import type {
 import type { WorkbenchBlueprintApplyOutcome } from "../src/shared/workbench-blueprint.ts";
 import { WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
 import { BlueprintApplyResult } from "../packages/plugin/src/workbench/blueprint-ui.tsx";
+import { SpaceTemplatesPage } from "../packages/plugin/src/workbench/templates/page.tsx";
 import {
   WorkbenchController,
   type WorkbenchEnv,
@@ -255,29 +256,27 @@ function defaultProduct(request: WorkbenchProductRequest): WorkbenchProductResul
   throw new Error(request.method);
 }
 
-test("settings navigation includes Blueprints without renaming templates or import", async () => {
+test("the blueprint tab is the unified space template page and keeps the blueprint markers", async () => {
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
-  ctrl.openSettings();
-  const home = html(ctrl);
-  assert.ok(home.includes(t("zh", "home.blueprints")));
-  assert.ok(home.includes(t("zh", "home.templates")));
-  assert.ok(!home.includes("data-blueprints=\"true\""));
-  ctrl.setHomeTab("blueprints");
-  const page = html(ctrl);
-  assert.ok(page.includes("data-blueprints=\"true\""));
-  assert.ok(page.includes(t("zh", "blueprints.use")));
-  assert.ok(page.includes(t("zh", "blueprints.generate")));
-  assert.ok(page.includes(t("zh", "blueprints.paste")));
-  assert.ok(page.includes(t("zh", "blueprints.openFile")));
-  assert.ok(page.includes(t("zh", "blueprints.inspect")));
-  assert.ok(!page.includes(t("zh", "templates.title")));
-  assert.ok(!page.includes(t("zh", "share.import")));
+  const page = renderToStaticMarkup(
+    React.createElement(SpaceTemplatesPage, { ui: ctrl.getSnapshot(), controller: ctrl }),
+  );
+  assert.ok(page.includes('data-templates="true"'));
+  assert.ok(page.includes('data-blueprints="true"'));
+  assert.ok(page.includes('data-blueprint-mode="use"'));
+  assert.ok(page.includes(t("zh", "templates.section.create")));
+  assert.ok(page.includes(t("zh", "templates.section.import")));
+  assert.ok(page.includes(t("zh", "templates.section.export")));
+  // Only the open section is on the page.
+  assert.equal(page.includes(t("zh", "templates.drop.title")), false);
+  assert.equal(page.includes(t("zh", "share.export")), false);
   ctrl.setLocale("en");
-  const english = html(ctrl);
-  assert.ok(english.includes("Use blueprint"));
-  assert.ok(english.includes("Create blueprint"));
-  assert.ok(english.includes("Paste a share code or JSON"));
+  const english = renderToStaticMarkup(
+    React.createElement(SpaceTemplatesPage, { ui: ctrl.getSnapshot(), controller: ctrl }),
+  );
+  assert.ok(english.includes("Space templates"));
+  assert.ok(english.includes("Create from a template"));
 });
 
 test("ordinary space menu offers Create blueprint; manager and web do not", async () => {
@@ -357,8 +356,8 @@ test("create mode lists packages separately from bundle order and convert contro
   assert.ok(page.includes(t("zh", "blueprints.advancedPointer")));
   assert.ok(page.includes(t("zh", "blueprints.provenance")));
   assert.match(page, /<details[^>]*>/);
-  assert.doesNotMatch(page, /<details[^>]*\sopen(?:[=&\s>]|$)/);
-  assert.match(page, new RegExp(`<summary>${t("zh", "blueprints.advancedPointer")}</summary>`));
+  // The advanced pointer editor stays closed; the share code options may be open.
+  assert.match(page, new RegExp(`<details class="dsh-wb-form"><summary>${t("zh", "blueprints.advancedPointer")}</summary>`));
 });
 
 test("managed observations stay out of convert drafts while directory and dynamic remain reachable", async () => {
@@ -399,8 +398,8 @@ test("managed observations stay out of convert drafts while directory and dynami
   assert.ok(page.includes(convert));
   assert.equal(page.split(convert).length - 1, 2);
   assert.match(page, /<details class="dsh-wb-form">/);
-  assert.doesNotMatch(page, /<details[^>]*\sopen(?:[=&\s>]|$)/);
-  assert.match(page, new RegExp(`<summary>${t("zh", "blueprints.advancedPointer")}</summary>`));
+  // The advanced pointer editor stays closed; the share code options may be open.
+  assert.match(page, new RegExp(`<details class="dsh-wb-form"><summary>${t("zh", "blueprints.advancedPointer")}</summary>`));
   assert.ok(page.includes(t("zh", "blueprints.inputId")));
 });
 
@@ -514,7 +513,7 @@ test("successful blueprint apply renders created-not-started and does not auto-e
   assert.ok(page.includes("data-blueprint-created=\"true\""));
   assert.ok(!page.includes(t("zh", "create.enter")));
   assert.equal(page.includes(t("zh", "blueprints.previewExpired")), false);
-  assert.equal(page.includes(t("zh", "blueprints.apply")), false);
+  assert.equal(page.includes('data-blueprint-apply-action="true"'), false);
   assert.equal(live.getSnapshot().selected, "home");
   assert.equal(live.getSnapshot().createdNotice, null);
   assert.equal(live.blueprint.getSnapshot().applyOutcome?.stages.start.status, "not-run");
@@ -566,13 +565,13 @@ test("successful current plan hides expired chrome; a new plan is valid; unsent 
   live.blueprint.apply();
   await flush();
   const expired = t("zh", "blueprints.previewExpired");
-  const applyLabel = t("zh", "blueprints.apply");
+  const applyAction = 'data-blueprint-apply-action="true"';
   const created = html(live);
   assert.ok(created.includes(t("zh", "blueprints.createdNotStarted")));
   assert.ok(created.includes("data-blueprint-created=\"true\""));
   assert.ok(created.includes("data-blueprint-apply=\"true\""));
   assert.equal(created.includes(expired), false);
-  assert.equal(created.includes(applyLabel), false);
+  assert.equal(created.includes(applyAction), false);
   assert.equal(live.blueprint.canApply(), false);
 
   live.blueprint.preview();
@@ -581,8 +580,8 @@ test("successful current plan hides expired chrome; a new plan is valid; unsent 
   assert.equal(live.blueprint.getSnapshot().preview?.planId, "plan-bp-2");
   assert.equal(live.blueprint.getSnapshot().applyPlanId, "plan-bp-1");
   assert.equal(next.includes(expired), false);
-  assert.ok(next.includes(applyLabel));
-  const nextAt = next.lastIndexOf(applyLabel);
+  assert.ok(next.includes(applyAction));
+  const nextAt = next.lastIndexOf(applyAction);
   assert.ok(nextAt > 0);
   assert.equal(next.slice(Math.max(0, nextAt - 180), nextAt).includes("disabled"), false);
   assert.equal(live.blueprint.canApply(), true);
@@ -592,7 +591,7 @@ test("successful current plan hides expired chrome; a new plan is valid; unsent 
   const stale = html(live);
   assert.ok(stale.includes(expired));
   assert.equal(live.blueprint.canApply(), false);
-  const staleAt = stale.lastIndexOf(applyLabel);
+  const staleAt = stale.lastIndexOf(applyAction);
   assert.ok(staleAt > 0);
   assert.equal(stale.slice(Math.max(0, staleAt - 180), staleAt).includes("disabled"), true);
 });

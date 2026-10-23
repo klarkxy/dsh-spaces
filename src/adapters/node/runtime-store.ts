@@ -397,7 +397,7 @@ export class RuntimeStore {
         }
         await rmTree(dest);
       }
-      await renameTree(staging, dest);
+      await rename(staging, dest);
       const installed = this.readInstalled(version);
       if (!installed) throw new Error(`runtime ${version} failed to become readable after install`);
       atomicWrite(
@@ -414,27 +414,6 @@ export class RuntimeStore {
 
 function rmTree(path: string): Promise<void> {
   return rm(path, { recursive: true, force: true });
-}
-
-/** Same-volume directory publish. Retry scanner locks without blocking the HTTP loop. */
-async function renameTree(source: string, destination: string): Promise<void> {
-  const deadline = Date.now() + 500;
-  for (;;) {
-    try {
-      await rename(source, destination);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (
-        process.platform !== "win32" ||
-        !["EPERM", "EACCES", "EBUSY"].includes(code ?? "") ||
-        Date.now() >= deadline
-      ) {
-        throw error;
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-    }
-  }
 }
 
 function describeFetchError(err: unknown): string {

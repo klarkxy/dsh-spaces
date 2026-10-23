@@ -23,7 +23,7 @@ afterEach(() => {
   }
 });
 
-type PatchRow = { id?: unknown; name?: unknown; insert?: unknown; config?: unknown; inject?: unknown };
+type PatchRow = { id?: unknown; name?: unknown; insert?: unknown; config?: unknown; inject?: unknown; disabled?:unknown };
 type OfficialAppBoot = {
   loadOverlayPatches: (binName: string, file: string) => PatchRow[];
   composeEntries: (layers: unknown[][], warn?: (message: string) => void) => PatchRow[];
@@ -129,8 +129,12 @@ test(
         {
           insert: [
             { id: "seed", name: "seed-mod" },
+            { id: "llm", name: "@deepseek-ai/dsh-llm" },
             { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai" },
             { id: "agent-default-model", name: "@deepseek-ai/dsh-agent-default-model" },
+            { id: "session-title-llm", name: "@deepseek-ai/dsh-session-title-first-prompt-llm" },
+            { id: "compaction-basic", name: "@deepseek-ai/dsh-compaction-basic" },
+            { id: "command-compact", name: "@deepseek-ai/dsh-command-compact" },
           ],
         },
       ], patches],
@@ -138,6 +142,7 @@ test(
     );
     assert.deepEqual(warnings, []);
     assert.equal(composed.some((row) => row.id === "seed" && row.name === "seed-mod"), true);
+    assert.equal(composed.find(row=>row.id==='llm')?.disabled,true);
     const mounted = composed.find((row) => row.id === BRIDGE_ID);
     assert.equal(mounted?.name, BRIDGE_NAME);
     assert.deepEqual(mounted?.config, {});

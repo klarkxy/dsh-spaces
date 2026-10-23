@@ -193,7 +193,7 @@ export class GlobalLlmService {
     const current = await this.policyStore.read(spaceId);
     return this.policyStore.write(
       spaceId,
-      { ...current, shared, revision: current.revision + 1 },
+      { ...current, shared, ...(current.schemaVersion===2?{inheritMain:false}:{}), revision: current.revision + 1 },
       expectedRevision,
     );
   }

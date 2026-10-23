@@ -20,5 +20,9 @@
     "packages/plugin/src/types.ts",
     "packages/llm-bridge/src/activity-protocol.ts",
     "src/shared/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/shared/ui/**/*"
   ]
 }

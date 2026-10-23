@@ -9,6 +9,7 @@ import { WorkbenchLog } from "./workbench-log";
 import { settingsPath } from "./hub-settings";
 import {
   loadPluginCatalog,
+  lookupCatalogEntry,
   readLocalPluginCatalog,
   type CatalogFetcher,
 } from "./plugin-catalog";
@@ -16,6 +17,7 @@ import { pluginLibraryPath, spacesUsingPlugin } from "./plugin-library";
 import {
   downloadPlugin,
   listAllProfilePlugins,
+  listNpmPackageVersions,
   parseNpmNameAndVersion,
   removeDownloadedPlugin,
   type GitPacker,
@@ -49,6 +51,7 @@ import {
   spaceIdFromName,
   type LocalePreference,
   type PackageSource,
+  type PluginCatalogEntry,
   type PluginLibraryEntry,
   type PluginLibrarySource,
   type ThemePreference,
@@ -60,6 +63,7 @@ import {
   WORKBENCH_IMPORT_TTL_MS,
   type WorkbenchHomeSettings,
   type WorkbenchLibraryItem,
+  type WorkbenchPluginVersions,
   type WorkbenchProductCommand,
   type WorkbenchProductObservation,
   type WorkbenchProductOutcome,
@@ -67,6 +71,7 @@ import {
   type WorkbenchProductResult,
   type WorkbenchDiagnostics,
 } from "../../shared/workbench-product";
+import { WorkbenchPublicError } from "./supervisor/errors";
 import {
   BlueprintWorkbench,
   type BlueprintWorkbenchPorts,
@@ -158,6 +163,12 @@ export class WorkbenchProductService {
         return { method: "catalog", catalog: this.readCatalog(request.query), observation };
       case "library":
         return { method: "library", items: this.readLibrary(), observation };
+      case "plugin.versions":
+        return {
+          method: "plugin.versions",
+          ...(await this.readPluginVersions(request.catalogId)),
+          observation,
+        };
       case "diagnostics":
         return {
           method: "diagnostics",
@@ -294,6 +305,49 @@ export class WorkbenchProductService {
     const spaceIds = this.ports.listSpaces().map((space) => space.id);
     const installed = listAllProfilePlugins(this.ports.home, spaceIds);
     return entries.map((entry) => publicLibraryItem(entry, spacesUsingPlugin(this.ports.home, installed, entry)));
+  }
+
+  /** A catalog entry is addressed by its catalog id or by its npm package name. */
+  private findCatalogEntry(catalogId: string): PluginCatalogEntry | undefined {
+    const key = catalogId.trim().toLowerCase();
+    if (!key) return undefined;
+    const direct = lookupCatalogEntry(this.ports.home, key);
+    if (direct) return direct;
+    return this.readCatalog().entries.find(
+      (entry) => entry.id.toLowerCase() === key || (entry.packageName ?? "").toLowerCase() === key,
+    );
+  }
+
+  /**
+   * The published versions of one catalog entry.
+   *
+   * Only npm entries have a version list. A git or manual entry is reported as
+   * unsupported instead of guessing a version for it.
+   */
+  private async readPluginVersions(catalogId: string): Promise<WorkbenchPluginVersions> {
+    const entry = this.findCatalogEntry(catalogId);
+    if (!entry) {
+      throw new WorkbenchPublicError("workbench/not-found", `The catalog has no entry ${catalogId}.`);
+    }
+    if (entry.installMethod !== "npm" || isGitSpec(entry.installSpec ?? "")) {
+      throw new WorkbenchPublicError(
+        "workbench/unsupported",
+        `${entry.id} is not an npm package, so it has no published version list.`,
+      );
+    }
+    const packageName = entry.packageName || entry.installSpec;
+    if (!packageName || !isBareNpmPackageName(packageName)) {
+      throw new WorkbenchPublicError(
+        "workbench/invalid-input",
+        `The catalog entry ${entry.id} has no npm package name.`,
+      );
+    }
+    const published = await listNpmPackageVersions(packageName, { fetchImpl: this.ports.fetchImpl });
+    return {
+      versions: published.versions,
+      latest: published.latest,
+      packageName: published.packageName,
+    };
   }
 
   private async exportShare(spaceId: string, includeConfig: boolean): Promise<{

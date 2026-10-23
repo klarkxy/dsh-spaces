@@ -14,12 +14,45 @@ import {
   uniqueSpaceName,
 } from "../src/adapters/node/space-share.ts";
 import { PLUGIN_LIBRARY_FILE } from "../src/adapters/node/plugin-library.ts";
-import { packZip } from "../src/adapters/node/space-share-zip.ts";
+import { packZip, unpackZip } from "../src/adapters/node/space-share-zip.ts";
 import type { InstalledPlugin } from "../src/shared/types.ts";
 import { COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
 import { workbenchProductResultSchema } from "../src/shared/workbench-product-schemas.ts";
 
 const temps: string[] = [];
+
+test("ZIP rejects repeated payload references and malformed ranges before copying data", () => {
+  const original = Buffer.from;
+  for (const name of ["payload.bin", "directory/"]) {
+    const zip = packZip([{name, data: Buffer.alloc(512 * 1024)}]);
+    const end = zip.length - 22, centralStart = zip.readUInt32LE(end + 16);
+    const central = zip.subarray(centralStart, end), count = 32;
+    const footer = Buffer.from(zip.subarray(end));
+    footer.writeUInt16LE(count, 8); footer.writeUInt16LE(count, 10);
+    footer.writeUInt32LE(central.length * count, 12);
+    const repeated = Buffer.concat([zip.subarray(0, centralStart), ...Array(count).fill(central), footer]);
+    let copies = 0;
+    Buffer.from = ((...args: Parameters<typeof Buffer.from>) => {
+      if (Buffer.isBuffer(args[0])) copies++;
+      return (original as any)(...args);
+    }) as typeof Buffer.from;
+    try {
+      assert.throws(() => unpackZip(repeated), /too large|overlapping/);
+      assert.equal(copies, 0, "untrusted payloads were copied before validation");
+    } finally { Buffer.from = original; }
+  }
+  const zip = packZip([{name: "safe.txt", data: Buffer.from("valid")}]);
+  assert.equal(unpackZip(zip, zip.length)[0]?.data.toString(), "valid");
+  assert.throws(() => unpackZip(zip, zip.length - 1), /too large/);
+  const broken = Buffer.from(zip), central = broken.readUInt32LE(broken.length - 6);
+  broken.writeUInt32LE(0xffffffff, central + 20);
+  assert.throws(() => unpackZip(broken), /not a zip/);
+  const duplicate = packZip([{name: "a", data: Buffer.from("ok")}, {name: "b", data: Buffer.from("ok")}]);
+  const start = duplicate.readUInt32LE(duplicate.length - 6);
+  duplicate.writeUInt32LE(0, start + 47 + 42);
+  duplicate[start + 47 + 46] = "a".charCodeAt(0);
+  assert.throws(() => unpackZip(duplicate), /overlapping/);
+});
 
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });

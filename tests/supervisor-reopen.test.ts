@@ -109,6 +109,39 @@ test("a dead owner with unfinished maintenance retains its lease, endpoint and e
   }
 });
 
+test("a toolchain record superseded by a host update does not block retiring a dead owner", async () => {
+  for (const mode of ["version-changed", "binary-gone"]) {
+    const home = tempHome();
+    const owner = await exitedHolder(home);
+    const controller = new HomeController(home);
+    const cliRoot = join(home, "cli");
+    mkdirSync(join(cliRoot, "lib"), { recursive: true });
+    writeFileSync(join(cliRoot, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.4" }));
+    const bin = mode === "binary-gone" ? join(home, "removed", "lib", "bin.js") : join(cliRoot, "lib", "bin.js");
+    if (mode === "version-changed") writeFileSync(bin, "export {};");
+    const snapshots = tempHome();
+    writeFileSync(join(controller.controlDir, "toolchain.json"), JSON.stringify({
+      version: 1, bin, nodeExe: process.execPath, dshVersion: "0.2.0-rc.2", snapshotRoot: snapshots,
+    }));
+    retirePreviousSupervisor(home, owner, false);
+    assert.equal(existsSync(join(controller.controlDir, "previous-controller-exit.json")), true, mode);
+    assert.equal(existsSync(join(controller.controlDir, "endpoint.json")), false, mode);
+  }
+});
+
+test("pending restore evidence in a stale record's snapshot root still prevents lease retirement", async () => {
+  const home = tempHome();
+  const owner = await exitedHolder(home);
+  const controller = new HomeController(home);
+  const snapshots = tempHome();
+  writeFileSync(join(snapshots, "pending-restore.json"), "{unfinished");
+  writeFileSync(join(controller.controlDir, "toolchain.json"), JSON.stringify({
+    version: 1, bin: join(home, "gone", "lib", "bin.js"), nodeExe: process.execPath, dshVersion: "0.2.0-rc.2", snapshotRoot: snapshots,
+  }));
+  assert.throws(() => retirePreviousSupervisor(home, owner, false), /Unfinished Home maintenance/);
+  assert.equal(existsSync(join(controller.controlDir, "previous-controller-exit.json")), false);
+});
+
 test("pending restore evidence in bound, explicit and default snapshot roots prevents lease retirement", async () => {
   const home = tempHome();
   const owner = await exitedHolder(home);

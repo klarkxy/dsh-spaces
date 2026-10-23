@@ -28,6 +28,7 @@ import type { WorkbenchLogEntry } from "../../../../src/shared/workbench-log";
 import { createWorkbenchLlmClient, type LlmUiClient } from "./llm/client";
 import { validateWorkbenchIcon } from "./icons";
 import { localizeError, t, type WorkbenchLocale, type WorkbenchMessageKey } from "./i18n";
+import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import {
   defaultStorage,
   homeSelectionId,
@@ -52,6 +53,18 @@ import {
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 const RESERVED = new Set(["web", "hub", "headless", "node_modules", "spaces-hub"]);
 const ACTIVE_JOB = new Set(["queued", "running"]);
+const CREATE_JOB = new Set(["space.create", "template.create", "space.import"]);
+
+/**
+ * D1 confirmation tiers.
+ *
+ * A stop or a restart of one space is reversible and does not destroy data, so
+ * its preview executes without a second dialog. Everything that removes data,
+ * switches a version or stops the whole service keeps the confirmation dialog.
+ * A destructive plan of the same kind still shows the dialog: the backend
+ * decides what the plan does, the client only decides whether to ask again.
+ */
+const AUTO_CONFIRM_KINDS = new Set(["space.stop", "space.restart"]);
 
 export type HomeTab = "overview" | "spaces" | "plugins" | "snapshots" | "runtime" | "templates" | "blueprints";
 
@@ -59,7 +72,6 @@ export type OverlayKind =
   | { type: "create" }
   | { type: "rename"; spaceId: string }
   | { type: "icon"; spaceId: string }
-  | { type: "detail"; spaceId: string }
   | { type: "settings" }
   | { type: "import" }
   | { type: "menu"; spaceId: string; x: number; y: number }
@@ -77,6 +89,31 @@ export interface ImportPreviewState {
   preview: SpaceSharePreview;
   observation: WorkbenchProductObservation;
   fileName: string;
+}
+
+/**
+ * The published npm versions of one catalog entry.
+ *
+ * The versions are exact semver, newest first. A failed read keeps its reason:
+ * there is no retry and no guessed version.
+ */
+export interface WorkbenchPluginVersions {
+  catalogId: string;
+  packageName: string;
+  versions: string[];
+  latest: string | null;
+  status: "loading" | "ready" | "error";
+  error: string | null;
+}
+
+/** The options of one submit. */
+interface SubmitOptions {
+  /** The mutation context of a prepared plan. */
+  context?: WorkbenchMutationContext;
+  /** The surface that owns the failure of this command. */
+  origin?: string | null;
+  /** Called with the accepted job, before the next poll. */
+  onJob?: (job: WorkbenchJob) => void;
 }
 
 export interface WorkbenchEnv {
@@ -111,10 +148,16 @@ export interface WorkbenchUiState {
   pendingPlan: { request: WorkbenchPlanRequest; plan: WorkbenchPlan } | null;
   planError: string | null;
   commandError: string | null;
+  /** The surface that owns the last failure. A failure without an origin stays global. */
+  requestOrigin: string | null;
   commandPending: boolean;
   readError: Partial<Record<WorkbenchReadSurface, string>>;
   homeTab: HomeTab;
   settingsTab: "general" | "llm" | "advanced" | HomeTab;
+  /** The space whose detail page is open inside the spaces tab. */
+  detailSpaceId: string | null;
+  /** The maintenance group of the settings navigation, remembered for this session. */
+  maintenanceExpanded: boolean;
   settingsDraft: SettingsDraft | null;
   settingsStatus: "idle" | "loading" | "ready" | "error";
   detail: SpaceDetail | null;
@@ -132,6 +175,8 @@ export interface WorkbenchUiState {
   pluginVersion: string;
   pluginSpec: string;
   pluginsStatus: "idle" | "loading" | "ready" | "error";
+  /** The published npm versions of a catalog entry, loaded on demand. */
+  pluginVersions: Record<string, WorkbenchPluginVersions>;
   catalog: PluginCatalogSnapshot | null;
   catalogStatus: "idle" | "loading" | "ready" | "error";
   library: WorkbenchLibraryItem[];
@@ -262,6 +307,92 @@ function intentKey(command: WorkbenchCommand): string {
   return JSON.stringify(command);
 }
 
+/**
+ * The surface that owns the failure of a command.
+ *
+ * An origin is only set when the surface that shows it is on screen. A request
+ * from a surface that is not open has no origin, and its reason stays in the
+ * global banner at the top of the client.
+ */
+export function workbenchRequestOrigin(
+  ui: WorkbenchUiState,
+  request: { kind: string; spaceId?: string; spaceIds?: string[] },
+): string | null {
+  const settings = ui.overlay?.type === "settings";
+  const tab = ui.settingsTab;
+  const detail = ui.detailSpaceId;
+  const templates = settings && (tab === "templates" || tab === "blueprints");
+  const spaces = settings && tab === "spaces";
+  const detailOf = (spaceId: string | undefined): string | null =>
+    spaceId && detail === spaceId ? `detail:${spaceId}` : null;
+  switch (request.kind) {
+    case "space.create":
+      return ui.overlay?.type === "create" ? "create" : null;
+    case "space.update":
+      return detailOf(request.spaceId) ?? (spaces ? "spaces" : null);
+    case "space.reorder":
+      return spaces ? "spaces" : null;
+    case "space.start":
+    case "space.stop":
+    case "space.restart":
+    case "space.delete":
+      return detailOf(request.spaceId) ?? (spaces ? "spaces" : null);
+    case "space.runtime.set":
+      return detail && detail === request.spaceId ? `detail:${request.spaceId}:dsh` : null;
+    case "space.import":
+      return templates ? "templates:import" : null;
+    case "plugin.install":
+      return detail && (request.spaceIds ?? []).includes(detail) ? `detail:${detail}:plugins` : null;
+    case "plugin.toggle":
+    case "plugin.remove":
+    case "plugin.cleanup-manager":
+      return detail && detail === request.spaceId ? `detail:${detail}:plugins` : null;
+    case "plugin.download":
+    case "plugin.library.remove":
+    case "catalog.refresh":
+      return detail ? `detail:${detail}:plugins` : null;
+    case "snapshot.create":
+    case "snapshot.delete":
+      return settings && tab === "snapshots" ? "backups" : null;
+    case "runtime.remove":
+      return settings && tab === "runtime" ? "dshVersions" : null;
+    case "service.shutdown":
+      return settings && tab === "advanced" ? "service" : null;
+    case "settings.update":
+      return settings && tab === "advanced" ? "service:settings" : null;
+    case "template.save":
+      return templates ? "templates:export" : null;
+    case "template.create":
+      return templates ? "templates:create" : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Whether the surface that owns `requestOrigin` is on screen right now and
+ * actually renders its failures. When it is not (the user navigated away, the
+ * dialog closed, or no surface renders that origin), the failure belongs in the
+ * global banner. A failure is never dropped (let it crash).
+ */
+export function requestOriginMounted(ui: WorkbenchUiState): boolean {
+  const origin = ui.requestOrigin;
+  if (origin === null) return false;
+  const overlay = ui.overlay?.type;
+  if (origin === "create" || origin === "rename" || origin === "icon") return overlay === origin;
+  if (overlay !== "settings") return false;
+  const tab = ui.settingsTab;
+  if (origin === "spaces") return tab === "spaces" && !ui.detailSpaceId;
+  if (origin === "dshVersions") return tab === "runtime";
+  if (origin === "service" || origin === "service:settings") return tab === "advanced";
+  if (origin === "templates:import" || origin === "templates:export") return tab === "templates" || tab === "blueprints";
+  const detail = /^detail:([a-z0-9][a-z0-9-]{0,38})(?::(plugins|dsh))?$/.exec(origin);
+  if (detail) return tab === "spaces" && ui.detailSpaceId === detail[1];
+  // "backups", "templates:create" and any future origin without a rendered
+  // inline host fall back to the banner.
+  return false;
+}
+
 function mapLocale(value: LocalePreference): WorkbenchLocale {
   if (value === "en") return "en";
   if (value === "zh") return "zh";
@@ -284,14 +415,23 @@ export class WorkbenchController {
   private running = false;
   private shutdownRequested = false;
   private stateGeneration = 0;
+  // User navigation is independent of view tokens advanced by startup observations.
+  private navigationIntent = 0;
   private cycle = 0;
   private wrapDepth = 0;
   private requestSurface = 0;
   private handledProductJobs = new Set<string>();
+  private watchedCreates = new Set<string>();
   private primedProductJobs = false;
+  /** Set only by the current poll generation's own rejection. Late failures cannot set it. */
+  private stateReadFailed = false;
   private submittedSettingsJson: string | null = null;
   private restoreId: string | null;
   private notedCreates = new Set<string>();
+  /** Creates this client submitted, keyed by request id. */
+  private submittedCreates = new Map<string, { spaceId: string; intent: number }>();
+  /** A finished create that still waits for its space to appear in the state. */
+  private pendingAutoEnter: { spaceId: string; intent: number } | null = null;
   private persistEmpty: boolean;
   private appliedClientDefaults = false;
   private ui: WorkbenchUiState;
@@ -336,10 +476,13 @@ export class WorkbenchController {
       pendingPlan: null,
       planError: null,
       commandError: null,
+      requestOrigin: null,
       commandPending: false,
       readError: {},
       homeTab: "overview",
       settingsTab: "general",
+      detailSpaceId: null,
+      maintenanceExpanded: false,
       settingsDraft: null,
       settingsStatus: "idle",
       detail: null,
@@ -357,6 +500,7 @@ export class WorkbenchController {
       pluginVersion: "",
       pluginSpec: "",
       pluginsStatus: "idle",
+      pluginVersions: {},
       catalog: null,
       catalogStatus: "idle",
       library: [],
@@ -398,7 +542,9 @@ export class WorkbenchController {
   start(): void {
     if (this.running) return;
     this.running = true;
-    this.unsubVisibility = this.env.onVisibilityChange(() => this.schedulePoll());
+    this.unsubVisibility = this.env.onVisibilityChange(() => {
+      if (!this.stateReadFailed) this.schedulePoll();
+    });
     this.unsubMessages = this.env.addMessageListener((event) => this.handleMessage(event));
     void this.poll();
   }
@@ -434,7 +580,21 @@ export class WorkbenchController {
 
   setHomeTab = (homeTab: HomeTab): void => {
     this.clearRequestError();
-    this.patch({ homeTab, settingsTab: homeTab, overlay: { type: "settings" } });
+    // The plugin tab is not a top-level destination any more: it is the
+    // plugin section of the space detail page.
+    if (homeTab === "plugins") {
+      const spaceId = this.ui.pluginSpaceId || this.workspaceSpaces()[0]?.id;
+      if (spaceId) {
+        this.openDetail(spaceId);
+        return;
+      }
+    }
+    this.patch({
+      homeTab,
+      settingsTab: homeTab,
+      detailSpaceId: homeTab === "spaces" ? null : this.ui.detailSpaceId,
+      overlay: { type: "settings" },
+    });
     if (homeTab === "plugins") {
       if (this.ui.pluginsStatus === "idle") void this.searchPlugins(this.ui.pluginQuery);
       if (this.ui.catalogStatus === "idle") void this.loadCatalog(this.ui.pluginQuery);
@@ -444,6 +604,11 @@ export class WorkbenchController {
     if (homeTab === "runtime" && this.ui.runtimesStatus === "idle") void this.loadRuntimes();
     if (homeTab === "templates" && this.ui.templatesStatus === "idle") void this.loadTemplates();
     if (homeTab === "overview") void this.loadLogs();
+  };
+
+  /** The maintenance group of the settings navigation. It stays expanded while one of its tabs is open. */
+  toggleMaintenance = (): void => {
+    this.patch({ maintenanceExpanded: !this.ui.maintenanceExpanded });
   };
 
   blueprintSourceSpaces = (): WorkbenchSpace[] => {
@@ -458,6 +623,7 @@ export class WorkbenchController {
   };
 
   selectHome = (): void => {
+    ++this.navigationIntent;
     this.clearRequestError();
     this.clearWait();
     this.views.commitHome();
@@ -475,23 +641,30 @@ export class WorkbenchController {
   selectSpace = (spaceId: string): void => {
     const space = this.space(spaceId);
     if (!space) return;
-    this.beginSpace(space, { startIfStopped: true, force: false });
+    ++this.navigationIntent;
+    this.beginSpace(space, true);
   };
 
   /** Presentation-only navigation: a stopped or foreign entry never becomes an implicit start. */
   selectRunningSpace = async (spaceId: string, isCurrent: () => boolean = () => true): Promise<boolean> => {
-    const cycle = this.cycle, selectionToken = this.views.selectToken;
+    if (this.stateReadFailed) return false;
+    const cycle = this.cycle, intent = ++this.navigationIntent;
     try {
       // The outer host has its own inventory. A normal selection reads current
       // authority once instead of rejecting from this iframe's older poll.
       const state = await this.api.state();
-      if (!this.stillOpen(cycle) || !isCurrent() || !this.views.isCurrentToken(selectionToken) || state.serviceEpoch !== this.ui.state?.serviceEpoch) return false;
+      if (this.stateReadFailed || !this.stillOpen(cycle) || !isCurrent() || intent !== this.navigationIntent || state.serviceEpoch !== this.ui.state?.serviceEpoch) return false;
       const space = state.spaces.find(item => item.id === spaceId);
       if (!space || space.status !== "running" || !space.hasWebApp || space.isHost || state.managerId === spaceId || state.availability === "unavailable") return false;
       ++this.stateGeneration; // older in-flight polls cannot overwrite this selection's state
       this.applyState(state);
-      if (!isCurrent() || !this.views.isCurrentToken(selectionToken)) return false;
-      this.beginSpace(space, { startIfStopped: false, force: false });
+      if (!isCurrent() || intent !== this.navigationIntent) return false;
+      const frame = this.views.get(spaceId);
+      if (this.views.pendingSpaceId === spaceId && frame?.generation === space.generation &&
+          (frame.status === "loading" || frame.status === "pending")) {
+        // Adjacent clicks share the existing authorization request and handshake.
+        this.continuePending(state);
+      } else this.beginSpace(space, false);
       return true;
     } catch { return false; }
   };
@@ -531,12 +704,6 @@ export class WorkbenchController {
     }
   };
 
-  retryView = (spaceId: string): void => {
-    const space = this.space(spaceId);
-    if (!space) return;
-    this.beginSpace(space, { startIfStopped: true, force: true });
-  };
-
   openIndependent = (spaceId: string): void => {
     const cycle = this.cycle;
     void this.wrap(async () => {
@@ -548,7 +715,7 @@ export class WorkbenchController {
 
   openCreate = (): void => {
     if (!this.canMutate()) {
-      this.patch({ commandError: localizeError(this.ui.locale, "workbench/read-only") });
+      this.patch({ commandError: localizeError(this.ui.locale, "workbench/read-only"), requestOrigin: null });
       return;
     }
     this.clearRequestError();
@@ -579,7 +746,7 @@ export class WorkbenchController {
       return;
     }
     this.clearRequestError();
-    this.patch({ settingsTab });
+    this.patch({ settingsTab, detailSpaceId: null });
   };
 
   private cachedLlmClient: LlmUiClient | null = null;
@@ -600,11 +767,34 @@ export class WorkbenchController {
     }));
   };
 
+  /**
+   * Open the detail page of one space.
+   *
+   * The detail page lives inside the settings surface (the spaces tab), so it
+   * replaces the old detail dialog: the space id, its status, its appearance,
+   * its plugins, its model binding, its DSH version, its diagnostics and its
+   * destructive actions have exactly one authoritative place.
+   */
   openDetail = (spaceId: string): void => {
     this.clearRequestError();
-    this.patch({ overlay: { type: "detail", spaceId } });
+    this.patch({
+      overlay: { type: "settings" },
+      settingsTab: "spaces",
+      homeTab: "spaces",
+      detailSpaceId: spaceId,
+      pluginSpaceId: spaceId,
+    });
     void this.loadDetail(spaceId);
     if (this.ui.runtimesStatus === "idle") void this.loadRuntimes();
+    if (this.ui.pluginsStatus === "idle") void this.searchPlugins(this.ui.pluginQuery);
+    else this.loadSpacePluginVersions(this.ui.plugins);
+    if (this.ui.catalogStatus === "idle") void this.loadCatalog(this.ui.pluginQuery);
+    if (this.ui.libraryStatus === "idle") void this.loadLibrary();
+  };
+
+  /** Leave the space detail page and show the space list again. */
+  closeDetail = (): void => {
+    this.patch({ detailSpaceId: null });
   };
 
   openMenu = (spaceId: string, x: number, y: number): void => {
@@ -616,7 +806,7 @@ export class WorkbenchController {
     this.patch({ overlay: null, planError: null });
   };
 
-  closePlan = (): void => this.patch({ pendingPlan: null, planError: null });
+  closePlan = (): void => this.patch({ pendingPlan: null, planError: null, requestOrigin: null });
 
   closeImport = (): void => {
     this.clearRequestError();
@@ -627,45 +817,73 @@ export class WorkbenchController {
     this.patch({ commandError: localizeError(this.ui.locale, errorCode(error)) });
   };
 
-  createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; browser?: boolean }): void => {
+  createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean }): void => {
     const name = input.name.trim().toLowerCase();
+    // The create dialog owns the failure of its own form.
+    const origin = this.ui.overlay?.type === "create" ? "create" : null;
     if (!NAME_RE.test(name)) {
-      this.patch({ commandError: this.msg("app.nameInvalid") });
+      this.patch({ commandError: this.msg("app.nameInvalid"), requestOrigin: origin });
       return;
     }
     if (RESERVED.has(name)) {
-      this.patch({ commandError: this.msg("app.nameReserved") });
+      this.patch({ commandError: this.msg("app.nameReserved"), requestOrigin: origin });
       return;
     }
     const icon = validateWorkbenchIcon(input.icon);
     if (!icon.ok) {
-      this.patch({ commandError: this.msg(icon.reason === "too-large" ? "app.iconTooLarge" : "app.iconInvalid") });
+      this.patch({ commandError: this.msg(icon.reason === "too-large" ? "app.iconTooLarge" : "app.iconInvalid"), requestOrigin: origin });
       return;
     }
-    void this.submit({
-      kind: "space.create",
-      input: {
-        name,
-        displayName: input.displayName?.trim() || undefined,
-        icon: icon.icon || undefined,
-        ...(input.useSharedLlm === undefined ? {} : { useSharedLlm: input.useSharedLlm }),
-        ...(input.browser ? { browser: true } : {}),
+    void this.submit(
+      {
+        kind: "space.create",
+        input: {
+          name,
+          displayName: input.displayName?.trim() || undefined,
+          icon: icon.icon || undefined,
+          ...(input.useSharedLlm === undefined ? {} : { useSharedLlm: input.useSharedLlm }),
+          ...(input.modelSource === undefined ? {} : { modelSource: input.modelSource }),
+          ...(input.browser ? { browser: true } : {}),
+        },
       },
-    });
-    this.patch({ overlay: null });
+      {
+        origin,
+        // The dialog closes when the request is accepted. A failed job keeps it
+        // open with the reason next to the form.
+        onJob: (job) => {
+          if (job.status === "failed") {
+            this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }) });
+            return;
+          }
+          this.patch({ overlay: this.ui.overlay?.type === "create" ? null : this.ui.overlay });
+        },
+      },
+    );
   };
 
   updateSpace = (spaceId: string, patch: { displayName?: string; icon?: string }): void => {
     if (patch.icon !== undefined) {
       const icon = validateWorkbenchIcon(patch.icon);
       if (!icon.ok) {
-        this.patch({ commandError: this.msg(icon.reason === "too-large" ? "app.iconTooLarge" : "app.iconInvalid") });
+        this.patch({ commandError: this.msg(icon.reason === "too-large" ? "app.iconTooLarge" : "app.iconInvalid"), requestOrigin: this.updateOrigin(spaceId) });
         return;
       }
       patch = { ...patch, icon: icon.icon };
     }
-    void this.submit({ kind: "space.update", spaceId, ...patch });
-    this.patch({ overlay: null });
+    const dialog = this.ui.overlay?.type === "rename" || this.ui.overlay?.type === "icon" ? this.ui.overlay.type : null;
+    void this.submit({ kind: "space.update", spaceId, ...patch }, {
+      origin: this.updateOrigin(spaceId),
+      // Like the create dialog, the rename and icon dialogs close only once the
+      // request is accepted; a failure keeps them open with the reason inside.
+      // The detail page stays open either way.
+      onJob: (job) => {
+        if (job.status === "failed") {
+          this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }) });
+          return;
+        }
+        if (dialog && this.ui.overlay?.type === dialog) this.patch({ overlay: null });
+      },
+    });
   };
 
   moveSpace = (spaceId: string, direction: -1 | 1): void => {
@@ -678,7 +896,7 @@ export class WorkbenchController {
     copy.splice(next, 0, item);
     const managerId = this.ui.state?.managerId;
     const spaceIds = managerId && !copy.includes(managerId) ? [managerId, ...copy] : copy;
-    void this.submit({ kind: "space.reorder", spaceIds });
+    void this.submit({ kind: "space.reorder", spaceIds }, { origin: "spaces" });
   };
 
   startSpace = (spaceId: string): void => {
@@ -707,15 +925,16 @@ export class WorkbenchController {
   confirmPlan = (): void => {
     const pending = this.ui.pendingPlan;
     if (!pending) {
-      this.patch({ planError: this.msg("app.noPlan") });
+      this.patch({ planError: this.msg("app.noPlan"), requestOrigin: null });
       return;
     }
-    this.patch({ pendingPlan: null, overlay: null });
+    // The plan takes the stage, so the failure of its execution is global.
+    this.patch({ pendingPlan: null, overlay: null, requestOrigin: null });
     if (pending.request.kind === "service.shutdown") {
       void this.submitShutdown(pending.plan.id);
       return;
     }
-    void this.submit({ kind: "plan.execute", planId: pending.plan.id });
+    void this.submit({ kind: "plan.execute", planId: pending.plan.id }, { origin: null });
   };
 
   cancelJob = (id: string): void => {
@@ -734,11 +953,67 @@ export class WorkbenchController {
   setPluginCatalog = (pluginCatalogId: string, pluginVersion?: string): void => {
     this.patch({
       pluginCatalogId,
-      pluginVersion: pluginVersion ?? this.ui.pluginVersion,
+      pluginVersion: pluginVersion ?? "",
     });
+    // Picking an entry reads its published versions again: the previous read
+    // belongs to another entry and a failed read may be retried by picking
+    // the entry once more.
+    void this.loadPluginVersions(pluginCatalogId, true);
   };
   setPluginVersion = (pluginVersion: string): void => this.patch({ pluginVersion });
   setPluginSpec = (pluginSpec: string): void => this.patch({ pluginSpec });
+
+  /**
+   * Read the published versions of one catalog entry.
+   *
+   * One request per entry, no retry. A failed read keeps its reason next to
+   * the version list instead of offering a guessed version.
+   */
+  loadPluginVersions = (catalogId: string, force = false): Promise<void> => {
+    const key = catalogId.trim().toLowerCase();
+    if (!key) return Promise.resolve();
+    const known = this.ui.pluginVersions[key];
+    if (!force && known && known.status !== "error") return Promise.resolve();
+    const cycle = this.cycle;
+    this.patch({
+      pluginVersions: {
+        ...this.ui.pluginVersions,
+        [key]: { catalogId: key, packageName: "", versions: [], latest: null, status: "loading", error: null },
+      },
+    });
+    return this.wrap(async () => {
+      const result = await this.api.product({ method: "plugin.versions", catalogId: key });
+      if (!this.stillOpen(cycle)) return;
+      if (result.method !== "plugin.versions") {
+        throw wrongProduct("plugin.versions", result.method);
+      }
+      const selected = this.ui.pluginCatalogId.trim().toLowerCase();
+      this.patch({
+        pluginVersions: {
+          ...this.ui.pluginVersions,
+          [key]: {
+            catalogId: key,
+            packageName: result.packageName,
+            versions: result.versions,
+            latest: result.latest,
+            status: "ready",
+            error: null,
+          },
+        },
+        // The selected entry starts at its newest version. Another entry keeps
+        // the version the user chose for the selected one.
+        pluginVersion: selected === key && !this.ui.pluginVersion ? (result.latest ?? "") : this.ui.pluginVersion,
+      });
+    }, (message) => {
+      if (!this.stillOpen(cycle)) return;
+      this.patch({
+        pluginVersions: {
+          ...this.ui.pluginVersions,
+          [key]: { catalogId: key, packageName: "", versions: [], latest: null, status: "error", error: message },
+        },
+      });
+    });
+  };
 
   searchPlugins = (query: string): Promise<void> => {
     const cycle = this.cycle;
@@ -747,11 +1022,27 @@ export class WorkbenchController {
       const plugins = await this.api.plugins(query);
       if (!this.stillOpen(cycle)) return;
       this.patch({ plugins: Array.isArray(plugins) ? plugins : [], pluginsStatus: "ready", readError: this.readErrors("plugins") });
+      this.loadSpacePluginVersions(this.ui.plugins);
     }, (message) => {
       if (!this.stillOpen(cycle)) return;
       this.patch({ pluginsStatus: "error", readError: this.readErrors("plugins", message) });
     });
   };
+
+  /**
+   * Read the published versions of the plugins this space has.
+   *
+   * The upgrade row needs them, and the read belongs to the store: the space
+   * detail page renders whatever the store knows.
+   */
+  private loadSpacePluginVersions(plugins: WorkbenchPlugin[]): void {
+    const spaceId = this.ui.pluginSpaceId;
+    if (!spaceId) return;
+    for (const plugin of plugins) {
+      if (!plugin.installedIn.includes(spaceId)) continue;
+      void this.loadPluginVersions(plugin.packageName);
+    }
+  }
 
   loadCatalog = (query?: string): Promise<void> => {
     const cycle = this.cycle;
@@ -787,7 +1078,7 @@ export class WorkbenchController {
 
   refreshCatalog = (): void => {
     const url = this.ui.settingsDraft?.settings.catalogUrl?.trim();
-    void this.submit({ kind: "catalog.refresh", ...(url ? { url } : {}) });
+    void this.submit({ kind: "catalog.refresh", ...(url ? { url } : {}) }, { origin: workbenchRequestOrigin(this.ui, { kind: "catalog.refresh" }) });
   };
 
   downloadPlugin = (): void => {
@@ -798,30 +1089,35 @@ export class WorkbenchController {
       this.patch({ commandError: this.msg("plugins.needDownload") });
       return;
     }
-    void this.submit({
-      kind: "plugin.download",
-      ...(catalogId ? { catalogId } : {}),
-      ...(spec ? { spec } : {}),
-      ...(version ? { version } : {}),
-    });
+    void this.submit(
+      {
+        kind: "plugin.download",
+        ...(catalogId ? { catalogId } : {}),
+        ...(spec ? { spec } : {}),
+        ...(version ? { version } : {}),
+      },
+      { origin: workbenchRequestOrigin(this.ui, { kind: "plugin.download" }) },
+    );
   };
 
   removeLibraryItem = (libraryId: string): void => {
-    void this.submit({ kind: "plugin.library.remove", libraryId });
+    void this.submit({ kind: "plugin.library.remove", libraryId }, { origin: workbenchRequestOrigin(this.ui, { kind: "plugin.library.remove" }) });
   };
 
-  previewInstallSelected = (): void => {
-    const { pluginSpaceId, pluginCatalogId, pluginVersion } = this.ui;
-    if (!pluginSpaceId || !pluginCatalogId || !pluginVersion) {
-      this.patch({ planError: this.msg("plugins.needExact"), pendingPlan: null });
-      return;
-    }
-    this.preview({
+  previewInstallSelected = (spaceId?: string): void => {
+    const target = spaceId ?? this.ui.pluginSpaceId;
+    const { pluginCatalogId, pluginVersion } = this.ui;
+    const request: WorkbenchPlanRequest = {
       kind: "plugin.install",
-      spaceIds: [pluginSpaceId],
+      spaceIds: [target ?? ""],
       catalogId: pluginCatalogId,
       version: pluginVersion,
-    });
+    };
+    if (!target || !pluginCatalogId || !pluginVersion) {
+      this.patch({ planError: this.msg("plugins.needExact"), pendingPlan: null, requestOrigin: workbenchRequestOrigin(this.ui, request) });
+      return;
+    }
+    this.preview(request);
   };
 
   loadSnapshots = (): Promise<void> => {
@@ -889,7 +1185,7 @@ export class WorkbenchController {
     const draft = this.ui.settingsDraft;
     if (!draft) return;
     this.submittedSettingsJson = JSON.stringify(draft.settings);
-    void this.submit({ kind: "settings.update", settings: draft.settings }, draft.observation);
+    void this.submit({ kind: "settings.update", settings: draft.settings }, { context: draft.observation });
   };
 
   loadLogs = (): Promise<void> => {
@@ -994,12 +1290,15 @@ export class WorkbenchController {
       this.patch({ commandError: this.msg("templates.needName") });
       return;
     }
-    void this.submit({
-      kind: "template.save",
-      spaceId,
-      name,
-      includeConfig: this.ui.templateIncludeConfig,
-    });
+    void this.submit(
+      {
+        kind: "template.save",
+        spaceId,
+        name,
+        includeConfig: this.ui.templateIncludeConfig,
+      },
+      { origin: workbenchRequestOrigin(this.ui, { kind: "template.save" }) },
+    );
   };
 
   createFromTemplate = (): void => {
@@ -1013,18 +1312,21 @@ export class WorkbenchController {
       this.patch({ commandError: this.msg("app.nameReserved") });
       return;
     }
-    void this.submit({
-      kind: "template.create",
-      templateId,
-      name,
-      displayName: this.ui.templateDisplayName.trim() || undefined,
-    });
+    void this.submit(
+      {
+        kind: "template.create",
+        templateId,
+        name,
+        displayName: this.ui.templateDisplayName.trim() || undefined,
+      },
+      { origin: workbenchRequestOrigin(this.ui, { kind: "template.create" }) },
+    );
   };
 
   exportShare = (): void => {
     const spaceId = this.ui.shareSpaceId;
     if (!spaceId) {
-      this.patch({ commandError: this.msg("share.needSpace") });
+      this.patch({ commandError: this.msg("share.needSpace"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     const cycle = this.cycle;
@@ -1044,10 +1346,11 @@ export class WorkbenchController {
 
   previewImportArchive = (archiveBase64: string, fileName: string): void => {
     if (archiveBase64.length > MAX_WORKBENCH_SHARE_BASE64) {
-      this.patch({ commandError: this.msg("share.tooLarge"), importPreview: null });
+      this.patch({ commandError: this.msg("share.tooLarge"), importPreview: null, requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     const cycle = this.cycle;
+    this.patch({ requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
     void this.wrap(async () => {
       const result = await this.api.product({ method: "share.previewImport", archiveBase64 });
       if (!this.stillOpen(cycle)) return;
@@ -1073,26 +1376,26 @@ export class WorkbenchController {
   confirmImport = (): void => {
     const preview = this.ui.importPreview;
     if (!preview) {
-      this.patch({ commandError: this.msg("share.noPreview") });
+      this.patch({ commandError: this.msg("share.noPreview"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     const name = this.ui.importName.trim().toLowerCase();
     if (!NAME_RE.test(name)) {
-      this.patch({ commandError: this.msg("app.nameInvalid") });
+      this.patch({ commandError: this.msg("app.nameInvalid"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     if (RESERVED.has(name)) {
-      this.patch({ commandError: this.msg("app.nameReserved") });
+      this.patch({ commandError: this.msg("app.nameReserved"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     const liveEpoch = this.ui.state?.serviceEpoch;
     if (!liveEpoch || liveEpoch !== preview.observation.serviceEpoch) {
-      this.patch({ commandError: this.msg("share.epochChanged") });
+      this.patch({ commandError: this.msg("share.epochChanged"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     const expires = Date.parse(preview.expiresAt);
     if (!Number.isFinite(expires) || this.env.now() >= expires) {
-      this.patch({ commandError: this.msg("share.expired") });
+      this.patch({ commandError: this.msg("share.expired"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
       return;
     }
     const importId = preview.importId;
@@ -1104,7 +1407,7 @@ export class WorkbenchController {
         name,
         displayName: this.ui.importDisplayName.trim() || undefined,
       },
-      preview.observation,
+      { context: preview.observation, origin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) },
     );
   };
 
@@ -1171,26 +1474,28 @@ export class WorkbenchController {
   };
 
   poll = async (): Promise<void> => {
-    if (this.shutdownRequested) return;
+    if (this.shutdownRequested || this.stateReadFailed) return;
     const cycle = this.cycle;
     const generation = ++this.stateGeneration;
     try {
       const state = await this.api.state();
       if (!this.stillOpen(cycle) || generation !== this.stateGeneration) return;
       this.applyState(state);
+      if (this.running && !this.stateReadFailed) this.schedulePoll();
     } catch (error) {
       if (!this.stillOpen(cycle) || generation !== this.stateGeneration) return;
+      this.stateReadFailed = true;
+      if (this.pollTimer !== null) this.env.clearTimeout(this.pollTimer);
+      this.pollTimer = null;
       this.patch({
         boot: this.ui.state || this.ui.frames.length > 0 ? "ready" : "error",
         error: localizeError(this.ui.locale, errorCode(error)),
       });
-    } finally {
-      if (this.running) this.schedulePoll();
     }
   };
 
   canMutate(): boolean {
-    if (this.shutdownRequested) return false;
+    if (this.shutdownRequested || this.stateReadFailed) return false;
     const state = this.ui.state;
     if (!state) return false;
     if (state.protocolVersion !== 2) return false;
@@ -1223,6 +1528,7 @@ export class WorkbenchController {
 
   private applyState(state: WorkbenchState): void {
     const previousEpoch = this.ui.state?.serviceEpoch;
+    const epochChanged = previousEpoch !== undefined && previousEpoch !== state.serviceEpoch;
     const epochDestroyed = this.views.syncServiceEpoch(state.serviceEpoch);
     const destroyed = this.views.syncGenerations(state.spaces);
     for (const spaceId of [...epochDestroyed, ...destroyed]) {
@@ -1258,7 +1564,7 @@ export class WorkbenchController {
       error: state.protocolVersion === 2 ? null : protocolError,
       state,
       selected,
-      createdNotice: noticeId === selected || noticeRemoved ? null : this.ui.createdNotice,
+      createdNotice: epochChanged || noticeId === selected || noticeRemoved ? null : this.ui.createdNotice,
       pluginSpaceId,
       templateSpaceId,
       shareSpaceId,
@@ -1267,37 +1573,43 @@ export class WorkbenchController {
       viewError: this.views.viewError,
     });
     if (selectedWasRemoved) this.writePersist();
-    if (previousEpoch && previousEpoch !== state.serviceEpoch) {
-      this.blueprint.onServiceEpoch(state.serviceEpoch);
-    }
-    if (!this.primedProductJobs) {
+    if (epochChanged) this.blueprint.onServiceEpoch(state.serviceEpoch);
+    const priming = !this.primedProductJobs;
+    if (priming) {
       this.primedProductJobs = true;
       for (const item of state.jobs) {
         if (!ACTIVE_JOB.has(item.status)) this.handledProductJobs.add(item.id);
       }
     }
+    if (epochChanged) {
+      for (const item of state.jobs) {
+        if (!ACTIVE_JOB.has(item.status)) this.handledProductJobs.add(item.id);
+        else this.handledProductJobs.delete(item.id);
+      }
+      this.watchedCreates.clear();
+    }
     for (const item of state.jobs) {
-      this.noteCreated(item, true);
+      if (ACTIVE_JOB.has(item.status) && CREATE_JOB.has(item.kind)) this.watchedCreates.add(item.id);
+      this.noteCreated(item, priming || epochChanged || !this.watchedCreates.has(item.id));
       this.onProductJob(item);
     }
     const restoreId = this.restoreId;
     if (restoreId) {
       this.restoreId = null;
       const restore = state.spaces.find((item) => item.id === restoreId);
-      if (restore?.status === "running") {
-        this.beginSpace(restore, { startIfStopped: false, force: false });
-      }
+      if (restore?.status === "running") this.beginSpace(restore, false);
     }
     this.continuePending(state);
+    this.flushAutoEnter(state);
   }
 
   private workspaceSpacesFrom(state: WorkbenchState): WorkbenchSpace[] {
     return state.spaces.filter((space) => space.id !== state.managerId && !space.isHost);
   }
 
-  private beginSpace(space: WorkbenchSpace, options: { startIfStopped: boolean; force: boolean }): void {
+  private beginSpace(space: WorkbenchSpace, startIfStopped: boolean): void {
     if (space.status !== "running") {
-      if (!options.startIfStopped) return;
+      if (!startIfStopped) return;
       if (!space.managed) {
         this.patch({ commandError: this.msg("app.unmanaged") });
         return;
@@ -1307,26 +1619,21 @@ export class WorkbenchController {
         return;
       }
       this.clearRequestError();
-      const decision = options.force ? this.views.retry(space) : this.views.requestSpace(space);
+      const decision = this.views.requestSpace(space);
       this.syncSelection();
-      void this.submit({ kind: "space.start", spaceId: space.id });
+      void this.submit({ kind: "space.start", spaceId: space.id }, { origin: workbenchRequestOrigin(this.ui, { kind: "space.start", spaceId: space.id }) });
       this.armWait(decision.token, this.env.startTimeoutMs, space.id, "start");
       return;
     }
     this.clearRequestError();
-    if (options.force) {
-      for (const key of [...this.iframeWindows.keys()]) {
-        if (key.startsWith(`${space.id}:`)) this.iframeWindows.delete(key);
-      }
-    }
-    const decision = options.force ? this.views.retry(space) : this.views.requestSpace(space);
+    const decision = this.views.requestSpace(space);
     if (decision.reuseReady) {
       this.views.commitPending(space.id, decision.token);
       this.syncSelection();
       return;
     }
     this.syncSelection();
-    if (decision.load || options.force) void this.loadAuthorizedView(space.id, decision.token);
+    if (decision.load) void this.loadAuthorizedView(space.id, decision.token);
     this.armWait(decision.token, this.env.handshakeTimeoutMs, space.id, "handshake");
   }
 
@@ -1342,7 +1649,7 @@ export class WorkbenchController {
     const frame = this.views.get(pendingId);
     if (space.status !== "running") return;
     if (!frame || frame.generation !== space.generation) {
-      this.beginSpace(space, { startIfStopped: false, force: false });
+      this.beginSpace(space, false);
       return;
     }
     if (frame.status === "loading" && frame.view === null) {
@@ -1366,9 +1673,10 @@ export class WorkbenchController {
       }
       this.views.applyView(spaceId, token, view);
       this.syncSelection();
-    } catch {
+    } catch (error) {
       if (!this.stillOpen(cycle)) return;
-      this.views.failView(spaceId, token, "view-failed");
+      const reason = reportedOrFallback(errorCode(error).message, "");
+      this.views.failView(spaceId, token, reason || "view-failed");
       this.syncSelection();
     } finally {
       this.pendingViewRequests.delete(requestKey);
@@ -1420,28 +1728,52 @@ export class WorkbenchController {
 
   private async runPreview(request: WorkbenchPlanRequest): Promise<void> {
     const context = this.mutationContext();
+    const origin = workbenchRequestOrigin(this.ui, request);
     if (!context) {
       this.patch({
         pendingPlan: null,
         planError: localizeError(this.ui.locale, "workbench/unsupported"),
-        commandPending: false,
+        commandPending: this.wrapDepth > 0,
+        requestOrigin: origin,
       });
       return;
     }
     const cycle = this.cycle;
-    this.patch({ planError: null, pendingPlan: null, commandPending: true });
+    // A preview holds a busy slot in the same accounting as wrap(): a read
+    // that finishes while the preview is still in flight must not clear it.
+    this.wrapDepth += 1;
+    this.patch({ planError: null, pendingPlan: null, commandPending: true, requestOrigin: origin });
     try {
       const plan = await this.api.preview(request, context);
       if (!this.stillOpen(cycle)) return;
-      this.patch({ pendingPlan: { request, plan }, planError: null, commandPending: false, overlay: null });
+      // D1: a non-destructive stop or restart runs from its preview. Every
+      // other kind, and every destructive plan, still asks for a confirmation.
+      if (AUTO_CONFIRM_KINDS.has(request.kind) && !plan.destructive) {
+        // The plan takes the stage, so the failure of its execution is global.
+        this.patch({ pendingPlan: null, planError: null, commandPending: this.wrapDepth - 1 > 0, overlay: null, requestOrigin: null });
+        void this.submit({ kind: "plan.execute", planId: plan.id }, { origin: null });
+        return;
+      }
+      this.patch({ pendingPlan: { request, plan }, planError: null, commandPending: this.wrapDepth - 1 > 0, overlay: null, requestOrigin: null });
     } catch (error) {
       if (!this.stillOpen(cycle)) return;
+      // The surface that started the preview stays open, so the reason of the
+      // failed preview stays next to the control that caused it.
       this.patch({
         pendingPlan: null,
         planError: localizeError(this.ui.locale, errorCode(error)),
-        commandPending: false,
+        commandPending: this.wrapDepth - 1 > 0,
       });
+    } finally {
+      this.wrapDepth = Math.max(0, this.wrapDepth - 1);
     }
+  }
+
+  /** The surface that owns the failure of a rename or an icon change. */
+  private updateOrigin(spaceId: string): string | null {
+    if (this.ui.overlay?.type === "rename") return "rename";
+    if (this.ui.overlay?.type === "icon") return "icon";
+    return workbenchRequestOrigin(this.ui, { kind: "space.update", spaceId });
   }
 
   private async submitBlueprintApply(
@@ -1480,14 +1812,15 @@ export class WorkbenchController {
     }
   }
 
-  private async submit(command: WorkbenchCommand, contextOverride?: WorkbenchMutationContext): Promise<void> {
+  private async submit(command: WorkbenchCommand, options: SubmitOptions = {}): Promise<void> {
     if (!this.canMutate()) {
       this.rejectReadonly();
       return;
     }
-    const context = contextOverride ?? this.mutationContext();
+    const context = options.context ?? this.mutationContext();
+    const origin = options.origin === undefined ? workbenchRequestOrigin(this.ui, command) : options.origin;
     if (!context) {
-      this.patch({ commandError: localizeError(this.ui.locale, "workbench/unsupported") });
+      this.patch({ commandError: localizeError(this.ui.locale, "workbench/unsupported"), requestOrigin: origin });
       return;
     }
     const key = intentKey(command);
@@ -1495,7 +1828,11 @@ export class WorkbenchController {
     const requestId = this.intentRequestIds.get(key) ?? this.env.uuid();
     this.intentRequestIds.set(key, requestId);
     this.intentInflight.add(key);
+    if (command.kind === "space.create") {
+      this.submittedCreates.set(requestId, { spaceId: command.input.name, intent: this.navigationIntent });
+    }
     const cycle = this.cycle;
+    this.patch({ requestOrigin: origin });
     try {
       await this.wrap(async () => {
         const job = await this.api.submit(command, requestId, context);
@@ -1504,6 +1841,7 @@ export class WorkbenchController {
         this.noteCreated(job);
         this.onProductJob(job);
         if (!ACTIVE_JOB.has(job.status)) this.intentRequestIds.delete(key);
+        options.onJob?.(job);
         await this.poll();
       });
     } finally {
@@ -1522,7 +1860,7 @@ export class WorkbenchController {
     const unconfirmed = this.ui.locale === "en"
       ? "Shutdown was requested. This view may close before the result is confirmed. The request has not been resent."
       : "已请求停止服务。此页面可能在结果确认前关闭；当前结果尚未确认，没有重新发送请求。";
-    this.patch({ commandPending: true, commandError: unconfirmed, error: null });
+    this.patch({ commandPending: true, commandError: unconfirmed, error: null, requestOrigin: null });
     try {
       const job = await this.api.submit({ kind: "plan.execute", planId }, requestId, context);
       if (!this.stillOpen(cycle)) return;
@@ -1551,6 +1889,7 @@ export class WorkbenchController {
     if (!state) return;
     const jobs = state.jobs.filter((item) => item.id !== job.id);
     jobs.unshift(job);
+    if (ACTIVE_JOB.has(job.status) && CREATE_JOB.has(job.kind)) this.watchedCreates.add(job.id);
     this.patch({ state: { ...state, jobs } });
     this.noteCreated(job);
     this.onProductJob(job);
@@ -1610,13 +1949,42 @@ export class WorkbenchController {
     }
   }
 
-  private noteCreated(job: WorkbenchJob, fromSnapshot = false): void {
+  private noteCreated(job: WorkbenchJob, historical = false): void {
     const spaceId = job.result?.spaceId ?? importSpaceId(job.result?.product);
-    if ((job.kind !== "space.create" && job.kind !== "template.create" && job.kind !== "space.import") || job.status !== "succeeded" || !spaceId) return;
-    if (fromSnapshot && !this.ui.state?.spaces.some(space => space.id === spaceId)) return;
-    if (this.notedCreates.has(spaceId)) return;
-    this.notedCreates.add(spaceId);
+    if (!CREATE_JOB.has(job.kind) || job.status !== "succeeded" || !spaceId || historical) return;
+    if (this.notedCreates.has(job.id)) return;
+    this.notedCreates.add(job.id);
     this.patch({ createdNotice: { spaceId } });
+    this.armAutoEnter(job, spaceId);
+  }
+
+  /**
+   * Plan section 4: a space created from this client is entered directly.
+   *
+   * The request id decides whether this client sent the create at all, and the
+   * navigation intent decides whether the user has moved somewhere else since.
+   * A create from another client, or a user who navigated away in the
+   * meantime, keeps the notice and the explicit "enter" action.
+   */
+  private armAutoEnter(job: WorkbenchJob, spaceId: string): void {
+    if (job.kind !== "space.create") return;
+    const submitted = this.submittedCreates.get(job.requestId);
+    if (!submitted) return;
+    this.submittedCreates.delete(job.requestId);
+    this.pendingAutoEnter = { spaceId: spaceId || submitted.spaceId, intent: submitted.intent };
+  }
+
+  /** Enter the created space once it exists in the current state. */
+  private flushAutoEnter(state: WorkbenchState): void {
+    const pending = this.pendingAutoEnter;
+    if (!pending) return;
+    if (!state.spaces.some((space) => space.id === pending.spaceId)) return;
+    this.pendingAutoEnter = null;
+    if (this.navigationIntent !== pending.intent) return;
+    if (this.ui.selected === pending.spaceId) return;
+    // The settings surface must not cover the space that is entered.
+    this.patch({ overlay: null });
+    this.selectSpace(pending.spaceId);
   }
 
   hasActiveJobs(): boolean {
@@ -1624,7 +1992,7 @@ export class WorkbenchController {
   }
 
   private schedulePoll(): void {
-    if (!this.running || this.shutdownRequested) return;
+    if (!this.running || this.shutdownRequested || this.stateReadFailed) return;
     if (this.pollTimer !== null) this.env.clearTimeout(this.pollTimer);
     const active = (this.ui.state?.jobs ?? []).some((job) => ACTIVE_JOB.has(job.status));
     const delay = pollDelayMs(active, this.env.hidden());
@@ -1667,13 +2035,13 @@ export class WorkbenchController {
 
   private clearRequestError(): void {
     ++this.requestSurface;
-    this.patch({ commandError: null });
+    this.patch({ commandError: null, requestOrigin: null });
   }
 
   private rejectReadonly(): void {
     const state = this.ui.state;
     const code = state && state.protocolVersion !== 2 ? "workbench/unsupported" : "workbench/read-only";
-    this.patch({ commandError: localizeError(this.ui.locale, code), pendingPlan: null });
+    this.patch({ commandError: localizeError(this.ui.locale, code), pendingPlan: null, requestOrigin: null });
   }
 
   private applyClientDefaults(defaults: { locale: LocalePreference; theme: ThemePreference }): void {

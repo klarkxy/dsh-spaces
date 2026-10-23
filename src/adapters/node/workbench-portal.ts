@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { browserProtocolScript } from "../../shared/browser-guest";
 import { parseSpaceHostAudience, parsePortalSnapshot, parsePortalFailure, nativePortalFailureHash,
-  PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT, type SpaceHostAudience } from "../../shared/space-host";
+  parseNativeCreateIntent, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
+  type SpaceHostAudience } from "../../shared/space-host";
 
 /** Bounded, process-local, audience-bound entry grants. No disk state or cross-restart replay. */
 export class WorkbenchPortalGrants {
@@ -68,7 +70,11 @@ const NATIVE_PORTAL_FAILURE_HASH_LIMIT = ${NATIVE_PORTAL_FAILURE_HASH_LIMIT};
 const parsePortalFailure = ${parsePortalFailure.toString()};
 const nativePortalFailureHash = ${nativePortalFailureHash.toString()};
 const parseSnapshot = ${parsePortalSnapshot.toString()};
-let lastNativeRequest = 0;
+const parseNativeCreateIntent = ${parseNativeCreateIntent.toString()};
+${browserProtocolScript()}
+let lastNativeRequest = 0, lastNativeIntent = 0;
+let lastNativeTarget = null;
+let browserRequest = null;
 let stopped = false, reading = false, preparing = false, timer, selectionTimer, readyTimer;
 let snapshot = null, managerView = null, frame = null, managerReady = false, viewReady = false, surfaceReady = false, pending = null, forwarded = null;
 const lifetime = new AbortController();
@@ -206,6 +212,27 @@ window.addEventListener("message", event => {
   if (stopped) return;
   const message = event.data;
   if (!message || typeof message !== "object" || Array.isArray(message)) return;
+  if (native && managerReady && frame && event.source === frame.contentWindow && event.origin === audience.managerOrigin) {
+    const relay = parseBrowserRelay(message);
+    if (relay) {
+      const identity = relay.identity;
+      const row = snapshot?.spaces.find(row => row.id === identity.spaceId && row.id !== snapshot.managerId &&
+        row.status === "running" && row.generation === identity.generation);
+      if (!row || identity.serviceEpoch !== snapshot.serviceEpoch) return;
+      if (relay.kind === "hide") {
+        browserRequest = null;
+        if (!pending) location.replace(nativeBrowserFragment("browser", relay));
+      } else if (!pending) {
+        const rect = frame.getBoundingClientRect();
+        // Manager coordinates are relative to its frame, never the outer Desktop window.
+        const viewport = relay.viewport;
+        if (viewport.x + viewport.width > rect.width + 1 || viewport.y + viewport.height > rect.height + 1) return;
+        browserRequest = relay.requestId;
+        location.replace(nativeBrowserFragment("browser", relay));
+      }
+      return;
+    }
+  }
   if (frame && event.source === frame.contentWindow && event.origin === audience.managerOrigin && managerView &&
       message.serviceEpoch === managerView.serviceEpoch && message.spaceId === managerView.spaceId &&
       message.generation === managerView.generation && message.channel === managerView.channel) {
@@ -223,8 +250,12 @@ window.addEventListener("message", event => {
     } else if (message.source === "dsh-spaces-surface" && pending && message.requestId === pending.requestId) {
       if (Object.keys(message).sort().join(",") !== "channel,generation,requestId,serviceEpoch,source,spaceId,target,type") return;
       if (message.type === "selected" && message.target === pending.spaceId) {
-        send("selected", { requestId: pending.requestId, spaceId: pending.spaceId }); pending = null; clearTimeout(selectionTimer);
-      } else if (message.type === "selection-failed") { rejected(pending.requestId); pending = null; clearTimeout(selectionTimer); }
+        send("selected", { requestId: pending.requestId, spaceId: pending.spaceId });
+        // The completed selection decides which further fragment may follow.
+        lastNativeTarget = pending.spaceId; pending = null; clearTimeout(selectionTimer);
+      } else if (message.type === "selection-failed") {
+        rejected(pending.requestId); lastNativeTarget = null; pending = null; clearTimeout(selectionTimer);
+      }
     }
     return;
   }
@@ -233,21 +264,47 @@ window.addEventListener("message", event => {
       message.source !== "dsh-spaces-portal-parent" || message.channel !== audience.channel || message.type !== "select" ||
       !Number.isSafeInteger(message.requestId) || message.requestId < 1 ||
       !(message.spaceId === null || typeof message.spaceId === "string" && /^[a-z0-9][a-z0-9-]{0,38}$/.test(message.spaceId))) return;
-  const allowed = snapshot && (message.spaceId === null || snapshot.spaces.some(row => row.id === message.spaceId && row.id !== snapshot.managerId && row.status === "running"));
+  // Cached status can lag a completed start/restart. The manager authorizes current running state.
+  const allowed = snapshot && (message.spaceId === null || snapshot.spaces.some(row => row.id === message.spaceId && row.id !== snapshot.managerId));
   if (!allowed) { rejected(message.requestId); return; }
   pending = { requestId: message.requestId, spaceId: message.spaceId };
   if (managerReady) forwardSelection(); else void ensureManager();
 });
 function nativeSelection() {
   if (!native || stopped || !snapshot) return;
+  const result = parseNativeBrowserFragment(location.hash, "browser-result");
+  if (result) {
+    if (result.requestId === browserRequest && frame && managerReady && !pending) {
+      browserRequest = null;
+      frame.contentWindow.postMessage(result, audience.managerOrigin);
+    }
+    return;
+  }
+  const intent = parseNativeCreateIntent(location.hash);
+  if (intent !== null) { forwardCreateIntent(intent); return; }
   const match = location.hash.split("/");
   if (match.length !== 3 || match[0] !== "#select" || !/^[1-9][0-9]{0,9}$/.test(match[1]) ||
       !/^(@dashboard|@settings|[a-z0-9][a-z0-9-]{0,38})$/.test(match[2]) || Number(match[1]) <= lastNativeRequest) return;
   const requestId = Number(match[1]), target = match[2]; lastNativeRequest = requestId;
-  const allowed = target === "@dashboard" || target === "@settings" || snapshot.spaces.some(row => row.id === target && row.id !== snapshot.managerId && row.status === "running");
+  browserRequest = null;
+  const allowed = target === "@dashboard" || target === "@settings" || snapshot.spaces.some(row => row.id === target && row.id !== snapshot.managerId);
   if (!allowed) { send("selection-failed", {requestId, spaceId: target}); return; }
   pending = {requestId, spaceId: target};
   if (managerReady) forwardSelection(); else void ensureManager();
+}
+/**
+ * The desktop shell asks the manager for a new space through this closed
+ * fragment. Only a completed settings selection may carry it and every id is
+ * used once. The portal forwards that request and nothing else: it never
+ * navigates, starts or mutates anything for it.
+ */
+function forwardCreateIntent(requestId) {
+  if (requestId <= lastNativeIntent) return;
+  lastNativeIntent = requestId;
+  if (!managerReady || !frame || !managerView || pending || lastNativeTarget !== "@settings") return;
+  frame.contentWindow.postMessage({ source: "dsh-spaces-surface-parent", type: "intent", intent: "create", requestId,
+    serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
+    channel: managerView.channel }, audience.managerOrigin);
 }
 if (native) window.addEventListener("hashchange", nativeSelection);
 window.addEventListener("pagehide", () => { stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });

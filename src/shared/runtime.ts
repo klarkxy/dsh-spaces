@@ -2,7 +2,7 @@ import type { PackageSource } from "./types";
 
 export const DSH_RUNTIME_PACKAGE = "@deepseek-ai/dsh";
 /** Default for a new installation; existing selected runtimes keep their version. */
-export const DSH_DEFAULT_VERSION = "0.2.0-rc.2";
+export const DSH_DEFAULT_VERSION = "0.2.1-rc.2";
 /** Official stable channel used when browsing the runtime catalog. */
 export const DSH_DEFAULT_CHANNEL = "latest";
 /** Oldest DSH runtime a space may be pinned to and still start. */

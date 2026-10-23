@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { lt as semverLt, valid as semverValid } from "semver";
+import { lt as semverLt, prerelease as semverPrerelease, valid as semverValid } from "semver";
 import { t } from "../../shared/i18n";
 import { formatWorkbenchFailure } from "../../shared/workbench";
 import { DSH_RUNTIME_PACKAGE, isExactRuntimeVersion } from "../../shared/runtime";
@@ -37,6 +37,8 @@ export const DOWNLOAD_TIMEOUT_MS = 180_000;
 export const DOWNLOAD_METADATA_MAX_BYTES = 32 * 1024 * 1024;
 /** Workbench plugin tarballs are tens of MiB; 256 MiB is a hard RAM cap, not an expected size. */
 export const DOWNLOAD_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
+/** How many exact versions one catalog entry reports. */
+export const DEFAULT_PLUGIN_VERSION_LIMIT = 50;
 
 export type PluginFetcher = (
   url: string,
@@ -647,6 +649,67 @@ async function resolveNpmLatest(
     throw new Error(t("errors.pluginLatestMissing", { name: packageName }));
   }
   return { packageName, version: latest };
+}
+
+/** Exact npm versions of one package, newest first. */
+export interface NpmPackageVersions {
+  packageName: string;
+  /** Exact semver versions, newest first. */
+  versions: string[];
+  /** The newest listed version, or null when the registry published none. */
+  latest: string | null;
+}
+
+/**
+ * Read the published versions of one npm package.
+ *
+ * One packument request, no retry and no cache. A failed request is the real
+ * failure: the caller reports it instead of guessing a version.
+ */
+export async function listNpmPackageVersions(
+  name: string,
+  options: {
+    fetchImpl?: PluginFetcher;
+    signal?: AbortSignal;
+    metadataMaxBytes?: number;
+    limit?: number;
+  } = {},
+): Promise<NpmPackageVersions> {
+  const fetchImpl = options.fetchImpl ?? defaultFetcher({ metadataMaxBytes: options.metadataMaxBytes });
+  const control = new AbortController();
+  const onParentAbort = () => control.abort();
+  options.signal?.addEventListener("abort", onParentAbort, { once: true });
+  const metadataMaxBytes = options.metadataMaxBytes ?? DOWNLOAD_METADATA_MAX_BYTES;
+  try {
+    throwIfDownloadAborted(control.signal);
+    const url = npmPackumentUrl(currentPackageSource(), name);
+    const response = await fetchImpl(url, { headers: { accept: "application/json" }, signal: control.signal });
+    if (!response.ok) {
+      throw downloadFailed(name, `HTTP ${response.status}`);
+    }
+    const packument = (await readFetcherJson(response, control.signal, metadataMaxBytes, name)) as {
+      name?: unknown;
+      "dist-tags"?: { latest?: unknown };
+      versions?: Record<string, unknown>;
+    };
+    const packageName = typeof packument.name === "string" && packument.name ? packument.name : name;
+    const published = packument.versions && typeof packument.versions === "object" ? Object.keys(packument.versions) : [];
+    const exact = published.filter((version) => isExactRuntimeVersion(version) && semverValid(version));
+    // Newest first. Versions the registry published out of order keep their registry order.
+    const versions = exact
+      .map((version, index) => ({ version, index }))
+      .sort((a, b) => semverLt(a.version, b.version) ? 1 : semverLt(b.version, a.version) ? -1 : a.index - b.index)
+      .map((row) => row.version)
+      .slice(0, Math.max(0, options.limit ?? DEFAULT_PLUGIN_VERSION_LIMIT));
+    // The default and the upgrade target follow the registry's latest tag when it
+    // names a listed version; otherwise the newest stable version. A prerelease is
+    // only offered when the publisher tagged it latest.
+    const tagged = typeof packument["dist-tags"]?.latest === "string" ? packument["dist-tags"].latest : "";
+    const latest = versions.includes(tagged) ? tagged : versions.find((version) => !semverPrerelease(version)) ?? null;
+    return { packageName, versions, latest };
+  } finally {
+    options.signal?.removeEventListener("abort", onParentAbort);
+  }
 }
 
 async function pinDownloadMeta(

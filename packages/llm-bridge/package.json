@@ -33,6 +33,7 @@
   ],
   "exports": {
     ".": "./lib/index.js",
+    "./auxiliary": "./lib/auxiliary.js",
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
@@ -42,15 +43,19 @@
     }
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-session": ">=0.2.0-rc.2 || >=0.2.1-rc.2",
     "@deepseek-ai/cordis": "^4.0.3",
-    "@deepseek-ai/dsh-credentials": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-credentials-local": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-llm-pi-ai": ">=0.2.0-rc.2",
-    "@deepseek-ai/dsh-util-values": ">=0.2.0-rc.2"
+    "@deepseek-ai/dsh-credentials": ">=0.2.0-rc.2 || >=0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials-local": ">=0.2.0-rc.2 || >=0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2 || >=0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 || >=0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": ">=0.2.0-rc.2 || >=0.2.1-rc.2",
+    "@deepseek-ai/dsh-util-values": ">=0.2.0-rc.2 || >=0.2.1-rc.2"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-session": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-credentials": {
       "optional": true
     },
@@ -71,6 +76,6 @@
     }
   },
   "engines": {
-    "node": ">=26.0.0 <27.0.0"
+    "node": ">=24.21.0 <25.0.0 || >=26.0.0 <27.0.0"
   }
 }

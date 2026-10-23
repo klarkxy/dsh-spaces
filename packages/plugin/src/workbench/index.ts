@@ -1,6 +1,5 @@
 export { WorkbenchApp, type WorkbenchAppProps } from "./app";
-export { RecoverySurface, type RecoverySurfaceProps } from "./recovery";
-export { WorkbenchView, RecoveryView, JobsList, LanguageSwitch, SpaceGlyph } from "./components";
+export { WorkbenchView, JobsList, LanguageSwitch, SpaceGlyph } from "./components";
 export {
   WorkbenchController,
   pollDelayMs,

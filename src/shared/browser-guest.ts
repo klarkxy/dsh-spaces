@@ -62,3 +62,44 @@ export function parseBrowserObservations(value: unknown): BrowserGuestObservatio
   }
   return value as BrowserGuestObservation[];
 }
+
+export function parseBrowserRelay(value: unknown): BrowserRelay | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const v = value as BrowserRelay;
+  if (v.source !== BROWSER_RELAY || !id(v.requestId) || !browserIdentity(v.identity)) return null;
+  if (v.kind === 'hide' && Object.keys(v).length === 4) return v;
+  return v.kind === 'present' && Object.keys(v).length === 7 && id(v.tabId) && browserUrl(v.url) && browserViewport(v.viewport) ? v : null;
+}
+
+export function parseBrowserResult(value: unknown): BrowserGuestResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const v = value as BrowserGuestResult;
+  if (v.source !== BROWSER_RESULT || !id(v.requestId)) return null;
+  if (v.ok === false && Object.keys(v).length === 4 && ['unavailable', 'unauthorized', 'invalid-input', 'not-visible'].includes(v.error)) return v;
+  return v.ok === true && Object.keys(v).length === 6 && id(v.tabId) && v.mode === 'native' && parseBrowserObservations(v.observations) ? v : null;
+}
+
+/** Fragments stay inside the authenticated native portal; they carry no host credentials. */
+export function nativeBrowserFragment(kind: 'browser' | 'browser-result', value: unknown): string | null {
+  const parsed = kind === 'browser' ? parseBrowserRelay(value) : parseBrowserResult(value);
+  return parsed ? '#' + kind + '/' + encodeURIComponent(JSON.stringify(parsed)) : null;
+}
+export function parseNativeBrowserFragment(hash: string, kind: 'browser'): BrowserRelay | null;
+export function parseNativeBrowserFragment(hash: string, kind: 'browser-result'): BrowserGuestResult | null;
+export function parseNativeBrowserFragment(hash: string, kind: 'browser' | 'browser-result'): BrowserRelay | BrowserGuestResult | null {
+  const prefix = '#' + kind + '/';
+  if (!hash.startsWith(prefix) || hash.length > 131072) return null;
+  try {
+    const value = JSON.parse(decodeURIComponent(hash.slice(prefix.length)));
+    const parsed = kind === 'browser' ? parseBrowserRelay(value) : parseBrowserResult(value);
+    return parsed && nativeBrowserFragment(kind, parsed) === hash ? parsed : null;
+  } catch { return null; }
+}
+
+/** Used when embedding the same closed validators in the credentialed portal document. */
+export function browserProtocolScript(): string {
+  return `const BROWSER_RELAY = ${JSON.stringify(BROWSER_RELAY)}, BROWSER_RESULT = ${JSON.stringify(BROWSER_RESULT)};\nconst id = ${id.toString()};\n` +
+    [browserUrl, browserViewport, browserIdentity, boundedBrowserTitle, parseBrowserObservations,
+      parseBrowserRelay, parseBrowserResult, nativeBrowserFragment, parseNativeBrowserFragment]
+      .map(fn => fn.toString()).join('\n');
+}

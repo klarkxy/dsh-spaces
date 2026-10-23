@@ -1,4 +1,4 @@
-import React, { useEffect, useState, type ReactElement } from "react";
+import React, { useEffect, useRef, useState, type ReactElement } from "react";
 import type {
   LlmDescribeResult,
   LlmImportedRequirementsResult,
@@ -9,6 +9,8 @@ import type {
 } from "../../../../../src/shared/llm-api";
 import { localizeError, t, type WorkbenchLocale } from "../i18n";
 import { newOperationId, type LlmUiClient, type LlmUiSpace } from "./client";
+import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { PressableButton } from "../feature-motion";
 
 function errorText(locale: WorkbenchLocale, error: unknown): string {
   if (error && typeof error === "object" && "code" in error) {
@@ -17,22 +19,37 @@ function errorText(locale: WorkbenchLocale, error: unknown): string {
   return localizeError(locale, error instanceof Error ? error.message : null);
 }
 
-export function SpaceBindingPanel({
-  locale,
-  writable,
-  client,
-  spaces,
-  describe,
-  onChanged,
-}: {
+type SpaceBindingProps = {
   locale: WorkbenchLocale;
   writable: boolean;
   client: LlmUiClient;
   spaces: LlmUiSpace[];
+  /** The space this panel edits. Without it the first space of the list is used. */
+  selectedSpaceId?: string;
   describe: LlmDescribeResult;
   onChanged: () => void;
-}): ReactElement {
-  const [selected, setSelected] = useState(spaces[0]?.spaceId ?? "web");
+};
+
+export function SpaceBindingPanel(props: SpaceBindingProps): ReactElement {
+  const {locale, spaces, selectedSpaceId} = props;
+  const [choice, setChoice] = useState(spaces[0]?.spaceId ?? "web");
+  const pinned = selectedSpaceId && spaces.some((space) => space.spaceId === selectedSpaceId) ? selectedSpaceId : null;
+  const selected = pinned ?? (spaces.some(space => space.spaceId === choice) ? choice : spaces[0]?.spaceId ?? "web");
+  return <section className="dsh-wb-llm-spaces" data-llm-spaces="true">
+    <h4>{t(locale, "llm.spacesTitle")}</h4>
+    <p className="dsh-wb-muted">{t(locale, "llm.sharedReadonly")}</p>
+    {!pinned && <label className="dsh-wb-field">
+      {t(locale, "home.spaces")}
+      <select value={selected} onChange={event => setChoice(event.target.value)}>
+        {spaces.map(space => <option key={space.spaceId} value={space.spaceId}>{space.displayName}</option>)}
+      </select>
+    </label>}
+    <SpaceBindingEditor key={selected} {...props} selected={selected} />
+  </section>;
+}
+
+// A space switch isolates prior async results, mapping and secret state.
+function SpaceBindingEditor({locale, writable, client, spaces, describe, onChanged, selected}: SpaceBindingProps & {selected: string}): ReactElement {
   const [policy, setPolicy] = useState<LlmSpacePolicyResult | null>(null);
   const [defaults, setDefaults] = useState<LlmSpaceDefaultResult | null>(null);
   const [locals, setLocals] = useState<LlmLocalCandidate[]>([]);
@@ -41,10 +58,21 @@ export function SpaceBindingPanel({
   const [adoptId, setAdoptId] = useState<string | null>(null);
   const [imported, setImported] = useState<LlmImportedRequirementsResult | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
-  const [applyIds, setApplyIds] = useState<string[]>(describe.pendingRestartSpaceIds);
+  const completeSpaces = spaces.filter(space => space.status !== "unknown" && Number.isInteger(space.generation) && space.generation >= 0 && !!space.serviceEpoch);
+  const scope = completeSpaces.map(space => space.spaceId).sort().join("\0");
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const [applyIds, setApplyIds] = useState<string[]>(() => describe.pendingRestartSpaceIds.filter(id => completeSpaces.some(space => space.spaceId === id)));
+  const visibleApplyIds = applyIds.filter(id => completeSpaces.some(space => space.spaceId === id));
+  useEffect(() => {
+    setApplyIds(describe.pendingRestartSpaceIds.filter(id => completeSpaces.some(space => space.spaceId === id)));
+  }, [scope, describe.pendingRestartSpaceIds.join("\0")]);
+  const reads = useRef(0);
 
   const load = async (spaceId: string): Promise<void> => {
+    const request = ++reads.current;
     setError(null);
+    setPolicy(null); setDefaults(null); setLocals([]); setImported(null); setMapping({});
     try {
       const [nextPolicy, nextDefault, nextLocals, nextImported] = await Promise.all([
         client.spacePolicy(spaceId),
@@ -52,25 +80,27 @@ export function SpaceBindingPanel({
         client.listLocalCandidates(spaceId),
         client.importedRequirements(spaceId),
       ]);
+      if (request !== reads.current) return;
       setPolicy(nextPolicy);
       setDefaults(nextDefault);
       setLocals(nextLocals.candidates);
       setImported(nextImported);
       setMapping({});
     } catch (caught) {
-      setError(errorText(locale, caught));
+      if (request === reads.current) setError(errorText(locale, caught));
     }
   };
 
   useEffect(() => {
     if (selected) void load(selected);
+    return () => { reads.current++; };
   }, [selected, client]);
 
   const mode = policy?.policy.shared.mode ?? "none";
   const selectedIds = policy?.policy.shared.mode === "selected" ? policy.policy.shared.connectionIds : [];
 
   const savePolicy = async (shared: SharedSelection): Promise<void> => {
-    if (!policy) return;
+    if (!writable || !policy) return;
     try {
       const next = await client.updateSpacePolicy(selected, shared, policy.policy.revision);
       setPolicy(next);
@@ -81,24 +111,12 @@ export function SpaceBindingPanel({
   };
 
   return (
-    <section className="dsh-wb-llm-spaces" data-llm-spaces="true">
-      <h4>{t(locale, "llm.spacesTitle")}</h4>
-      <p className="dsh-wb-muted">{t(locale, "llm.sharedReadonly")}</p>
+    <>
       {error && (
         <p className="dsh-wb-alert" role="alert">
           {error}
         </p>
       )}
-      <label className="dsh-wb-field">
-        {t(locale, "home.spaces")}
-        <select value={selected} onChange={(event) => setSelected(event.target.value)}>
-          {spaces.map((space) => (
-            <option key={space.spaceId} value={space.spaceId}>
-              {space.displayName}
-            </option>
-          ))}
-        </select>
-      </label>
       {policy && (
         <>
           {policy.pendingRestart && <p className="dsh-wb-notice">{t(locale, "llm.pendingRestart")}</p>}
@@ -137,9 +155,20 @@ export function SpaceBindingPanel({
             </label>
           </fieldset>
           {mode === "selected" && (
-            <div>
-              {describe.connections.map((connection) => (
-                <label key={connection.id} className="dsh-wb-field">
+            <StaggerList as="div" className="dsh-wb-llm-connection-list" step={0}>
+              {describe.connections.map((connection, index) => (
+                <StaggerItem
+                  key={connection.id}
+                  as="label"
+                  className="dsh-wb-field dsh-wb-llm-connection-row"
+                  transition={{ ...springSoft, delay: Math.min(index, 8) * 0.05 }}
+                >
+                  <LayoutIndicator
+                    as="span"
+                    layoutId="dsh-wb-llm-connection"
+                    active={selectedIds.includes(connection.id)}
+                    className="dsh-wb-llm-connection-indicator"
+                  />
                   <input
                     type="checkbox"
                     checked={selectedIds.includes(connection.id)}
@@ -152,9 +181,9 @@ export function SpaceBindingPanel({
                     }}
                   />
                   {connection.displayName}
-                </label>
+                </StaggerItem>
               ))}
-            </div>
+            </StaggerList>
           )}
         </>
       )}
@@ -227,27 +256,35 @@ export function SpaceBindingPanel({
           <p className="dsh-wb-muted">{t(locale, "llm.mapEmpty")}</p>
         ) : (
           <>
-            {imported.manifest.requirements.map((requirement) => (
-              <label key={requirement.requirementId} className="dsh-wb-field">
-                {requirement.displayName} · {requirement.protocol} · {requirement.endpoint}
-                <select
-                  data-llm-map-select="true"
-                  value={mapping[requirement.requirementId] ?? ""}
-                  disabled={!writable}
-                  onChange={(event) =>
-                    setMapping((current) => ({ ...current, [requirement.requirementId]: event.target.value }))
-                  }
+            <StaggerList as="div" className="dsh-wb-llm-map-list" step={0}>
+              {imported.manifest.requirements.map((requirement, index) => (
+                <StaggerItem
+                  key={requirement.requirementId}
+                  as="label"
+                  className="dsh-wb-field"
+                  transition={{ ...springSoft, delay: Math.min(index, 8) * 0.05 }}
                 >
-                  <option value="">{t(locale, "llm.mapNone")}</option>
-                  {describe.connections.map((connection) => (
-                    <option key={connection.id} value={connection.id}>
-                      {connection.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-            <button
+                  {requirement.displayName} · {requirement.protocol} · {requirement.endpoint}
+                  <select
+                    data-llm-map-select="true"
+                    value={mapping[requirement.requirementId] ?? ""}
+                    disabled={!writable}
+                    onChange={(event) =>
+                      setMapping((current) => ({ ...current, [requirement.requirementId]: event.target.value }))
+                    }
+                  >
+                    <option value="">{t(locale, "llm.mapNone")}</option>
+                    {describe.connections.map((connection) => (
+                      <option key={connection.id} value={connection.id}>
+                        {connection.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </StaggerItem>
+              ))}
+            </StaggerList>
+            <PressableButton
+              as="button"
               type="button"
               className="dsh-wb-btn primary"
               data-llm-map-apply="true"
@@ -265,68 +302,78 @@ export function SpaceBindingPanel({
               }}
             >
               {t(locale, "llm.mapApply")}
-            </button>
+            </PressableButton>
           </>
         )}
       </div>
       <div>
         <h5>{t(locale, "llm.localGroup")}</h5>
         {locals.length === 0 ? <p className="dsh-wb-muted">{t(locale, "llm.localEmpty")}</p> : null}
-        {locals.map((candidate) => (
-          <div key={candidate.routeId} className="dsh-wb-space-row">
-            <span>
-              {candidate.displayName} · {candidate.api ?? ""} · {candidate.origin} · {candidate.modelIds.length}
-            </span>
-            <button
-              type="button"
-              className="dsh-wb-btn"
-              disabled={!writable || candidate.credentialCopy === "unsupported"}
-              onClick={() => {
-                setAdoptId(candidate.routeId);
-                if (candidate.credentialCopy === "available") {
-                  void client
-                    .adoptLocal(selected, candidate.routeId, candidate.displayName, describe.revision, true)
-                    .then(() => {
-                      setAdoptId(null);
-                      onChanged();
-                    })
-                    .catch((caught) => setError(errorText(locale, caught)));
-                }
-              }}
+        <StaggerList as="div" className="dsh-wb-product-list" step={0}>
+          {locals.map((candidate, index) => (
+            <StaggerItem
+              key={candidate.routeId}
+              as="div"
+              transition={{ ...springSoft, delay: Math.min(index, 8) * 0.05 }}
             >
-              {t(locale, "llm.adopt")}
-            </button>
-            {adoptId === candidate.routeId && candidate.credentialCopy !== "available" && (
-              <label className="dsh-wb-field">
-                {t(locale, "llm.adoptReenter")}
-                <input type="password" value={adoptSecret} onChange={(event) => setAdoptSecret(event.target.value)} />
-                <button
+              <div className="dsh-wb-space-row dsh-wb-product-card">
+                <span>
+                  {candidate.displayName} · {candidate.api ?? ""} · {candidate.origin} · {candidate.modelIds.length}
+                </span>
+                <PressableButton
+                  as="button"
                   type="button"
-                  className="dsh-wb-btn primary"
+                  className="dsh-wb-btn"
+                  disabled={!writable || candidate.credentialCopy === "unsupported"}
                   onClick={() => {
-                    void client
-                      .adoptLocalWithSecret(
-                        selected,
-                        candidate.routeId,
-                        candidate.displayName,
-                        adoptSecret,
-                        describe.revision,
-                        newOperationId(() => crypto.randomUUID()),
-                      )
-                      .then(() => {
-                        setAdoptSecret("");
-                        setAdoptId(null);
-                        onChanged();
-                      })
-                      .catch((caught) => setError(errorText(locale, caught)));
+                    setAdoptId(candidate.routeId);
+                    if (candidate.credentialCopy === "available") {
+                      void client
+                        .adoptLocal(selected, candidate.routeId, candidate.displayName, describe.revision, true)
+                        .then(() => {
+                          setAdoptId(null);
+                          onChanged();
+                        })
+                        .catch((caught) => setError(errorText(locale, caught)));
+                    }
                   }}
                 >
-                  {t(locale, "app.save")}
-                </button>
-              </label>
-            )}
-          </div>
-        ))}
+                  {t(locale, "llm.adopt")}
+                </PressableButton>
+                {adoptId === candidate.routeId && candidate.credentialCopy !== "available" && (
+                  <label className="dsh-wb-field">
+                    {t(locale, "llm.adoptReenter")}
+                    <input type="password" value={adoptSecret} onChange={(event) => setAdoptSecret(event.target.value)} />
+                    <PressableButton
+                      as="button"
+                      type="button"
+                      className="dsh-wb-btn primary"
+                      onClick={() => {
+                        void client
+                          .adoptLocalWithSecret(
+                            selected,
+                            candidate.routeId,
+                            candidate.displayName,
+                            adoptSecret,
+                            describe.revision,
+                            newOperationId(() => crypto.randomUUID()),
+                          )
+                          .then(() => {
+                            setAdoptSecret("");
+                            setAdoptId(null);
+                            onChanged();
+                          })
+                          .catch((caught) => setError(errorText(locale, caught)));
+                      }}
+                    >
+                      {t(locale, "app.save")}
+                    </PressableButton>
+                  </label>
+                )}
+              </div>
+            </StaggerItem>
+          ))}
+        </StaggerList>
         <p className="dsh-wb-muted">{t(locale, "llm.adoptHint")}</p>
       </div>
       <div>
@@ -336,7 +383,8 @@ export function SpaceBindingPanel({
           <label key={space.spaceId} className="dsh-wb-field">
             <input
               type="checkbox"
-              checked={applyIds.includes(space.spaceId)}
+              disabled={!writable || !completeSpaces.some(row => row.spaceId === space.spaceId)}
+              checked={visibleApplyIds.includes(space.spaceId)}
               onChange={(event) => {
                 setApplyIds(
                   event.target.checked ? [...applyIds, space.spaceId] : applyIds.filter((id) => id !== space.spaceId),
@@ -346,33 +394,37 @@ export function SpaceBindingPanel({
             {space.displayName} ({space.status})
           </label>
         ))}
-        <button
+        <PressableButton
+          as="button"
           type="button"
           className="dsh-wb-btn primary"
-          disabled={!writable || applyIds.length === 0}
+          disabled={!writable || visibleApplyIds.length === 0}
           onClick={() => {
-            void Promise.all(applyIds.map((spaceId) => client.spacePolicy(spaceId)))
+            if (!writable || visibleApplyIds.length === 0) return;
+            const request = reads.current;
+            const selectedSpaces = visibleApplyIds.map(id => completeSpaces.find(space => space.spaceId === id)!);
+            void Promise.all(selectedSpaces.map(space => client.spacePolicy(space.spaceId)))
               .then((policies) => {
-                const observations = applyIds.map((spaceId, index) => {
-                  const space = spaces.find((row) => row.spaceId === spaceId);
+                if (request !== reads.current || scope !== currentScope.current) return;
+                const observations = selectedSpaces.map((space, index) => {
                   return {
-                    spaceId,
-                    status: space?.status ?? "unknown",
-                    generation: space?.generation ?? 0,
+                    spaceId: space.spaceId,
+                    status: space.status,
+                    generation: space.generation,
                     catalogRevision: policies[index]?.runningCatalogRevision ?? null,
-                    busy: space?.status === "starting" || space?.status === "stopping",
-                    serviceEpoch: space?.serviceEpoch ?? "",
+                    busy: space.status === "starting" || space.status === "stopping",
+                    serviceEpoch: space.serviceEpoch,
                   };
                 });
-                return client.applyPlan(applyIds, describe.revision, observations, `apply-${Date.now()}`);
+                return client.applyPlan(selectedSpaces.map(space => space.spaceId), describe.revision, observations, `apply-${Date.now()}`);
               })
               .then(onChanged)
               .catch((caught) => setError(errorText(locale, caught)));
           }}
         >
           {t(locale, "llm.apply")}
-        </button>
+        </PressableButton>
       </div>
-    </section>
+    </>
   );
 }

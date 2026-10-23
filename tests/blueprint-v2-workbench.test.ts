@@ -233,6 +233,7 @@ test("legacy v1 raw inputs, patches and settings remain intact in inspect and pr
 test("official DSH 0.2 inspection and composition apply a v2 builtin plus exact profile npm identity", async (t) => {
   const bin = process.env.DSH_BLUEPRINT_TEST_BIN ?? process.env.DSH_TEST_CLI_BIN ?? join(process.env.APPDATA ?? "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
   if (!existsSync(bin)) { t.skip("official bound DSH installation unavailable"); return; }
+  const version = JSON.parse(readFileSync(join(bin, "..", "..", "package.json"), "utf8")).version;
   const f = fixture();
   const builtin = "@deepseek-ai/dsh-experimental-auto-review";
   f.ports.runtimeBin = () => bin;
@@ -245,7 +246,7 @@ test("official DSH 0.2 inspection and composition apply a v2 builtin plus exact 
     write(join(dir, "package.json"), { name: "alpha", version: "1.0.0", dsh: { bundle: { patch: ["first.yml", "second.yml"] } } });
     write(join(dir, "first.yml"), "[]\n"); write(join(dir, "second.yml"), "[]\n");
   };
-  const raw = document([{ name: "alpha", version: "1.0.0", source: "npm" }, { name: builtin, version: "0.2.0-rc.2", source: "builtin" }], [builtin, "alpha"]);
+  const raw = document([{ name: "alpha", version: "1.0.0", source: "npm" }, { name: builtin, version, source: "builtin" }], [builtin, "alpha"]);
   const preview = await f.wb.preview({ content: encodeBlueprintDocument(raw), name: "official", values: {} });
   assert.ok(preview.planId, JSON.stringify(preview.diagnostics));
   const outcome = await f.wb.apply(preview.planId, context().ctx);
@@ -253,7 +254,7 @@ test("official DSH 0.2 inspection and composition apply a v2 builtin plus exact 
   assert.deepEqual(f.calls, ["create:official", "prepare:alpha", "install:alpha"]);
   const manifest = JSON.parse(readFileSync(join(f.home, "profiles", "space-official", "package.json"), "utf8"));
   assert.deepEqual(manifest.dsh.profile.bundles, [...HOST.slice(0, 2), builtin, "alpha"]);
-  assert.equal(outcome.host.dsh, "0.2.0-rc.2"); assert.equal(outcome.stages.start.status, "not-run");
+  assert.equal(outcome.host.dsh, version); assert.equal(outcome.stages.start.status, "not-run");
   const origin = JSON.parse(readFileSync(join(f.home, "hub", "space-official", "blueprint-origin.json"), "utf8"));
   assert.deepEqual(parseStandalone(encodeBlueprintDocument(origin.blueprint)), raw);
   assert.equal(existsSync(join(f.home, "profiles", "web")), false);

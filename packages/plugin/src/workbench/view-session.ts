@@ -265,12 +265,6 @@ export class ViewSession {
     return false;
   }
 
-  retry(space: WorkbenchSpace): { token: number; load: boolean; reuseReady: boolean } {
-    this.frames.delete(space.id);
-    if (this.visibleSpaceId === space.id) this.visibleSpaceId = null;
-    return this.requestSpace(space);
-  }
-
   destroy(spaceId: string): void {
     this.frames.delete(spaceId);
     if (this.visibleSpaceId === spaceId) this.visibleSpaceId = null;

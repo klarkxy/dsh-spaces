@@ -105,7 +105,7 @@ export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = 
   ctx.on(
     "internal/config",
     function (this: Fiber, config: unknown, next: () => unknown) {
-      return projectInternalConfig(this as ConfigFiber, config, next, snapshot, editor);
+      return projectInternalConfig(this as ConfigFiber, config, next, snapshot, editor,env.DSH_SPACES_LLM_INHERIT_MAIN==='1');
     },
     { global: true, prepend: true },
   );
@@ -144,9 +144,11 @@ function projectInternalConfig(
   next: () => unknown,
   snapshot: LlmSharedSnapshot | null,
   editor: ConfigEditorSeam,
+  inheritMain=false,
 ): unknown {
   const id = fiber.entry?.options.id;
   if (id !== LLM_PI_AI_NAMESPACE && id !== AGENT_DEFAULT_MODEL_NAMESPACE) return next();
+  if(inheritMain&&id===AGENT_DEFAULT_MODEL_NAMESPACE&&!hasPersistedDefault(editor.configuration().find(row=>row.entry.options.id===id)?.override))return {...asRecord(next()),provider:'spaces-main',model:'default'};
   if (!snapshot) return next();
   if (id === LLM_PI_AI_NAMESPACE) {
     const raw = asRecord(config) ?? {};

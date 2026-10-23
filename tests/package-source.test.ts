@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inferPackageSource } from "../src/shared/types.ts";
-import { assertSupportedNode } from "../src/shared/node-version.ts";
+import { readFileSync } from "node:fs";
+import { assertSupportedNode, SUPPORTED_NODE_RANGE } from "../src/shared/node-version.ts";
 
-test("only Node 26 is supported", () => {
-  assert.doesNotThrow(() => assertSupportedNode("26.10.0"));
-  for (const version of ["22.23.2", "24.21.0", "25.0.0", "27.0.0", "unknown"]) {
-    assert.throws(() => assertSupportedNode(version), /requires Node.js 26.x/);
+test("official Desktop Node 24.21 and Node 26 are supported", () => {
+  for (const version of ["24.21.0", "v24.21.0", "24.22.0", "26.0.0", "26.10.0"]) {
+    assert.doesNotThrow(() => assertSupportedNode(version), version);
+  }
+  for (const version of ["22.23.2", "24.20.0", "24.21.0-rc.1", "25.0.0", "27.0.0", "26.1", "unknown"]) {
+    assert.throws(() => assertSupportedNode(version), /requires Node.js 24.21\+ \(24.x\) or 26.x/);
+  }
+});
+
+test("distributed package engines admit exactly the supported runtime range", () => {
+  for (const path of ["package.json", ...["core", "plugin", "supervisor", "doctor", "browser", "view-bridge", "llm-bridge", "dashboard", "blueprint"].map(name => `packages/${name}/package.json`)]) {
+    const manifest = JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"));
+    assert.equal(manifest.engines.node, SUPPORTED_NODE_RANGE, path);
   }
 });
 import {

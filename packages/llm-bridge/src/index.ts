@@ -16,5 +16,5 @@ export { freezeSpaceSnapshot } from "./space-bridge";
 export { attachOfficialLlm } from "./official-host";
 export { apply, inject, name, SNAPSHOT_SERVICE } from "./plugin";
 export { LLM_ERROR, LlmConfigError, sharedReadOnlyError, managedRouteConflictError, missingSharedCredentialError } from "./errors";
-import plugin from "./plugin";
+import plugin from "./main-facade";
 export default plugin;

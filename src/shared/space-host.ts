@@ -5,6 +5,26 @@ export const CONTAINED_MANAGEMENT_PARAM = "dsh-spaces-contained";
 export const PORTAL_CHANNEL_RE = /^[a-f0-9]{32}$/;
 export const PORTAL_SPACE_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 export type NativeSpaceTarget = "@dashboard" | "@settings" | string;
+/**
+ * The closed fragment the desktop shell writes into the portal page after it
+ * has opened the settings page. The portal page forwards it to the manager
+ * guest, which opens its own create dialog on top of that page. It carries
+ * presentation only: no right, no credential and no management request
+ * travels with it.
+ *
+ * An older portal page does not know this fragment. It ignores it and the
+ * user stays on the settings page without a dialog: no failure, no timeout.
+ */
+export function nativeCreateIntentHash(requestId: number): string {
+  return "#intent/create/" + String(requestId);
+}
+/** Strictly parsed create intent. Only a bounded positive integer is accepted. */
+export function parseNativeCreateIntent(hash: string): number | null {
+  const match = /^#intent\/create\/([1-9][0-9]{0,9})$/.exec(hash);
+  if (!match) return null;
+  const requestId = Number(match[1]);
+  return Number.isSafeInteger(requestId) ? requestId : null;
+}
 export function isNativeSpaceTarget(value: unknown): value is NativeSpaceTarget {
   return value === "@dashboard" || value === "@settings" || typeof value === "string" && PORTAL_SPACE_RE.test(value);
 }

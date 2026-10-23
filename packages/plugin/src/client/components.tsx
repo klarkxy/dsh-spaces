@@ -1,19 +1,16 @@
-import React, { useState, type FormEvent, type ReactElement } from "react";
-import type {
-  SpaceDetail,
-  SpaceSummary,
-  SpacesCapabilities,
-  SpacesMode,
-} from "../../../../src/shared/spaces-control";
+import React, { type ReactElement } from "react";
+import { FadeIn } from "../../../../src/shared/ui/motion";
 import {
   t,
   type SpacesLocale,
-  type SpacesMessageKey,
-  localizeDiagnostic,
   localizeSafeText,
 } from "./i18n";
 import type { SpacesPanelSnapshot } from "./state";
 import { SPACES_PANEL_CSS } from "./styles";
+import { DetailPane } from "./ui/spaces-detail";
+import { SpaceList } from "./ui/spaces-list";
+import { Capabilities, CreateForm } from "./ui/spaces-form";
+import { PressButton } from "./ui/press-button";
 
 /** Presentational views for the Spaces panel. Pure props in, markup out — DOM-free, SSR-safe. */
 
@@ -26,38 +23,24 @@ export interface SpacesPanelViewProps {
   onCreate: (input: { name: string; displayName?: string }) => void;
 }
 
-const MODE_KEY: Record<SpacesMode, SpacesMessageKey> = {
-  "verified-full": "mode.verified-full",
-  "verified-limited": "mode.verified-limited",
-  "unknown-readonly": "mode.unknown-readonly",
-  "recovery-only": "mode.recovery-only",
-};
-
-const STATUS_KEY: Record<SpaceSummary["status"], SpacesMessageKey> = {
-  running: "status.running",
-  stopped: "status.stopped",
-  unknown: "status.unknown",
-};
-
-function modeLabel(locale: SpacesLocale, mode: SpacesMode): string {
-  return t(locale, MODE_KEY[mode]);
-}
-
-function statusLabel(locale: SpacesLocale, status: SpaceSummary["status"]): string {
-  return t(locale, STATUS_KEY[status]);
-}
-
+/**
+ * The Spaces panel.
+ *
+ * The list enters as a staggered list with a sliding selection pill, the
+ * detail pane crossfades when the selection changes, and a failure is always
+ * rendered in its visible end state.
+ */
 export function SpacesPanelView(props: SpacesPanelViewProps): ReactElement {
   const { snapshot, onRefresh, locale = "en", onLocaleChange } = props;
   const { overview } = snapshot;
   const busy = overview.status === "loading" || overview.refreshing;
   return (
-    <div className="dsh-spaces" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale}>
+    <div className="dsh-spaces dsh-ui" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale}>
       <style>{SPACES_PANEL_CSS}</style>
       <header className="dsh-spaces-header">
         <h2 className="dsh-spaces-title">{t(locale, "panel.title")}</h2>
         <LanguageSwitch locale={locale} onLocaleChange={onLocaleChange} />
-        <button
+        <PressButton
           type="button"
           className="dsh-spaces-refresh"
           onClick={onRefresh}
@@ -65,7 +48,7 @@ export function SpacesPanelView(props: SpacesPanelViewProps): ReactElement {
           aria-busy={overview.refreshing || undefined}
         >
           {overview.refreshing ? t(locale, "panel.refreshing") : t(locale, "panel.refresh")}
-        </button>
+        </PressButton>
       </header>
       {overview.status === "loading" && (
         <div className="dsh-spaces-center" role="status">
@@ -74,9 +57,9 @@ export function SpacesPanelView(props: SpacesPanelViewProps): ReactElement {
       )}
       {overview.status === "error" && (
         <div className="dsh-spaces-center">
-          <p className="dsh-spaces-alert" role="alert">
+          <FadeIn appear={false} as="p" className="dsh-spaces-alert" role="alert">
             {localizeSafeText(locale, overview.error)}
-          </p>
+          </FadeIn>
         </div>
       )}
       {overview.status === "ready" && <ReadyBody {...props} locale={locale} />}
@@ -127,9 +110,9 @@ function ReadyBody({
           <Capabilities locale={locale} capabilities={overview.capabilities} />
         )}
         {overview.error && (
-          <p className="dsh-spaces-alert" role="alert">
+          <FadeIn appear={false} as="p" className="dsh-spaces-alert" role="alert">
             {localizeSafeText(locale, overview.error)}
-          </p>
+          </FadeIn>
         )}
         <CreateForm
           locale={locale}
@@ -141,31 +124,14 @@ function ReadyBody({
         {overview.spaces.length === 0 ? (
           <p className="dsh-spaces-muted">{t(locale, "list.empty")}</p>
         ) : (
-          <ul className="dsh-spaces-list" aria-label={t(locale, "list.label")}>
-            {overview.spaces.map((space) => (
-              <li key={space.id}>
-                <button
-                  type="button"
-                  className="dsh-spaces-item"
-                  aria-current={space.id === selectedId ? "true" : undefined}
-                  onClick={() => onSelect(space.id)}
-                >
-                  <span
-                    className="dsh-spaces-status"
-                    data-status={space.status}
-                    aria-hidden="true"
-                  />
-                  <span className="dsh-spaces-item-name">{space.displayName}</span>
-                  {space.isHost && (
-                    <span className="dsh-spaces-badge" data-tone="host">
-                      {t(locale, "list.host")}
-                    </span>
-                  )}
-                  <span className="dsh-spaces-sr-only">{statusLabel(locale, space.status)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <SpaceList
+            locale={locale}
+            spaces={overview.spaces}
+            selectedId={selectedId}
+            transitionalId={detail?.status === "loading" ? detail.id : null}
+            refreshing={overview.refreshing}
+            onSelect={onSelect}
+          />
         )}
       </div>
       <section
@@ -179,227 +145,5 @@ function ReadyBody({
         />
       </section>
     </div>
-  );
-}
-
-function Capabilities({
-  locale,
-  capabilities,
-}: {
-  locale: SpacesLocale;
-  capabilities: SpacesCapabilities;
-}): ReactElement {
-  return (
-    <div className="dsh-spaces-capabilities" aria-label={t(locale, "capabilities.label")}>
-      <div className="dsh-spaces-mode">
-        <strong>{modeLabel(locale, capabilities.mode)}</strong>
-        {capabilities.dshVersion && (
-          <span className="dsh-spaces-version">DSH {capabilities.dshVersion}</span>
-        )}
-      </div>
-      {capabilities.reasons.length > 0 && (
-        <ul className="dsh-spaces-reasons" aria-label={t(locale, "capabilities.reasons")}>
-          {capabilities.reasons.map((reason) => (
-            <li key={reason}>{localizeSafeText(locale, reason)}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function CreateForm({
-  locale,
-  capabilities,
-  pending,
-  error,
-  onCreate,
-}: {
-  locale: SpacesLocale;
-  capabilities: SpacesCapabilities | null;
-  pending: boolean;
-  error: string | null;
-  onCreate: SpacesPanelViewProps["onCreate"];
-}): ReactElement {
-  const [name, setName] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const allowed = capabilities?.canCreate === true;
-  const canSubmit = allowed && !pending && name.trim().length > 0;
-  const submit = (event: FormEvent): void => {
-    event.preventDefault();
-    if (!canSubmit) return;
-    const trimmedDisplay = displayName.trim();
-    onCreate({ name: name.trim(), ...(trimmedDisplay ? { displayName: trimmedDisplay } : {}) });
-    setName("");
-    setDisplayName("");
-  };
-  return (
-    <form className="dsh-spaces-form" aria-label={t(locale, "create.form")} onSubmit={submit}>
-      <h3 className="dsh-spaces-section-title">{t(locale, "create.title")}</h3>
-      <label className="dsh-spaces-field">
-        {t(locale, "create.name")}
-        <input
-          type="text"
-          name="dsh-spaces-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          disabled={!allowed || pending}
-          required
-          autoComplete="off"
-        />
-      </label>
-      <label className="dsh-spaces-field">
-        {t(locale, "create.displayName")}
-        <input
-          type="text"
-          name="dsh-spaces-display-name"
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-          disabled={!allowed || pending}
-          autoComplete="off"
-        />
-      </label>
-      {!allowed && <p className="dsh-spaces-muted">{t(locale, "create.denied")}</p>}
-      {error && (
-        <p className="dsh-spaces-alert" role="alert">
-          {localizeSafeText(locale, error)}
-        </p>
-      )}
-      <button type="submit" className="dsh-spaces-submit" disabled={!canSubmit} aria-busy={pending || undefined}>
-        {pending ? t(locale, "create.pending") : t(locale, "create.submit")}
-      </button>
-    </form>
-  );
-}
-
-function DetailPane({
-  locale,
-  detail,
-}: {
-  locale: SpacesLocale;
-  detail: SpacesPanelSnapshot["detail"];
-}): ReactElement {
-  if (!detail) {
-    return <p className="dsh-spaces-muted">{t(locale, "detail.placeholder")}</p>;
-  }
-  if (detail.status === "loading") {
-    return (
-      <div className="dsh-spaces-center" role="status">
-        {t(locale, "detail.loading")}
-      </div>
-    );
-  }
-  if (detail.status === "error" || !detail.detail) {
-    return (
-      <p className="dsh-spaces-alert" role="alert">
-        {detail.error ? localizeSafeText(locale, detail.error) : t(locale, "detail.failed")}
-      </p>
-    );
-  }
-  return (
-    <DetailContent
-      locale={locale}
-      detail={detail.detail}
-    />
-  );
-}
-
-function DetailContent({
-  locale,
-  detail,
-}: {
-  locale: SpacesLocale;
-  detail: SpaceDetail;
-}): ReactElement {
-  const { space, plugins, snapshots, diagnostics } = detail;
-  return (
-    <>
-      <div className="dsh-spaces-detail-head">
-        <h3 className="dsh-spaces-detail-title">{space.displayName}</h3>
-        {space.isHost && (
-          <span className="dsh-spaces-badge" data-tone="host">
-            {t(locale, "list.host")}
-          </span>
-        )}
-      </div>
-      <dl className="dsh-spaces-meta">
-        <dt>{t(locale, "detail.id")}</dt>
-        <dd>
-          <code>{space.id}</code>
-        </dd>
-        <dt>{t(locale, "detail.status")}</dt>
-        <dd>{statusLabel(locale, space.status)}</dd>
-        <dt>{t(locale, "detail.webApp")}</dt>
-        <dd>{space.hasWebApp ? t(locale, "detail.webAppInstalled") : t(locale, "detail.webAppNone")}</dd>
-      </dl>
-      <div>
-        <h4 className="dsh-spaces-section-title">{t(locale, "detail.plugins")}</h4>
-        {plugins.length === 0 ? (
-          <p className="dsh-spaces-muted">{t(locale, "detail.pluginsEmpty")}</p>
-        ) : (
-          <table className="dsh-spaces-table">
-            <thead>
-              <tr>
-                <th scope="col">{t(locale, "detail.pluginName")}</th>
-                <th scope="col">{t(locale, "detail.pluginVersion")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plugins.map((plugin) => (
-                <tr key={plugin.name}>
-                  <td>{plugin.name}</td>
-                  <td>{plugin.version ?? t(locale, "detail.unknown")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      <div>
-        <h4 className="dsh-spaces-section-title">{t(locale, "detail.snapshots")}</h4>
-        {snapshots.length === 0 ? (
-          <p className="dsh-spaces-muted">{t(locale, "detail.snapshotsEmpty")}</p>
-        ) : (
-          <table className="dsh-spaces-table">
-            <thead>
-              <tr>
-                <th scope="col">{t(locale, "detail.snapshotId")}</th>
-                <th scope="col">{t(locale, "detail.snapshotCreated")}</th>
-                <th scope="col">{t(locale, "detail.snapshotRuntime")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshots.map((snapshot) => (
-                <tr key={snapshot.id}>
-                  <td>
-                    <code>{snapshot.id}</code>
-                  </td>
-                  <td>{snapshot.createdAt}</td>
-                  <td>{snapshot.runtimeVersion ?? t(locale, "detail.unknown")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-      {diagnostics.length > 0 && (
-        <div>
-          <h4 className="dsh-spaces-section-title">{t(locale, "detail.diagnostics")}</h4>
-          <ul className="dsh-spaces-diagnostics">
-            {diagnostics.map((diagnostic, index) => (
-              <li
-                key={`${diagnostic.code}-${index}`}
-                className="dsh-spaces-diagnostic"
-                data-level={diagnostic.level}
-                role={diagnostic.level === "error" ? "alert" : undefined}
-              >
-                <span className="dsh-spaces-diagnostic-code">{diagnostic.code}</span>
-                {localizeDiagnostic(locale, diagnostic.code, diagnostic.message)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </>
   );
 }

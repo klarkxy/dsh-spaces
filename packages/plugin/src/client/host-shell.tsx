@@ -1,12 +1,29 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
+import { motion } from "motion/react";
+import { UI_TOKENS_CSS } from "../../../../src/shared/ui/tokens";
+import { FadeIn, Presence, fade } from "../../../../src/shared/ui/motion";
 import { HostShellController } from "./host-shell-state";
 import { attachHostLayout } from "./host-layout";
-import { inferSpacesLocale } from "./i18n";
 import { SpaceGlyph } from "../workbench/space-glyph";
-export const HOST_SHELL_CSS = `
+import { HOST_LIGHT_MATERIAL_CSS, HOST_UI_TOKEN_CSS } from "./ui/material";
+import { HostLoadingPill, HostShellPanel } from "./ui/host-guide";
+import { HostRail, HostRailButton, HostRailDivider, HostRailList } from "./ui/host-rail";
+import { hostTexts } from "./ui/host-texts";
+
+/**
+ * The additive space dock of a compatible host.
+ *
+ * The host keeps its own root, branding, native chrome and live conversation:
+ * this shell only adds a rail and a surface. The portal frame keeps its
+ * element, its parent and its mount order — it is never remounted, resized
+ * or re-placed, because the space inside it would reload.
+ */
+export const HOST_SHELL_CSS = `${UI_TOKENS_CSS}${HOST_UI_TOKEN_CSS}${HOST_LIGHT_MATERIAL_CSS}
 [data-spaces-host-rail] > [data-spaces-host-covered] { visibility: hidden !important; pointer-events: none !important; }
-.dsh-host-dock { position:absolute; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--dsw-alias-label-primary,#202127); }
-.dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-bg-base,#f0f1f5); border-right:1px solid var(--dsw-alias-border-l3,#d6d8de); }
+.dsh-host-dock { position:absolute; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--host-text,var(--dsw-alias-label-primary,#202127)); }
+.dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-bg-base,var(--host-rail-bg,#f0f1f5)); border-right:1px solid var(--dsw-alias-border-l3,var(--host-border,#d6d8de)); transition:box-shadow var(--host-dur-base) var(--host-ease-standard); }
+.dsh-host-rail[data-busy="true"] { box-shadow:inset -1px 0 0 0 color-mix(in srgb,var(--host-accent) 45%,transparent); }
+.dsh-host-rail-divider { flex:none; width:32px; height:2px; margin:2px 0; border-radius:1px; background:color-mix(in srgb,currentColor 18%,transparent); }
 .dsh-host-rail-list { flex:1; min-height:0; overflow-y:auto; width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .dsh-host-rail button { flex-shrink:0; width:48px; height:48px; border:1px solid transparent; border-radius:14px; background:transparent; color:inherit; font:inherit; cursor:pointer; overflow:hidden; }
 .dsh-host-rail button:hover { background:color-mix(in srgb,currentColor 10%,transparent); }
@@ -15,36 +32,55 @@ export const HOST_SHELL_CSS = `
 .dsh-host-rail button:has(.dsh-wb-glyph-img) { padding:0; }
 .dsh-host-rail .dsh-wb-glyph-img { display:block; width:100% !important; height:100% !important; max-width:100%; max-height:100%; object-fit:cover; }
 .dsh-host-rail .dsh-wb-glyph { width:32px; height:32px; fill:currentColor; }
-.dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:72px; right:0; pointer-events:auto; background:var(--dsw-alias-bg-base,#fff); color:var(--dsw-alias-label-primary,#202127); }
+.dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:72px; right:0; pointer-events:auto; background:var(--dsw-alias-bg-base,var(--host-bg,#fff)); color:var(--dsw-alias-label-primary,var(--host-text,#202127)); }
 iframe.dsh-host-surface { width:calc(100% - 72px); height:calc(100% - var(--dsh-frame-top-clearance,0px)); border:0; }
 .dsh-host-surface[hidden] { display:none !important; }
-.dsh-host-guide { padding:24px; box-sizing:border-box; overflow:auto; color:var(--dsw-alias-label-primary,#202127); }
-.dsh-host-guide button { padding:8px 14px; margin:8px 8px 8px 0; border:1px solid currentColor; border-radius:8px; background:transparent; color:inherit; cursor:pointer; }
-.dsh-host-loading { position:absolute; bottom:12px; left:84px; padding:6px 12px; background:var(--dsw-alias-bg-base,#fff); color:var(--dsw-alias-label-primary,#202127); pointer-events:none; }
-`;
-const texts = {
-  zh: { current:"当前应用", home:"Spaces 首页", title:"空间", initialize:"初始化 Spaces", start:"启动工作台", connecting:"正在连接空间服务", loading:"正在打开空间", manage:"打开空间管理", stopped:"该空间尚未运行。请在空间管理中明确启动。", unsupported:"当前宿主尚未提供兼容的嵌入通道。本版内置通道需要 http://127.0.0.1；没有启动或修改宿主。", unavailable:"空间服务或宿主身份不可用。当前应用仍可继续使用。", entry:"空间视图未能完成认证或握手。该次操作已失败，未自动重连。", initBody:"在当前应用中使用空间栏。初始化只准备 Spaces 的独立管理服务，不接管当前应用。", startBody:"当前空间不是管理工作台。这里只会打开已认证的工作台入口；若工作台已停止，请启动它。管理能力仍在专用管理空间。" },
-  en: { current:"Current application", home:"Spaces Home", title:"Spaces", initialize:"Initialize Spaces", start:"Start workbench", connecting:"Connecting to the space service", loading:"Opening space", manage:"Open space management", stopped:"This space is not running. Start it explicitly in space management.", unsupported:"This host has no compatible embedding transport. The bundled transport requires http://127.0.0.1. No host was started or modified.", unavailable:"The space service or host identity is unavailable. The current application remains usable.", entry:"The space view could not authenticate or complete its handshake. This operation failed; it was not reconnected automatically.", initBody:"Use the space rail in this application. Initialization prepares the independent Spaces manager; it does not take over this application.", startBody:"This space is not the manager. Open the authenticated workbench, or start it if it is stopped. Management stays on the dedicated manager profile." },
-};
-export function HostShellPanel({ controller }: { controller: HostShellController }): ReactElement {
-  const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const t = texts[inferSpacesLocale()];
-  return <section className="dsh-host-guide" data-spaces-host-guide={ui.phase} data-dsh-spaces-guide={ui.phase}>
-    <h2>{t.title}</h2>
-    {ui.error ? <p role="alert" data-dsh-spaces-error={ui.error}>{t[ui.error]}</p> : <p>{ui.phase === "start" ? t.startBody : ui.phase === "loading" || ui.phase === "connecting" ? t.connecting : t.initBody}</p>}
-    {ui.detail && <p data-dsh-spaces-detail="true">{ui.detail}</p>}
-    {ui.phase === "initialize" && <button type="button" data-dsh-spaces-action="initialize" onClick={() => void controller.initialize()}>{t.initialize}</button>}
-    {ui.phase === "start" && <button type="button" data-dsh-spaces-action="initialize" onClick={() => void controller.initialize()}>{t.start}</button>}
-    {ui.phase === "ready" && <button type="button" data-dsh-spaces-action="enter" onClick={() => controller.select(null)}>{t.manage}</button>}
-    <button type="button" onClick={controller.showCurrent}>{t.current}</button>
-  </section>;
+.dsh-host-guide { padding:24px; box-sizing:border-box; overflow:auto; color:var(--dsw-alias-label-primary,var(--host-text,#202127)); }
+.dsh-host-guide button { padding:8px 14px; margin:8px 8px 8px 0; border:1px solid currentColor; border-radius:8px; background:transparent; color:inherit; cursor:pointer; transition:background-color var(--host-dur-fast) linear, border-color var(--host-dur-fast) linear, box-shadow var(--host-dur-base) var(--host-ease-standard); }
+.dsh-host-guide button:hover:not(:disabled) { background:color-mix(in srgb,currentColor 10%,transparent); }
+.dsh-host-guide button:focus-visible { outline:2px solid currentColor; outline-offset:1px; }
+.dsh-host-loading { position:absolute; bottom:12px; left:84px; display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--dsw-alias-bg-base,var(--host-bg,#fff)); color:var(--dsw-alias-label-primary,var(--host-text,#202127)); pointer-events:none; border-radius:var(--host-radius-pill,999px); box-shadow:var(--host-elev-md,0 10px 26px -14px rgba(0,0,0,0.45)); }
+
+/* Rail material: a hover morph and a sliding selection pill. */
+.dsh-host-rail-btn {
+  position:relative;
+  transition:transform var(--host-dur-base) var(--host-ease-spring,cubic-bezier(0.34,1.56,0.64,1)), border-radius var(--host-dur-base) var(--host-ease-standard), background-color var(--host-dur-fast) linear, box-shadow var(--host-dur-base) var(--host-ease-standard);
 }
+.dsh-host-rail-btn:hover:not(:disabled) { transform:translateY(-2px) scale(1.06); border-radius:18px; box-shadow:var(--host-elev-sm,0 1px 2px rgba(0,0,0,0.2)); }
+.dsh-host-rail-btn:active:not(:disabled) { transform:translateY(0) scale(0.96); }
+.dsh-host-rail-btn[aria-current] { box-shadow:var(--host-glow,0 0 24px -6px rgba(88,101,242,0.6)); }
+.dsh-host-rail-btn > *:not(.dsh-host-rail-pill) { position:relative; z-index:1; }
+.dsh-host-rail-pill {
+  position:absolute; inset:0; z-index:2; pointer-events:none;
+  border-radius:inherit;
+  border:2px solid var(--host-accent,#5865f2);
+}
+
+/* Guide and loading material. */
+.dsh-host-guide-title { margin:0 0 8px; font-size:18px; font-weight:600; }
+.dsh-host-guide-body { margin:0 0 8px; color:var(--host-text,var(--dsw-alias-label-secondary,#59636e)); }
+.dsh-host-error { margin:0 0 8px; padding:8px 10px; border:1px solid var(--host-danger,var(--dsw-alias-label-error,#d1242f)); border-radius:8px; color:var(--host-danger,var(--dsw-alias-label-error,#d1242f)); overflow-wrap:anywhere; }
+.dsh-host-detail { margin:0 0 8px; padding:8px 10px; border:1px solid var(--host-border,var(--dsw-alias-border-l3,#d6d8de)); border-radius:8px; font-family:var(--ds-font-family-code,ui-monospace,monospace); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.dsh-host-action { background:transparent; }
+.dsh-host-loading-bar {
+  display:block; width:36px; height:4px; border-radius:var(--host-radius-pill,999px);
+  background-color:color-mix(in srgb,var(--host-text,#202127) 12%,transparent);
+  background-image:var(--host-shimmer,linear-gradient(100deg,transparent 20%,rgba(255,255,255,0.35) 42%,transparent 64%));
+  background-size:200% 100%;
+  animation:dsh-ui-shimmer 1.6s linear infinite;
+}
+.dsh-host-loading-label { white-space:nowrap; }
+`;
+
+/** Shared layout id of the portable selection pill. */
+const RAIL_LAYOUT_ID = "dsh-host-rail-pill";
+
 /** Additive shell-overlay occupant. The host's root and document are never replaced. */
 export function PortableHostShell({ controller }: { controller: HostShellController }): ReactElement {
   const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const anchor = useRef<HTMLDivElement>(null), layout = useRef<ReturnType<typeof attachHostLayout> | null>(null);
   const [layoutError, setLayoutError] = useState(false);
-  const t = texts[inferSpacesLocale()];
+  const t = hostTexts();
   useLayoutEffect(() => {
     if (!anchor.current) return;
     try { layout.current = attachHostLayout(anchor.current); }
@@ -60,19 +96,40 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
     return () => { window.removeEventListener("message", listen); controller.stop(); };
   }, [controller, layoutError]);
   const spaces = ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== ui.role?.profileId) ?? [];
-  return <div ref={anchor} className="dsh-host-dock" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined}>
-    <nav className="dsh-host-rail" aria-label={t.title}>
-      <button type="button" title={t.current} aria-label={t.current} data-pinned="true" aria-current={ui.visible === "current" ? "true" : undefined} onClick={controller.showCurrent}><SpaceGlyph spaceId={ui.role?.profileId ?? ""} icon={ui.inventory?.spaces.find(space => space.id === ui.role?.profileId)?.icon} /></button>
-      <button type="button" title={t.home} aria-label={t.home} aria-current={ui.visible === "portal" && ui.selected === null ? "true" : undefined} onClick={() => controller.select(null)}>⌂</button>
-      <div className="dsh-host-rail-list">{spaces.map(space => <button key={space.id} type="button" title={space.displayName} aria-label={space.displayName}
-        data-space-status={space.status} aria-current={ui.visible === "portal" && ui.selected === space.id ? "true" : undefined}
-        onClick={() => controller.select(space.id)}><SpaceGlyph spaceId={space.id} icon={space.icon} /></button>)}</div>
-      <button type="button" title={t.manage} aria-label={t.manage} onClick={controller.showGuide}>⋯</button>
-    </nav>
+  // A guide that reports a failure is never faded: an animation must not delay
+  // or soften a real error.
+  const failed = ui.error !== null || layoutError;
+  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined}>
+    <HostRail label={t.title} layoutId={RAIL_LAYOUT_ID} busy={ui.pending !== null}>
+      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.current} current={ui.visible === "current"} pinned onSelect={controller.showCurrent}>
+        <SpaceGlyph spaceId={ui.role?.profileId ?? ""} icon={ui.inventory?.spaces.find(space => space.id === ui.role?.profileId)?.icon} />
+      </HostRailButton>
+      <HostRailDivider />
+      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.home} current={ui.visible === "portal" && ui.selected === null} onSelect={() => controller.select(null)}>⌂</HostRailButton>
+      <HostRailList>
+        {spaces.map(space => <HostRailButton key={space.id} layoutId={RAIL_LAYOUT_ID} label={space.displayName}
+          current={ui.visible === "portal" && ui.selected === space.id} status={space.status}
+          onSelect={() => controller.select(space.id)}>
+          <SpaceGlyph spaceId={space.id} icon={space.icon} />
+        </HostRailButton>)}
+      </HostRailList>
+      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.manage} onSelect={controller.showGuide}>⋯</HostRailButton>
+    </HostRail>
     {ui.portal && <iframe className="dsh-host-surface" title="Spaces surface" data-spaces-host-surface="true" src={ui.portal.src}
       ref={element => controller.registerFrame(element?.contentWindow ?? null)} referrerPolicy="no-referrer" allow="clipboard-write"
       hidden={ui.visible !== "portal"} />}
-    {(ui.visible === "guide" || layoutError) && <div className="dsh-host-surface">{layoutError ? <section className="dsh-host-guide" role="alert">{t.unsupported}</section> : <HostShellPanel controller={controller} />}</div>}
-    {ui.pending !== null && <div className="dsh-host-loading" role="status">{t.loading}</div>}
+    {(ui.visible === "guide" || layoutError) && <Presence initial={false}>
+      <motion.div
+        key="dsh-host-guide"
+        className="dsh-host-surface"
+        initial={failed ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={failed ? { opacity: 1 } : { opacity: 0 }}
+        transition={fade}
+      >{layoutError ? <FadeIn as="section" appear={false} className="dsh-host-guide" role="alert">{t.unsupported}</FadeIn> : <HostShellPanel controller={controller} />}</motion.div>
+    </Presence>}
+    {ui.pending !== null && <HostLoadingPill label={t.loading} />}
   </div>;
 }
+
+export { HostShellPanel };

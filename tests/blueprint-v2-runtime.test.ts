@@ -105,14 +105,15 @@ test("builtin manifest identity and every patch path are validated without profi
   assert.equal(existsSync(join(fixture.home, "profiles")), false);
 });
 
-test("official DSH 0.2.0-rc.2 inspection exposes available OPTIONAL_BUNDLES read-only", async (t) => {
+test("bound official DSH inspection exposes available OPTIONAL_BUNDLES read-only", async (t) => {
   const bin = process.env.DSH_BLUEPRINT_TEST_BIN ?? process.env.DSH_TEST_CLI_BIN ?? join(process.env.APPDATA ?? "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
   if (!existsSync(bin)) { t.skip("official bound DSH installation unavailable"); return; }
+  const version = JSON.parse(readFileSync(join(bin, "..", "..", "package.json"), "utf8")).version;
   const home = temp();
   const inspected = await inspectBlueprintRuntime({ home, bin });
-  assert.equal(inspected.versions.dsh, "0.2.0-rc.2");
+  assert.equal(inspected.versions.dsh, version);
   assert.ok(inspected.builtinLayers?.some(layer => layer.name === "@deepseek-ai/dsh-experimental-agent-team-profile"));
-  for (const layer of inspected.builtinLayers ?? []) assert.equal(layer.version, "0.2.0-rc.2");
+  for (const layer of inspected.builtinLayers ?? []) assert.equal(layer.version, version);
   assert.equal(existsSync(join(home, "profiles")), false);
   assert.equal(existsSync(join(home, "sessions")), false);
   assert.equal(existsSync(join(home, "storages")), false);

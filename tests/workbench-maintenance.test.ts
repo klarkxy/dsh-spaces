@@ -352,6 +352,34 @@ test("global runtime install requests and saved legacy plans are unsupported wit
   assert.deepEqual(state.stopped, []);
 });
 
+test("saved deleted commands are unsupported at the plan boundary and their bytes stay", async () => {
+  const { maintenance, home, state } = harness();
+  const plan = await maintenance.preview({ kind: "snapshot.create" });
+  const path = join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`);
+  const original = readFileSync(path);
+  const deleted = [
+    { kind: "snapshot.restore", snapshotId: "11111111-1111-1111-1111-111111111111" },
+    { kind: "config.restore", spaceId: "space-coding", backupId: "cordis.patch.yml.bak-1" },
+    { kind: "runtime.upgrade" },
+    { kind: "workbench.upgrade" },
+    { kind: "controller.release" },
+    { kind: "controller.shutdown" },
+  ];
+  for (const command of deleted) {
+    const saved = JSON.parse(original.toString("utf8")) as { command: unknown; public: { kind: string } };
+    saved.command = command;
+    saved.public.kind = command.kind;
+    const bytes = JSON.stringify(saved);
+    writeFileSync(path, bytes);
+    await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/unsupported"));
+    assert.equal(readFileSync(path, "utf8"), bytes);
+  }
+  writeFileSync(path, original);
+  assert.equal(state.reinitialized, 0);
+  assert.equal(state.stopAll, 0);
+  assert.deepEqual(state.started, []);
+});
+
 function writeRuntimeTree(version: string): { bin: string; root: string } {
   const root = tempDir(`dsh-spaces-rt-${version.replace(/\W/g, "_")}-`);
   const dsh = join(root, "node_modules", "@deepseek-ai", "dsh");
@@ -399,7 +427,7 @@ test("space.runtime.set preview rejects invalid versions, protected targets, and
   await reject(
     { kind: "space.runtime.set", spaceId: "space-coding", version: "0.9.9" },
     "workbench/invalid-input",
-    /These plugins do not support DSH 0\.9\.9: @deepseek-ai\/dsh@\^9\.9\.0\. Remove or upgrade them first\./,
+    /These plugins do not support DSH 0\.9\.9: @dsh-spaces\/view-bridge \(@deepseek-ai\/dsh@\^9\.9\.0\)\. Remove or upgrade them first\./,
   );
 });
 
@@ -589,6 +617,43 @@ test("space.runtime.set execute rechecks a manifest changed after preview before
   assert.equal(installs, 0);
   assert.deepEqual(state.stopped, []);
   assert.equal(new ProfileRegistry(home).scan().find((row) => row.name === "space-coding")?.meta?.dshVersion, version);
+});
+
+test("space.runtime.set rechecks authoritative engine requirements before any switch effects", async () => {
+  const version = "0.2.1-rc.2";
+  let installs = 0;
+  const { maintenance, home, state } = harness({
+    install: async () => { installs++; throw new Error("must not install"); },
+    installedBin: () => "bin.js",
+  });
+  const profile = join(home, "profiles", "space-coding");
+  const manifestPath = join(profile, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.dependencies["engine-fixture"] = "1.0.0";
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  const pluginDir = join(profile, "node_modules", "engine-fixture");
+  mkdirSync(pluginDir, { recursive: true });
+  const pluginPath = join(pluginDir, "package.json");
+  const writePlugin = (engines: unknown, peers: unknown) => writeFileSync(pluginPath, JSON.stringify({
+    name: "engine-fixture", version: "1.0.0", engines, peerDependencies: peers,
+  }));
+  for (const incompatible of [{ dsh: "<0.1.0" }, { dsh: 42 }, null]) {
+    // A compatible engine supersedes both stale and malformed peer declarations.
+    writePlugin({ dsh: ">=0.2.1-alpha.4" }, null);
+    const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version });
+    writePlugin(incompatible, { "@deepseek-ai/dsh": "workspace:*" });
+    await assert.rejects(maintenance.execute(plan.id, jobCtx()), (error: unknown) => {
+      assert.ok(error instanceof WorkbenchMaintenanceError);
+      assert.equal(error.code, "workbench/invalid-input");
+      assert.match(error.message, /engines/);
+      return true;
+    });
+    assert.equal(installs, 0);
+    assert.deepEqual(state.stopped, []);
+    assert.deepEqual(state.started, []);
+    assert.equal(new ProfileRegistry(home).scan().find(row => row.name === "space-coding")?.meta?.dshVersion, undefined);
+    assert.equal(JSON.parse(readFileSync(join(home, ".dsh-spaces-control", "plans", `${plan.id}.json`), "utf8")).status, "previewed");
+  }
 });
 
 test("space.runtime.set pins the version for a stopped space without installing official plugins", async () => {

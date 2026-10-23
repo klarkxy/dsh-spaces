@@ -12,6 +12,8 @@ export type { SharedAuth, SharedModelRef, SharedSelection, SpaceLlmPolicy };
 export type { LlmShareManifest, LlmShareMapping, LlmShareRequirement } from "../core/domain/llm-share";
 import type { WorkbenchJob, WorkbenchSpace } from "./workbench";
 
+export const LLM_ADAPTER_VERSION = "0.2.1-rc.2";
+
 export type RedactedConnection = Omit<SharedConnection, "auth"> & {
   auth: { kind: "none" } | { kind: "api-key"; configured: true };
   routeId: string;
@@ -77,7 +79,7 @@ export type LlmSpaceObservation = {
 
 export type LlmCapabilities = {
   adapter: "llm-pi-ai";
-  adapterVersion: "0.2.0-rc.2";
+  adapterVersion: typeof LLM_ADAPTER_VERSION;
   protocols: readonly ["openai-completions", "openai-responses", "anthropic-messages"];
   keyless: false;
 };

@@ -47,6 +47,9 @@ export interface WorkbenchInitializeResult {
 }
 
 export interface WorkbenchGuideApi {
+  /** Desktop-only, explicit preview and confirmation; never called by discovery. */
+  previewServiceRestart?(): Promise<WorkbenchServiceRestartPreview>;
+  restartService?(confirmationId: string): Promise<WorkbenchBootstrapResult>;
   presentationSnapshot?(): Promise<import("../../../src/shared/space-host").PortalSnapshot>;
   /** Explicit audience-bound presentation entry; no management operations. Optional for older adapters. */
   portalTarget?(audience: import("../../../src/shared/space-host").SpaceHostAudience): Promise<WorkbenchReturnTarget>;
@@ -54,4 +57,11 @@ export interface WorkbenchGuideApi {
   bootstrap(): Promise<WorkbenchBootstrapResult>;
   returnTarget(): Promise<WorkbenchReturnTarget>;
   initialize(): Promise<WorkbenchInitializeResult>;
+}
+
+export interface WorkbenchServiceRestartPreview {
+  confirmationId: string;
+  expiresAt: string;
+  action: "start" | "restart";
+  spaces: { id: string; displayName: string; running: boolean }[];
 }

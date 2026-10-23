@@ -6,6 +6,7 @@ import { afterEach, test } from "node:test";
 import {
   isProtectedPlugin,
   listAllProfilePlugins,
+  listNpmPackageVersions,
   listProfilePlugins,
   parseNpmNameAndVersion,
   pluginAdd,
@@ -133,6 +134,79 @@ test("resolveInstallSpec uses catalog id not a renderer spec", async () => {
   await assert.rejects(resolveInstallSpec(dir, { spec: "-foo" }), /not allowed|不合法/);
   const typed = await resolveInstallSpec(dir, { spec: "github:owner/repo" });
   assert.equal(typed, "github:owner/repo");
+});
+
+test("listNpmPackageVersions returns the exact versions newest first and skips tags", async () => {
+  const published: Record<string, unknown> = {
+    "1.0.0": {},
+    "1.2.3": {},
+    "2.0.0-rc.1": {},
+    latest: {},
+    "not-a-version": {},
+  };
+  let requests = 0;
+  const result = await listNpmPackageVersions("dsh-outline", {
+    fetchImpl: async () => {
+      requests += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({ name: "dsh-outline", versions: published }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    },
+  });
+  assert.equal(requests, 1, "one packument request, no retry");
+  assert.equal(result.packageName, "dsh-outline");
+  assert.deepEqual(result.versions, ["2.0.0-rc.1", "1.2.3", "1.0.0"]);
+  assert.equal(result.latest, "1.2.3", "without a latest tag the default is the newest stable version, not a prerelease");
+  const tagged = await listNpmPackageVersions("dsh-outline", {
+    fetchImpl: async () => ({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({ name: "dsh-outline", "dist-tags": { latest: "1.0.0" }, versions: published }),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }),
+  });
+  assert.equal(tagged.latest, "1.0.0", "a latest tag that names a listed version wins");
+  const taggedPre = await listNpmPackageVersions("dsh-outline", {
+    fetchImpl: async () => ({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({ name: "dsh-outline", "dist-tags": { latest: "2.0.0-rc.1" }, versions: published }),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }),
+  });
+  assert.equal(taggedPre.latest, "2.0.0-rc.1", "a prerelease is offered only when the publisher tagged it latest");
+});
+
+test("listNpmPackageVersions reports the registry failure and keeps the limit", async () => {
+  await assert.rejects(
+    listNpmPackageVersions("dsh-outline", {
+      fetchImpl: async () => ({
+        ok: false,
+        status: 503,
+        headers: { get: () => null },
+        json: async () => ({}),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+    }),
+    /503/,
+  );
+  const versions: Record<string, unknown> = {};
+  for (let index = 1; index <= 60; index += 1) versions[`1.0.${index}`] = {};
+  const capped = await listNpmPackageVersions("dsh-outline", {
+    limit: 5,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ name: "dsh-outline", versions }),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }),
+  });
+  assert.equal(capped.versions.length, 5);
+  assert.equal(capped.versions[0], "1.0.60");
+  assert.equal(capped.latest, "1.0.60");
 });
 
 test("pluginAdd error keeps generic dsh stderr and the pnpm stdout tail", async () => {

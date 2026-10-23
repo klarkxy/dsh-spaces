@@ -10,6 +10,7 @@ import {
   snapshotIdSchema,
   spaceIdSchema,
   workbenchBootstrapResultSchema,
+  serviceRestartPreviewSchema,
   workbenchCommandSchema,
   workbenchGuideRoleSchema,
   workbenchInitializeResultSchema,
@@ -112,6 +113,8 @@ export const TYPERT = {
     invocation("workbenchGuide", "returnTarget", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
     invocation("workbenchGuide", "portalTarget", guideFile, [param("audience", z.object({ parentOrigin: z.string().max(128), channel: z.string().regex(/^[a-f0-9]{32}$/) }).strict().refine(value => parseSpaceHostAudience(value) !== null), "@dsh-spaces/plugin#SpaceHostAudience")], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
     invocation("workbenchGuide", "initialize", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchInitializeResult", workbenchInitializeResultSchema)),
+    invocation("workbenchGuide", "previewServiceRestart", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchServiceRestartPreview", serviceRestartPreviewSchema)),
+    invocation("workbenchGuide", "restartService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("@dsh-spaces/plugin/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("spaces", "overview", spacesFile, [], result("@dsh-spaces/plugin/types#SpacesOverview", overviewSchema)),
     invocation(
       "spaces",
@@ -222,7 +225,7 @@ export const TYPERT = {
   },
 };
 
-export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget", "portalTarget", "initialize"] as const;
+export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget", "portalTarget", "initialize", "previewServiceRestart", "restartService"] as const;
 export const MANAGER_METHODS = [
   "state",
   "detail",

@@ -1,4 +1,5 @@
 import { crc32 } from "node:zlib";
+import { MAX_WORKBENCH_SHARE_BYTES } from "../../shared/workbench-product";
 
 export interface ZipEntry {
   name: string;
@@ -75,11 +76,12 @@ export function packZip(entries: ZipEntry[], now = new Date()): Buffer {
   return Buffer.concat([...locals, centralDir, eocd]);
 }
 
-export function unpackZip(archive: Buffer): ZipEntry[] {
+export function unpackZip(archive: Buffer, maxBytes = MAX_WORKBENCH_SHARE_BYTES): ZipEntry[] {
+  if (archive.length > maxBytes) throw new Error("The space share archive is too large.");
   if (archive.length < 22) throw new Error("The space share archive is not a zip.");
   let eocd = -1;
   for (let i = archive.length - 22; i >= 0 && i >= archive.length - 22 - 65535; i -= 1) {
-    if (archive.readUInt32LE(i) === 0x06054b50) {
+    if (archive.readUInt32LE(i) === 0x06054b50 && i + 22 + archive.readUInt16LE(i + 20) === archive.length) {
       eocd = i;
       break;
     }
@@ -87,9 +89,15 @@ export function unpackZip(archive: Buffer): ZipEntry[] {
   if (eocd < 0) throw new Error("The space share archive is not a zip.");
   const count = archive.readUInt16LE(eocd + 10);
   let offset = archive.readUInt32LE(eocd + 16);
-  const entries: ZipEntry[] = [];
+  const centralStart = offset, centralSize = archive.readUInt32LE(eocd + 12);
+  if (archive.readUInt16LE(eocd + 4) !== 0 || archive.readUInt16LE(eocd + 6) !== 0 ||
+      archive.readUInt16LE(eocd + 8) !== count || centralStart + centralSize !== eocd ||
+      count > Math.floor(centralSize / 46)) throw new Error("The space share archive is not a zip.");
+  // Validate all ranges and the complete payload budget before making any payload copies.
+  const records: {name: string; start: number; end: number; local: number}[] = [];
+  let total = 0;
   for (let i = 0; i < count; i += 1) {
-    if (offset + 46 > archive.length || archive.readUInt32LE(offset) !== 0x02014b50) {
+    if (offset + 46 > eocd || archive.readUInt32LE(offset) !== 0x02014b50) {
       throw new Error("The space share archive is not a zip.");
     }
     const method = archive.readUInt16LE(offset + 10);
@@ -98,17 +106,35 @@ export function unpackZip(archive: Buffer): ZipEntry[] {
     const extraLen = archive.readUInt16LE(offset + 30);
     const commentLen = archive.readUInt16LE(offset + 32);
     const localOff = archive.readUInt32LE(offset + 42);
+    const nextOffset = offset + 46 + nameLen + extraLen + commentLen;
+    if (nextOffset > eocd || archive.readUInt16LE(offset + 34) !== 0) throw new Error("The space share archive is not a zip.");
     const name = archive.subarray(offset + 46, offset + 46 + nameLen).toString("utf8");
     if (method !== 0) throw new Error(`Compressed zip entries are not supported: ${name}`);
-    if (localOff + 30 > archive.length || archive.readUInt32LE(localOff) !== 0x04034b50) {
+    const flags = archive.readUInt16LE(offset + 8);
+    if ((flags & 1) !== 0 || compressed !== archive.readUInt32LE(offset + 24) ||
+        localOff + 30 > centralStart || archive.readUInt32LE(localOff) !== 0x04034b50) {
       throw new Error("The space share archive is not a zip.");
     }
     const localNameLen = archive.readUInt16LE(localOff + 26);
     const localExtra = archive.readUInt16LE(localOff + 28);
     const dataStart = localOff + 30 + localNameLen + localExtra;
-    const data = Buffer.from(archive.subarray(dataStart, dataStart + compressed));
-    if (!name.endsWith("/")) entries.push({ name, data });
-    offset += 46 + nameLen + extraLen + commentLen;
+    const dataEnd = dataStart + compressed;
+    if (dataEnd > centralStart || archive.readUInt16LE(localOff + 8) !== method ||
+        archive.readUInt16LE(localOff + 6) !== flags || localNameLen !== nameLen ||
+        !archive.subarray(localOff + 30, localOff + 30 + localNameLen).equals(archive.subarray(offset + 46, offset + 46 + nameLen)) ||
+        (!(flags & 8) && (archive.readUInt32LE(localOff + 18) !== compressed || archive.readUInt32LE(localOff + 22) !== compressed))) {
+      throw new Error("The space share archive is not a zip.");
+    }
+    total += compressed;
+    if (total > maxBytes) throw new Error("The space share archive is too large.");
+    records.push({name, start:dataStart, end:dataEnd, local:localOff});
+    offset = nextOffset;
   }
-  return entries;
+  if (offset !== eocd) throw new Error("The space share archive is not a zip.");
+  const ranges = [...records].sort((a, b) => a.local - b.local);
+  for (let i = 1; i < ranges.length; i++) {
+    if (ranges[i]!.local < ranges[i - 1]!.end) throw new Error("The space share archive contains overlapping entries.");
+  }
+  return records.filter(record => !record.name.endsWith("/"))
+    .map(record => ({name:record.name, data:Buffer.from(archive.subarray(record.start, record.end))}));
 }

@@ -17,6 +17,7 @@ import type {
 } from "../../shared/llm-api";
 import {
   isLlmWriteMethod,
+  LLM_ADAPTER_VERSION,
   LLM_CREDENTIAL_ADOPT_METHOD,
   LLM_CREDENTIAL_DISCOVER_METHOD,
   LLM_CREDENTIAL_METHOD,
@@ -44,7 +45,7 @@ import {
 
 export const LLM_CAPABILITIES = {
   adapter: "llm-pi-ai",
-  adapterVersion: "0.2.0-rc.2",
+  adapterVersion: LLM_ADAPTER_VERSION,
   protocols: PINNED_LLM_PI_AI_PROTOCOLS,
   keyless: false,
 } as const;

@@ -140,7 +140,7 @@ export interface WorkbenchJob {
 }
 
 export type WorkbenchCommand =
-  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; useSharedLlm?: boolean; browser?: boolean } }
+  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean } }
   | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string }
   | { kind: 'space.reorder'; spaceIds: string[] }
   | { kind: 'space.start'; spaceId: string }

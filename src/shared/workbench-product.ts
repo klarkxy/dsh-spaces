@@ -19,6 +19,8 @@ import type {
 export const MAX_WORKBENCH_SHARE_BYTES = 8 * 1024 * 1024;
 export const MAX_WORKBENCH_SHARE_BASE64 = Math.ceil(MAX_WORKBENCH_SHARE_BYTES / 3) * 4;
 export const WORKBENCH_IMPORT_TTL_MS = 5 * 60_000;
+/** How many exact versions one catalog entry reports. */
+export const MAX_WORKBENCH_PLUGIN_VERSIONS = 50;
 
 export interface WorkbenchHomeSettings {
   portStart: number;
@@ -37,6 +39,16 @@ export interface WorkbenchLibraryItem {
   installedIn: string[];
 }
 
+/** Exact npm versions of one catalog entry, newest first. */
+export interface WorkbenchPluginVersions {
+  /** Exact semver versions, newest first. */
+  versions: string[];
+  /** The newest listed version, or null when the registry published none. */
+  latest: string | null;
+  /** The npm package the versions belong to. */
+  packageName: string;
+}
+
 export interface WorkbenchDiagnostics {
   spaceId: string;
   status: 'running' | 'starting' | 'stopping' | 'stopped' | 'crashed' | 'unknown';
@@ -50,6 +62,7 @@ export type WorkbenchProductRequest =
   | { method: 'settings' }
   | { method: 'catalog'; query?: string }
   | { method: 'library' }
+  | { method: 'plugin.versions'; catalogId: string }
   | { method: 'diagnostics'; spaceId: string }
   | { method: 'logs' }
   | { method: 'log.record'; level: 'error'; area: 'client'; event: 'request'; message: string }
@@ -71,6 +84,7 @@ export type WorkbenchProductResult = (
   | { method: 'settings'; settings: WorkbenchHomeSettings; clientDefaults: { locale: LocalePreference; theme: ThemePreference } }
   | { method: 'catalog'; catalog: PluginCatalogSnapshot }
   | { method: 'library'; items: WorkbenchLibraryItem[] }
+  | { method: 'plugin.versions'; versions: string[]; latest: string | null; packageName: string }
   | { method: 'diagnostics'; diagnostics: WorkbenchDiagnostics }
   | { method: 'logs'; entries: WorkbenchLogEntry[]; logError: string | null }
   | { method: 'templates'; templates: SpaceTemplate[] }

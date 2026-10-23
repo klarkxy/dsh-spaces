@@ -226,10 +226,11 @@ function requireWorker(): string {
 async function compileWorker(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "dsh-rt-worker-"));
   const outfile = join(dir, "snapshot-worker.mjs");
-  await build({
+  const bundle = await build({
     absWorkingDir: repoRoot,
     entryPoints: [join(repoRoot, "src", "adapters/node", "snapshot-worker.ts")],
     outfile,
+    write: false,
     bundle: true,
     platform: "node",
     format: "esm",
@@ -239,5 +240,8 @@ async function compileWorker(): Promise<string> {
       js: 'import { createRequire as __spacesCreateRequire } from "node:module"; const require = __spacesCreateRequire(import.meta.url);',
     },
   });
+  // The Node process owns this scratch directory; the native build service may not.
+  if (bundle.outputFiles.length !== 1) throw new Error("Expected one snapshot worker module");
+  writeFileSync(outfile, bundle.outputFiles[0].contents, { flag: "wx" });
   return outfile;
 }

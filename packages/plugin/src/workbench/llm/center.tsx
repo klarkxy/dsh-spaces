@@ -3,6 +3,9 @@ import type { LlmDescribeResult, RedactedConnection } from "../../../../../src/s
 import { localizeError, t, type WorkbenchLocale } from "../i18n";
 import { newOperationId, type LlmUiClient, type LlmUiSpace } from "./client";
 import { SpaceBindingPanel } from "./space-binding";
+import { FadeIn, Presence, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { EmptyState } from "../empty-state";
+import { PressableButton, VisibleSlide } from "../feature-motion";
 
 export type LlmModelCenterProps = {
   locale: WorkbenchLocale;
@@ -78,14 +81,22 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
 
   return (
     <section className="dsh-wb-llm" data-llm-center="true">
-      <h3 className="dsh-wb-title">{t(locale, "settings.models")}</h3>
+      <FadeIn as="h3" className="dsh-wb-title">
+        {t(locale, "settings.models")}
+      </FadeIn>
       <p className="dsh-wb-notice">{t(locale, "llm.scope")}</p>
       {pending.length > 0 && (
         <p className="dsh-wb-notice" data-llm-pending="true">
+          <span className="dsh-wb-pulse-dot" data-pulse="true" aria-hidden="true" />
           {t(locale, "llm.savedPending", { count: String(pending.length) })}
         </p>
       )}
-      {status === "loading" && <p role="status">{t(locale, "app.loading")}</p>}
+      {status === "loading" && (
+        <p role="status" className="dsh-wb-status-line">
+          <span className="dsh-wb-spin" aria-hidden="true" />
+          {t(locale, "app.loading")}
+        </p>
+      )}
       {error && (
         <p className="dsh-wb-alert" role="alert">
           {error}
@@ -94,7 +105,8 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
       {describe && editor === "closed" && deleteId === null && (
         <>
           <div className="dsh-wb-row">
-            <button
+            <PressableButton
+              as="button"
               type="button"
               className="dsh-wb-btn primary"
               disabled={!writable}
@@ -104,13 +116,30 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
               }}
             >
               {t(locale, "llm.new")}
-            </button>
-            <button type="button" className="dsh-wb-btn" onClick={() => void reload()}>
+            </PressableButton>
+            <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={() => void reload()}>
               {t(locale, "app.retry")}
-            </button>
+            </PressableButton>
           </div>
           {describe.connections.length === 0 ? (
-            <p className="dsh-wb-muted">{t(locale, "llm.empty")}</p>
+            <EmptyState
+              testId="connections"
+              title={t(locale, "llm.empty")}
+              action={
+                <PressableButton
+                  as="button"
+                  type="button"
+                  className="dsh-wb-btn primary"
+                  disabled={!writable}
+                  onClick={() => {
+                    setEditing(null);
+                    setEditor("create");
+                  }}
+                >
+                  {t(locale, "llm.new")}
+                </PressableButton>
+              }
+            />
           ) : (
             <table className="dsh-wb-table" data-llm-list="true">
               <thead>
@@ -124,9 +153,16 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
                   <th>{t(locale, "llm.revision")}</th>
                 </tr>
               </thead>
-              <tbody>
-                {describe.connections.map((connection) => (
-                  <tr key={connection.id} data-connection-id={connection.id}>
+              <StaggerList as="tbody" step={0}>
+                {describe.connections.map((connection, index) => (
+                  <StaggerItem
+                    key={connection.id}
+                    as="tr"
+                    data-connection-id={connection.id}
+                    hidden={{ opacity: 0 }}
+                    show={{ opacity: 1 }}
+                    transition={{ duration: 0.24, delay: Math.min(index, 8) * 0.05 }}
+                  >
                     <td>{connection.displayName}</td>
                     <td>
                       <code>{protocolLabel(connection.providerConfig.api)}</code>
@@ -145,7 +181,8 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
                     </td>
                     <td>
                       <div className="dsh-wb-actions">
-                        <button
+                        <PressableButton
+                          as="button"
                           type="button"
                           className="dsh-wb-btn"
                           disabled={!writable}
@@ -155,20 +192,21 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
                           }}
                         >
                           {t(locale, "llm.edit")}
-                        </button>
-                        <button
+                        </PressableButton>
+                        <PressableButton
+                          as="button"
                           type="button"
                           className="dsh-wb-btn danger"
                           disabled={!writable}
                           onClick={() => setDeleteId(connection.id)}
                         >
                           {t(locale, "app.delete")}
-                        </button>
+                        </PressableButton>
                       </div>
                     </td>
-                  </tr>
+                  </StaggerItem>
                 ))}
-              </tbody>
+              </StaggerList>
             </table>
           )}
           <SpaceBindingPanel
@@ -181,40 +219,56 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
           />
         </>
       )}
-      {describe && editor !== "closed" && (
-        <ConnectionEditor
-          locale={locale}
-          writable={writable}
-          client={client}
-          uuid={uuid}
-          revision={describe.revision}
-          existing={editing}
-          mode={editor}
-          onCancel={() => {
-            setEditor("closed");
-            setEditing(null);
-          }}
-          onSaved={() => {
-            setEditor("closed");
-            setEditing(null);
-            void reload();
-          }}
-        />
-      )}
-      {describe && deleteId && (
-        <DeletePanel
-          locale={locale}
-          writable={writable}
-          client={client}
-          connectionId={deleteId}
-          revision={describe.revision}
-          onClose={() => setDeleteId(null)}
-          onDeleted={() => {
-            setDeleteId(null);
-            void reload();
-          }}
-        />
-      )}
+      <Presence>
+        {describe && editor !== "closed" && (
+          <VisibleSlide
+            key="llm-editor"
+            className="dsh-wb-llm-editor-shell"
+            from={18}
+            exit={{ opacity: 0, x: 18 }}
+          >
+            <ConnectionEditor
+              locale={locale}
+              writable={writable}
+              client={client}
+              uuid={uuid}
+              revision={describe.revision}
+              existing={editing}
+              mode={editor}
+              onCancel={() => {
+                setEditor("closed");
+                setEditing(null);
+              }}
+              onSaved={() => {
+                setEditor("closed");
+                setEditing(null);
+                void reload();
+              }}
+            />
+          </VisibleSlide>
+        )}
+        {describe && deleteId && (
+          <VisibleSlide
+            key="llm-delete"
+            className="dsh-wb-llm-delete-shell"
+            from={18}
+            exit={{ opacity: 0, x: 18 }}
+          >
+            <DeletePanel
+              locale={locale}
+              writable={writable}
+              client={client}
+              connectionId={deleteId}
+              revision={describe.revision}
+              onClose={() => setDeleteId(null)}
+              onDeleted={() => {
+                setDeleteId(null);
+                void reload();
+              }}
+            />
+          </VisibleSlide>
+        )}
+      </Presence>
     </section>
   );
 }
@@ -353,6 +407,7 @@ function ConnectionEditor({
     <form className="dsh-wb-llm-editor" onSubmit={(event) => void save(event)} data-llm-editor={mode}>
       <p className="dsh-wb-kicker">
         {t(locale, "llm.stepLabel", { step: String(step) })} · {t(locale, `llm.step${step}` as "llm.step1")}
+        {busy ? <span className="dsh-wb-pulse-dot" data-pulse="true" aria-hidden="true" /> : null}
       </p>
       {error && (
         <p className="dsh-wb-alert" role="alert">
@@ -366,19 +421,21 @@ function ConnectionEditor({
         </p>
       )}
       {step === 1 && (
-        <label className="dsh-wb-field">
-          {t(locale, "llm.protocol")}
-          <select value={api} onChange={(event) => setApi(event.target.value)} disabled={!writable}>
-            {PROTOCOLS.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </label>
+        <VisibleSlide as="div" className="dsh-wb-llm-step" from={14}>
+          <label className="dsh-wb-field">
+            {t(locale, "llm.protocol")}
+            <select value={api} onChange={(event) => setApi(event.target.value)} disabled={!writable}>
+              {PROTOCOLS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+        </VisibleSlide>
       )}
       {step === 2 && (
-        <>
+        <VisibleSlide as="div" className="dsh-wb-llm-step" from={14}>
           <label className="dsh-wb-field">
             {t(locale, "llm.displayName")}
             <input
@@ -410,10 +467,10 @@ function ConnectionEditor({
           </label>
           <p className="dsh-wb-muted">{t(locale, "llm.apiKeyHint")}</p>
           <p className="dsh-wb-muted">{t(locale, "llm.keylessUnsupported")}</p>
-        </>
+        </VisibleSlide>
       )}
       {step === 3 && (
-        <>
+        <VisibleSlide as="div" className="dsh-wb-llm-step" from={14}>
           <div className="dsh-wb-row">
             <input
               data-llm-field="modelId"
@@ -421,7 +478,8 @@ function ConnectionEditor({
               onChange={(event) => setManualModel(event.target.value)}
               placeholder={t(locale, "llm.modelId")}
             />
-            <button
+            <PressableButton
+              as="button"
               type="button"
               className="dsh-wb-btn"
               onClick={() => {
@@ -432,10 +490,10 @@ function ConnectionEditor({
               }}
             >
               {t(locale, "llm.addModel")}
-            </button>
-            <button type="button" className="dsh-wb-btn" disabled={busy || (!secret && !existing)} onClick={() => void discover()}>
+            </PressableButton>
+            <PressableButton as="button" type="button" className="dsh-wb-btn" disabled={busy || (!secret && !existing)} onClick={() => void discover()}>
               {t(locale, "llm.discover")}
-            </button>
+            </PressableButton>
           </div>
           <p className="dsh-wb-muted">{t(locale, "llm.discoverHint")}</p>
           {truncated && <p className="dsh-wb-notice">{t(locale, "llm.truncated")}</p>}
@@ -443,9 +501,9 @@ function ConnectionEditor({
             {models.map((id) => (
               <li key={id}>
                 <code>{id}</code>{" "}
-                <button type="button" className="dsh-wb-btn" onClick={() => setModels(models.filter((item) => item !== id))}>
+                <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={() => setModels(models.filter((item) => item !== id))}>
                   {t(locale, "app.delete")}
-                </button>
+                </PressableButton>
               </li>
             ))}
           </ul>
@@ -466,19 +524,20 @@ function ConnectionEditor({
               ))}
             </div>
           )}
-        </>
+        </VisibleSlide>
       )}
       {step === 4 && (
-        <>
+        <VisibleSlide as="div" className="dsh-wb-llm-step" from={14}>
           <label className="dsh-wb-field">
             <input type="checkbox" checked={asDefault} onChange={(event) => setAsDefault(event.target.checked)} />
             {t(locale, "llm.setDefault")}
           </label>
           <p className="dsh-wb-muted">{t(locale, "llm.draftNote")}</p>
-        </>
+        </VisibleSlide>
       )}
       <div className="dsh-wb-actions">
-        <button
+        <PressableButton
+          as="button"
           type="button"
           className="dsh-wb-btn"
           onClick={() => {
@@ -487,14 +546,15 @@ function ConnectionEditor({
           }}
         >
           {t(locale, "llm.cancelDraft")}
-        </button>
+        </PressableButton>
         {step > 1 && (
-          <button type="button" className="dsh-wb-btn" onClick={() => setStep((step - 1) as WizardStep)}>
+          <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={() => setStep((step - 1) as WizardStep)}>
             {t(locale, "llm.back")}
-          </button>
+          </PressableButton>
         )}
         {step < 4 && (
-          <button
+          <PressableButton
+            as="button"
             type="button"
             className="dsh-wb-btn primary"
             onClick={() => {
@@ -503,12 +563,12 @@ function ConnectionEditor({
             }}
           >
             {t(locale, "llm.next")}
-          </button>
+          </PressableButton>
         )}
         {step === 4 && (
-          <button type="submit" className="dsh-wb-btn primary" disabled={!writable || busy || !displayName || models.length === 0}>
+          <PressableButton as="button" type="submit" className="dsh-wb-btn primary" disabled={!writable || busy || !displayName || models.length === 0}>
             {t(locale, "app.save")}
-          </button>
+          </PressableButton>
         )}
       </div>
     </form>
@@ -565,10 +625,11 @@ function DeletePanel({
         <p>{t(locale, "llm.deleteConfirm")}</p>
       )}
       <div className="dsh-wb-actions">
-        <button type="button" className="dsh-wb-btn" onClick={onClose}>
+        <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={onClose}>
           {t(locale, "app.close")}
-        </button>
-        <button
+        </PressableButton>
+        <PressableButton
+          as="button"
           type="button"
           className="dsh-wb-btn danger"
           disabled={!writable || busy || refs.length > 0}
@@ -584,7 +645,7 @@ function DeletePanel({
           }}
         >
           {t(locale, "app.delete")}
-        </button>
+        </PressableButton>
       </div>
     </div>
   );

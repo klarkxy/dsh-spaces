@@ -3,6 +3,8 @@ import { test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LlmModelCenter } from "../packages/plugin/src/workbench/llm/center.tsx";
+import { SpaceBindingPanel } from "../packages/plugin/src/workbench/llm/space-binding.tsx";
+import { t } from "../packages/plugin/src/workbench/i18n.ts";
 import type { LlmUiClient } from "../packages/plugin/src/workbench/llm/client.ts";
 import type { LlmDescribeResult } from "../src/shared/llm-api.ts";
 import { WorkbenchController } from "../packages/plugin/src/workbench/store.ts";
@@ -16,7 +18,7 @@ function describeResult(): LlmDescribeResult {
     defaultModel: { connectionId: CONNECTION_ID, modelId: "demo-large" },
     capabilities: {
       adapter: "llm-pi-ai",
-      adapterVersion: "0.2.0-rc.2",
+      adapterVersion: "0.2.1-rc.2",
       protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
       keyless: false,
     },
@@ -148,6 +150,38 @@ test("model center lists redacted connections and required copy without secrets"
   assert.match(html, /http:\/\/127.0.0.1:9\/v1/);
   assert.doesNotMatch(html, /sk-live/);
   assert.doesNotMatch(html, /credentialRecordId/);
+});
+
+test("the space binding panel edits exactly the space it is pinned to", () => {
+  const spaces = [
+    { spaceId: "alpha", displayName: "Alpha", status: "running" as const, generation: 1, serviceEpoch: "aa".repeat(32) },
+    { spaceId: "beta", displayName: "Beta", status: "running" as const, generation: 1, serviceEpoch: "aa".repeat(32) },
+  ];
+  const pinned = renderToStaticMarkup(
+    <SpaceBindingPanel
+      locale="zh"
+      writable
+      client={client()}
+      spaces={spaces}
+      selectedSpaceId="beta"
+      describe={describeResult()}
+      onChanged={() => undefined}
+    />,
+  );
+  const open = renderToStaticMarkup(
+    <SpaceBindingPanel
+      locale="zh"
+      writable
+      client={client()}
+      spaces={spaces}
+      describe={describeResult()}
+      onChanged={() => undefined}
+    />,
+  );
+  const countSelects = (html: string): number => [...html.matchAll(/<select/g)].length;
+  assert.ok(countSelects(pinned) < countSelects(open), "a pinned space has no space picker");
+  assert.ok(open.includes(t("zh", "home.spaces")), "without a pinned space the picker stays");
+  assert.ok(pinned.includes("Beta"), "the pinned space belongs to the panel");
 });
 
 test("create space submits the explicit shared-connection choice", async () => {

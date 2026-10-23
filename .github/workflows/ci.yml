@@ -10,6 +10,10 @@ jobs:
   windows-gate:
     runs-on: windows-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["24.21.0", "26.10.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -17,7 +21,7 @@ jobs:
           version: "10.29.2"
       - uses: actions/setup-node@v4
         with:
-          node-version: "26"
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run check:test-lists
@@ -35,10 +39,10 @@ jobs:
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
       - run: npm run build:spaces
-      - name: Install official DSH CLI (0.2.0-rc.2)
+      - name: Install official DSH CLI (0.2.1-rc.2)
         run: |
           pnpm --version
-          npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+          npm install -g @deepseek-ai/dsh@0.2.1-rc.2
           dsh --version
       - name: Official CLI integration check
         shell: pwsh
@@ -52,16 +56,16 @@ jobs:
         env:
           DSH_TEST_OUTPUT: ${{ runner.temp }}/plugin-standard-install
         run: node scripts/verify-plugin-standard-install.mjs --preflight
-      - name: Setup sandbox profiles
+      - name: Official CLI sandbox profiles (not registered spaces)
         run: node scripts/setup-sandbox.mjs "${{ runner.temp }}/dsh-home"
-      - name: Isolation gate
+      - name: Official CLI isolation gate (not registered spaces)
         run: node scripts/validate-isolation.mjs --home "${{ runner.temp }}/dsh-home" --clean
-      - name: Lifecycle A3/A9 gate
+      - name: Official CLI lifecycle gate (not registered spaces)
         run: node scripts/verify-lifecycle.mjs --home "${{ runner.temp }}/dsh-home"
-      - name: A8 row-id gate
+      - name: Official CLI A8 row-id gate (not registered spaces)
         env:
           DSH_SPACES_HOME: ${{ runner.temp }}/dsh-home
-        run: node scripts/verify-a8.mjs
+        run: node --import tsx scripts/verify-a8.mjs
 
   plugin-install:
     runs-on: windows-latest
@@ -75,9 +79,11 @@ jobs:
       - run: npm ci
       - run: npm run build:spaces
       - run: npx playwright install chromium
+      - name: Fit icon browser
+        run: node --import tsx --test tests/fit-icon-browser.test.ts
       - run: npm run test:llm:browser
       - name: Install official DSH 0.2 CLI and package manager for acceptance
-        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.2.0-rc.2 pnpm@10.29.2 --no-audit --no-fund
+        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.2.1-rc.2 pnpm@10.29.2 --no-audit --no-fund
       - name: Blueprint and official model bridge regressions
         env:
           DSH_TEST_CLI_BIN: ${{ runner.temp }}/plugin-tools/node_modules/@deepseek-ai/dsh/lib/bin.js

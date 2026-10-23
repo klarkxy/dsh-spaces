@@ -24,6 +24,9 @@ import type { LlmLocalCandidate } from "../src/shared/llm-api.ts";
 import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../src/core/ports/llm-store.ts";
 import { emptyPolicy } from "../src/core/domain/llm-connections.ts";
 import type { LlmShareManifest } from "../src/core/domain/llm-share.ts";
+import { LLM_ADAPTER_VERSION } from "../src/shared/llm-api.ts";
+import { workbenchPost } from "../packages/plugin/src/host/workbench-http.ts";
+import { llmApiResultSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 
 const temps: string[] = [];
 const servers: Server[] = [];
@@ -369,6 +372,15 @@ test("describe is redacted and stays available without write owner", async () =>
   const described = (await host.dispatch({ method: "describe" })) as { connections: unknown[]; capabilities: { keyless: boolean } };
   assert.equal(described.capabilities.keyless, false);
   assert.deepEqual(described.connections, []);
+});
+
+test("actual model capabilities pass the host HTTP response validator", async () => {
+  const { host } = hostOf({ writable: false });
+  const http = await startFakeApi(host);
+  const result = await workbenchPost(fetch, http.origin, http.bearer, "llm", { method: "describe" }, llmApiResultSchema);
+  assert.ok("capabilities" in result);
+  assert.equal(result.capabilities.adapterVersion, LLM_ADAPTER_VERSION);
+  assert.deepEqual(result.connections, []);
 });
 
 test("credential write records operation status and is not replayed", async () => {

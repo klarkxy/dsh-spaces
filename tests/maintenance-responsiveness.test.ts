@@ -228,10 +228,11 @@ async function compileWorker(): Promise<string> {
   assertTempPath(dir);
   const outfile = join(dir, "snapshot-worker.mjs");
   const src = join(repoRoot, "src", "adapters/node", "snapshot-worker.ts");
-  await build({
+  const bundle = await build({
     absWorkingDir: repoRoot,
     entryPoints: [src],
     outfile,
+    write: false,
     bundle: true,
     platform: "node",
     format: "esm",
@@ -241,6 +242,9 @@ async function compileWorker(): Promise<string> {
       js: 'import { createRequire as __spacesCreateRequire } from "node:module"; const require = __spacesCreateRequire(import.meta.url);',
     },
   });
+  // Keep the temporary-file write in the process that created its directory.
+  if (bundle.outputFiles.length !== 1) throw new Error("Expected one snapshot worker module");
+  writeFileSync(outfile, bundle.outputFiles[0].contents, { flag: "wx" });
   return outfile;
 }
 

@@ -21,6 +21,7 @@ import type {
   WorkbenchGuideRole,
   WorkbenchInitializeResult,
   WorkbenchReturnTarget,
+  WorkbenchServiceRestartPreview,
 } from "./types";
 import { TYPERT } from "./typert.host";
 import "./host/remote-errors";
@@ -32,6 +33,8 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     returnTarget: () => Promise<RemoteResult<WorkbenchReturnTarget>>;
     portalTarget: (audience: SpaceHostAudience) => Promise<RemoteResult<WorkbenchReturnTarget>>;
     initialize: () => Promise<RemoteResult<WorkbenchInitializeResult>>;
+    previewServiceRestart: () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
+    restartService: (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
   }
   interface TypertRemoteNamespace$spaces {
     overview: () => Promise<RemoteResult<SpacesOverview>>;
@@ -60,6 +63,8 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "workbenchGuide/returnTarget": () => Promise<RemoteResult<WorkbenchReturnTarget>>;
     "workbenchGuide/portalTarget": (audience: SpaceHostAudience) => Promise<RemoteResult<WorkbenchReturnTarget>>;
     "workbenchGuide/initialize": () => Promise<RemoteResult<WorkbenchInitializeResult>>;
+    "workbenchGuide/previewServiceRestart": () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
+    "workbenchGuide/restartService": (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     "spaces/overview": () => Promise<RemoteResult<SpacesOverview>>;
     "spaces/detail": (id: string) => Promise<RemoteResult<SpaceDetail>>;
     "workbench/state": () => Promise<RemoteResult<WorkbenchState>>;

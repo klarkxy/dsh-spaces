@@ -3,6 +3,10 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { renameDirectory, renameDirectoryAsync } from "../src/adapters/node/atomic.ts";
 import { parseDocument } from "yaml";
 import {
   PatchForbiddenError,
@@ -13,6 +17,22 @@ import {
 } from "../src/adapters/node/patch-writer.ts";
 
 const temps: string[] = [];
+
+test("atomic publication preserves the first failure and makes exactly one attempt", async () => {
+  const sync = fs.renameSync, asyncRename = fsp.rename;
+  for (const code of ["EPERM", "EACCES", "EBUSY"]) {
+    let syncCalls = 0, asyncCalls = 0;
+    const failure = Object.assign(new Error("first publication failed"), {code});
+    try {
+      fs.renameSync = () => { if (++syncCalls === 1) throw failure; };
+      fsp.rename = async () => { if (++asyncCalls === 1) throw failure; };
+      syncBuiltinESMExports();
+      assert.throws(() => renameDirectory("source", "destination"), error => error === failure);
+      await assert.rejects(renameDirectoryAsync("source", "destination"), error => error === failure);
+      assert.equal(syncCalls, 1); assert.equal(asyncCalls, 1);
+    } finally { fs.renameSync = sync; fsp.rename = asyncRename; syncBuiltinESMExports(); }
+  }
+});
 
 test("isolation requires a tagged expression, not a lookalike string or relative path", () => {
   for (const root of [

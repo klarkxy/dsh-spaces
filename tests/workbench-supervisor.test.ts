@@ -20,6 +20,8 @@ import { archiveAbsPath } from "../src/adapters/node/plugin-library.ts";
 import { afterEach, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { satisfies } from "semver";
+import { SPACES_MIN_DSH_VERSION } from "../src/shared/runtime.ts";
 import { HomeController } from "../src/adapters/node/home-controller.ts";
 import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home-operation-lock.ts";
 import {
@@ -1331,7 +1333,7 @@ test("recovery resume does not settle jobs or start the manager when pending rec
   assert.equal(readFileSync(join(home, ".dsh-spaces-control", "plugin-mutation.json"), "utf8"), mutation);
 });
 
-test("ROOT cold recovery opens with a dead transaction lock and reclaims only after explicit resume", async () => {
+test("a dead transaction lock stays in place and recovery.resume is unsupported", async () => {
   for (const pid of [2147483647, process.pid]) {
     const home = tempHome();
     await new HomeController(home).ensureManager();
@@ -1353,7 +1355,7 @@ test("ROOT cold recovery opens with a dead transaction lock and reclaims only af
   }
 });
 
-test("ROOT package recovery settles only its matching job and preserves abandoned failure", async () => {
+test("recovery.resume is unsupported and both interrupted package jobs stay unchanged", async () => {
   const home = tempHome();
   for (const suffix of ["a", "b"]) {
     writeInterruptedPlan(home, `plan-package-${suffix}`, { kind: "workbench.upgrade" });
@@ -2169,6 +2171,34 @@ test("spaces pinned to different installed runtimes spawn with their own binarie
   assert.equal(spawned.find((row) => row.profile === "space-beta")?.bin, betaBin);
 });
 
+test("startup without a selected payload checks each component's target engine requirement", async () => {
+  const home = tempHome();
+  const version = "0.2.1-rc.2";
+  writeSpace(home, "alpha", {}, { dshVersion: version });
+  const bridgeDir = join(home, "profiles", "space-alpha", "node_modules", "@dsh-spaces", "view-bridge");
+  mkdirSync(bridgeDir, { recursive: true });
+  const bridgePath = join(bridgeDir, "package.json");
+  const writeBridge = (engine: string, peer: string) => writeFileSync(bridgePath, JSON.stringify({
+    name: "@dsh-spaces/view-bridge", version: "0.4.0",
+    engines: { dsh: engine }, peerDependencies: { "@deepseek-ai/dsh": peer },
+  }));
+  writeBridge("<0.1.0", "workspace:*");
+  const handle = await startSupervisor(home, { bin: writeFakeCli(home, version) });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-alpha" }, requestId: "engine-rejected",
+  });
+  const failed = await waitJob(handle.origin, cookie, "engine-rejected", "failed");
+  assert.match(failed.error?.message ?? "", /view-bridge.*engines\.dsh@<0\.1\.0/);
+  assert.equal((await handle.runtime.state()).spaces.find(row => row.id === "space-alpha")?.status, "stopped");
+  writeBridge(">=0.2.1-alpha.4", "<0.1.0");
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-alpha" }, requestId: "engine-accepted",
+  });
+  await waitJob(handle.origin, cookie, "engine-accepted");
+  assert.equal((await handle.runtime.state()).spaces.find(row => row.id === "space-alpha")?.status, "running");
+});
+
 test("a pinned version below the supported minimum rejects at start", async () => {
   const home = tempHome();
   writeSpace(home, "alpha", {}, { dshVersion: "0.0.1-rc.1" });
@@ -2269,7 +2299,7 @@ test("space.runtime.set preview rejects protected, unmanaged, and downgrade targ
   assert.equal(peers.error?.code, "workbench/invalid-input");
   assert.match(
     peers.error?.message ?? "",
-    /These plugins do not support DSH 0\.9\.9: @deepseek-ai\/dsh@\^9\.0\.0\. Remove or upgrade them first\./,
+    /These plugins do not support DSH 0\.9\.9: @dsh-spaces\/view-bridge \(@deepseek-ai\/dsh@\^9\.0\.0\)\. Remove or upgrade them first\./,
   );
 });
 
@@ -2427,7 +2457,7 @@ test("bridge packages declare peer ranges covering the supported DSH minimum", (
     ) as { peerDependencies?: Record<string, string> };
     for (const [dep, range] of Object.entries(pkg.peerDependencies ?? {})) {
       if (!dep.startsWith("@deepseek-ai/dsh-")) continue;
-      assert.equal(range, ">=0.2.0-rc.2", `${name} peer ${dep}`);
+      assert.ok(satisfies(SPACES_MIN_DSH_VERSION, range), `${name} peer ${dep}`);
     }
   }
 });

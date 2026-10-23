@@ -17,7 +17,7 @@ afterEach(() => {
   }
 });
 
-test("findNodeDir locates a nested windows node distribution", () => {
+test("findNodeDir locates a supported nested windows node distribution", () => {
   const root = mkdtempSync(join(tmpdir(), "dsh-toolchain-"));
   temps.push(root);
   setToolchainRoot(root);
@@ -25,6 +25,19 @@ test("findNodeDir locates a nested windows node distribution", () => {
   mkdirSync(nested, { recursive: true });
   writeFileSync(join(nested, "node.exe"), "");
   assert.equal(findNodeDir(root), nested);
+});
+
+test("findNodeDir accepts Node 24.21 without replacing it and ignores older Node 24", () => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-toolchain-"));
+  temps.push(root);
+  const old = join(root, "node", "node-v24.20.0-win-x64");
+  const supported = join(root, "node", "node-v24.21.0-win-x64");
+  for (const dir of [old, supported]) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "node.exe"), dir);
+  }
+  assert.equal(findNodeDir(root), supported);
+  assert.equal(readFileSync(join(old, "node.exe"), "utf8"), old);
 });
 
 test("toolchain config round-trips packageSource", () => {

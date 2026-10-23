@@ -7,6 +7,8 @@ import type { SpaceOperation } from '../packages/view-bridge/src/message-bus';
 import { busJson } from '../src/shared/space-message-bus';
 import { mergeTabSnapshots } from '../packages/browser/src/client';
 import { apply as applyBrowserClient } from '../packages/browser/src/client';
+import { BrowserFailurePanel } from '../packages/browser/src/ui/failure-panel';
+import { BrowserTabStrip } from '../packages/browser/src/ui/tab-strip';
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -69,6 +71,27 @@ test('a delayed pre-open UI snapshot cannot remove the newly opened tab', () => 
   const merged = mergeTabSnapshots([...oldSnapshot, opened], oldSnapshot);
   assert.deepEqual(merged.map(tab => tab.id), [oldSnapshot[0]!.id, opened.id]);
   assert.equal(merged[1]?.requestedUrl, 'https://example.com/');
+});
+test('a navigation failure is announced at once, keeps the remote wording and offers no retry', () => {
+  const message = displayBrowserFailure(new BrowserRequestFailure('listTabs', 'http', 'browser/unauthenticated', 401), 'Browser tabs are unavailable.');
+  const html = renderToStaticMarkup(createElement(BrowserFailurePanel, { message }));
+  assert.match(html, /role="alert"/);
+  assert.match(html, /Browser tabs are unavailable\./);
+  assert.match(html, /HTTP 401/);
+  assert.doesNotMatch(html, /opacity:0/, 'a failure must not start hidden behind an entrance');
+  assert.doesNotMatch(html, /retry|重试/i, 'a failure must not offer a retry');
+});
+test('the tab strip marks the active tab and keeps every tab title', () => {
+  const tabs = [
+    { id: 'a', requestedUrl: null, url: null, title: 'Home' },
+    { id: 'b', requestedUrl: 'https://example.com/', url: 'https://example.com/', title: 'Example' },
+  ];
+  const html = renderToStaticMarkup(createElement(BrowserTabStrip, { tabs, selected: 'b', onSelect: () => {} }));
+  assert.match(html, /aria-label="Browser tabs"/);
+  assert.match(html, /aria-current="page"/);
+  assert.match(html, /Example/);
+  assert.match(html, /Home/);
+  assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
 });
 
 test('Browser starts with one blank home and opens separate tabs', () => {

@@ -112,6 +112,14 @@ test("Browser create preset survives the actual job command validator", async ()
     "browser-invalid", noop()), { code: "workbench/invalid-input" });
 });
 
+test('main model create choice survives job parsing and rejects ambiguous legacy choices',async()=>{
+  const home=tempHome(),store=new WorkbenchJobStore({home});
+  const command:WorkbenchCommand={kind:'space.create',input:{name:'main-model',modelSource:'main'}};
+  await store.submit(command,'main-create',noop());await store.whenIdle();
+  assert.deepEqual(JSON.parse(readFileSync(jobFile(home,'main-create'),'utf8')).command,command);
+  for(const input of [{name:'bad',modelSource:'other'},{name:'bad',modelSource:'main',useSharedLlm:true}])await assert.rejects(()=>store.submit({kind:'space.create',input} as never,'bad-create',noop()),{code:'workbench/invalid-input'});
+});
+
 test("handler failure is a failed job and does not block later work", async () => {
   const store = new WorkbenchJobStore({ home: tempHome() });
   await store.submit(startCmd(), "uncertain", async () => {

@@ -16,6 +16,10 @@ import type {
   WorkbenchView,
 } from "../../../../src/shared/workbench";
 import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../../src/shared/workbench-product";
+import {
+  KNOWN_WORKBENCH_ERROR_CODES,
+  publicWorkbenchErrorMessage,
+} from "../../../../src/shared/workbench-errors";
 import type {
   WorkbenchBootstrapResult,
   WorkbenchGuideApi,
@@ -26,44 +30,10 @@ import type {
 } from "../types";
 
 const CHANNEL = "/api";
-const GENERIC_ERROR_MESSAGE = "The workbench request failed. Try again later.";
+const GENERIC_ERROR_MESSAGE = "The workbench request failed.";
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 
-export const KNOWN_WORKBENCH_ERROR_CODES: ReadonlySet<string> = new Set([
-  "workbench/invalid-input",
-  "workbench/not-found",
-  "workbench/conflict",
-  "workbench/locked",
-  "workbench/unavailable",
-  "workbench/unsupported",
-  "workbench/recovery-required",
-  "workbench/read-only",
-  "workbench/forbidden",
-  "workbench/not-cancellable",
-  "spaces/read-only",
-  "spaces/host-denied",
-  "spaces/invalid-input",
-  "spaces/not-found",
-  "spaces/already-exists",
-  "spaces/locked",
-  "spaces/unavailable",
-  "LLM_REVISION_CONFLICT",
-  "LLM_WRITE_OWNER_REQUIRED",
-  "LLM_CONFIG_INVALID",
-  "LLM_UNSUPPORTED_RUNTIME",
-  "LLM_UNSUPPORTED_PROTOCOL",
-  "LLM_ADAPTER_MISSING",
-  "LLM_MODEL_NOT_FOUND",
-  "LLM_CONNECTION_IN_USE",
-  "LLM_SHARED_CONNECTION_READ_ONLY",
-  "LLM_MANAGED_ROUTE_CONFLICT",
-  "LLM_CREDENTIAL_MISSING",
-  "LLM_CREDENTIAL_WRITE_FAILED",
-  "LLM_DISCOVERY_FAILED",
-  "LLM_SPACE_BUSY",
-  "LLM_APPLY_FAILED",
-  "LLM_RESULT_UNKNOWN",
-]);
+export { KNOWN_WORKBENCH_ERROR_CODES };
 
 export class WorkbenchRemoteError extends Error {
   readonly code: string | null;
@@ -78,16 +48,10 @@ export class WorkbenchRemoteError extends Error {
 export type WorkbenchConnection = Pick<ConnectionHandle, "rpc">;
 
 function sanitizeBackendError(error: unknown): WorkbenchRemoteError {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    typeof (error as { code?: unknown }).code === "string" &&
-    typeof (error as { message?: unknown }).message === "string"
-  ) {
-    const { code, message } = error as { code: string; message: string };
-    if (KNOWN_WORKBENCH_ERROR_CODES.has(code) && message.length > 0) {
-      return new WorkbenchRemoteError(code, message);
-    }
+  if (typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string") {
+    const code = (error as { code: string }).code;
+    const message = publicWorkbenchErrorMessage(code, (error as { message?: unknown }).message);
+    if (message !== null) return new WorkbenchRemoteError(code, message);
   }
   return new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE);
 }
@@ -153,6 +117,8 @@ export function createWorkbenchGuideRemote(connection: WorkbenchConnection): Wor
     returnTarget: () => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/returnTarget", {}),
     portalTarget: audience => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/portalTarget", { audience }),
     initialize: () => callRemote<WorkbenchInitializeResult>(connection, "workbenchGuide/initialize", {}),
+    previewServiceRestart: () => callRemote<import("../types").WorkbenchServiceRestartPreview>(connection, "workbenchGuide/previewServiceRestart", {}),
+    restartService: confirmationId => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/restartService", { confirmationId }),
   };
 }
 

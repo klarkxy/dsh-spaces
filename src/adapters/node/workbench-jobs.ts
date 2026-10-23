@@ -1000,12 +1000,13 @@ function assertCommandHasNoSecrets(value: unknown): void {
   }
 }
 
-function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; browser?: boolean } {
+function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean } {
   if (!isPlainObject(input)) throw new WorkbenchJobError("workbench/invalid-input");
-  expectKeys(input, ["name"], ["displayName", "icon", "useSharedLlm", "browser"]);
+  expectKeys(input, ["name"], ["displayName", "icon", "useSharedLlm", "modelSource", "browser"]);
   const name = parseOptionalString(input.name);
   if (!name) throw new WorkbenchJobError("workbench/invalid-input");
-  const parsed: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; browser?: boolean } = { name };
+  const parsed: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean } = { name };
+  if(input.modelSource!==undefined){if(!['main','shared','local'].includes(String(input.modelSource))||input.useSharedLlm!==undefined)throw new WorkbenchJobError('workbench/invalid-input');parsed.modelSource=input.modelSource as 'main'|'shared'|'local';}
   if (input.displayName !== undefined) parsed.displayName = parseOptionalString(input.displayName);
   if (input.icon !== undefined) parsed.icon = parseOptionalString(input.icon);
   if (input.useSharedLlm !== undefined) {

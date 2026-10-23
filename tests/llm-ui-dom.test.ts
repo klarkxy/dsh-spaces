@@ -112,6 +112,57 @@ test("DOM: model center saves through the credential channel and never stores th
 
 const CONNECTION_OPTION = "11111111-1111-4111-8111-111111111111";
 
+test("DOM: space bindings isolate late reads and writes and apply only complete visible spaces", {timeout:120_000}, async t => {
+  const bundled = await esbuild.build({absWorkingDir:root, entryPoints:[join(here,'fixtures/llm-ui/binding.tsx')], bundle:true, write:false, format:'iife', platform:'browser', jsx:'automatic'});
+  const server = await listen((req,res) => {
+    res.setHeader('content-type',req.url === '/host.js' ? 'application/javascript' : 'text/html');
+    res.end(req.url === '/host.js' ? bundled.outputFiles[0]!.text : '<div id="root"></div><script src="/host.js"></script>');
+  });
+  t.after(() => server.close());
+  const {chromium} = createRequire(join(root,'node_modules/playwright/index.js'))('playwright');
+  const browser = await chromium.launch({headless:true}); t.after(() => browser.close());
+  const page: Page = await browser.newPage();
+  const checked = () => page.locator('[data-llm-spaces] input[type=checkbox]').evaluateAll(rows => rows.filter(row => (row as HTMLInputElement).checked).map(row => row.parentElement?.textContent?.trim()));
+  const flush = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await page.goto(server.url+'?mode=race');
+  await page.waitForFunction(() => (window as any).__BINDING.resolve.a);
+  await page.locator('select').first().selectOption('b');
+  assert.equal(await page.locator('input[name=llm-mode]').count(),0);
+  await page.waitForFunction(() => (window as any).__BINDING.resolve.b);
+  await page.evaluate(() => (window as any).__BINDING.resolve.b());
+  await page.getByLabel('conn-b',{exact:true}).waitFor();
+  await page.evaluate(() => (window as any).__BINDING.resolve.a()); await flush();
+  assert.ok((await checked()).includes('conn-b')); assert.ok(!(await checked()).includes('conn-a'));
+  await page.getByLabel('conn-c',{exact:true}).click();
+  await page.waitForFunction(() => (window as any).__BINDING.writes.length === 1);
+  assert.deepEqual(await page.evaluate(() => (window as any).__BINDING.writes[0]),['b',{mode:'selected',connectionIds:['conn-b','conn-c']}]);
+
+  await page.goto(server.url+'?mode=write'); await page.getByLabel('conn-a',{exact:true}).waitFor();
+  await page.getByLabel('conn-c',{exact:true}).click();
+  await page.waitForFunction(() => (window as any).__BINDING.resolve.write);
+  await page.locator('select').first().selectOption('b'); await page.getByLabel('conn-b',{exact:true}).waitFor();
+  await page.evaluate(() => (window as any).__BINDING.resolve.write()); await flush();
+  assert.ok((await checked()).includes('conn-b')); assert.ok(!(await checked()).includes('conn-a'));
+
+  await page.goto(server.url+'?mode=hidden'); await page.getByLabel('conn-a',{exact:true}).waitFor();
+  assert.equal(await page.locator('button').last().isDisabled(),true);
+  assert.deepEqual(await page.evaluate(() => (window as any).__BINDING.plans),[]);
+  await page.goto(server.url+'?mode=pinned'); await page.getByLabel('conn-a',{exact:true}).waitFor();
+  await page.locator('button').last().click();
+  await page.waitForFunction(() => (window as any).__BINDING.plans.length === 1);
+  const plan = await page.evaluate(() => (window as any).__BINDING.plans[0]);
+  assert.deepEqual(plan[0],['a']); assert.deepEqual(plan[2],[{spaceId:'a',status:'running',generation:1,catalogRevision:1,busy:false,serviceEpoch:'epoch'}]);
+  await page.evaluate(() => (window as any).__BINDING.pin('b')); await page.getByLabel('conn-b',{exact:true}).waitFor();
+  await page.locator('button').last().click();
+  await page.waitForFunction(() => (window as any).__BINDING.plans.length === 2);
+  assert.deepEqual(await page.evaluate(() => (window as any).__BINDING.plans[1][0]),['b']);
+  await page.goto(server.url+'?mode=incomplete'); await page.getByLabel('conn-a',{exact:true}).waitFor();
+  assert.equal(await page.getByLabel('b (unknown)',{exact:true}).isDisabled(),true);
+  await page.locator('button').last().click();
+  await page.waitForFunction(() => (window as any).__BINDING.plans.length === 1);
+  assert.deepEqual(await page.evaluate(() => (window as any).__BINDING.plans[0][0]),['a']);
+});
+
 async function launchChromium(chromium: {
   launch: (opts?: { headless?: boolean; channel?: string }) => Promise<{
     close: () => Promise<void>;

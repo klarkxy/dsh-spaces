@@ -67,6 +67,9 @@ const PACK_SCRIPT = join(REPO, "scripts", "pack-spaces-plugin.mjs");
 const PLUGIN_DIR = join(REPO, "packages", "plugin");
 const CANONICAL_NAME = "@dsh-spaces/plugin";
 const WEB_PROFILE = "web";
+const SPACE_USER_NAME = "coding";
+const SPACE_ID = "space-coding";
+const SPACE_LABEL = "编程";
 const EXACT_CLI = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z.-]+)?$/;
 const HEX64 = /^[a-f0-9]{64}$/;
 const GUIDE_ROOT = "[data-dsh-spaces-guide]:visible";
@@ -95,7 +98,7 @@ const report = {
   pageErrors: [],
   consoleErrors: [],
   rpcErrors: [],
-  cli: { channel: "latest" },
+  cli: { selection: "explicit-installed-version" },
 };
 
 function redact(value) {
@@ -344,6 +347,12 @@ async function dismissOnboarding(page) {
     } catch {
       /* optional first-run chrome */
     }
+  }
+  // DSH 0.2.1's account prompt has an explicit close action for keyless setup.
+  const signIn = page.getByRole("dialog", { name: /^(开始使用|Get started)$/ });
+  if (await signIn.isVisible()) {
+    await signIn.getByRole("button", { name: /^(关闭|Close)$/ }).click();
+    await signIn.waitFor({ state: "hidden", timeout: 8000 });
   }
 }
 
@@ -672,6 +681,62 @@ async function waitServiceShutdownAccepted({ home, api, submitted, requestId, pl
   return { job: last, proof };
 }
 
+function assertRegisteredSpace(home) {
+  const file = JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8"));
+  const entry = file?.meta?.[SPACE_ID];
+  if (!entry || typeof entry.createdAt !== "string" || Number.isNaN(Date.parse(entry.createdAt))) {
+    throw new Error(`${SPACE_ID} is not a registered space`);
+  }
+  if (!Array.isArray(file.order) || !file.order.includes(SPACE_ID)) {
+    throw new Error(`${SPACE_ID} is missing from the space registry order`);
+  }
+  if (file.meta?.[SPACE_USER_NAME]) throw new Error("registry adopted the unprefixed profile name");
+  return entry;
+}
+
+async function assertProductionIsolation(nodeExe, bin, home, tooling) {
+  const { assertDumpPatched, PatchVerifyError } = await import(
+    pathToFileURL(join(REPO, "packages", "core", "lib", "index.js")).href
+  );
+  const dump = runDsh(
+    nodeExe,
+    bin,
+    home,
+    tooling,
+    ["--profile", SPACE_ID, "--dump-config"],
+    DUMP_MS,
+    "dump registered space",
+  );
+  assertDumpPatched(dump, SPACE_ID);
+  const broken = dump.replaceAll("session-persistence-jsonl", "session-persistence-jsonl-BROKEN");
+  let refused = false;
+  try {
+    assertDumpPatched(broken, SPACE_ID);
+  } catch (error) {
+    if (!(error instanceof PatchVerifyError)) throw error;
+    refused = true;
+  }
+  if (!refused) throw new Error("production assertDumpPatched accepted a broken exact row id");
+}
+
+async function restartRegisteredSpace(api) {
+  const state = await api("state");
+  const context = contextOf(state);
+  const plan = await api("preview", { request: { kind: "space.restart", spaceId: SPACE_ID }, context });
+  if (!plan?.id || plan.kind !== "space.restart") {
+    throw new Error(`space.restart preview rejected: ${redact(JSON.stringify(plan))}`);
+  }
+  const submitted = await api("submit", {
+    command: { kind: "plan.execute", planId: plan.id },
+    requestId: randomUUID(),
+    context,
+  });
+  const latest = await waitPublicJob(api, submitted, "space.restart");
+  if (latest.status !== "succeeded") {
+    throw new Error(`space.restart ${latest.status}: ${redact(JSON.stringify(latest.error))}`);
+  }
+}
+
 async function waitJob(api, command, label) {
   const state = await api("state");
   assertV2State(state, label);
@@ -986,20 +1051,20 @@ async function preflight({ syntaxOnly = false } = {}) {
   assert.equal(parsed?.protocolVersion, 2);
   const src = viewSrc({
     serviceEpoch: epoch,
-    spaceId: "coding",
+    spaceId: SPACE_ID,
     generation: 1,
     origin: `http://${HOST}:10`,
     entryOrigin: `http://${HOST}:9`,
-    entryPath: "/view/coding/1",
+    entryPath: `/view/${SPACE_ID}/1`,
     channel: "ch",
   });
-  assert.equal(src, `http://${HOST}:9/view/coding/1?epoch=${epoch}`);
+  assert.equal(src, `http://${HOST}:9/view/${SPACE_ID}/1?epoch=${epoch}`);
   assert.throws(() =>
     viewSrc({
       serviceEpoch: epoch,
       origin: `http://${HOST}:9`,
       entryOrigin: `http://${HOST}:9`,
-      entryPath: "/view/coding/1",
+      entryPath: `/view/${SPACE_ID}/1`,
     }),
   );
   pass("v2 endpoint/context/view parsers reject v1 endpoint and missing epoch");
@@ -1165,7 +1230,7 @@ async function main() {
   const bin = resolveDshBin();
   const version = inspectCli(bin, "selected DSH CLI");
   report.cli.resolved = { bin, version };
-  pass(`using official CLI ${version} (channel=latest)`);
+  pass(`using official CLI ${version} (explicit installed version)`);
 
   const packDest = join(tmpdir(), "dsh-spaces-standard-install-pack");
   assertNoSpaces(packDest, "staged pack dest");
@@ -1286,27 +1351,51 @@ async function main() {
     assert.equal(state.role, "manager");
     assert.ok(!state.reasons.includes("Unfinished Home maintenance must be recovered before new changes."));
     assert.ok(!state.reasons.includes("The manager profile cannot be used until recovery."));
-    await waitJob(api, { kind: "space.create", input: { name: "coding", displayName: "编程" } }, "space.create");
-    await waitJob(api, { kind: "space.start", spaceId: "coding" }, "space.start");
-    const codingPkg = JSON.parse(readFileSync(join(home, "profiles", "coding", "package.json"), "utf8"));
+    await waitJob(api, { kind: "space.create", input: { name: SPACE_USER_NAME, displayName: SPACE_LABEL } }, "space.create");
+    await waitJob(api, { kind: "space.start", spaceId: SPACE_ID }, "space.start");
+    if (existsSync(join(home, "profiles", SPACE_USER_NAME))) {
+      throw new Error("registration created an unprefixed profile");
+    }
+    const codingPkg = JSON.parse(readFileSync(join(home, "profiles", SPACE_ID, "package.json"), "utf8"));
     assert.equal(Boolean(codingPkg.dependencies?.[CANONICAL_NAME]), false);
     assert.ok(codingPkg.dependencies?.["@dsh-spaces/view-bridge"]);
-    pass("created and started an ordinary space with view-bridge only");
+    const registered = assertRegisteredSpace(home);
+    await assertProductionIsolation(nodeExe, bin, home, tooling);
+    pass("registered space-coding, production isolation accepted, view-bridge only");
     const managerView = await managerFrameOf(page, api);
-    const codingButton = page.getByRole("button", { name: "编程", exact: true });
+    const codingButton = page.getByRole("button", { name: SPACE_LABEL, exact: true });
     await until(() => codingButton.getAttribute("data-space-status").then(status => status === "running"), "running space in host inventory", 15000);
     await codingButton.click();
     const live = await api("state");
-    assertV2State(live, "coding view");
-    const codingView = await api("view", { spaceId: "coding" });
-    assertV2View(codingView, "coding", live.serviceEpoch, "coding view");
+    assertV2State(live, "registered space view");
+    const codingView = await api("view", { spaceId: SPACE_ID });
+    assertV2View(codingView, SPACE_ID, live.serviceEpoch, "registered space view");
     const expectedSrc = viewSrc(codingView);
-    await managerView.frame.locator('iframe[data-space-id="coding"][data-visible="true"]').waitFor({ state: "visible", timeout: 60000 });
-    const codingSrc = await managerView.frame.locator('iframe[data-space-id="coding"]').getAttribute("src");
+    await managerView.frame.locator(`iframe[data-space-id="${SPACE_ID}"][data-visible="true"]`).waitFor({ state: "visible", timeout: 60000 });
+    const codingSrc = await managerView.frame.locator(`iframe[data-space-id="${SPACE_ID}"]`).getAttribute("src");
     if (codingSrc !== expectedSrc) {
-      throw new Error(`coding iframe src is not authorized v2 view: ${redact(codingSrc || "")}`);
+      throw new Error(`registered space iframe src is not authorized v2 view: ${redact(codingSrc || "")}`);
     }
-    pass("selected space completed the view-bridge handshake and is visible");
+    pass("selected registered space completed the view-bridge handshake and is visible");
+    const others = live.spaces
+      .filter((row) => row.id !== SPACE_ID)
+      .map((row) => ({ id: row.id, status: row.status, generation: row.generation }));
+    await restartRegisteredSpace(api);
+    const restarted = await api("state");
+    assertV2State(restarted, "after registered space restart");
+    for (const row of others) {
+      const now = restarted.spaces.find((item) => item.id === row.id);
+      if (!now || now.status !== row.status || now.generation !== row.generation) {
+        throw new Error(`space ${row.id} changed when ${SPACE_ID} restarted`);
+      }
+    }
+    if (assertRegisteredSpace(home).createdAt !== registered.createdAt) {
+      throw new Error("registered createdAt changed across restart");
+    }
+    if (restarted.spaces.find((row) => row.id === SPACE_ID)?.status !== "running") {
+      throw new Error("restarted registered space is not running");
+    }
+    pass("registered space restart left every other space unchanged");
     await screenshot(page, out, "coding.png");
     assertWebPathsProtected(home, webBefore, "after create/start");
 

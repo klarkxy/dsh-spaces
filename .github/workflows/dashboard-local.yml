@@ -59,7 +59,7 @@ jobs:
 
       - run: npm run build:blueprint
       - name: Install pinned official CLI in an isolated SDK fixture
-        run: npm install --prefix .sandbox/dashboard-sdk --no-audit --no-fund --ignore-scripts --fetch-retries=0 @deepseek-ai/dsh@0.2.0-rc.2
+        run: npm install --prefix .sandbox/dashboard-sdk --no-audit --no-fund --ignore-scripts --fetch-retries=0 @deepseek-ai/dsh@0.2.1-rc.2
       - name: Inspect actually resolved SDK versions
         env:
           DSH_DASHBOARD_SDK_ROOT: .sandbox/dashboard-sdk

@@ -4,6 +4,7 @@ import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client
 import type {} from "@deepseek-ai/dsh-client-ui-layout/client";
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
+import { MotionRoot } from "../../../../src/shared/ui/motion";
 import { WorkbenchApp } from "../workbench";
 import { WORKBENCH_CSS } from "../workbench/styles";
 import { HOME_CSS } from "../workbench/dashboard-home";
@@ -12,7 +13,7 @@ import { mountStaticClientStyle } from "../../../dashboard/src/client-style";
 import { readViewHint } from "../../../view-bridge/src/env";
 import { CONTAINED_MANAGEMENT_PARAM } from "../../../../src/shared/space-host";
 import { HostShellController } from "./host-shell-state";
-import { desktopBrowserBridge, NativeHostController, NativeHostShell, NATIVE_HOST_CSS } from "./native-host";
+import { desktopBrowserBridge, NativeHostController, NativeHostShell, NATIVE_HOST_CSS, NATIVE_BROWSER_CSS } from "./native-host";
 import { PortableHostShell, HostShellPanel, HOST_SHELL_CSS } from "./host-shell";
 import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
@@ -72,9 +73,10 @@ export function apply(ctx: Context): void {
   const nativeBridge = desktopBrowserBridge();
   if (nativeBridge) {
     const native = new NativeHostController(guide, nativeBridge);
-    ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS));
+    ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
     ctx.slots.inject("shell.overlay", () => ctx.slots.register(
-      { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () => createElement(NativeHostShell, { controller: native }),
+      { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () =>
+        createElement(MotionRoot, null, createElement(NativeHostShell, { controller: native })),
     ));
     return;
   }
@@ -82,7 +84,8 @@ export function apply(ctx: Context): void {
   if (typeof document !== "undefined") ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS));
   // The host keeps its own root, branding, native chrome and live conversation.
   ctx.slots.inject("shell.overlay", () => ctx.slots.register(
-    { name: "shell.overlay", id: "dsh-spaces-host-shell" }, () => createElement(PortableHostShell, { controller: host }),
+    { name: "shell.overlay", id: "dsh-spaces-host-shell" }, () =>
+      createElement(MotionRoot, null, createElement(PortableHostShell, { controller: host })),
   ));
   ctx.slots.inject("sidebar.panellist", () =>
     ctx.slots.register(
@@ -97,7 +100,7 @@ export function apply(ctx: Context): void {
   );
   ctx.slots.inject("main", () =>
     ctx.slots.register({ name: "main", key: SPACES_PANEL_ID }, () =>
-      createElement(ReturnToWorkbenchPanel, { host }),
+      createElement(MotionRoot, null, createElement(ReturnToWorkbenchPanel, { host })),
     ),
   );
 }
@@ -107,6 +110,9 @@ const panelStyle: CSSProperties = {
   padding: "24px",
   color: "var(--dsw-alias-label-primary, #1f2328)",
   background: "var(--dsw-alias-bg-base, #fff)",
+  borderRadius: "12px",
+  boxShadow: "0 20px 48px -16px rgba(0,0,0,0.28)",
+  overflow: "auto",
 };
 const bodyStyle: CSSProperties = {
   margin: "0 0 16px",
@@ -119,8 +125,15 @@ const primaryButtonStyle = (busy: boolean): CSSProperties => ({
   background: "var(--dsw-alias-button-primary-fill, #5865f2)",
   color: "#fff",
   cursor: busy ? "progress" : "pointer",
+  boxShadow: "0 6px 18px -8px rgba(0,0,0,0.45)",
+  transition: "transform 120ms cubic-bezier(0.2,0,0,1), box-shadow 200ms cubic-bezier(0.2,0,0,1)",
 });
-const alertStyle: CSSProperties = { color: "var(--dsw-alias-label-error, #d1242f)" };
+const alertStyle: CSSProperties = {
+  color: "var(--dsw-alias-label-error, #d1242f)",
+  border: "1px solid var(--dsw-alias-label-error, #d1242f)",
+  borderRadius: "8px",
+  padding: "8px 10px",
+};
 const copyButtonStyle: CSSProperties = {
   padding: "8px 14px",
   borderRadius: "8px",
@@ -128,6 +141,7 @@ const copyButtonStyle: CSSProperties = {
   background: "transparent",
   color: "var(--dsw-alias-label-primary, #1f2328)",
   cursor: "pointer",
+  transition: "background-color 120ms cubic-bezier(0.2,0,0,1), transform 120ms cubic-bezier(0.2,0,0,1)",
 };
 
 export type GuidePanelMode = "loading" | "failed" | "blocked" | "init" | "init-failed" | "enter" | "enter-failed";

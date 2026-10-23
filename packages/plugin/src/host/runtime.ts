@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Context } from "@deepseek-ai/cordis";
 import { bindDshCli, isCompatibleDshCliVersion } from "../../../../src/adapters/node/spaces-control";
 import type { WorkbenchApi } from "../../../../src/shared/workbench";
+import { WORKBENCH_ENTRY_UNAVAILABLE } from "../../../../src/shared/workbench-errors";
 import type {
   WorkbenchBootstrapResult,
   WorkbenchGuideRole,
@@ -12,6 +13,7 @@ import type {
   WorkbenchReturnTarget,
 } from "../types";
 import { resolveHostIdentity, type HostIdentity, type HostIdentityInput } from "./identity";
+import { DesktopServiceRestart } from "./service-restart";
 import { createWorkbenchHttpClient, mintSupervisorHandoff, mintSupervisorPortal, type WorkbenchHttpClientOptions } from "./workbench-http";
 import { attachExistingSupervisor, pingSupervisorState, type SupervisorAttachResult } from "./supervisor-attach";
 import {
@@ -29,7 +31,7 @@ const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 
 const IDENTITY_DAMAGED = "Manager identity is damaged or ambiguous and cannot be guessed.";
 const HANDOFF_FAILED = "The workbench entry handoff could not be minted.";
-const ENTRY_UNAVAILABLE = "The workbench entry is not available yet.";
+const ENTRY_UNAVAILABLE = WORKBENCH_ENTRY_UNAVAILABLE;
 
 export interface WorkbenchHostRuntimeOptions extends HostIdentityInput {
   snapshotRoot?: string;
@@ -46,6 +48,16 @@ export class WorkbenchHostRuntime {
   readonly snapshotRoot?: string;
   private endpoint: SupervisorEndpoint | null = null;
   private api: WorkbenchApi | null = null;
+  private readonly attachedListeners=new Set<(endpoint:SupervisorEndpoint)=>Promise<void>>();
+  private readonly stoppedListeners = new Set<(previousEpoch: string | null) => Promise<void>>();
+  private serviceRestart?: DesktopServiceRestart;
+  private restarting = false;
+  private connectionGeneration = 0;
+  onSupervisorAttached(listener:(endpoint:SupervisorEndpoint)=>Promise<void>, stopped?: (previousEpoch: string | null) => Promise<void>):()=>void {
+    this.attachedListeners.add(listener);
+    if (stopped) this.stoppedListeners.add(stopped);
+    return () => { this.attachedListeners.delete(listener); if (stopped) this.stoppedListeners.delete(stopped); };
+  }
   private readonly options: WorkbenchHostRuntimeOptions;
 
   constructor(options: WorkbenchHostRuntimeOptions = {}) {
@@ -85,12 +97,14 @@ export class WorkbenchHostRuntime {
 
   /** Attach and read only. Never bootstrap, initialize or retire an owner during discovery. */
   async presentationSnapshot(): Promise<PortalSnapshot> {
+    this.assertNotRestarting();
     const identity = this.identity;
     if (!identity.confirmed || identity.recoveryRequired || !identity.home) throw new Error(ENTRY_UNAVAILABLE);
     if (!this.api || !this.endpoint) {
       const attached = await attachExistingSupervisor({ home: identity.home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch });
       if (!("endpoint" in attached)) throw new Error(ENTRY_UNAVAILABLE);
-      this.remember(attached.endpoint);
+      await this.remember(attached.endpoint);
+
     }
     const state = await this.api!.state();
     const failure = [...state.jobs].reverse().find(job => job.kind === "plan.execute");
@@ -104,6 +118,7 @@ export class WorkbenchHostRuntime {
   }
 
   async bootstrap(): Promise<WorkbenchBootstrapResult> {
+    this.assertNotRestarting();
     if (this.identity.recoveryRequired) {
       return {
         ok: false,
@@ -175,6 +190,7 @@ export class WorkbenchHostRuntime {
    * Ordinary bootstrap/returnTarget still do not cold-start a workspace profile.
    */
   async initialize(): Promise<WorkbenchInitializeResult> {
+    this.assertNotRestarting();
     const denied = this.deniedInitialize();
     if (denied) return denied;
     const home = this.identity.home;
@@ -196,22 +212,22 @@ export class WorkbenchHostRuntime {
     if (!this.endpoint) {
       const attached = await attachExistingSupervisor({ home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch });
       if (!("endpoint" in attached)) return this.initializeFailure([ENTRY_UNAVAILABLE]);
-      this.remember(attached.endpoint);
+      await this.remember(attached.endpoint);
     }
     const ready = await this.waitForManager();
     if (ready) return ready;
     return this.finishInitialize(this.currentManagerId());
   }
 
-  private async waitForManager(): Promise<WorkbenchInitializeResult | null> {
+  private async waitForManager(api = this.api!, endpoint = this.endpoint): Promise<WorkbenchInitializeResult | null> {
     const deadline = Date.now() + (this.options.supervisorTimeoutMs ?? 240_000);
     let reasons = ["The manager did not become ready before the startup deadline."];
     while (Date.now() < deadline) {
       try {
-        const state = await this.api!.state();
+        const state = await api.state();
         if (state.reasons.length) reasons = state.reasons;
         const manager = state.spaces.find(space => space.id === state.managerId);
-        if ((state.maintenance && [...state.jobs].reverse().find(job => job.kind === "plan.execute")?.status === "failed") || state.availability === "unavailable" || state.serviceEpoch !== this.endpoint?.serviceEpoch || manager?.status === "crashed") {
+        if ((state.maintenance && [...state.jobs].reverse().find(job => job.kind === "plan.execute")?.status === "failed") || state.availability === "unavailable" || state.serviceEpoch !== endpoint?.serviceEpoch || manager?.status === "crashed") {
           return this.initializeFailure(state.reasons.length ? reasons : ["The manager launch or its owning service is unavailable."]);
         }
         if (state.role === "manager" && manager?.status === "running") return null;
@@ -243,7 +259,7 @@ export class WorkbenchHostRuntime {
       fetch: this.options.fetch,
     });
     if ("endpoint" in attached) {
-      this.remember(attached.endpoint);
+      await this.remember(attached.endpoint);
       return this.api!;
     }
     throw new Error("workbench/unavailable");
@@ -256,7 +272,7 @@ export class WorkbenchHostRuntime {
       fetch: this.options.fetch,
     });
     if ("endpoint" in attached) {
-      this.remember(attached.endpoint);
+      await this.remember(attached.endpoint);
       return { ok: true, connected: true, unavailable: false, origin: attached.endpoint.origin, reasons: [] };
     }
     if ("blocked" in attached || "stale" in attached) {
@@ -376,7 +392,7 @@ export class WorkbenchHostRuntime {
       fetch: this.options.fetch,
     });
     if ("endpoint" in attached) {
-      this.remember(attached.endpoint);
+      await this.remember(attached.endpoint);
       return {
         ok: true,
         connected: true,
@@ -418,7 +434,8 @@ export class WorkbenchHostRuntime {
         reasons: result.reasons,
       };
     }
-    this.remember(result.endpoint);
+    await this.remember(result.endpoint);
+
     return {
       ok: true,
       connected: true,
@@ -428,11 +445,62 @@ export class WorkbenchHostRuntime {
     };
   }
 
-  private remember(endpoint: SupervisorEndpoint): void {
-    this.endpoint = endpoint;
-    this.api = (this.options.connect ?? createWorkbenchHttpClient)({
+  private async remember(endpoint: SupervisorEndpoint): Promise<void> {
+    const generation = this.connectionGeneration;
+    const api = (this.options.connect ?? createWorkbenchHttpClient)({
       endpoint,
       fetch: this.options.fetch,
+    });
+    // The endpoint is published before initialization finishes. Main registration
+    // is a mutation: observe manager readiness before sending it for the first
+    // time. Manager hosts have no attachment listeners and must not wait on their
+    // own startup. Publish the connection only after attachment succeeds.
+    if (this.attachedListeners.size) {
+      const failure = await this.waitForManager(api, endpoint);
+      if (failure) throw new Error(failure.reasons.join("\n") || ENTRY_UNAVAILABLE);
+      for (const listener of this.attachedListeners) await listener(endpoint);
+    }
+    if (generation !== this.connectionGeneration) throw new Error("The connection belongs to the service being manually restarted.");
+    this.endpoint = endpoint;
+    this.api = api;
+  }
+
+  previewServiceRestart() { this.assertNotRestarting(); return this.restartOperation().preview(); }
+
+  async restartService(confirmationId: string): Promise<WorkbenchBootstrapResult> {
+    this.assertNotRestarting();
+    const operation = this.restartOperation();
+    this.restarting = true;
+    try { return await operation.execute(confirmationId); }
+    finally { this.restarting = false; }
+  }
+
+  private assertNotRestarting(): void {
+    if (this.restarting) throw new Error("A manual service restart is in progress.");
+  }
+
+  private restartOperation(): DesktopServiceRestart {
+    const assertDesktop = () => {
+      const identity = this.identity;
+      if (!identity.confirmed || identity.recoveryRequired || identity.profileId !== "desktop" || identity.role !== "workspace" || !identity.home) {
+        throw new Error("Only the confirmed Desktop host can manually restart the Spaces service.");
+      }
+      if (inflight.has(resolve(identity.home)) || initializeInflight.has(resolve(identity.home))) throw new Error("The current launch has not finished.");
+      const denied = this.deniedInitialize();
+      if (denied) throw new Error(denied.reasons.join("\n"));
+    };
+    assertDesktop();
+    return this.serviceRestart ??= new DesktopServiceRestart({
+      home: this.identity.home!, allowRealHome: this.options.allowRealHome === true,
+      assertDesktop, connect: this.options.connect, fetch: this.options.fetch, timeoutMs: this.options.supervisorTimeoutMs,
+      launch: async (previousEpoch, missing) => {
+        this.connectionGeneration++;
+        this.endpoint = null; this.api = null;
+        for (const listener of this.stoppedListeners) await listener(previousEpoch);
+        const result = await this.connectSupervisor(true, missing);
+        if (result.connected && (this.endpoint as SupervisorEndpoint | null)?.serviceEpoch === previousEpoch) throw new Error("The previous service is still active.");
+        return result;
+      },
     });
   }
 }

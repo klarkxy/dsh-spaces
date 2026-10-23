@@ -1,10 +1,62 @@
 import { lstatSync } from "../../shared/node/filesystem";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
-import { satisfies } from "semver";
+import { gte, satisfies, valid } from "semver";
 import { isBareNpmPackageName } from "../../shared/plugin";
 
 const DSH_PEER = /^@deepseek-ai\/dsh(?:-|$)/;
+// Official dsh-v0.2.1-alpha.4 introduced engines.dsh precedence over peers.
+const DSH_ENGINE_REQUIREMENTS_VERSION = "0.2.1-alpha.4";
+
+/** Evaluate a manifest for a target runtime, which need not be installed yet. */
+export function unmetDshRequirements(manifest: unknown, version: string): Record<string, string> {
+  if (!valid(version)) throw new Error(`Invalid DSH runtime version: ${version}.`);
+  if (!isRecord(manifest)) throw new Error("Plugin manifest must be an object.");
+  const ranges: Record<string, string> = {};
+  let engine: string | undefined;
+  if (gte(version, DSH_ENGINE_REQUIREMENTS_VERSION) && Object.hasOwn(manifest, "engines")) {
+    if (!isRecord(manifest.engines)) throw new Error("Plugin manifest engines must be an object.");
+    if (Object.hasOwn(manifest.engines, "dsh")) {
+      if (typeof manifest.engines.dsh !== "string") throw new Error("Plugin manifest engines.dsh must be a string.");
+      engine = manifest.engines.dsh;
+    }
+  }
+  if (engine === undefined && Object.hasOwn(manifest, "peerDependencies")) {
+    if (!isRecord(manifest.peerDependencies)) throw new Error("Plugin manifest has an invalid DSH peerDependencies declaration.");
+    for (const [name, range] of Object.entries(manifest.peerDependencies)) {
+      if (typeof range !== "string") throw new Error(`Invalid plugin peer range for ${name}.`);
+      if (DSH_PEER.test(name)) ranges[name] = range;
+    }
+  }
+  const unmet: Record<string, string> = {};
+  if (engine !== undefined) {
+    if (!engine.trim() || !satisfies(version, engine, { includePrerelease: true })) unmet["engines.dsh"] = engine;
+  } else {
+    for (const [name, range] of Object.entries(ranges)) {
+      if (unmetDshPeers(version, { [name]: range }).length) unmet[name] = range;
+    }
+  }
+  if (Object.keys(unmet).length) {
+    for (const field of ["name", "version"]) {
+      if (!Object.hasOwn(manifest, field) || typeof manifest[field] !== "string" || !manifest[field].trim()) {
+        throw new Error(`Plugin manifest ${field} must be a non-empty string when DSH requirements are unmet.`);
+      }
+    }
+  }
+  return unmet;
+}
+
+/** Keep each component's constraints separate; later packages cannot hide an earlier mismatch. */
+export function unmetProfileDshRequirements(profileDir: string, version: string): string[] {
+  const modules = join(profileDir, "node_modules", "@dsh-spaces");
+  return ["plugin", "view-bridge", "llm-bridge", "browser"].flatMap(name => {
+    const path = join(modules, name, "package.json");
+    if (!existsSync(path)) return [];
+    const manifest = readPluginManifest(path, `@dsh-spaces/${name}`);
+    return Object.entries(unmetDshRequirements(manifest, version))
+      .map(([dependency, range]) => `@dsh-spaces/${name} (${dependency}@${range})`);
+  });
+}
 
 /** Peer ranges the current component build expects the host CLI release to satisfy. */
 export function dshPeerRangesFromPackages(packageJsonPaths: readonly string[]): Record<string, string> {
@@ -57,7 +109,7 @@ export function unmetDshPeers(version: string, ranges: Record<string, string>): 
 
 
 /**
- * Installed third-party DSH peers that do not accept this runtime.
+ * Installed third-party DSH requirements that do not accept this runtime.
  * A declared dependency counts when its bundle is disabled. An enabled bundle
  * counts without a dependency key. Official @deepseek-ai/* and Spaces
  * @dsh-spaces/* packages are outside this scan. A missing manifest imposes no
@@ -69,8 +121,9 @@ export function unmetInstalledThirdPartyDshPeers(profileDir: string, version: st
   for (const name of installedThirdPartyNames(profileDir)) {
     const manifestPath = containedPackageManifest(profileDir, name);
     if (!existsSync(manifestPath)) continue;
-    for (const item of unmetDshPeers(version, declaredDshPeerRanges(manifestPath, name))) {
-      unmet.push(`${name} (${item})`);
+    const manifest = readPluginManifest(manifestPath, name);
+    for (const [dependency, range] of Object.entries(unmetDshRequirements(manifest, version))) {
+      unmet.push(`${name} (${dependency}@${range})`);
     }
   }
   return unmet;
@@ -129,7 +182,7 @@ function containedPackageManifest(profileDir: string, packageName: string): stri
   return manifestPath;
 }
 
-function declaredDshPeerRanges(manifestPath: string, packageName: string): Record<string, string> {
+function readPluginManifest(manifestPath: string, packageName: string): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -139,10 +192,7 @@ function declaredDshPeerRanges(manifestPath: string, packageName: string): Recor
   if (!isRecord(parsed)) {
     throw new Error(`Installed plugin ${packageName} manifest could not be read, so its DSH peer declaration was not checked.`);
   }
-  if ("peerDependencies" in parsed && parsed.peerDependencies !== undefined && !isRecord(parsed.peerDependencies)) {
-    throw new Error(`Installed plugin ${packageName} has an invalid DSH peerDependencies declaration.`);
-  }
-  return dshPeerRangesFromPackages([manifestPath]);
+  return parsed;
 }
 
 function peerScanError(): Error {

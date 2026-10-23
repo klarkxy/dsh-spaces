@@ -15,6 +15,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { isSupportedNodeVersion } from "../../src/shared/node-version.ts";
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CORE_LIB = join(REPO, "packages", "core", "lib", "index.js");
 const REAL_HOME = join(homedir(), ".dsh");
@@ -65,7 +66,7 @@ function sha256File(path) {
 }
 
 function resolveNode() {
-  if (!/^26\./.test(process.versions.node)) throw new Error("DSH Spaces acceptance requires Node.js 26.x.");
+  if (!isSupportedNodeVersion(process.versions.node)) throw new Error("DSH Spaces acceptance requires Node.js 24.21+ (24.x) or 26.x.");
   info(`node ${process.execPath}`);
   return process.execPath;
 }
@@ -364,7 +365,6 @@ function rpcAvailable(call) {
 export {
   HOST,
   DEFAULT_BIN,
-  FALLBACK_NODE,
   TOOLCHAIN_PNPM,
   REGISTRY,
   DUMP_MS,

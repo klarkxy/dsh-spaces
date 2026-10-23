@@ -1,3 +1,117 @@
+# 2026-10-22 Desktop UI 链接安装与手动服务操作
+
+- [x] 用户明确授权错误页“确认受影响空间后手动重启服务”。已实现认证预览、一次性确认、正常停机完成后单次启动；只对确认的 Desktop 开放，不自动重试、不强杀、不清证据、不重启子空间或续跑任务。同步有限政策例外。
+- [x] 官方安装版 Desktop 先启动空白环境，再通过插件 UI 链接仓库并启用，首次／重开注册均 200。另用旧服务＋新链接插件复现 404；手动预览取消不改变服务，确认后同一个 Desktop 注册 404→200、main 草稿保留、设置可用、运行中测试子空间保持停止。服务正常停止后的手动启动也通过。
+- [x] 完整 15 组首次 14 通过；spaces 旧方法清单断言修正后整组 148 通过／1 跳过。工作台 573／2 跳过、LLM 123、Chromium 15 均通过，类型／构建／包预检通过；原失败保留。隔离实例已正常关闭，官方文件哈希保持，功能验收期间 7 个非测试进程身份保持。未操作真实 Home，未提交推送：[验收报告](manual-service-restart-20261022.md)。
+
+# 2026-10-22 Desktop 启动保留 main
+
+- [x] 用户追加独立官方 Desktop 调试后，四个新隔离 Home 实测并修复首次注册时序：Supervisor 初始化时原注册返回 400，现先只读等待管理器就绪再首次注册；失败不注册、不重试。修复包首次初始化／正常重开均各一次 200，同服务纪元与 manager generation 不变，main／草稿保持。
+- [x] 另用旧包启动隔离 Supervisor，仅升级该测试 Desktop profile 后复现真实 `MAIN_REGISTRATION_REFUSED:404`；新版 main 保持可输入，设置详情保留错误，返回草稿不丢，无重试。未读取真实 Home，不能据此确定用户实际服务版本。
+- [x] 追加专项 9/9；新一轮完整检查 14/15 组通过，默认组一项子进程提前退出单独复查通过；工作台 558 通过／2 跳过，LLM 122/122，Chromium 13/13。全部测试实例正常退出，原有 7 个 Desktop 进程身份和官方文件哈希保持，未提交推送：[实机报告](main-startup-desktop-20261022.md)。
+- [x] 修复后台发现／启动失败无条件打开整页错误面板：默认保留当前 main；只有正在使用或明确打开 Spaces 页面时才立即显示错误。设置入口标明服务不可用，可查看原始详情；错误终态、不重试、不重启及原生 guest 释放保持不变。
+- [x] 回归覆盖 `MAIN_REGISTRATION_REFUSED:404`、连接未结束时打开设置、后台轮询失败、显式页面失败；Chromium 实际验证 main 输入、原 DOM 和草稿保留、查看详情／返回以及失败后不重连。工作台 555 通过／2 跳过，浏览器交互 13/13。
+- [x] Node 26.10.0、官方 rc.2 SDK 与仓库外临时根下运行完整 15 组：14 组通过，默认测试 269 通过／1 项进程 API 启动超时；原测试不改超时单独复查 1/1 通过。三组类型、构建、包预检通过，首次失败保留：[完整记录](../.sandbox/main-startup-checks-20261022/result.json)、[超时复查](../.sandbox/main-startup-checks-20261022/process-manager-timeout-recheck.log)。
+- [x] 首轮仅为源码／构建及隔离 Chromium 验证；后来追加的官方安装版 Desktop 验证见上。两轮均未操作真实 Home 或重启用户服务，用户当前 404 实例的实际服务版本尚未确认。未提交、推送或发布。
+
+# 2026-10-22 全仓审查五项问题修复
+
+- [x] 修复聊天 `01a160ff-8a2d-72f0-bb39-52b394669293` 的 1 项 P1、4 项 P2：ZIP 读取在载荷复制前检查累计大小、目录/本地头范围及重叠引用，解析复用同一验证结果；空间绑定按空间隔离异步结果与编辑状态，应用选择限制为当前可见且 observation 完整的空间；会话授权按准备请求引用计数并释放，已准备/在途 lease 独立持有授权；同步/异步原子 rename 均单次执行，传播首次失败。
+- [x] 回归覆盖恶意 ZIP 零载荷复制、正常分享导入导出、迟到读写、详情页与不完整 observation、300 个顺序授权及并发引用、准备失败释放、释放后 stream/图片有效、三类 Windows 首次 rename 错误。ZIP 独立安全复审未发现可证实绕过或兼容回归。
+- [x] Node 26.10.0、rc.2 SDK、仓库外隔离临时根下，完整 15 项检查通过：[机器结果](../.sandbox/review-fixes-checks-final-20261022/result.json)。规定八组 1,675 通过、0 失败、8 项既有条件跳过，工作台 Chromium 12/12；额外 LLM Chromium 2/2。最后源码的类型复查通过，重新构建后的包预检与 LLM 122/122 通过：[补充结果](../.sandbox/review-fixes-checks-final-20261022/post-edit-result.json)。早期沙箱 EPERM、测试夹具类型及延迟断言失败保留于工具记录和首轮检查目录，不覆盖历史失败。
+- [x] 保留既有未提交工作；未提交、推送、发布、部署或访问真实 Home。本轮是源码、打包与隔离交互验证，不关闭既有 S1/P0/P1、安装版 Desktop 或持续运行门槛。
+
+# 2026-10-21 当前版本收口与主空间 LLM 继承施工
+
+- [x] 2026-10-22 检查收口：三份文件已查明为 S0 既有删除，上一轮审计误读 deleted:true，已保留原文并纠正；worker/包预检改为目录持有 Node 写入内存构建结果，针对性 12/12 与包预检通过。完整检查 15/15 已通过，指定 Astra 最终独立复核 READY（仅本轮检查收口）。[本轮报告](../docs/plans/verification-closeout-results-20261022.md)。SDK 不动，不提交推送。
+
+- [x] 2026-10-22 正式标题／手动与自动压缩接入完成；Astra 首轮 R1 自动失败吞错、R2 过早绑定拒绝已修。最终五组运行 42 项通过（自动 500／开始前失败各 6、正式手动 14、自动成功 5、Magpie 11），MiniMax 最终 8 次请求均 200；LLM 120/120。15 项检查 12 通过，workbench/recovery/包预检仍为临时文件 Access is denied。指定 Astra 最终独立复核 READY（仅本轮固定 SDK 有界阶段）；[本轮报告](../docs/plans/llm-auxiliary-results-20261022.md)。SDK 不动，不提交推送，不关闭 S1/P0/完整 P1/Desktop 门槛。
+
+- [x] 用户追加正式主插件/facade、模型发现与 controls、普通创建真实 Agent/UI 验证授权。本轮已接入：默认/明确模型、reasoning 来源、图像工具、DeepSeek 多轮、运行中新增 provider 与 500 单次失败，最终真实 Supervisor/官方 Web/正式包新 Home 14/14；LLM 117/117、integration 21/21、browser 1/1。Astra 首轮三项 proposal/取消/初始化清理缺口已修并复验，最终独立复核 READY（仅本阶段）。[阶段报告](../docs/plans/llm-formal-plugin-agent-ui-results-20261021.md)；证据 `plugin-main-facade-1/run-2026-10-21T15-32-02-483Z/RESULT.json`。完整检查仍四项失败且保留原日志，SDK 不动，不提交推送，不关闭 S1/P0/完整 P1/Desktop。
+
+- [x] 用户追加正式 Supervisor 注册认证、图像与 DeepSeek 集成授权；已接入实际 Supervisor/所有权与真实子进程 IPC，官方 CLI 主服务加载原 pi-ai/DeepSeek 插件，图像 Files/工具/多轮/JSONL 重开与故障共 31 项通过。[本轮报告](../docs/plans/llm-supervisor-images-deepseek-results-20261021.md)；最终证据 `p0-supervisor-images-deepseek-1/run-2026-10-21T13-26-02-756Z/RESULT.json`。Astra 三轮 REVISE 的取消及异步终结缺口均已修复，最终 Astra 独立复核 READY（仅本轮有界集成）；完整 15 项检查执行但 workbench/recovery/包预检有真实失败，详见报告。官方 SDK 不变，不提交推送，正式 UI/产品启用和 S1/P0/P1 门槛未闭合。
+
+- [x] 用户追加下一阶段集成验证授权后，接通独立主进程＋两个子空间进程的认证 HTTP/NDJSON、真实官方 read 与权限、官方 JSONL 持久化及新进程多轮 replay；最终 26 项具名断言通过，指定 Astra 独立复核 READY（仅隔离集成范围）。首轮复核指出的取消/500 断言漏洞已修正，旧失败、新 Home、错误及落盘重读证据保留；[集成报告](../docs/plans/llm-plugin-integration-results-20261021.md)，最终证据 `p0-plugin-integration-1/run-2026-10-21T12-07-03-516Z/RESULT.json`。SDK 不变，817 个 S0 产品文件一致。
+
+- [x] 用户批准 Astra 插件方向后执行三个阻断原型，完成 39 项具名核心断言与独立 Astra 复核：服务/来源 13、附件 13、公开准备 9、真实官方 CLI 补充 4。官方 SDK 未改，817 个非协调产品文件保持 S0；[结果报告](../docs/plans/llm-plugin-prototype-results-20261021.md)，机器索引 `.sandbox/construction-20261021/p0-plugin-proofs-1/SUMMARY-final.json`。仅有界核心可行性，不是完整 P0/契约/产品验收。
+- [x] 原型修正了 Astra 初始装配推论：bundle patch `name` 为匹配校验，不能改名替换。采用子空间层禁用原服务条目、插入插件子类条目的公开组合；实际官方 Agent/标题执行器/压缩 summarize/计量服务接入。旧失败全部保留。
+- [x] 补充真实负例：聊天默认 A→B 不重定向已选 A 的标题/压缩；主 policy 允许两次重试时，active 官方 retry 下真实子 Agent 500 仍单次；失去/撤销委派上下文时零主 store 读取。旧 proof3 retry 声明撤回，正确证据归最终 proof1。
+- [ ] 前轮交付三个原型后，用户已授权并实际继续上述集成验证。正式 Supervisor 注册认证和图像/DeepSeek 网络链路已有上列源码与隔离证据；facade/UI controls 和正式标题/压缩进展见上列追加阶段，Files 失败政策、完整配额/流控及安装版 Desktop 仍待。S1/P0 不闭合，完整 P1 未放行，不提交推送。
+
+- [x] Codex 接手只读核对 MiniMax 原生会话 `mvs_574730b0a4ae4c0687716738c79ce75c`、原始失败与 S0 摘要；817 个非协调文档产品文件与 S0 一致。当前 root 的 llm/pi-ai/attachment rc.2 源文件与既有隔离 SDK 相同，非新拉包认证。见 `.sandbox/construction-20261021/codex-takeover-2/SOURCE-AUDIT.json`。
+- [x] 用户纠正执行边界：我们只是插件，不修改官方 SDK。撤销将上游接口实现列为下一步；旧 v0.2/Astra READY 保留为历史文档结论，不是当前施工批准。技术计划与提案已同步；不改 SDK、node_modules、官方安装包或凭据。
+- [x] 插件公开 middleware 位置局部验证：真实 rc.2 `LlmRuntime` 的 prepared stream 在 `llm/stream` 中仍携带 file block 和原始 replay source，短路时未进入默认 adapter；`next()` 对照会投影文件并过滤异源 replay，原冻结请求不变。新目录 `codex-takeover-2/RESULT.json`，零供应商调用；第一次清理 API 错误保留于 `codex-takeover-1/FAILURE.json`。仅边界测试，不宣称真实 Agent、图像、G2/G3/G4 已过。
+- [x] 官方 Agent 冻结前入口实证：使用既有隔离 rc.2 SDK 的官方 Agent loop、会话服务和测试 adapter，`agent/request` 异步返回的 reasoning/maxTokens 写入真实请求头，并用于唯一一次冻结派发。证据 `.sandbox/construction-20261021/codex-agent-request-1/RESULT.json`；内存会话、零供应商调用，不是主空间远端交接、真实 provider 多轮、图像或完整 G4 通过。
+- [ ] 插件方案重新准入：用官方 `agent/request` 冻结前入口验证 controls/defaults 的交接与真实 Agent 关联；保留投影前文件授权和 replay 来源检查；验证公开服务组合的图像隔离，不猜关联、不运行中替换全局服务。不再等待或调用候选 SDK 方法。C01–C18 需重新映射实现位置，尚不冻结契约或放行 P1。
+
+- [ ] 18:36 用户选择在普通终端执行单次检查脚本，结果目录待提供，S1 仍未闭合；不为等待结果创建提醒或重复运行。
+- [x] 用户授权仅在本仓库形成最小官方接口设计，不改上游。[接口修订提案 v0.2](../docs/plans/llm-official-seam-proposal.md) 已完成并经指定 Astra 复审 READY（仅文档）：两阶段官方准备句柄、冻结前 controls provenance、请求级图像访问、子空间文件权威投影/manifest、虚拟 adapter replay 保真门及 C01–C18 验收要求。首轮 REVISE 的三项信息流缺口已修；SDK 可行性与 P0 未因此通过，候选接口未实现、capability 契约未冻结。
+
+- [x] 用户授权按 [施工方案](../docs/plans/construction-20261021.md) 实施；无提交、推送或发布授权。S0 基线 `26aab5d`，120 个 tracked 改动、84 个未跟踪文件；源摘要和所有权表：`.sandbox/construction-20261021/s0-1/baseline.json`，已有改动保留。
+- [ ] S0/S1a 环境与机器检查：Node 26.10.0、Chromium 已存在；SDK 为匹配锁定依赖的 `.sandbox/dsh-rc2-upgrade-20261018/sdk`。授权临时根 `H:/Code/dsh-spaces-checktmp` 中 Node 写入成功，当前会话和 Bridge 原生 esbuild 写入均被拒；原始单次探针保留。真实剩余三组已于 18:06 完成：workbench 546 pass/7 fail/2 skip，recovery 26 pass/5 fail，包预检 exit 1；失败均为外部临时 worker/validator 的 Access is denied，见 `s1a-checks-1/remaining-once/result.json` 和全日志。未修改 ACL、未提权、未换临时根，不将检查失败记成通过。
+- [ ] S1b 官方 Desktop 四项验收：未启动本轮实机。指定 Astra 首次驱动复审 REVISE 后，已修订异常句柄、unknown owner、npm 包身份和启动次数判据；颜色改为 pending-visual-review，不自动判通过。父代理在授权外部临时根执行语法及静态检查均 exit 0，见 `s1b-desktop-1/REVIEW-FIX.md`；查询失败、fatal crash、视觉结论与正式包仍待。修订后未宣称独立验收 READY，不继承旧包结果。
+- [x] 修订方案独立复审 READY（仅计划层）：保留用户原宿主作为主空间；官方 Web 专用非 web 验收 profile 与 Desktop desktop profile 均须预先隔离数据并检查 protected trees，不复制用户配置、不把管理器当主空间、不用夹具替代实际宿主。
+- [ ] S1a 汇总：清单、三组类型、构建和七个独立测试脚本本轮通过，条件跳过逐项保留；三组真实失败见上，不再记为未执行。完整 runner 未一次性运行，不声明全量通过。原 `result.json`/`result-tests.json` 是各批当时状态，后续实际结果以 `result-remaining.json` 与 `remaining-once/result.json` 补充；不覆盖历史。主代理仅改三份 Markdown，产品源摘要保持 S0。Bridge files_changed 收集因失效旧 worktree 路径不可用，必须独立核对磁盘，未修复旧 worktree。
+- [ ] 条件 P0 放行：S1a 剩余外部原生写权限阻塞已有实证，类型/构建通过，当前未发现该失败关联产品缺陷；允许在 `.sandbox/construction-20261021/p0-*` 进行不依赖该编译步骤的公开 API/受控 provider 原型。S1b 仍待真实 Desktop，S1 不闭合，P0 官方 host/UI 证据未通过也不闭合；P1 重新准入要求 S1a 全量和 S1b 四项全部通过、S2 摘要冻结、P0 四道门与契约冻结全部完成。
+
+- [ ] P0 G2/G3 集成：Grok 原型返回 adapter harness G2 PASS/G3 BLOCKED；指定 Astra 复核为 FAIL（仅门槛声明），不接受生产门槛 PASS。G2 使用自行构造的 adapter/profiles Map，不是已运行主空间公开 generation；G3 现有官方图像 resolver 捕获插件 ctx 且无请求级读取参数，但原碰撞夹具不足以证明所有 scoped 附件方案不可行，文件 handle 投影另属未验证。原始 `p0-llm-1/RESULT.json` 保留，`CONTRACT.md` 只作历史提案，不冻结共享类型、不进入 P1；后续仅研究现有公开插件接法，不修改 SDK。
+- [ ] P0 G1 Web 本轮 failed 且验收环境不合规：实际非 web 官方宿主、Spaces 链接插件、公开 LLM/默认模型/profile 服务存在；observer 的 loaderEntry 匹配为空后中止，鉴权/unary/dispose/原驱动退出后 protected-tree 检查未执行。记录于 `p0-host-1/RESULT.json`。父代理复核发现 `host.mjs:125-127` 将 TMP/TEMP/TMPDIR 设为仓库内 CACHE/tmp，违反外部临时根要求，本轮不作为合规 G1 通过证据。记录 PID 2476 已退出；父代理事后只读确认三个受保护目录仍不存在，另记补充审计不覆盖原结果。不重启失败环境；G1/G4 未闭合。
+
+# 2026-10-20 前端动效重构与 Desktop 打开即启动
+
+- [x] 四个界面（Workbench、宿主 Spaces 面板/外壳、Dashboard、Browser）引入 motion 14.4.0，共享 `src/shared/ui/` token 与动效原语；大文件拆分为 `workbench/view/`、`workbench/blueprint/`、`client/ui/`、`dashboard/src/ui/`、`browser/src/ui/`，导出、类名、aria 与文案保留。失败与提示内容不进入不透明入场动画；iframe 与原生视图占位不变换、不重挂。独立验收复核 READY。
+- [x] 宿主栏主空间下加分割线；原生外壳失败后再点栏按钮重新显示已记录的失败（不重连）。
+- [x] Desktop 打开时只读发现没有存活 Supervisor，本次打开发起一次受保护的启动；会话中失败不再启动，启动失败如实报告不重试。
+- [x] `toolchain.json` 被宿主升级取代的绑定判为 stale（非维护证据），沿用其目录继续检查维护证据；损坏/不完整记录仍阻止退休。政策补入 `docs/let-it-crash.md`。
+- [x] 设置页重整计划 [settings-ux-redesign](../docs/plans/settings-ux-redesign.md) 第 0 阶段：修复动效重写丢失的「保存服务设置」提交（加 DOM 回归断言并验证可抓住）；Desktop 设置整页铺满；确认弹窗显示空间显示名。第 1–3 阶段（D1–D4 按建议获批）：导航四组+折叠维护区；空间详情页替代诊断对话框；停止/重启非破坏性预览免确认；创建后自动进入；Desktop 侧栏「＋」经门户受控 intent 消息打开创建对话框；统一「空间模板」页（拖放导入、保守识别）；插件只在详情页，`plugin.versions` 只读接口 + 版本下拉（默认 npm latest 标签，否则最新稳定版）；术语统一、空状态 CTA、错误就近显示且来源界面不在屏幕时回落横幅。独立验收两轮 READY；全量检查除 3 组沙箱 esbuild 限制外通过。
+- [x] 看板能力封存（2026-10-21，用户指示「先封存，等以后再唤醒」）：新增 `workbench/dashboard-sealed.ts` 的 `HOME_DASHBOARD_SEALED` 开关；Desktop 侧栏 ▦ 看板按钮隐藏（⚙ 设置保留），首页面只留聊天视图（落到首页即直进聊天），看板/发布授权视图与其数据会话不再开启。`@dashboard` 门户目标、仪表盘后端、发布 schema 与全部 dashboard 测试原样保留。唤醒＝把开关改回 false，回检 native-desktop 的 @dashboard 链路并重拍侧栏截图（settings-wa）。
+- [ ] `test:workbench`、`test:workbench:recovery`、`check:plugin-package` 在会话沙箱中因 esbuild 原生子进程无法写仓库外临时目录而未验证；需在普通终端运行 `check:all`（2026-10-21 收尾轮在沙箱内复跑确认：除这三组已知失败外全绿，失败名单与上轮逐项一致）。真实 Desktop 尚待用户实测：打开即启动、侧栏「＋」、插件版本下拉，以及深色主题下侧栏配色——侧栏的 `--dsw-alias-*` / `--dsw-specific-*` 令牌由宿主应用提供、仓库夹具里只能回落浅色，真机深色表现要在实测中确认。
+- [x] 设置页重整收尾（2026-10-21）：P6 闭合——空间列表行移除启停/重启/删除，只留进入/排序/管理，生命周期操作的权威位置为空间详情页，右键菜单为快捷方式；死代码 `SpaceActions` 删除。修复收尾测试暴露的缺陷：`runPreview` 直写 `commandPending` 不占用 `wrapDepth`，预览在途时一次并发的 wrap() 读取完成会把忙碌标志提前清除（详情页按钮在命令进行中提前解禁）；`runPreview` 现与 `wrap()` 共用同一计数，由更新后的禁用态用例覆盖。界面证据截图按最终用词与主题全部重拍（settings-wa/wp/w3c）：service 浅色截图不再是深色字节副本；Desktop 侧栏截图改用 `prefers-color-scheme` 机制（宿主外壳不听 `data-theme`）并修正浅色页底。`TemplatesShareTab` 死代码确认已清（全仓零引用）。`check:all` 复跑：除沙箱受限三组外全过（test 268/268、spaces 148、llm 100、blueprints 94+239、browser 13、dashboard 52+152、workbench:browser 12、workbench 546/555、recovery 26/31）。
+
+# 2026-10-20 Node 24 与官方 Desktop Browser
+
+- [x] 支持 Node 24.21+（24.x）和 26.x，统一运行时守卫、包 engines、工具链发现、类型基线和 CI 矩阵；不替换官方 Desktop 内置 Node。
+- [x] 官方 Windows Desktop 0.2.1-rc.2 / Electron 44.7 / Node 24.21 安装版实际隔离 Home 验证：初始化、普通空间创建/进入/启动/重启、正常关闭重开、服务停机；代次 1→3，同一 Supervisor，无任务重放。
+- [x] 用户追加授权的 Browser Space 官方原生适配：官方 lease、最外层 sandbox guest、认证 manager 展示通道、地址/标题同步、A/B/A 保留、隐藏释放、新分区和失败不重试。最终包在另一新 Home 实测，包括拒绝 iframe 的页面及实际 -312 导航失败。
+- [x] 两版本八组汇总各 1600 通过 / 8 条件跳过，额外界面测试各 12/12；最后失败标签显示修正后，native 专项各 19/19、类型/构建/包预检及最终包实机通过。失败轮原样保留，详见 [完整记录](node24-desktop-20261020.md)。
+- [x] 最终插件安装包已生成；实际安装内容核对、源文件冻结、既有脏文件与官方 EXE/ASAR 保留、正常停机无遗留进程/端口均有证据。不访问真实 Home，不提交、推送或发布。
+
+# 2026-10-20 根目录本地链接调试
+
+- [x] 修复两处导航问题：侧栏/portal 不再用缓存状态误拒绝已运行空间，manager 区分用户选择与加载 token，并沿用同目标在途认证。102 项相关回归及 11 项浏览器回归通过。
+- [x] 新 Home 根目录软链接完整实测通过：初始化、创建、首次启动后立即双击、重启后缓存仍为 starting 时立即双击、重建宿主重开与正常停机；generation 1→3，manager/Supervisor 稳定，独立检查无遗留进程/监听。证据 `.sandbox/link-navigation-fix-20261020/run-1/`。
+- [x] Windows async rename `EPERM` 根因已通过管理员文件跟踪确认：仓库内 TMP 的 staging 后代被 Codex 并发打开，Windows 拒绝整目录改名。新增 `check:all` 隔离并验证仓库外临时目录，未改运行时单次发布或加重试；普通用户仓库外 32/32 对照通过。授权管理员完整轮 15 项检查全部通过，规定八组 1,601 通过 / 0 失败 / 0 跳过，额外浏览器 11/11、包预检通过。原失败与受限沙箱原生构建写入失败均保留；详见 [根因与验收](runtime-eperm-20261020.md)。
+- [x] 追加完整软链接 UI 验收：初始化、创建、启动、重启后页面显示，以及关闭宿主→重建→重开均通过；PID/generation 1→3、manager/Supervisor 稳定、注册和链接保留、正常停机与无遗留端口均有证据。最终轮为 `.sandbox/root-link-lifecycle-20261020/run-7/`，本轮无模型调用或产品源码修改。
+- [x] 前轮两处导航失败已在上方追加修复及复验，原失败现场保留。正常重启仍有卸载旧页的空白间隙，不声明无缝切换或所有导航路径稳定。
+- [x] 用户确认仓库根目录直接安装；私有根包暴露现有 `@dsh-spaces/plugin` 构建产物和 bundle，保留独立发行包及六组件契约。
+- [x] `dev:web` / `dev:link` 使用独立 `spaces-dev` profile 和持久调试 Home，复用目录链接，不打包、重装或清空调试数据；Windows 默认 CLI 发现通过。
+- [x] 官方 0.2.1-rc.2 实跑根目录 `add .`、链接配置层、浏览器工作台入口，以及重复构建的数据/配置/链接保留。清单、三组类型、构建、八组测试（1,587 通过、7 项条件跳过）及包预检通过。
+- [x] 保留原有未提交工作；不提交、推送、发布，不访问真实 Home 或写入 `profiles/web`。本轮没有执行完整初始化或安装版 Desktop 验收。
+
+详见[实现与验收记录](local-link-debug-20261020.md)。
+
+# 2026-10-18 DSH 0.2.1-rc.2 升级
+
+- [x] SDK、锁文件、新安装默认 CLI、配套 Cordis/loader/Schemastery、CI 和有效说明对齐官方 rc.2；Spaces 保持 0.4.0，最低支持版本和已有空间 pin 不变。
+- [x] 适配新旧宿主兼容性结果、按目标版本处理 engines.dsh 优先级、逐包检查与切换前复查；统一 LLM 版本常量和响应校验，补齐真实传输回归。
+- [x] Node 26.10.0 下清单、三组类型、构建通过；八组规定测试最终 1,585 通过、7 项平台权限跳过；额外 Chromium 11/11、旧宿主兼容回归 44/44。独立 Astra 审查 READY。
+- [x] 最终插件包在全新官方 rc.2 Home 完成安装、UI 初始化、创建/进入/重启空间、重开、停机与卸载；没有模型调用、强制清理或遗留端口。
+- [ ] 保留早期 Windows 临时文件与并行启动偶发失败证据，后者根因未判定；不关闭历史持续 UI 调查，也不将官方 Web 验收写成安装版 Desktop 验收。
+
+详见 [升级与验收记录](dsh-rc2-upgrade-20261018.md)。原有未提交工作保留，未提交、推送、发布或访问真实 Home。
+
+# 2026-10-15 迁移债务审查施工（Grok 原生子智能体）
+
+用户授权按审查结果施工，不提交、推送或发布。基线 `26aab5d`，四个 Grok 4.7 子智能体按文件边界并行实现，主代理负责集成和验证。
+
+- [x] 公开错误码共享契约及脱敏原因透传，保留未知错误与原型键保护；七个现行公开码不再被客户端丢弃。
+- [x] 工作台状态读取首次失败终止并保留可见原因，过期 writable 快照不再允许变更；历史成功作业不重放创建通知，本次提交及已观察活动作业完成仍提示；移除无消费者前端入口。
+- [x] A8 接入生产精确行校验并用隔离官方 CLI 实跑通过；标准安装门改用注册制 space-coding 并增加注册/隔离/重启断言，图标浏览器测试接入 CI；声明目录清理拒绝重定向并移除七个旧产物。标准安装完整流程本轮未跑，静态预检通过；修复共享验收模块导出已删除 FALLBACK_NODE 导致的加载失败。
+- [x] 运行时发布单次 rename 失败留真，回归证明不重试；旧恢复命令在磁盘边界拒绝且计划字节不变，移除内部死分支、孤儿 crash 夹具及误导测试标题。
+- [x] Node 26.10.0 下清单、三组类型、构建、八组规定测试全部通过（1,576 通过、7 个平台权限跳过）；额外浏览器 11/11、包与标准安装预检通过。独立受控 Chromium 验证终态读取、错误可见且脱敏、历史通知不重放；日志/机器结果在 `.sandbox/migration-fixes-grok-20261015/`。真实官方宿主持续 UI 与旧生产 Home 迁移不由这些检查替代。
+
+本次施工不关闭下方 `read.deadline` 持续 UI 根因项，不触碰真实 Home 和历史失败证据。
+
 # 2026-10-15 全新 Home 持续 UI 验收（Playwright 干净上下文）
 
 在 Devin 中延续 10-14 的未关闭项。全新隔离 Home、Node 26.10.0、未修改的官方 rc.2 SDK、上一轮包 `a313325d…`（源码冻结校验未变）、Playwright Chromium 全新上下文（无累积 Cookie），每步截图 + ARIA + Supervisor 状态快照，`requestfailed` 经 CDP 逐条特征化。验收驱动与证据在 `.sandbox/ui-accept-devin-20261015/`（`REPORT.md`、`RESULT.json`、`host-playwright-7/`）。
@@ -82,7 +196,7 @@
 - [x] P1c：删除自我更新与组件交接：`workbench.upgrade`、`workbench.prepare`、`component-handoff`、一次性 launcher、`--accept-handoff`、管理界面更新面板与对应 RPC。旧式更新遗留证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻断写入；旧客户端的 `workbench.upgrade` 返回 `workbench/unsupported`（`4f0a551`）。
 - [x] P2 按空间固定版本：每个空间固定精确的 DSH 运行时版本，官方基础插件（dsh-base / dsh-web-app）内置于运行时并随之变化，Spaces 不向 profile 安装；第三方插件安装与升级只接受精确版本。升级在空间设置中由用户发起，版本来源为插件库与 npm。已有空间首次启动时固定为当前实际使用的版本；新空间默认宿主的 DSH 版本。切换前不自动建快照，禁止降级。管理空间（spaces-hub）跟随宿主 CLI。Spaces 声明支持的 DSH 最低版本，桥接必须兼容整个范围；低于最低版本的空间启动失败并提示到空间设置升级。删除全局 runtime.install / runtime.upgrade 与协调升级。提供用户触发的删除未使用运行时（`f1e8a90`、`74ea256`、`cddabe9`、`86d51bf`）。
 - [x] `validate:plugin` / `validate:distribution` 仍假定普通 profile 提供 `spaces/*`（专用 manager 之前的设计），已过时：已删除两个校验入口与 `scripts/verify-spaces-plugin.mjs`、`scripts/verify-spaces-distribution.mjs`；共享 harness 移至 `scripts/lib/distribution-harness.mjs`（本条目即该提交记录）。
-- [ ] `packages/*/README.md` 中残留 `0.1.7-alpha.1` 等旧版本说明，待统一。
+- [x] 2026-10-18 升级时统一 `packages/*/README.md` 中的当前 SDK、默认 CLI 和兼容下限说明；历史验收版本保持原文。
 
 # 2026-10-12 清理与结构拆分
 

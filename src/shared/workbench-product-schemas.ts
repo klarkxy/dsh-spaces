@@ -12,6 +12,7 @@ import { isExactRuntimeVersion } from "./runtime";
 import { SPACE_NAME_RE } from "./types";
 import { WORKBENCH_BLUEPRINT_RESPONSE_BODY_LIMIT } from "./workbench-blueprint";
 import {
+  MAX_WORKBENCH_PLUGIN_VERSIONS,
   MAX_WORKBENCH_SHARE_BASE64,
   type WorkbenchProductCommand,
   type WorkbenchProductOutcome,
@@ -58,6 +59,23 @@ const catalogIdSchema = z
   .min(1)
   .max(214)
   .regex(CATALOG_ID_RE)
+  .refine(
+    (value) =>
+      !value.includes("..") &&
+      !/^(file|git|git\+|https?|ssh):/i.test(value) &&
+      !/[\s;|&$`<>(){}]/.test(value) &&
+      !containsLocalPath(value),
+    "catalog id",
+  );
+/**
+ * A catalog entry is addressed by its catalog id (`owner/repo`) or by its npm
+ * package name. The Supervisor resolves both against the local catalog only.
+ */
+const pluginCatalogIdSchema = z
+  .string()
+  .min(1)
+  .max(214)
+  .regex(/^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$|^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/)
   .refine(
     (value) =>
       !value.includes("..") &&
@@ -669,6 +687,7 @@ export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> =
   z.object({ method: z.literal("settings") }).strict(),
   z.object({ method: z.literal("catalog"), query: z.string().max(200).optional() }).strict(),
   z.object({ method: z.literal("library") }).strict(),
+  z.object({ method: z.literal("plugin.versions"), catalogId: pluginCatalogIdSchema }).strict(),
   z.object({ method: z.literal("diagnostics"), spaceId: spaceIdSchema }).strict(),
   z.object({ method: z.literal("logs") }).strict(),
   z
@@ -763,6 +782,15 @@ export const workbenchProductResultSchema: z.ZodType<WorkbenchProductResult> = z
     .strict(),
   z.object({ method: z.literal("catalog"), catalog: catalogSnapshotSchema, observation: productObservationSchema }).strict(),
   z.object({ method: z.literal("library"), items: z.array(libraryItemSchema).max(256), observation: productObservationSchema }).strict(),
+  z
+    .object({
+      method: z.literal("plugin.versions"),
+      versions: z.array(exactVersionSchema).max(MAX_WORKBENCH_PLUGIN_VERSIONS),
+      latest: z.union([exactVersionSchema, z.null()]),
+      packageName: packageNameSchema,
+      observation: productObservationSchema,
+    })
+    .strict(),
   z.object({ method: z.literal("diagnostics"), diagnostics: diagnosticsSchema, observation: productObservationSchema }).strict(),
   z
     .object({

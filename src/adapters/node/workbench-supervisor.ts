@@ -21,13 +21,15 @@ import { pluginAdd } from "./plugin-ops";
 import { lt as semverLt } from "semver";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
 import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
+import { FileLlmPolicyStore, llmPolicyPath } from "./llm-policy-store";
+import { parsePolicy } from "../../core/domain/llm-connections";
 import { ProfileRegistry } from "./profile-registry";
 import { compareScannedProfiles, defaultSpaceMeta } from "../../core/domain/registry";
 import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
 import { RuntimeStore } from "./runtime-store";
 import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile-settings";
 import { installedComponentMatches, migrateProfileToAlpha } from "./profile-alpha-migration";
-import { alignmentArchiveId, cliLoadError, dshPeerRangesFromProfile, unmetDshPeers } from "./component-cli";
+import { alignmentArchiveId, cliLoadError, unmetProfileDshRequirements } from "./component-cli";
 import { SnapshotExecutor } from "./snapshot-executor";
 import { setPackageSource, setToolchainRoot } from "./toolchain";
 import type { ProfileStatus } from "../../shared/types";
@@ -128,6 +130,7 @@ import {
 import { SupervisorInstanceRecords } from "./supervisor/instance-records";
 import { SupervisorLifecycle } from "./supervisor/lifecycle";
 import { SupervisorLlm } from "./supervisor/llm";
+import { SupervisorLlmDelegation } from "./llm-delegation/supervisor";
 import {
   bindSelectedCli,
   defaultSnapshotWorkerFile,
@@ -230,6 +233,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   readonly llmHost: GlobalLlmHost;
   private readonly instances: SupervisorInstanceRecords;
   private readonly llmOps: SupervisorLlm;
+  private readonly llmDelegation: SupervisorLlmDelegation;
   private readonly dashboardHost: SupervisorDashboardHost;
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
     assertSupportedNode();
@@ -336,6 +340,45 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       assertWritable: () => this.llmOps.assertLlmWritable(),
       submitApply: (command, requestId) => this.llmOps.submitLlmApply(command, requestId),
     });
+    this.llmDelegation = new SupervisorLlmDelegation({
+      home: this.home, origin: () => this.origin, epoch: () => this.requireServiceEpoch(),
+      hostBearerEquals: value => this.hostBearerEquals(value),
+      assertOwner: () => {
+        this.lifecycle.assertWritable();
+        const current = this.controller.inspect(), expected = this.lifecycle.handle?.owner;
+        if (!expected || !current.held || !("owner" in current) || current.handoff || current.liveness !== "alive" ||
+            current.owner.nonce !== expected.nonce || current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt || this.lifecycle.closed || this.lifecycle.blocked) {
+          throw new WorkbenchPublicError("workbench/read-only");
+        }
+      },
+      assertSource: (id, generation, child) => {
+        if (id === this.managerId || this.runs.unmanaged.has(id) || this.runs.generation(id) !== generation ||
+            this.runs.spawned.get(id)?.pid !== child.pid || !child.connected || child.exitCode !== null || child.signalCode !== null) {
+          throw new WorkbenchPublicError("workbench/unmanaged");
+        }
+        this.requireManaged(id);
+      },
+      assertMainProfile: profile => {
+        if (profile === this.managerId || this.runs.spawned.has(profile)) {
+          throw new WorkbenchPublicError("workbench/protected");
+        }
+        const directory = join(this.home, "profiles", profile);
+        assertOwnedProfilePath(this.home, join(directory, "package.json"));
+        const stat = lstatSync(directory), manifest = lstatSync(join(directory, "package.json"));
+        if (!stat.isDirectory() || stat.isSymbolicLink() || !manifest.isFile() || manifest.isSymbolicLink()) {
+          throw new WorkbenchPublicError("workbench/unavailable");
+        }
+      },
+      assertAllowedSpace: id => { this.protectSpecial(this.requireManaged(id), { allowManager: false }); },
+      inheritsMain: id => existsSync(llmPolicyPath(this.home,id)) && parsePolicy(JSON.parse(readFileSync(llmPolicyPath(this.home,id),'utf8'))).inheritMain===true,
+      reportCleanupFailure: reason => {
+        this.lifecycle.addReason(reason);
+        const current = this.controller.inspect(), expected = this.lifecycle.handle?.owner;
+        if (expected && current.held && "owner" in current && !current.handoff && current.liveness === "alive" && current.owner.nonce === expected.nonce) {
+          this.workbenchLog().append({ level: "error", area: "llm-delegation", event: "cancel.unconfirmed", message: reason, code: "LLM_CANCEL_UNCONFIRMED" });
+        } else console.error(reason);
+      },
+    });
   }
 
   cookieName(): string {
@@ -376,6 +419,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   async handleDashboardRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     if (!req.url?.startsWith("/api/dashboard/") && !req.url?.startsWith("/internal/dashboard/")) return false;
     return this.dashboardHost.handle(req, res);
+  }
+  handleLlmDelegationRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    return this.llmDelegation.handle(req, res);
   }
 
   bootstrapUrl(): string {
@@ -431,6 +477,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.lifecycle.closed) return;
     this.lifecycle.sealing = true;
     try {
+      await this.llmDelegation.close();
       if (this.jobs) await this.jobs.whenIdle();
       await this.stopOwnedAll();
       this.messageBus.close();
@@ -837,7 +884,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       const recorded = inspectHomeToolchain(this.home);
       if (recorded.kind === "invalid") throw new Error(recorded.reason);
-      if (recorded.kind === "verified") {
+      // A stale record (host update replaced the bound binary) keeps its
+      // directories; the CLI below binds the current host and rewrites it.
+      if (recorded.kind === "verified" || recorded.kind === "stale") {
         this.options.controlToolRoot = recorded.toolchainRoot ?? this.options.controlToolRoot;
         this.options.runtimeRoot = recorded.runtimeRoot ?? this.options.runtimeRoot;
         this.options.snapshotRoot = recorded.snapshotRoot ?? this.options.snapshotRoot;
@@ -1079,6 +1128,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           }),
           ...writeSpaceLlmLaunchSnapshot(this.home, profile),
         };
+        if(!existsSync(llmPolicyPath(this.home,profile))||!parsePolicy(JSON.parse(readFileSync(llmPolicyPath(this.home,profile),'utf8'))).inheritMain)delete env.DSH_SPACES_LLM_INHERIT_MAIN;
         delete env[DASHBOARD_LAUNCH_ENV]; // never inherit another Host's private handoff
         Object.assign(env, this.dashboard?.environment(profile, this.runs.generation(profile)));
         const dashboardGeneration = this.runs.generation(profile);
@@ -1095,6 +1145,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           this.llmOps.attachChild(profile, child, this.runs.generation(profile), this.currentServiceEpoch());
           if (profile !== this.managerId) this.messageBus.attach(profile, child);
           this.runs.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
+          if (profile !== this.managerId) this.llmDelegation.attachChild(profile, child, this.runs.generation(profile));
           try { this.instances.writeInstanceRecord(profile, port, this.runs.generation(profile)); }
           catch {
             this.lifecycle.maintenanceBlocked = true;
@@ -1103,6 +1154,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           child.once("exit", () => {
             const recorded = this.runs.spawned.get(profile);
             if (recorded?.pid === child.pid) {
+              void this.llmDelegation.retire(profile).catch(() => {}); // broker has already recorded the cleanup failure
               this.dashboardHost.retireDashboardRun(profile, dashboardGeneration);
               this.runs.spawned.delete(profile);
               this.instances.removeInstanceRecord(profile);
@@ -1374,7 +1426,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     switch (command.kind) {
       case "space.create":
-        return this.createSpace(command.input, ctx);
+        return this.createSpace({...command.input,...command.input.modelSource===undefined&&command.input.useSharedLlm===undefined&&!command.input.browser?{modelSource:'main' as const}:{}}, ctx);
       case "space.update":
         return this.updateSpace(command, ctx);
       case "space.reorder":
@@ -1392,7 +1444,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async createSpace(
-    input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; browser?: boolean },
+    input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean },
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchJob["result"]> {
     ctx.phase("create");
@@ -1421,15 +1473,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     });
     // Spaces inherit shared connections by default; only an explicit choice is persisted.
     // Blueprint/template callers omit the flag so their own policy write keeps revision 0.
-    if (input.useSharedLlm !== undefined) {
+    if (!input.browser && input.modelSource==='main') {
+      await new FileLlmPolicyStore(this.home).write(spaceId,{schemaVersion:2,revision:1,shared:{mode:'none'},inheritMain:true},0);
+      await this.llmOps.ensureLlmBridge(spaceId);
+    } else if (input.useSharedLlm !== undefined || input.modelSource!==undefined) {
       ctx.phase("llm-policy");
       await this.llmHost.dispatch({
         method: "updateSpacePolicy",
         spaceId,
-        shared: input.useSharedLlm ? { mode: "all" } : { mode: "none" },
+        shared: input.modelSource==='shared'||input.useSharedLlm ? { mode: "all" } : { mode: "none" },
         expectedRevision: 0,
       });
-      if (input.useSharedLlm) await this.llmOps.ensureLlmBridge(spaceId);
+      if (input.modelSource==='shared'||input.useSharedLlm) await this.llmOps.ensureLlmBridge(spaceId);
     }
     return { spaceId };
   }
@@ -1574,7 +1629,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         },
       }));
     } else {
-      const cliBlock = unmetDshPeers(spaceRuntime.version, dshPeerRangesFromProfile(join(this.home, "profiles", spaceId)));
+      const cliBlock = unmetProfileDshRequirements(join(this.home, "profiles", spaceId), spaceRuntime.version);
       if (cliBlock.length) {
         throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(spaceRuntime.version, cliBlock));
       }
@@ -1592,6 +1647,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private async stopOwned(spaceId: string): Promise<void> {
     if (!this.processes) return;
     if (this.runs.unmanaged.has(spaceId)) return;
+    await this.llmDelegation.retire(spaceId);
     const dashboardError = this.dashboardHost.retireDashboardRun(spaceId);
     await this.processes.stop(spaceId);
     this.runs.nextGeneration(spaceId);

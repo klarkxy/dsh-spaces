@@ -70,6 +70,7 @@ const PLUGIN_REQUIRED = [
   "lib/llm-bridge/LICENSE",
   "lib/llm-bridge/cordis.patch.yml",
   "lib/llm-bridge/lib/index.js",
+  "lib/llm-bridge/lib/auxiliary.js",
 ];
 
 const VIEW_REQUIRED = [
@@ -88,6 +89,7 @@ const LLM_REQUIRED = [
   "LICENSE",
   "cordis.patch.yml",
   "lib/index.js",
+  "lib/auxiliary.js",
 ];
 
 const BROWSER_REQUIRED = [
@@ -472,8 +474,11 @@ async function validateBuiltPayload() {
   const scratch = mkdtempSync(join(tmpdir(), "dsh-spaces-pack-validate-"));
   try {
     const outfile = join(scratch, "validator.mjs");
-    await build({ absWorkingDir: REPO, entryPoints: ["src/adapters/node/component-payload.ts"],
-      outfile, bundle: true, platform: "node", format: "esm", logLevel: "silent" });
+    const bundle = await build({ absWorkingDir: REPO, entryPoints: ["src/adapters/node/component-payload.ts"],
+      outfile, write: false, bundle: true, platform: "node", format: "esm", logLevel: "silent" });
+    // The scratch owner writes the result; esbuild's native service only compiles it.
+    if (bundle.outputFiles.length !== 1) throw new Error("Expected one payload validator module");
+    writeFileSync(outfile, bundle.outputFiles[0].contents, { flag: "wx" });
     const validator = await import(pathToFileURL(outfile).href);
     return validator.validateComponentPayload(join(PLUGIN_DIR, "lib"));
   } finally {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {parsePolicy} from '../src/core/domain/llm-connections.ts';
 import { test } from "node:test";
 import {
   LLM_ERROR,
@@ -166,4 +167,9 @@ test("mode selected still binds a disabled connection by id", () => {
   assert.equal(policyBindsConnection(policy, stopped.id), true);
   assert.deepEqual(selectSharedConnections(catalog, policy), []);
   assert.deepEqual(boundConnectionIds(catalog, policy), [stopped.id]);
+});
+test('main inheritance is explicit v2 policy and legacy policies keep their meaning',()=>{
+  assert.deepEqual(parsePolicy({schemaVersion:2,revision:1,shared:{mode:'none'},inheritMain:true}),{schemaVersion:2,revision:1,shared:{mode:'none'},inheritMain:true});
+  assert.equal(parsePolicy({schemaVersion:1,revision:0,shared:{mode:'all'}}).inheritMain,undefined);
+  assert.throws(()=>parsePolicy({schemaVersion:2,revision:0,shared:{mode:'none'}}),{code:'LLM_CONFIG_INVALID'});
 });

@@ -13,6 +13,10 @@ import { packZip } from "../src/adapters/node/space-share-zip.ts";
 import { SPACE_TEMPLATES_FILE } from "../src/adapters/node/space-templates.ts";
 import { emptyCatalog, emptyPolicy } from "../src/core/domain/llm-connections.ts";
 import { buildLlmShareManifest } from "../src/core/domain/llm-share.ts";
+import {
+  parseWorkbenchProductRequest,
+  parseWorkbenchProductResult,
+} from "../src/shared/workbench-product-schemas.ts";
 import type { LlmApiResult } from "../src/shared/llm-api.ts";
 import type { WorkbenchSpace } from "../src/shared/workbench.ts";
 import {
@@ -256,6 +260,116 @@ test("explicit catalog refresh failure does not fall back to seed", async () => 
   const { ctx } = jobCtx();
   await assert.rejects(service.execute({ kind: "catalog.refresh" }, ctx), /offline/);
   assert.equal(existsSync(join(dir, "hub", CATALOG_CACHE_FILE)), false);
+});
+
+test("plugin versions lists the published exact versions newest first and caps the list", async () => {
+  const dir = home();
+  const published: Record<string, unknown> = {};
+  for (let index = 1; index <= 60; index += 1) {
+    published[`1.0.${index}`] = { dist: { tarball: "https://registry.npmjs.org/dsh-outline.tgz" } };
+  }
+  published["0.9.0"] = { dist: { tarball: "https://registry.npmjs.org/dsh-outline-0.9.0.tgz" } };
+  published["latest"] = { dist: { tarball: "https://registry.npmjs.org/dsh-outline-latest.tgz" } };
+  published["2.0.0-rc.1"] = { dist: { tarball: "https://registry.npmjs.org/dsh-outline-rc.tgz" } };
+  let requests = 0;
+  const service = createService(dir, {
+    fetchImpl: async () => {
+      requests += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({ name: "dsh-outline", versions: published }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    },
+  });
+  const result = await service.read({ method: "plugin.versions", catalogId: "urzeye/dsh-outline" });
+  assert.equal(result.method, "plugin.versions");
+  if (result.method !== "plugin.versions") return;
+  assert.equal(result.packageName, "dsh-outline");
+  assert.equal(result.versions.length, 50, "the list is capped");
+  assert.equal(result.versions[0], "2.0.0-rc.1", "the newest exact version comes first");
+  assert.equal(result.versions[1], "1.0.60");
+  assert.equal(result.latest, "1.0.60", "the default skips an untagged prerelease");
+  assert.equal(result.versions.includes("latest"), false, "a dist tag is not a version");
+  assert.equal(result.versions.includes("0.9.0"), false, "the oldest versions fall outside the cap");
+  assert.equal(requests, 1, "one packument request, no retry");
+});
+
+test("plugin versions reports a catalog entry without an npm package as unsupported", async () => {
+  const dir = home();
+  const service = createService(dir, {
+    fetchImpl: async () => {
+      throw new Error("should not fetch");
+    },
+  });
+  await assert.rejects(
+    service.read({ method: "plugin.versions", catalogId: "example/git-bundle" }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as { code?: string }).code, "workbench/unsupported");
+      return true;
+    },
+  );
+});
+
+test("plugin versions reports an unknown catalog entry and the real registry failure", async () => {
+  const dir = home();
+  const service = createService(dir, {
+    fetchImpl: async () => {
+      throw new Error("should not fetch");
+    },
+  });
+  await assert.rejects(
+    service.read({ method: "plugin.versions", catalogId: "example/missing" }),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as { code?: string }).code, "workbench/not-found");
+      return true;
+    },
+  );
+  const failing = createService(dir, {
+    fetchImpl: async () => ({
+      ok: false,
+      status: 503,
+      headers: { get: () => null },
+      json: async () => ({}),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }),
+  });
+  await assert.rejects(
+    failing.read({ method: "plugin.versions", catalogId: "urzeye/dsh-outline" }),
+    /503/,
+  );
+});
+
+test("the plugin versions product contract is strict", () => {
+  const request = parseWorkbenchProductRequest({ method: "plugin.versions", catalogId: "urzeye/dsh-outline" });
+  assert.equal(request.method, "plugin.versions");
+  assert.throws(() =>
+    parseWorkbenchProductRequest({ method: "plugin.versions", catalogId: "dsh-outline", extra: true }),
+  );
+  assert.throws(() => parseWorkbenchProductRequest({ method: "plugin.versions" }));
+  assert.throws(() => parseWorkbenchProductRequest({ method: "plugin.versions", catalogId: "file:C:/tmp/x.tgz" }));
+  const result = parseWorkbenchProductResult({
+    method: "plugin.versions",
+    versions: ["1.0.0"],
+    latest: "1.0.0",
+    packageName: "dsh-outline",
+    observation: { serviceEpoch: "a".repeat(64), expectedRevision: "b".repeat(64) },
+  });
+  assert.equal(result.method, "plugin.versions");
+  assert.throws(() =>
+    parseWorkbenchProductResult({
+      method: "plugin.versions",
+      versions: ["1.0.0"],
+      latest: "1.0.0",
+      packageName: "dsh-outline",
+      observation: { serviceEpoch: "a".repeat(64), expectedRevision: "b".repeat(64) },
+      extra: true,
+    }),
+  );
 });
 
 test("library public view hides tarball paths and raw specs and does not sync", async () => {

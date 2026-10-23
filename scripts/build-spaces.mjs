@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { removeExactCoreDeclarations } from './lib/clean-core-declarations.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const at = path => resolve(root, path);
@@ -33,6 +34,8 @@ async function buildClient(packageName, entryPoint, outfile) {
   await writeFile(at(outfile), `window.__ModuleLoader__.load({id:${JSON.stringify(packageName)},factory:(require)=>{const module={exports:{}};const exports=module.exports;\n${clientJs.text}\nreturn module.exports;}});\n`);
 }
 
+// Drop stale declaration emit only. A symlink or a path outside this directory is refused.
+await removeExactCoreDeclarations(root);
 await mkdir(at('packages/core/lib'), { recursive: true });
 await build({ ...common, platform: 'neutral', mainFields: ['module', 'main'], entryPoints: ['packages/core/src/index.ts'], outfile: 'packages/core/lib/index.js' });
 const declarations = spawnSync(process.execPath, [at('node_modules/typescript/bin/tsc'), '-p', at('tsconfig.core-build.json')], { cwd: root, stdio: 'inherit', windowsHide: true });
@@ -45,6 +48,7 @@ if (!process.argv.includes('--core-only')) {
   const sdkExternal = ['@deepseek-ai/*'];
   await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal, entryPoints: {
     index: 'packages/plugin/src/index.ts',
+    'llm-images': 'packages/plugin/src/host/llm-images.ts',
     'typert.host': 'packages/plugin/src/typert.host.ts',
     'typert.remote-client': 'packages/plugin/src/typert.remote-client.ts',
   }, outdir: 'packages/plugin/lib' });
@@ -66,11 +70,12 @@ if (!process.argv.includes('--core-only')) {
   await copyFile(at('LICENSE'), at('packages/browser/LICENSE'));
 
   await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
-    entryPoints: ['packages/llm-bridge/src/index.ts'], outfile: 'packages/llm-bridge/lib/index.js' });
+    entryPoints: {index:'packages/llm-bridge/src/index.ts',auxiliary:'packages/llm-bridge/src/auxiliary-services.ts'}, outdir: 'packages/llm-bridge/lib' });
   await copyFile(at('LICENSE'), at('packages/llm-bridge/LICENSE'));
   await rm(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true, force: true });
   await mkdir(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true });
   await copyFile(at('packages/llm-bridge/lib/index.js'), at('packages/plugin/lib/llm-bridge/lib/index.js'));
+  await copyFile(at('packages/llm-bridge/lib/auxiliary.js'), at('packages/plugin/lib/llm-bridge/lib/auxiliary.js'));
   for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
     await copyFile(at(`packages/llm-bridge/${file}`), at(`packages/plugin/lib/llm-bridge/${file}`));
   }
@@ -105,14 +110,19 @@ async function writeSpacesComponentPayload() {
   const scratch = await mkdtemp(join(tmpdir(), 'dsh-spaces-component-payload-'));
   const outfile = join(scratch, 'component-payload.mjs');
   try {
-    await build({
+    const bundle = await build({
       ...common,
       platform: 'node',
       bundle: true,
       format: 'esm',
       entryPoints: ['src/adapters/node/component-payload.ts'],
       outfile,
+      write: false,
     });
+    // Keep temporary-file writes in the Node process that created the scratch
+    // directory. A long-lived native build service may not have that access.
+    if (bundle.outputFiles.length !== 1) throw new Error('Expected one component payload module');
+    await writeFile(outfile, bundle.outputFiles[0].contents);
     const check = spawnSync(process.execPath, ['--check', outfile], { cwd: root, stdio: 'inherit', windowsHide: true });
     if (check.status !== 0) throw new Error('Invalid bundled component payload module');
     const mod = await import(pathToFileURL(outfile).href);

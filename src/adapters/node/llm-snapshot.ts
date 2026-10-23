@@ -14,13 +14,14 @@ import {
 import { snapshotForSpace } from "../../core/domain/llm-resolution";
 import { llmCatalogPath, llmControlDir } from "./llm-paths";
 import { llmPolicyPath } from "./llm-policy-store";
+import { LLM_ADAPTER_VERSION } from "../../shared/llm-api";
 
 export const LLM_LAUNCH_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const LLM_SNAPSHOT_ENV = {
   snapshot: "DSH_SPACES_LLM_SNAPSHOT",
   home: "DSH_SPACES_LLM_HOME",
 } as const;
-export const PINNED_LLM_ADAPTER_VERSION = "0.2.0-rc.2";
+export const PINNED_LLM_ADAPTER_VERSION = LLM_ADAPTER_VERSION;
 
 export type LlmLaunchSnapshotFile = {
   schemaVersion: typeof LLM_LAUNCH_SNAPSHOT_SCHEMA_VERSION;
@@ -50,6 +51,7 @@ export function readLaunchSnapshotFile(path: string): LlmLaunchSnapshotFile {
 export function writeSpaceLlmLaunchSnapshot(home: string, spaceId: string): NodeJS.ProcessEnv {
   const catalog = readCatalogSync(home);
   const policy = readPolicySync(home, spaceId);
+  if(policy.inheritMain)return {DSH_SPACES_LLM_INHERIT_MAIN:'1',[LLM_SNAPSHOT_ENV.home]:home};
   if (policy.shared.mode === "none") return {};
   const snapshot = snapshotForSpace(catalog, policy, PINNED_LLM_ADAPTER_VERSION);
   const path = llmSnapshotPath(home, spaceId);

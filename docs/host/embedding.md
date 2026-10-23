@@ -1,6 +1,6 @@
 # Spaces 宿主嵌入合同 / Host embedding contract
 
-状态：2026-09-26 增加官方 Desktop 隔离实验，见 [原生实验记录](../../tasks/archive/native-desktop-acceptance-2026-09-26.md)。2026-09-25 的 Web 首批实现继续保留。基于 Home 看板 PR #16；不是已发布版本或全宿主兼容认证。验收及剩余范围见 [实施记录](implementation.md)。本页取代旧文档中“普通宿主只能跳转到管理工作台”的展示限制，不改变管理权限和故障政策。
+状态：2026-10-20 已在安装版官方 Windows Desktop 0.2.1-rc.2 / Node 24.21.0 完成隔离 Home 普通空间和原生 Browser 实测，见 [当前验收](../../tasks/node24-desktop-20261020.md)。2026-09-26 的 [原生实验记录](../../tasks/archive/native-desktop-acceptance-2026-09-26.md) 和 Web 首批实现保留作历史。不是已发布版本或全宿主兼容认证；本合同不改变管理权限和故障政策。
 
 ## 产品边界
 
@@ -45,7 +45,9 @@ Supervisor 签发有界、单次、60 秒 entry ticket，绑定父来源和随�
             -> 普通空间来源的 WebUI
 ```
 
-这条链保留既有 view-bridge 的精确 parentOrigin，避免把受保护的子页面直接搬到任意父来源。展示页仅向外发送裁剪的空间目录、切换结果和错误状态。外层只可选择目录中运行中的空间或 Home（官方 Desktop 实验另有固定的看板/设置系统目标）；没有 submit、preview、start、stop、安装、任意 URL 或脚本转发。
+这条链保留既有 view-bridge 的精确 parentOrigin，避免把受保护的子页面直接搬到任意父来源。展示页向外发送裁剪的空间目录、切换结果和错误状态。外层只可选择目录中运行中的空间或 Home（官方 Desktop 另有固定的看板/设置系统目标）；没有 submit、preview、start、stop、安装或脚本转发。
+
+官方 Desktop 的 Browser Space 使用额外的封闭展示消息：manager 先确认当前可见、已注册的 child Window/origin/channel/epoch/generation，并裁剪视口；native portal 只接收该 manager Window 和 origin，校验当前运行空间，再通过有界 fragment 交给最外层插件。插件以官方 browser lease 创建 HTTP(S) 网页 guest，回复匹配 requestId 的 URL/title 观察。新标签请求取代旧的在途展示，旧回复不覆盖新选择。外部网页不获得 preload、Node、嵌套 webview 或 Desktop API；宿主切换/退出立即隐藏，短租约到期释放网页 guest。该专用展示通道不授予管理权限。
 
 用户需要启动尚未运行的空间时，进入真正的空间管理界面执行正常操作。所有写入仍由 manager 经现有 epoch/revision、计划、单写者规则处理。按钮可见不等于管理权限。
 
