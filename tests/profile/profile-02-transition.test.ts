@@ -7,7 +7,7 @@ import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { gte } from "semver";
 import { assertAlphaSettingsIsolation, migrateProfileToAlpha } from "../../src/adapters/node/profile/profile-alpha-migration.ts";
-import { WorkbenchSupervisorRuntime } from "../../src/adapters/node/workbench-supervisor.ts";
+import { SupervisorSpaceLifecycle } from "../../src/adapters/node/supervisor/space-lifecycle.ts";
 
 type Bridge = "view-bridge" | "llm-bridge" | "browser";
 type Row = { id?: string; name?: string; disabled?: unknown };
@@ -363,19 +363,21 @@ test("a patch changed during component installation keeps the mutation and marke
 
 test("Supervisor start admits the known transition under its writer lock before spawning", async () => {
   const f = fixture(); const steps: string[] = []; const archiveIds: string[] = [];
-  const startOwned = (WorkbenchSupervisorRuntime.prototype as unknown as { startOwned(id: string): Promise<void> }).startOwned;
-  const supervisor = {
-    home: f.home, cli: { bin: f.input.bin, version: f.input.cliVersion }, runs: { unmanaged: new Set<string>() },
+  const startOwned = (SupervisorSpaceLifecycle.prototype as unknown as { startOwned(id: string): Promise<void> }).startOwned;
+  const host = {
+    home: f.home, runs: { unmanaged: new Set<string>() },
     options: { componentPayloadRoot: f.input.payloadRoot, viewBridgeArtifact: join(f.home, "view.tgz"), llmBridgeArtifact: join(f.home, "llm.tgz") },
     lifecycle: { assertWritable: () => { steps.push("guard"); } }, statusOf: () => "stopped",
+    managerId: () => null,
     pinnedDshVersion: () => undefined,
     resolveSpaceRuntime: () => ({ bin: f.input.bin, version: f.input.cliVersion }),
-    processes: { start: async () => { steps.push("spawn"); } },
+    processes: () => ({ start: async () => { steps.push("spawn"); } }),
     lock: { run: async (_name: string, action: () => Promise<void>) => { steps.push("lock"); await action(); steps.push("unlock"); } },
     installArtifact: async (_id: string, artifact: string, archiveId: string) => { steps.push("install"); archiveIds.push(archiveId); await f.input.install(artifact.endsWith("view.tgz") ? "view-bridge" : "llm-bridge"); },
     readDump: f.input.dump,
   };
-  writeFileSync(supervisor.options.viewBridgeArtifact, "view archive"); writeFileSync(supervisor.options.llmBridgeArtifact, "llm archive");
+  const supervisor = { host };
+  writeFileSync(host.options.viewBridgeArtifact, "view archive"); writeFileSync(host.options.llmBridgeArtifact, "llm archive");
   await startOwned.call(supervisor, "writing");
   assert.deepEqual(steps, ["guard", "lock", "install", "install", "unlock", "spawn"]);
   assert.match(archiveIds[0]!, /^dsh-spaces-view-bridge-[0-9a-f]{20}$/);

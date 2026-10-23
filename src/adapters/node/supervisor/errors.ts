@@ -16,6 +16,7 @@ export const WORKBENCH_ERROR = {
 } as const;
 
 export const STOP_KEPT_REASON = "Owned processes could not be stopped. Run rights were kept.";
+export const STOP_NOT_FORCED = "Timed stop did not force-kill the process. The instance is still recorded.";
 export const WRITABLE_STARTUP_FAILED_REASON = "Writable startup did not finish. The stable entry is still available.";
 
 export type WorkbenchErrorCode = keyof typeof WORKBENCH_ERROR;
