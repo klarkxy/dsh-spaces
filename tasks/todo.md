@@ -10,7 +10,9 @@
 - [x] 第三波命名统一：HomeController→HomeLease（home/home-lease.ts，租约不是控制器）；SpacesControlApi→SpacesApi（shared 接口）、NodeSpacesControl→NodeSpacesService（products/spaces-service.ts 实现）、SpacesHost→SpacesRemote（host Typert 代理）；workbench-contract.md 现行模块边界段跟随新路径。wire 面零改动（@Remote 字符串、Typert 命名空间、清单组件名、落盘路径与协议枚举均未动），全量检查组与包预检通过。
 - [x] 第四波 tests 按域分 18 个子目录：106 个测试文件 git mv，590 条相对路径引用零漂移，各测试组文件集合与基线逐项证明一致；check-test-lists 升级为递归收集并解析目录参数；发现 tsx 目录发现不含 .tsx 的实证并以「目录＋显式 tsx」形式规避。
 - [x] 第五波 WorkbenchApi 单源化：权威定义 WORKBENCH_API（src/shared/workbench.ts），接口、host @Remote 注册、Typert 描述符、双端客户端与 Supervisor 方法白名单全部由它派生（原表面实际手写在九处）；host 侧 codec 表按层隔离 zod。前后 wire 探针转储 SHA-256 相同（标记、24 描述符、codec 行为摘要、15 RPC、15 HTTP）。llm/llmCredential 保留原有裸体会话约定，Supervisor 手写解析器是不同严格度的校验器未并合；发现既有 llmApiResultSchema 多收 catalogRevision 的偏差一处，保留待裁。仅本地提交，不推送。
-- [ ] 第六波：god 文件拆分（blueprint-workbench 2914 行、workbench-maintenance 1989、workbench/store 1957、workbench-supervisor ~1950，facade 保路径），进行中。
+- [x] 第六波 god 文件拆分（facade 保路径、零 importer 改动，四个 worker 并行）：blueprint-workbench 2914→16 部件＋10 行 facade（blueprint/blueprint-workbench/）；workbench-supervisor 2008→1309 行，supervisor/ 新增 spaces/space-lifecycle/space-commands/state/maintenance/toolchain/job-context 七个部件；workbench-maintenance 1989→30 行 facade＋15 部件（maintenance/workbench-maintenance/）；store.ts 2092→32 行 facade＋16 模块（workbench/store/，类按部件继承链）。四个拆分均有脚本化导出面相等证明与逐字移动对照（164/164、113/113、145/145、52/52）。
+- [x] 集成修复两处：validate-llm-secrets.mjs 改钉单源结构（WORKBENCH_API 定义＋server/manager/codec 三层派生），修掉 API 单源化引入的门禁回归；profile-02-transition 测试跟随 startOwned 新宿主（SupervisorSpaceLifecycle.prototype＋{host} 接收者），39/39 通过。
+- [x] 已知并行抖动定位：workbench-supervisor.test.ts 夹具绑定固定端口段 34000–34999，多套件并发时 EADDRINUSE 表现为管理器崩溃；A/B 对照纯净基线证明为既有现象（基线并发失败更多），单跑 59/59 通过。
 
 # 2026-10-22 Desktop UI 链接安装与手动服务操作
 

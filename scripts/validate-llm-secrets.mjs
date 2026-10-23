@@ -68,14 +68,26 @@ if (!api.includes('"saveConnectionWithCredential"')) {
 const supervisor = readFileSync(join(REPO, "src/adapters/node/workbench-supervisor.ts"), "utf8");
 if (!supervisor.includes('"llmCredential"')) fail("Supervisor must dispatch llmCredential");
 
+// The workbench API is single-sourced in src/shared/workbench.ts (WORKBENCH_API);
+// the server method list and the host remote registration derive from it, so the
+// credential channel is gated at the canonical definition plus each derivation.
+const apiDefinition = readFileSync(join(REPO, "src/shared/workbench.ts"), "utf8");
+if (!apiDefinition.includes("llmCredential:")) fail("WORKBENCH_API must define llmCredential");
+
 const nodeHttp = readFileSync(join(REPO, "src/adapters/node/server/workbench-http.ts"), "utf8");
-if (!nodeHttp.includes('"llmCredential"')) fail("Supervisor HTTP methods must include llmCredential");
+if (!nodeHttp.includes("WORKBENCH_API_METHODS") || !nodeHttp.includes("shared/workbench")) {
+  fail("Supervisor HTTP methods must derive from the canonical WORKBENCH_API");
+}
 
 const hostHttp = readFileSync(join(REPO, "packages/plugin/src/host/workbench-http.ts"), "utf8");
 if (!hostHttp.includes('"llmCredential"')) fail("Host HTTP client must call llmCredential");
 
 const hostRemote = readFileSync(join(REPO, "packages/plugin/src/host/workbench-manager.ts"), "utf8");
-if (!hostRemote.includes("@Remote(\"llmCredential\")")) fail("Host Remote must expose llmCredential");
+if (!hostRemote.includes("registerWorkbenchRemoteMethods") || !hostRemote.includes("llmCredential(")) {
+  fail("Host Remote must derive registration and expose llmCredential");
+}
+const hostCodecs = readFileSync(join(REPO, "packages/plugin/src/host/workbench-api.ts"), "utf8");
+if (!hostCodecs.includes("llmCredential:")) fail("Host codec table must validate llmCredential");
 
 const credentials = readFileSync(join(REPO, "src/adapters/node/llm/llm-credential-store.ts"), "utf8");
 if (!credentials.includes("readSecret") || !credentials.includes("writeRecord")) {
