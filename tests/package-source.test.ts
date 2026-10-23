@@ -27,7 +27,7 @@ import {
   npmPackumentUrl,
   npmRegistry,
   sourceEnv,
-} from "../src/adapters/node/package-source.ts";
+} from "../src/adapters/node/products/package-source.ts";
 
 test("infers china source from zh locales", () => {
   assert.equal(inferPackageSource("zh-CN"), "china");

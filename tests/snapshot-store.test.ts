@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { afterEach, test } from "node:test";
-import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
+import { SnapshotStore } from "../src/adapters/node/snapshots/snapshot-store.ts";
 import {
   RESTORE_STAGE_DIR,
   SNAPSHOT_ID_RE,

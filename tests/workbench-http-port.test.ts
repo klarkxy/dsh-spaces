@@ -6,7 +6,7 @@ import {
   isForbiddenFetchPort,
   startWorkbenchHttp,
   type WorkbenchHttpRuntime,
-} from "../src/adapters/node/workbench-http.ts";
+} from "../src/adapters/node/server/workbench-http.ts";
 
 const HOST = "127.0.0.1";
 const FETCH_BLOCKED_PORTS = [

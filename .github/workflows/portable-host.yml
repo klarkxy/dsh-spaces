@@ -5,6 +5,7 @@ on:
       - 'packages/plugin/**'
       - 'packages/view-bridge/**'
       - 'src/adapters/node/workbench*'
+      - 'src/adapters/node/*/workbench*'
       - 'src/shared/space-host.ts'
       - 'tests/portable-host*'
       - 'tests/fixtures/portable-host/**'

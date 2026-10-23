@@ -1,4 +1,4 @@
-import { describeRuntime } from "../src/adapters/node/runtime-descriptor.ts";
+import { describeRuntime } from "../src/adapters/node/runtime/runtime-descriptor.ts";
 import { createDirectoryLink } from "../src/shared/node/filesystem.ts";
 import { spawnSync } from "node:child_process";
 import fsPromises from "node:fs/promises";
@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { npmPackumentUrl, npmRegistry } from "../src/adapters/node/package-source.ts";
-import { RuntimeStore, type RegistryFetcher, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
+import { npmPackumentUrl, npmRegistry } from "../src/adapters/node/products/package-source.ts";
+import { RuntimeStore, type RegistryFetcher, type RunProcessFn } from "../src/adapters/node/runtime/runtime-store.ts";
 import { isExactRuntimeVersion, preferredTaggedVersion } from "../src/shared/runtime.ts";
 import type { PackageSource } from "../src/shared/types.ts";
 

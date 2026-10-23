@@ -6,7 +6,7 @@ import {
   parseControlEndpoint,
   type HomeControlInspect,
   type HomeControlOwner,
-} from "../../../../src/adapters/node/home-controller";
+} from "../../../../src/adapters/node/home/home-controller";
 import { workbenchStateSchema } from "./workbench-schemas";
 import { workbenchPost, type WorkbenchHttpFetch } from "./workbench-http";
 import {
@@ -15,7 +15,7 @@ import {
   readEndpointFile,
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
-} from "../../../../src/adapters/node/supervisor-endpoint";
+} from "../../../../src/adapters/node/home/supervisor-endpoint";
 
 export type LeaseVerdict = "ok" | "free" | "foreign" | "ambiguous" | "dead" | "unbound" | "mismatch";
 

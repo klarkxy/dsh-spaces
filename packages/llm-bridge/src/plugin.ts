@@ -1,7 +1,7 @@
 import { Context, type Fiber } from "@deepseek-ai/cordis";
 import { deepEqualJson } from "@deepseek-ai/dsh-util-values";
 import { existsSync } from "node:fs";
-import { FileLlmCredentialStore } from "../../../src/adapters/node/llm-credential-store";
+import { FileLlmCredentialStore } from "../../../src/adapters/node/llm/llm-credential-store";
 import {
   LLM_ERROR,
   LlmConfigError,
@@ -13,7 +13,7 @@ import {
   mergeSharedProvidersIntoBase,
 } from "../../../src/core/domain/llm-resolution";
 import type { LlmSharedSnapshot } from "../../../src/shared/llm-connections";
-import { LLM_SNAPSHOT_ENV, readLaunchSnapshotFile } from "../../../src/adapters/node/llm-snapshot";
+import { LLM_SNAPSHOT_ENV, readLaunchSnapshotFile } from "../../../src/adapters/node/llm/llm-snapshot";
 import { SpacesCredentialsProvider } from "./credentials-provider";
 import { installManagedRequestGuard } from "./request-guard";
 import { installLlmActivity } from "./activity";

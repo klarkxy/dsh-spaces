@@ -7,9 +7,9 @@ import { afterEach, test } from "node:test";
 import { AddressInfo } from "node:net";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { createUserMessage, type StreamChunk } from "@deepseek-ai/dsh-llm";
-import { FileLlmCatalogStore } from "../src/adapters/node/llm-catalog-store.ts";
-import { FileLlmCredentialStore } from "../src/adapters/node/llm-credential-store.ts";
-import { FileLlmPolicyStore } from "../src/adapters/node/llm-policy-store.ts";
+import { FileLlmCatalogStore } from "../src/adapters/node/llm/llm-catalog-store.ts";
+import { FileLlmCredentialStore } from "../src/adapters/node/llm/llm-credential-store.ts";
+import { FileLlmPolicyStore } from "../src/adapters/node/llm/llm-policy-store.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import {
   LLM_ERROR,

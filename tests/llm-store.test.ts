@@ -3,10 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { FileLlmCatalogStore, assertCatalogPathInsideHome, llmCatalogPath } from "../src/adapters/node/llm-catalog-store.ts";
-import { FileLlmCredentialStore } from "../src/adapters/node/llm-credential-store.ts";
-import { FileLlmPolicyStore, llmPolicyPath } from "../src/adapters/node/llm-policy-store.ts";
-import { llmCredentialsPath } from "../src/adapters/node/llm-paths.ts";
+import { FileLlmCatalogStore, assertCatalogPathInsideHome, llmCatalogPath } from "../src/adapters/node/llm/llm-catalog-store.ts";
+import { FileLlmCredentialStore } from "../src/adapters/node/llm/llm-credential-store.ts";
+import { FileLlmPolicyStore, llmPolicyPath } from "../src/adapters/node/llm/llm-policy-store.ts";
+import { llmCredentialsPath } from "../src/adapters/node/llm/llm-paths.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import {
   LLM_ERROR,

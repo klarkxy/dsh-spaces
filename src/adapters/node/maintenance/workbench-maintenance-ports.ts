@@ -1,0 +1,37 @@
+import type { ProfileRegistry } from '../profile/profile-registry';
+import type { SnapshotExecutor } from '../snapshots/snapshot-executor';
+import type { RuntimeStore } from '../runtime/runtime-store';
+import type { DiagnosticsService } from '../diagnostics/diagnostics';
+import type { HomeOperationLock } from '../home/home-operation-lock';
+import type { ProfileStatus } from '../../../shared/types';
+import type { SnapshotRuntime } from '../../../shared/snapshots';
+import type { WorkbenchProductObservation } from '../../../shared/workbench-product';
+
+/** Node-only composition boundary; all paths and process authority stay here. */
+export interface WorkbenchMaintenancePorts {
+  home: string;
+  registry: ProfileRegistry;
+  lock: HomeOperationLock;
+  snapshots: SnapshotExecutor;
+  runtimes: RuntimeStore;
+  diagnostics: DiagnosticsService;
+  managerId(): string | null;
+  hasUnfinishedPlan?(planId: string): boolean;
+  unfinishedPlanIds?(): string[];
+  assertWritable(): void;
+  validateSpace(spaceId: string, allowManager?: boolean): void;
+  statusOf(spaceId: string): ProfileStatus;
+  ownedSpaceIds(): string[];
+  /** These callbacks may only stop instances whose ownership is known. No auto force-kill. */
+  stopSpace(spaceId: string): Promise<void>;
+  stopAll(): Promise<void>;
+  startSpace(spaceId: string): Promise<void>;
+  currentRuntime(): SnapshotRuntime;
+  /** The host CLI that manages the Home; ordinary spaces may pin a different runtime. */
+  hostRuntime(): { bin: string; version: string } | null;
+  /** Refresh selected CLI resolver and re-establish the manager after maintenance. */
+  reinitializeManager(): Promise<void>;
+  setMaintenance(active: boolean): void;
+  isCompatibleRuntime(version: string): boolean;
+  observation(): WorkbenchProductObservation;
+}

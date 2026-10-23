@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { gte } from "semver";
-import { assertAlphaSettingsIsolation, migrateProfileToAlpha } from "../src/adapters/node/profile-alpha-migration.ts";
+import { assertAlphaSettingsIsolation, migrateProfileToAlpha } from "../src/adapters/node/profile/profile-alpha-migration.ts";
 import { WorkbenchSupervisorRuntime } from "../src/adapters/node/workbench-supervisor.ts";
 
 type Bridge = "view-bridge" | "llm-bridge" | "browser";

@@ -1,4 +1,4 @@
-import { readProfileSettings } from "../src/adapters/node/profile-settings.ts";
+import { readProfileSettings } from "../src/adapters/node/profile/profile-settings.ts";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -14,15 +14,15 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { stringifyBlueprint } from "../src/adapters/node/blueprint-codec.ts";
-import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+import { stringifyBlueprint } from "../src/adapters/node/blueprint/blueprint-codec.ts";
+import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 import {
   INTERRUPTED_JOB_MESSAGE,
   WORKBENCH_CONTROL_DIR_NAME,
   WORKBENCH_JOBS_DIR_NAME,
   WorkbenchJobStore,
-} from "../src/adapters/node/workbench-jobs.ts";
-import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/workbench-products.ts";
+} from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/products/workbench-products.ts";
 import { parseBlueprint } from "../src/core/domain/blueprint.ts";
 import type { LlmApiResult } from "../src/shared/llm-api.ts";
 import type { WorkbenchCommand, WorkbenchJob, WorkbenchSpace } from "../src/shared/workbench.ts";

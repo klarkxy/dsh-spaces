@@ -1,6 +1,6 @@
 import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/shared/space-host";
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
-import { parseControlEndpoint } from "../../../../src/adapters/node/home-controller";
+import { parseControlEndpoint } from "../../../../src/adapters/node/home/home-controller";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../../src/shared/space-icon";
 import {
   isBlueprintLargeRequestMethod,
@@ -44,7 +44,7 @@ import {
   llmCredentialRequestSchema,
 } from "./workbench-schemas";
 import { parseSupervisorHandoffPath } from "../../../../src/shared/loopback";
-import type { SupervisorEndpoint } from "../../../../src/adapters/node/supervisor-endpoint";
+import type { SupervisorEndpoint } from "../../../../src/adapters/node/home/supervisor-endpoint";
 
 export const WORKBENCH_HTTP_METHODS = [
   "state",

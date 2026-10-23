@@ -18,16 +18,16 @@ import {
   parseLlmShareManifest,
   scanShareEntries,
 } from "../src/shared/llm-share.ts";
-import { FileLlmCatalogStore } from "../src/adapters/node/llm-catalog-store.ts";
-import { FileLlmPolicyStore } from "../src/adapters/node/llm-policy-store.ts";
+import { FileLlmCatalogStore } from "../src/adapters/node/llm/llm-catalog-store.ts";
+import { FileLlmPolicyStore } from "../src/adapters/node/llm/llm-policy-store.ts";
 import {
   buildSpaceShare,
   exportSpaceArchive,
   importSpaceArchive,
   packSpaceShare,
   parseSpaceShare,
-} from "../src/adapters/node/space-share.ts";
-import { packZip } from "../src/adapters/node/space-share-zip.ts";
+} from "../src/adapters/node/products/space-share.ts";
+import { packZip } from "../src/adapters/node/products/space-share-zip.ts";
 import type { InstalledPlugin } from "../src/shared/types.ts";
 
 const temps: string[] = [];

@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { migrateProfileToAlpha } from "../src/adapters/node/profile-alpha-migration.ts";
+import { migrateProfileToAlpha } from "../src/adapters/node/profile/profile-alpha-migration.ts";
 
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, {recursive: true, force: true})));

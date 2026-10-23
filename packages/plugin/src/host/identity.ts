@@ -8,9 +8,9 @@ import {
   HOME_CONTROL_MANAGER_FILE,
   HomeController,
   HomeControlPathError,
-} from "../../../../src/adapters/node/home-controller";
-import { invocationProfile } from "../../../../src/adapters/node/spaces-control";
-import { samePath } from "../../../../src/adapters/node/home-guard";
+} from "../../../../src/adapters/node/home/home-controller";
+import { invocationProfile } from "../../../../src/adapters/node/products/spaces-control";
+import { samePath } from "../../../../src/adapters/node/home/home-guard";
 import { PROFILE_NAME_RE } from "../../../../src/shared/types";
 import type { WorkbenchRole } from "../../../../src/shared/workbench";
 

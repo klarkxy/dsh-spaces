@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, test } from "node:test";
-import { migrateLegacyProfileSettings, profileSettingsPath, readProfileSettings, writeProfileSettings } from "../src/adapters/node/profile-settings.ts";
+import { migrateLegacyProfileSettings, profileSettingsPath, readProfileSettings, writeProfileSettings } from "../src/adapters/node/profile/profile-settings.ts";
 
 const homes: string[] = [];
 function fixture(patch = "# profile comment\n[]\n", legacy = "llm-pi-ai:\n  providers:\n    local:\n      api: openai-completions\n") {

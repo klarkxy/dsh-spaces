@@ -1,4 +1,4 @@
-import { sanitizeJobText } from "../src/adapters/node/workbench-jobs.ts";
+import { sanitizeJobText } from "../src/adapters/node/maintenance/workbench-jobs.ts";
 import assert from "node:assert/strict";
 import { LLM_ERROR, LlmConfigError } from "../src/shared/llm-connections.ts";
 import { WorkbenchPublicError } from "../src/adapters/node/supervisor/errors.ts";
@@ -25,7 +25,7 @@ import {
   WorkbenchJobStore,
   publicJobKeys,
   type WorkbenchJobHandler,
-} from "../src/adapters/node/workbench-jobs.ts";
+} from "../src/adapters/node/maintenance/workbench-jobs.ts";
 import { formatWorkbenchFailure } from "../src/shared/workbench.ts";
 import type { WorkbenchCommand } from "../src/shared/workbench.ts";
 

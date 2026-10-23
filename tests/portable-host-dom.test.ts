@@ -5,10 +5,10 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { build } from "esbuild";
 import { chromium } from "playwright";
-import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
-import { expectedAuthCookieName } from "../src/adapters/node/workbench-http.ts";
+import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/server/workbench-http.ts";
+import { expectedAuthCookieName } from "../src/adapters/node/server/workbench-http.ts";
 import { mintSupervisorPortal } from "../packages/plugin/src/host/workbench-http.ts";
-import { renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
+import { renderPortalPage } from "../src/adapters/node/server/workbench-portal.ts";
 
 const EPOCH = "aa".repeat(32), REVISION = "bb".repeat(32);
 async function serve(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) {

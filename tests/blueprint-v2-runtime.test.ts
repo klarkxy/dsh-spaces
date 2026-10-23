@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
-import { BlueprintRuntimeError, inspectBlueprintRuntime } from "../src/adapters/node/blueprint-runtime.ts";
+import { BlueprintRuntimeError, inspectBlueprintRuntime } from "../src/adapters/node/blueprint/blueprint-runtime.ts";
 
 const dirs: string[] = [];
 const BUILTIN = "fixture-optional-bundle";

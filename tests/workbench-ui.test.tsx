@@ -23,7 +23,7 @@ import type { WorkbenchProductRequest, WorkbenchProductResult } from "../src/sha
 import type { PackageSource } from "../src/shared/types.ts";
 import { WorkbenchApp } from "../packages/plugin/src/workbench/app.tsx";
 import { JobsList, WorkbenchView } from "../packages/plugin/src/workbench/components.tsx";
-import { INTERRUPTED_JOB_MESSAGE } from "../src/adapters/node/workbench-jobs.ts";
+import { INTERRUPTED_JOB_MESSAGE } from "../src/adapters/node/maintenance/workbench-jobs.ts";
 import {
   WorkbenchController,
   pollDelayMs,

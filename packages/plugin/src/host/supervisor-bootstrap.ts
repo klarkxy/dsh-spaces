@@ -10,30 +10,30 @@ import {
   stageComponentPayload,
   coldStartLockLabel,
   COLD_START_LOCK_NAME,
-} from "../../../../src/adapters/node/component-selection";
+} from "../../../../src/adapters/node/payload/component-selection";
 import {
   COMPONENT_PAYLOAD_ENTRIES,
   validateComponentPayload,
   type ValidatedComponentPayload,
-} from "../../../../src/adapters/node/component-payload";
-import { bindDshCli } from "../../../../src/adapters/node/spaces-control";
-import { authorizeProductHome } from "../../../../src/adapters/node/home-guard";
-import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeController } from "../../../../src/adapters/node/home-controller";
-import { HomeOperationLock, HomeLockBusyError } from "../../../../src/adapters/node/home-operation-lock";
-import { retirePreviousSupervisor, beginLaunchDiagnostics, readLaunchMarker, readLastSupervisorDiagnostics } from "../../../../src/adapters/node/supervisor-launch";
-import { readSupervisorDiagnostics, reportSupervisorLaunchFailure, reportSupervisorExit } from "../../../../src/adapters/node/supervisor-diagnostics";
+} from "../../../../src/adapters/node/payload/component-payload";
+import { bindDshCli } from "../../../../src/adapters/node/products/spaces-control";
+import { authorizeProductHome } from "../../../../src/adapters/node/home/home-guard";
+import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeController } from "../../../../src/adapters/node/home/home-controller";
+import { HomeOperationLock, HomeLockBusyError } from "../../../../src/adapters/node/home/home-operation-lock";
+import { retirePreviousSupervisor, beginLaunchDiagnostics, readLaunchMarker, readLastSupervisorDiagnostics } from "../../../../src/adapters/node/home/supervisor-launch";
+import { readSupervisorDiagnostics, reportSupervisorLaunchFailure, reportSupervisorExit } from "../../../../src/adapters/node/diagnostics/supervisor-diagnostics";
 import { packLocalArtifacts, validateSnapshotRoot, type PackOneRequest } from "./supervisor-pack";
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
 import {
   diagnoseEndpointResidue,
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
-} from "../../../../src/adapters/node/supervisor-endpoint";
+} from "../../../../src/adapters/node/home/supervisor-endpoint";
 import type { WorkbenchHttpFetch } from "./workbench-http";
 
-export { SUPERVISOR_ENDPOINT_FILE, readEndpointFile, writeEndpointFile } from "../../../../src/adapters/node/supervisor-endpoint";
-export type { SupervisorEndpoint } from "../../../../src/adapters/node/supervisor-endpoint";
-export { readLastSupervisorDiagnostics } from "../../../../src/adapters/node/supervisor-launch";
+export { SUPERVISOR_ENDPOINT_FILE, readEndpointFile, writeEndpointFile } from "../../../../src/adapters/node/home/supervisor-endpoint";
+export type { SupervisorEndpoint } from "../../../../src/adapters/node/home/supervisor-endpoint";
+export { readLastSupervisorDiagnostics } from "../../../../src/adapters/node/home/supervisor-launch";
 
 export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";
 export const VIEW_BRIDGE_PAYLOAD_DIRNAME = "view-bridge";

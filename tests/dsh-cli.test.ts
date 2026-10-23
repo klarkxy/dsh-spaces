@@ -12,8 +12,8 @@ import {
   setManagedCliPrefix,
   setManagedNodeExecutable,
   spawnNode,
-} from "../src/adapters/node/dsh-cli.ts";
-import { setToolchainRoot } from "../src/adapters/node/toolchain.ts";
+} from "../src/adapters/node/runtime/dsh-cli.ts";
+import { setToolchainRoot } from "../src/adapters/node/runtime/toolchain.ts";
 import { DSH_DEFAULT_VERSION } from "../src/shared/runtime.ts";
 
 const temps: string[] = [];

@@ -1,7 +1,7 @@
 import { sanitizeSpaceIcon } from "../../../shared/space-icon";
 import { SPACE_NAME_RE } from "../../../shared/types";
 import type { WorkbenchPlanRequest } from "../../../shared/workbench";
-import { parseSpaceId, SpacesPublicError } from "../spaces-control";
+import { parseSpaceId, SpacesPublicError } from "../products/spaces-control";
 import { WorkbenchPublicError } from "./errors";
 
 const ENTITY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

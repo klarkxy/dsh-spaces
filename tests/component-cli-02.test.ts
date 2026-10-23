@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { dshPeerRangesFromPackages, unmetDshPeers } from "../src/adapters/node/component-cli.ts";
+import { dshPeerRangesFromPackages, unmetDshPeers } from "../src/adapters/node/payload/component-cli.ts";
 import { satisfies } from "semver";
 import { DSH_DEFAULT_VERSION, SPACES_MIN_DSH_VERSION } from "../src/shared/runtime.ts";
-import { unmetDshRequirements, unmetProfileDshRequirements } from "../src/adapters/node/component-cli.ts";
+import { unmetDshRequirements, unmetProfileDshRequirements } from "../src/adapters/node/payload/component-cli.ts";
 
 test("target requirements match the selected official evaluator, including malformed contracts", async () => {
   const officialPath = process.env.DSH_COMPAT_APP_BOOT

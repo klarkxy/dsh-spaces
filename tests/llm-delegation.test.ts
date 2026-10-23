@@ -5,7 +5,7 @@ import {createServer,type Server,type ServerResponse} from 'node:http';
 import {randomBytes} from 'node:crypto';
 import {once, EventEmitter} from 'node:events';
 import {resolve} from 'node:path';
-import {SupervisorLlmDelegation,LLM_DELEGATION_PREFIX} from '../src/adapters/node/llm-delegation/supervisor.ts';
+import {SupervisorLlmDelegation,LLM_DELEGATION_PREFIX} from '../src/adapters/node/llm/delegation.ts';
 import type {LlmDelegationBootstrap} from '../src/shared/llm-delegation.ts';
 import {wrapMainReplay,unwrapMainReplay} from '../src/shared/llm-replay-route.ts';
 import {Context} from '@deepseek-ai/cordis';

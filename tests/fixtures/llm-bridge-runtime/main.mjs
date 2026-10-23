@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { compileManagedCredentialRef, compileManagedRecordKey, compileManagedRouteId, LLM_ERROR } from '../../../src/shared/llm-connections.ts';
-import { FileLlmCredentialStore } from '../../../src/adapters/node/llm-credential-store.ts';
+import { FileLlmCredentialStore } from '../../../src/adapters/node/llm/llm-credential-store.ts';
 import { openSpaceLlmBridge } from '../../helpers/llm-official.ts';
 
 const testRoot = process.env.DSH_BRIDGE_TEST_ROOT;

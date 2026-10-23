@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
-import type { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+import type { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 import {
   FULL_SPACES_PACKAGE,
   WORKBENCH_MAINTENANCE_ERROR,
@@ -21,22 +21,22 @@ import {
   WorkbenchMaintenance,
   WorkbenchMaintenanceError,
   type MaintenanceFetcher,
-} from "../src/adapters/node/workbench-maintenance.ts";
-import type { WorkbenchMaintenancePorts } from "../src/adapters/node/workbench-maintenance-ports.ts";
+} from "../src/adapters/node/maintenance/workbench-maintenance.ts";
+import type { WorkbenchMaintenancePorts } from "../src/adapters/node/maintenance/workbench-maintenance-ports.ts";
 import {
   WORKBENCH_CONTROL_DIR_NAME,
   WorkbenchJobAbortError,
   WorkbenchJobError,
   type WorkbenchJobContext,
-} from "../src/adapters/node/workbench-jobs.ts";
-import { ProcessTerminationError } from "../src/adapters/node/terminate-process.ts";
-import { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
-import { CATALOG_CACHE_FILE } from "../src/adapters/node/plugin-catalog.ts";
-import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
-import { listProfilePlugins } from "../src/adapters/node/plugin-ops.ts";
-import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
-import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
-import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
+} from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import { ProcessTerminationError } from "../src/adapters/node/runtime/terminate-process.ts";
+import { DiagnosticsService } from "../src/adapters/node/diagnostics/diagnostics.ts";
+import { CATALOG_CACHE_FILE } from "../src/adapters/node/products/plugin-catalog.ts";
+import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../src/adapters/node/products/plugin-library.ts";
+import { listProfilePlugins } from "../src/adapters/node/products/plugin-ops.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile/profile-registry.ts";
+import { SnapshotStore } from "../src/adapters/node/snapshots/snapshot-store.ts";
+import type { SnapshotExecutor } from "../src/adapters/node/snapshots/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 import type { WorkbenchPlanRequest } from "../src/shared/workbench.ts";
 import type { ProfileStatus } from "../src/shared/types.ts";

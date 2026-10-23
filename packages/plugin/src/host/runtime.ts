@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Context } from "@deepseek-ai/cordis";
-import { bindDshCli, isCompatibleDshCliVersion } from "../../../../src/adapters/node/spaces-control";
+import { bindDshCli, isCompatibleDshCliVersion } from "../../../../src/adapters/node/products/spaces-control";
 import type { WorkbenchApi } from "../../../../src/shared/workbench";
 import { WORKBENCH_ENTRY_UNAVAILABLE } from "../../../../src/shared/workbench-errors";
 import type {

@@ -10,10 +10,10 @@ import {
   isCompatibleDshCliVersion,
   NodeSpacesControl,
   SpacesPublicError,
-} from "../src/adapters/node/spaces-control.ts";
+} from "../src/adapters/node/products/spaces-control.ts";
 
 const temps: string[] = [];
-const SOURCE = join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node/spaces-control.ts");
+const SOURCE = join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node/products/spaces-control.ts");
 
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });

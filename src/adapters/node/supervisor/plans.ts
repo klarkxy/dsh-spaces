@@ -9,10 +9,10 @@ import type {
   WorkbenchPlan,
   WorkbenchPlanRequest,
 } from "../../../shared/workbench";
-import type { HomeOperationLock } from "../home-operation-lock";
+import type { HomeOperationLock } from "../home/home-operation-lock";
 import type { SpaceMessageRouter } from "../message-bus/router";
-import type { ProfileRegistry } from "../profile-registry";
-import { WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, type WorkbenchJobContext, type WorkbenchJobStore } from "../workbench-jobs";
+import type { ProfileRegistry } from "../profile/profile-registry";
+import { WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, type WorkbenchJobContext, type WorkbenchJobStore } from "../maintenance/workbench-jobs";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorInstanceRecords } from "./instance-records";
 import type { SupervisorLifecycle } from "./lifecycle";

@@ -4,10 +4,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertSupportedNode } from "../../../src/shared/node-version.ts";
 
-import { HomeLockBusyError, HomeOperationLock } from "../../../src/adapters/node/home-operation-lock.ts";
+import { HomeLockBusyError, HomeOperationLock } from "../../../src/adapters/node/home/home-operation-lock.ts";
 import { assertDumpPatched } from "../../../src/core/domain/isolation.ts";
-import { terminateProcessTree } from "../../../src/adapters/node/terminate-process.ts";
-import { authorizeProductHome } from "../../../src/adapters/node/home-guard.ts";
+import { terminateProcessTree } from "../../../src/adapters/node/runtime/terminate-process.ts";
+import { authorizeProductHome } from "../../../src/adapters/node/home/home-guard.ts";
 import { PROFILE_NAME_RE } from "../../../src/shared/types.ts";
 import {
   EXIT,

@@ -25,7 +25,7 @@ import {
   XP_SUPPORTED_VERSION,
   XP_VIEW_HINT_GLOBAL,
   XpCompatibilityError,
-} from "../src/adapters/node/xp-compatibility.ts";
+} from "../src/adapters/node/diagnostics/xp-compatibility.ts";
 
 const repoRoot = dirname(fileURLToPath(new URL(".", import.meta.url)));
 const ORIGINAL_XP_DIR = join(repoRoot, "tests", "fixtures", "xp-original");

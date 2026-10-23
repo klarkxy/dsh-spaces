@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
-import { COMPONENT_PAYLOAD_PACKAGES, writeComponentPayloadManifest } from "../src/adapters/node/component-payload.ts";
+import { COMPONENT_PAYLOAD_PACKAGES, writeComponentPayloadManifest } from "../src/adapters/node/payload/component-payload.ts";
 import {
   COLD_START_LOCK_NAME,
   coldStartLockLabel,
@@ -12,14 +12,14 @@ import {
   selectComponentPayload,
   selectedPointerPath,
   stageComponentPayload,
-} from "../src/adapters/node/component-selection.ts";
+} from "../src/adapters/node/payload/component-selection.ts";
 import {
   HOME_CONTROL_OWNER_FILE,
   HomeControlBusyError,
   HomeController,
   homeControlDigest,
-} from "../src/adapters/node/home-controller.ts";
-import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+} from "../src/adapters/node/home/home-controller.ts";
+import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 
 describe("component-selection", { concurrency: 1 }, () => {
 const temps: string[] = [];

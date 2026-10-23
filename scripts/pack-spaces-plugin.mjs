@@ -474,7 +474,7 @@ async function validateBuiltPayload() {
   const scratch = mkdtempSync(join(tmpdir(), "dsh-spaces-pack-validate-"));
   try {
     const outfile = join(scratch, "validator.mjs");
-    const bundle = await build({ absWorkingDir: REPO, entryPoints: ["src/adapters/node/component-payload.ts"],
+    const bundle = await build({ absWorkingDir: REPO, entryPoints: ["src/adapters/node/payload/component-payload.ts"],
       outfile, write: false, bundle: true, platform: "node", format: "esm", logLevel: "silent" });
     // The scratch owner writes the result; esbuild's native service only compiles it.
     if (bundle.outputFiles.length !== 1) throw new Error("Expected one payload validator module");

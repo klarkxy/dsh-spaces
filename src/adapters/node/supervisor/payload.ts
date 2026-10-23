@@ -2,15 +2,15 @@ import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { samePath } from "../home-guard";
-import { bindDshCli, isCompatibleDshCliVersion } from "../spaces-control";
+import { samePath } from "../home/home-guard";
+import { bindDshCli, isCompatibleDshCliVersion } from "../products/spaces-control";
 import {
   COMPONENT_PAYLOAD_ENTRIES,
   ComponentPayloadError,
   validateComponentPayload,
   validateComponentPayloadArtifacts,
   type ValidatedComponentPayload,
-} from "../component-payload";
+} from "../payload/component-payload";
 import { WorkbenchPublicError } from "./errors";
 import type { BoundCli, WorkbenchSupervisorOptions } from "./types";
 

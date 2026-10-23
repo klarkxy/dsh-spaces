@@ -25,12 +25,12 @@ import {
   readSupervisorDiagnostics,
   reportSupervisorExit,
   reportSupervisorLaunchFailure,
-} from "../src/adapters/node/supervisor-diagnostics.ts";
+} from "../src/adapters/node/diagnostics/supervisor-diagnostics.ts";
 
 const SECRET = "dsh-diag-secret-sentinel-9f3c2b1a";
 const repoRoot = dirname(fileURLToPath(new URL(".", import.meta.url)));
 const diagnosticsModule = fileURLToPath(
-  new URL("../src/adapters/node/supervisor-diagnostics.ts", import.meta.url),
+  new URL("../src/adapters/node/diagnostics/supervisor-diagnostics.ts", import.meta.url),
 );
 const supervisorCli = fileURLToPath(new URL("../packages/supervisor/src/index.ts", import.meta.url));
 

@@ -16,10 +16,10 @@ import {
   HOME_CONTROL_RUN_DIR_NAME,
   HomeController,
   type HomeControlHandle,
-} from "../src/adapters/node/home-controller.ts";
-import { canonicalHome, HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
-import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
-import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/spaces-control.ts";
+} from "../src/adapters/node/home/home-controller.ts";
+import { canonicalHome, HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
+import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
+import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-control.ts";
 import { resolveHostIdentity } from "../packages/plugin/src/host/identity.ts";
 import { SpacesPlugin, injectHintScript } from "../packages/plugin/src/host/plugin.ts";
 import { WorkbenchHostRuntime } from "../packages/plugin/src/host/runtime.ts";
@@ -32,13 +32,13 @@ import {
   bootstrapSupervisor,
   writeEndpointFile,
 } from "../packages/plugin/src/host/supervisor-bootstrap.ts";
-import { writeComponentPayloadManifest, validateComponentPayload, COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
+import { writeComponentPayloadManifest, validateComponentPayload, COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/payload/component-payload.ts";
 import {
   readSelectedComponentPayload,
   selectComponentPayload,
   stageComponentPayload,
   coldStartLockLabel,
-} from "../src/adapters/node/component-selection.ts";
+} from "../src/adapters/node/payload/component-selection.ts";
 import { catalogIdSchema, workbenchCommandSchema, workbenchInitializeResultSchema, workbenchViewSchema, workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import { GUIDE_METHODS, TYPERT } from "../packages/plugin/src/typert.host.ts";
 import {
@@ -1580,7 +1580,7 @@ for (const changed of [false, true]) {
     writeProfile(home, "spaces-hub");
     writeManager(home, "spaces-hub");
     const script = join(home, "exited-owner.mts");
-    writeFileSync(script, `import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home-controller.ts", import.meta.url).href)};
+    writeFileSync(script, `import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home/home-controller.ts", import.meta.url).href)};
 new HomeController(process.argv[2]).acquire("web", "http://127.0.0.1:9/");
 process.exit(17);`);
     await new Promise<void>((resolve, reject) => {

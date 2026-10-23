@@ -11,7 +11,7 @@ import { WORKBENCH_PUBLIC_ERROR } from "../packages/plugin/src/host/remote-error
 import { workbenchStateSchema } from "../packages/plugin/src/host/workbench-schemas.ts";
 import { createWorkbenchRemote } from "../packages/plugin/src/client/workbench-remote.ts";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../src/shared/workbench-product.ts";
-import type { SupervisorEndpoint } from "../src/adapters/node/supervisor-endpoint.ts";
+import type { SupervisorEndpoint } from "../src/adapters/node/home/supervisor-endpoint.ts";
 import type { WorkbenchMutationContext } from "../src/shared/workbench.ts";
 
 const ORIGIN = "http://127.0.0.1:9";

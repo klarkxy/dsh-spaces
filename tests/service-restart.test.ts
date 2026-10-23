@@ -4,11 +4,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, unlinkSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { HomeController } from "../src/adapters/node/home-controller.ts";
-import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
-import { canonicalHome } from "../src/adapters/node/home-operation-lock.ts";
-import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/spaces-control.ts";
-import { writeEndpointFile } from "../src/adapters/node/supervisor-endpoint.ts";
+import { HomeController } from "../src/adapters/node/home/home-controller.ts";
+import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
+import { canonicalHome } from "../src/adapters/node/home/home-operation-lock.ts";
+import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-control.ts";
+import { writeEndpointFile } from "../src/adapters/node/home/supervisor-endpoint.ts";
 import { DesktopServiceRestart } from "../packages/plugin/src/host/service-restart.ts";
 import { WorkbenchHostRuntime } from "../packages/plugin/src/host/runtime.ts";
 import type { WorkbenchApi, WorkbenchState, WorkbenchPlan } from "../src/shared/workbench.ts";

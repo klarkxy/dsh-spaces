@@ -23,9 +23,9 @@ import {
   canonicalHome,
   type HomeLockOwner,
   type UnlockDeadResult,
-} from "../src/adapters/node/home-operation-lock.ts";
+} from "../src/adapters/node/home/home-operation-lock.ts";
 import { MaintenanceGate } from "../src/core/application/maintenance-gate.ts";
-import { realDshHome } from "../src/adapters/node/home-guard.ts";
+import { realDshHome } from "../src/adapters/node/home/home-guard.ts";
 
 const temps: string[] = [];
 const children: ChildProcess[] = [];
@@ -45,7 +45,7 @@ function tempHome(): string {
 
 function lockModuleHref(): string {
   return pathToFileURL(
-    fileURLToPath(new URL("../src/adapters/node/home-operation-lock.ts", import.meta.url)),
+    fileURLToPath(new URL("../src/adapters/node/home/home-operation-lock.ts", import.meta.url)),
   ).href;
 }
 

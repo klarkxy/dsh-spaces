@@ -8,7 +8,7 @@ import {
   readLocalProviderConfig,
   readSpaceDefaultModel,
   writeSpaceDefaultModel,
-} from "../src/adapters/node/llm-space-settings.ts";
+} from "../src/adapters/node/llm/llm-space-settings.ts";
 import { redactEndpoint } from "../src/shared/llm-connections.ts";
 
 const temps: string[] = [];

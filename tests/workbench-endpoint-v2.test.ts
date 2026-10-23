@@ -18,9 +18,9 @@ import {
   HOME_CONTROL_RUN_DIR_NAME,
   HomeController,
   type HomeControlHandle,
-} from "../src/adapters/node/home-controller.ts";
-import { canonicalHome } from "../src/adapters/node/home-operation-lock.ts";
-import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
+} from "../src/adapters/node/home/home-controller.ts";
+import { canonicalHome } from "../src/adapters/node/home/home-operation-lock.ts";
+import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
 import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor-attach.ts";
 import {
   bootstrapSupervisor,
@@ -32,7 +32,7 @@ import {
   readEndpointFile,
   writeEndpointFile,
   type SupervisorEndpoint,
-} from "../src/adapters/node/supervisor-endpoint.ts";
+} from "../src/adapters/node/home/supervisor-endpoint.ts";
 import {
   mutationContextSchema,
   workbenchCommandSchema,

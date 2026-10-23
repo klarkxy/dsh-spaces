@@ -27,8 +27,8 @@ import {
   validateComponentPayload,
   writeComponentPayloadManifest,
   type ComponentPayloadManifest,
-} from "../src/adapters/node/component-payload.ts";
-import { extractArchiveAsync } from "../src/adapters/node/toolchain.ts";
+} from "../src/adapters/node/payload/component-payload.ts";
+import { extractArchiveAsync } from "../src/adapters/node/runtime/toolchain.ts";
 import { create as createTar } from "tar";
 import { PLUGIN_REQUIRED } from "../scripts/pack-spaces-plugin.mjs";
 

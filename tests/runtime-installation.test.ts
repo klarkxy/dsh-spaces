@@ -5,11 +5,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, afterEach, before, test } from "node:test";
 import { build } from "esbuild";
-import { runRuntimeInstallation } from "../src/adapters/node/runtime-installation.ts";
-import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
-import { ProcessTerminationError } from "../src/adapters/node/terminate-process.ts";
-import type { RunProcessFn } from "../src/adapters/node/runtime-store.ts";
-import { npmRegistry } from "../src/adapters/node/package-source.ts";
+import { runRuntimeInstallation } from "../src/adapters/node/runtime/runtime-installation.ts";
+import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshots/snapshot-executor.ts";
+import { ProcessTerminationError } from "../src/adapters/node/runtime/terminate-process.ts";
+import type { RunProcessFn } from "../src/adapters/node/runtime/runtime-store.ts";
+import { npmRegistry } from "../src/adapters/node/products/package-source.ts";
 
 const temps: string[] = [];
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -228,7 +228,7 @@ async function compileWorker(): Promise<string> {
   const outfile = join(dir, "snapshot-worker.mjs");
   const bundle = await build({
     absWorkingDir: repoRoot,
-    entryPoints: [join(repoRoot, "src", "adapters/node", "snapshot-worker.ts")],
+    entryPoints: [join(repoRoot, "src", "adapters/node/snapshots", "snapshot-worker.ts")],
     outfile,
     write: false,
     bundle: true,

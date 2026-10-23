@@ -17,13 +17,13 @@ import {
   HOME_CONTROL_DIR_NAME,
   HOME_CONTROL_OWNER_FILE,
   HOME_CONTROL_RUN_DIR_NAME,
-} from "../src/adapters/node/home-controller.ts";
+} from "../src/adapters/node/home/home-controller.ts";
 import {
   HOME_LOCK_DIR_NAME,
   HOME_LOCK_OWNER_FILE,
-} from "../src/adapters/node/home-operation-lock.ts";
-import { WORKBENCH_JOBS_DIR_NAME } from "../src/adapters/node/workbench-jobs.ts";
-import { SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
+} from "../src/adapters/node/home/home-operation-lock.ts";
+import { WORKBENCH_JOBS_DIR_NAME } from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import { SnapshotStore } from "../src/adapters/node/snapshots/snapshot-store.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 const root = dirname(fileURLToPath(new URL(".", import.meta.url)));

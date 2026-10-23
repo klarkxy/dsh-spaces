@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SpaceMessageRouter } from '../src/adapters/node/message-bus/router.ts';
-import { dshSessionCookie } from '../src/adapters/node/dsh-endpoint.ts';
+import { dshSessionCookie } from '../src/adapters/node/runtime/dsh-endpoint.ts';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const cliEnv = process.env.DSH_WEB_CLI;

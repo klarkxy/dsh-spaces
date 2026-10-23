@@ -18,7 +18,7 @@ import {
   decodeBlueprint,
   encodeBlueprint,
   stringifyBlueprint,
-} from "../src/adapters/node/blueprint-codec.ts";
+} from "../src/adapters/node/blueprint/blueprint-codec.ts";
 
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "../docs/examples/blueprints");

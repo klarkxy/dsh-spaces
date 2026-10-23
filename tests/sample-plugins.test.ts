@@ -18,18 +18,18 @@ import {
   FULL_SPACES_PACKAGE,
   WorkbenchMaintenance,
   type MaintenanceFetcher,
-} from "../src/adapters/node/workbench-maintenance.ts";
-import type { WorkbenchMaintenancePorts } from "../src/adapters/node/workbench-maintenance-ports.ts";
-import type { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+} from "../src/adapters/node/maintenance/workbench-maintenance.ts";
+import type { WorkbenchMaintenancePorts } from "../src/adapters/node/maintenance/workbench-maintenance-ports.ts";
+import type { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 import {
   WorkbenchJobError,
   type WorkbenchJobContext,
-} from "../src/adapters/node/workbench-jobs.ts";
-import { isHubPluginArchive, readPluginLibrary } from "../src/adapters/node/plugin-library.ts";
-import { listProfilePlugins } from "../src/adapters/node/plugin-ops.ts";
-import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
-import type { DiagnosticsService } from "../src/adapters/node/diagnostics.ts";
-import type { SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
+} from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import { isHubPluginArchive, readPluginLibrary } from "../src/adapters/node/products/plugin-library.ts";
+import { listProfilePlugins } from "../src/adapters/node/products/plugin-ops.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile/profile-registry.ts";
+import type { DiagnosticsService } from "../src/adapters/node/diagnostics/diagnostics.ts";
+import type { SnapshotExecutor } from "../src/adapters/node/snapshots/snapshot-executor.ts";
 import type { SnapshotRuntime } from "../src/shared/snapshots.ts";
 import type { ProfileStatus } from "../src/shared/types.ts";
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { t } from "../src/shared/i18n/index.ts";
-import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile/profile-registry.ts";
 import { writeOrdinaryProfile, writeRegisteredSpace } from "./fixtures/space.ts";
 
 const temps: string[] = [];

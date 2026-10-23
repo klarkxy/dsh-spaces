@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { createWorkbenchSupervisor } from '../src/adapters/node/workbench-supervisor.ts';
-import { expectedAuthCookieName } from '../src/adapters/node/workbench-http.ts';
-import type { PatchWriter } from '../src/adapters/node/patch-writer.ts';
+import { expectedAuthCookieName } from '../src/adapters/node/server/workbench-http.ts';
+import type { PatchWriter } from '../src/adapters/node/profile/patch-writer.ts';
 import { writeRegisteredSpace } from './fixtures/space.ts';
 function profile(home: string, id: string, manager = false) {
   const root = join(home, 'profiles', id); mkdirSync(root, { recursive: true });

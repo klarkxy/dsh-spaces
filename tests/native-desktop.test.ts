@@ -8,8 +8,8 @@ import { join } from "node:path";
 import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailureHash, portalFailureDetail,
   PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT, parseNativeCreateIntent,
   type PortalFailure } from "../src/shared/space-host.ts";
-import { renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
-import { bindDshCli, invocationProfile } from "../src/adapters/node/spaces-control.ts";
+import { renderPortalPage } from "../src/adapters/node/server/workbench-portal.ts";
+import { bindDshCli, invocationProfile } from "../src/adapters/node/products/spaces-control.ts";
 import { NativeHostController } from "../packages/plugin/src/client/native-host.tsx";
 import { NativeBrowserHost } from "../packages/plugin/src/client/native-browser-host.ts";
 import { BROWSER_RELAY, BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, browserProtocolScript,

@@ -3,11 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/spaces-control.ts";
+import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-control.ts";
 import {
   COMPONENT_PAYLOAD_PACKAGES,
   writeComponentPayloadManifest,
-} from "../src/adapters/node/component-payload.ts";
+} from "../src/adapters/node/payload/component-payload.ts";
 import {
   bootstrapSupervisor,
   LLM_BRIDGE_PAYLOAD_DIRNAME,

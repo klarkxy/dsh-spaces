@@ -23,9 +23,9 @@ import {
   BlueprintPackageError,
   prepareBlueprintPackage,
   type BlueprintPackage,
-} from "../src/adapters/node/blueprint-package.ts";
-import { archiveAbsPath, upsertLibraryEntry } from "../src/adapters/node/plugin-library.ts";
-import type { PluginFetcher } from "../src/adapters/node/plugin-ops.ts";
+} from "../src/adapters/node/blueprint/blueprint-package.ts";
+import { archiveAbsPath, upsertLibraryEntry } from "../src/adapters/node/products/plugin-library.ts";
+import type { PluginFetcher } from "../src/adapters/node/products/plugin-ops.ts";
 
 const temps: string[] = [];
 const realHome = join(homedir(), ".dsh");

@@ -26,7 +26,7 @@
 
 源码侧恢复编排已删：`RestoreSession`、`SnapshotStore.restore` / `recover` / `completeRestore`、snapshot-worker 的同名操作以及 Doctor 恢复编译桩均已移除。历史 `pending-restore.json` 与 restore journal 仍可读作未完成证据并挡住后续写入，不重放、不修补。
 
-运行时安装 IO 已抽到 `src/adapters/node/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及安装过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。
+运行时安装 IO 已抽到 `src/adapters/node/runtime/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及安装过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。
 
 维护成功路径可以 `reinitializeManager`（同一 Supervisor `serviceEpoch`）；失败路径保持 maintenance、不重启管理 profile。Spaces 不再在应用内自我更新：宿主插件通过 `dsh plugin --profile web add <新包>` 升级，管理界面停止服务后重新打开；Supervisor 选择宿主插件的组件组并在管理器启动前对齐管理插件，对齐失败即阻止启动并报告原因。中断的旧式更新留下的证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。标准安装、正常维护及桌面真实流程的具体版本、结果和限制见 [合并执行记录](../tasks/merge-execution.md)；实现完成与实际验收分别记录。
 

@@ -17,12 +17,12 @@ import {
   composeBlueprintRuntime,
   inspectBlueprintRuntime,
   resolveBlueprintModule,
-} from "../src/adapters/node/blueprint-runtime.ts";
+} from "../src/adapters/node/blueprint/blueprint-runtime.ts";
 
 const temps: string[] = [];
 const realHome = join(homedir(), ".dsh");
 const here = fileURLToPath(import.meta.url);
-const sourcePath = join(dirname(here), "../src/adapters/node/blueprint-runtime.ts");
+const sourcePath = join(dirname(here), "../src/adapters/node/blueprint/blueprint-runtime.ts");
 const jsYamlPath = createRequire(here).resolve("js-yaml");
 const officialBin = officialRc2Bin();
 

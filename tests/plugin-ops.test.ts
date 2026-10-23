@@ -12,9 +12,9 @@ import {
   pluginAdd,
   pluginRemove,
   resolveInstallSpec,
-} from "../src/adapters/node/plugin-ops.ts";
-import { seedCatalog } from "../src/adapters/node/plugin-catalog.ts";
-import { resetDshBinCache, setSelectedDshResolver } from "../src/adapters/node/dsh-cli.ts";
+} from "../src/adapters/node/products/plugin-ops.ts";
+import { seedCatalog } from "../src/adapters/node/products/plugin-catalog.ts";
+import { resetDshBinCache, setSelectedDshResolver } from "../src/adapters/node/runtime/dsh-cli.ts";
 import { applyAppLocale, t } from "../src/shared/i18n/index.ts";
 
 const temps: string[] = [];

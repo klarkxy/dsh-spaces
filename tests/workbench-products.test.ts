@@ -3,14 +3,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
-import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/workbench-products.ts";
-import type { WorkbenchJobContext } from "../src/adapters/node/workbench-jobs.ts";
-import { archiveRelPath, upsertLibraryEntry } from "../src/adapters/node/plugin-library.ts";
-import { CATALOG_CACHE_FILE } from "../src/adapters/node/plugin-catalog.ts";
-import { packSpaceShare, pluginToShare } from "../src/adapters/node/space-share.ts";
-import { packZip } from "../src/adapters/node/space-share-zip.ts";
-import { SPACE_TEMPLATES_FILE } from "../src/adapters/node/space-templates.ts";
+import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
+import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/products/workbench-products.ts";
+import type { WorkbenchJobContext } from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import { archiveRelPath, upsertLibraryEntry } from "../src/adapters/node/products/plugin-library.ts";
+import { CATALOG_CACHE_FILE } from "../src/adapters/node/products/plugin-catalog.ts";
+import { packSpaceShare, pluginToShare } from "../src/adapters/node/products/space-share.ts";
+import { packZip } from "../src/adapters/node/products/space-share-zip.ts";
+import { SPACE_TEMPLATES_FILE } from "../src/adapters/node/products/space-templates.ts";
 import { emptyCatalog, emptyPolicy } from "../src/shared/llm-connections.ts";
 import { buildLlmShareManifest } from "../src/shared/llm-share.ts";
 import {

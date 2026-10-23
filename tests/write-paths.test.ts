@@ -1,18 +1,28 @@
 import assert from "node:assert/strict";
 import { existsSync, lstatSync as rawLstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createDirectoryLink, lstatSync } from "../src/shared/node/filesystem.ts";
 
 const adapterDir = join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node");
 
+function adapterSources(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...adapterSources(full));
+    else if (entry.name.endsWith(".ts")) files.push(full);
+  }
+  return files;
+}
+
 test("no Node-adapter write path targets profiles/web", () => {
-  const files = readdirSync(adapterDir).filter((name) => name.endsWith(".ts"));
   const offenders: string[] = [];
-  for (const name of files) {
-    const text = readFileSync(join(adapterDir, name), "utf8");
+  for (const file of adapterSources(adapterDir)) {
+    const name = basename(file);
+    const text = readFileSync(file, "utf8");
     if (name === "patch-writer.ts") {
       assert.match(text, /errors\.webSacred/);
       assert.match(text, /name === "web"/);

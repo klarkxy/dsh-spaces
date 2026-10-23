@@ -8,8 +8,8 @@ import {
   renderEntryPage,
   startWorkbenchHttp,
   type WorkbenchHttpRuntime,
-} from "../src/adapters/node/workbench-http.ts";
-import { renderPortalPage } from "../src/adapters/node/workbench-portal.ts";
+} from "../src/adapters/node/server/workbench-http.ts";
+import { renderPortalPage } from "../src/adapters/node/server/workbench-portal.ts";
 
 const HOST = "127.0.0.1";
 const EPOCH = "aa".repeat(32);

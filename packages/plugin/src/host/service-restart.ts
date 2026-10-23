@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { lstatSync } from "../../../../src/shared/node/filesystem";
-import { HomeController, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home-controller";
+import { HomeController, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home/home-controller";
 import type { WorkbenchApi, WorkbenchPlan } from "../../../../src/shared/workbench";
 import type { WorkbenchBootstrapResult, WorkbenchServiceRestartPreview } from "../types";
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
-import { SUPERVISOR_ENDPOINT_FILE, type SupervisorEndpoint } from "../../../../src/adapters/node/supervisor-endpoint";
+import { SUPERVISOR_ENDPOINT_FILE, type SupervisorEndpoint } from "../../../../src/adapters/node/home/supervisor-endpoint";
 import { createWorkbenchHttpClient, type WorkbenchHttpClientOptions } from "./workbench-http";
 
 type Missing = Extract<SupervisorAttachResult, { missing: true }>;

@@ -12,11 +12,11 @@ import {
   pluginToShare,
   previewSpaceShare,
   uniqueSpaceName,
-} from "../src/adapters/node/space-share.ts";
-import { PLUGIN_LIBRARY_FILE } from "../src/adapters/node/plugin-library.ts";
-import { packZip, unpackZip } from "../src/adapters/node/space-share-zip.ts";
+} from "../src/adapters/node/products/space-share.ts";
+import { PLUGIN_LIBRARY_FILE } from "../src/adapters/node/products/plugin-library.ts";
+import { packZip, unpackZip } from "../src/adapters/node/products/space-share-zip.ts";
 import type { InstalledPlugin } from "../src/shared/types.ts";
-import { COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/component-payload.ts";
+import { COMPONENT_PAYLOAD_PACKAGES } from "../src/adapters/node/payload/component-payload.ts";
 import { workbenchProductResultSchema } from "../src/shared/workbench-product-schemas.ts";
 
 const temps: string[] = [];

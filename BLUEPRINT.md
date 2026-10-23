@@ -46,7 +46,7 @@ DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。
 
 工具开发者可使用仓库中的 [JSON Schema](schemas/blueprint-v1.schema.json) 做字段检查，再用运行时解析器校验跨字段关系、输入位置及编码规则。Schema 不是插件安全或运行兼容性的证明。
 
-在编辑器中关联该 Schema 即可；不要把 `$schema` 加入蓝图根对象，v1 根字段是封闭的。代码入口为 `src/core/domain/blueprint.ts` 的 `parseBlueprint` / `bindBlueprintInputs` / `diagnoseBlueprint`，以及 `src/adapters/node/blueprint-codec.ts` 的 `decodeBlueprint` / `encodeBlueprint`。JSON 与分享码的解析都走同一份规则。仓库验收入口为 `npm run test:blueprints`。
+在编辑器中关联该 Schema 即可；不要把 `$schema` 加入蓝图根对象，v1 根字段是封闭的。代码入口为 `src/core/domain/blueprint.ts` 的 `parseBlueprint` / `bindBlueprintInputs` / `diagnoseBlueprint`，以及 `src/adapters/node/blueprint/blueprint-codec.ts` 的 `decodeBlueprint` / `encodeBlueprint`。JSON 与分享码的解析都走同一份规则。仓库验收入口为 `npm run test:blueprints`。
 
 ## 1. 产品边界
 
@@ -387,10 +387,10 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 | 入口 | 职责 |
 | --- | --- |
 | `src/core/domain/blueprint.ts` | 格式检查、输入绑定和声明关系诊断 |
-| `src/adapters/node/blueprint-codec.ts` | JSON 与 J/Z 分享码读取、编码及大小限制 |
-| `src/adapters/node/blueprint-package.ts` | npm 制品下载、缓存字节、身份和摘要检查 |
-| `src/adapters/node/blueprint-runtime.ts` | 从实际绑定的 DSH 读取宿主、bundle、组合和模块解析证据 |
-| `src/adapters/node/blueprint-workbench.ts` | 来源选择、生成、预览、一次性计划和分阶段应用 |
+| `src/adapters/node/blueprint/blueprint-codec.ts` | JSON 与 J/Z 分享码读取、编码及大小限制 |
+| `src/adapters/node/blueprint/blueprint-package.ts` | npm 制品下载、缓存字节、身份和摘要检查 |
+| `src/adapters/node/blueprint/blueprint-runtime.ts` | 从实际绑定的 DSH 读取宿主、bundle、组合和模块解析证据 |
+| `src/adapters/node/blueprint/blueprint-workbench.ts` | 来源选择、生成、预览、一次性计划和分阶段应用 |
 | `src/shared/workbench-blueprint.ts` | 工作台蓝图请求、预览和结果类型 |
 | `packages/plugin/src/workbench/blueprint-ui.tsx` | 桌面与浏览器共用的蓝图界面 |
 

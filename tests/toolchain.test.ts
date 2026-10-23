@@ -5,9 +5,9 @@ import { crc32, deflateRawSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { extractArchiveAsync, findNodeDir, setToolchainRoot, writeToolchainConfig } from "../src/adapters/node/toolchain.ts";
-import { nodeArchiveName } from "../src/adapters/node/package-source.ts";
-import { withChildObservation } from "../src/adapters/node/owned-process-record.ts";
+import { extractArchiveAsync, findNodeDir, setToolchainRoot, writeToolchainConfig } from "../src/adapters/node/runtime/toolchain.ts";
+import { nodeArchiveName } from "../src/adapters/node/products/package-source.ts";
+import { withChildObservation } from "../src/adapters/node/runtime/owned-process-record.ts";
 
 const temps: string[] = [];
 

@@ -29,9 +29,9 @@ import {
   parseControlEndpoint,
   type HomeControlOwner,
   type ReclaimDeadResult,
-} from "../src/adapters/node/home-controller.ts";
-import { HomeLockBusyError, HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
-import { digestHomeIdentity } from "../src/adapters/node/workbench-protocol.ts";
+} from "../src/adapters/node/home/home-controller.ts";
+import { HomeLockBusyError, HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
+import { digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
 import { MANAGED_HOME_ENTRIES } from "../src/shared/snapshots.ts";
 
 const temps: string[] = [];
@@ -59,7 +59,7 @@ function writeProfile(home: string, name: string, pkg: unknown = {}): string {
 
 function controlModuleHref(): string {
   return pathToFileURL(
-    fileURLToPath(new URL("../src/adapters/node/home-controller.ts", import.meta.url)),
+    fileURLToPath(new URL("../src/adapters/node/home/home-controller.ts", import.meta.url)),
   ).href;
 }
 

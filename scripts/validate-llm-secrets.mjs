@@ -21,15 +21,15 @@ const SECRET_SCAN = [
   "src/shared/llm-share.ts",
   "src/core/application/global-llm-host.ts",
   "src/core/application/global-llm-service.ts",
-  "src/adapters/node/llm-catalog-store.ts",
-  "src/adapters/node/llm-credential-store.ts",
-  "src/adapters/node/llm-policy-store.ts",
-  "src/adapters/node/llm-operation-store.ts",
-  "src/adapters/node/llm-probe.ts",
-  "src/adapters/node/llm-snapshot.ts",
-  "src/adapters/node/llm-host.ts",
-  "src/adapters/node/workbench-jobs.ts",
-  "src/adapters/node/workbench-http.ts",
+  "src/adapters/node/llm/llm-catalog-store.ts",
+  "src/adapters/node/llm/llm-credential-store.ts",
+  "src/adapters/node/llm/llm-policy-store.ts",
+  "src/adapters/node/llm/llm-operation-store.ts",
+  "src/adapters/node/llm/llm-probe.ts",
+  "src/adapters/node/llm/llm-snapshot.ts",
+  "src/adapters/node/llm/llm-host.ts",
+  "src/adapters/node/maintenance/workbench-jobs.ts",
+  "src/adapters/node/server/workbench-http.ts",
   "src/adapters/node/workbench-supervisor.ts",
   "src/shared/llm-api.ts",
   "packages/llm-bridge/src/plugin.ts",
@@ -49,12 +49,12 @@ for (const rel of SECRET_SCAN) {
   if (PRODUCT_RECOVERY.test(text)) fail(`${rel} contains a recovery/fallback product path`);
 }
 
-const jobs = readFileSync(join(REPO, "src/adapters/node/workbench-jobs.ts"), "utf8");
+const jobs = readFileSync(join(REPO, "src/adapters/node/maintenance/workbench-jobs.ts"), "utf8");
 for (const key of ["key", "apiKey", "secret", "credential", "token", "authorization"]) {
   if (!jobs.includes(`"${key}"`)) fail(`StoredJob secret denylist is missing ${key}`);
 }
 
-const operations = readFileSync(join(REPO, "src/adapters/node/llm-operation-store.ts"), "utf8");
+const operations = readFileSync(join(REPO, "src/adapters/node/llm/llm-operation-store.ts"), "utf8");
 for (const key of ["key", "apiKey", "secret", "hash", "authorization"]) {
   if (!operations.includes(`"${key}"`)) fail(`operations.json secret denylist is missing ${key}`);
 }
@@ -68,7 +68,7 @@ if (!api.includes('"saveConnectionWithCredential"')) {
 const supervisor = readFileSync(join(REPO, "src/adapters/node/workbench-supervisor.ts"), "utf8");
 if (!supervisor.includes('"llmCredential"')) fail("Supervisor must dispatch llmCredential");
 
-const nodeHttp = readFileSync(join(REPO, "src/adapters/node/workbench-http.ts"), "utf8");
+const nodeHttp = readFileSync(join(REPO, "src/adapters/node/server/workbench-http.ts"), "utf8");
 if (!nodeHttp.includes('"llmCredential"')) fail("Supervisor HTTP methods must include llmCredential");
 
 const hostHttp = readFileSync(join(REPO, "packages/plugin/src/host/workbench-http.ts"), "utf8");
@@ -77,7 +77,7 @@ if (!hostHttp.includes('"llmCredential"')) fail("Host HTTP client must call llmC
 const hostRemote = readFileSync(join(REPO, "packages/plugin/src/host/workbench-manager.ts"), "utf8");
 if (!hostRemote.includes("@Remote(\"llmCredential\")")) fail("Host Remote must expose llmCredential");
 
-const credentials = readFileSync(join(REPO, "src/adapters/node/llm-credential-store.ts"), "utf8");
+const credentials = readFileSync(join(REPO, "src/adapters/node/llm/llm-credential-store.ts"), "utf8");
 if (!credentials.includes("readSecret") || !credentials.includes("writeRecord")) {
   fail("credential store must keep writeRecord/readSecret off the public catalog");
 }

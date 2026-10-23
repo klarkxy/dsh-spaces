@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import { writeProfileSettings } from "../src/adapters/node/profile-settings.ts";
+import { writeProfileSettings } from "../src/adapters/node/profile/profile-settings.ts";
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -15,25 +15,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { createHash } from "node:crypto";
-import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
+import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 import {
   BlueprintWorkbench,
   type BlueprintRuntimeCompose,
   type BlueprintRuntimeInspect,
   type BlueprintWorkbenchPorts,
-} from "../src/adapters/node/blueprint-workbench.ts";
+} from "../src/adapters/node/blueprint/blueprint-workbench.ts";
 import {
   composeBlueprintRuntime,
   inspectBlueprintRuntime,
   resolveBlueprintModule,
-} from "../src/adapters/node/blueprint-runtime.ts";
-import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/workbench-products.ts";
-import type { WorkbenchJobContext } from "../src/adapters/node/workbench-jobs.ts";
-import { stringifyBlueprint } from "../src/adapters/node/blueprint-codec.ts";
+} from "../src/adapters/node/blueprint/blueprint-runtime.ts";
+import { WorkbenchProductService, type WorkbenchProductPorts } from "../src/adapters/node/products/workbench-products.ts";
+import type { WorkbenchJobContext } from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import { stringifyBlueprint } from "../src/adapters/node/blueprint/blueprint-codec.ts";
 import { parseBlueprint } from "../src/core/domain/blueprint.ts";
 import type { Blueprint } from "../src/shared/blueprint.ts";
 import { GlobalLlmHost } from "../src/core/application/global-llm-host.ts";
-import { BlueprintPackageError } from "../src/adapters/node/blueprint-package.ts";
+import { BlueprintPackageError } from "../src/adapters/node/blueprint/blueprint-package.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import {
   LLM_ERROR,

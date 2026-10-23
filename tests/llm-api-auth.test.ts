@@ -4,10 +4,10 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/workbench-http.ts";
-import { OfficialLlmProbe, LLM_DISCOVERY_MAX_BYTES, LLM_DISCOVERY_MAX_MODELS } from "../src/adapters/node/llm-probe.ts";
-import { FileLlmOperationStore, llmOperationsPath } from "../src/adapters/node/llm-operation-store.ts";
-import { WorkbenchJobError, WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
+import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../src/adapters/node/server/workbench-http.ts";
+import { OfficialLlmProbe, LLM_DISCOVERY_MAX_BYTES, LLM_DISCOVERY_MAX_MODELS } from "../src/adapters/node/llm/llm-probe.ts";
+import { FileLlmOperationStore, llmOperationsPath } from "../src/adapters/node/llm/llm-operation-store.ts";
+import { WorkbenchJobError, WorkbenchJobStore } from "../src/adapters/node/maintenance/workbench-jobs.ts";
 import { GlobalLlmHost } from "../src/core/application/global-llm-host.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import {

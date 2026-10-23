@@ -6,7 +6,7 @@ import { MainTransport } from './main-transport';
 import { apply as legacyApply } from './plugin';
 import { createHash } from 'node:crypto';
 import { deepFreeze } from '@deepseek-ai/dsh-util-values';
-import {assertOwnedProfilePath} from '../../../src/adapters/node/profile-settings';
+import {assertOwnedProfilePath} from '../../../src/adapters/node/profile/profile-settings';
 import { wrapMainReplay } from '../../../src/shared/llm-replay-route';
 import {AuxiliaryContext,type Route} from './auxiliary-context';
 import type {Session,SessionSeq} from '@deepseek-ai/dsh-session';

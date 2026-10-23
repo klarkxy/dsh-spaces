@@ -7,21 +7,21 @@ import { EventEmitter } from "node:events";
 import { Context } from "@deepseek-ai/cordis";
 import LlmRuntime, { type StreamChunk } from "@deepseek-ai/dsh-llm";
 import AgentRegistry from "@deepseek-ai/dsh-agent";
-import { createHomeLlmHost } from "../src/adapters/node/llm-host.ts";
+import { createHomeLlmHost } from "../src/adapters/node/llm/llm-host.ts";
 import { SupervisorLlm, type SupervisorLlmHost } from "../src/adapters/node/supervisor/llm.ts";
 import { SupervisorLifecycle } from "../src/adapters/node/supervisor/lifecycle.ts";
 import { SpaceRunRegistry } from "../src/adapters/node/supervisor/space-runs.ts";
 import type { GlobalLlmHost, LlmApplyCommand } from "../src/core/application/global-llm-host.ts";
-import type { WorkbenchJobContext, WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
-import type { HomeControlHandle } from "../src/adapters/node/home-controller.ts";
+import type { WorkbenchJobContext, WorkbenchJobStore } from "../src/adapters/node/maintenance/workbench-jobs.ts";
+import type { HomeControlHandle } from "../src/adapters/node/home/home-controller.ts";
 import type { WorkbenchSpace } from "../src/shared/workbench.ts";
 import { LlmActivity, installLlmActivity } from "../packages/llm-bridge/src/activity.ts";
 import {
   LLM_ACTIVITY_CHANNEL, LLM_ACTIVITY_TIMEOUT_MS, parseActivityReport, type LlmActivityIdentity,
 } from "../src/shared/llm-activity.ts";
-import { FileLlmCatalogStore } from "../src/adapters/node/llm-catalog-store.ts";
-import { FileLlmCredentialStore } from "../src/adapters/node/llm-credential-store.ts";
-import { FileLlmPolicyStore } from "../src/adapters/node/llm-policy-store.ts";
+import { FileLlmCatalogStore } from "../src/adapters/node/llm/llm-catalog-store.ts";
+import { FileLlmCredentialStore } from "../src/adapters/node/llm/llm-credential-store.ts";
+import { FileLlmPolicyStore } from "../src/adapters/node/llm/llm-policy-store.ts";
 import { GlobalLlmService } from "../src/core/application/global-llm-service.ts";
 import { LLM_ERROR } from "../src/shared/llm-connections.ts";
 

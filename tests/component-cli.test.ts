@@ -10,7 +10,7 @@ import {
   dshPeerRangesFromPackages,
   unmetDshPeers,
   unmetInstalledThirdPartyDshPeers,
-} from "../src/adapters/node/component-cli.ts";
+} from "../src/adapters/node/payload/component-cli.ts";
 
 test("component peers reject an older CLI and accept the alpha release", () => {
   const root = mkdtempSync(join(tmpdir(), "dsh-cli-peers-"));

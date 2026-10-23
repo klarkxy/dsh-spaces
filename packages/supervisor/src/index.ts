@@ -6,7 +6,7 @@ import { assertSupportedNode } from "../../../src/shared/node-version.ts";
 import {
   bindSupervisorDiagnostics,
   type SupervisorDiagnosticsReporter,
-} from "../../../src/adapters/node/supervisor-diagnostics.ts";
+} from "../../../src/adapters/node/diagnostics/supervisor-diagnostics.ts";
 import {
   bindSupervisorComponentPayload,
   createWorkbenchSupervisor,
@@ -17,7 +17,7 @@ import {
   type SupervisorCliOptions,
   type WorkbenchSupervisorHandle,
 } from "../../../src/adapters/node/workbench-supervisor.ts";
-import type { ValidatedComponentPayload } from "../../../src/adapters/node/component-payload.ts";
+import type { ValidatedComponentPayload } from "../../../src/adapters/node/payload/component-payload.ts";
 
 export {
   bindSupervisorComponentPayload,

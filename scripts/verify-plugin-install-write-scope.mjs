@@ -48,7 +48,7 @@ import {
   writeJson,
   writePnpmShim,
 } from "./lib/distribution-harness.mjs";
-import { copyLinkedTree } from "../src/adapters/node/snapshot-store.ts";
+import { copyLinkedTree } from "../src/adapters/node/snapshots/snapshot-store.ts";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const THIS_FILE = fileURLToPath(import.meta.url);

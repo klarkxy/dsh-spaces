@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { WorkbenchLog, WORKBENCH_LOG_FILE, WORKBENCH_LOG_MAX_ENTRIES } from "../src/adapters/node/workbench-log.ts";
-import { WORKBENCH_CONTROL_DIR_NAME } from "../src/adapters/node/workbench-jobs.ts";
+import { WorkbenchLog, WORKBENCH_LOG_FILE, WORKBENCH_LOG_MAX_ENTRIES } from "../src/adapters/node/maintenance/workbench-log.ts";
+import { WORKBENCH_CONTROL_DIR_NAME } from "../src/adapters/node/maintenance/workbench-jobs.ts";
 
 const temps: string[] = [];
 

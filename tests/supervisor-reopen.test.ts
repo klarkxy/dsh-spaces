@@ -4,16 +4,16 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { HomeController, type HomeControlOwner } from "../src/adapters/node/home-controller.ts";
-import { retirePreviousSupervisor } from "../src/adapters/node/supervisor-launch.ts";
+import { HomeController, type HomeControlOwner } from "../src/adapters/node/home/home-controller.ts";
+import { retirePreviousSupervisor } from "../src/adapters/node/home/supervisor-launch.ts";
 import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor-attach.ts";
-import { WorkbenchJobStore } from "../src/adapters/node/workbench-jobs.ts";
+import { WorkbenchJobStore } from "../src/adapters/node/maintenance/workbench-jobs.ts";
 import { SpaceMessageRouter } from "../src/adapters/node/message-bus/router.ts";
 import { SupervisorLifecycle } from "../src/adapters/node/supervisor/lifecycle.ts";
 import { SpaceRunRegistry } from "../src/adapters/node/supervisor/space-runs.ts";
 import { SupervisorPlans } from "../src/adapters/node/supervisor/plans.ts";
-import { HomeOperationLock } from "../src/adapters/node/home-operation-lock.ts";
-import { ProfileRegistry } from "../src/adapters/node/profile-registry.ts";
+import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
+import { ProfileRegistry } from "../src/adapters/node/profile/profile-registry.ts";
 
 const homes: string[] = [];
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -25,8 +25,8 @@ function tempHome(): string {
 async function exitedHolder(home: string, kind = "web", endpoint = true, bindOrigin = true): Promise<HomeControlOwner> {
   const script = join(home, "holder.mts");
   writeFileSync(script, `
-import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home-controller.ts", import.meta.url).href)};
-import { writeEndpointFile, endpointHomeId, endpointServiceEpoch } from ${JSON.stringify(new URL("../src/adapters/node/supervisor-endpoint.ts", import.meta.url).href)};
+import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home/home-controller.ts", import.meta.url).href)};
+import { writeEndpointFile, endpointHomeId, endpointServiceEpoch } from ${JSON.stringify(new URL("../src/adapters/node/home/supervisor-endpoint.ts", import.meta.url).href)};
 import { join } from 'node:path';
 const home = process.argv[2];
 const controller = new HomeController(home);

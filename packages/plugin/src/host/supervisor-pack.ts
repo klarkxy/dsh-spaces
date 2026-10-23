@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { MANAGED_HOME_ENTRIES, RESTORE_STAGE_DIR } from "../../../../src/shared/snapshots";
-import { ensureNode, npmCliJs, setToolchainRoot } from "../../../../src/adapters/node/toolchain";
+import { ensureNode, npmCliJs, setToolchainRoot } from "../../../../src/adapters/node/runtime/toolchain";
 
 export const PACK_TIMEOUT_MS = 240_000;
 

@@ -9,7 +9,7 @@ import {
   listSpaceTemplates,
   saveSpaceTemplate,
   spaceTemplateId,
-} from "../src/adapters/node/space-templates.ts";
+} from "../src/adapters/node/products/space-templates.ts";
 import { workbenchProductResultSchema } from "../src/shared/workbench-product-schemas.ts";
 
 const temps: string[] = [];

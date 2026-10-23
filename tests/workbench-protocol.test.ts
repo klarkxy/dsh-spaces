@@ -19,7 +19,7 @@ import {
   digestHomeIdentity,
   parseMutationContext,
   type WorkbenchRevisionSpace,
-} from "../src/adapters/node/workbench-protocol.ts";
+} from "../src/adapters/node/server/workbench-protocol.ts";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../src/shared/workbench-product.ts";
 import { parsePlanRequest } from "../src/adapters/node/supervisor/input.ts";
 import { workbenchPlanRequestSchema } from "../packages/plugin/src/host/workbench-schemas.ts";

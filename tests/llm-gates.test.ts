@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 import { LLM_CAPABILITIES } from "../src/core/application/global-llm-host.ts";
 import { LLM_ERROR, parseCatalog } from "../src/shared/llm-connections.ts";
-import { readLaunchSnapshotFile } from "../src/adapters/node/llm-snapshot.ts";
+import { readLaunchSnapshotFile } from "../src/adapters/node/llm/llm-snapshot.ts";
 import { requireOfficialLlmAdapter } from "../packages/llm-bridge/src/official-host.ts";
 import { LLM_REQUIRED, listTarEntries, normalizePacked } from "../scripts/pack-spaces-plugin.mjs";
 
@@ -23,13 +23,13 @@ const LLM_FEATURE_GLOBS = [
   "src/shared/llm-share.ts",
   "src/core/application/global-llm-host.ts",
   "src/core/application/global-llm-service.ts",
-  "src/adapters/node/llm-catalog-store.ts",
-  "src/adapters/node/llm-credential-store.ts",
-  "src/adapters/node/llm-policy-store.ts",
-  "src/adapters/node/llm-operation-store.ts",
-  "src/adapters/node/llm-probe.ts",
-  "src/adapters/node/llm-snapshot.ts",
-  "src/adapters/node/llm-space-settings.ts",
+  "src/adapters/node/llm/llm-catalog-store.ts",
+  "src/adapters/node/llm/llm-credential-store.ts",
+  "src/adapters/node/llm/llm-policy-store.ts",
+  "src/adapters/node/llm/llm-operation-store.ts",
+  "src/adapters/node/llm/llm-probe.ts",
+  "src/adapters/node/llm/llm-snapshot.ts",
+  "src/adapters/node/llm/llm-space-settings.ts",
   "packages/llm-bridge/src/official-host.ts",
   "packages/llm-bridge/src/plugin.ts",
   "packages/llm-bridge/src/request-guard.ts",
@@ -168,7 +168,7 @@ test("A30 LLM feature paths have no retry, rollback, restore, or silent adapter 
     assert.equal(forbidden.test(text), false, rel);
     assert.doesNotMatch(text, /automatically (retry|restore|reinstall|fallback)/i);
   }
-  const probe = readFileSync(join(repo, "src/adapters/node/llm-probe.ts"), "utf8");
+  const probe = readFileSync(join(repo, "src/adapters/node/llm/llm-probe.ts"), "utf8");
   assert.match(probe, /no retry/);
   const host = readFileSync(join(repo, "src/core/application/global-llm-host.ts"), "utf8");
   assert.match(host, /was not replayed/);

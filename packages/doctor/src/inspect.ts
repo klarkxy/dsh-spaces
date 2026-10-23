@@ -5,11 +5,11 @@ import {
   HomeController,
   defaultPidAlive,
   type HomeControlInspect,
-} from "../../../src/adapters/node/home-controller.ts";
+} from "../../../src/adapters/node/home/home-controller.ts";
 import {
   WORKBENCH_JOBS_DIR_NAME,
-} from "../../../src/adapters/node/workbench-jobs.ts";
-import { HomeOperationLock, type HomeLockInspect } from "../../../src/adapters/node/home-operation-lock.ts";
+} from "../../../src/adapters/node/maintenance/workbench-jobs.ts";
+import { HomeOperationLock, type HomeLockInspect } from "../../../src/adapters/node/home/home-operation-lock.ts";
 import { normalizeSpacesFile } from "../../../src/core/domain/registry.ts";
 import { RESTORE_STAGE_DIR } from "../../../src/shared/snapshots.ts";
 import { PROFILE_NAME_RE, type SpacesFile } from "../../../src/shared/types.ts";

@@ -70,7 +70,7 @@ for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
 
 await buildNodeCli('packages/supervisor/src/index.ts', 'packages/supervisor/lib/index.js');
 await build({ ...common, platform: 'node', banner: { js: nodeRequire },
-  entryPoints: ['src/adapters/node/snapshot-worker.ts'], outfile: 'packages/supervisor/lib/snapshot-worker.mjs' });
+  entryPoints: ['src/adapters/node/snapshots/snapshot-worker.ts'], outfile: 'packages/supervisor/lib/snapshot-worker.mjs' });
 await copyFile(at('LICENSE'), at('packages/supervisor/LICENSE'));
 
 // These immutable program resources are copied out of profiles before launch.
@@ -102,7 +102,7 @@ async function writeSpacesComponentPayload() {
       platform: 'node',
       bundle: true,
       format: 'esm',
-      entryPoints: ['src/adapters/node/component-payload.ts'],
+      entryPoints: ['src/adapters/node/payload/component-payload.ts'],
       outfile,
       write: false,
     });

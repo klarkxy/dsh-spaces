@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync } from "../../shared/node/filesystem";
-import { managedCliPrefix } from "./dsh-cli";
+import { managedCliPrefix } from "./runtime/dsh-cli";
 import { assertSupportedNode } from "../../shared/node-version";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
@@ -7,30 +7,30 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { atomicWrite } from "./atomic";
 import { SpaceMessageRouter } from "./message-bus/router";
-import { CooperativeChildren } from "./cooperative-children";
-import { observeMaintenanceChild, withChildObservation } from "./owned-process-record";
-import { hasUnfinishedMaintenance, inspectHomeToolchain } from "./control-residue";
-import { DiagnosticsService, sanitizeLogText } from "./diagnostics";
-import { WorkbenchLog } from "./workbench-log";
-import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "./dsh-cli";
-import { assertNotRealHome, authorizeProductHome } from "./home-guard";
-import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./patch-writer";
-import { archiveAbsPath } from "./plugin-library";
-import { pluginAdd } from "./plugin-ops";
+import { CooperativeChildren } from "./runtime/cooperative-children";
+import { observeMaintenanceChild, withChildObservation } from "./runtime/owned-process-record";
+import { hasUnfinishedMaintenance, inspectHomeToolchain } from "./home/control-residue";
+import { DiagnosticsService, sanitizeLogText } from "./diagnostics/diagnostics";
+import { WorkbenchLog } from "./maintenance/workbench-log";
+import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "./runtime/dsh-cli";
+import { assertNotRealHome, authorizeProductHome } from "./home/home-guard";
+import { PatchWriter, SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "./profile/patch-writer";
+import { archiveAbsPath } from "./products/plugin-library";
+import { pluginAdd } from "./products/plugin-ops";
 import { lt as semverLt } from "semver";
-import { ProcessManager, type KillKind, type ProcessRuntime } from "./process-manager";
-import { writeSpaceLlmLaunchSnapshot } from "./llm-snapshot";
-import { FileLlmPolicyStore, llmPolicyPath } from "./llm-policy-store";
+import { ProcessManager, type KillKind, type ProcessRuntime } from "./runtime/process-manager";
+import { writeSpaceLlmLaunchSnapshot } from "./llm/llm-snapshot";
+import { FileLlmPolicyStore, llmPolicyPath } from "./llm/llm-policy-store";
 import { parsePolicy } from "../../shared/llm-connections";
-import { ProfileRegistry } from "./profile-registry";
+import { ProfileRegistry } from "./profile/profile-registry";
 import { compareScannedProfiles, defaultSpaceMeta } from "../../core/domain/registry";
-import { describeRuntime, readRuntimeRef } from "./runtime-descriptor";
-import { RuntimeStore } from "./runtime-store";
-import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile-settings";
-import { installedComponentMatches, migrateProfileToAlpha } from "./profile-alpha-migration";
-import { alignmentArchiveId, cliLoadError, unmetProfileDshRequirements } from "./component-cli";
-import { SnapshotExecutor } from "./snapshot-executor";
-import { setPackageSource, setToolchainRoot } from "./toolchain";
+import { describeRuntime, readRuntimeRef } from "./runtime/runtime-descriptor";
+import { RuntimeStore } from "./runtime/runtime-store";
+import { assertOwnedProfilePath, migrateLegacyProfileSettings } from "./profile/profile-settings";
+import { installedComponentMatches, migrateProfileToAlpha } from "./profile/profile-alpha-migration";
+import { alignmentArchiveId, cliLoadError, unmetProfileDshRequirements } from "./payload/component-cli";
+import { SnapshotExecutor } from "./snapshots/snapshot-executor";
+import { setPackageSource, setToolchainRoot } from "./runtime/toolchain";
 import type { ProfileStatus } from "../../shared/types";
 import { redactPublicReason } from "../../shared/public-reason";
 import type { SnapshotRuntime } from "../../shared/snapshots";
@@ -59,7 +59,7 @@ import type {
   WorkbenchProductRequest,
 } from "../../shared/workbench-product";
 import { parseWorkbenchProductCommand, parseWorkbenchProductRequest } from "../../shared/workbench-product-schemas";
-import { readSettings } from "./hub-settings";
+import { readSettings } from "./home/hub-settings";
 import {
   WORKBENCH_PROTOCOL_VERSION,
   WorkbenchProtocolConflictError,
@@ -69,18 +69,18 @@ import {
   deriveServiceEpoch,
   digestHomeIdentity,
   parseMutationContext,
-} from "./workbench-protocol";
-import { WorkbenchProductService } from "./workbench-products";
+} from "./server/workbench-protocol";
+import { WorkbenchProductService } from "./products/workbench-products";
 import {
   composeBlueprintRuntime,
   inspectBlueprintRuntime,
   resolveBlueprintModule,
-} from "./blueprint-runtime";
+} from "./blueprint/blueprint-runtime";
 import {
   isCompatibleDshCliVersion,
   NodeSpacesControl,
   type SpacesLoaderView,
-} from "./spaces-control";
+} from "./products/spaces-control";
 import {
   HOME_CONTROL_DIR_NAME,
   HomeControlBusyError,
@@ -88,20 +88,20 @@ import {
   defaultPidAlive,
   parseControlEndpoint,
   type PidAliveFn,
-} from "./home-controller";
+} from "./home/home-controller";
 import {
   validateComponentPayload,
   type ValidatedComponentPayload,
-} from "./component-payload";
-import { HomeOperationLock, canonicalHome } from "./home-operation-lock";
+} from "./payload/component-payload";
+import { HomeOperationLock, canonicalHome } from "./home/home-operation-lock";
 import {
   WorkbenchJobStore,
   type WorkbenchJobContext,
-} from "./workbench-jobs";
+} from "./maintenance/workbench-jobs";
 import {
   WorkbenchMaintenance as WorkbenchMaintenanceService,
-} from "./workbench-maintenance";
-import type { WorkbenchMaintenancePorts } from "./workbench-maintenance-ports";
+} from "./maintenance/workbench-maintenance";
+import type { WorkbenchMaintenancePorts } from "./maintenance/workbench-maintenance-ports";
 import {
   expectedAuthCookieName,
   renderEntryPage,
@@ -110,8 +110,8 @@ import {
   type WorkbenchApiMethod,
   type WorkbenchHttpRuntime,
   type ViewBootstrap,
-} from "./workbench-http";
-import { createHomeLlmHost } from "./llm-host";
+} from "./server/workbench-http";
+import { createHomeLlmHost } from "./llm/llm-host";
 import { GlobalLlmHost } from "../../core/application/global-llm-host";
 import type { LlmApiRequest, LlmApiResult } from "../../shared/llm-api";
 import { STOP_KEPT_REASON, WORKBENCH_ERROR, WorkbenchPublicError, WRITABLE_STARTUP_FAILED_REASON } from "./supervisor/errors";
@@ -128,7 +128,7 @@ import {
 import { SupervisorInstanceRecords } from "./supervisor/instance-records";
 import { SupervisorLifecycle } from "./supervisor/lifecycle";
 import { SupervisorLlm } from "./supervisor/llm";
-import { SupervisorLlmDelegation } from "./llm-delegation/supervisor";
+import { SupervisorLlmDelegation } from "./llm/delegation";
 import {
   bindSelectedCli,
   defaultSnapshotWorkerFile,
@@ -148,7 +148,7 @@ import type {
   WorkbenchSupervisorOptions,
 } from "./supervisor/types";
 
-export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./workbench-http";
+export { WORKBENCH_API_METHODS, expectedAuthCookieName } from "./server/workbench-http";
 export { isCompatibleDshCliVersion };
 export { WORKBENCH_ERROR, WorkbenchPublicError };
 export type { WorkbenchErrorCode } from "./supervisor/errors";
@@ -1936,7 +1936,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.options.runCli) return this.options.runCli(args);
     const bin = this.resolveCliBin(profile);
     if (!bin) throw new WorkbenchPublicError("workbench/incompatible");
-    const { spawnBoundCli } = await import("./spaces-control.ts");
+    const { spawnBoundCli } = await import("./products/spaces-control.ts");
     return spawnBoundCli(this.nodeExe, bin, this.home, { ...process.env, DSH_HOME: this.home }, args);
   }
 

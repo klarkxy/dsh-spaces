@@ -15,8 +15,8 @@ import {
   spawnBoundCli,
   type BoundCliResult,
   type SpacesLoaderView,
-} from "../src/adapters/node/spaces-control";
-import { HomeOperationLock } from "../src/adapters/node/home-operation-lock";
+} from "../src/adapters/node/products/spaces-control";
+import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock";
 import { writeRegisteredSpace } from "./fixtures/space.ts";
 import { SpacesHost } from "../packages/plugin/src/host/spaces-service";
 import { SPACES_REMOTE_CODES, WORKBENCH_REMOTE_CODES } from "../packages/plugin/src/host/remote-errors";

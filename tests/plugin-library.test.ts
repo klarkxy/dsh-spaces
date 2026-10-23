@@ -13,15 +13,15 @@ import {
   readPluginLibrary,
   syncLibraryFromProfiles,
   upsertLibraryEntry,
-} from "../src/adapters/node/plugin-library.ts";
+} from "../src/adapters/node/products/plugin-library.ts";
 import {
   downloadPlugin,
   listPluginLibrary,
   listProfilePlugins,
   removeDownloadedPlugin,
   setSpacePlugin,
-} from "../src/adapters/node/plugin-ops.ts";
-import { enqueuePlugin } from "../src/adapters/node/dsh-cli.ts";
+} from "../src/adapters/node/products/plugin-ops.ts";
+import { enqueuePlugin } from "../src/adapters/node/runtime/dsh-cli.ts";
 import { applyAppLocale, t } from "../src/shared/i18n/index.ts";
 import { setTimeout as delay } from "node:timers/promises";
 

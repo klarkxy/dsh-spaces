@@ -20,9 +20,9 @@ import { fileURLToPath } from "node:url";
 import { after, afterEach, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { build } from "esbuild";
-import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime-store.ts";
-import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshot-executor.ts";
-import { retargetTree, SnapshotStore } from "../src/adapters/node/snapshot-store.ts";
+import { RuntimeStore, type RunProcessFn } from "../src/adapters/node/runtime/runtime-store.ts";
+import { runSnapshotWorker, SnapshotExecutor } from "../src/adapters/node/snapshots/snapshot-executor.ts";
+import { retargetTree, SnapshotStore } from "../src/adapters/node/snapshots/snapshot-store.ts";
 import { RESTORE_STAGE_DIR, type SnapshotRuntime } from "../src/shared/snapshots.ts";
 
 const FILE_COUNT = 900;
@@ -227,7 +227,7 @@ async function compileWorker(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "dsh-snap-worker-"));
   assertTempPath(dir);
   const outfile = join(dir, "snapshot-worker.mjs");
-  const src = join(repoRoot, "src", "adapters/node", "snapshot-worker.ts");
+  const src = join(repoRoot, "src", "adapters/node/snapshots", "snapshot-worker.ts");
   const bundle = await build({
     absWorkingDir: repoRoot,
     entryPoints: [src],

@@ -16,14 +16,14 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { Script } from "node:vm";
 import { basename, dirname, join } from "node:path";
-import { archiveAbsPath } from "../src/adapters/node/plugin-library.ts";
+import { archiveAbsPath } from "../src/adapters/node/products/plugin-library.ts";
 import { afterEach, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { satisfies } from "semver";
 import { SPACES_MIN_DSH_VERSION } from "../src/shared/runtime.ts";
-import { HomeController } from "../src/adapters/node/home-controller.ts";
-import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home-operation-lock.ts";
+import { HomeController } from "../src/adapters/node/home/home-controller.ts";
+import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home/home-operation-lock.ts";
 import {
   createWorkbenchSupervisor,
   WorkbenchSupervisorRuntime,
@@ -39,11 +39,11 @@ import {
   startWorkbenchHttp,
   WORKBENCH_HTTP_BODY_LIMIT,
   type WorkbenchHttpRuntime,
-} from "../src/adapters/node/workbench-http.ts";
-import { WorkbenchMaintenance as WorkbenchMaintenanceService } from "../src/adapters/node/workbench-maintenance.ts";
-import type { PatchWriter } from "../src/adapters/node/patch-writer.ts";
-import type { ProcessRuntime } from "../src/adapters/node/process-manager.ts";
-import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES, type ValidatedComponentPayload } from "../src/adapters/node/component-payload.ts";
+} from "../src/adapters/node/server/workbench-http.ts";
+import { WorkbenchMaintenance as WorkbenchMaintenanceService } from "../src/adapters/node/maintenance/workbench-maintenance.ts";
+import type { PatchWriter } from "../src/adapters/node/profile/patch-writer.ts";
+import type { ProcessRuntime } from "../src/adapters/node/runtime/process-manager.ts";
+import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES, type ValidatedComponentPayload } from "../src/adapters/node/payload/component-payload.ts";
 import type { WorkbenchPlan, WorkbenchPlanRequest } from "../src/shared/workbench.ts";
 
 const temps: string[] = [];
