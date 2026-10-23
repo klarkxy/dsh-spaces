@@ -75,8 +75,10 @@ const apiDefinition = readFileSync(join(REPO, "src/shared/workbench.ts"), "utf8"
 if (!apiDefinition.includes("llmCredential:")) fail("WORKBENCH_API must define llmCredential");
 
 const nodeHttp = readFileSync(join(REPO, "src/adapters/node/server/workbench-http.ts"), "utf8");
-if (!nodeHttp.includes("WORKBENCH_API_METHODS") || !nodeHttp.includes("shared/workbench")) {
-  fail("Supervisor HTTP methods must derive from the canonical WORKBENCH_API");
+// The server's method whitelist must BE the canonical list, not a parallel copy:
+// it re-exports WORKBENCH_API_METHODS from shared/workbench and gates requests with it.
+if (!nodeHttp.includes('from "../../../shared/workbench"') || !nodeHttp.includes("export { WORKBENCH_API_METHODS }") || !nodeHttp.includes("(WORKBENCH_API_METHODS as readonly string[]).includes(")) {
+  fail("Supervisor HTTP method gate must be the canonical WORKBENCH_API_METHODS re-export");
 }
 
 const hostHttp = readFileSync(join(REPO, "packages/plugin/src/host/workbench-http.ts"), "utf8");

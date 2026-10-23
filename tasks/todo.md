@@ -13,6 +13,7 @@
 - [x] 第六波 god 文件拆分（facade 保路径、零 importer 改动，四个 worker 并行）：blueprint-workbench 2914→16 部件＋10 行 facade（blueprint/blueprint-workbench/）；workbench-supervisor 2008→1309 行，supervisor/ 新增 spaces/space-lifecycle/space-commands/state/maintenance/toolchain/job-context 七个部件；workbench-maintenance 1989→30 行 facade＋15 部件（maintenance/workbench-maintenance/）；store.ts 2092→32 行 facade＋16 模块（workbench/store/，类按部件继承链）。四个拆分均有脚本化导出面相等证明与逐字移动对照（164/164、113/113、145/145、52/52）。
 - [x] 集成修复两处：validate-llm-secrets.mjs 改钉单源结构（WORKBENCH_API 定义＋server/manager/codec 三层派生），修掉 API 单源化引入的门禁回归；profile-02-transition 测试跟随 startOwned 新宿主（SupervisorSpaceLifecycle.prototype＋{host} 接收者），39/39 通过。
 - [x] 已知并行抖动定位：workbench-supervisor.test.ts 夹具绑定固定端口段 34000–34999，多套件并发时 EADDRINUSE 表现为管理器崩溃；A/B 对照纯净基线证明为既有现象（基线并发失败更多），单跑 59/59 通过。
+- [x] 第三至六波独立验收 SHIP-WITH-NOTES：wire 探针前后 SHA-256 被验收方独立复现（1D5F9444…AA99）、四个 facade 导出面与逐字移动抽查通过、测试组构成 11 组逐项集合相等、check-test-lists 破坏实验证明失败闭合并即时清理。CONCERN 已修：secrets 门禁 server 侧断言由子串代理改为钉死「白名单即权威表再导出」组合关系（:75 权威定义 + re-export + 门控调用三literal 同断）；docs/workbench-api-surface.md 一处导出笔误（WORKBENCH_API_METHOD）修正。遗留 N-2/N-3 接受：wire 探针为沙箱产物未入库、MANAGER_METHODS 类型由字面量元组放宽为 WorkbenchApiMethod[]（值与序不变）。
 
 # 2026-10-22 Desktop UI 链接安装与手动服务操作
 

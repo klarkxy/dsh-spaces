@@ -187,7 +187,7 @@ throws instead of registering a wrong surface.
 
 | File | Change | Derived from |
 |---|---|---|
-| `src/shared/workbench.ts` | new: `WORKBENCH_API`, `WORKBENCH_API_METHODS`, `WORKBENCH_API_METHOD`, `WorkbenchApiArgs/Result/ArgNames`, `WorkbenchApiOptionalMethod/RequiredMethod`; `WorkbenchApi` is now derived | — (the source) |
+| `src/shared/workbench.ts` | new: `WORKBENCH_API`, `WORKBENCH_API_METHODS`, `WorkbenchApiMethod`, `WorkbenchApiArgs/Result/ArgNames`, `WorkbenchApiOptionalMethod/RequiredMethod`; `WorkbenchApi` is now derived | — (the source) |
 | `packages/plugin/src/host/workbench-api.ts` | **new**: `WORKBENCH_API_CODECS` (zod codec + type symbol per method/parameter/result) | `WORKBENCH_API` (mapped type) |
 | `packages/plugin/src/host/workbench-manager.ts` | the 15 `@Remote` decorators replaced by `registerWorkbenchRemoteMethods()`; the class now `implements WorkbenchApi` | `WORKBENCH_API_METHODS` |
 | `packages/plugin/src/typert.host.ts` | the 15 hand-written `invocation(...)` rows replaced by `workbenchInvocations`; `MANAGER_METHODS` derived | `WORKBENCH_API` + `WORKBENCH_API_CODECS` |
