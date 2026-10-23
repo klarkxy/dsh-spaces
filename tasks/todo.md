@@ -6,6 +6,11 @@
 - [x] 分层 DAG 修复：supervisor 端点格式移入 src/adapters/node、loopback 解析移入 src/shared，LLM activity 协议移入 src/shared（llm-bridge 再导出），llm-share/llm-connections 下移 src/shared（selectSharedConnections 经 core/domain/llm-resolution 再导出），孤儿 @dsh-spaces/core 整包删除，客户端构建守卫由失效的 src/main 改拦 src/adapters 与 src/shared/node。
 - [x] 合并树验证：check:test-lists、typecheck（node/web/spaces/tests）、build 与 test／spaces／workbench／workbench:recovery／llm／blueprints／browser 全绿。仅本地提交，不推送。
 - [x] 第二波：src/adapters/node 按领域拆成 11 个目录（home／llm／blueprint／maintenance／products／runtime／snapshots／server／diagnostics／payload／profile），63 个文件 git mv 纯移动、160 文件 635 处导入与路径字面量重写；字节级对照证明零逻辑变化。全量检查组与包预检通过；中央抽查 typecheck×3／build／npm test 通过（npm test 中 process-manager 端口等待超时按惯例单独复查 25/25 通过，并发负载下抖动的既有现象）。仅本地提交，不推送。
+- [x] 独立验收 SHIP-WITH-NOTES 后修复 4 条 notes（UI README 重复词、blueprint NOTICE 补当前路径、llm-activity 去掉 NodeJS 类型、台账冻结名单补根目录计划书）。
+- [x] 第三波命名统一：HomeController→HomeLease（home/home-lease.ts，租约不是控制器）；SpacesControlApi→SpacesApi（shared 接口）、NodeSpacesControl→NodeSpacesService（products/spaces-service.ts 实现）、SpacesHost→SpacesRemote（host Typert 代理）；workbench-contract.md 现行模块边界段跟随新路径。wire 面零改动（@Remote 字符串、Typert 命名空间、清单组件名、落盘路径与协议枚举均未动），全量检查组与包预检通过。
+- [x] 第四波 tests 按域分 18 个子目录：106 个测试文件 git mv，590 条相对路径引用零漂移，各测试组文件集合与基线逐项证明一致；check-test-lists 升级为递归收集并解析目录参数；发现 tsx 目录发现不含 .tsx 的实证并以「目录＋显式 tsx」形式规避。
+- [x] 第五波 WorkbenchApi 单源化：权威定义 WORKBENCH_API（src/shared/workbench.ts），接口、host @Remote 注册、Typert 描述符、双端客户端与 Supervisor 方法白名单全部由它派生（原表面实际手写在九处）；host 侧 codec 表按层隔离 zod。前后 wire 探针转储 SHA-256 相同（标记、24 描述符、codec 行为摘要、15 RPC、15 HTTP）。llm/llmCredential 保留原有裸体会话约定，Supervisor 手写解析器是不同严格度的校验器未并合；发现既有 llmApiResultSchema 多收 catalogRevision 的偏差一处，保留待裁。仅本地提交，不推送。
+- [ ] 第六波：god 文件拆分（blueprint-workbench 2914 行、workbench-maintenance 1989、workbench/store 1957、workbench-supervisor ~1950，facade 保路径），进行中。
 
 # 2026-10-22 Desktop UI 链接安装与手动服务操作
 

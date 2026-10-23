@@ -47,7 +47,7 @@ jobs:
         run: |
           $bin = Join-Path ((npm root -g).Trim()) "@deepseek-ai/dsh/lib/bin.js"
           $env:DSH_TEST_CLI_BIN = $bin
-          node --import tsx --test tests/compatible-dsh-cli.test.ts
+          node --import tsx --test tests/products/compatible-dsh-cli.test.ts
       - name: Pack preflight
         run: node scripts/pack-spaces-plugin.mjs --preflight
       - name: Standard-install static evidence
@@ -78,7 +78,7 @@ jobs:
       - run: npm run build:spaces
       - run: npx playwright install chromium
       - name: Fit icon browser
-        run: node --import tsx --test tests/fit-icon-browser.test.ts
+        run: node --import tsx --test tests/ui/fit-icon-browser.test.ts
       - run: npm run test:llm:browser
       - name: Install official DSH 0.2 CLI and package manager for acceptance
         run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.2.1-rc.2 pnpm@10.29.2 --no-audit --no-fund

@@ -7,9 +7,9 @@ on:
       - 'src/adapters/node/workbench*'
       - 'src/adapters/node/*/workbench*'
       - 'src/shared/space-host.ts'
-      - 'tests/portable-host*'
+      - 'tests/native/portable-host*'
       - 'tests/fixtures/portable-host/**'
-      - 'tests/workbench-plugin.test.ts'
+      - 'tests/products/workbench-plugin.test.ts'
       - 'scripts/verify-plugin-standard-install.mjs'
       - '.github/workflows/portable-host.yml'
 permissions:
@@ -34,11 +34,11 @@ jobs:
 
       - run: npm run build:blueprint
       - run: npm run typecheck:spaces && npm run typecheck
-      - run: node --import tsx --test tests/portable-host.test.ts tests/workbench-plugin.test.ts tests/spaces-host.test.ts tests/workbench-ui.test.tsx tests/workbench-http-port.test.ts
+      - run: node --import tsx --test tests/native/portable-host.test.ts tests/products/workbench-plugin.test.ts tests/spaces/spaces-host.test.ts tests/ui/workbench-ui.test.tsx tests/server/workbench-http-port.test.ts
       - run: npm run build:spaces
       - run: npx --no-install playwright install --with-deps chromium
       - name: Actual browser DOM, origin-bound portal and preserved native application
-        run: node --import tsx --test tests/portable-host-dom.test.ts tests/workbench-ui-dom.test.ts
+        run: node --import tsx --test tests/ui/portable-host-dom.test.ts tests/ui/workbench-ui-dom.test.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

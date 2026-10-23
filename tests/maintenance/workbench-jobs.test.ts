@@ -1,0 +1,1045 @@
+import { sanitizeJobText } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
+import assert from "node:assert/strict";
+import { LLM_ERROR, LlmConfigError } from "../../src/shared/llm-connections.ts";
+import { WorkbenchPublicError } from "../../src/adapters/node/supervisor/errors.ts";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  INTERRUPTED_JOB_MESSAGE,
+  WORKBENCH_CONTROL_DIR_NAME,
+  WORKBENCH_JOB_ERROR,
+  WORKBENCH_JOBS_DIR_NAME,
+  WorkbenchJobAbortError,
+  WorkbenchJobError,
+  WorkbenchJobStore,
+  publicJobKeys,
+  type WorkbenchJobHandler,
+} from "../../src/adapters/node/maintenance/workbench-jobs.ts";
+import { formatWorkbenchFailure } from "../../src/shared/workbench.ts";
+import type { WorkbenchCommand } from "../../src/shared/workbench.ts";
+
+const temps: string[] = [];
+
+afterEach(() => {
+  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function tempHome(): string {
+  const home = mkdtempSync(join(tmpdir(), "dsh-spaces-jobs-"));
+  temps.push(home);
+  return home;
+}
+
+function jobsDir(home: string): string {
+  return join(home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME);
+}
+
+function jobFile(home: string, id: string): string {
+  return join(jobsDir(home), `${id}.json`);
+}
+
+function startCmd(spaceId = "alpha"): WorkbenchCommand {
+  return { kind: "space.start", spaceId };
+}
+
+function noop(): WorkbenchJobHandler {
+  return async () => undefined;
+}
+
+async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 80; i++) {
+    if (predicate()) return;
+    await delay(10);
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+function latch(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+test("same request id concurrent submit runs the handler once", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const started: number[] = [];
+  const gate = latch();
+  const handler: WorkbenchJobHandler = async () => {
+    started.push(started.length + 1);
+    await gate.promise;
+  };
+
+  const [first, second] = await Promise.all([
+    store.submit(startCmd(), "req-1", handler),
+    store.submit({ spaceId: "alpha", kind: "space.start" }, "req-1", async () => {
+      started.push(99);
+    }),
+  ]);
+
+  assert.equal(first.id, "req-1");
+  assert.equal(second.id, first.id);
+  assert.equal(first.status, "queued");
+  await waitUntil(() => store.job("req-1").status === "running", "running");
+  gate.release();
+  await store.whenIdle();
+  assert.deepEqual(started, [1]);
+  assert.equal(store.job("req-1").status, "succeeded");
+});
+
+test("Browser create preset survives the actual job command validator", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  const command: WorkbenchCommand = { kind: "space.create", input: { name: "browser", browser: true, useSharedLlm: false } };
+  await store.submit(command, "browser-create", noop());
+  await store.whenIdle();
+  const record = JSON.parse(readFileSync(jobFile(home, "browser-create"), "utf8")) as { command: WorkbenchCommand };
+  assert.deepEqual(record.command, command);
+  assert.equal(store.job("browser-create").status, "succeeded");
+  await assert.rejects(() => store.submit({ kind: "space.create", input: { name: "other", browser: "yes" } } as never,
+    "browser-invalid", noop()), { code: "workbench/invalid-input" });
+});
+
+test('main model create choice survives job parsing and rejects ambiguous legacy choices',async()=>{
+  const home=tempHome(),store=new WorkbenchJobStore({home});
+  const command:WorkbenchCommand={kind:'space.create',input:{name:'main-model',modelSource:'main'}};
+  await store.submit(command,'main-create',noop());await store.whenIdle();
+  assert.deepEqual(JSON.parse(readFileSync(jobFile(home,'main-create'),'utf8')).command,command);
+  for(const input of [{name:'bad',modelSource:'other'},{name:'bad',modelSource:'main',useSharedLlm:true}])await assert.rejects(()=>store.submit({kind:'space.create',input} as never,'bad-create',noop()),{code:'workbench/invalid-input'});
+});
+
+test("handler failure is a failed job and does not block later work", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(startCmd(), "uncertain", async () => {
+    throw new WorkbenchJobError("workbench/failed", WORKBENCH_JOB_ERROR["workbench/failed"], {
+      spaceId: "alpha",
+      stage: "start",
+      pluginAttribution: "unknown",
+    });
+  });
+  await store.whenIdle();
+  assert.equal(store.job("uncertain").status, "failed");
+  assert.equal(store.job("uncertain").error?.spaceId, "alpha");
+  assert.equal(store.job("uncertain").error?.pluginAttribution, "unknown");
+  let called = false;
+  await store.submit(startCmd("beta"), "later", async () => { called = true; });
+  await store.whenIdle();
+  assert.equal(called, true);
+  assert.equal(store.job("later").status, "succeeded");
+});
+
+test("structured failure reasons survive public projection, persistence and reload", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  const failures = [
+    { id: "stale-epoch", code: "workbench/conflict", message: "The service epoch or state revision does not match." },
+    { id: "missing-space", code: "workbench/not-found", message: "That item was not found." },
+    { id: "upstream-code", code: "DSH_BUNDLE_MISSING", message: "Cannot resolve the profile bundle.", expectedCode: "workbench/failed" },
+    { id: "permission", code: "workbench/failed", message: "EACCES: permission denied, lstat 'C:\\private\\snapshot' token=test-token password=test-password", expected: "EACCES: permission denied, lstat '[path]' token=[redacted] password=[redacted]" },
+  ];
+  for (const failure of failures) {
+    await store.submit(startCmd(), failure.id, async () => { throw { code: failure.code, message: failure.message }; });
+  }
+  await store.whenIdle();
+  const reloaded = new WorkbenchJobStore({ home });
+  for (const failure of failures) {
+    const expected = failure.expected ?? failure.message;
+    for (const current of [store, reloaded]) {
+      const job = current.job(failure.id);
+      assert.equal(job.status, "failed");
+      assert.equal(job.error?.code, failure.expectedCode ?? failure.code);
+      assert.equal(job.error?.message, expected);
+      assert.equal(job.message, expected);
+      assert.equal(current.list().find(item => item.id === failure.id)?.error?.message, expected);
+    }
+    const stored = JSON.parse(readFileSync(jobFile(home, failure.id), "utf8"));
+    assert.equal(stored.error.message, expected);
+  }
+});
+
+test("DSH bundle failures keep the reason without upstream install advice", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "missing-bundle", async () => {
+    throw new Error('dsh: cannot resolve profile bundle "@dsh-spaces/qa-missing-dependency" from the dsh installation or C:\\private\\profile; run \'dsh plugin --profile space-qa-failure install\' if its dependency is not installed');
+  });
+  await store.whenIdle();
+  const expected = 'dsh: cannot resolve profile bundle "@dsh-spaces/qa-missing-dependency" from the dsh installation or [path]';
+  for (const current of [store, new WorkbenchJobStore({ home })]) {
+    assert.equal(current.job("missing-bundle").message, expected);
+    assert.equal(current.job("missing-bundle").error?.message, expected);
+  }
+});
+
+test("quoted and serialized credentials are redacted before persistence and on historical readback", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  const messages = [
+    'upstream rejected {"password":"synthetic-private-password","token":"synthetic-private-token"}',
+    String.raw`upstream rejected {"access_token":"synthetic-private-escaped\"tail","apiKey":"synthetic-private-api"}`,
+    "upstream rejected {'password':'synthetic-private-single','accessKey':'synthetic-private-key'}",
+    String.raw`upstream rejected {\"token\":\"synthetic-private-serialized\"}`,
+    String.raw`upstream rejected {"to\u006ben":"synthetic-private-unicode"}`,
+    '{"reason":"password=synthetic-private-nested"}',
+    "{'reason':'password=synthetic-private-single-nested'}",
+    'upstream rejected {"authorization":"Basic synthetic-private-basic","cookie":"a=synthetic-private-cookie; b=value"}',
+    '{"headers":{"set-cookie":["sid=synthetic-private-array; HttpOnly"]}}',
+    '{"token":{"value":"synthetic-private-object"}}',
+    String.raw`{"to\u006ben":["synthetic-private-unicode-array"]}`,
+    "apiKey: |\n  synthetic-private-yaml-block",
+    "password: >-\n  synthetic-private-yaml-folded",
+    "token: first-line\n  synthetic-private-yaml-continuation",
+    JSON.stringify({ diagnostic: "apiKey: |\n  synthetic-private-nested-yaml-block" }),
+    JSON.stringify({ diagnostic: "password: >-\n  synthetic-private-nested-yaml-folded" }),
+    JSON.stringify({ diagnostic: "token: first-line\n  synthetic-private-nested-yaml-continuation" }),
+    JSON.stringify({ diagnostic: '{"token":["synthetic-private-nested-array"]}' }),
+    JSON.stringify("apiKey: |\n  synthetic-private-standalone-yaml"),
+    JSON.stringify(["apiKey: |\n  synthetic-private-array-yaml"]),
+    JSON.stringify({ diagnostics: ["apiKey: |\n  synthetic-private-field-array-yaml"] }),
+  ];
+  for (const [index, message] of messages.entries()) {
+    await store.submit(startCmd(), `secret-form-${index}`, async () => { throw { code: "NPM_FAILURE", message }; });
+  }
+  await store.whenIdle();
+  for (const [index, message] of messages.entries()) {
+    const id = `secret-form-${index}`;
+    const file = jobFile(home, id);
+    assert.doesNotMatch(readFileSync(file, "utf8"), /synthetic-private/);
+    for (const current of [store, new WorkbenchJobStore({ home })]) {
+      assert.doesNotMatch(JSON.stringify(current.job(id)), /synthetic-private/);
+      assert.doesNotMatch(JSON.stringify(current.list()), /synthetic-private/);
+    }
+    // Existing records are evidence, not a migration target. Public projection
+    // must still be safe when opening an older unredacted terminal record.
+    const record = JSON.parse(readFileSync(file, "utf8"));
+    record.error.message = message; record.message = message;
+    const bytes = JSON.stringify(record);
+    writeFileSync(file, bytes);
+    assert.doesNotMatch(JSON.stringify(new WorkbenchJobStore({ home }).job(id)), /synthetic-private/);
+    assert.equal(readFileSync(file, "utf8"), bytes);
+  }
+});
+
+test("reported failure text remains bounded and chat payloads do not become reasons", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "long-reason", async () => {
+    throw { code: "workbench/conflict", message: `State changed: ${"x".repeat(800)}` };
+  });
+  await store.submit(startCmd(), "chat-payload", async () => {
+    throw { code: "workbench/failed", message: '{"role":"user","content":"private-chat-sentinel"}' };
+  });
+  await store.submit(startCmd(), "empty-reason", async () => { throw { code: "workbench/not-found" }; });
+  await store.whenIdle();
+  for (const current of [store, new WorkbenchJobStore({ home })]) {
+    assert.equal(current.job("long-reason").error?.message.length, 500);
+    assert.match(current.job("long-reason").error?.message ?? "", /^State changed:/);
+    assert.equal(current.job("chat-payload").error?.message, WORKBENCH_JOB_ERROR["workbench/failed"]);
+    assert.equal(current.job("empty-reason").error?.message, WORKBENCH_JOB_ERROR["workbench/not-found"]);
+  }
+  assert.equal(readFileSync(jobFile(home, "chat-payload"), "utf8").includes("private-chat-sentinel"), false);
+});
+
+test("same request id with a different payload is rejected", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const gate = latch();
+  const first = await store.submit(startCmd("alpha"), "req-2", async () => {
+    await gate.promise;
+  });
+  await waitUntil(() => store.job("req-2").status === "running", "running");
+  await assert.rejects(
+    () => store.submit(startCmd("beta"), "req-2", noop()),
+    (error: unknown) => {
+      assert.ok(error instanceof WorkbenchJobError);
+      assert.equal(error.code, "workbench/conflict");
+      return true;
+    },
+  );
+  gate.release();
+  await store.whenIdle();
+  assert.equal(first.kind, "space.start");
+  assert.equal(store.job("req-2").status, "succeeded");
+});
+
+test("extra command fields are rejected instead of being ignored", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await assert.rejects(
+    () =>
+      store.submit(
+        { kind: "space.start", spaceId: "alpha", extra: true } as unknown as WorkbenchCommand,
+        "req-extra",
+        noop(),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof WorkbenchJobError);
+      assert.equal(error.code, "workbench/invalid-input");
+      return true;
+    },
+  );
+  assert.deepEqual(store.list(), []);
+});
+
+test("known LLM errors retain their code through public projection and reload", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "llm-busy-error", async () => {
+    throw new LlmConfigError(LLM_ERROR.SPACE_BUSY, "space is busy; it was not force-stopped", { spaceId: "alpha" });
+  });
+  await store.whenIdle();
+  assert.equal(store.job("llm-busy-error").error?.code, LLM_ERROR.SPACE_BUSY);
+  const reloaded = new WorkbenchJobStore({ home });
+  assert.equal(reloaded.job("llm-busy-error").error?.code, LLM_ERROR.SPACE_BUSY);
+});
+
+test("an unavailable alignment barrier retains its code and sanitized cause through reload", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  await store.submit(startCmd(), "alignment-unavailable", async () => {
+    throw new WorkbenchPublicError("workbench/unavailable", "Manager alignment failed at H:\\private\\artifact.tgz token=synthetic");
+  });
+  await store.whenIdle();
+  for (const observed of [store, new WorkbenchJobStore({ home })]) {
+    assert.equal(observed.job("alignment-unavailable").error?.code, "workbench/unavailable");
+    assert.match(observed.job("alignment-unavailable").error?.message ?? "", /Manager alignment failed/);
+    assert.doesNotMatch(observed.job("alignment-unavailable").error?.message ?? "", /private|artifact\.tgz|synthetic/);
+  }
+});
+
+test("a persist failure before enqueue does not run the handler", async () => {
+  const home = tempHome();
+  let ran = 0;
+  const store = new WorkbenchJobStore({
+    home,
+    inject: (op) => {
+      if (op === "write") throw new Error("EACCES D:\\secret\\jobs\\token=abc cookie=session");
+    },
+  });
+  await assert.rejects(
+    () =>
+      store.submit(startCmd(), "req-3", async () => {
+        ran += 1;
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof WorkbenchJobError);
+      assert.equal(error.code, "workbench/persist-failed");
+      assert.equal(error.message.includes("D:"), false);
+      assert.equal(error.message.includes("token=abc"), false);
+      assert.equal(error.message.includes("cookie=session"), false);
+      assert.equal(error.message.includes("secret"), false);
+      return true;
+    },
+  );
+  assert.equal(ran, 0);
+  assert.deepEqual(store.list(), []);
+  assert.equal(existsSync(jobFile(home, "req-3")), false);
+});
+
+test("cancelling a queued job becomes terminal without running it", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const gate = latch();
+  let ranQueued = false;
+  await store.submit(startCmd("one"), "job-a", async (ctx) => {
+    ctx.cancellable(true);
+    await gate.promise;
+  });
+  const queued = await store.submit(startCmd("two"), "job-b", async () => {
+    ranQueued = true;
+  });
+  assert.equal(queued.status, "queued");
+  const cancelled = await store.cancel("job-b");
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.canCancel, false);
+  assert.equal(store.job("job-b").status, "cancelled");
+  gate.release();
+  await store.whenIdle();
+  assert.equal(ranQueued, false);
+  assert.equal(store.job("job-a").status, "succeeded");
+  assert.equal(store.job("job-b").status, "cancelled");
+});
+
+test("an irreversible running phase rejects cancel and keeps the real result", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const gate = latch();
+  void store.submit(startCmd(), "job-irrev", async (ctx) => {
+    ctx.cancellable(false);
+    ctx.phase("commit");
+    await gate.promise;
+    return { spaceId: "alpha" };
+  });
+  await waitUntil(() => store.job("job-irrev").phase === "commit", "commit phase");
+  await assert.rejects(
+    () => store.cancel("job-irrev"),
+    (error: unknown) => {
+      assert.ok(error instanceof WorkbenchJobError);
+      assert.equal(error.code, "workbench/not-cancellable");
+      return true;
+    },
+  );
+  assert.equal(store.job("job-irrev").status, "running");
+  gate.release();
+  await store.whenIdle();
+  const done = store.job("job-irrev");
+  assert.equal(done.status, "succeeded");
+  assert.equal(done.result?.spaceId, "alpha");
+});
+
+test("a cancellable running job stays running until the handler confirms abort", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const started = latch();
+  void store.submit(startCmd(), "job-abort", async (ctx) => {
+    ctx.cancellable(true);
+    ctx.phase("copy");
+    started.release();
+    await new Promise<void>((_resolve, reject) => {
+      ctx.signal.addEventListener("abort", () => reject(new WorkbenchJobAbortError()), { once: true });
+    });
+  });
+  await started.promise;
+  await waitUntil(() => store.job("job-abort").canCancel, "cancellable");
+  const afterCancel = await store.cancel("job-abort");
+  assert.equal(afterCancel.status, "running");
+  await store.whenIdle();
+  assert.equal(store.job("job-abort").status, "cancelled");
+});
+
+test("ignoring abort keeps the handler's real result", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const gate = latch();
+  void store.submit(startCmd(), "job-ignore", async (ctx) => {
+    ctx.cancellable(true);
+    await gate.promise;
+    ctx.result({ spaceId: "alpha" });
+  });
+  await waitUntil(() => store.job("job-ignore").canCancel, "cancellable");
+  const afterCancel = await store.cancel("job-ignore");
+  assert.equal(afterCancel.status, "running");
+  gate.release();
+  await store.whenIdle();
+  const done = store.job("job-ignore");
+  assert.equal(done.status, "succeeded");
+  assert.equal(done.result?.spaceId, "alpha");
+});
+
+test("startup leftover queued jobs are failed interrupted and are not replayed", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  const createdAt = "2026-09-12T00:00:00.000Z";
+  writeFileSync(
+    jobFile(home, "legacy-1"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      id: "legacy-1",
+      requestId: "legacy-1",
+      kind: "space.start",
+      command: { kind: "space.start", spaceId: "alpha" },
+      commandCanonical: '{"kind":"space.start","spaceId":"alpha"}',
+      status: "queued",
+      phase: "copy-files",
+      message: "copying",
+      affectedSpaceIds: ["alpha"],
+      createdAt,
+      updatedAt: createdAt,
+      canCancel: true,
+    }, null, 2)}\n`,
+  );
+
+  let writes = 0;
+  let ran = 0;
+  const store = new WorkbenchJobStore({
+    home,
+    inject: (op) => {
+      if (op === "write") writes += 1;
+    },
+  });
+  await store.whenIdle();
+  assert.equal(ran, 0);
+  const job = store.job("legacy-1");
+  assert.equal(job.status, "failed");
+  assert.equal(job.phase, "copy-files");
+  assert.equal(job.requestId, "legacy-1");
+  assert.equal(job.canCancel, false);
+  assert.equal("command" in job, false);
+  assert.equal(job.message, INTERRUPTED_JOB_MESSAGE);
+  assert.equal(job.error?.message, INTERRUPTED_JOB_MESSAGE);
+  assert.match(job.message, /unconfirmed/i);
+  assert.match(job.message, /not replayed/i);
+  assert.equal(job.message.includes("copying"), false);
+  assert.equal(writes, 1);
+
+  const onDisk = JSON.parse(readFileSync(jobFile(home, "legacy-1"), "utf8")) as {
+    status: string;
+    phase: string;
+    command: WorkbenchCommand;
+  };
+  assert.equal(onDisk.status, "failed");
+  assert.equal(onDisk.phase, "copy-files");
+  assert.deepEqual(onDisk.command, { kind: "space.start", spaceId: "alpha" });
+
+  const same = await store.submit(startCmd("alpha"), "legacy-1", async () => {
+    ran += 1;
+  });
+  assert.equal(same.status, "failed");
+  await store.whenIdle();
+  assert.equal(ran, 0);
+
+  await store.submit(startCmd("beta"), "new-start", async () => {
+    ran += 1;
+  });
+  await store.whenIdle();
+  assert.equal(ran, 1);
+  assert.equal(store.job("new-start").status, "succeeded");
+
+  await assert.rejects(
+    // @ts-expect-error the removed kind is rejected intentionally
+    () => store.submit({ kind: "recovery.resume" }, "resume-1", async () => {
+      ran += 1;
+    }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
+  assert.equal(store.job("legacy-1").status, "failed");
+});
+
+test("public job views omit internal fields; unknown errors stay static", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(startCmd(), "job-leak", async (ctx) => {
+    ctx.message("could not start; D:\\Users\\admin\\.dsh\\credentials.yaml token=private-launch-token cookie=dsh-auth-fixture=session");
+    throw new Error("ENOENT D:\\Users\\admin\\.dsh\\credentials.yaml token=private-launch-token");
+  });
+  await store.whenIdle();
+  const job = store.get("job-leak");
+  assert.equal(job.status, "failed");
+  for (const key of Object.keys(job)) {
+    assert.ok(publicJobKeys().includes(key), key);
+  }
+  assert.equal("command" in job, false);
+  assert.equal("commandCanonical" in job, false);
+  assert.equal("schemaVersion" in job, false);
+  assert.equal(job.error?.code, "workbench/failed");
+  assert.match(job.error?.message ?? "", /ENOENT/);
+  assert.equal(job.error?.message?.includes("private-launch-token"), false);
+  assert.equal(job.error?.message?.includes("D:"), false);
+  assert.equal(job.message.includes("D:"), false);
+  assert.equal(job.message.includes("private-launch-token"), false);
+  assert.equal(job.message.includes("dsh-auth-fixture"), false);
+  const encoded = JSON.stringify(job);
+  assert.equal(encoded.includes("command"), false);
+  assert.equal(encoded.includes("credentials.yaml"), false);
+  assert.equal(encoded.includes("private-launch-token"), false);
+});
+
+test("a corrupt job file is failed unreadable and the original bytes are kept", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  writeFileSync(jobFile(home, "broken-1"), "{not-json", "utf8");
+  const store = new WorkbenchJobStore({ home });
+  const jobs = store.list();
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.id, "broken-1");
+  assert.equal(jobs[0]?.status, "failed");
+  assert.equal(jobs[0]?.error?.code, "workbench/unreadable");
+  assert.equal("command" in jobs[0]!, false);
+  assert.equal(readFileSync(jobFile(home, "broken-1"), "utf8"), "{not-json");
+});
+
+test("jobs run serially and survive returning the HTTP-facing promise", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  const first = await store.submit(startCmd("one"), "serial-a", async () => {
+    order.push("a-start");
+    await delay(40);
+    order.push("a-end");
+  });
+  const second = await store.submit(startCmd("two"), "serial-b", async () => {
+    order.push("b-start");
+    order.push("b-end");
+  });
+  assert.equal(first.status, "queued");
+  assert.equal(second.status, "queued");
+  await store.whenIdle();
+  assert.deepEqual(order, ["a-start", "a-end", "b-start", "b-end"]);
+});
+
+test("unreadable history cannot be settled into a fabricated terminal job", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  writeFileSync(jobFile(home, "unknown"), "{broken", "utf8");
+  const store = new WorkbenchJobStore({ home });
+  await assert.rejects(() => store.settleRecovery("unknown", { status: "failed" }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported");
+  assert.equal(readFileSync(jobFile(home, "unknown"), "utf8"), "{broken");
+  assert.equal(new WorkbenchJobStore({ home }).job("unknown").status, "failed");
+});
+
+test("unknown command kinds and controller.acquire are rejected as contract input", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await assert.rejects(
+    () => store.submit({ kind: "space.delete", spaceId: "alpha" } as unknown as WorkbenchCommand, "nope", noop()),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/invalid-input",
+  );
+  await assert.rejects(
+    () => store.submit({ kind: "controller.acquire" } as unknown as WorkbenchCommand, "acq-1", async () => undefined),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
+});
+
+function validStoredJob(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    id,
+    requestId: id,
+    kind: "space.start",
+    command: { kind: "space.start", spaceId: "alpha" },
+    commandCanonical: '{"kind":"space.start","spaceId":"alpha"}',
+    status: "succeeded",
+    phase: "succeeded",
+    message: "",
+    affectedSpaceIds: ["alpha"],
+    createdAt: "2026-09-12T00:00:00.000Z",
+    updatedAt: "2026-09-12T00:00:00.000Z",
+    canCancel: false,
+    ...overrides,
+  };
+}
+
+test("unknown schemaVersion is failed unreadable and does not look succeeded", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  const raw = `${JSON.stringify(validStoredJob("future-1", { schemaVersion: 999 }), null, 2)}\n`;
+  writeFileSync(jobFile(home, "future-1"), raw, "utf8");
+  const store = new WorkbenchJobStore({ home });
+  const job = store.job("future-1");
+  assert.equal(job.status, "failed");
+  assert.equal(job.error?.code, "workbench/unreadable");
+  assert.notEqual(job.status, "succeeded");
+  assert.equal(readFileSync(jobFile(home, "future-1"), "utf8"), raw);
+});
+
+test("filename id mismatch does not overwrite another job file", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  const mismatched = `${JSON.stringify(validStoredJob("bar", { id: "bar", requestId: "bar" }), null, 2)}\n`;
+  const legitimate = `${JSON.stringify(validStoredJob("bar", {
+    command: { kind: "space.start", spaceId: "kept" },
+    kind: "space.start",
+    affectedSpaceIds: ["kept"],
+    result: { spaceId: "kept" },
+  }), null, 2)}\n`;
+  writeFileSync(jobFile(home, "foo"), mismatched, "utf8");
+  writeFileSync(jobFile(home, "bar"), legitimate, "utf8");
+  const store = new WorkbenchJobStore({ home });
+  assert.equal(store.job("foo").status, "failed");
+  assert.equal(store.job("bar").status, "succeeded");
+  assert.equal(store.job("bar").result?.spaceId, "kept");
+  assert.equal(readFileSync(jobFile(home, "foo"), "utf8"), mismatched);
+  assert.equal(readFileSync(jobFile(home, "bar"), "utf8"), legitimate);
+});
+
+test("missing command or invalid terminal result is failed unreadable and keeps the file", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  const missingCommand = validStoredJob("no-cmd");
+  delete missingCommand.command;
+  const missingRaw = `${JSON.stringify(missingCommand, null, 2)}\n`;
+  const pathResult = `${JSON.stringify(validStoredJob("path-ver", {
+    result: { runtimeVersion: "D:\\\\dsh\\\\versions\\\\0.1.5-rc.1" },
+  }), null, 2)}\n`;
+  writeFileSync(jobFile(home, "no-cmd"), missingRaw, "utf8");
+  writeFileSync(jobFile(home, "path-ver"), pathResult, "utf8");
+  const store = new WorkbenchJobStore({ home });
+  assert.equal(store.job("no-cmd").status, "failed");
+  assert.equal(store.job("path-ver").status, "failed");
+  assert.equal(readFileSync(jobFile(home, "no-cmd"), "utf8"), missingRaw);
+  assert.equal(readFileSync(jobFile(home, "path-ver"), "utf8"), pathResult);
+});
+
+test("a missing jobs directory is empty; only ENOENT counts as absent", async () => {
+  const home = tempHome();
+  const store = new WorkbenchJobStore({ home });
+  assert.deepEqual(store.list(), []);
+
+  const blocked = tempHome();
+  mkdirSync(join(blocked, WORKBENCH_CONTROL_DIR_NAME), { recursive: true });
+  writeFileSync(join(blocked, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME), "not-a-dir", "utf8");
+  assert.throws(
+    () => new WorkbenchJobStore({ home: blocked }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unreadable",
+  );
+});
+
+test("persist failure on a running job fails that job and does not freeze later work", async () => {
+  const home = tempHome();
+  const writes = new Map<string, number>();
+  let secondSide = 0;
+  const store = new WorkbenchJobStore({
+    home,
+    inject: (_op, id) => {
+      if (!id) return;
+      const n = (writes.get(id) ?? 0) + 1;
+      writes.set(id, n);
+      if (id === "job-first" && n === 3) throw new Error("EACCES D:\\secret\\jobs");
+    },
+  });
+
+  const first = await store.submit(startCmd("one"), "job-first", async (ctx) => {
+    ctx.phase("commit");
+    return { spaceId: "one" };
+  });
+  const second = await store.submit(startCmd("two"), "job-second", async () => {
+    secondSide += 1;
+    return { spaceId: "two" };
+  });
+  assert.equal(first.status, "queued");
+  assert.equal(second.status, "queued");
+  await store.whenIdle();
+
+  assert.equal(store.job("job-first").status, "failed");
+  assert.equal(store.job("job-second").status, "succeeded");
+  assert.equal(secondSide, 1);
+
+  await assert.rejects(
+    // @ts-expect-error the removed kind is rejected intentionally
+    () => store.submit({ kind: "recovery.resume" }, "job-resume", async () => {
+      return { snapshotId: "snap-1" };
+    }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
+  await assert.rejects(
+    () => store.settleRecovery("job-first", { status: "failed" }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
+
+  const next = await store.submit(startCmd("three"), "job-third", async () => ({ spaceId: "three" }));
+  await store.whenIdle();
+  assert.equal(next.kind, "space.start");
+  assert.equal(store.job("job-third").status, "succeeded");
+});
+
+test("result and view projection drop path, token, and non-loopback origins", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const entryOrigin = "http://127.0.0.1:3100";
+  await store.submit(startCmd(), "proj-1", async () => ({
+    spaceId: "alpha",
+    runtimeVersion: "D:\\dsh\\versions\\0.1.5-rc.1",
+    view: {
+      spaceId: "alpha",
+      generation: 2,
+      serviceEpoch: "a".repeat(64),
+      origin: "http://127.0.0.1:3210/?token=private-launch-token",
+      entryOrigin,
+      entryPath: "/workbench/view/alpha",
+      channel: "ch-1",
+    },
+  }));
+  await store.whenIdle();
+  const leaked = store.job("proj-1");
+  assert.equal(leaked.status, "succeeded");
+  assert.equal(leaked.result?.spaceId, "alpha");
+  assert.equal(leaked.result?.runtimeVersion, undefined);
+  assert.equal(leaked.result?.view, undefined);
+  const encoded = JSON.stringify(leaked);
+  assert.equal(encoded.includes("D:"), false);
+  assert.equal(encoded.includes("private-launch-token"), false);
+  assert.equal(encoded.includes("versions"), false);
+
+  await store.submit(startCmd("beta"), "proj-2", async () => ({
+    spaceId: "beta",
+    runtimeVersion: "0.1.5-rc.1",
+    view: {
+      spaceId: "beta",
+      generation: 1,
+      serviceEpoch: "a".repeat(64),
+      origin: "http://127.0.0.1:3210",
+      entryOrigin,
+      entryPath: "//127.0.0.1/workbench/view/beta",
+      channel: "ch-2",
+    },
+  }));
+  await store.whenIdle();
+  assert.equal(store.job("proj-2").result?.runtimeVersion, "0.1.5-rc.1");
+  assert.equal(store.job("proj-2").result?.view, undefined);
+
+  await store.submit(startCmd("gamma"), "proj-3", async () => ({
+    spaceId: "gamma",
+    view: {
+      spaceId: "gamma",
+      generation: 1,
+      serviceEpoch: "a".repeat(64),
+      origin: "http://user:pass@127.0.0.1:3210",
+      entryOrigin,
+      entryPath: "/workbench/view/gamma",
+      channel: "ch-3",
+    },
+  }));
+  await store.whenIdle();
+  assert.equal(store.job("proj-3").result?.view, undefined);
+
+  const epoch = "a".repeat(64);
+  await store.submit(startCmd("delta"), "proj-4", async () => ({
+    spaceId: "delta",
+    runtimeVersion: "0.1.5-rc.1",
+    view: {
+      serviceEpoch: epoch,
+      spaceId: "delta",
+      generation: 3,
+      origin: "http://127.0.0.1:3210",
+      entryOrigin,
+      entryPath: "/view/delta/3",
+      channel: "ch-4",
+    },
+  }));
+  await store.whenIdle();
+  const clean = store.job("proj-4");
+  assert.equal(clean.result?.runtimeVersion, "0.1.5-rc.1");
+  assert.deepEqual(clean.result?.view, {
+    serviceEpoch: epoch,
+    spaceId: "delta",
+    generation: 3,
+    origin: "http://127.0.0.1:3210",
+    entryOrigin,
+    entryPath: "/view/delta/3",
+    channel: "ch-4",
+  });
+
+  await store.submit(startCmd("epsilon"), "proj-5", async () => ({
+    spaceId: "epsilon",
+    runtimeVersion: "0.1.5-rc.1",
+    view: {
+      spaceId: "epsilon",
+      generation: 1,
+      serviceEpoch: "a".repeat(64),
+      origin: "http://127.0.0.1:3210",
+      entryOrigin: "http://192.168.0.5:3100",
+      entryPath: "/view/epsilon/1",
+      channel: "ch-5",
+    },
+  }));
+  await store.whenIdle();
+  assert.equal(store.job("proj-5").result?.runtimeVersion, "0.1.5-rc.1");
+  assert.equal(store.job("proj-5").result?.view, undefined);
+
+  await store.submit(startCmd("zeta"), "proj-6", async () => ({
+    spaceId: "zeta",
+    view: {
+      spaceId: "zeta",
+      generation: 4,
+      serviceEpoch: "a".repeat(64),
+      origin: "http://127.0.0.1:3210",
+      entryOrigin: "http://127.0.0.1:3100/?token=private-entry-token",
+      entryPath: "/view/zeta/4",
+      channel: "ch-6",
+    },
+  }));
+  await store.whenIdle();
+  assert.equal(store.job("proj-6").result?.view, undefined);
+  assert.equal(JSON.stringify(store.job("proj-6")).includes("private-entry-token"), false);
+});
+
+test("settleRecovery is unsupported and leftover jobs stay failed", async () => {
+  const home = tempHome();
+  mkdirSync(jobsDir(home), { recursive: true });
+  writeFileSync(
+    jobFile(home, "need-settle"),
+    `${JSON.stringify(validStoredJob("need-settle", { status: "queued", phase: "copy", canCancel: true }), null, 2)}\n`,
+    "utf8",
+  );
+  const store = new WorkbenchJobStore({ home });
+  assert.equal(store.job("need-settle").status, "failed");
+  assert.equal(store.job("need-settle").phase, "copy");
+  await assert.rejects(
+    () =>
+      store.settleRecovery("need-settle", {
+        status: "succeeded",
+        result: { runtimeVersion: "0.1.5-rc.1", spaceId: "alpha" },
+      }),
+    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
+  );
+  assert.equal(store.job("need-settle").status, "failed");
+});
+
+test("formatWorkbenchFailure names space, stage, plugin-or-unknown, and exit", () => {
+  const known = formatWorkbenchFailure({
+    spaceId: "coding",
+    stage: "加载插件",
+    packageName: "example-plugin@1.2.3",
+    pluginAttribution: "known",
+    reason: "缺少服务 example.database",
+    exitCode: 1,
+  });
+  assert.match(known, /空间 coding/);
+  assert.match(known, /阶段：加载插件/);
+  assert.match(known, /插件：example-plugin@1.2.3/);
+  assert.match(known, /退出码：1/);
+  assert.equal(known.includes("建议重新安装"), false);
+
+  const unknown = formatWorkbenchFailure({
+    spaceId: "coding",
+    stage: "run",
+    pluginAttribution: "unknown",
+    reason: "进程已退出",
+    signal: "SIGKILL",
+  });
+  assert.match(unknown, /未能归属到单个插件/);
+  assert.match(unknown, /SIGKILL/);
+});
+
+test("failure context is stored on the public job error", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(startCmd("coding"), "ctx-1", async () => {
+    throw new WorkbenchJobError("workbench/failed", WORKBENCH_JOB_ERROR["workbench/failed"], {
+      spaceId: "coding",
+      stage: "load-plugin",
+      packageName: "example-plugin@1.2.3",
+      pluginAttribution: "known",
+      exitCode: 1,
+    });
+  });
+  await store.whenIdle();
+  const job = store.job("ctx-1");
+  assert.equal(job.status, "failed");
+  assert.equal(job.error?.spaceId, "coding");
+  assert.equal(job.error?.stage, "load-plugin");
+  assert.equal(job.error?.packageName, "example-plugin@1.2.3");
+  assert.equal(job.error?.exitCode, 1);
+});
+
+test("failed jobs keep a validated product partial result", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  await store.submit(
+    { kind: "plugin.library.remove", libraryId: "lib-1" },
+    "partial-1",
+    async (ctx) => {
+      ctx.result({ product: { kind: "plugin.library.remove", libraryId: "lib-1" } });
+      throw new WorkbenchJobError("workbench/failed");
+    },
+  );
+  await store.whenIdle();
+  const job = store.job("partial-1");
+  assert.equal(job.status, "failed");
+  assert.deepEqual(job.result?.product, { kind: "plugin.library.remove", libraryId: "lib-1" });
+});
+
+test("runExclusive shares the job tail and does not persist the callback payload", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  const gate = latch();
+  await store.submit(startCmd("one"), "serial-job", async () => {
+    order.push("job-start");
+    await gate.promise;
+    order.push("job-end");
+  });
+  const exclusive = store.runExclusive(async () => {
+    order.push("exclusive");
+    return { secret: "do-not-persist" };
+  });
+  await waitUntil(() => store.job("serial-job").status === "running", "running");
+  gate.release();
+  const value = await exclusive;
+  await store.whenIdle();
+  assert.deepEqual(order, ["job-start", "job-end", "exclusive"]);
+  assert.deepEqual(value, { secret: "do-not-persist" });
+  const files = readdirSync(jobsDir(store.home));
+  for (const name of files) {
+    const text = readFileSync(join(jobsDir(store.home), name), "utf8");
+    assert.equal(text.includes("do-not-persist"), false);
+  }
+});
+
+test("runAdmitted from an unrelated caller waits for the exclusive tail", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const events: string[] = [];
+  const gate = latch();
+  const exclusive = store.runExclusive(async () => {
+    events.push("exclusive started");
+    await gate.promise;
+    events.push("exclusive done");
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const admitted = store.runAdmitted(async () => {
+    events.push("unrelated external mutation");
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ["exclusive started"]);
+  gate.release();
+  await Promise.all([exclusive, admitted]);
+  assert.deepEqual(events, ["exclusive started", "exclusive done", "unrelated external mutation"]);
+});
+
+test("runAdmitted nested in the exclusive callback runs inline", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  await store.runExclusive(async () => {
+    order.push("outer");
+    await store.runAdmitted(async () => {
+      order.push("nested");
+    });
+    order.push("after");
+  });
+  assert.deepEqual(order, ["outer", "nested", "after"]);
+});
+
+test("runAdmitted nested in a job handler does not deadlock", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  await store.submit(startCmd("one"), "admit-job", async () => {
+    order.push("job");
+    await store.runAdmitted(async () => {
+      order.push("nested");
+    });
+  });
+  await store.whenIdle();
+  assert.deepEqual(order, ["job", "nested"]);
+});
+
+test("detached descendant from a finished exclusive waits for a later exclusive", async () => {
+  const store = new WorkbenchJobStore({ home: tempHome() });
+  const order: string[] = [];
+  const detached = latch();
+  const secondHold = latch();
+  await store.runExclusive(async () => {
+    order.push("first");
+    void detached.promise.then(async () => {
+      order.push("detached-enter");
+      await store.runAdmitted(async () => {
+        order.push("detached-admitted");
+      });
+    });
+  });
+  const second = store.runExclusive(async () => {
+    order.push("second-start");
+    await secondHold.promise;
+    order.push("second-end");
+  });
+  await waitUntil(() => order.includes("second-start"), "second exclusive started");
+  detached.release();
+  await waitUntil(() => order.includes("detached-enter"), "detached entered");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(order.includes("detached-admitted"), false);
+  secondHold.release();
+  await second;
+  await store.whenIdle();
+  assert.deepEqual(order, [
+    "first",
+    "second-start",
+    "detached-enter",
+    "second-end",
+    "detached-admitted",
+  ]);
+});
+
+test("public reasons omit complete Basic authorization and cookie headers",()=>{
+ for(const header of ["Authorization: Basic c3ludGhldGljOm9ubHk=","Cookie: sid=synthetic-one; remember=synthetic-two"]){
+ const out=sanitizeJobText(header); assert.doesNotMatch(out,/c3ludGhldGlj|synthetic-one|synthetic-two/); assert.match(out,/redacted/);
+ }
+});
