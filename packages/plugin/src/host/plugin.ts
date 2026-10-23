@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { workbenchHostHintSchema } from "./workbench-schemas";
 import { WorkbenchGuideHost } from "./workbench-guide";
 import { WorkbenchManagerHost } from "./workbench-manager";
-import { SpacesHost, type SpacesHostConfig } from "./spaces-service";
+import { SpacesRemote, type SpacesRemoteConfig } from "./spaces-service";
 import { runtimeFromContext, WorkbenchHostRuntime } from "./runtime";
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "../../../../src/shared/loopback";
 import { assertSupportedNode } from "../../../../src/shared/node-version";
@@ -15,7 +15,7 @@ const HANDOFF_PATH = "/dsh-spaces/handoff";
 /**
  * Package default plugin. Registers the guide Remote with presentation and
  * explicit launch operations (manual service restart is Desktop-only). Manager write remotes and
- * compatibility spaces reads register only when HomeController.roleOf(current
+ * compatibility spaces reads register only when HomeLease.roleOf(current
  * profile) is manager. Ordinary profiles never auto-bootstrap a supervisor.
  */
 export class SpacesPlugin {
@@ -25,15 +25,15 @@ export class SpacesPlugin {
   readonly runtime: WorkbenchHostRuntime;
   readonly guide: WorkbenchGuideHost;
   readonly manager: WorkbenchManagerHost | null;
-  readonly spaces: SpacesHost | null;
+  readonly spaces: SpacesRemote | null;
 
-  constructor(ctx: Context, config: SpacesHostConfig = {}, runtime?: WorkbenchHostRuntime) {
+  constructor(ctx: Context, config: SpacesRemoteConfig = {}, runtime?: WorkbenchHostRuntime) {
     assertSupportedNode();
     this.runtime = runtime ?? runtimeFromContext(ctx, config);
     this.guide = new WorkbenchGuideHost(ctx, this.runtime);
     if (this.runtime.shouldRegisterManager) {
       this.manager = new WorkbenchManagerHost(ctx, this.runtime);
-      this.spaces = new SpacesHost(ctx, this.runtime);
+      this.spaces = new SpacesRemote(ctx, this.runtime);
       void this.runtime.bootstrap();
     } else {
       this.manager = null;

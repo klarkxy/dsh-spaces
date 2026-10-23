@@ -17,7 +17,7 @@ import {
   HOME_CONTROL_DIR_NAME,
   HOME_CONTROL_OWNER_FILE,
   HOME_CONTROL_RUN_DIR_NAME,
-} from "../src/adapters/node/home/home-controller.ts";
+} from "../src/adapters/node/home/home-lease.ts";
 import {
   HOME_LOCK_DIR_NAME,
   HOME_LOCK_OWNER_FILE,

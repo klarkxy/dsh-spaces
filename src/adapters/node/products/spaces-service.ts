@@ -30,7 +30,7 @@ import type {
   SpaceDetail,
   SpaceSummary,
   SpacesCapabilities,
-  SpacesControlApi,
+  SpacesApi,
   SpacesMode,
   SpacesOverview,
 } from "../../../shared/spaces-control";
@@ -162,7 +162,7 @@ export interface HomeLockPort {
   unlockDead(): unknown;
 }
 
-export interface NodeSpacesControlOptions {
+export interface NodeSpacesServiceOptions {
   home: string;
   /** The installed Host explicitly authorizes its own home; never changes process.env. */
   allowRealHome?: boolean;
@@ -210,13 +210,13 @@ type IsolationOutcome = "valid" | "invalid" | "interrupted";
  * Node control-plane for Host and tests. Binds CLI to process.argv[1] only.
  * Never installs a runtime and never copies raw errors, paths, or secrets into DTOs.
  */
-export class NodeSpacesControl implements SpacesControlApi {
+export class NodeSpacesService implements SpacesApi {
   private readonly operation = new AsyncLocalStorage<{ active: boolean; journal: boolean }>();
   private get ownedRun(): boolean { return this.operation.getStore()?.active === true; }
   private get sessionJournal(): boolean { return this.ownedRun && this.operation.getStore()?.journal === true; }
   private cachedLock: HomeLockPort | undefined;
 
-  constructor(private readonly options: NodeSpacesControlOptions) {}
+  constructor(private readonly options: NodeSpacesServiceOptions) {}
 
   async overview(): Promise<SpacesOverview> {
     const capabilities = this.capabilities();

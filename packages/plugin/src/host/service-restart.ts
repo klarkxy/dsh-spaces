@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { lstatSync } from "../../../../src/shared/node/filesystem";
-import { HomeController, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home/home-controller";
+import { HomeLease, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home/home-lease";
 import type { WorkbenchApi, WorkbenchPlan } from "../../../../src/shared/workbench";
 import type { WorkbenchBootstrapResult, WorkbenchServiceRestartPreview } from "../types";
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
@@ -97,8 +97,8 @@ export class DesktopServiceRestart {
 
   private async waitForShutdown(id: string, requestId: string, planId: string): Promise<void> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) throw Error("The shutdown job identity is invalid.");
-    const controller = new HomeController(this.options.home, { allowRealHome: this.options.allowRealHome });
-    const control = join(controller.home, HOME_CONTROL_DIR_NAME), jobs = join(control, "jobs"), file = join(jobs, id + ".json");
+    const lease = new HomeLease(this.options.home, { allowRealHome: this.options.allowRealHome });
+    const control = join(lease.home, HOME_CONTROL_DIR_NAME), jobs = join(control, "jobs"), file = join(jobs, id + ".json");
     const deadline = Date.now() + (this.options.timeoutMs ?? 240_000);
     while (Date.now() < deadline) {
       // Only observe the exact accepted job, never instantiate a job store (which recovers records).
@@ -114,7 +114,7 @@ export class DesktopServiceRestart {
       }
       if (job.status === "failed" || job.status === "cancelled") throw Error("The confirmed shutdown failed. No new service was started.");
       if (!["queued", "running", "succeeded"].includes(job.status)) throw Error("The shutdown job result is unreadable.");
-      if (job.status === "succeeded" && !controller.inspect().held && missingFile(join(control, SUPERVISOR_ENDPOINT_FILE))) return;
+      if (job.status === "succeeded" && !lease.inspect().held && missingFile(join(control, SUPERVISOR_ENDPOINT_FILE))) return;
       await delay(100);
     }
     throw Error("Shutdown completion could not be confirmed before the deadline. No new service was started.");

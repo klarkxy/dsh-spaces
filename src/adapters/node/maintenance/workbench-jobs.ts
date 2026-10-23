@@ -135,8 +135,8 @@ interface StoredJob {
  * Combined job store and single-process serial runner.
  *
  * The constructor caller must already hold exclusive run rights for this
- * canonical Home (supervisor / HomeController). This module does not create a
- * process lock and must not contend with HomeController ownership.
+ * canonical Home (supervisor / HomeLease). This module does not create a
+ * process lock and must not contend with HomeLease ownership.
  *
  * Leftover queued/running records become failed (interrupted, unconfirmed)
  * and are not replayed. Unreadable files stay as original bytes.

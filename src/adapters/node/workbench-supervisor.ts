@@ -78,17 +78,17 @@ import {
 } from "./blueprint/blueprint-runtime";
 import {
   isCompatibleDshCliVersion,
-  NodeSpacesControl,
+  NodeSpacesService,
   type SpacesLoaderView,
-} from "./products/spaces-control";
+} from "./products/spaces-service";
 import {
   HOME_CONTROL_DIR_NAME,
   HomeControlBusyError,
-  HomeController,
+  HomeLease,
   defaultPidAlive,
   parseControlEndpoint,
   type PidAliveFn,
-} from "./home/home-controller";
+} from "./home/home-lease";
 import {
   validateComponentPayload,
   type ValidatedComponentPayload,
@@ -180,7 +180,7 @@ const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume", 
 const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.install", "runtime.upgrade"]);
 
 /**
- * Independent web supervisor: stable 127.0.0.1 entry, HomeController run
+ * Independent web supervisor: stable 127.0.0.1 entry, HomeLease run
  * rights, profile/view/lifecycle, and WorkbenchApi over POST JSON.
  */
 function dispatchEventName(method: string, payload: unknown): string {
@@ -202,7 +202,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private bootstrap = new Map<string, number>();
   private readonly nodeExe: string;
   private readonly options: WorkbenchSupervisorOptions;
-  private readonly controller: HomeController;
+  private readonly lease: HomeLease;
   private readonly lock: HomeOperationLock;
   private readonly registry: ProfileRegistry;
   private readonly patchWriter: PatchWriter;
@@ -211,7 +211,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly lifecycle = new SupervisorLifecycle(() => this.assertRegistryReadable());
   private jobs: WorkbenchJobStore | undefined;
   private processes: ProcessManager | undefined;
-  private spaces: NodeSpacesControl | undefined;
+  private spaces: NodeSpacesService | undefined;
   private maintenance: WorkbenchMaintenance | null = null;
   private products: WorkbenchProductService | null = null;
   private diagnostics: DiagnosticsService | undefined;
@@ -238,7 +238,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!options.allowRealHome) assertNotRealHome(this.home);
     this.nodeExe = resolve(options.nodeExe ?? process.execPath);
     this.controlDir = join(this.home, HOME_CONTROL_DIR_NAME);
-    this.controller = new HomeController(this.home, {
+    this.lease = new HomeLease(this.home, {
       allowRealHome: options.allowRealHome,
       pidAlive: options.pidAlive,
     });
@@ -321,7 +321,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       hostBearerEquals: value => this.hostBearerEquals(value),
       assertOwner: () => {
         this.lifecycle.assertWritable();
-        const current = this.controller.inspect(), expected = this.lifecycle.handle?.owner;
+        const current = this.lease.inspect(), expected = this.lifecycle.handle?.owner;
         if (!expected || !current.held || !("owner" in current) || current.handoff || current.liveness !== "alive" ||
             current.owner.nonce !== expected.nonce || current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt || this.lifecycle.closed || this.lifecycle.blocked) {
           throw new WorkbenchPublicError("workbench/read-only");
@@ -349,7 +349,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       inheritsMain: id => existsSync(llmPolicyPath(this.home,id)) && parsePolicy(JSON.parse(readFileSync(llmPolicyPath(this.home,id),'utf8'))).inheritMain===true,
       reportCleanupFailure: reason => {
         this.lifecycle.addReason(reason);
-        const current = this.controller.inspect(), expected = this.lifecycle.handle?.owner;
+        const current = this.lease.inspect(), expected = this.lifecycle.handle?.owner;
         if (expected && current.held && "owner" in current && !current.handoff && current.liveness === "alive" && current.owner.nonce === expected.nonce) {
           this.workbenchLog().append({ level: "error", area: "llm-delegation", event: "cancel.unconfirmed", message: reason, code: "LLM_CANCEL_UNCONFIRMED" });
         } else console.error(reason);
@@ -413,13 +413,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async tryOwn(): Promise<void> {
-    const inspection = this.controller.inspect();
+    const inspection = this.lease.inspect();
     if (inspection.held) {
       this.lifecycle.reasons = this.heldReasons(inspection);
       return;
     }
     try {
-      this.lifecycle.handle = this.controller.acquire("web", this.origin);
+      this.lifecycle.handle = this.lease.acquire("web", this.origin);
     } catch (error) {
       if (error instanceof HomeControlBusyError) {
         this.lifecycle.reasons = this.heldReasons(error.inspection);
@@ -754,7 +754,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.assertManagerBootstrapNotInterrupted();
     this.bindToolchain();
     mkdirSync(this.controlDir, { recursive: true });
-    const identity = await this.controller.ensureManager();
+    const identity = await this.lease.ensureManager();
     this.managerId = identity.profileId;
     this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
     this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
@@ -805,7 +805,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const loader = this.managerId
       ? await this.syncLoader(this.managerId, this.managerId === identity.profileId ? managerDump : undefined)
       : undefined;
-    this.spaces = this.createSpacesControlWithLoader(loader);
+    this.spaces = this.createSpacesServiceWithLoader(loader);
     try {
       this.maintenance = this.createMaintenance();
     } catch {
@@ -1276,9 +1276,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
-  private createSpacesControlWithLoader(loader?: SpacesLoaderView): NodeSpacesControl | undefined {
+  private createSpacesServiceWithLoader(loader?: SpacesLoaderView): NodeSpacesService | undefined {
     if (!this.cli || !this.managerId) return undefined;
-    return new NodeSpacesControl({
+    return new NodeSpacesService({
       home: this.home,
       allowRealHome: this.options.allowRealHome,
       argv: [this.nodeExe, this.cli.bin, "--profile", this.managerId],
@@ -1361,7 +1361,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (this.managerInstall !== "manager") throw new WorkbenchPublicError("workbench/unavailable");
     }
     const loader = this.managerId ? await this.syncLoader(this.managerId, managerDump) : undefined;
-    this.spaces = this.createSpacesControlWithLoader(loader);
+    this.spaces = this.createSpacesServiceWithLoader(loader);
     if (this.managerId && this.managerInstall === "manager" && !this.runs.unmanaged.has(this.managerId)) {
       const runningWorkspaces = this.ownedSpaceIds().filter(
         (id) => id !== this.managerId && this.statusOf(id) === "running",
@@ -1730,7 +1730,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private peekOwnerNonce(): string | undefined {
-    const inspection = this.controller.inspect();
+    const inspection = this.lease.inspect();
     if (inspection.held && "owner" in inspection) return inspection.owner.nonce;
     return undefined;
   }
@@ -1863,7 +1863,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private readOwner(): WorkbenchState["owner"] {
-    const inspection = this.controller.inspect();
+    const inspection = this.lease.inspect();
     if (!inspection.held || !("owner" in inspection)) return null;
     return { kind: inspection.owner.kind, since: inspection.owner.startedAt };
   }
@@ -1888,7 +1888,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return hasUnfinishedMaintenance(this.home, this.snapshotRoot());
   }
 
-  private heldReasons(inspection: ReturnType<HomeController["inspect"]>): string[] {
+  private heldReasons(inspection: ReturnType<HomeLease["inspect"]>): string[] {
     if (!inspection.held) return [];
     if ("owner" in inspection && inspection.liveness === "dead") {
       return ["A previous controller is dead. Run rights were not taken."];
@@ -1936,7 +1936,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.options.runCli) return this.options.runCli(args);
     const bin = this.resolveCliBin(profile);
     if (!bin) throw new WorkbenchPublicError("workbench/incompatible");
-    const { spawnBoundCli } = await import("./products/spaces-control.ts");
+    const { spawnBoundCli } = await import("./products/spaces-service.ts");
     return spawnBoundCli(this.nodeExe, bin, this.home, { ...process.env, DSH_HOME: this.home }, args);
   }
 

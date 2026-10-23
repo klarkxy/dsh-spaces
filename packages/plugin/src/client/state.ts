@@ -3,7 +3,7 @@ import type {
   SpaceDetail,
   SpaceSummary,
   SpacesCapabilities,
-  SpacesControlApi,
+  SpacesApi,
 } from "../../../../src/shared/spaces-control";
 import { displayMessage } from "./remote";
 
@@ -75,7 +75,7 @@ export class SpacesPanelStore {
   private selectionGeneration = 0;
   private detailGeneration = 0;
 
-  constructor(private readonly remote: SpacesControlApi) {}
+  constructor(private readonly remote: SpacesApi) {}
 
   getSnapshot = (): SpacesPanelSnapshot => this.snapshot;
 

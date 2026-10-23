@@ -14,12 +14,12 @@ import {
   HOME_CONTROL_MANAGER_FILE,
   HOME_CONTROL_OWNER_FILE,
   HOME_CONTROL_RUN_DIR_NAME,
-  HomeController,
+  HomeLease,
   type HomeControlHandle,
-} from "../src/adapters/node/home/home-controller.ts";
+} from "../src/adapters/node/home/home-lease.ts";
 import { canonicalHome, HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
-import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-control.ts";
+import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-service.ts";
 import { resolveHostIdentity } from "../packages/plugin/src/host/identity.ts";
 import { SpacesPlugin, injectHintScript } from "../packages/plugin/src/host/plugin.ts";
 import { WorkbenchHostRuntime } from "../packages/plugin/src/host/runtime.ts";
@@ -226,7 +226,7 @@ function v2Endpoint(home: string, origin: string, bearer: string, nonce: string)
 }
 
 function leaseWeb(home: string, origin: string): HomeControlHandle {
-  const handle = new HomeController(home, { allowRealHome: false }).acquire("web", `${origin}/`);
+  const handle = new HomeLease(home, { allowRealHome: false }).acquire("web", `${origin}/`);
   handles.push(handle);
   return handle;
 }
@@ -1580,19 +1580,19 @@ for (const changed of [false, true]) {
     writeProfile(home, "spaces-hub");
     writeManager(home, "spaces-hub");
     const script = join(home, "exited-owner.mts");
-    writeFileSync(script, `import { HomeController } from ${JSON.stringify(new URL("../src/adapters/node/home/home-controller.ts", import.meta.url).href)};
-new HomeController(process.argv[2]).acquire("web", "http://127.0.0.1:9/");
+    writeFileSync(script, `import { HomeLease } from ${JSON.stringify(new URL("../src/adapters/node/home/home-lease.ts", import.meta.url).href)};
+new HomeLease(process.argv[2]).acquire("web", "http://127.0.0.1:9/");
 process.exit(17);`);
     await new Promise<void>((resolve, reject) => {
       const child = spawnChild(process.execPath, ["--import", "tsx", script, home], { cwd: process.cwd(), stdio: "ignore", windowsHide: true });
       child.once("error", reject);
       child.once("exit", code => code === 17 ? resolve() : reject(new Error(`owner exited ${code}`)));
     });
-    const controller = new HomeController(home);
-    const inspection = controller.inspect();
+    const lease = new HomeLease(home);
+    const inspection = lease.inspect();
     assert.ok("owner" in inspection && inspection.liveness === "dead");
-    const ownerFile = join(controller.runDir, HOME_CONTROL_OWNER_FILE);
-    const endpointFile = join(controller.controlDir, SUPERVISOR_ENDPOINT_FILE);
+    const ownerFile = join(lease.runDir, HOME_CONTROL_OWNER_FILE);
+    const endpointFile = join(lease.controlDir, SUPERVISOR_ENDPOINT_FILE);
     const originalOwner = inspection.owner;
     writeEndpointFile(endpointFile, v2Endpoint(home, "http://127.0.0.1:9", "O".repeat(32), originalOwner.nonce));
     let ownerBytes = readFileSync(ownerFile), endpointBytes = readFileSync(endpointFile);
@@ -1615,7 +1615,7 @@ process.exit(17);`);
         }
         return bootstrapSupervisor({ ...options, pack: stubPack, pollMs: 20, spawn: () => {
           starts++;
-          assert.equal(controller.inspect().held, false);
+          assert.equal(lease.inspect().held, false);
           assert.equal(existsSync(endpointFile), false);
           const next = leaseWeb(home, fixture.origin);
           epochRef.value = deriveServiceEpoch(next.owner.nonce);
@@ -1631,7 +1631,7 @@ process.exit(17);`);
       const result = await runtime.initialize();
       assert.equal(result.ok, !changed, result.reasons.join(" | "));
       assert.equal(starts, changed ? 0 : 1);
-      const evidence = join(controller.controlDir, "previous-controller-exit.json");
+      const evidence = join(lease.controlDir, "previous-controller-exit.json");
       if (changed) {
         assert.match(result.reasons.join(" "), /ownership changed/);
         assert.deepEqual(readFileSync(ownerFile), ownerBytes);

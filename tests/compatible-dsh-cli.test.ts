@@ -8,12 +8,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   COMPATIBLE_DSH_CLI_VERSION,
   isCompatibleDshCliVersion,
-  NodeSpacesControl,
+  NodeSpacesService,
   SpacesPublicError,
-} from "../src/adapters/node/products/spaces-control.ts";
+} from "../src/adapters/node/products/spaces-service.ts";
 
 const temps: string[] = [];
-const SOURCE = join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node/products/spaces-control.ts");
+const SOURCE = join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/node/products/spaces-service.ts");
 
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -61,8 +61,8 @@ test("exact CLI versions can bind; tags and junk stay out", () => {
   assert.doesNotMatch(source, /COMPATIBLE_DSH_CLI_VERSIONS/);
 });
 
-function control(home: string, bin: string, extra: Partial<ConstructorParameters<typeof NodeSpacesControl>[0]> = {}) {
-  return new NodeSpacesControl({
+function control(home: string, bin: string, extra: Partial<ConstructorParameters<typeof NodeSpacesService>[0]> = {}) {
+  return new NodeSpacesService({
     home,
     env: { ...process.env, DSH_HOME: home },
     argv: [process.execPath, bin, "--profile", "web"],

@@ -10,7 +10,7 @@ import {
   ComponentPayloadError,
   type ValidatedComponentPayload,
 } from "./component-payload";
-import { HomeController } from "../home/home-controller";
+import { HomeLease } from "../home/home-lease";
 import { canonicalHome, HomeOperationLock } from "../home/home-operation-lock";
 import { digestHomeIdentity } from "../server/workbench-protocol";
 
@@ -192,7 +192,7 @@ function boundToolsRoot(toolsRoot: string, home: string): string {
 }
 
 function assertSelectionReservation(home: string, toolsRoot: string, access?: ComponentHomeAccess): void {
-  const inspection = new HomeController(home, homeAccess(home, access)).inspect();
+  const inspection = new HomeLease(home, homeAccess(home, access)).inspect();
   if (inspection.held) {
     if ("handoff" in inspection && inspection.handoff && "owner" in inspection) {
       if (inspection.owner.pid !== process.pid) {

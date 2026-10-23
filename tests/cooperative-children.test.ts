@@ -12,7 +12,7 @@ import {
   HOME_MUTATION_JOURNAL,
   inspectControlResidue,
 } from "../src/adapters/node/home/control-residue.ts";
-import { HOME_CONTROL_DIR_NAME } from "../src/adapters/node/home/home-controller.ts";
+import { HOME_CONTROL_DIR_NAME } from "../src/adapters/node/home/home-lease.ts";
 import { runProcess } from "../src/adapters/node/runtime/toolchain.ts";
 
 test("package-manager child identity is journaled in its async Home scope and removed on exit", async () => {

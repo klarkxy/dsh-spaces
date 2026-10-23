@@ -20,7 +20,7 @@ export type ProfileRole = "manager" | "workspace" | "uninitialized";
 export type PidLiveness = "alive" | "dead" | "ambiguous";
 export type PidAliveFn = (pid: number, startedAt: string) => PidLiveness;
 
-export interface HomeControllerOptions {
+export interface HomeLeaseOptions {
   pidAlive?: PidAliveFn;
   allowRealHome?: boolean;
 }
@@ -112,7 +112,7 @@ export class HomeControlPathError extends Error {
  * Control state lives in `{canonicalHome}/.dsh-spaces-control` (not snapshot-replaced).
  * Runtime ownership does not hold the home transaction lock; ensureManager writes do.
  */
-export class HomeController {
+export class HomeLease {
   readonly home: string;
   readonly controlDir: string;
   readonly runDir: string;
@@ -122,7 +122,7 @@ export class HomeController {
   private readonly pidAlive: PidAliveFn;
   private readonly lock: HomeOperationLock;
 
-  constructor(home: string, options: HomeControllerOptions = {}) {
+  constructor(home: string, options: HomeLeaseOptions = {}) {
     this.home = canonicalHome(home, options);
     this.controlDir = join(this.home, HOME_CONTROL_DIR_NAME);
     this.managerFile = join(this.controlDir, HOME_CONTROL_MANAGER_FILE);
@@ -379,7 +379,7 @@ export class HomeController {
   }
 }
 
-export function homeControlDigest(home: string, options: HomeControllerOptions = {}): string {
+export function homeControlDigest(home: string, options: HomeLeaseOptions = {}): string {
   return digestHomeIdentity(canonicalHome(home, options));
 }
 

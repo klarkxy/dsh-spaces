@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore, type ReactElement } from "react";
-import type { SpacesControlApi } from "../../../../src/shared/spaces-control";
+import type { SpacesApi } from "../../../../src/shared/spaces-control";
 import { MotionRoot } from "../../../../src/shared/ui/motion";
 import { SpacesPanelView } from "./components";
 import { inferSpacesLocale, type SpacesLocale } from "./i18n";
@@ -17,7 +17,7 @@ import { SpacesPanelStore } from "./state";
  * Locale: browser language (`navigator` / `Intl`), then the visible
  * 中文/English switch. Not `ctx.locale` — see i18n.ts.
  */
-export function SpacesMainPanel({ remote }: { remote: SpacesControlApi }): ReactElement {
+export function SpacesMainPanel({ remote }: { remote: SpacesApi }): ReactElement {
   const store = useMemo(() => new SpacesPanelStore(remote), [remote]);
   const [locale, setLocale] = useState<SpacesLocale>(() => inferSpacesLocale());
   useEffect(() => {

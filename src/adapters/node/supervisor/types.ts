@@ -8,10 +8,10 @@ import type {
   WorkbenchRuntime as WorkbenchRuntimeDto,
   WorkbenchSnapshot,
 } from "../../../shared/workbench";
-import type { PidAliveFn } from "../home/home-controller";
+import type { PidAliveFn } from "../home/home-lease";
 import type { ProcessRuntime } from "../runtime/process-manager";
 import type { PatchWriter } from "../profile/patch-writer";
-import type { BoundCliRunner } from "../products/spaces-control";
+import type { BoundCliRunner } from "../products/spaces-service";
 import type { WorkbenchJobContext, WorkbenchJobsInject } from "../maintenance/workbench-jobs";
 import type { WorkbenchMaintenancePorts } from "../maintenance/workbench-maintenance-ports";
 import type { WorkbenchSupervisorRuntime } from "../workbench-supervisor";

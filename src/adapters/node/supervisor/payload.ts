@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { samePath } from "../home/home-guard";
-import { bindDshCli, isCompatibleDshCliVersion } from "../products/spaces-control";
+import { bindDshCli, isCompatibleDshCliVersion } from "../products/spaces-service";
 import {
   COMPONENT_PAYLOAD_ENTRIES,
   ComponentPayloadError,

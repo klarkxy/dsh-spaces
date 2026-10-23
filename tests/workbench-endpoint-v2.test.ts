@@ -16,9 +16,9 @@ import {
   HOME_CONTROL_MANAGER_FILE,
   HOME_CONTROL_OWNER_FILE,
   HOME_CONTROL_RUN_DIR_NAME,
-  HomeController,
+  HomeLease,
   type HomeControlHandle,
-} from "../src/adapters/node/home/home-controller.ts";
+} from "../src/adapters/node/home/home-lease.ts";
 import { canonicalHome } from "../src/adapters/node/home/home-operation-lock.ts";
 import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
 import { attachExistingSupervisor } from "../packages/plugin/src/host/supervisor-attach.ts";
@@ -68,7 +68,7 @@ function endpointPath(home: string): string {
 }
 
 function acquireWeb(home: string, origin: string): HomeControlHandle {
-  const handle = new HomeController(home, { allowRealHome: false }).acquire("web", `${origin}/`);
+  const handle = new HomeLease(home, { allowRealHome: false }).acquire("web", `${origin}/`);
   handles.push(handle);
   return handle;
 }

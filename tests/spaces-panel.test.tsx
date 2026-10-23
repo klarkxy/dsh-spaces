@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type {
   SpaceDetail,
   SpacesCapabilities,
-  SpacesControlApi,
+  SpacesApi,
   SpaceSummary,
   SpacesOverview,
 } from "../src/shared/spaces-control.ts";
@@ -83,11 +83,11 @@ function detailOf(space: SpaceSummary): SpaceDetail {
 
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-interface FakeApi extends SpacesControlApi {
+interface FakeApi extends SpacesApi {
   calls: Array<{ method: string; arg: unknown }>;
 }
 
-function fakeApi(overrides: Partial<SpacesControlApi> = {}): FakeApi {
+function fakeApi(overrides: Partial<SpacesApi> = {}): FakeApi {
   const calls: FakeApi["calls"] = [];
   return {
     calls,

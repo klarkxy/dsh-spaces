@@ -13,7 +13,7 @@ import { SupervisorLifecycle } from "../src/adapters/node/supervisor/lifecycle.t
 import { SpaceRunRegistry } from "../src/adapters/node/supervisor/space-runs.ts";
 import type { GlobalLlmHost, LlmApplyCommand } from "../src/core/application/global-llm-host.ts";
 import type { WorkbenchJobContext, WorkbenchJobStore } from "../src/adapters/node/maintenance/workbench-jobs.ts";
-import type { HomeControlHandle } from "../src/adapters/node/home/home-controller.ts";
+import type { HomeControlHandle } from "../src/adapters/node/home/home-lease.ts";
 import type { WorkbenchSpace } from "../src/shared/workbench.ts";
 import { LlmActivity, installLlmActivity } from "../packages/llm-bridge/src/activity.ts";
 import {

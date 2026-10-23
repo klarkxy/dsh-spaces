@@ -205,7 +205,7 @@ interface Packument {
 
 /**
  * Maintenance application service. Supervisor runtime supplies ports; this
- * module does not create a ProcessManager, HomeController, or job engine.
+ * module does not create a ProcessManager, HomeLease, or job engine.
  */
 export class WorkbenchMaintenance {
   private readonly now: () => Date;

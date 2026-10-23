@@ -2,10 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   HOME_CONTROL_DIR_NAME,
-  HomeController,
+  HomeLease,
   defaultPidAlive,
   type HomeControlInspect,
-} from "../../../src/adapters/node/home/home-controller.ts";
+} from "../../../src/adapters/node/home/home-lease.ts";
 import {
   WORKBENCH_JOBS_DIR_NAME,
 } from "../../../src/adapters/node/maintenance/workbench-jobs.ts";
@@ -163,9 +163,9 @@ export function readPluginMutation(home: string): Json {
   }
 }
 
-export function readManager(controller: HomeController): Json {
+export function readManager(lease: HomeLease): Json {
   try {
-    const identityPath = join(controller.controlDir, "manager.json");
+    const identityPath = join(lease.controlDir, "manager.json");
     const state = inspectNamedFile(identityPath);
     if (state === "missing") return { status: "missing" };
     if (state === "unreadable") return { status: "damaged", code: "UNREADABLE" };
@@ -175,7 +175,7 @@ export function readManager(controller: HomeController): Json {
       if (parsed.version !== 1 || typeof parsed.profileId !== "string") {
         return { status: "damaged", code: "UNSUPPORTED_SCHEMA" };
       }
-      const role = controller.roleOf(parsed.profileId);
+      const role = lease.roleOf(parsed.profileId);
       return { status: "ok", role, profileReserved: true };
     } catch {
       return { status: "damaged", code: "UNREADABLE" };
@@ -367,12 +367,12 @@ export function inspectHome(
   toolchain: Json,
   cliError?: ResolvedResources["cliError"],
 ): Json {
-  const controller = new HomeController(lock.home);
+  const lease = new HomeLease(lock.home);
   const restore = readRestoreJournal(lock.home);
   const upgrade = readUpgradeJournal(lock.home);
   const plugin = readPluginMutation(lock.home);
-  const control = publicControl(controller.inspect());
-  const manager = readManager(controller);
+  const control = publicControl(lease.inspect());
+  const manager = readManager(lease);
   const jobs = readJobs(lock.home);
   const instances = readInstances(lock.home);
   const body = {

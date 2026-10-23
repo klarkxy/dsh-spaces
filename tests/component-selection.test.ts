@@ -16,9 +16,9 @@ import {
 import {
   HOME_CONTROL_OWNER_FILE,
   HomeControlBusyError,
-  HomeController,
+  HomeLease,
   homeControlDigest,
-} from "../src/adapters/node/home/home-controller.ts";
+} from "../src/adapters/node/home/home-lease.ts";
 import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock.ts";
 
 describe("component-selection", { concurrency: 1 }, () => {
@@ -187,8 +187,8 @@ test("select refuses a live non-launcher owner and does not write a pointer", ()
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
   mkdirSync(join(tools, COLD_START_LOCK_NAME));
-  const controller = new HomeController(home);
-  const handle = controller.acquire("web");
+  const lease = new HomeLease(home);
+  const handle = lease.acquire("web");
   assert.throws(() => selectComponentPayload(home, tools, staged.digest), ComponentSelectionError);
   assert.equal(readSelectedComponentPayload(home, tools), undefined);
   handle.release();
@@ -199,9 +199,9 @@ test("select is allowed for the current launcher occupancy", () => {
   const tools = tempDir("dsh-sel-tools-");
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
-  const controller = new HomeController(home);
-  const handle = controller.acquire("desktop");
-  writeFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
+  const lease = new HomeLease(home);
+  const handle = lease.acquire("desktop");
+  writeFileSync(join(lease.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
     version: 2,
     phase: "launcher",
     pid: process.pid,
@@ -214,7 +214,7 @@ test("select is allowed for the current launcher occupancy", () => {
     secretHash: "12".repeat(32),
     original: { pid: handle.owner.pid, nonce: handle.owner.nonce, startedAt: handle.owner.startedAt, kind: "desktop" },
   })}\n`);
-  assert.throws(() => new HomeController(home).acquire("web"), HomeControlBusyError);
+  assert.throws(() => new HomeLease(home).acquire("web"), HomeControlBusyError);
   const selected = selectComponentPayload(home, tools, staged.digest);
   assert.equal(selected.digest, staged.digest);
   assert.equal(readSelectedComponentPayload(home, tools)?.digest, staged.digest);
@@ -225,9 +225,9 @@ test("select refuses authorized occupancy; only launcher phase may switch the po
   const tools = tempDir("dsh-sel-tools-");
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
-  const controller = new HomeController(home);
-  const handle = controller.acquire("web");
-  writeFileSync(join(controller.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
+  const lease = new HomeLease(home);
+  const handle = lease.acquire("web");
+  writeFileSync(join(lease.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
     version: 2,
     phase: "authorized",
     pid: process.pid,

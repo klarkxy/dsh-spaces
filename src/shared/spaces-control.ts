@@ -35,7 +35,7 @@ export interface CreateSpaceInput {
 }
 
 /** Transport adapters wrap these operations in the upstream typed Remote API. */
-export interface SpacesControlApi {
+export interface SpacesApi {
   overview(): Promise<SpacesOverview>;
   detail(id: string): Promise<SpaceDetail>;
   create(input: CreateSpaceInput): Promise<SpaceSummary>;

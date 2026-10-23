@@ -2,7 +2,7 @@ import { lstatSync } from "../../../shared/node/filesystem";
 import { mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "../atomic";
-import type { PidAliveFn } from "../home/home-controller";
+import type { PidAliveFn } from "../home/home-lease";
 import { parseSpaceName } from "./input";
 import type { SupervisorLifecycle } from "./lifecycle";
 import type { SpaceRunRegistry } from "./space-runs";

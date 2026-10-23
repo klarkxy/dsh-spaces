@@ -18,7 +18,7 @@ import {
   HOME_LOCK_OWNER_FILE,
   HOME_RECLAIM_DIR_NAME,
 } from "../src/adapters/node/home/home-operation-lock.ts";
-import { MUTATION_JOURNAL_NAME } from "../src/adapters/node/products/spaces-control.ts";
+import { MUTATION_JOURNAL_NAME } from "../src/adapters/node/products/spaces-service.ts";
 import { RESTORE_STAGE_DIR } from "../src/shared/snapshots.ts";
 
 const root = dirname(fileURLToPath(new URL(".", import.meta.url)));

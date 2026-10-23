@@ -22,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { satisfies } from "semver";
 import { SPACES_MIN_DSH_VERSION } from "../src/shared/runtime.ts";
-import { HomeController } from "../src/adapters/node/home/home-controller.ts";
+import { HomeLease } from "../src/adapters/node/home/home-lease.ts";
 import { HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE } from "../src/adapters/node/home/home-operation-lock.ts";
 import {
   createWorkbenchSupervisor,
@@ -1038,7 +1038,7 @@ test("stable entry still responds after the manager process is gone", async () =
 
 test("busy home keeps a read-only entry and does not write the job store", async () => {
   const home = tempHome();
-  const holder = new HomeController(home).acquire("desktop");
+  const holder = new HomeLease(home).acquire("desktop");
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const page = await fetch(`${handle.origin}/`, { headers: { cookie } });
@@ -1336,7 +1336,7 @@ test("recovery resume does not settle jobs or start the manager when pending rec
 test("a dead transaction lock stays in place and recovery.resume is unsupported", async () => {
   for (const pid of [2147483647, process.pid]) {
     const home = tempHome();
-    await new HomeController(home).ensureManager();
+    await new HomeLease(home).ensureManager();
     const lockDir = join(home, HOME_LOCK_DIR_NAME);
     mkdirSync(lockDir);
     const owner = JSON.stringify({ pid, nonce: "a".repeat(32), startedAt: new Date().toISOString(), label: "interrupted-restore" });
@@ -1499,7 +1499,7 @@ test("shutdown with unconfirmed final persistence keeps ownership and never anno
   assert.equal(submitted.body.ok, true);
   await waitUntil(async () => (await handle.runtime.state()).reasons.some(row => row.includes("Shutdown completion could not be saved")), "unconfirmed shutdown remains visible");
   assert.equal(normalExit, false);
-  assert.equal(new HomeController(home).inspect().held, true);
+  assert.equal(new HomeLease(home).inspect().held, true);
   const record = JSON.parse(readFileSync(jobFile, "utf8"));
   assert.equal(record.status, "running");
   assert.equal(record.phase, "finalizing");
@@ -1618,7 +1618,7 @@ test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
   );
   await waitUntil(async () => (await handle.runtime.job("root-start")).status === "succeeded", "root start");
   await assert.rejects(() => handle.close());
-  assert.equal(new HomeController(home).inspect().held, true);
+  assert.equal(new HomeLease(home).inspect().held, true);
 });
 
 test("submit without context is rejected and old epoch cannot mutate", async () => {

@@ -1,8 +1,8 @@
 import { lstatSync, realpathSync } from "../../../src/shared/node/filesystem";
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { HOME_CONTROL_DIR_NAME } from "../../../src/adapters/node/home/home-controller.ts";
-import { isCompatibleDshCliVersion } from "../../../src/adapters/node/products/spaces-control.ts";
+import { HOME_CONTROL_DIR_NAME } from "../../../src/adapters/node/home/home-lease.ts";
+import { isCompatibleDshCliVersion } from "../../../src/adapters/node/products/spaces-service.ts";
 import {
   CONTROL_TOOLCHAIN_FILE,
   EXIT,

@@ -16,9 +16,9 @@ import {
   validateComponentPayload,
   type ValidatedComponentPayload,
 } from "../../../../src/adapters/node/payload/component-payload";
-import { bindDshCli } from "../../../../src/adapters/node/products/spaces-control";
+import { bindDshCli } from "../../../../src/adapters/node/products/spaces-service";
 import { authorizeProductHome } from "../../../../src/adapters/node/home/home-guard";
-import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeController } from "../../../../src/adapters/node/home/home-controller";
+import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeLease } from "../../../../src/adapters/node/home/home-lease";
 import { HomeOperationLock, HomeLockBusyError } from "../../../../src/adapters/node/home/home-operation-lock";
 import { retirePreviousSupervisor, beginLaunchDiagnostics, readLaunchMarker, readLastSupervisorDiagnostics } from "../../../../src/adapters/node/home/supervisor-launch";
 import { readSupervisorDiagnostics, reportSupervisorLaunchFailure, reportSupervisorExit } from "../../../../src/adapters/node/diagnostics/supervisor-diagnostics";
@@ -112,7 +112,7 @@ export interface SupervisorBootstrapOptions {
 
 /**
  * Attach a live supervisor if the private endpoint authenticates and the
- * HomeController lease matches. Otherwise, for allowed roles, validate and
+ * HomeLease matches. Otherwise, for allowed roles, validate and
  * stage the full v2 component group outside Home, pack plugin/view-bridge/
  * llm-bridge tarballs from the selected package, and cold-start the supervisor CLI.
  */
@@ -396,13 +396,13 @@ async function pollEndpoint(
   const reasons = [...extraReasons];
   // Reusable discovery handles: construction is idempotent and every inspect()
   // re-reads on-disk state, so per-round semantics are unchanged. When the
-  // controller cannot be constructed up front, fall back to per-call discovery
+  // lease cannot be constructed up front, fall back to per-call discovery
   // (which reports HOME_UNAVAILABLE as a blocked verdict, as before).
-  let polledController: HomeController | undefined;
+  let polledLease: HomeLease | undefined;
   try {
-    polledController = new HomeController(home, { allowRealHome: options.allowRealHome === true });
+    polledLease = new HomeLease(home, { allowRealHome: options.allowRealHome === true });
   } catch {
-    polledController = undefined;
+    polledLease = undefined;
   }
   const preparation = new HomeOperationLock(toolsDir);
   while (now() < deadline) {
@@ -411,7 +411,7 @@ async function pollEndpoint(
       home,
       allowRealHome: options.allowRealHome === true,
       fetch: options.fetch,
-      ...(polledController ? { controller: polledController } : {}),
+      ...(polledLease ? { lease: polledLease } : {}),
     });
     if ("endpoint" in attached) {
       return {

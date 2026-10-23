@@ -4,10 +4,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, unlinkSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { HomeController } from "../src/adapters/node/home/home-controller.ts";
+import { HomeLease } from "../src/adapters/node/home/home-lease.ts";
 import { deriveServiceEpoch, digestHomeIdentity } from "../src/adapters/node/server/workbench-protocol.ts";
 import { canonicalHome } from "../src/adapters/node/home/home-operation-lock.ts";
-import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-control.ts";
+import { COMPATIBLE_DSH_CLI_VERSION } from "../src/adapters/node/products/spaces-service.ts";
 import { writeEndpointFile } from "../src/adapters/node/home/supervisor-endpoint.ts";
 import { DesktopServiceRestart } from "../packages/plugin/src/host/service-restart.ts";
 import { WorkbenchHostRuntime } from "../packages/plugin/src/host/runtime.ts";
@@ -15,7 +15,7 @@ import type { WorkbenchApi, WorkbenchState, WorkbenchPlan } from "../src/shared/
 
 function fixture(t: TestContext, live = true) {
   const home = mkdtempSync(join(tmpdir(), "dsh-manual-restart-"));
-  const owner = new HomeController(home, { allowRealHome: false });
+  const owner = new HomeLease(home, { allowRealHome: false });
   let handle = live ? owner.acquire("web", "http://127.0.0.1:34567/") : undefined;
   const endpoint = { origin: "http://127.0.0.1:34567", bearer: "a".repeat(64), protocolVersion: 2 as const,
     homeId: digestHomeIdentity(canonicalHome(home)), serviceEpoch: deriveServiceEpoch(handle?.owner.nonce ?? "a".repeat(32)) };

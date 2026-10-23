@@ -1,7 +1,7 @@
 import { lstatSync } from "../../../shared/node/filesystem";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { defaultPidAlive, HOME_CONTROL_DIR_NAME, type PidAliveFn } from "./home-controller";
+import { defaultPidAlive, HOME_CONTROL_DIR_NAME, type PidAliveFn } from "./home-lease";
 import { readRuntimeRef } from "../runtime/runtime-descriptor";
 
 export const CONTROL_JOBS_DIR_NAME = "jobs";

@@ -2,7 +2,7 @@ import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { atomicWrite } from "../atomic";
-import { parseControlEndpoint } from "./home-controller";
+import { parseControlEndpoint } from "./home-lease";
 import { canonicalHome } from "./home-operation-lock";
 import { deriveServiceEpoch, digestHomeIdentity } from "../server/workbench-protocol";
 import { parseLoopbackOrigin, parsePrivateBearer } from "../../../shared/loopback";

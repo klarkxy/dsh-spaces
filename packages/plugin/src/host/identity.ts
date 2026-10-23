@@ -6,10 +6,10 @@ import { fileURLToPath } from "node:url";
 import {
   HOME_CONTROL_DIR_NAME,
   HOME_CONTROL_MANAGER_FILE,
-  HomeController,
+  HomeLease,
   HomeControlPathError,
-} from "../../../../src/adapters/node/home/home-controller";
-import { invocationProfile } from "../../../../src/adapters/node/products/spaces-control";
+} from "../../../../src/adapters/node/home/home-lease";
+import { invocationProfile } from "../../../../src/adapters/node/products/spaces-service";
 import { samePath } from "../../../../src/adapters/node/home/home-guard";
 import { PROFILE_NAME_RE } from "../../../../src/shared/types";
 import type { WorkbenchRole } from "../../../../src/shared/workbench";
@@ -38,7 +38,7 @@ const IDENTITY_DAMAGED = "Manager identity is damaged or ambiguous and cannot be
 const HOME_UNAVAILABLE = "The DSH home could not be opened safely.";
 
 /**
- * Resolve the current profile role only from HomeController.roleOf(actual profile id).
+ * Resolve the current profile role only from HomeLease.roleOf(actual profile id).
  * Never infers manager from package name, plugin id, or environment role flags.
  * Does not call ensureManager and does not clear locks.
  */
@@ -61,9 +61,9 @@ export function resolveHostIdentity(input: HostIdentityInput = {}): HostIdentity
   if (invoked === "desktop" && argv[1]?.includes("dsh-desktop-host") &&
       !sameContainedPath(expected, argv[3] ?? "", home)) return unconfirmed(home, IDENTITY_UNCONFIRMED);
 
-  let controller: HomeController;
+  let lease: HomeLease;
   try {
-    controller = new HomeController(home, { allowRealHome: input.allowRealHome === true });
+    lease = new HomeLease(home, { allowRealHome: input.allowRealHome === true });
   } catch {
     return {
       home,
@@ -77,7 +77,7 @@ export function resolveHostIdentity(input: HostIdentityInput = {}): HostIdentity
   }
 
   try {
-    const role = controller.roleOf(invoked);
+    const role = lease.roleOf(invoked);
     const managerId = role === "manager" ? invoked : readExistingManagerId(home);
     return {
       home,

@@ -1,5 +1,5 @@
 import type { WorkbenchSpace, WorkbenchState } from "../../../shared/workbench";
-import type { HomeControlHandle } from "../home/home-controller";
+import type { HomeControlHandle } from "../home/home-lease";
 import { WorkbenchPublicError } from "./errors";
 
 export class SupervisorLifecycle {

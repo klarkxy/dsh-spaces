@@ -9,16 +9,16 @@ import {
   CLI_OUTPUT_CAP,
   COMPATIBLE_DSH_CLI_VERSION,
   MUTATION_JOURNAL_NAME,
-  NodeSpacesControl,
+  NodeSpacesService,
   PUBLIC_ERROR,
   SpacesPublicError,
   spawnBoundCli,
   type BoundCliResult,
   type SpacesLoaderView,
-} from "../src/adapters/node/products/spaces-control";
+} from "../src/adapters/node/products/spaces-service";
 import { HomeOperationLock } from "../src/adapters/node/home/home-operation-lock";
 import { writeRegisteredSpace } from "./fixtures/space.ts";
-import { SpacesHost } from "../packages/plugin/src/host/spaces-service";
+import { SpacesRemote } from "../packages/plugin/src/host/spaces-service";
 import { SPACES_REMOTE_CODES, WORKBENCH_REMOTE_CODES } from "../packages/plugin/src/host/remote-errors";
 import { TYPERT, workbenchCommandSchema } from "../packages/plugin/src/typert.host";
 import { TYPERT_REMOTE } from "../packages/plugin/src/typert.remote-client";
@@ -89,9 +89,9 @@ function defaultLoader(): SpacesLoaderView {
   };
 }
 
-function control(home: string, extra: Partial<ConstructorParameters<typeof NodeSpacesControl>[0]> = {}) {
+function control(home: string, extra: Partial<ConstructorParameters<typeof NodeSpacesService>[0]> = {}) {
   const bin = extra.argv?.[1] ?? writeCli(home);
-  return new NodeSpacesControl({
+  return new NodeSpacesService({
     home,
     env: { ...process.env, DSH_HOME: home },
     argv: extra.argv ?? [process.execPath, bin, "--profile", "web"],
@@ -420,7 +420,7 @@ test("bound CLI timeout waits for the child and caps output", async () => {
 });
 
 test("Typert descriptors are strict spaces remotes and Host injects loader", () => {
-  assert.deepEqual(SpacesHost.inject, ["loader"]);
+  assert.deepEqual(SpacesRemote.inject, ["loader"]);
   assert.equal(TYPERT.package, "@dsh-spaces/plugin");
   assert.equal(TYPERT.face, "host");
   assert.deepEqual(

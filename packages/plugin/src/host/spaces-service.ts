@@ -5,16 +5,16 @@ import type { SpaceDetail, SpaceSummary, SpacesOverview } from "../../../../src/
 import type { WorkbenchSpace } from "../../../../src/shared/workbench";
 import type { WorkbenchHostRuntime } from "./runtime";
 
-export interface SpacesHostConfig {
+export interface SpacesRemoteConfig {
   snapshotRoot?: string;
 }
 
 /**
- * Compatibility read Remote. Never constructs NodeSpacesControl, so it cannot
+ * Compatibility read Remote. Never constructs NodeSpacesService, so it cannot
  * bypass manager-only writes. Overview/detail are supervisor reads with
  * canCreate forced false.
  */
-export class SpacesHost extends TypertRemoteService {
+export class SpacesRemote extends TypertRemoteService {
   static inject = ["loader"];
 
   constructor(
@@ -70,4 +70,4 @@ function toSummary(space: WorkbenchSpace): SpaceSummary {
   };
 }
 
-export default SpacesHost;
+export default SpacesRemote;

@@ -50,10 +50,10 @@ queued → running → succeeded / failed / cancelled
 
 ## 模块边界（现行）
 
-- Home 运行权：`src/adapters/node/home-controller.ts`。Supervisor 消费该锁，客户端不公开 acquire/release。
-- 任务：`src/adapters/node/workbench-jobs.ts`。调用者必须已在 Supervisor 串行边界内。
-- 维护端口：`src/adapters/node/workbench-maintenance-ports.ts`。维护层不另造 ProcessManager。停服务走 `service.shutdown`。
-- 产品读/写：`src/adapters/node/workbench-products.ts` 与配方 `src/core/application/space-recipe.ts`。
+- Home 运行权：`src/adapters/node/home/home-lease.ts`。Supervisor 消费该锁，客户端不公开 acquire/release。
+- 任务：`src/adapters/node/maintenance/workbench-jobs.ts`。调用者必须已在 Supervisor 串行边界内。
+- 维护端口：`src/adapters/node/maintenance/workbench-maintenance-ports.ts`。维护层不另造 ProcessManager。停服务走 `service.shutdown`。
+- 产品读/写：`src/adapters/node/products/workbench-products.ts` 与配方 `src/core/application/space-recipe.ts`。
 - 桌面连接：只附着已有 Supervisor 或用户显式 start；`dispose` 不停止服务。
 
 公共合同、依赖和最终构建整合仍由主 Agent 单写。

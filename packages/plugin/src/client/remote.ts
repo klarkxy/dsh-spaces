@@ -3,7 +3,7 @@ import type {
   CreateSpaceInput,
   SpaceDetail,
   SpaceSummary,
-  SpacesControlApi,
+  SpacesApi,
   SpacesOverview,
 } from "../../../../src/shared/spaces-control";
 
@@ -105,10 +105,10 @@ async function callSpaces<T>(
 }
 
 /**
- * Bridge a live ctx.connection handle to the shared SpacesControlApi face.
+ * Bridge a live ctx.connection handle to the shared SpacesApi face.
  * Pure transport: no Node/Electron APIs, no SDK shims.
  */
-export function createSpacesRemote(connection: SpacesConnection): SpacesControlApi {
+export function createSpacesRemote(connection: SpacesConnection): SpacesApi {
   return {
     overview: () => callSpaces<SpacesOverview>(connection, ENDPOINTS.overview, {}),
     detail: (id: string) => callSpaces<SpaceDetail>(connection, ENDPOINTS.detail, { id }),

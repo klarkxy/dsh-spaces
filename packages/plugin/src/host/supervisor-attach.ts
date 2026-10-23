@@ -1,12 +1,12 @@
 import { join } from "node:path";
 import {
   HOME_CONTROL_DIR_NAME,
-  HomeController,
+  HomeLease,
   validLaunchOwner,
   parseControlEndpoint,
   type HomeControlInspect,
   type HomeControlOwner,
-} from "../../../../src/adapters/node/home/home-controller";
+} from "../../../../src/adapters/node/home/home-lease";
 import { workbenchStateSchema } from "./workbench-schemas";
 import { workbenchPost, type WorkbenchHttpFetch } from "./workbench-http";
 import {
@@ -30,7 +30,7 @@ export interface SupervisorAttachOptions {
   allowRealHome: boolean;
   fetch?: WorkbenchHttpFetch;
   /** Reusable discovery handle; inspect() always re-reads on-disk state. */
-  controller?: HomeController;
+  lease?: HomeLease;
 }
 
 const HELD_NO_ENDPOINT = "A controller holds the Home lease but no supervisor endpoint was found.";
@@ -71,21 +71,21 @@ export async function pingSupervisorState(
 export async function attachExistingSupervisor(
   options: SupervisorAttachOptions,
 ): Promise<SupervisorAttachResult> {
-  let controller: HomeController;
-  if (options.controller) {
-    controller = options.controller;
+  let lease: HomeLease;
+  if (options.lease) {
+    lease = options.lease;
   } else {
     try {
-      controller = new HomeController(options.home, { allowRealHome: options.allowRealHome });
+      lease = new HomeLease(options.home, { allowRealHome: options.allowRealHome });
     } catch {
       return blocked([HOME_UNAVAILABLE]);
     }
   }
 
-  const homeId = endpointHomeId(controller.home, { allowRealHome: options.allowRealHome });
-  const path = join(controller.home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE);
+  const homeId = endpointHomeId(lease.home, { allowRealHome: options.allowRealHome });
+  const path = join(lease.home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE);
   const recorded = readEndpointFile(path);
-  const before = controller.inspect();
+  const before = lease.inspect();
 
   if ("missing" in recorded) {
     if (!before.held) return { missing: true };
@@ -125,7 +125,7 @@ export async function attachExistingSupervisor(
     return { stale: true, reasons: [STALE_PING] };
   }
 
-  const after = controller.inspect();
+  const after = lease.inspect();
   if (ownerFingerprint(before) !== ownerFingerprint(after)) {
     return blocked([OWNER_CHANGED]);
   }

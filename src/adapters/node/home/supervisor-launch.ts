@@ -4,15 +4,15 @@ import { randomUUID } from "node:crypto";
 import { readSupervisorDiagnostics } from "../diagnostics/supervisor-diagnostics";
 import { join } from "node:path";
 import { atomicWrite } from "../atomic";
-import { HomeController, sameControlOwner, validLaunchOwner, parseControlEndpoint, type HomeControlOwner } from "./home-controller";
+import { HomeLease, sameControlOwner, validLaunchOwner, parseControlEndpoint, type HomeControlOwner } from "./home-lease";
 import { HomeOperationLock } from "./home-operation-lock";
 import { hasUnfinishedMaintenance } from "./control-residue";
 import { endpointHomeId, endpointServiceEpoch, readEndpointFile, SUPERVISOR_ENDPOINT_FILE } from "./supervisor-endpoint";
 
 /** Called only by a new launch, with the owner observed when that launch began. */
 export function retirePreviousSupervisor(home: string, previousOwner: HomeControlOwner | undefined, allowRealHome: boolean, snapshotRoot?: string): void {
-  const controller = new HomeController(home, { allowRealHome });
-  const inspection = controller.inspect();
+  const lease = new HomeLease(home, { allowRealHome });
+  const inspection = lease.inspect();
   if (!inspection.held && !previousOwner) return;
   if (!inspection.held) throw new Error("The observed controller was already retired by another launch.");
   if (!previousOwner || !("owner" in inspection) || "handoff" in inspection ||
@@ -21,13 +21,13 @@ export function retirePreviousSupervisor(home: string, previousOwner: HomeContro
       !sameControlOwner(inspection.owner, previousOwner)) {
     throw new Error("Controller ownership changed since this launch began. No second startup was attempted.");
   }
-  const retired = controller.reclaimDead({
+  const retired = lease.reclaimDead({
     expectedOwner: previousOwner,
     beforeRelease: (owner) => {
       if (new HomeOperationLock(home, { allowRealHome }).inspect().held || hasUnfinishedMaintenance(home, snapshotRoot)) {
         throw new Error("Unfinished Home maintenance evidence was retained. The previous controller lease was not retired.");
       }
-      const endpointPath = join(controller.controlDir, SUPERVISOR_ENDPOINT_FILE);
+      const endpointPath = join(lease.controlDir, SUPERVISOR_ENDPOINT_FILE);
       const recorded = readEndpointFile(endpointPath);
       if ("invalid" in recorded) throw new Error(recorded.reasons.join(" "));
       if ("endpoint" in recorded && (
@@ -40,7 +40,7 @@ export function retirePreviousSupervisor(home: string, previousOwner: HomeContro
       }
       // Keep the failure fact separate from the live ownership token. No jobs or
       // workspace data are changed, and no credentials enter this evidence.
-      const evidence = join(controller.controlDir, "previous-controller-exit.json");
+      const evidence = join(lease.controlDir, "previous-controller-exit.json");
       try {
         const stat = lstatSync(evidence);
         if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Previous controller evidence is not a regular file.");
