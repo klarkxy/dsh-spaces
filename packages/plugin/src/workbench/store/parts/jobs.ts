@@ -1,0 +1,121 @@
+/**
+ * The job tracking of the workbench client.
+ *
+ * This part owns what happens to a job: how it joins the state, which product
+ * outcome it carries and when a created space is entered automatically. The
+ * code moves unchanged from `workbench/store.ts`.
+ */
+
+import type { WorkbenchJob, WorkbenchState } from "../../../../../../src/shared/workbench";
+import { ACTIVE_JOB, CREATE_JOB } from "../constants";
+import { importSpaceId } from "../errors";
+import { RequestPart } from "./requests";
+
+export abstract class JobPart extends RequestPart {
+  protected mergeJob(job: WorkbenchJob): void {
+    const state = this.ui.state;
+    if (!state) return;
+    const jobs = state.jobs.filter((item) => item.id !== job.id);
+    jobs.unshift(job);
+    if (ACTIVE_JOB.has(job.status) && CREATE_JOB.has(job.kind)) this.watchedCreates.add(job.id);
+    this.patch({ state: { ...state, jobs } });
+    this.noteCreated(job);
+    this.onProductJob(job);
+  }
+
+  protected onProductJob(job: WorkbenchJob): void {
+    if (job.kind === "blueprint.apply") this.blueprint.onApplyJob(job);
+    if (ACTIVE_JOB.has(job.status)) return;
+    for (const [key, requestId] of [...this.intentRequestIds.entries()]) {
+      if (requestId === job.requestId) this.intentRequestIds.delete(key);
+    }
+    if (this.handledProductJobs.has(job.id)) return;
+    this.handledProductJobs.add(job.id);
+    const product = job.result?.product;
+    if (product) this.patch({ lastProductOutcome: product });
+    if (job.status === "succeeded" && product?.kind === "settings.update") {
+      const draft = this.ui.settingsDraft;
+      const submitted = this.submittedSettingsJson;
+      this.submittedSettingsJson = null;
+      const newerEdit = Boolean(draft && submitted && JSON.stringify(draft.settings) !== submitted);
+      if (draft && !newerEdit) {
+        this.patch({
+          settingsDraft: {
+            settings: product.settings,
+            observation: draft.observation,
+            dirty: false,
+          },
+          settingsStatus: "idle",
+        });
+        void this.loadSettings();
+      }
+    } else if (job.status === "succeeded") {
+      if (job.kind === "catalog.refresh" || product?.kind === "catalog.refresh") {
+        this.patch({ catalogStatus: "idle" });
+        if (this.ui.homeTab === "plugins") void this.loadCatalog(this.ui.pluginQuery);
+      }
+      if (
+        job.kind === "plugin.download" ||
+        job.kind === "plugin.library.remove" ||
+        product?.kind === "plugin.download" ||
+        product?.kind === "plugin.library.remove"
+      ) {
+        this.patch({ libraryStatus: "idle" });
+        if (this.ui.homeTab === "plugins") void this.loadLibrary();
+      }
+      if (
+        job.kind === "template.save" ||
+        job.kind === "template.create" ||
+        job.kind === "space.import" ||
+        product?.kind === "template.save" ||
+        product?.kind === "template.create" ||
+        product?.kind === "space.import"
+      ) {
+        this.patch({ templatesStatus: "idle" });
+        if (this.ui.homeTab === "templates") void this.loadTemplates();
+      }
+    }
+  }
+
+  protected noteCreated(job: WorkbenchJob, historical = false): void {
+    const spaceId = job.result?.spaceId ?? importSpaceId(job.result?.product);
+    if (!CREATE_JOB.has(job.kind) || job.status !== "succeeded" || !spaceId || historical) return;
+    if (this.notedCreates.has(job.id)) return;
+    this.notedCreates.add(job.id);
+    this.patch({ createdNotice: { spaceId } });
+    this.armAutoEnter(job, spaceId);
+  }
+
+  /**
+   * Plan section 4: a space created from this client is entered directly.
+   *
+   * The request id decides whether this client sent the create at all, and the
+   * navigation intent decides whether the user has moved somewhere else since.
+   * A create from another client, or a user who navigated away in the
+   * meantime, keeps the notice and the explicit "enter" action.
+   */
+  private armAutoEnter(job: WorkbenchJob, spaceId: string): void {
+    if (job.kind !== "space.create") return;
+    const submitted = this.submittedCreates.get(job.requestId);
+    if (!submitted) return;
+    this.submittedCreates.delete(job.requestId);
+    this.pendingAutoEnter = { spaceId: spaceId || submitted.spaceId, intent: submitted.intent };
+  }
+
+  /** Enter the created space once it exists in the current state. */
+  protected flushAutoEnter(state: WorkbenchState): void {
+    const pending = this.pendingAutoEnter;
+    if (!pending) return;
+    if (!state.spaces.some((space) => space.id === pending.spaceId)) return;
+    this.pendingAutoEnter = null;
+    if (this.navigationIntent !== pending.intent) return;
+    if (this.ui.selected === pending.spaceId) return;
+    // The settings surface must not cover the space that is entered.
+    this.patch({ overlay: null });
+    this.selectSpace(pending.spaceId);
+  }
+
+  hasActiveJobs(): boolean {
+    return (this.ui.state?.jobs ?? []).some((job) => ACTIVE_JOB.has(job.status));
+  }
+}
