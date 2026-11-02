@@ -1,11 +1,15 @@
 # Isolation sandbox — never commit live DSH_HOME data
 .sandbox/
 
-# Dependencies
+# Dependencies and build output
 node_modules/
 dist/
 out/
 release/
+packages/*/lib/
+packages/*/*.tgz
+*.asar
+*.tsbuildinfo
 
 # Logs / OS
 *.log
@@ -22,40 +26,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
-
-# Electron
-*.asar
-packages/*/lib/
-packages/*/*.tgz
-
-# TypeScript build info
-*.tsbuildinfo
 
 # Local tooling
 .playwright-mcp/
 .pnpm-store/
-
-# Dependencies
-node_modules/
-dist/
-out/
-release/
-
-# Logs / OS
-*.log
-npm-debug.log*
-.DS_Store
-Thumbs.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# Env / secrets
-.env
-.env.*
-!.env.example
-
-# Electron
-*.asar
+.learnings/
