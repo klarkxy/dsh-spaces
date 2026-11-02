@@ -13,6 +13,7 @@ import { WorkbenchCore } from "../core";
 
 export abstract class StatePart extends WorkbenchCore {
   protected applyState(state: WorkbenchState): void {
+    ++this.stateObservation;
     const previousEpoch = this.ui.state?.serviceEpoch;
     const epochChanged = previousEpoch !== undefined && previousEpoch !== state.serviceEpoch;
     const epochDestroyed = this.views.syncServiceEpoch(state.serviceEpoch);

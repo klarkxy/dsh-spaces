@@ -2,7 +2,7 @@
 
 DSH-native Spaces workbench, with a dedicated manager and an independent local supervisor.
 
-Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment.
+Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment. Current architecture baseline: [现行架构](../../docs/architecture.md).
 
 当前为本地预构建包，尚未发布到 npm。新安装默认固定官方 CLI **`0.2.1-rc.2`**；已有运行时通过正常升级操作更新。本仓库使用 `0.2.1-rc.2` SDK 构建；peer 保留原有下限，并显式接纳这个预发布版本，不构成 CLI 白名单。
 
@@ -18,24 +18,29 @@ Run the printed `dsh plugin --profile web add <tarball>` command, then `dsh web`
 
 No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2` in place of `dsh`. Package output defaults to `%TEMP%/dsh-spaces-pack`, outside package trees. Pass local archives as one absolute path argument, quoted by your shell if needed. Keep the CLI's default `autoInstallPeers: false`: its shared SDK is supplied by the runtime, and installing another copy can split Cordis service identity.
 
-初始化使用当前 DSH Home。普通页面保持原有界面，只有用户点击初始化后才创建管理空间和启动监督程序；失败会显示原因，该次请求结束，下次打开不会自动补装或续接。再次进入时点击“进入工作台”。只需在一个已有 Web profile 安装完整入口，工作台新建的空间自动使用轻量 view-bridge。
+初始化使用当前 DSH Home。上面的安装步骤和初始化点击针对普通 Web：普通页面保持原有界面，只有用户点击初始化后才创建管理空间和启动监督程序；失败会显示原因，该次请求结束，下次打开不会自动补装或续接。再次进入时点击“进入工作台”。只需在一个已有 Web profile 安装完整入口，工作台新建的空间自动使用轻量 view-bridge。
+
+官方 Desktop 在打开应用时后台初始化并启动管理服务，主界面保留。宿主进程按当前 Home 保存该次终态；刷新界面只是重新加入，失败或正常停止不会自动重启。再次打开应用是一份新启动，已有确认式手动服务入口也会建立新操作。子空间仍需点击后启动。缺少启动观察接口是明确的兼容失败，不改走 Web 的初始化点击，也不能据此断定服务没有启动。
 
 ## Package contract
 
 - Standard `dsh.bundle.patch` and `cordis.patch.yml` let the official CLI maintain the profile's bundle list.
 - `dsh.client` and `./client` supply the Web client through DSH's module loader and shared React.
-- The tarball carries the component group: supervisor, manager plugin, view-bridge, browser, llm-bridge, and the installation worker (`snapshot-worker.mjs`). Users do not need a second package or this source checkout at runtime. `llm-bridge` supplies new spaces' main-model inheritance and retains legacy shared/local behavior.
-- The ordinary host registers its public LLM services with its owning Supervisor. New ordinary spaces default to the main model; the create dialog also offers global connections or local configuration. Existing spaces keep their policy. Main credentials remain in that host.
+- The tarball carries one immutable component group of the same build: supervisor, manager plugin, view bridge, Browser, LLM bridge and the installation worker. Users do not need a second package or this source checkout at runtime. The LLM bridge supplies new spaces' main-model inheritance and retains legacy shared/local behavior.
+- The ordinary host registers its public LLM services with its owning Supervisor. The create dialog offers the main model (default) or local configuration. The separate shared connection library and its space bindings are available under the collapsed Legacy connection settings in Models and connections and space details. Existing policies remain unchanged. Main credentials remain in that host.
+- Spaces blueprint workflows are sealed while the core space system stabilizes. Blueprint creation, generation, preview, apply and share-code import/export return `workbench/unsupported`; ordinary templates and `.dshspace` shares remain available. The independent `@klarkxy/dsh-blueprint` package is not disabled.
 - The supervisor allocates the manager under the existing Home locks; ordinary profiles never gain manager write remotes.
-- Unknown CLI versions, damaged identity, and another controller's lease are refused before initialization writes. Concurrent callers share startup but receive separate one-time handoffs.
+- Unknown CLI versions, damaged identity, and another controller's lease are refused before initialization writes. Concurrent callers share startup but receive separate one-time entries.
 
 ## Lifecycle
 
-Closing a browser tab does not stop the supervisor or spaces. Use the workbench's explicit shutdown action to stop them. Stopping the ordinary Web process also leaves the independent workbench running.
+Closing a browser tab does not stop the supervisor or spaces. Use the workbench's explicit shutdown action to stop them. Stopping the ordinary Web process also leaves the independent workbench running, but main-model inheritance becomes unavailable while its main host is stopped.
 
-`dsh plugin --profile web remove @dsh-spaces/plugin` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor. Upgrading Spaces means adding a newer version of this plugin to the host profile, shutting the service down from the manager UI, and reopening Spaces — the Supervisor then selects the host plugin's component group and aligns the manager plugin at startup.
+`dsh plugin --profile web remove @dsh-spaces/plugin` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor.
 
-安装时可能需要联网获取官方依赖。当前 alpha 的真实管理器、原生设置与新旧空间启动验收见 [迁移记录](../../tasks/archive/alpha-migration.md)；rc.1 / rc.2 的历史安装结果不替代 alpha 验证。故障政策见 [let it crash](../../docs/let-it-crash.md)。
+Upgrading Spaces means three separate user actions: add a newer version of this plugin to the host profile, shut the service down from the manager UI, and reopen Spaces. The new Supervisor then selects the host plugin's component group and aligns the manager plugin before the manager starts. Ordinary spaces receive the group's bridge when they do not have one yet; an already-installed space bridge is not automatically re-aligned to the new group, so its presence must not be treated as proof of version alignment. There is no in-app self-update and no automatic component handoff.
+
+安装时可能需要联网获取官方依赖。早期 alpha 的管理器与隔离验证见 [历史迁移记录](../../tasks/archive/alpha-migration.md)；它不作为当前版本验收。当前宿主与平台范围以 [宿主嵌入合同](../../docs/host/embedding.md) 及其指向的最新验收记录为准。
 
 ## Distribution
 
@@ -43,4 +48,4 @@ The private repository root also exposes `@dsh-spaces/plugin` for local linked d
 
 Metadata includes `repository.directory`, `keywords` (`dsh-plugin`, `deepseek-harness`), public publish configuration and MIT license. npm publication and community catalog listing still require completion; local pack success is not a public release.
 
-[Installation guide](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md) · [Workbench architecture](https://github.com/klarkxy/dsh-spaces/blob/main/docs/workbench.md)
+[Installation guide](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md) · [Host embedding contract](https://github.com/klarkxy/dsh-spaces/blob/main/docs/host/embedding.md) · [Current architecture](https://github.com/klarkxy/dsh-spaces/blob/main/docs/architecture.md)

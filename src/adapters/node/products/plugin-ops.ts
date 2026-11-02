@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { lt as semverLt, prerelease as semverPrerelease, valid as semverValid } from "semver";
 import { t } from "../../../shared/i18n";
 import { formatWorkbenchFailure } from "../../../shared/workbench";
@@ -215,6 +215,42 @@ export async function pluginAdd(dshHome: string, name: string, spec: string, opt
       { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
     if (code !== 0) throw pluginError(name, target, code, stdout, stderr);
+  });
+}
+
+/**
+ * Dev-checkout install: `dsh plugin add` of a verified package directory so
+ * the profile records a `link:` spec. Unlike pluginAdd this accepts a bare
+ * directory, but only an absolute readable package outside Home whose
+ * package.json name matches the expected component.
+ */
+export async function pluginLinkDirectory(
+  dshHome: string,
+  name: string,
+  dir: string,
+  expectedName: string,
+): Promise<void> {
+  assertProfile(dshHome, name);
+  const invalid = (): Error => new Error(t("errors.pluginSpecInvalid", { spec: dir }));
+  const inside = relative(resolve(dshHome), dir);
+  const insideHome = inside === "" || (!inside.startsWith("..") && !isAbsolute(inside));
+  let valid = isAbsolute(dir) && !insideHome;
+  if (valid) {
+    try {
+      valid = statSync(dir).isDirectory()
+        && (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name?: unknown }).name === expectedName;
+    } catch {
+      valid = false;
+    }
+  }
+  if (!valid) throw invalid();
+  await enqueuePlugin(t("queue.pluginAddSpec", { name, spec: dir }), async () => {
+    const { stdout, stderr, code } = await runDsh(
+      dshHome,
+      ["plugin", "--profile", name, "add", dir],
+      { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
+    );
+    if (code !== 0) throw pluginError(name, dir, code, stdout, stderr);
   });
 }
 

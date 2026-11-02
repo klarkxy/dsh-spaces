@@ -1,5 +1,7 @@
 # 核心思想：let it crash
 
+> 本文件只定义故障政策。现行角色、数据流和可用性见 [architecture.md](architecture.md)。
+
 插件由用户自由选择和组合。插件错误、依赖冲突、配置不兼容、启动失败和进程崩溃，都是允许出现的结果。DSH Spaces 不承诺任意插件组合都能正常运行，也不负责把失败的环境修复成可运行状态。
 
 出错时，让失败的操作、插件或进程按照其原有执行边界失败或退出。Spaces 负责如实记录失败，并在仍可用的界面或本地输出中说明发生了什么、已知原因是什么。无法确定根因或具体插件时，明确说明未知，不猜测。
@@ -24,11 +26,11 @@
 
 管理器初始化和插件对齐完成前，Supervisor 不接受并发变更；初始化失败后，当前 Supervisor 拒绝继续写入。遗留的 `manager-bootstrap.json`（包括损坏或归属不明的记录）在下一次启动时仍保留，不继续安装、不重新应用隔离 patch，也不清除该标记。管理插件对齐失败则阻止该管理器的后续启动请求，并保留原始诊断，不连带停止其他健康空间。
 
-源码侧恢复编排已删：`RestoreSession`、`SnapshotStore.restore` / `recover` / `completeRestore`、snapshot-worker 的同名操作以及 Doctor 恢复编译桩均已移除。历史 `pending-restore.json` 与 restore journal 仍可读作未完成证据并挡住后续写入，不重放、不修补。
+恢复编排及其执行入口已移除。历史未完成恢复记录仍可作为证据读取并阻止后续写入，但不重放、不修补，也不据此重建恢复能力。
 
-运行时安装 IO 已抽到 `src/adapters/node/runtime/runtime-installation.ts`。`--snapshot-worker` 仍用于正常快照 create/delete，以及安装过程的树拷贝 / 改名 / 重定向；worker 上的 `runtimeInstall` 只转发抽出的安装函数，不是恢复产品。
+正常快照创建、删除和安装 IO 不是恢复产品，不得据此重新引入恢复链。
 
-维护成功路径可以 `reinitializeManager`（同一 Supervisor `serviceEpoch`）；失败路径保持 maintenance、不重启管理 profile。Spaces 不再在应用内自我更新：宿主插件通过 `dsh plugin --profile web add <新包>` 升级，管理界面停止服务后重新打开；Supervisor 选择宿主插件的组件组并在管理器启动前对齐管理插件，对齐失败即阻止启动并报告原因。中断的旧式更新留下的证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。标准安装、正常维护及桌面真实流程的具体版本、结果和限制见 [合并执行记录](../tasks/merge-execution.md)；实现完成与实际验收分别记录。
+维护成功后可以在同一服务纪元内重新初始化管理器；失败路径保持维护状态，不自动重启管理 profile。Spaces 不在应用内自我更新：宿主插件通过 `dsh plugin --profile web add <新包>` 升级，管理界面停止服务后重新打开。管理插件对齐失败会阻止启动并报告原因。中断的旧式更新留下的证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。标准安装、正常维护及桌面真实流程的具体版本、结果和限制见 [合并执行记录](../tasks/merge-execution.md)；实现完成与实际验收分别记录。
 
 ## 两个必须明确的解释
 

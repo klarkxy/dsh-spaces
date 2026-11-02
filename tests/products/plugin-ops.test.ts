@@ -10,6 +10,7 @@ import {
   listProfilePlugins,
   parseNpmNameAndVersion,
   pluginAdd,
+  pluginLinkDirectory,
   pluginRemove,
   resolveInstallSpec,
 } from "../../src/adapters/node/products/plugin-ops.ts";
@@ -207,6 +208,28 @@ test("listNpmPackageVersions reports the registry failure and keeps the limit", 
   assert.equal(capped.versions.length, 5);
   assert.equal(capped.versions[0], "1.0.60");
   assert.equal(capped.latest, "1.0.60");
+});
+
+test("pluginLinkDirectory rejects anything but an absolute outside-Home package dir", async () => {
+  const dir = home();
+  mkdirSync(join(dir, "profiles", "coding"), { recursive: true });
+  const pkg = mkdtempSync(join(tmpdir(), "dsh-spaces-link-"));
+  temps.push(pkg);
+  writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@dsh-spaces/plugin" }));
+  await assert.rejects(pluginLinkDirectory(dir, "coding", "relative/path", "@dsh-spaces/plugin"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", join(pkg, "package.json"), "@dsh-spaces/plugin"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", join(dir, "profiles", "coding"), "@dsh-spaces/plugin"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", pkg, "@dsh-spaces/other"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", join(pkg, "missing"), "@dsh-spaces/plugin"), /spec/i);
+});
+
+test("pluginAdd still rejects a raw absolute directory", async () => {
+  const dir = home();
+  mkdirSync(join(dir, "profiles", "coding"), { recursive: true });
+  const pkg = mkdtempSync(join(tmpdir(), "dsh-spaces-rawdir-"));
+  temps.push(pkg);
+  writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@dsh-spaces/plugin" }));
+  await assert.rejects(pluginAdd(dir, "coding", pkg));
 });
 
 test("pluginAdd error keeps generic dsh stderr and the pnpm stdout tail", async () => {

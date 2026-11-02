@@ -69,7 +69,7 @@ export abstract class RequestPart extends CommandPart {
     const generation = ++this.stateGeneration;
     try {
       const state = await this.api.state();
-      if (!this.stillOpen(cycle) || generation !== this.stateGeneration) return;
+      if (this.stateReadFailed || this.shutdownRequested || !this.stillOpen(cycle) || generation !== this.stateGeneration) return;
       this.applyState(state);
       if (this.running && !this.stateReadFailed) this.schedulePoll();
     } catch (error) {
@@ -106,7 +106,7 @@ export abstract class RequestPart extends CommandPart {
       if (!this.stillOpen(cycle)) return;
       // D1: a non-destructive stop or restart runs from its preview. Every
       // other kind, and every destructive plan, still asks for a confirmation.
-      if (AUTO_CONFIRM_KINDS.has(request.kind) && !plan.destructive) {
+      if (AUTO_CONFIRM_KINDS.has(request.kind) && !plan.destructive && plan.taskActivity === "idle") {
         // The plan takes the stage, so the failure of its execution is global.
         this.patch({ pendingPlan: null, planError: null, commandPending: this.wrapDepth - 1 > 0, overlay: null, requestOrigin: null });
         void this.submit({ kind: "plan.execute", planId: plan.id }, { origin: null });

@@ -9,13 +9,14 @@ import type { HomeOperationLock } from "../home/home-operation-lock";
 import { setManagedCliPrefix, setManagedNodeExecutable, setSelectedDshResolver } from "../runtime/dsh-cli";
 import { managedCliPrefix } from "../runtime/dsh-cli";
 import { archiveAbsPath } from "../products/plugin-library";
-import { pluginAdd } from "../products/plugin-ops";
+import { pluginAdd, pluginLinkDirectory } from "../products/plugin-ops";
 import { installedComponentMatches } from "../profile/profile-alpha-migration";
 import { assertOwnedProfilePath } from "../profile/profile-settings";
 import { SESSION_ROW_ID, STORAGE_ROW_ID, extractRoot } from "../profile/patch-writer";
 import type { ProfileRegistry } from "../profile/profile-registry";
 import { alignmentArchiveId } from "../payload/component-cli";
 import { validateComponentPayload, type ValidatedComponentPayload } from "../payload/component-payload";
+import { devComponentDir, devComponentLinked, type SpacesComponent } from "../payload/dev-checkout";
 import { describeRuntime, readRuntimeRef } from "../runtime/runtime-descriptor";
 import type { RuntimeStore } from "../runtime/runtime-store";
 import { setToolchainRoot } from "../runtime/toolchain";
@@ -28,6 +29,13 @@ import { profileHasViewBridge } from "./profile-probe";
 import type { BoundCli, WorkbenchSupervisorOptions } from "./types";
 
 export const VIEW_BRIDGE_ID = "dsh-spaces-view-bridge";
+
+const COMPONENT_ARCHIVE_PREFIX: Record<SpacesComponent, string> = {
+  plugin: "dsh-spaces-plugin",
+  "view-bridge": VIEW_BRIDGE_ID,
+  "llm-bridge": "dsh-spaces-llm-bridge",
+  browser: "dsh-spaces-browser",
+};
 
 export interface SupervisorToolchainHost {
   home: string;
@@ -179,6 +187,62 @@ export class SupervisorToolchain {
     return createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
   }
 
+  /** Whether this launch can provide a component: always true for a linked checkout, else its artifact. */
+  hasComponent(component: SpacesComponent): boolean {
+    if (this.host.options.devCheckoutRoot !== undefined) return true;
+    return this.componentArtifact(component) !== undefined;
+  }
+
+  /**
+   * Dev checkouts link the component directory in place; the packaged path
+   * installs the artifact tarball under the same archive ids as before.
+   */
+  async installComponent(profileId: string, component: SpacesComponent): Promise<void> {
+    const checkout = this.host.options.devCheckoutRoot;
+    if (checkout !== undefined) {
+      const add = this.host.options.pluginLink ?? pluginLinkDirectory;
+      await add(this.host.home, profileId, devComponentDir(checkout, component), `@dsh-spaces/${component}`);
+      return;
+    }
+    const artifact = this.componentArtifact(component);
+    if (!artifact) {
+      throw new Error(`The selected ${component} archive is unavailable.`);
+    }
+    await this.installArtifact(profileId, artifact, `${COMPONENT_ARCHIVE_PREFIX[component]}-${this.artifactDigest(artifact)}`);
+  }
+
+  /**
+   * Dev checkouts align by link identity; packaged installs align on installed
+   * content (plugin payload digest, bridge/component file bytes).
+   */
+  componentAligned(profileId: string, component: SpacesComponent): boolean {
+    const checkout = this.host.options.devCheckoutRoot;
+    if (checkout !== undefined) {
+      return devComponentLinked(this.host.home, profileId, checkout, component);
+    }
+    const selected = this.host.selectedPayload();
+    if (!selected) return false;
+    if (component === "plugin") {
+      const lib = this.installedManagerPluginLib(profileId);
+      if (!lib) return false;
+      try {
+        return validateComponentPayload(lib).digest === selected.digest;
+      } catch {
+        return false;
+      }
+    }
+    return installedComponentMatches(this.host.home, profileId, selected.payloadRootLib, component);
+  }
+
+  private componentArtifact(component: SpacesComponent): string | undefined {
+    switch (component) {
+      case "plugin": return this.host.options.pluginArtifact;
+      case "view-bridge": return this.host.options.viewBridgeArtifact;
+      case "llm-bridge": return this.host.options.llmBridgeArtifact;
+      case "browser": return this.host.options.browserArtifact;
+    }
+  }
+
   async installArtifact(profileId: string, artifact: string, id: string): Promise<void> {
     const profileDir = join(this.host.home, "profiles", profileId);
     const canonicalDest = archiveAbsPath(this.host.home, id);
@@ -195,39 +259,30 @@ export class SupervisorToolchain {
   }
 
   async ensureViewBridge(profileId: string): Promise<void> {
-    if (!this.host.options.viewBridgeArtifact) return;
+    if (!this.hasComponent("view-bridge")) return;
     if (profileId === this.host.managerId()) return;
-    if (profileHasViewBridge(this.host.home, profileId)) return;
-    await this.installArtifact(profileId, this.host.options.viewBridgeArtifact, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.host.options.viewBridgeArtifact)}`);
+    const checkout = this.host.options.devCheckoutRoot;
+    if (checkout !== undefined
+      ? devComponentLinked(this.host.home, profileId, checkout, "view-bridge")
+      : profileHasViewBridge(this.host.home, profileId)) return;
+    await this.installComponent(profileId, "view-bridge");
   }
 
   async alignManagerPlugin(profileId: string): Promise<void> {
-    const selected = this.host.selectedPayload()!;
-    const installed = () => {
-      const lib = this.installedManagerPluginLib(profileId);
-      if (!lib) return undefined;
-      try {
-        return validateComponentPayload(lib);
-      } catch {
-        return undefined;
-      }
-    };
-    const bridgeMatches = () =>
-      installedComponentMatches(this.host.home, profileId, selected.payloadRootLib, "view-bridge");
-    const pluginAligned = installed()?.digest === selected.digest;
-    const bridgeAligned = !this.host.options.viewBridgeArtifact || bridgeMatches();
+    const pluginAligned = this.componentAligned(profileId, "plugin");
+    const bridgeAligned = !this.hasComponent("view-bridge") || this.componentAligned(profileId, "view-bridge");
     if (pluginAligned && bridgeAligned) return;
     await this.host.lock.run("manager.align", () => this.host.observeChildWork(async () => {
       if (!pluginAligned) {
-        await this.installArtifact(profileId, this.host.options.pluginArtifact!, `dsh-spaces-plugin-${this.artifactDigest(this.host.options.pluginArtifact!)}`);
+        await this.installComponent(profileId, "plugin");
       }
       if (!bridgeAligned) {
-        await this.installArtifact(profileId, this.host.options.viewBridgeArtifact!, `${VIEW_BRIDGE_ID}-${this.artifactDigest(this.host.options.viewBridgeArtifact!)}`);
+        await this.installComponent(profileId, "view-bridge");
       }
-      if (installed()?.digest !== selected.digest) {
+      if (!this.componentAligned(profileId, "plugin")) {
         throw new Error("The installed manager plugin payload does not match the selected component group.");
       }
-      if (this.host.options.viewBridgeArtifact && !bridgeMatches()) {
+      if (this.hasComponent("view-bridge") && !this.componentAligned(profileId, "view-bridge")) {
         throw new Error("The installed manager view bridge does not match the selected component group.");
       }
     }));

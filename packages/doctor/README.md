@@ -2,11 +2,11 @@
 
 生产 Home 必须显式传入 `--home` 与 `--allow-real-home`；默认仍拒绝生产目录。该授权只作用于本次 CLI 进程和指定 Home，不修改全局环境或权限。开发与验收始终使用隔离 Home，无需此标志。
 
-Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
+Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md). Current architecture baseline: [docs/architecture.md](../../docs/architecture.md).
 
-**Target policy:** standalone Node CLI for DSH Spaces **diagnostics**. It inspects a Home and prints what it can prove. It does not install DSH, start Electron, start services, recover, roll back, unlock, rewrite jobs, write runtime pointers, rebuild config, or default to `~/.dsh`.
+**Target policy:** standalone Node CLI for DSH Spaces **diagnostics**. It inspects a Home and prints what it can prove. It does not install DSH, start services, recover, roll back, unlock, rewrite jobs, write runtime pointers, rebuild config, or default to `~/.dsh`.
 
-`unlock` / `recover` / `rollback` are not product commands. They return `UNSUPPORTED` and exit `7` without forwarding to the old recover implementation or rewriting Home.
+`unlock` / `recover` / `rollback` are not product commands. They return `UNSUPPORTED` and exit `7` without forwarding to an old recover implementation or rewriting Home.
 
 ```
 dsh-spaces doctor   --home <dir> [--cli <absolute-bin>]
@@ -15,9 +15,13 @@ dsh-spaces verify   --home <dir> --cli <absolute-bin> --profile <name>
 
 `--home` is required. `--cli` must be an absolute path to a bound DSH CLI whose adjacent `package.json` is an exact version. Tags such as `latest` are refused.
 
-`doctor` is intended to be read-only: it should never call `unlockDead()`, `reclaimDead()`, or `WorkbenchJobStore` writes. It reports registry, journals, plugin-mutation evidence, transaction lock, run-control, manager identity, persistent jobs, and leftover instances. Unreadable or future schemas keep their original bytes. Permission failures are not treated as absence. Public JSON does not include CLI paths, tokens, cookies, or config secrets.
+## Read-only scope
+
+`doctor` is intended to be read-only: it must not release run rights, retire a lease, release a maintenance lock, or write task records. It reports the space registry, journals, plugin-mutation evidence, the transaction lock, the run-control record, manager identity, persistent jobs, and leftover instances. Unreadable or future schemas keep their original bytes. Permission failures are not treated as absence. Public JSON does not include CLI paths, tokens, cookies, or config secrets.
 
 Treat any `verify` as a check only if you can prove it does not start services, write files, or trigger upstream mutation. A command is not “read-only” because of its name.
+
+A Home that is blocked — for example because a run record is incomplete, ambiguous, or belongs to another controller — is **reported**, not cleared. Diagnosis is the whole product: doctor does not repair, and it does not stand in for the user-initiated service stop/restart described in the fault policy.
 
 Revoked product commands (exit `7`, code `UNSUPPORTED`, Home bytes unchanged):
 
@@ -29,7 +33,9 @@ dsh-spaces rollback --home <dir> ...
 
 Do not use `--dry-run` as a recovery rehearsal. Calling a revoked command is not a supported operator flow.
 
-Resource paths prefer `--cli` and explicit roots. Otherwise doctor may read `.dsh-spaces-control/toolchain.json` as **input**. Target policy: inspect must not update that record. Missing trusted fields are reported as flags to pass. Production AppData and empty first-init directories are not guessed as old data. The running doctor binary must not live inside the Home being inspected.
+## Resource paths
+
+Resource paths prefer `--cli` and explicit roots. Otherwise doctor may read the toolchain record kept in the Home's control area as **input**. Target policy: inspect must not update that record. Missing trusted fields are reported as flags to pass. Production AppData and empty first-init directories are not guessed as old data. The running doctor binary must not live inside the Home being inspected.
 
 Build from the repository root with `npm run build:spaces`.
 

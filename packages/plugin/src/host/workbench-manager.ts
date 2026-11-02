@@ -11,6 +11,7 @@ import type {
   WorkbenchPlugin,
   WorkbenchRuntime,
   WorkbenchSnapshot,
+  WorkbenchStartupStatus,
   WorkbenchState,
   WorkbenchView,
 } from "../../../../src/shared/workbench";
@@ -43,6 +44,13 @@ export class WorkbenchManagerHost extends TypertRemoteService implements Workben
 
   async state(): Promise<WorkbenchState> {
     return this.guard((api) => api.state());
+  }
+
+  async startupStatus(): Promise<WorkbenchStartupStatus> {
+    return this.guard((api) => {
+      if (!api.startupStatus) throw new Error("workbench/unsupported");
+      return api.startupStatus();
+    });
   }
 
   async detail(spaceId: string): Promise<SpaceDetail> {

@@ -1,5 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { assertBrowserRelease, profileBase } from '../profile/space-base';
+import { SPACES_BROWSER_SEALED } from '../../../shared/browser-sealed';
+import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { lt as semverLt } from "semver";
 import type { GlobalLlmHost } from "../../../core/application/global-llm-host";
@@ -10,6 +12,7 @@ import type { SupervisorLlmDelegation } from "../llm/delegation";
 import type { HomeOperationLock } from "../home/home-operation-lock";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import { cliLoadError, unmetProfileDshRequirements } from "../payload/component-cli";
+import type { SpacesComponent } from "../payload/dev-checkout";
 import { migrateLegacyProfileSettings } from "../profile/profile-settings";
 import { migrateProfileToAlpha } from "../profile/profile-alpha-migration";
 import type { ProcessManager } from "../runtime/process-manager";
@@ -37,8 +40,8 @@ export interface SupervisorSpaceLifecycleHost {
   requireServiceEpoch: () => string;
   ensureViewBridge: (profileId: string) => Promise<void>;
   ensureLlmBridge: (profileId: string) => Promise<void>;
-  installArtifact: (profileId: string, artifact: string, id: string) => Promise<void>;
-  artifactDigest: (artifact: string) => string;
+  installComponent: (profileId: string, component: SpacesComponent) => Promise<void>;
+  componentAligned: (profileId: string, component: SpacesComponent) => boolean;
   readDump: (profile: string) => Promise<string | undefined>;
   pinnedDshVersion: (spaceId: string) => string | undefined;
   resolveSpaceRuntime: (spaceId: string) => { bin: string; version: string };
@@ -64,8 +67,9 @@ export class SupervisorSpaceLifecycle {
       if (!this.host.runs.views.has(id)) throw new WorkbenchPublicError("workbench/unavailable");
       return { spaceId: id, view: await this.host.view(id) };
     }
+    if (SPACES_BROWSER_SEALED && profileBase(this.host.home, id) === 'browser') throw new WorkbenchPublicError('workbench/unsupported');
     if (id !== this.host.managerId()) await this.host.ensureViewBridge(id);
-    await this.host.ensureLlmBridge(id);
+    if (profileBase(this.host.home, id) !== 'browser') await this.host.ensureLlmBridge(id);
     const gen = this.host.runs.nextGeneration(id);
     const channel = randomBytes(8).toString("hex");
     const epoch = this.host.requireServiceEpoch();
@@ -117,19 +121,21 @@ export class SupervisorSpaceLifecycle {
       );
     }
     const spaceRuntime = this.host.resolveSpaceRuntime(spaceId);
-    if (this.host.options.componentPayloadRoot) {
+    if (profileBase(this.host.home, spaceId) === 'browser') {
+      if (SPACES_BROWSER_SEALED) throw new WorkbenchPublicError('workbench/unsupported');
+      assertBrowserRelease(this.host.home, spaceId, spaceRuntime.version);
+      const incompatible = unmetProfileDshRequirements(join(this.host.home, 'profiles', spaceId), spaceRuntime.version);
+      if (incompatible.length) throw new WorkbenchPublicError('workbench/incompatible', cliLoadError(spaceRuntime.version, incompatible));
+    } else if (this.host.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.host.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
       await this.host.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({
         home: this.host.home, profileId: spaceId, payloadRoot: this.host.options.componentPayloadRoot!,
         bin: spaceRuntime.bin, cliVersion: spaceRuntime.version,
-        install: async (bridge) => {
-          const artifact = bridge === "view-bridge" ? this.host.options.viewBridgeArtifact
-            : bridge === "llm-bridge" ? this.host.options.llmBridgeArtifact
-            : this.host.options.browserArtifact;
-          if (!artifact) throw new Error(`The selected ${bridge} archive is unavailable.`);
-          const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
-          await this.host.installArtifact(spaceId, artifact, `dsh-spaces-${bridge}-${digest}`);
-        },
+        install: (bridge) => this.host.installComponent(spaceId, bridge),
+        // A linked checkout matches by link identity; packaged installs keep byte comparison.
+        ...(this.host.options.devCheckoutRoot !== undefined
+          ? { matches: (component: SpacesComponent) => this.host.componentAligned(spaceId, component) }
+          : {}),
         dump: async () => {
           const dump = await this.host.readDump(spaceId);
           if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");

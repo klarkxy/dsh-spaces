@@ -12,6 +12,7 @@ import {
   packageHasWebApp,
 } from "../../../core/domain/registry";
 import { atomicWrite } from "../atomic";
+import { assertBrowserDumpIsolated } from '../../../core/domain/isolation';
 import {
   PatchForbiddenError,
   PatchVerifyError,
@@ -156,6 +157,15 @@ export interface BoundCliResult {
 
 export type BoundCliRunner = (args: readonly string[]) => Promise<BoundCliResult>;
 
+/** Trusted Supervisor-only creation recipe; paths and executable selection never come from RPC. */
+export interface SpaceCreationRecipe {
+  base: 'web' | 'browser';
+  baseVersion: string;
+  runtimeVersion: string;
+  runCli: BoundCliRunner;
+  initialize?: (name: string) => Promise<void>;
+}
+
 export interface HomeLockPort {
   run<T>(label: string, action: () => Promise<T>): Promise<T>;
   inspect(): HomeLockInspect;
@@ -236,7 +246,7 @@ export class NodeSpacesService implements SpacesApi {
     };
   }
 
-  async create(input: CreateSpaceInput): Promise<SpaceSummary> {
+  async create(input: CreateSpaceInput, recipe?: SpaceCreationRecipe): Promise<SpaceSummary> {
     const parsed = parseCreateInput(input);
     try {
       return await this.withLock("spaces.create", async () => {
@@ -263,11 +273,12 @@ export class NodeSpacesService implements SpacesApi {
           phase: "cli",
           startedAt: new Date().toISOString(),
         });
-        const created = await this.runCli([
+        const runCli = recipe?.runCli ?? ((args: readonly string[]) => this.runCli(args));
+        if (recipe?.initialize) await recipe.initialize(spaceId);
+        const created = await runCli([
           "--profile",
           spaceId,
-          "--from-default-profile",
-          "web",
+          ...(recipe?.base === 'browser' ? [] : ["--from-default-profile", "web"]),
           "--dump-config",
         ]);
         if (created.code !== 0) throw new SpacesPublicError("spaces/unavailable");
@@ -279,7 +290,7 @@ export class NodeSpacesService implements SpacesApi {
           startedAt: new Date().toISOString(),
         });
         try {
-          new PatchWriter(this.homeRoot()).ensureWorkbenchPatch(spaceId);
+          if (recipe?.base !== 'browser') new PatchWriter(this.homeRoot()).ensureWorkbenchPatch(spaceId);
         } catch (error) {
           if (error instanceof PatchForbiddenError) throw new SpacesPublicError("spaces/host-denied");
           throw new SpacesPublicError("spaces/unavailable");
@@ -291,7 +302,7 @@ export class NodeSpacesService implements SpacesApi {
           phase: "verify-cli",
           startedAt: new Date().toISOString(),
         });
-        const isolation = await this.checkIsolation(spaceId);
+        const isolation = await this.checkIsolation(spaceId, runCli, recipe?.base === 'browser');
         if (isolation !== "valid") throw new SpacesPublicError("spaces/unavailable");
         this.writeJournal({
           version: 1,
@@ -306,6 +317,7 @@ export class NodeSpacesService implements SpacesApi {
           displayName: parsed.displayName,
           order: 1000,
           createdAt: new Date().toISOString(),
+          ...(recipe ? { base: recipe.base, baseVersion: recipe.baseVersion, dshVersion: recipe.runtimeVersion } : {}),
         });
         this.clearJournal();
         const summary = this.summarize(spaceId, this.capabilities());
@@ -519,12 +531,13 @@ export class NodeSpacesService implements SpacesApi {
     return rows;
   }
 
-  private async checkIsolation(name: string): Promise<IsolationOutcome> {
+  private async checkIsolation(name: string, runCli: BoundCliRunner = args => this.runCli(args), browser = false): Promise<IsolationOutcome> {
     try {
-      const dump = await this.runCli(["--profile", name, "--dump-config"]);
+      const dump = await runCli(["--profile", name, "--dump-config"]);
       if (dump.code !== 0) return "invalid";
       try {
-        assertDumpPatched(dump.stdout, name);
+        if (browser) assertBrowserDumpIsolated(dump.stdout, name);
+        else assertDumpPatched(dump.stdout, name);
         return "valid";
       } catch (error) {
         if (error instanceof PatchVerifyError) return "invalid";

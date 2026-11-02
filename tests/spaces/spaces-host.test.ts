@@ -427,15 +427,23 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
     TYPERT.invocations.map((row) => `${row.namespace}/${row.method}`),
     [
       "workbenchGuide/role",
+      "workbenchGuide/presentationSnapshot",
+      "workbenchGuide/spaceActivity",
+      "workbenchGuide/spaceAction",
       "workbenchGuide/bootstrap",
       "workbenchGuide/returnTarget",
       "workbenchGuide/portalTarget",
       "workbenchGuide/initialize",
       "workbenchGuide/previewServiceRestart",
+      "workbenchGuide/previewServiceStop",
+      "workbenchGuide/stopService",
       "workbenchGuide/restartService",
+      "workbenchGuide/beginDesktopLaunch",
+      "workbenchGuide/desktopLaunchState",
       "spaces/overview",
       "spaces/detail",
       "workbench/state",
+      "workbench/startupStatus",
       "workbench/detail",
       "workbench/submit",
       "workbench/job",
@@ -454,6 +462,12 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
   );
   assert.equal(TYPERT_REMOTE.package, "@dsh-spaces/plugin");
   assert.equal(TYPERT_REMOTE.descriptors.length, TYPERT.invocations.length);
+  const actionCodec = TYPERT.invocations.find(row => row.method === "spaceAction")!.parameters[0].codec.create();
+  const action = { spaceId: "coding", action: "open", serviceEpoch: "a".repeat(64) };
+  assert.equal(actionCodec.safeParse(action).success, true);
+  for (const invalid of [{ ...action, action: "delete" }, { ...action, spaceId: "../web" }, { ...action, extra: true }, { ...action, serviceEpoch: "stale" }]) {
+    assert.equal(actionCodec.safeParse(invalid).success, false);
+  }
   assert.equal(
     TYPERT.invocations.some((row) => row.method === "create" || row.method === "verify"),
     false,

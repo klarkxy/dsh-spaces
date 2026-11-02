@@ -343,3 +343,25 @@ test("cookie requests reject present invalid Origin before dispatch",async()=>{
  }assert.equal(dispatched,0);
  const accepted=await fetch(origin+"/api/workbench/state",{method:"POST",headers:{Cookie:"dsh-auth-test=session",Origin:origin,"Content-Type":"application/json"},body:"{}"});assert.equal(accepted.status,200);assert.equal(dispatched,1);
 });
+
+test("native bootstrap goes directly to the authenticated portal without an open redirect", async () => {
+  let origin = "", consumed = 0;
+  const rt = runtime(() => origin), tokens = new Set(["first", "ordinary"]);
+  rt.consumeBootstrapToken = token => { if (!tokens.delete(token)) return false; consumed++; return true; };
+  rt.managerOrigin = () => "http://127.0.0.1:3091";
+  const server = await startWorkbenchHttp(rt); origin = server.origin; closers.push(server.close);
+  const channel = "a".repeat(32);
+  for (const query of ["native=", "native=https://evil.example", "native=../", `native=${channel}&native=${channel}`]) {
+    assert.equal((await fetch(`${origin}/bootstrap/first?${query}`, { redirect: "manual" })).status, 400);
+  }
+  assert.equal(consumed, 0);
+  assert.equal((await fetch(`${origin}/bootstrap/first?native=${channel}`, { headers: { "sec-fetch-site": "cross-site" }, redirect: "manual" })).status, 403);
+  const result = await fetch(`${origin}/bootstrap/first?native=${channel}`, { redirect: "manual" });
+  assert.equal(result.status, 303); assert.equal(result.headers.get("location"), `/native/${channel}`);
+  assert.match(result.headers.get("set-cookie")!, /HttpOnly; SameSite=Strict/);
+  assert.equal((await fetch(`${origin}/bootstrap/first?native=${channel}`, { redirect: "manual" })).status, 401);
+  assert.equal((await fetch(`${origin}/native/${channel}`)).status, 403);
+  assert.equal((await fetch(`${origin}/native/${channel}`, { headers: { cookie: "dsh-auth-test=session" } })).status, 200);
+  const ordinary = await fetch(`${origin}/bootstrap/ordinary`, { redirect: "manual" });
+  assert.equal(ordinary.headers.get("location"), "/");
+});

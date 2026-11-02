@@ -1,3 +1,4 @@
+import { profileBase } from '../../profile/space-base';
 import { join } from "node:path";
 import { lt as semverLt } from "semver";
 import { SPACES_MIN_DSH_VERSION } from "../../../../shared/runtime";
@@ -21,6 +22,7 @@ export class MaintenanceRuntime extends MaintenanceSnapshots {
     request: Extract<WorkbenchPlanRequest, { kind: "space.runtime.set" }>,
   ): Promise<StoredPlan> {
     const spaceId = this.targetSpace(request.spaceId, false);
+    if (profileBase(this.ports.home, spaceId) === 'browser') throw new WorkbenchMaintenanceError('workbench/invalid-input', 'Browser framework versions are fixed by the Browser base release.');
     const version = requireExactVersion(request.version);
     if (semverLt(version, SPACES_MIN_DSH_VERSION)) {
       throw new WorkbenchMaintenanceError(
@@ -103,7 +105,7 @@ export class MaintenanceRuntime extends MaintenanceSnapshots {
     }
     ctx.phase("pin");
     ctx.message(`Pinning ${spaceId} to DSH ${version}.`);
-    this.ports.registry.updateMeta(spaceId, { dshVersion: version });
+    this.ports.registry.updateMeta(spaceId, { dshVersion: version, base: 'web', baseVersion: version });
     if (wasRunning) {
       ctx.phase("start");
       ctx.message(`Starting ${spaceId}.`);

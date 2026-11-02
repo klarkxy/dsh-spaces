@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 import { motion } from "motion/react";
 import { FadeIn, Presence, fade } from "../../../../../src/shared/ui/motion";
 import { SpaceGlyph } from "../../workbench/space-glyph";
@@ -8,6 +8,9 @@ import { HostLoadingPill } from "./host-guide";
 import { HostRail, HostRailButton, HostRailDivider, HostRailList } from "./host-rail";
 import { PressButton } from "./press-button";
 import { useServiceRestart } from "./service-restart";
+import { NativeSpaceMenu } from "./native-space-menu";
+import { nativeStartupLabel, nativeStatusText, nativeTexts } from "./native-texts";
+import { NativeDialog } from "./native-dialog";
 
 /**
  * The desktop (Electron) host shell.
@@ -28,7 +31,12 @@ export function NativeHostShell({ controller }: { controller: NativeHostControll
 
 function NativeHostShellView({ controller, onRestarted }: { controller: NativeHostController; onRestarted: (next: NativeHostController) => void }): ReactElement {
   const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const restart = useServiceRestart(controller, onRestarted);
+  const restart = useServiceRestart(controller, onRestarted, ui.serviceStopRequest);
+  const texts = nativeTexts();
+  const [menu, setMenu] = useState<{ spaceId: string; x: number; y: number } | null>(null);
+  const [scopeHelp, setScopeHelp] = useState(false);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const menuSpace = ui.inventory?.spaces.find(space => space.id === menu?.spaceId);
   const anchor = useRef<HTMLDivElement>(null), container = useRef<HTMLDivElement>(null), layout = useRef<ReturnType<typeof attachHostLayout> | null>(null);
   useEffect(() => {
     try { layout.current = attachHostLayout(anchor.current!); }
@@ -37,6 +45,8 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
     return () => { controller.stop(); layout.current?.dispose(); };
   }, [controller]);
   useEffect(() => { layout.current?.cover(ui.selected !== "current" || ui.guide); }, [ui.selected, ui.guide]);
+  const railLocked = ui.phase === "stopping" || !!ui.operation;
+  const startupLabel = nativeStartupLabel(ui.phase, texts);
   const button = (target: string, label: string, glyph: React.ReactNode): ReactElement => (
     <HostRailButton
       key={target}
@@ -46,17 +56,17 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
       currentValue="page"
       transitional={ui.pending === target}
       busy={ui.pending === target}
-      disabled={ui.phase === "loading" || ui.phase === "launching"}
+      disabled={railLocked}
       onSelect={() => controller.select(target)}
     >
       {glyph}
     </HostRailButton>
   );  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-native="true">
-    <HostRail label="空间" layoutId={RAIL_LAYOUT_ID}>
+    <HostRail label={texts.rail} layoutId={RAIL_LAYOUT_ID}>
       <HostRailButton
         layoutId={RAIL_LAYOUT_ID}
-        label="Desktop · 默认空间"
-        title="Desktop · 默认空间（始终置顶）"
+        label={texts.desktopMain}
+        title={texts.desktopMainPinned}
         current={ui.selected === "current"}
         currentValue="page"
         pinned
@@ -71,36 +81,51 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
           <HostRailButton
             key={s.id}
             layoutId={RAIL_LAYOUT_ID}
-            label={s.displayName}
+            label={`${s.displayName} · ${nativeStatusText(controller.spaceStatus(s.id), texts)}${ui.operation?.spaceId === s.id ? ` · ${texts.operating}` : ""}`}
             current={ui.selected === s.id}
             currentValue="page"
             transitional={ui.pending === s.id}
-            busy={ui.pending === s.id}
-            status={s.status}
+            busy={ui.pending === s.id || ui.operation?.spaceId === s.id}
+            disabled={!!ui.operation && ui.operation.spaceId !== s.id}
+            status={controller.spaceStatus(s.id)}
+            spaceId={s.id}
             onSelect={() => controller.select(s.id)}
+            onContextMenu={event => { if (!controller.supportsSpaceActions) return; event.preventDefault(); setMenu({ spaceId: s.id, x: event.clientX, y: event.clientY }); }}
+            onKeyDown={event => {
+              if (!controller.supportsSpaceActions || !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) return;
+              event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect();
+              setMenu({ spaceId: s.id, x: bounds.right, y: bounds.top });
+            }}
           >
             <SpaceGlyph spaceId={s.id} icon={s.icon} />
+            <span className="dsh-native-space-status" data-status={controller.spaceStatus(s.id)} aria-hidden="true" />
           </HostRailButton>
         ))}
         <HostRailButton
           layoutId={RAIL_LAYOUT_ID}
-          label="新建空间"
-          title="新建空间"
-          disabled={ui.phase === "loading" || ui.phase === "launching"}
+          label={texts.newSpace}
+          title={texts.newSpace}
+          disabled={railLocked}
           onSelect={controller.openCreate}
         >
           <span aria-hidden="true">＋</span>
         </HostRailButton>
       </HostRailList>
-      {button("@settings", ui.phase === "failed" ? "设置 · 空间服务不可用（查看详情）" : "设置",
+      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={texts.scopeHelpLabel} title={texts.scopeHelpHint} onSelect={() => setScopeHelp(true)}><span aria-hidden="true">ⓘ</span></HostRailButton>
+      {button("@settings", ui.phase === "service-stopped" ? texts.settingsStopped : ui.phase === "failed" ? texts.settingsUnavailable : texts.settings,
         <><span aria-hidden="true">⚙</span>{ui.phase === "failed" && <span className="dsh-native-service-error" aria-hidden="true">!</span>}</>)}
+      {startupLabel && <p className="dsh-native-startup-status" role="status" aria-live="polite" aria-label={startupLabel} data-startup-phase={ui.phase}>{startupLabel}</p>}
     </HostRail>
+    {menu && menuSpace && <NativeSpaceMenu space={menuSpace} x={menu.x} y={menu.y} busy={!!ui.operation || ui.phase !== "ready"}
+      onClose={closeMenu} onAction={action => { closeMenu(); void controller.spaceAction(menuSpace.id, action); }} />}
+    {ui.operationError && <div className="dsh-native-operation-error" role="alert">{ui.operationError}
+      <button type="button" aria-label={texts.dismissOperationError} onClick={controller.dismissOperationError}>×</button></div>}
     <div ref={container} className="dsh-host-surface dsh-native-container" hidden={ui.selected === "current" || ui.guide} />
     {ui.guide && <Presence initial={false}>
       <motion.section
         key="dsh-native-guide"
         className="dsh-host-surface dsh-host-guide"
-        aria-label="空间状态"
+        aria-label={texts.guideLabel}
         initial={ui.error ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={ui.error ? { opacity: 1 } : { opacity: 0 }}
@@ -108,16 +133,37 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
       >
         {ui.error
           ? <FadeIn as="p" appear={false} className="dsh-host-error" role="alert">{ui.error}</FadeIn>
-          : <FadeIn as="p" className="dsh-host-guide-body">{ui.phase === "loading" ? "正在连接空间服务…"
-            : ui.phase === "launching" ? "Spaces 管理服务没有在运行，正在随本次打开启动它…"
-            : "初始化独立的 Spaces 管理服务后，即可在这里切换空间。"}</FadeIn>}
-        {ui.detail ? <FadeIn as="p" appear={false} className="dsh-host-detail">{ui.detail}</FadeIn> : null}
-        {ui.phase === "failed" && restart}
-        {ui.phase === "initialize" && <PressButton type="button" className="dsh-host-action" onClick={() => void controller.initialize()}>初始化 Spaces</PressButton>}
-        <PressButton type="button" className="dsh-host-action" onClick={controller.showCurrent}>当前应用</PressButton>
+          : <FadeIn as="p" className="dsh-host-guide-body">{nativeStartupLabel(ui.phase, texts)
+            ?? (ui.phase === "stopping" ? texts.guideStopping
+            : ui.phase === "service-stopped" ? texts.guideStopped
+            : ui.phase === "loading" ? texts.guideLoading
+            : texts.guideLoading)}</FadeIn>}
+        {ui.detail ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="primary" aria-label={texts.failurePrimary}>{texts.failurePrimary}{"\n"}{ui.detail}</FadeIn> : null}
+        {ui.cleanupDetail ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="cleanup" aria-label={texts.failureCleanup}>{texts.failureCleanup}{"\n"}{ui.cleanupDetail}</FadeIn> : null}
+        {typeof ui.instanceRetained === "boolean" ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="instance" aria-label={texts.failureInstance}>{texts.failureInstance}{"\n"}{ui.instanceRetained ? texts.instanceRetainedYes : texts.instanceRetainedNo}</FadeIn> : null}
+        {["failed", "service-stopped"].includes(ui.phase) && restart.action}
+        <PressButton type="button" className="dsh-host-action" onClick={controller.showCurrent}>{texts.backToMain}</PressButton>
       </motion.section>
     </Presence>}
-    {ui.pending && <HostLoadingPill label="正在打开空间" />}
-    {ui.phase === "launching" && !ui.pending && <HostLoadingPill label="正在启动 Spaces 服务" />}
+    {restart.dialog}
+    {ui.spaceConfirmation && <NativeDialog label={texts.confirmInterruptLabel} onCancel={controller.cancelSpaceAction}>
+      <h3>{(ui.spaceConfirmation.request.action === "stop" ? texts.stopTitle : texts.restartTitle).replace("{name}", ui.inventory?.spaces.find(row => row.id === ui.spaceConfirmation?.request.spaceId)?.displayName ?? ui.spaceConfirmation.request.spaceId)}</h3>
+      <p>{ui.spaceConfirmation.activity === "busy" ? texts.confirmBusyBody : texts.confirmUnknownBody}{texts.confirmInterruptTail}</p>
+      <div className="dsh-native-confirm-actions"><PressButton type="button" className="dsh-host-action" onClick={controller.cancelSpaceAction}>{texts.cancel}</PressButton>
+        <PressButton type="button" className="dsh-host-action danger" onClick={controller.confirmSpaceAction}>{ui.spaceConfirmation.request.action === "stop" ? texts.stopSpace : texts.restartSpace}</PressButton></div>
+    </NativeDialog>}
+    {scopeHelp && <NativeDialog label={texts.scopeHelpLabel} onCancel={() => setScopeHelp(false)}>
+      <h3>{texts.scopeHelpTitle}</h3>
+      <p>{texts.scopeHelpClose}</p>
+      <p>{texts.scopeHelpQuit}</p>
+      <p>{texts.scopeHelpStopSpace}</p>
+      <p>{texts.scopeHelpStopService}</p>
+      <p>{texts.scopeHelpNote}</p>
+      <div className="dsh-native-confirm-actions"><PressButton className="dsh-host-action" type="button" onClick={() => setScopeHelp(false)}>{texts.scopeHelpOk}</PressButton>
+        <PressButton className="dsh-host-action" type="button" disabled={railLocked} onClick={() => { setScopeHelp(false); controller.select("@settings"); }}>{texts.scopeHelpGoSettings}</PressButton></div>
+    </NativeDialog>}
+    {ui.notice && <div className="dsh-native-operation-notice" role="status">{ui.notice}</div>}
+    {ui.pending && <HostLoadingPill label={texts.openingSpace} />}
+    {ui.operation && <HostLoadingPill label={`${ui.operation.action === "stop" ? texts.stoppingSpace : ui.operation.action === "restart" ? texts.restartingSpace : texts.opening} ${ui.inventory?.spaces.find(s => s.id === ui.operation?.spaceId)?.displayName ?? ui.operation.spaceId}`} />}
   </div>;
 }

@@ -6,12 +6,15 @@ Maintained in [dsh-spaces/packages/blueprint](https://github.com/klarkxy/dsh-spa
 
 Share a plugin set as exact versions plus a preferred order. Paste a blueprint code into **Creator mode** together with your import intent, and the Agent merges it into the current profile's bundle collection. The Core part does not need Web — the Plugins page is an optional export and read-only parsing view. Blueprint does not provide Spaces, a separate application or a background Agent orchestrator.
 
+A blueprint describes a plugin combination, not an environment backup: it carries no credentials, sessions, data, running instances or sender authorization, and it does not claim to restore an environment. The same artifact means different things in different receivers, and neither result is promised to match the other.
+
 **Source preview: the redesigned implementation has not completed real-host end-to-end acceptance.** The checks already run and the items still outstanding are listed in [ACCEPTANCE.md](ACCEPTANCE.md).
 
 ## Use
 
 - **Merge in Creator.** In Creator (`cordis`), send the code with an intent such as “Merge this blueprint into my current plugin composition, preserve local bundles, and resolve versions and order yourself.” The Agent does not ask you to review a routine merge plan; native safety approvals still apply.
 - **Plugin page.** Open **Plugins → Blueprint** to export the installed identities you select, in the order you prefer. The import view only parses the artifact, shows the package identities and preferred order, and prepares a copyable merge request. Paste and send that request in Creator: copying neither starts a model nor changes the profile.
+- **Spaces integration is sealed.** Spaces currently rejects its blueprint source/generate/inspect/preview/apply workflows, so the same artifact is not a current Spaces creation entry. This does not affect the independent Creator plugin or the blueprint formats. If Spaces later unseals them, model requirements must be mapped by the receiver without carrying main-space tokens, instances, authorizations or credentials; otherwise the new space follows the creation policy in force at that time.
 - Local bundles the blueprint does not mention are preserved by default. A package listed in `packages` but absent from `bundles` only asks to be installed; it never asks to disable the same-name bundle in the receiving profile.
 
 ## Environment-independent Core
@@ -54,6 +57,8 @@ Reusable settings belong in native composition/preset packages, with explicit co
 
 The [protocol](PROTOCOL.md) defines the fields, the encoding, the limits and the test vectors. DSHBP2 / `formatVersion: 2` are unchanged, so existing codes stay readable. Autonomous merge in Creator is a new execution policy: the old page `preview` / `apply` / `result` endpoints are retired, not quietly repurposed for reordering.
 
+DSHBP2 transports a plugin combination: exact package identities plus a requested bundle order. DSHBP1 additionally transports configuration presets and receiver-local inputs. The two formats are not converted into each other, and neither is a backup of an environment.
+
 ```json
 {
   "kind": "dsh-blueprint",
@@ -66,7 +71,7 @@ The [protocol](PROTOCOL.md) defines the fields, the encoding, the limits and the
 
 The package name above is illustrative. Settings, credentials, row states and nested blueprints are not transported. A code is the literal prefix `DSHBP2:` followed by raw-DEFLATE UTF-8 JSON in unpadded canonical Base64url. Limits: 2 MiB input, 1 MiB decoded JSON, 64 container levels. Strict parsing rejects duplicate members, unsafe numbers, prototype keys, malformed Unicode, noncanonical Base64url and trailing compressed data.
 
-`./core` retains `validate` and adds `parseBlueprint`, `encodeBlueprint` and `BlueprintCore`. `./codec` retains `encode` / `decode`.
+The public capabilities cover protocol operations, dual-format document handling and legacy-format compatibility. [PROTOCOL.md](PROTOCOL.md) and [BLUEPRINT.md](../../BLUEPRINT.md) own the field and encoding contracts; this README does not duplicate the export inventory.
 
 ## Development and source installation
 
@@ -84,8 +89,8 @@ Official packages are provided by the runtime: this plugin declares them as opti
 
 ## Protocol consumers
 
-`./core` and `./codec` retain the standalone v2 API. `./document` validates either supported document and exposes `blueprintRecipe()` as a pure view of already validated data; keep its `document` for persistence/sharing. This entry is browser-safe. `./document-codec` is the Node encoder/decoder for DSHBP1, DSHBP2 and JSON. Unknown versions fail explicitly.
+The standalone v2 API stays available for tools that only handle plugin combinations. The document layer validates either supported format and exposes a pure view of already validated data; keep the document it returns for persistence and sharing, and call it from browser-side code where the environment allows. Encoding and decoding of DSHBP1, DSHBP2 and JSON are Node-side. Unknown versions fail explicitly instead of being guessed.
 
-`./v1`, `./v1/types`, `./v1/codec` and `./schemas/blueprint-v1.schema.json` retain the complete legacy preset format. Spaces imports these public interfaces and implements its own space creation, isolation and installation. The standalone Creator tools still use v2 current-profile merge semantics. Exporting plugin identities as v2 does not transport configuration or user data.
+The complete legacy preset format stays available for tools that still emit or read it. Spaces imports these public interfaces and implements its own space creation, isolation and installation. The standalone Creator tools still use v2 current-profile merge semantics. Exporting plugin identities as v2 does not transport configuration or user data.
 
 MIT licensed. The retained codec attribution is in [NOTICE.md](NOTICE.md); the licence text is in [LICENSE](LICENSE).

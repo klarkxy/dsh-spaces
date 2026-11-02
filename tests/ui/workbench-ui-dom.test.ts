@@ -91,15 +91,45 @@ test("DOM: native settings creation entry is clickable and reveals its space", {
   const { chromium } = require("playwright") as { chromium: Parameters<typeof launchChromium>[0] };
   const browser = await launchChromium(chromium); t.after(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(supervisor.url);
-  await page.getByRole("button", { name: "新建空间", exact: true }).click();
-  const form = page.getByRole("form", { name: "创建空间", exact: true });
-  await form.getByRole("textbox", { name: "名称", exact: true }).fill("native-created");
-  await form.getByRole("button", { name: "创建", exact: true }).click();
-  // The created space is entered directly; the settings page releases it.
-  await page.locator('iframe[data-space-id="alpha"][data-visible="true"]').waitFor({ state: "visible" });
-  assert.equal(await page.locator(".dsh-wb-settings-page").count(), 0, "the settings page must release the selected space surface");
-  assert.equal(await page.frameLocator('iframe[data-space-id="alpha"]').locator("textarea").isVisible(), true);
+  for (const source of ["main", "local"]) {
+    await page.goto(supervisor.url);
+    await page.getByRole("button", { name: "新建空间", exact: true }).click();
+    const form = page.getByRole("dialog", { name: "创建空间", exact: true });
+    const models = form.getByRole("combobox", { name: "模型来源", exact: true });
+    assert.deepEqual(await models.locator("option").evaluateAll(options => options.map(option => (option as HTMLOptionElement).value)), ["main", "local"]);
+    assert.equal(await models.inputValue(), "main");
+    assert.equal(await form.locator('[name="base"], [name="browser"]').count(), 0);
+    assert.doesNotMatch(await form.textContent() ?? '', /Browser|浏览器空间|封存/);
+    const version = form.getByRole('combobox', { name: 'DSH 版本', exact: true });
+    await models.selectOption(source);
+    await version.selectOption(source === 'local' ? '0.2.0-rc.2' : '0.2.1-rc.2');
+    await form.getByRole("textbox", { name: "名称", exact: true }).fill("native-created");
+    await form.getByRole("button", { name: "创建", exact: true }).click();
+    // The created space is entered directly; the settings page releases it.
+    await page.locator('iframe[data-space-id="alpha"][data-visible="true"]').waitFor({ state: "visible" });
+    const commands = await page.evaluate(() => window.__WB_CALLS?.filter(row => row.method === "submit").map(row => row.arg));
+    const input = (commands?.[0] as { input: { base: string; baseVersion: string; modelSource?: string } }).input;
+    assert.equal(input.base, 'web');
+    assert.equal(input.baseVersion, source === 'local' ? '0.2.0-rc.2' : '0.2.1-rc.2');
+    assert.equal(input.modelSource, source);
+    assert.equal(await page.locator(".dsh-wb-settings-page").count(), 0, "the settings page must release the selected space surface");
+    assert.equal(await page.frameLocator('iframe[data-space-id="alpha"]').locator("textarea").isVisible(), true);
+    const draft = page.frameLocator('iframe[data-space-id="alpha"]').locator("textarea");
+    await draft.fill("warm-switch-draft");
+    const switched = await page.evaluate(async () => {
+      const controller = window.__WB_CONTROLLER!;
+      const frame = document.querySelector('iframe[data-space-id="alpha"]');
+      const views = window.__WB_CALLS!.filter(call => call.method === "view").length;
+      controller.selectHome();
+      const switching = controller.selectRunningSpace("alpha", () => true, 1);
+      const immediate = controller.getSnapshot().selected === "alpha" && controller.getSnapshot().pendingId === null;
+      return { immediate, accepted: await switching,
+        sameNode: frame === document.querySelector('iframe[data-space-id="alpha"]'),
+        extraViews: window.__WB_CALLS!.filter(call => call.method === "view").length - views };
+    });
+    assert.deepEqual(switched, { immediate: true, accepted: true, sameNode: true, extraViews: 0 });
+    assert.equal(await draft.inputValue(), "warm-switch-draft");
+  }
 });
 
 test("DOM: home navigation keeps the same iframe node and textarea draft", { timeout: 120_000 }, async (t) => {
@@ -265,6 +295,19 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
 
   await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "模型与连接", exact: true }).click();
+  const legacy = page.locator("[data-llm-legacy-settings]");
+  assert.equal(await legacy.evaluate(el => (el as HTMLDetailsElement).open), false);
+  assert.equal(await page.locator("[data-llm-center]").count(), 0, "the legacy library is not loaded in ordinary settings");
+  await legacy.locator("summary").focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await page.locator("[data-settings-close]").evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(await legacy.locator("summary").evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press("Enter");
+  await page.locator("[data-llm-center]").waitFor({ state: "visible" });
+  await legacy.locator("summary").click();
+  assert.equal(await page.locator("[data-llm-center]").count(), 1, "folding keeps the compatibility editor mounted");
   await page.getByRole("button", { name: "维护", exact: true }).click();
   await page.getByRole("tab", { name: "服务" }).click();
   await page.locator("[data-settings-home]").waitFor({ state: "visible", timeout: 15_000 });
@@ -397,6 +440,9 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
   await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  const modelSettings = page.locator('[data-space-section="models"]');
+  assert.equal(await modelSettings.locator("[data-llm-legacy-settings]").evaluate(el => (el as HTMLDetailsElement).open), false);
+  assert.equal(await modelSettings.locator("[data-llm-spaces]").count(), 0);
   const select = page.locator("[data-dsh-target=\"true\"]");
   await select.waitFor({ state: "visible", timeout: 15_000 });
   await select.selectOption("0.2.0");
@@ -448,6 +494,94 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
     { kind: "space.delete", spaceId: "alpha", removeData: false },
   ]);
   await page.getByRole("button", { name: "取消" }).click();
+});
+
+test("DOM: dialogs trap and restore focus, names validate live, the menu answers arrows and copy reports its status", { timeout: 120_000 }, async (t) => {
+  const bundled = await esbuild.build({
+    absWorkingDir: root, entryPoints: [join(audit, "host.tsx")], bundle: true,
+    write: false, format: "iife", platform: "browser", jsx: "automatic",
+  });
+  const childHtml = readFileSync(join(audit, "child.html"), "utf8");
+  const child = await listen((_req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end(childHtml); });
+  t.after(() => child.close());
+  let supervisorUrl = "";
+  const supervisor = await listen((req, res) => {
+    const url = new URL(req.url ?? "/", supervisorUrl || "http://127.0.0.1");
+    if (routeView(url, child.url, res)) return;
+    if (url.pathname === "/host.js") {
+      res.writeHead(200, { "content-type": "text/javascript" }); res.end(bundled.outputFiles[0]?.text ?? ""); return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><html><body><div id="root" style="height:100vh"></div><script>window.__WB = ${JSON.stringify({ supervisor: supervisorUrl, child: child.url })};</script><script src="/host.js"></script></body></html>`);
+  });
+  supervisorUrl = supervisor.url;
+  t.after(() => supervisor.close());
+  const require = createRequire(join(playwrightRoot, "index.js"));
+  const { chromium } = require("playwright") as { chromium: Parameters<typeof launchChromium>[0] };
+  const browser = await launchChromium(chromium); t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.addInitScript(() => {
+    (window as unknown as { __copied: string[] }).__copied = [];
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => { (window as unknown as { __copied: string[] }).__copied.push(text); } },
+    });
+  });
+  await page.goto(supervisor.url);
+
+  // Escape closes the create dialog and returns focus to its trigger.
+  const create = page.getByRole("button", { name: "新建空间", exact: true }).first();
+  await create.click();
+  const dialog = page.getByRole("dialog", { name: "创建空间", exact: true });
+  await dialog.waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await dialog.count(), 0);
+  assert.equal(await create.evaluate((el) => el === document.activeElement), true, "focus returns to the create button");
+
+  // An invalid name disables Create and shows the inline hint; a valid one enables it.
+  await create.click();
+  await dialog.waitFor();
+  const nameField = dialog.locator('input[name="name"]');
+  await nameField.fill("Bad_Name");
+  await page.locator("#dsh-wb-create-name-invalid").waitFor();
+  assert.equal(await nameField.getAttribute("aria-invalid"), "true");
+  assert.equal(await dialog.getByRole("button", { name: "创建", exact: true }).isDisabled(), true);
+  await nameField.fill("ok-name");
+  assert.equal(await dialog.getByRole("button", { name: "创建", exact: true }).isDisabled(), false);
+  await page.keyboard.press("Escape");
+
+  // The space menu moves over enabled items with arrows and closes on Escape.
+  const alpha = page.locator('button[aria-label="Alpha · 运行中"]');
+  await alpha.click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "空间操作" });
+  await menu.waitFor();
+  const active = () => page.evaluate(() => document.activeElement?.textContent ?? "");
+  const first = await active();
+  await page.keyboard.press("ArrowDown");
+  assert.notEqual(await active(), first, "ArrowDown moves to the next enabled item");
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await active(), first);
+  await page.keyboard.press("End");
+  assert.notEqual(await active(), first, "End jumps to the last enabled item");
+  await page.keyboard.press("Home");
+  assert.equal(await active(), first, "Home jumps back to the first enabled item");
+  await page.keyboard.press("Escape");
+  assert.equal(await menu.count(), 0);
+  assert.equal(await alpha.evaluate((el) => el === document.activeElement), true, "closing returns focus to the rail button");
+
+  // The copy button reports success and failure inline.
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator('[data-space-section="diagnostics"]').waitFor();
+  const copy = page.getByRole("button", { name: "复制脱敏日志", exact: true });
+  await copy.click();
+  await page.getByRole("status").filter({ hasText: "已复制" }).waitFor();
+  await page.evaluate(() => {
+    Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: undefined });
+  });
+  await copy.click();
+  await page.getByRole("status").filter({ hasText: "复制失败" }).waitFor();
 });
 
 test("DOM: delayed runtime candidates derive a usable target and keep selections scoped to current space pins", { timeout: 120_000 }, async (t) => {

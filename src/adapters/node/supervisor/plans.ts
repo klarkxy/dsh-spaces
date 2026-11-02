@@ -22,6 +22,7 @@ import type { StoredPlan, WorkbenchMaintenance, WorkbenchSupervisorOptions } fro
 const PLAN_TTL_MS = 5 * 60_000;
 
 export interface SupervisorPlansHost {
+  whileIdle?<T>(spaceId: string, action: () => Promise<T>): Promise<T>;
   home: string;
   lifecycle: SupervisorLifecycle;
   runs: SpaceRunRegistry;
@@ -55,7 +56,7 @@ export class SupervisorPlans {
 
   constructor(private readonly host: SupervisorPlansHost) {}
 
-  previewLocal(request: WorkbenchPlanRequest): WorkbenchPlan {
+  previewLocal(request: WorkbenchPlanRequest, observedActivity?: "idle" | "busy" | "unknown"): WorkbenchPlan {
     const id = "spaceId" in request ? this.host.requireSpace(request.spaceId) : "";
     if (request.kind === "space.stop" || request.kind === "space.restart" || request.kind === "space.delete") {
       this.host.requireManaged(id);
@@ -63,10 +64,13 @@ export class SupervisorPlans {
       if (request.kind === "space.delete") this.host.protectSpecial(id, { allowManager: false });
     }
     const running = id && this.host.statusOf(id) === "running" ? [id] : [];
+    const taskActivity = request.kind === "space.stop" || request.kind === "space.restart"
+      ? observedActivity ?? "unknown" : undefined;
     const observed = this.host.productObservation();
     const plan: WorkbenchPlan = {
       id: randomUUID(),
       kind: request.kind,
+      ...(taskActivity ? { taskActivity } : {}),
       title: request.kind,
       scope: request.kind === "service.shutdown" ? "controller" : "space",
       affectedSpaceIds: id ? [id] : this.host.ownedSpaceIds(),
@@ -126,13 +130,15 @@ export class SupervisorPlans {
       case "space.stop": {
         ctx.phase("stop");
         const id = this.host.requireManaged(request.spaceId);
-        await this.host.stopOwned(id);
+        if (stored.plan.taskActivity === "idle" && this.host.whileIdle) await this.host.whileIdle(id, () => this.host.stopOwned(id));
+        else await this.host.stopOwned(id);
         return;
       }
       case "space.restart": {
         ctx.phase("restart");
         const id = this.host.requireManaged(request.spaceId);
-        await this.host.stopOwned(id);
+        if (stored.plan.taskActivity === "idle" && this.host.whileIdle) await this.host.whileIdle(id, () => this.host.stopOwned(id));
+        else await this.host.stopOwned(id);
         await this.host.startSpace(id, ctx);
         return;
       }

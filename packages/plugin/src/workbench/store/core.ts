@@ -54,6 +54,7 @@ export abstract class WorkbenchCore {
   protected running = false;
   protected shutdownRequested = false;
   protected stateGeneration = 0;
+  protected stateObservation = 0;
   // User navigation is independent of view tokens advanced by startup observations.
   protected navigationIntent = 0;
   protected cycle = 0;
@@ -283,7 +284,7 @@ export abstract class WorkbenchCore {
 
   abstract selectSpace: (spaceId: string) => void;
 
-  abstract selectRunningSpace: (spaceId: string, isCurrent?: () => boolean) => Promise<boolean>;
+  abstract selectRunningSpace: (spaceId: string, isCurrent?: () => boolean, targetGeneration?: number) => Promise<boolean>;
 
   abstract enterCreated: () => void;
 
@@ -323,7 +324,13 @@ export abstract class WorkbenchCore {
 
   abstract reportFailure: (error: unknown) => void;
 
-  abstract createSpace: (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean }) => void;
+  baseVersions = async (base: 'web' | 'browser') => {
+    const result = await this.api.product({ method: 'base.versions', base });
+    if (result.method !== 'base.versions' || result.base !== base) throw new Error('Unexpected base version response.');
+    return result;
+  };
+
+  abstract createSpace: (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }) => void;
 
   abstract updateSpace: (spaceId: string, patch: { displayName?: string; icon?: string }) => void;
 

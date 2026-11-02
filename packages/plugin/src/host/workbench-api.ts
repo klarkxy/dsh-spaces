@@ -30,6 +30,7 @@ import {
   workbenchRuntimeListSchema,
   workbenchSnapshotSchema,
   workbenchSpaceDetailSchema,
+  workbenchStartupStatusSchema,
   workbenchStateSchema,
   workbenchViewSchema,
 } from "./workbench-schemas";
@@ -55,6 +56,10 @@ export const WORKBENCH_API_CODECS: {
   state: {
     params: {},
     result: { schema: workbenchStateSchema, typeSymbol: "@dsh-spaces/plugin/types#WorkbenchState" },
+  },
+  startupStatus: {
+    params: {},
+    result: { schema: workbenchStartupStatusSchema, typeSymbol: "@dsh-spaces/plugin/types#WorkbenchStartupStatus" },
   },
   detail: {
     params: {

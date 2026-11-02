@@ -41,6 +41,8 @@ export interface WorkbenchSupervisorOptions {
   snapshotRoot?: string;
   /** Selected v2 payload `lib` root (`--component-payload`). Absent keeps library callers compatible. */
   componentPayloadRoot?: string;
+  /** Source checkout root (`--dev-checkout`): components link in place instead of installing tarballs. */
+  devCheckoutRoot?: string;
   /** CLI-only: process may exit after a durable shutdown. */
   onNormalExit?: () => void | Promise<void>;
   /** Test seam forwarded to WorkbenchJobStore. */
@@ -56,6 +58,7 @@ export interface WorkbenchSupervisorOptions {
   createMaintenance?: (ports: WorkbenchMaintenancePorts) => WorkbenchMaintenance;
   runCli?: BoundCliRunner;
   pluginAdd?: (home: string, profile: string, spec: string, options?: { force?: boolean }) => Promise<void>;
+  pluginLink?: (home: string, profile: string, dir: string, expectedName: string) => Promise<void>;
   dumpConfig?: (profile: string) => Promise<string>;
   patchWriter?: PatchWriter;
 }

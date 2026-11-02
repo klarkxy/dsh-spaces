@@ -1,236 +1,246 @@
-# DSH Spaces — 需求文档
+# DSH Spaces — 现行需求
 
-> 版本：1.0（2026-08-28 定稿）；现行故障政策：2026-09-15 [let it crash](docs/let-it-crash.md)
-> 项目名：**dsh-spaces**（已核实 GitHub 无撞名）
-> 一句话定位：**Spaces for DeepSeek Harness — 像切 Discord 服务器一样切换你的 DSH 工作空间。**
-> 目标：社区开源产品（Windows / macOS / Linux）
+> 版本：2.0（2026-10-25）。本文定义当前产品需求，不记录实施落点。架构说明见 [docs/architecture.md](docs/architecture.md)，故障政策唯一权威为 [docs/let-it-crash.md](docs/let-it-crash.md)。
+>
+> 本文取代早期的独立 Electron 客户端、应用内自我更新、统一共享全部设置、快照/配置恢复和故障后自动接管方案。历史需求和验收记录保留原事实，但不作为现行门槛。
 
-> **最高优先级原则（2026-09-15）：** 插件自由组合，失败允许发生。Spaces 如实报告已知原因或明确未知，不提供自动或手动恢复（不重试、不自动重启/重连、不回滚、不恢复快照、不重装依赖、不自动改配置或禁用插件、不切换版本或实现、不进入安全/救援模式、不续跑中断任务）。用户主动的启动、停止、重启、安装、卸载和配置仍是独立操作，不由错误处理器代替发起，也不包装成“检查并修复”“恢复中断任务”。安全、隔离、输入与路径校验、单写者、原子写和有界资源释放继续有效。校验失败拒绝并说明原因，不自动纠正。一个插件报错不要求杀掉整个应用。完整正文只维护在 [docs/let-it-crash.md](docs/let-it-crash.md)。
+## 1. 产品目标与边界
 
-> 2026-09-08 后续决策（历史）：以 `tasks/archive/plan.md` 为新增施工契约。关闭窗口进入托盘、明确退出停止全部；全应用统一 DSH 版本，协调升级官方基础插件。其中“支持升级前快照恢复”及同类恢复、修补、失败回退要求，已由 2026-09-15 的 let it crash 原则取代，不再作为当前施工与发布门槛。`web` 仍不写隔离 patch、不迁移旧聊天，但明确的升级操作可更新其官方基础插件。本文历史技术实测对应 0.1.1-rc.2，不代表更新版本已验收，也不把当时的恢复实现改写成从未存在。
+DSH Spaces 是安装进兼容 DSH Web / Desktop 的多空间插件。它保留原应用，在空间栏中切换主应用、管理工作台和普通空间，不要求独立客户端。
 
----
+目标平台为 Windows、macOS 和 Linux；实际宿主与平台支持以对应验收记录为准，不把设计目标写成已认证结果。
 
-## 0. 故障与错误（现行）
+### 1.1 基本前提
 
-插件错误、依赖冲突、配置不兼容、启动失败和进程崩溃都是允许结果。DSH Spaces 不承诺任意插件组合都能正常运行，也不负责把失败的环境修复成可运行状态。
+- 单机、单用户、同一 OS 用户信任域。
+- 每个 Home 一个 Supervisor 持有 Spaces 管理写权。
+- 每个普通空间使用独立 DSH 进程和独立数据根。
+- 插件由用户自由选择和组合；合法组合可以在安装或启动时失败。
+- 不修改官方 SDK，不用私有上游接口冒充稳定能力。
 
-- 失败按原有执行边界失败或退出。记录失败，并在仍可用的界面或本地输出中说明发生了什么、已知原因是什么。
-- 无法确定根因或具体插件时写明未知，不猜测；不能把最近安装的插件直接认定为原因。
-- 不提供故障后的自动或手动恢复流程。
-- 提交前准备失败、未切换到新结果，不是回滚。提交后失败保留现场，不再把旧环境写回去。
-- 历史记录：2026-08-28 定稿的隔离、生命周期与安全需求仍然有效。2026-09-08 写入的快照恢复、配置恢复、升级失败回退，不再是有效功能需求。
+### 1.2 明确不做
 
-当前施工入口：[tasks/todo.md](tasks/todo.md)。产品路径已按 let it crash 实施；不得把恢复重新写成有效需求。未接线的历史恢复源码不是产品能力。
+- 多租户、恶意插件安全沙箱和跨机器高可用。
+- 扫描、收养或迁移其他工具和历史 profile。
+- 多套 `DSH_HOME` 沙箱机模式。
+- 自动恢复、失败重试、自动重启/重连、回滚、配置或快照恢复、中断任务续跑。
+- 应用内自我更新、常驻 watchdog 和通用远程对象代理。
+- 云同步、全局模型请求负载均衡和自动模型降级。
 
-## 1. 背景与问题
+## 2. 角色与空间模型
 
-DeepSeek Harness（下称 DSH）官方支持 profile：`$DSH_HOME/profiles/<name>/` 下的一套插件组合。
-但现状是：
+### 2.1 主应用
 
-- 官方 profile 只隔离**插件栈**；会话（`sessions/`）、工作区分组（`storages/workspace.json`）、API Key 全部在 home 级共享。
-- 切 profile 必须重启 harness 进程，没有任何 GUI 支持多 profile 的可视化切换。
-- 想同时跑多个 profile 的用户会遇到端口冲突和**并发写坏数据**（JSONL 持久化是"每个 session 文件同一时刻只允许一个活的写者"；两个进程抢同一个 `workspace.json` 会 last-writer-wins，参见官方仓库 discussion #1485）。
-- 社区已有 DSH-Launcher V3 等多实例内嵌界面产品。Spaces 的重点是共享身份下的工作台管理、分离会话存储以及兼容性检查，不以多开或内嵌界面作为独有能力。
+主应用是用户原有 DSH Web 或 Desktop 宿主。它保留自己的会话、设置、凭据和界面，不作为普通空间被删除、停止或收养。
 
-## 2. 产品定义
+主应用可以向普通空间提供官方 LLM 能力；提供该能力不等于授予它其他空间的管理写权。
 
-> 2026-10-12：本节取代 2026-08-28 的“独立桌面外壳应用”定义。自有 Electron 壳已移除。
+### 2.2 管理空间
 
-安装进兼容 DSH 应用（官方 Web、官方 Desktop）的多空间插件，没有独立客户端；插件 tarball 是唯一发行单元。它把官方 profile 变成 Discord 风格的多工作空间：
+`spaces-hub` 是专用管理 profile，名称冲突时使用受控后缀。它承载管理工作台和认证转接，跟随宿主运行时，不是主空间，不出现在普通空间删除列表中。
 
-- **左侧空间栏**：由插件挂在宿主的 `shell.overlay` 上，保留原应用界面。每个图标对应一个 profile，可自定义显示名和图标，显示运行状态。
-- **右侧主区域**：显示所选 profile 的官方 DSH Web UI（原样，不修改）。
-- **管理**：空间的创建、配置和启停在专用管理 profile `spaces-hub` 的工作台内完成。
-- **后台**：每个 Home 一个独立的 Supervisor 进程（`127.0.0.1`），持有运行权和全部管理写入，生命周期独立于任何宿主窗口。
-- **多开并行**：多个 profile 同时运行，各自独立进程、独立端口。
+### 2.3 普通空间
 
-### 2.1 两类 profile（核心数据模型）
+普通空间只能在 Spaces 中通过直接创建、普通模板或 `.dshspace` 分享导入产生。蓝图创建工作流当前封存，不作为空间创建入口。
 
-| | `web`（根 profile，唯一） | 工作台（Spaces 注册空间） |
-|---|---|---|
-| 地位 | 钉在栏顶，相当于 Discord 的 Home 按钮 | 普通栏位 |
-| profile 目录 | `$DSH_HOME/profiles/web/` | `$DSH_HOME/profiles/space-<name>/`（name 由用户命名，小写字母/数字/连字符，≤33 字符） |
-| 数据路径 | 官方默认（`$DSH_HOME/sessions/`、`$DSH_HOME/storages/`），**永不打 patch** | 独立数据根：`$DSH_HOME/hub/space-<name>/sessions`、`$DSH_HOME/hub/space-<name>/storages` |
-| 历史数据 | **维护所有旧资源**：Hub 安装前的全部聊天记录、工作区分组都归它 | 全新开始，会话/工作区完全隔离 |
-| 来源 | 官方默认 profile，非空间，永不修改 | **仅在 Spaces 中创建**：① 直接新建；② 模板；③ 蓝图；④ 分享导入。创建即写入 `hub/spaces.json` 注册项（`createdAt`、pin、显示名） |
+- profile 目录固定为 `profiles/space-<name>`。
+- 数据根固定为 `hub/space-<name>`。
+- 成员资格以 `hub/spaces.json` 中的有效注册项为准。
+- 显示名和图标属于 Spaces 元数据，不改变官方 profile 身份。
+- 未注册目录不得因名称相似而被列出、启动、删除或授权。
 
-Spaces 不扫描 `$DSH_HOME/profiles/` 来发现空间：`hub/spaces.json` 里没有带 `createdAt` 注册项的目录都不是空间，不列出、不启动、不修改、不删除。旧版本或其他途径创建的 profile **不迁移**，仍是普通 DSH profile。
+主应用、管理空间和普通空间必须作为不同角色处理，不能混入一个权限相同的“空间 ID”集合。
 
-**明确不做**：数据迁移功能、profile 收养、共享模式、多套 `DSH_HOME` 沙箱。旧聊天永远住在 `web` 里看。
+## 3. 数据隔离与所有权
 
-### 2.2 隔离语义
+### 3.1 普通空间隔离
 
-- **隔离**（per-profile）：插件 bundle、`cordis.patch.yml`、会话、工作区分组视图、以及工作台自己的 `settings.yaml` / `.credentials.yaml`。
-- **共享**（Spaces 控制 Home 级）：全局 LLM 连接库（catalog + 独立凭据）。`web` 继续使用官方 home 级 `settings.yaml` / `.credentials.yaml`，除非用户显式接入共享连接。不共享整份 settings，不把 Key 复制进每个 Space。
-- **关键布局约束**：工作台数据根必须放在默认树的**兄弟目录**（`$DSH_HOME/hub/`），绝不能嵌在 `$DSH_HOME/sessions/` 下面——否则 `web` 的持久化扫描器会把工作台会话吃进去，隔离穿透。
+每个普通空间独立拥有：
 
-## 3. 功能需求
+- 插件组合与配置层；
+- 会话和工作区数据；
+- 本地设置与本地凭据；
+- 模型来源策略和本地默认选择；
+- 运行代次、诊断和失败记录。
 
-### FR1 左侧栏（rail）
-1. 展示全部已注册空间：`web` 钉顶，工作台按用户自定义顺序排列。未注册的 profile 目录不出现。
-2. 每项显示：图标（用户自定义，默认取名字首字母）、显示名（悬停提示）、运行状态（停止/启动中/运行中/异常）。
-3. 点击：已运行 → 右侧切到它的 GUI；未运行 → 启动并切换。
-4. 右键菜单：重启、停止、重命名（仅改显示名）、换图标、打开 profile 目录、删除（需确认，删注册项、profile 目录 `profiles/space-<name>`，hub 数据目录可选保留）。删除只作用于已注册空间。
-5. 栏底"＋"按钮：新建工作台向导（输入名字 → 选图标 → 自动执行创建流程）。
-6. 显示名和图标存在 Hub 自己的元数据里（如 `$DSH_HOME/hub/spaces.json`），**永不改动官方 profile 文件夹名**。
+任何配置都不得把普通空间指向主应用、其他空间或控制目录。启动前必须验证实际组合后的隔离结果；验证失败就拒绝启动，不静默使用不安全配置。
 
-### FR2 进程管理
-1. 每个运行中的 profile 对应一个 `dsh --profile <name>` 子进程，Hub 分配唯一本地端口，`--no-open` 禁止弹浏览器。
-2. 重启只影响该 profile 的进程，其他 profile 与 GUI 不受影响。用户从常规菜单主动启动、停止、重启，是独立操作，不是恢复承诺，也不由错误处理器代替发起。
-3. 关闭宿主窗口或标签不停止空间和 Supervisor。停止全部空间与停止服务（`service.shutdown`）是两个独立的显式操作。
-4. 进程崩溃要被侦测，并在栏上显示异常态与已知错误（空间、阶段、插件或未知、原因、退出码或信号）。不自动重启、不自动重连。错误页只提供错误详情和脱敏日志，不提供一键修复或恢复中断任务。
-5. 同一 profile 禁止双开（Hub 内互斥；Hub 外用户手动跑 CLI 不在保证范围）。
+### 3.2 主应用保护
 
-### FR3 新建工作台
-1. 仅在 Spaces 工作台内创建（模板、蓝图、分享导入走同一创建路径）。
-2. 用户输入名字（`a-z`、`0-9`、`-`，≤33 字符），生成的空间 id / profile 目录为 `space-<name>`；与现有 profile 目录和注册项查重。
-3. 创建写入双 root patch（见 §5 技术契约），并在 `hub/spaces.json` 登记 `createdAt`、pin 的宿主 DSH 版本和显示名。
-4. 创建通过受控 CLI 执行：`dsh --profile space-<name> --from-default-profile web`（自定义 profile 默认只带 `dsh-base`，必须装 web-app 才有 GUI）。
+主应用继续使用官方原有数据位置。Spaces 不打隔离 patch、不迁移旧聊天、不复制完整设置或凭据文档，也不向默认 `sessions/` / `storages/` 写入普通空间数据。
 
-### FR4 不收养已有 profile
-1. Spaces 不扫描 `$DSH_HOME/profiles/` 来发现空间；成员资格只认 `hub/spaces.json` 中带 `createdAt` 的注册项。
-2. `web` 是官方根 profile，钉在栏顶作为当前应用入口，不是空间，**零写入**。
-3. 其他 profile 目录（包括旧版本 Spaces 创建过的）不收养、不迁移、不列出、不修改，保持普通 DSH profile。
-4. 未注册的 profile 不参与任何按空间 id 进行的操作（启动、删除、插件、运行时切换、蓝图）。
+### 3.3 共享数据的例外
 
-### FR5 插件安装（Hub 安装器）
-1. 对勾选的一个或多个 profile 执行 `dsh plugin --profile <name> add <spec>` / `remove <pkg>`。
-2. Hub 内所有 plugin 命令**串行排队**，避免 pnpm 并发写 `profiles/node_modules` 回退链打架。
-3. 发现层复用公开的 NanmiCoder catalog schema v1（MIT）：只对 `verified-npm` / `verified-git` 且带 `installSpec` 的条目一键安装。Renderer 只传 catalog id，主进程用自己的目录副本解析 spec。
-4. 手动输入只接受 npm 包名或 `github:owner/repo`，不是 shell 命令。
-5. 不把任何社区「插件市场」bundle 预装进 profile。插件栈仍按 profile 隔离。
-6. 装完若目标 profile 正在运行，提示重启该进程（Hub 不热挂载）。
+只有明确声明的资源可以跨空间共享：
 
-### FR6 设置
-1. DSH_HOME 路径（默认 `~/.dsh`，可改）。
-2. 端口范围（默认如 3100-3199）。
-3. 退出行为、开机自启（V1 可选）。
+- Home 级旧共享 LLM 连接目录和独立凭据库；
+- 用户明确授权的跨空间能力；
+- 受控的目录、制品和公开元数据。
 
-## 4. 非功能需求（社区红线）
+共享不等于双向同步。各空间的本地配置、会话和默认选择仍归各空间所有。
 
-| # | 义务 | 具体要求 |
-|---|---|---|
-| NFR1 | 永不损坏用户已有 home | `web` 永不打 patch；任何写 `cordis.patch.yml` 前先备份原文件（如 `cordis.patch.yml.bak-<时间戳>`，这是提交前安全副本，不是产品恢复流程）；写文件必须原子（临时文件+rename）。提交前失败不替换原文件，不是回滚。提交后失败不得再把旧环境写回去。 |
-| NFR2 | 版本漂移防护 | 每次启动某工作台前跑 `dsh --profile <name> --dump-config`，校验 `session-persistence-jsonl` 和 `storage-json` 两个 row id 仍存在且 patch 生效；校验失败 → **拒绝启动**并给出清晰提示，绝不静默用不安全配置起进程，也不自动改 patch |
-| NFR3 | 并行安全有证据 | §6 的隔离验证脚本必须先跑通才允许开发 GUI；同一脚本进 CI 作为发布门 |
-| NFR4 | 跨平台 | Windows / macOS / Linux；进程与端口管理抽象封装 |
-| NFR5 | 隐私 | 不收集遥测；不上传任何用户数据 |
+## 4. 管理控制面
 
-## 5. 技术契约（已在真实环境核实，2026-08-28，dsh 0.1.1-rc.2）
+### 4.1 单写者与客户端
 
-以下全部为本机实测确认的事实，实现时直接依赖：
+- Supervisor 是 Spaces 管理操作的唯一执行者。
+- 浏览器和 Desktop 附着同一个健康服务，不创建第二套管理后台。
+- 只读发现不得清理记录、取得写权或触发启动。
+- 活进程、外来所有者、身份不明和中断维护必须失败关闭。
 
-### 5.1 CLI 接口
-```
-dsh --profile <name>            # 启动指定 profile
-dsh --patch <path>              # 追加 patch overlay（可重复）
-dsh --dump-config               # 打印组合后的配置树后退出
-dsh --dump-default-config       # 不含用户层的配置树
-dsh web [args...]               # --profile web 的别名
-dsh plugin --profile <n> [args] # 转发给 profile 目录里的 pnpm
-```
-启动器 flag 之后的参数会传给 profile 的 app。web-app 启动 flag 已于 2026-08-28 实测确认（`dsh --profile web --help`）：
+### 4.2 协议与并发
 
-```
---host <host>                  bind host
---no-open                      do not open the Web UI in the default browser
---port <port>                  listen port; pass 0 to let the OS pick a free one
---trusted-host <authority...>  extra authority the /api browser-trust fence accepts
+现行管理协议为 2。
+
+- 状态包含协议版本、服务纪元、状态版本和可用性。
+- 普通写入携带 `{ serviceEpoch, expectedRevision }`。
+- 校验发生在实际串行执行边界，不能只在请求入口预检。
+- 相同 `requestId` 与相同命令读取同一任务；相同 ID 不同命令拒绝。
+- 危险操作使用 preview → execute，执行时重新检查 epoch、revision、目标指纹和有效期。
+- 旧服务、旧实例、旧计划和旧视图消息必须可识别并拒绝。
+
+读取可以是瞬时投影。状态版本不承诺任务、日志和所有磁盘内容来自同一全局快照；需要一致复合视图的功能必须单独定义其一致性范围。
+
+### 4.3 任务与失败结果
+
+任务状态为：
+
+```text
+queued → running → succeeded / failed / cancelled
 ```
 
-多开时每个进程必须带 `--no-open --port <unique>`。`--port 0` 由 OS 分配，Hub 不便预知，V1 用显式端口池（默认 3100–3199）。
+刷新只读取原任务，不重发变更。进程中断后保留失败或结果无法确认的证据，不续跑。批量操作首项失败后停止：已完成结果保留，失败项留证，后续项未执行。
 
-### 5.2 profile 目录结构
-```
-$DSH_HOME/profiles/<name>/
-├── package.json        # dsh.profile.bundles: 插件 bundle 有序列表
-├── cordis.patch.yml    # 用户 patch 层：顶层 YAML 数组，id 定向覆盖，允许 !!js 表达式
-├── cordis.yml          # 空入口（注释明确写着"不要编辑此文件"）
-├── pnpm-lock.yaml / pnpm-workspace.yaml
-└── node_modules/
-```
+凭据使用独立秘密通道，不进入通用任务、日志、URL、浏览器存储或分享包；但仍服从同一 Home 写权与维护互斥。
 
-### 5.3 必须覆盖的两个持久化 row（来自 `dsh --profile web --dump-config` 实测输出）
-```yaml
-- id: session-persistence-jsonl
-  name: '@deepseek-ai/dsh-session-persistence-jsonl'
-  config:
-    root: !!js dshHomePath('sessions')      # ← 覆盖为 dshHomePath('hub/space-<name>/sessions')
+## 5. 视图与宿主嵌入
 
-- id: storage-json
-  name: '@deepseek-ai/dsh-storage-json'
-  config:
-    root: !!js dshHomePath('storages')      # ← 覆盖为 dshHomePath('hub/space-<name>/storages')
-```
-另外确认：`session-query-sqlite` 是 `:memory:`，无落盘，不需要处理。
+- 宿主提供实际布局和认证嵌入能力；缺少条件时在初始化写入前明确拒绝。
+- 空间栏是附加展示，不替换原应用 root、品牌或会话 DOM。
+- 管理权限只来自真正的 manager，不由页面位置或查询参数授予。
+- 展示入口使用有期限、单次、绑定来源和通道的票据。
+- 各层校验 Window、精确 origin、channel；空间实例还校验 epoch 和 generation。
+- 普通空间视图不暴露管理 API。
+- 关闭标签或窗口不停止后台；停止全部空间和停止服务是独立操作。
+- Web iframe 与 Desktop native guest 的能力差异必须如实呈现，不通过放宽浏览器安全机制消除。
 
-### 5.4 数据目录实测形态
-- `$DSH_HOME/sessions/`：按工作区路径编码命名的目录（两级结构），内含 `session.jsonl.zstd`（zstd 压缩 JSONL）。
-- `$DSH_HOME/storages/`：`workspace.json`（工作区分组）、`session_projcache.json`（投影缓存，`writeIntervalMs: 5000`）。
-- `web` 的 home 级文件：`.credentials.yaml`、`settings.yaml`、`.anonymous-user-id` 等——**全部不碰**。工作台 Space 的 settings / credentials 改走 `hub/space-<name>/` 独立路径，不写回 `web`。
-- **工作台覆盖后**：会话落在 `$DSH_HOME/hub/space-<name>/sessions/`，`workspace.json` 和 `session_projcache.json` 都跟随 `storage-json` 根，落在 `$DSH_HOME/hub/space-<name>/storages/`。无需额外覆盖 projection-cache。
-- 覆盖后的目录由 dsh 在首次写入时自动创建，脚本不必预先 mkdir。
+## 6. 生命周期与故障
 
-### 5.5 patch 写法（已固化）
+### 6.1 正常操作
 
-`cordis.patch.yml` 是顶层 YAML 数组。按 id 覆盖时**整份 `config` 被替换**（官方 web-app patch 注释原文），因此必须重写该 row 拥有的每一个 key。`session-persistence-jsonl` 和 `storage-json` 的 config 都只有 `root`，所以如下即可；`name` 可省略，`--dump-config` 仍会带上原 name。
+创建、启动、停止、重启、安装、卸载、配置和删除都是用户明确发起的独立操作。正常重启只影响目标空间，不连带其他健康空间。
 
-```yaml
-- id: session-persistence-jsonl
-  config:
-    root: !!js dshHomePath('hub/space-<name>/sessions')
-- id: storage-json
-  config:
-    root: !!js dshHomePath('hub/space-<name>/storages')
-```
+用户重新打开应用可以发起一次新的正常启动。只有满足现行所有权规则时，才能退休本次启动最初观察到且可证明死亡的允许类型租约；不清除模糊证据，不接管遗留活子进程。
 
-写完后用 `dsh --profile space-<name> --dump-config` 确认两处 `root` 已变成 hub 路径。`web` 禁止写入此文件。
+### 6.2 失败处理
 
-### 5.6 创建 profile 的实测路径
-- `web` / `headless`：首次 `dsh --profile web --dump-config`（或 `dsh web`）即从 CLI 自带模板自动初始化，bundles 为 `dsh-base` + `dsh-web-app`，**不必**再 `plugin add`。
-- 其它名字：`dsh plugin --profile <name> add @deepseek-ai/dsh-web-app@<CLI版本>`。必须**钉死与 CLI 相同的版本**（本机为 `0.1.1-rc.2`）。
-- **陷阱**：npm 上 `@deepseek-ai/dsh-web-app` 的 `latest` dist-tag 仍指向 `0.0.1-rc.1`，`next` 才是 `0.1.1-rc.2`。不钉版本会装到缺 `@deepseek-ai/dsh-code-runtime-worker` 的旧树并 404。Hub 创建工作台时必须读 `dsh --version` 再拼接 `@<version>`。
-- 沙箱无 API Key 时 Web UI 可启动；`POST /api/session.create` 能建会话并落盘，不需要凭据。发消息才会失败。
+- 失败按操作、插件、空间或进程原有边界失败。
+- 报告实际阶段、已知原因或明确未知，不猜测插件归属。
+- 提交前失败不发布新结果；提交后失败保留真实部分改变。
+- 不重试、不自动修复、不清锁、不切换备用实现、不续跑中断任务。
+- 错误输出必须脱敏，不能泄露 token、Cookie、凭据或聊天内容。
+- Desktop 手动服务启动/重启仅按 [docs/let-it-crash.md](docs/let-it-crash.md) 的有限例外执行。
 
-### 5.7 Web API（隔离脚本使用）
-- 默认 `http://127.0.0.1:3080`。TCP 端口就绪 ≠ API 就绪，需轮询 RPC 直到成功。
-- 请求：`POST /api/<method>`，`Content-Type: application/json`，带与监听地址一致的 `Origin`。
-- 信封：`{"type":"client-request","rpcId":"<uuid>","method":"<method>","payload":{}}`
-- 成功：`{"type":"server-response","rpcId":"...","result":{"ok":true,"value":{...}}}`
-- 建会话：`session.create` payload `{ cwd }`（与 `workspaceId` 互斥）；列会话：`session.list` payload `{}`。
+## 7. LLM 需求
 
-## 6. 验收标准
+### 7.1 主空间继承
 
-| # | 场景 | 通过条件 |
-|---|---|---|
-| A1 | 根保留 | `web` 在栏顶作为当前应用入口，旧聊天全部完好；`web` 的任何文件未被修改 |
-| A2 | 不收养 | 已存在的非 web profile 目录不出现在空间栏、注册表或任何空间操作里，内容不被修改 |
-| A3 | 多开 | `web` + 两个工作台同时在线，栏上三个都亮，右侧 GUI 跟随选中项 |
-| A4 | 插件隔离 | 装进工作台 A 的插件不出现在工作台 B 和 `web` |
-| A5 | 会话隔离 | 工作台 A 新建的聊天在 B 和 `web` 的侧边栏都看不见，反之亦然 |
-| A6 | 身份共享 | API Key 填一次，所有 profile 可用 |
-| A7 | 并行安全 | 并发使用下无 session 文件交叉写、无 workspace.json 互相覆盖（CI 自动验证） |
-| A8 | 版本防护 | 人为改掉 row id 后启动工作台被拒绝且提示清晰，而非静默启动 |
-| A9 | 单点重启 | 重启工作台 A，`web` 和工作台 B 的进程与 GUI 不受影响 |
-| A10 | 身份覆盖层 | 改显示名/图标不改官方 profile 文件夹名 |
-| A11 | 失败可见、无抢救 | 安装失败、启动失败或进程崩溃后，错误指向空间、阶段、已知包或明确未知；没有重试、自动重启、回滚、快照恢复、重装依赖、自动改配置或续跑中断任务。一个插件报错且宿主仍在时，不人为杀掉整个宿主 |
+新普通空间的零配置路径可以跟随主空间模型。
 
-> A1–A10 的隔离与生命周期目标继续有效。历史上曾把快照恢复、配置恢复、升级回退、kill 后抢救列为通过条件的补充验收，已由 2026-09-15 let it crash 取代，不再作为发布门槛。
+- 主空间拥有官方连接、adapter、调用准备和凭据。
+- 子空间保留自己的 Agent、工具、会话和附件授权。
+- 不向子空间复制主空间 provider 配置或 Key。
+- Supervisor 可以中转请求和响应，但不得记录模型正文、附件或 replay state。
+- 每次调用准备时固定目标，在途请求不随默认变化重新路由。
+- 主空间或 Supervisor 不可用时真实失败，不自动代启、改读配置或切换供应商。
 
-## 7. 明确不做（V1 排除项）
+### 7.2 旧共享连接库
 
-- 数据迁移（旧聊天搬进工作台）
-- 多套 `DSH_HOME` / 沙箱机模式
-- 把社区插件市场预装进每个 profile；跨 profile **共享一份插件栈**（批量对勾选空间执行官方 `plugin add` 可以）
-- 让空间进程跟随宿主进程退出：空间栏由宿主插件提供，空间进程由独立 Supervisor 管理（2026-10-12 起插件化，取代原“不做成 DSH Web 插件”的排除项）
-- 移动端
-- 故障后的自动或手动恢复（重试、自动重启/重连、回滚、快照恢复、重装依赖、自动改配置或禁用插件、切换版本或实现、安全/救援模式、续跑中断任务）
+旧共享连接和既有空间继续可用。
 
-## 8. 参考资料
+- 目录与凭据在 Home 级只保存一份。
+- 空间策略支持其既有共享选择语义，本地连接独立存在。
+- 空间启动时冻结目录、策略、连接和凭据版本快照。
+- 运行中保存只改变目标状态；实际生效按真实路径显示，需要时由用户正常重启。
+- 旧凭据记录不得与不同端点混用，删除仍被引用的连接必须拒绝。
+- 不把旧目录作为新用户零配置流程的强制前置步骤。
 
-- 官方文档：deepseekdocs.com（Boot & Configuration / Configuration / profile 目录）
-- 并发写冲突证据：deepseek-harness 仓库 discussion #1485
-- 单写者契约：`packages/session/session-persistence-jsonl/README.md`
-- 竞品与调研全景：本仓库配套 canvas 简报（DSH Spaces product brief）
-- 本机实测配置树：`web-dump-config.txt`（本仓库根目录）
+### 7.3 来源和默认选择
+
+主空间、旧共享连接、本地连接和会话选择必须可区分。模型来源切换是独立、明确的用户决定，其他设置保存不得暗中改变来源。显式目标失效时不得自动回退到另一来源。
+
+直接创建、普通模板和分享导入必须遵守同一来源规则。导入只能表达模型需求，由接收方完成本地映射；不得携带发送方凭据、实例、令牌或授权。蓝图相关工作流封存期间不适用，唤醒时必须重新核对该规则。
+
+## 8. 插件、空间配方与跨空间能力
+
+### 8.1 插件管理
+
+- 发现、下载制品、安装到空间和实际运行是不同状态。
+- 安装只接受受控目录身份和精确版本，或明确支持的受控来源。
+- 浏览器不能提交任意 shell、文件路径、launch token 或未限制安装规格。
+- 第三方插件的安装脚本和运行风险必须明确，不把结构校验当作安全认证。
+- 插件失败不自动换版本、禁用、重装或回滚。
+
+### 8.2 普通模板、分享与封存的蓝图
+
+- 普通模板保存与创建、`.dshspace` 分享导入导出继续使用同一空间创建语义。
+- DSHBP1 表达配置配方，DSHBP2 表达插件组合；独立蓝图包和两种格式保留，但 Spaces 的蓝图创建、生成、预览、应用及分享码导入导出当前封存。
+- 封存不删除既有蓝图文件、历史任务或独立包，也不改变普通模板与分享归档。
+- 待 Spaces 核心系统稳定后再评估唤醒；唤醒时必须重新验证接收方模型映射、权限、分阶段结果和完整回归。
+
+### 8.3 跨空间能力
+
+- 默认拒绝，目标空间拥有精确来源白名单。
+- 来源身份由 Supervisor 绑定实际进程，不能由请求自报。
+- 发现只返回已授权描述，不代表后续调用自动获准。
+- 请求有大小、深度、并发和时间限制；迟到响应不能作用于同名新实例。
+- 超时或断连不证明副作用未发生，不重试、不撤销。
+- 持久消息、广播、跨机器传输和任意 `ctx.*` 调用不属于现行需求。
+
+## 9. 制品、版本与升级
+
+- Spaces 的 Supervisor、管理插件和各桥接组件按同一不可变构建组发行。
+- 每份制品验证身份、版本和摘要，不混用不同构建。
+- 管理空间跟随宿主运行时；普通空间固定精确 DSH 版本，禁止降级。
+- 空间保留 base 与精确产品版本，当前创建界面只开放 Web 的官方版本目录。Browser 的独立产品版本及框架依赖契约保留，两者不能混用。
+- Browser 相关入口封存，直接创建、旧 Browser 参数、模板/分享创建与启动均不能绕过；UI 不显示 Browser 选项或封存提示。实现和测试保留，后续另行启用；本次不迁移旧空间。
+- 官方基础插件随所选 DSH 运行时变化，不作为第三方包安装进空间。
+- Spaces 升级通过宿主插件管理完成，然后由用户停止服务并重新打开。
+- 管理插件与普通空间桥接的版本一致性必须按实际组件组核验；不能把“存在桥接”显示为“已对齐”。
+- 升级失败保留现场，不回滚或自动再次启动。
+
+## 10. 备份、诊断与外部进程
+
+- 备份只支持创建、查看和删除，不提供产品恢复。
+- 创建备份前停止已知受管空间。
+- 未登记手工 DSH 不属于可发现、可停止范围；快照不得宣称覆盖所有潜在外部写者的一致性。
+- 不通过端口猜测、进程强杀或读取其他进程秘密来补齐发现。
+- Doctor 只诊断，不解锁、不恢复、不回滚、不修改任务或配置。
+- 诊断输出有界且脱敏，不可读、损坏和未来格式保留原证据。
+
+## 11. 非功能需求
+
+| 项目 | 要求 |
+| --- | --- |
+| 数据安全 | 单写者、路径校验、原子发布和必要的有界资源释放持续有效 |
+| 隐私 | 无 Spaces 遥测；秘密和聊天内容不进入普通日志、任务和导出 |
+| 故障半径 | 单空间失败不人为扩大；管理和数据面依赖必须可观察 |
+| 资源边界 | 请求、响应、队列、句柄、并发和时间预算必须有界 |
+| 可扩展性 | 新能力使用封闭契约和明确授权，不依赖任意反射或脚本 |
+| 可维护性 | 现行架构、协议、故障政策和历史记录分别维护，避免多份现行真相 |
+| 验证 | 区分源码检查、真实宿主、平台、发布包和长期运行证据，不相互替代 |
+
+## 12. 现行验收原则
+
+1. 主应用原有数据不被修改或迁移。
+2. 未注册 profile 不出现、不被操作。
+3. 多空间同时运行时，会话、插件和工作数据不串写。
+4. 多客户端写入具有明确的串行结果或版本冲突，旧请求和旧计划不能重复生效。
+5. 单空间重启和失败不影响健康空间。
+6. 视图、管理、消息和 LLM 权限不能通过伪造来源、旧实例或普通页面提升。
+7. 主空间继承、旧共享连接和本地模型的来源、生效状态及失败均准确可见。
+8. 所有创建入口分别报告定义、安装、配置和启动结果，不把部分成功伪装成整体成功。
+9. 组件升级与运行时切换不发生混组、双写、自动回退或任务重放。
+10. 任何失败路径都不引入自动重试、修复、恢复、接管或秘密泄露。
+
+具体执行结果以最新验收记录为准；本文不声明所有平台和场景已经通过。

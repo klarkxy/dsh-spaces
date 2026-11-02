@@ -1,5 +1,7 @@
 # 合并执行与验收记录
 
+> 历史导航：本文件是 2026-09-20 的历史施工/验收执行记录，只证明当时范围。现行架构见 [architecture.md](../docs/architecture.md)；故障政策见 [let it crash](../docs/let-it-crash.md)。文中与现行架构冲突的桌面壳、应用内升级、恢复、交接或旧 LLM 方案内容，仅作历史参考，不是当前合同或验收门槛。
+
 2026-09-20 开始。计划：[spaces-merge-convergence.md](../docs/plans/spaces-merge-convergence.md)。活动状态只在 [todo.md](todo.md) 维护。
 
 ## 基线

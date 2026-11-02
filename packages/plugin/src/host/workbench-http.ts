@@ -57,6 +57,11 @@ export interface WorkbenchHttpClientOptions {
   fetch?: WorkbenchHttpFetch;
 }
 
+/** Process-local abort for one startup observation. Omitted calls keep the existing timeout. */
+export interface WorkbenchPostTransport {
+  signal?: AbortSignal;
+}
+
 /**
  * The request body of one management API call.
  *
@@ -90,6 +95,7 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
   const call = <K extends WorkbenchApiMethod>(
     method: K,
     args: WorkbenchApiArgs<K>,
+    signal?: AbortSignal,
   ): Promise<WorkbenchApiResult<K>> => workbenchPost(
     doFetch,
     origin,
@@ -97,10 +103,12 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
     method,
     workbenchBody(method, args),
     WORKBENCH_API_CODECS[method].result.schema,
+    signal ? { signal } : undefined,
   ) as Promise<WorkbenchApiResult<K>>;
 
   return {
-    state: async () => call("state", []),
+    state: async (signal?: AbortSignal) => call("state", [], signal),
+    startupStatus: async (signal?: AbortSignal) => call("startupStatus", [], signal),
     detail: async (spaceId) => call("detail", [spaceId]),
     submit: async (command, requestId, context) => call("submit", [command, requestId, context]),
     job: async (id) => call("job", [id]),
@@ -125,6 +133,7 @@ export async function workbenchPost<T>(
   method: WorkbenchHttpMethod,
   body: unknown,
   resultSchema: { parse(value: unknown): T },
+  transport?: WorkbenchPostTransport,
 ): Promise<T> {
   if (!(WORKBENCH_HTTP_METHODS as readonly string[]).includes(method)) {
     throw publicError("workbench/invalid-input");
@@ -142,7 +151,7 @@ export async function workbenchPost<T>(
   const url = `${origin}/api/workbench/${method}`;
   let response: Response;
   try {
-    response = await doFetch(url, {
+    const init: RequestInit = {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -152,11 +161,13 @@ export async function workbenchPost<T>(
       },
       body: payload,
       redirect: "error",
-    });
+    };
+    if (transport?.signal) init.signal = transport.signal;
+    response = await doFetch(url, init);
   } catch {
     throw publicError("workbench/unavailable", "The workbench request did not reach the supervisor.");
   }
-  const text = await readLimitedText(response, responseBodyLimit(method, body));
+  const text = await readLimitedText(response, responseBodyLimit(method, body), transport?.signal);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -250,31 +261,57 @@ function remoteFromSupervisorError(error: unknown): RemoteError {
   return publicError("workbench/unavailable");
 }
 
-async function readLimitedText(response: Response, limit: number): Promise<string> {
+async function readLimitedText(response: Response, limit: number, signal?: AbortSignal): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) {
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > limit) throw publicError("workbench/unavailable", "The workbench response was too large.");
-    return new TextDecoder().decode(buffer);
+    if (signal?.aborted) {
+      detachBody(response.body);
+      throw publicError("workbench/unavailable", "The workbench response could not be read.");
+    }
+    try {
+      const buffer = await untilAborted(response.arrayBuffer(), signal);
+      if (buffer.byteLength > limit) throw publicError("workbench/unavailable", "The workbench response was too large.");
+      return new TextDecoder().decode(buffer);
+    } catch (error) {
+      if (signal) detachBody(response.body);
+      if (error instanceof RemoteError) throw error;
+      throw publicError("workbench/unavailable", "The workbench response could not be read.");
+    }
   }
+  // A stand-in stream may never resolve cancel(). Observation cleanup must not wait for it.
+  let released = false;
+  const release = (wait: boolean): Promise<void> => {
+    if (released) return Promise.resolve();
+    released = true;
+    const done = reader.cancel().then(() => undefined, () => undefined);
+    return wait ? done : Promise.resolve();
+  };
+  const onAbort = () => { void release(false); };
+  if (signal?.aborted) {
+    await release(false);
+    throw publicError("workbench/unavailable", "The workbench response could not be read.");
+  }
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
     for (;;) {
-      const next = await reader.read();
+      const next = await untilAborted(reader.read(), signal);
       if (next.done) break;
       const value = next.value;
       total += value.byteLength;
       if (total > limit) {
-        await reader.cancel().catch(() => undefined);
+        await release(signal === undefined);
         throw publicError("workbench/unavailable", "The workbench response was too large.");
       }
       chunks.push(value);
     }
   } catch (error) {
-    await reader.cancel().catch(() => undefined);
+    await release(signal === undefined);
     if (error instanceof RemoteError) throw error;
     throw publicError("workbench/unavailable", "The workbench response could not be read.");
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
   const merged = new Uint8Array(total);
   let offset = 0;
@@ -283,6 +320,31 @@ async function readLimitedText(response: Response, limit: number): Promise<strin
     offset += chunk.byteLength;
   }
   return new TextDecoder().decode(merged);
+}
+
+function detachBody(body: ReadableStream<Uint8Array> | null): void {
+  if (!body) return;
+  void body.cancel().then(() => undefined, () => undefined);
+}
+
+function untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  void work.then(() => undefined, () => undefined);
+  if (signal.aborted) return Promise.reject(publicError("workbench/unavailable", "The workbench response could not be read."));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(publicError("workbench/unavailable", "The workbench response could not be read."));
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function publicError(code: WorkbenchRemoteCode, reported?: unknown): RemoteError {

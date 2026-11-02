@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -10,6 +10,7 @@ import {
 } from "../../src/adapters/node/payload/component-payload.ts";
 import {
   bootstrapSupervisor,
+  COMPONENT_PAYLOAD_ARGV_FLAG,
   LLM_BRIDGE_PAYLOAD_DIRNAME,
   SUPERVISOR_CLI_FLAGS,
 } from "../../packages/plugin/src/host/supervisor-bootstrap.ts";
@@ -58,6 +59,7 @@ function writeV2Plugin(pluginRoot: string): string {
     ["lib/view-bridge/lib/index.js", "export {};\n"],
     ["lib/view-bridge/lib/client.js", "export {};\n"],
     ["lib/view-bridge/lib/settings.js", "export {};\n"],
+    ["lib/view-bridge/lib/typert.host.js", "export {};\n"],
     ["lib/browser/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.browser)],
     ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
     ["lib/browser/lib/index.js", "export {};\n"],
@@ -66,6 +68,7 @@ function writeV2Plugin(pluginRoot: string): string {
     ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
+    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   writeComponentPayloadManifest(join(pluginRoot, "lib"));
@@ -176,6 +179,57 @@ test("bootstrap packs selected llm-bridge and passes --llm-bridge-artifact", asy
   assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.llmBridgeArtifact));
   assert.ok(spawned[0]?.some((row) => /llm-bridge-0\.2\.0\.tgz$/.test(row.replaceAll("\\", "/"))));
   assert.ok(packedRoots.some((root) => root.replaceAll("\\", "/").includes(`/${LLM_BRIDGE_PAYLOAD_DIRNAME}`)));
+});
+
+test("bootstrap links a source checkout without staging, pointer writes, or packing", async () => {
+  const home = tempDir("dsh-boot-dev-home-");
+  const checkout = tempDir("dsh-boot-dev-co-");
+  writeFileSync(join(checkout, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
+  const payloadRoot = writeV2Plugin(join(checkout, "packages", "plugin"));
+  const toolsRoot = tempDir("dsh-boot-dev-tools-");
+  const bin = writeCli(home);
+  const spawned: string[][] = [];
+  let spawnedCwd = "";
+  let packs = 0;
+  const result = await bootstrapSupervisor({
+    home,
+    argv: [process.execPath, bin],
+    env: { ...process.env, DSH_HOME: home },
+    execPath: process.execPath,
+    payloadRoot,
+    toolsRoot,
+    allowColdStart: true,
+    timeoutMs: 80,
+    pollMs: 20,
+    pack: async (request) => {
+      packs += 1;
+      return stubPack(request);
+    },
+    spawn: (request) => {
+      spawned.push([...request.argv]);
+      spawnedCwd = request.cwd;
+    },
+  });
+  assert.equal(result.connected, false);
+  assert.equal(packs, 0, "a linked checkout is never packed");
+  assert.equal(spawned.length, 1);
+  assert.equal(spawnedCwd, toolsRoot, "dev supervisor must not pin the source lib as cwd");
+  const argv = spawned[0]!;
+  for (const flag of [
+    SUPERVISOR_CLI_FLAGS.pluginArtifact,
+    SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
+    SUPERVISOR_CLI_FLAGS.browserArtifact,
+    SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
+  ]) {
+    assert.equal(argv.includes(flag), false, flag);
+  }
+  const devIndex = argv.indexOf("--dev-checkout");
+  assert.ok(devIndex > 0, JSON.stringify(argv));
+  assert.equal(realpathSync(argv[devIndex + 1]!), realpathSync(checkout));
+  assert.ok(argv.includes(COMPONENT_PAYLOAD_ARGV_FLAG));
+  assert.equal(argv[argv.indexOf(COMPONENT_PAYLOAD_ARGV_FLAG) + 1], payloadRoot);
+  assert.equal(existsSync(join(toolsRoot, "components")), false, "no staged copy");
+  assert.equal(readdirSync(toolsRoot).some((name) => name.startsWith("selected-")), false, "no selected pointer");
 });
 
 test("bootstrap may stage a standard plugin install that lives inside a temp Home", async () => {

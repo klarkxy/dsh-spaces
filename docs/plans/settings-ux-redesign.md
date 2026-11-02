@@ -1,5 +1,7 @@
 # 设置与管理界面重整计划
 
+> 历史导航：本文件是 2026-10-20 的历史设计/实施记录，只证明当时范围。现行架构见 [architecture.md](../../docs/architecture.md)；故障政策见 [let it crash](../let-it-crash.md)。文中与现行架构冲突的桌面壳、应用内升级、恢复、交接或旧 LLM 方案内容，仅作历史参考，不是当前合同或验收门槛。
+
 版本：1.0
 日期：2026-10-20
 状态：第 0–3 阶段已在工作区落地（未提交）；D1–D4 按第 6 节建议获批。P1–P14 已全部解决：P6 于 2026-10-21 闭合，空间列表行只保留进入/排序/管理，启动/停止/重启/删除的权威位置是空间详情页，右键菜单仅为快捷方式（证据：workbench-ui.test.tsx 行结构用例与详情页禁用态用例、workbench-ui-dom.test.ts D1 流程、`.sandbox/ui-overhaul-20261020/settings-wa/settings-maintenance-expanded-*.png`）。同轮修复测试暴露的缺陷：预览在途时并发的 wrap() 读取完成会把 commandPending 提前清除，runPreview 现与 wrap() 共用同一忙碌计数。独立验收两轮后 READY；界面证据截图已按最终用词与主题重拍（settings-wa/settings-wp/settings-w3c）。

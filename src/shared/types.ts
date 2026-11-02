@@ -1,6 +1,8 @@
 export type ProfileStatus = "stopped" | "starting" | "running" | "crashed";
 
 export interface SpaceMeta {
+  base?: 'web' | 'browser';
+  baseVersion?: string;
   displayName: string;
   icon?: string;
   order: number;
@@ -162,6 +164,7 @@ export const PLUGIN_CATALOG_SCHEMA_VERSION = 1;
 export const INSTALLABLE_PLUGIN_TIERS: readonly PluginTier[] = ["verified-npm", "verified-git"];
 
 export const PROTECTED_PLUGIN_PACKAGES = [
+  "@dsh-spaces/browser",
   "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-web-app",
 ] as const;

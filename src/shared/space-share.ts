@@ -1,3 +1,4 @@
+import type { SpaceBaseSelection } from './space-base';
 /** Browser-safe space share types. Archives stay in the main process. */
 
 import type { LlmShareManifest, LlmShareRequirement } from "./llm-share";
@@ -12,7 +13,7 @@ export interface SpaceShareManifest {
   formatVersion: typeof SPACE_SHARE_FORMAT_VERSION;
   kind: typeof SPACE_SHARE_KIND;
   exportedAt: string;
-  source: { dshVersion?: string | null };
+  source: ({ dshVersion?: string | null } & SpaceBaseSelection);
   space: { displayName: string; icon?: string };
 }
 
@@ -64,7 +65,7 @@ export interface SpaceRecipe {
   plugins: SpaceSharePlugin[];
   patch?: string;
   llm?: LlmShareManifest;
-  source?: { dshVersion?: string | null };
+  source?: ({ dshVersion?: string | null } & SpaceBaseSelection);
 }
 
 export interface SpaceTemplate {

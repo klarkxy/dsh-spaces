@@ -2,132 +2,138 @@
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
 
-**A multi-space plugin installed into compatible DSH applications (official Web and Desktop). There is no standalone client.**
+**DSH Spaces is a multi-space plugin for compatible DSH Web and Desktop hosts. There is no standalone client.**
 
-DSH Spaces supports **Node.js 24.21+ (24.x) and 26.x** for its host, Supervisor, managed runtime and development tools. This includes the Node 24.21.0 bundled with official Desktop 0.2.1-rc.2. Newly installed managed toolchains still default to Node 26.10.0; existing supported toolchains are retained.
+It adds a space rail to the existing application, runs each ordinary space in its own DSH process, and keeps management in one Supervisor per Home. The original application remains available; ordinary spaces do not become second managers.
 
-Current positioning and supported adapters: [Host embedding contract](docs/host/embedding.md). Ordinary loopback Web hosts and official Windows Desktop 0.2.1-rc.2 support the in-place rail. The installed Desktop and native Browser Space were exercised with isolated Homes; see the [acceptance record](tasks/node24-desktop-20261020.md). Third-party native adapters remain unverified.
+## Current documents
 
-**Blueprint users and authors:** start with [BLUEPRINT.md](BLUEPRINT.md). The independently installable [`@klarkxy/dsh-blueprint`](packages/blueprint/README.md) lives in this repository; Spaces consumes its protocol for creating and sharing spaces. DSHBP2 shares plugin compositions; DSHBP1 retains configuration presets. Current migration and DSH 0.2 acceptance: [migration record](tasks/archive/blueprint-migration-0.2.md).
+- [Current architecture](docs/architecture.md) — roles, data ownership, control/data flows, availability and extension boundaries.
+- [Workbench guide](docs/workbench.md) — lifecycle, models, backups, upgrades and diagnostics.
+- [Standard installation](docs/plugin-standard-install.md) — installation, linked development and removal.
+- [Management contract](tasks/merge-contract-v2.md) — protocol 2, tasks, plans and concurrency.
+- [Fault policy](docs/let-it-crash.md) — the sole authority for failure and recovery behavior.
+- [Blueprint](BLUEPRINT.md) — DSHBP1/DSHBP2 protocols. Spaces blueprint workflows are currently sealed; the independent package remains available.
 
-Current workbench contract: [docs/workbench.md](docs/workbench.md), [tasks/workbench-contract.md](tasks/workbench-contract.md), [tasks/merge-contract-v2.md](tasks/merge-contract-v2.md). Fault policy: [docs/let-it-crash.md](docs/let-it-crash.md). Merge acceptance: [tasks/merge-execution.md](tasks/merge-execution.md). Historical recovery docs stay historical — start at [tasks/history-recovery.md](tasks/history-recovery.md), do not treat them as the current gate.
+## Data and identity
 
-Plugin install: [standard install guide](docs/plugin-standard-install.md). Run `pnpm run pack:plugin`, install the printed tarball with the official CLI, then **工作台 → 初始化 Spaces** in ordinary DSH Web. The original application stays in place; the same window displays the space rail and contained manager. Default CLI version: official **`0.2.1-rc.2`**, pinned for new installations. The local plugin is not on npm.
+- `web` remains the original home profile. Spaces does not patch or migrate its sessions and storage.
+- An ordinary space exists only after creation in Spaces. Its profile is `profiles/space-<name>`, its data is under `hub/space-<name>`, and membership comes from `hub/spaces.json`.
+- Spaces does not scan, adopt or modify unrelated profiles.
+- `spaces-hub` is the dedicated manager profile, not the main space and not an ordinary deletable space.
+- Main-space settings and credentials stay in the main host. Legacy shared connections use a separate Home catalog and credential store; neither is a copy of the main settings document.
 
-After installing the plugin into an official DSH Web or Desktop profile, open the **工作台 / Workbench** entry and click **初始化 Spaces / Initialize Spaces**. Initialization is one explicit user request: it connects to a healthy workbench or starts it once when no service exists and the runtime is ready. A stopped service is not an error; genuine startup failures and ownership conflicts remain visible, without automatic retry or lock takeover.
+## Runtime behavior
 
-One Supervisor owns Home run rights and management writes. Browsers and the official Desktop host attach to that process; the workbench page is the same spaces-hub UI everywhere. Ordinary spaces get a view bridge, not a second manager.
+Protocol 2 mutations carry a service epoch and expected revision. Requests and plans are rechecked at execution; refreshing reads existing jobs instead of replaying them. Closing a tab or host window does not stop spaces or the Supervisor. Stopping all spaces and stopping the service are separate actions.
 
-DSH Spaces does **not** promise that arbitrary plugin combinations will run. Failures are recorded and reported. Spaces does not recover a failed environment.
+New ordinary spaces can follow the main host's model without copying its credentials. This path depends on the child space, Supervisor and main host all remaining available. Legacy shared connections keep their launch-snapshot and direct-provider behavior; local and session-specific selections remain distinct. See [LLM data flows](docs/architecture.md#6-llm-数据面).
 
-中文说明见下方 [中文](#dsh-spaces-中文).
+Failures are recorded with their actual stage and known cause, or explicitly marked unknown. Spaces does not automatically retry, restart, reconnect, roll back, restore, repair or replay interrupted work. The bounded Desktop service-start/restart exception is defined only in the [fault policy](docs/let-it-crash.md).
 
-## Why
+Unregistered manual DSH processes are outside managed discovery and shutdown. Home backups therefore guarantee only the consistency scope of known, stopped managed spaces, not every possible external writer.
 
-Official DSH profiles isolate the plugin stack, not sessions or workspace groups. Spaces keeps each workbench's sessions, storage and local credentials under `$DSH_HOME/hub/space-<name>/`; alpha settings persist in `profiles/space-<name>/cordis.patch.yml` through the native ConfigEditor. Shared LLM connections live in a Home-level catalog. Named Spaces never import the root Home `settings.yaml` or write the default `web` profile. See the [alpha migration and acceptance record](tasks/archive/alpha-migration.md).
+## Install and upgrade
 
-A space exists only when the user creates it in Spaces — directly, or from a template, blueprint, or share import. Its profile directory is always `$DSH_HOME/profiles/space-<name>` and its data lives under `$DSH_HOME/hub/space-<name>`; membership is the entry recorded in `hub/spaces.json`. Spaces never scans, adopts, lists, or modifies other profile directories. Profiles created by older versions or other tools are not migrated — they stay ordinary DSH profiles.
+The next release is **0.5.0**, delivered as the prebuilt Spaces plugin for an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
 
-`web` is the unique home profile. Spaces never writes its isolation patch. The manager profile is `spaces-hub` (suffix if taken). Ordinary spaces install `@dsh-spaces/view-bridge`. Putting the full `@dsh-spaces/plugin` on an ordinary space is a misinstall.
+Build and pack the prebuilt plugin, then install it into the existing host profile:
 
-## Safety
+```powershell
+pnpm run pack:plugin
+dsh plugin --profile web add <printed-tarball-path>
+dsh web
+```
 
-- **No Spaces telemetry.** Model calls and plugins use their own network settings.
-- **`web` isolation protection.** No storage-root overrides, no chat migration.
-- **Backups before write.** `cordis.patch.yml.bak-<timestamp>` is a pre-commit copy, not product restore.
-- **Atomic writes.** Same-volume temp + rename. A failed prepare does not replace the previous file.
-- **Start gate.** `dsh --profile <name> --dump-config` first; missing/wrong row ids refuse to start.
-- **Dev sandbox.** Development uses `.sandbox` homes. Tests refuse real `~/.dsh`.
+In ordinary Web, open **Workbench / 工作台** and choose **Initialize Spaces / 初始化 Spaces**. That initialization is one explicit request; a later page load does not silently resume a failed request. Official Desktop starts the management service in the background when the application opens and leaves the main window usable. After a failed launch or a normal stop, the host does not automatically request another launch. Opening the application again, or the existing confirmed manual service action, starts a new operation. Refreshing the panel only rejoins the current Home record.
 
-One Supervisor per Home. Browser tabs and host windows attach to that process when it is healthy. Closing a tab or host window does not stop the service. Stopping all spaces and **stopping the service** (`service.shutdown`) are separate, explicit actions. Unregistered manual DSH processes are a known gap — [external discovery](tasks/workbench-external-discovery.md).
+To upgrade, install the newer host plugin, stop the Spaces service from the manager, and reopen Spaces. There is no in-app self-update or launcher handoff. Each ordinary space pins an exact DSH runtime; the manager follows the host runtime.
 
-## Failures
-
-See [docs/let-it-crash.md](docs/let-it-crash.md). Error actions are **查看错误详情** and **复制脱敏日志**. User start / stop / restart / install / uninstall / config stay ordinary management. Public restore APIs fail explicitly. Remaining unrun CLI/browser items: [tasks/q-coverage.md](tasks/q-coverage.md).
-
-Spaces follows the host-installed plugin: upgrade the plugin through DSH (`dsh plugin --profile web add <new tarball>`), shut the service down from the manager UI, then reopen Spaces. Each space pins an exact DSH version at creation (the host version). Switch a space's runtime from its details — no downgrade, no automatic snapshot; incompatible third-party plugins block the switch and official plugins are built into the selected runtime and change with it; Spaces never installs them into a profile. The manager follows the host CLI.
-
-## Current architecture (this branch)
-
-Protocol **2**. Management state carries `protocolVersion`, `serviceEpoch`, `revision`, and `availability`. Ordinary writes use `{ serviceEpoch, expectedRevision }`. Old protocol, missing context, or epoch/revision mismatch is rejected. There is no public `controller.acquire` / `controller.release` / `recovery.*` / `snapshot.restore` / `config.restore`.
-
-Shared Node modules for supervisor, jobs, products, and runtime live under `src/adapters/node`.
-
-Build lists six immutable components in `lib/supervisor/manifest.json` (schemaVersion 2): Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker. Cold start and pack consume that group. Bootstrap passes `--component-payload` and the same group's plugin / view-bridge / Browser / llm-bridge artifacts plus `--snapshot-worker`. On cold start the Supervisor always selects the group bundled with the host plugin; a previously selected group is reused only when its digest matches. An old Home is never rewritten or migrated.
-
-The create dialog offers a Browser preset. It creates an ordinary Space, installs the bundled Browser plugin and view bridge, selects its independent Browser root, and leaves cross-Space callers denied until the Browser Space's `allowedSpaces` is edited explicitly. Browser Host and client use official DSH Web profile services (Cordis, authenticated Connection RPC and slots); the small standalone Browser root and tab state belong to this repository. Web pages appear in iframes, so sites may refuse embedding and cross-origin navigation cannot update the displayed address. See [Browser plugin notes](packages/browser/README.md).
-
-`--snapshot-worker` remains required for **normal Home snapshots** and remaining installation IO. Runtime-installation has been extracted; the worker is not a restore product.
-
-To upgrade Spaces, install the new host plugin with `dsh plugin --profile web add <new tarball>`, shut the service down from the manager UI, and reopen Spaces. The Supervisor then selects the host plugin's component group, aligns the manager plugin before it starts, and each space's bridges align at space start. Leftover evidence from an interrupted earlier update still blocks writes. See [the acceptance record](tasks/merge-execution.md) for exact builds and platform limits.
-
-## Requirements
-
-- Node 24.21+ (24.x) or Node 26.x for contributing
-- Package source: China (npmmirror) or official (npmjs / nodejs.org)
-- First install uses `@deepseek-ai/dsh@0.2.1-rc.2`. Every space pins an exact DSH version — `0.2.0-rc.2` is the minimum, spaces below it refuse to start — and unused runtimes can be removed in settings
-- Workbench write gate accepts any exact installed DSH CLI version. Tags are not a bound version. This repo builds against SDK `0.2.1-rc.2`; plugin peers retain the `0.2.0-rc.2` lower bound and explicitly admit the new prerelease. This is not a CLI allowlist.
+Node.js 24.21+ (24.x) and 26.x are supported. New managed toolchains default to Node 26.10.0. The default DSH CLI for new installations is **`0.2.1-rc.2`**; `0.2.0-rc.2` is also the minimum supported space runtime. See the [installation guide](docs/plugin-standard-install.md) for exact package and platform limits.
 
 ## Develop
 
-```bash
+```powershell
 npm install
 node scripts/setup-sandbox.mjs
+npm run build
 npm test
-npm run test:llm
-npm run typecheck
-npm run validate:isolation
-npm run validate:llm:secrets
 npm run dev:web
 ```
 
-`npm run dev:web` builds and links the repository root into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. Existing development data stays. `npm run dev:link` only prepares the link. The root is directly installable with `dsh plugin --profile spaces-dev add .` after building; see [local linked development](docs/plugin-standard-install.md#local-linked-development). Rebuild and explicitly restart the host to load changes; Supervisor changes also need an explicit service shutdown before reopening Spaces. Click **初始化 Spaces / Initialize Spaces** in the browser. Do not run isolation/lifecycle scripts against profiles in use. Activity ledger: [tasks/todo.md](tasks/todo.md).
+Development uses an isolated Home. Never target the real `~/.dsh`, default `sessions/` / `storages/`, or `profiles/web/`. `npm run dev:link` prepares the linked development profile without starting the host. Rebuild and explicitly restart the host after changes; Supervisor changes also require a normal service shutdown and reopen.
 
-## Build
-
-```bash
-npm run build        # builds the component group into packages/*/lib
-npm run pack:plugin  # packs the prebuilt plugin tarball
-```
-
-Install the printed tarball with the official CLI; see [docs/plugin-standard-install.md](docs/plugin-standard-install.md). There is no standalone desktop package.
+The plugin and scoped packages are local prebuilt artifacts unless their individual documentation says otherwise. Publication and marketplace listing are separate release actions.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
 
 ---
 
-# DSH Spaces (中文)
+# DSH Spaces（中文）
 
-支持 **Node.js 24.21 及以上的 24.x，以及 26.x**，覆盖官方 Desktop 0.2.1-rc.2 内置的 Node 24.21.0。宿主、Supervisor、托管运行时和开发工具均接受这两个版本范围，CI 覆盖两条版本线；新安装的托管工具链仍默认 Node 26.10.0，不自动替换已有工具链。
+**安装在兼容 DSH Web / Desktop 中的多空间插件，没有独立客户端。**
 
-**安装在兼容 DSH 应用内的多空间插件：左侧切空间，右侧使用 WebUI，不要求打开专属客户端。**
+它在原应用内增加空间栏，每个普通空间使用独立 DSH 进程，每个 Home 只有一个 Supervisor 持有 Spaces 管理写权。原应用保留，普通空间不会变成第二个管理器。
 
-定位及支持边界见 [宿主嵌入合同](docs/host/embedding.md)。普通 loopback Web 和官方 Windows Desktop 0.2.1-rc.2 均支持宿主内空间栏。当前安装版 Desktop 的普通空间和原生浏览器空间已用隔离 Home 实测，见 [验收记录](tasks/node24-desktop-20261020.md)；第三方原生适配仍未验收。
+## 文档入口
 
-**使用或开发蓝图能力，请先阅读 [BLUEPRINT.md](BLUEPRINT.md)。** 独立蓝图插件在本仓库维护，Spaces 依赖其协议创建和分享空间；插件本身无需安装 Spaces。新版分享插件组合，旧格式保留配置预设。迁移及 DSH 0.2 验收见[迁移记录](tasks/archive/blueprint-migration-0.2.md)。
+- [现行架构](docs/architecture.md)：角色、数据所有权、控制/数据流、可用性与扩展边界。
+- [工作台说明](docs/workbench.md)：生命周期、模型、备份、升级与诊断。
+- [标准安装](docs/plugin-standard-install.md)：安装、链接开发与卸载。
+- [管理合同](tasks/merge-contract-v2.md)：协议 2、任务、计划与并发。
+- [故障政策](docs/let-it-crash.md)：唯一的失败与恢复边界。
+- [蓝图](BLUEPRINT.md)：DSHBP1/DSHBP2 协议。Spaces 内蓝图工作流当前已封存，独立蓝图包保留。
 
-现行工作台说明：[docs/workbench.md](docs/workbench.md)，合同：[tasks/workbench-contract.md](tasks/workbench-contract.md)、[tasks/merge-contract-v2.md](tasks/merge-contract-v2.md)。故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。本次合并验证见 [验收记录](tasks/merge-execution.md)。历史恢复文档只作追溯，从 [tasks/history-recovery.md](tasks/history-recovery.md) 进入，不是现行门槛。
+## 数据与身份
 
-把插件装进官方 DSH Web 或 Desktop 后，打开左侧 **工作台** 并点击 **初始化 Spaces**。初始化是一次明确的用户操作：连接健康的工作台，或在无服务且运行环境就绪时正常启动一次。尚未启动不再显示成错误；真正的启动失败与运行权冲突仍明确报告，不自动重试或接管锁。
+- `web` 保持原始主 profile，Spaces 不改写或迁移它的会话和存储。
+- 普通空间只能在 Spaces 中创建；profile 为 `profiles/space-<name>`，数据位于 `hub/space-<name>`，成员资格以 `hub/spaces.json` 为准。
+- 不扫描、收养或修改无关 profile。
+- `spaces-hub` 是专用管理空间，不是主空间，也不是可删除的普通空间。
+- 主空间设置和凭据留在主宿主；旧共享连接使用独立的 Home 目录和凭据库，不复制整份主空间设置。
 
-一个 Supervisor 持有 Home 运行权和管理写入。浏览器和官方 Desktop 宿主都连接同一个服务，使用同一套 spaces-hub 工作台。普通空间只装 view-bridge。
+## 运行语义
 
-插件组合可以失败。Spaces 记录并说明已知原因或明确未知，不提供自动或手动恢复。
+协议 2 的变更携带服务纪元和预期状态版本，请求与计划在执行时重新校验。刷新只读取原任务，不重放。关闭标签或宿主窗口不会停止空间和 Supervisor；停止全部空间与停止服务是不同操作。
 
-## 数据规则
+新普通空间可以跟随主空间模型，无需复制主空间凭据，但该调用依赖子空间、Supervisor 和主空间同时可用。旧共享连接保留启动快照和子空间直连供应商语义；本地默认与会话选择独立。见 [LLM 数据流](docs/architecture.md#6-llm-数据面)。
 
-- `web` 是唯一根 profile，使用官方默认 `$DSH_HOME/sessions/` 与 `$DSH_HOME/storages/`，**永不打 patch**。
-- 空间只在 Spaces 中创建（直接创建、模板、蓝图或分享导入），profile 目录固定为 `profiles/space-<name>`，数据在 `hub/space-<name>`；成员资格以 `hub/spaces.json` 注册项为准。Spaces 不扫描、不收养、不修改其他 profile 目录；旧版本或其他途径创建的 profile 不迁移，仍是普通 DSH profile。
-- 共享的是 Home 级 LLM 连接库，不是整份 `settings.yaml`。
-- 普通新建空间默认使用主空间模型，也可在创建时选择全局连接或本地配置；已有空间不自动改策略。主空间凭据不复制到子空间，显式模型与推理等级由官方聊天界面选择。
-- 管理工作台是专用 profile `spaces-hub`。普通空间使用 `@dsh-spaces/view-bridge` 与对应的 LLM bridge。
+失败按真实阶段和已知原因记录，无法确定时明确未知。不自动重试、重启、重连、回滚、恢复、修复或续跑。Desktop 手动服务启动/重启例外仅以[故障政策](docs/let-it-crash.md)为准。
 
-## 现行行为
+未登记的手工 DSH 进程不属于可发现、可停机范围。Home 备份只保证已知受管空间停止后的一致性范围，不保证所有潜在外部写者均已停止。
 
-协议版本 **2**。变更带 `serviceEpoch` 与 `expectedRevision`。公开合同没有 `controller.acquire` / `release`、没有恢复命令。关闭标签或宿主窗口不停止后台。停止全部空间和停止服务（`service.shutdown`）是两个独立操作。
+## 安装与升级
 
-通用 Node 模块在 `src/adapters/node`。构建清单覆盖 Supervisor、管理插件、view-bridge、Browser、llm-bridge、安装 worker 六组件。启动仍需要同组 `--snapshot-worker`，运行时安装 IO 已抽出。组件升级采用一次性启动器交接，新管理器就绪后才确认成功。本次源码测试、标准插件与组件更新的验证范围见 [合并验收记录](tasks/merge-execution.md)。
+下一版本为 **0.5.0**，通过预构建插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
 
-`npm run dev:web` 构建后把仓库根目录软链接到 `.sandbox/dsh-link-home` 下的独立 `spaces-dev` profile，再启动官方 Web 应用，保留已有调试数据。`npm run dev:link` 只准备链接。也可在构建后从根目录执行 `dsh plugin --profile spaces-dev add .`，完整步骤见[本地链接调试](docs/plugin-standard-install.md#local-linked-development)。修改后重新构建并显式重启宿主；Supervisor 变更还需从工作台停止服务后再进入。浏览器里点 **初始化 Spaces**。活动账本：[tasks/todo.md](tasks/todo.md)。
+```powershell
+pnpm run pack:plugin
+dsh plugin --profile web add <实际输出的包路径>
+dsh web
+```
+
+普通 Web 打开 **工作台**，点击 **初始化 Spaces**。初始化是一次明确请求，后续打开页面不会静默续接失败请求。官方 Desktop 在打开应用时后台启动管理服务，主界面保持可用。启动失败或正常停止后，宿主不会自动请求另一次启动。再次打开应用，或使用已有的确认式手动服务操作，才是一份新启动。刷新面板只是重新加入当前 Home 记录。
+
+升级时更新宿主插件，在管理界面停止 Spaces 服务，再重新打开。没有应用内自我更新或启动器交接。普通空间固定精确 DSH 运行时，管理空间跟随宿主。
+
+支持 Node.js 24.21+（24.x）和 26.x；新托管工具链默认 Node 26.10.0。新安装默认 DSH CLI 为 **`0.2.1-rc.2`**，它也是普通空间最低运行时。具体包与平台限制见[安装说明](docs/plugin-standard-install.md)。
+
+## 开发
+
+```powershell
+npm install
+node scripts/setup-sandbox.mjs
+npm run build
+npm test
+npm run dev:web
+```
+
+开发使用隔离 Home，禁止指向真实 `~/.dsh`、默认 `sessions/` / `storages/` 或 `profiles/web/`。`npm run dev:link` 只准备链接。修改后重新构建并显式重启宿主；Supervisor 变化还需正常停止服务后重新进入。
+
+插件和各 scoped 包是否为本地预构建制品，以各自文档为准。发布和市场收录是独立动作。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。

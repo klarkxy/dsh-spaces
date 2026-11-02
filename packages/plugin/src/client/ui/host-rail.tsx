@@ -69,6 +69,8 @@ export interface HostRailButtonProps {
   /** Identifier of the space behind the entry, if any. */
   spaceId?: string;
   onSelect: () => void;
+  onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement>;
 }
 
 /** One entry of the space dock rail. */
@@ -86,6 +88,8 @@ export function HostRailButton({
   disabled = false,
   spaceId,
   onSelect,
+  onContextMenu,
+  onKeyDown,
 }: HostRailButtonProps): ReactElement {
   return (
     <button
@@ -101,6 +105,8 @@ export function HostRailButton({
       data-transitional={transitional ? "true" : undefined}
       disabled={disabled}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
+      onKeyDown={onKeyDown}
     >
       {current && (
         <LayoutIndicator layoutId={layoutId} className="dsh-host-rail-pill" aria-hidden="true" />

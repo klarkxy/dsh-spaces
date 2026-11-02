@@ -2,19 +2,19 @@
 
 支持 **Node.js 24.21 及以上的 24.x，以及 26.x**：DSH 宿主、Supervisor、托管运行时和开发工具均接受这两个范围。官方 Desktop 0.2.1-rc.2 使用 Electron 44.7.0 内置的 Node 24.21.0，无需替换桌面版运行时。新安装的托管工具链仍默认 Node 26.10.0，已有受支持工具链保留；不自动升级或替换已有工具链。当前隔离桌面验收见 [Node 24 兼容记录](../tasks/node24-desktop-20261020.md)。
 
-展示合同见 [宿主嵌入](host/embedding.md)：初始化后留在原应用，空间栏在宿主内展开，右侧嵌入实际管理工作台及空间 WebUI。官方 Windows Desktop 0.2.1-rc.2 已通过本机隔离 Home 验收，包括原生 Browser Space；远程宿主未验收。下面的发行状态和旧验收记录不自动构成本批通过证据。
+展示合同见 [宿主嵌入](host/embedding.md)，当前架构基线见 [现行架构](architecture.md)：初始化后留在原应用，空间栏在宿主内展开，右侧嵌入实际管理工作台及空间 WebUI。官方 Windows Desktop 0.2.1-rc.2 已通过本机隔离 Home 验收，该历史记录也覆盖当时的原生 Browser Space；当前 Browser 入口封存，远程宿主未验收。下面的发行状态和旧验收记录不自动构成本批通过证据。
 
-用户入口：在当前项目运行 `pnpm run pack:plugin`，执行它打印的插件安装命令，再启动 DSH Web，打开左侧“工作台”并点击“初始化 Spaces”。无需手动传入管理器、worker 或数据目录路径。故障政策见 [let it crash](let-it-crash.md)。
+用户入口：在当前项目运行 `pnpm run pack:plugin`，执行它打印的插件安装命令。普通 Web 再启动 DSH Web，打开左侧“工作台”并点击“初始化 Spaces”。官方 Desktop 在打开应用时后台初始化并启动管理服务，主界面保留，无需先点击初始化。两种入口都无需手动传入管理器、worker 或数据目录路径。故障政策见 [let it crash](let-it-crash.md)。
 
-初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。
+普通 Web 的初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。官方 Desktop 由宿主进程按当前 Home 保存该次终态；刷新界面只是重新加入。失败或正常停止不会自动重启。再次打开应用，或使用已有的确认式手动服务操作，才是一份新启动。子空间仍要等用户点击。缺少启动观察接口是明确的兼容失败，不改走自动恢复，也不能据此断定服务没有启动。健康的旧服务可以直接连接。
 
 新安装默认固定官方 **`0.2.1-rc.2`**。每个空间固定一个精确 DSH 版本：已有空间首次启动时固定为其实际运行的版本，新空间默认宿主版本；切换在空间详情中发起（禁止降级，不自动建快照，不兼容的第三方插件会阻止切换；官方插件内置于所选运行时并随之变化，Spaces 不会把它们安装进 profile）。管理空间（spaces-hub）跟随宿主 CLI，低于 `0.2.0-rc.2` 的空间拒绝启动；不再使用的运行时可在设置中删除。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2 plugin --profile web add <完整包路径>` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2 web` 启动。
 
-现行验收脚本是 `scripts/verify-plugin-standard-install.mjs`（`pnpm run validate:plugin-install`）。当前 0.2 迁移与实际验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。`@dsh-spaces/plugin` **尚未发布到 npm**；现在使用本地预构建包。
+现行验收命令是 `pnpm run validate:plugin-install`。0.2 迁移的历史验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。`@dsh-spaces/plugin` **尚未发布到 npm**；现在使用本地预构建包。
 
-The distribution unit is the prebuilt **plugin tarball** (supervisor + view-bridge payload inside). `@dsh-spaces/supervisor` stays private.
+发行单元是预构建的**插件 tarball**。Supervisor 等内部组件随该包分发，用户不需要第二个包；`@dsh-spaces/supervisor` 保持私有。
 
-Default official CLI version for new installations: **`0.2.1-rc.2`**. An untested version number is not by itself read-only.
+新安装默认官方 CLI 版本：官方 **`0.2.1-rc.2`**。未经测试的版本号本身不构成只读结论。
 
 ## User steps (pnpm)
 
@@ -24,23 +24,21 @@ Default official CLI version for new installations: **`0.2.1-rc.2`**. An unteste
 
 ```powershell
 pnpm run pack:plugin
-pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2 plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.4.0.tgz"
+pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2 plugin --profile web add "$env:TEMP\dsh-spaces-pack\dsh-spaces-plugin-0.5.0.tgz"
 pnpm dlx @deepseek-ai/dsh@0.2.1-rc.2 web
 ```
 
-In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click **初始化 Spaces / Initialize Spaces**. That is an explicit `guide.initialize()` with no path arguments. The independent supervisor creates `spaces-hub` and hands off. This is **not** a misinstall. If initialization fails, that request ends and the page reports the failure; the next visit does not silently finish it.
+In ordinary **web**, open the **工作台 / Workbench** sidebar entry and click **初始化 Spaces / Initialize Spaces**. That is an explicit initialization request with no path arguments. The independent supervisor creates the manager profile and returns an authenticated entry. This is **not** a misinstall. If initialization fails, that request ends and the page reports the failure; the next visit does not silently finish it.
 
 若只想试用，可先在同一终端设置 `$env:DSH_HOME = Join-Path $env:TEMP "dsh-spaces-try"`，再执行安装和启动。若已设置 `DSH_PACK_DEST`，请使用打包输出的实际路径。
 
-Only one existing Web profile needs the full Spaces entry. Spaces created by the workbench receive the lightweight `@dsh-spaces/view-bridge`; repeating the full package installation in every space is unnecessary.
+Only one existing Web profile needs the full Spaces entry. Spaces created by the workbench receive the lightweight view bridge; repeating the full package installation in every space is unnecessary.
 
-A space exists only when created in Spaces (directly, or from a template, blueprint, or share import): profile directory `profiles/space-<name>`, data `hub/space-<name>`, membership recorded in `hub/spaces.json`. Spaces never scans, adopts, lists, or modifies other profile directories; profiles created by older versions or other tools are not migrated and stay ordinary profiles.
-
-Windows CLI `0.1.5-rc.1` splits tarball paths that contain spaces. `pnpm run pack:plugin` writes to a no-space directory (`%TEMP%\dsh-spaces-pack` unless `DSH_PACK_DEST` is set).
+A space exists only when created in Spaces (directly, or from an ordinary template or `.dshspace` share import): profile directory `profiles/space-<name>`, data `hub/space-<name>`, membership recorded in `hub/spaces.json`. Blueprint workflows in Spaces are currently sealed; the independent Blueprint package is unaffected. Spaces never scans, adopts, lists, or modifies other profile directories; profiles created by older versions or other tools are not migrated and stay ordinary profiles.
 
 ## Local linked development
 
-仓库根目录现在也是私有的 `@dsh-spaces/plugin` 开发入口，导出 `packages/plugin/lib` 的构建产物，与发行包使用同一插件身份和配置层。
+仓库根目录现在也是私有的 `@dsh-spaces/plugin` 开发入口，导出插件构建产物，与发行包使用同一插件身份和配置层。
 
 ```powershell
 npm install
@@ -62,7 +60,7 @@ dsh --profile spaces-dev
 
 依赖应记录为 `link:`，并指向本仓库根目录。不要链接到仓库父目录。开发流程不写真实 `~/.dsh` 或 `profiles/web`。
 
-修改源码后执行 `npm run build`，再显式重启宿主以加载新模块和客户端资源。Supervisor、管理插件或桥接组件有变化时，还需从工作台正常停止服务后重新进入，让新的启动选用新组件组。软链接不等于热替换，运行中的服务不会自动重启。首次进入仍需点击 **初始化 Spaces**。
+当宿主插件解析到本源码检出（私有根包 `@dsh-spaces/plugin` 下的 `packages/plugin/lib`）时，开发检出模式自动生效，无需环境变量：Supervisor 不再暂存组件副本、不写选中指针、不打包 tarball，直接以检出内验证过的组件组启动，并向 Supervisor 传入 `--dev-checkout <root>`。此后管理器 profile 在下次 Supervisor 启动时、各子空间在下次空间启动时，分别获得 `packages/plugin`、`packages/view-bridge`、`packages/llm-bridge` 的 `link:` 安装（浏览器组件被封存，不参与）。链接生效后：客户端改动经 `npm run build`（或持续运行的 `npm run dev:watch`）由官方 dsh-client-hmr 实时呈现；空间侧服务端桥接代码需重启该空间。Supervisor 代码变更后，普通 Web 遵循显式初始化或进入工作台；官方 Desktop 需重新打开应用，或使用既有的确认式手动启动。首次从既有 tarball 安装切换到链接模式时同样如此，并需每个子空间各一次重启。已知限制：`link:` 包从检出的 `node_modules` 解析 `@deepseek-ai/*` 对等依赖，因此固定到与检出开发依赖不同 DSH 版本的子空间在开发模式下可能无法正确加载。软链接不等于热替换，运行中的服务不会自动重启。普通 Web 首次进入仍需点击 **初始化 Spaces**。官方 Desktop 开发宿主在打开应用时后台启动管理服务；同一进程里服务已停止则保持停止，重新进入面板不会再请求启动。再次打开应用，或使用已有的确认式手动服务操作，才是新的启动。
 
 发行仍使用 `npm run pack:plugin` 生成的独立包，根目录保持 `private`。
 
@@ -70,11 +68,15 @@ dsh --profile spaces-dev
 
 | Status | Meaning |
 | --- | --- |
-| **Local tarball acceptance** | `pnpm run pack:plugin` → `dsh plugin --profile web add` → `dsh web` → Initialize. The recorded result of `pnpm run validate:plugin-install` determines acceptance. See the current [merge acceptance record](../tasks/merge-execution.md); the command itself is not proof. |
+| **Local tarball acceptance** | `pnpm run pack:plugin` → `dsh plugin --profile web add` → `dsh web` → Initialize. The recorded result of `pnpm run validate:plugin-install` determines acceptance. The [merge acceptance record](../tasks/merge-execution.md) is historical and does not prove the current package; the command itself is not proof. |
 | **Community listing, pending** | Marketplace search/install once the scoped package is owned and published. Not done. |
-| **Not a release** | GitHub root is the monorepo. A CI pack artifact is for review, not `npm publish`. Desktop tags stay on the Release workflow. |
+| **Not a release** | GitHub root is the monorepo. A CI pack artifact is for review, not `npm publish`; there is no standalone Desktop package. |
 
-Upgrade an existing install: `dsh plugin --profile web add <new tarball>` replaces the host plugin entry, then shut the Spaces service down from the manager UI and reopen Spaces. The Supervisor selects the plugin's bundled component group, aligns the manager plugin before it starts, and each space's bridges align at space start.
+## Upgrade
+
+Upgrade an existing install: `dsh plugin --profile web add <new tarball>` replaces the host plugin entry, then shut the Spaces service down from the manager UI and reopen Spaces. The new Supervisor selects the host plugin's bundled component group and aligns the manager plugin before the manager starts.
+
+Ordinary spaces receive the group's bridge when they do not have one yet. An already-installed space bridge is not automatically re-aligned to the new group, so the actual bridge state must be shown rather than assumed. There is no in-app self-update and no automatic component handoff: the host plugin update, the service shutdown and the reopen are three separate user actions.
 
 Uninstall the ordinary entry: `dsh plugin --profile web remove @dsh-spaces/plugin`. That must drop the web bundle row. It does not by itself delete a manager already created for the Home.
 

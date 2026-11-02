@@ -105,6 +105,24 @@ export function applyIsolationPatch(original: string, name: string, source: stri
   return body.endsWith("\n") ? body : `${body}\n`;
 }
 
+/** Scope providers explicitly present in a Browser patch without adding chat providers. */
+export function applyBrowserIsolationPatch(original: string, name: string): string {
+  if (name === 'web') throw new PatchForbiddenError(t('errors.webSacred'));
+  const doc = parsePatchDocument(original, 'Browser profile patch');
+  const seq = requireSeq(doc, 'Browser profile patch');
+  for (const [id, field, path] of [
+    [SESSION_ROW_ID, 'root', `hub/${name}/sessions`],
+    [STORAGE_ROW_ID, 'root', `hub/${name}/storages`],
+    ['attachment-local', 'dshHome', `hub/${name}`],
+    [CREDENTIALS_ROW_ID, 'path', `hub/${name}/.credentials.yaml`],
+  ]) {
+    const rows = rowsWithId(seq, id!);
+    if (rows.length > 1) throw new PatchVerifyError(`Duplicate Browser patch row: ${id}`);
+    if (rows.length || id === CREDENTIALS_ROW_ID) upsertJsConfigField(seq, rows[0], id!, field!, `dshHomePath('${path}')`);
+  }
+  return doc.toString({ lineWidth: 0 });
+}
+
 export function extractRoot(dump: string, id: string): string | null {
   return extractConfigField(dump, id, "root");
 }
@@ -143,6 +161,46 @@ export function assertDumpPatched(dump: string, name: string): void {
       t("errors.dumpRootMismatch", { id: STORAGE_ROW_ID, actual: storageRoot, name, kind: "storages" }),
     );
   }
+}
+
+/** Browser has no session/storage providers by default. Validate every provider that is
+ * actually present (including nested/renamed rows); a missing path never passes.
+ * Web retains its mandatory session + storage checks above.
+ */
+export function assertBrowserDumpIsolated(dump: string, name: string): void {
+  const doc = parsePatchDocument(dump, 'browser dump-config');
+  const seq = requireSeq(doc, 'browser dump-config');
+  const providers = new Map([
+    ['@deepseek-ai/dsh-session-persistence-jsonl', [SESSION_ROW_ID, 'root', `hub/${name}/sessions`]],
+    ['@deepseek-ai/dsh-storage-json', [STORAGE_ROW_ID, 'root', `hub/${name}/storages`]],
+    ['@deepseek-ai/dsh-credentials-local', [CREDENTIALS_ROW_ID, 'path', `hub/${name}/.credentials.yaml`]],
+    ['@deepseek-ai/dsh-attachment-local', ['attachment-local', 'dshHome', `hub/${name}`]],
+  ]);
+  const seen = new Set<string>();
+  const visit = (rows: YAMLSeq): void => {
+    for (const row of rows.items) {
+      if (!isMap(row)) throw new PatchVerifyError('Invalid Browser config row.');
+      const id = row.get('id');
+      if (typeof id === 'string') {
+        if (seen.has(id)) throw new PatchVerifyError(`Duplicate Browser config row: ${id}`);
+        seen.add(id);
+      }
+      if (row.get('group') === true) {
+        const children = row.get('config', true);
+        if (!isSeq(children)) throw new PatchVerifyError('Cannot verify dynamic Browser config group.');
+        visit(children);
+      }
+      const provider = providers.get(String(row.get('name')))
+        ?? [...providers.values()].find(([knownId]) => id === knownId);
+      if (!provider) continue;
+      const [, field, path] = provider;
+      const config = row.get('config', true);
+      const value = isMap(config) ? formatRoot(config.get(field!, true)) : null;
+      const match = value?.startsWith('!!js ') ? value.slice(5).trim().match(DSH_HOME_PATH_RE) : null;
+      if (match?.[2] !== path) throw new PatchVerifyError(`Browser provider ${String(id)} is not isolated to this space.`);
+    }
+  };
+  visit(seq);
 }
 
 /** Session/storage and credentials paths. Alpha settings are profile-owned. */

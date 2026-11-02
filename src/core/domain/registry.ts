@@ -1,4 +1,5 @@
 import { t } from "../../shared/i18n";
+import { parseSpaceBaseSelection } from '../../shared/space-base';
 import {
   PROFILE_NAME_RE,
   RESERVED_PROFILE_NAMES,
@@ -29,6 +30,7 @@ export function normalizeSpacesFile(parsed: SpacesFile): SpacesFile {
       typeof meta.displayName !== "string" || !Number.isFinite(meta.order)) {
       throw new Error("Space registry metadata is invalid.");
     }
+    parseSpaceBaseSelection(meta);
   }
   return {
     version: 1,
@@ -48,7 +50,7 @@ export function packageHasWebApp(pkg: unknown): boolean {
   if (!pkg || typeof pkg !== "object") return false;
   const dsh = (pkg as { dsh?: { profile?: { bundles?: unknown } } }).dsh;
   const bundles = dsh?.profile?.bundles;
-  return Array.isArray(bundles) && bundles.includes(WEB_APP_BUNDLE);
+  return Array.isArray(bundles) && (bundles.includes(WEB_APP_BUNDLE) || bundles.includes('@dsh-spaces/browser'));
 }
 
 export function assertValidProfileName(name: string): void {

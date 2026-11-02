@@ -120,6 +120,10 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
       observation: OBSERVATION,
     };
   }
+  if (request.method === 'base.versions') {
+    const versions = request.base === 'browser' ? ['0.4.0'] : ['0.2.1-rc.2', '0.2.0-rc.2'];
+    return { method: 'base.versions', base: request.base, versions, preferred: versions[0]!, observation: OBSERVATION };
+  }
   if (request.method === "plugin.versions") {
     if (window.__WB?.failPluginVersions) {
       throw Object.assign(new Error("The plugin registry could not be read."), { code: "workbench/failed" });
@@ -355,6 +359,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
         scope: request.kind === "service.shutdown" ? "controller" : "space",
         affectedSpaceIds: [],
         runningSpaceIds: [],
+        taskActivity: "idle",
         changes: ["x"],
         destructive: request.kind === "service.shutdown",
         expiresAt: new Date().toISOString(),

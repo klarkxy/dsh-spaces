@@ -48,6 +48,7 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   if (flags["component-payload"]) {
     options.componentPayloadRoot = requirePath(flags["component-payload"], "--component-payload");
   }
+  if (flags["dev-checkout"]) options.devCheckoutRoot = requirePath(flags["dev-checkout"], "--dev-checkout");
   return options;
 }
 
@@ -65,6 +66,7 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
   if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
   if (options.componentPayloadRoot) args.push("--component-payload", options.componentPayloadRoot);
+  if (options.devCheckoutRoot) args.push("--dev-checkout", options.devCheckoutRoot);
   return args;
 }
 
@@ -84,6 +86,7 @@ function flagName(token: string): string | undefined {
     "--snapshot-worker": "snapshot-worker",
     "--snapshot-root": "snapshot-root",
     "--component-payload": "component-payload",
+    "--dev-checkout": "dev-checkout",
   };
   return names[token];
 }

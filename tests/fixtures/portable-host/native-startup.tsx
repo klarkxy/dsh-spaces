@@ -3,14 +3,25 @@ import { createRoot } from "react-dom/client";
 import { NativeHostController, NativeHostShell, NATIVE_HOST_CSS } from "../../../packages/plugin/src/client/native-host";
 import { HOST_SHELL_CSS } from "../../../packages/plugin/src/client/host-shell";
 
+const readyLaunch = {
+  operationId: "launch-one", phase: "ready" as const, serviceEpoch: "aa".repeat(32), managerId: "hub", reasons: [] as string[], failure: null,
+};
 const controller = new NativeHostController({
   role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+  beginDesktopLaunch: async () => readyLaunch,
+  desktopLaunchState: async () => readyLaunch,
   presentationSnapshot: async () => {
     const response = await fetch("/directory");
     if (!response.ok) throw Error(await response.text());
     return response.json();
   },
   initialize: async () => { throw Error("Unexpected launch"); },
+  spaceActivity: async () => ({ activity: "idle", generation: 1 }),
+  spaceAction: async request => {
+    const response = await fetch("/space-action", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
+    if (!response.ok) throw Error(await response.text());
+    return response.json();
+  },
   previewServiceRestart: async () => {
     const response = await fetch("/restart-preview", { method: "POST" });
     if (!response.ok) throw Error(await response.text());

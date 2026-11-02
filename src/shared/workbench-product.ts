@@ -1,3 +1,4 @@
+import type { SpaceBase, SpaceBaseVersions } from './space-base';
 /** Public product contracts. Jobs never carry local paths, archive bytes or credentials. Transient blueprint preview/generate responses may include receiver-local input values. */
 import type { ConfigBackupMeta, DiagnosticLogEntry } from './diagnostics';
 import type { SpaceImportResult, SpaceSharePreview, SpaceTemplate } from './space-share';
@@ -59,6 +60,7 @@ export interface WorkbenchDiagnostics {
 }
 
 export type WorkbenchProductRequest =
+  | { method: 'base.versions'; base: SpaceBase }
   | { method: 'settings' }
   | { method: 'catalog'; query?: string }
   | { method: 'library' }
@@ -81,6 +83,7 @@ export interface WorkbenchProductObservation {
 }
 
 export type WorkbenchProductResult = (
+  | ({ method: 'base.versions' } & SpaceBaseVersions)
   | { method: 'settings'; settings: WorkbenchHomeSettings; clientDefaults: { locale: LocalePreference; theme: ThemePreference } }
   | { method: 'catalog'; catalog: PluginCatalogSnapshot }
   | { method: 'library'; items: WorkbenchLibraryItem[] }

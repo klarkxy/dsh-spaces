@@ -62,6 +62,8 @@ export class SupervisorSpaces {
           isHost: row.name === this.host.managerId(),
           hasWebApp: row.hasWebApp,
           icon: row.meta.icon ?? "",
+          base: row.meta.base,
+          baseVersion: row.meta.baseVersion,
           status,
           generation: view?.generation ?? this.host.runs.generation(row.name),
           managed: Boolean(this.host.lifecycle.handle) && !leftover,

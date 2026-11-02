@@ -7,6 +7,9 @@ import type {
   WorkbenchProductRequest,
   WorkbenchProductResult,
 } from './workbench-product';
+import type { WorkbenchStartupStatus } from './workbench-startup';
+
+export type { WorkbenchStartupStatus };
 
 export type WorkbenchRole = 'manager' | 'workspace' | 'uninitialized';
 export type ControllerKind = 'web' | 'desktop';
@@ -64,6 +67,8 @@ export function formatWorkbenchFailure(input: {
 }
 
 export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
+  base?: 'web' | 'browser';
+  baseVersion?: string;
   icon: string;
   status: 'running' | 'starting' | 'stopping' | 'stopped' | 'crashed' | 'unknown';
   generation: number;
@@ -139,7 +144,7 @@ export interface WorkbenchJob {
 }
 
 export type WorkbenchCommand =
-  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean } }
+  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } }
   | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string }
   | { kind: 'space.reorder'; spaceIds: string[] }
   | { kind: 'space.start'; spaceId: string }
@@ -161,6 +166,8 @@ export type WorkbenchPlanRequest =
   | { kind: 'service.shutdown' };
 
 export interface WorkbenchPlan {
+  /** Fresh task observation for a stop/restart; unknown requires an impact confirmation. */
+  taskActivity?: 'idle' | 'busy' | 'unknown';
   id: string;
   kind: WorkbenchPlanRequest['kind'];
   title: string;
@@ -221,6 +228,12 @@ export const WORKBENCH_API = {
   state: {
     args: [] as const,
     result: undefined as unknown as WorkbenchState,
+  },
+  /** Readonly startup observation. Legacy lightweight adapters may omit it. */
+  startupStatus: {
+    args: [] as const,
+    result: undefined as unknown as WorkbenchStartupStatus,
+    optional: true,
   },
   detail: {
     args: [{ name: "spaceId", value: undefined as unknown as string }] as const,

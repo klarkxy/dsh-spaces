@@ -55,11 +55,12 @@ test('official DSH root slot elects Browser-only UI ahead of the Web layout', ()
   slots.register({ name: 'root' }, () => createElement('div', { 'data-dsh-layout': true }));
   applyBrowserClient({
     get: () => ({ rpc: { call: async () => ({ ok: true, value: [] }) } }),
-    slots: { inject: (_name: string, register: () => void) => register(), register: slots.register.bind(slots) },
+    slots: { inject: (_name: string, register: () => void) => register(), register: slots.register.bind(slots),
+      installScope: (_name: string, adapter: { current: { getSnapshot(): { key?: string } } }) => assert.equal(adapter.current.getSnapshot().key, undefined) },
   } as never);
   const winner = slots.entriesOfSlot('root')[0];
   assert.equal(winner?.options.priority, -2);
-  const html = renderToStaticMarkup(createElement(winner!.component as never, {}));
+  const html = renderToStaticMarkup(createElement(winner!.component as never, { renderSlot: () => null } as never));
   assert.match(html, /data-spaces-browser-root="true"/);
   assert.doesNotMatch(html, /data-dsh-layout/);
 });

@@ -10,6 +10,9 @@ import { canonicalHome } from "../../src/adapters/node/home/home-operation-lock.
 import { COMPATIBLE_DSH_CLI_VERSION } from "../../src/adapters/node/products/spaces-service.ts";
 import { writeEndpointFile } from "../../src/adapters/node/home/supervisor-endpoint.ts";
 import { DesktopServiceRestart } from "../../packages/plugin/src/host/service-restart.ts";
+import { runDesktopSpaceAction } from "../../packages/plugin/src/host/space-action.ts";
+import { validDesktopSpaceAction } from "../../packages/plugin/src/types.ts";
+import { readWelcomeNotice, writeWelcomeNotice } from "../../src/adapters/node/home/welcome-notice.ts";
 import { WorkbenchHostRuntime } from "../../packages/plugin/src/host/runtime.ts";
 import type { WorkbenchApi, WorkbenchState, WorkbenchPlan } from "../../src/shared/workbench.ts";
 
@@ -127,5 +130,125 @@ test("guide restart privilege is restricted to the actual Desktop profile", asyn
       env: { DSH_HOME: f.home }, fetch: f.fetchState, connect: () => f.api });
     if (profile === "desktop") assert.equal((await runtime.previewServiceRestart()).action, "start");
     else assert.throws(() => runtime.previewServiceRestart(), /confirmed Desktop/);
+    if (profile !== "desktop") await assert.rejects(runtime.spaceAction({ spaceId: "coding", action: "open", serviceEpoch: f.state.serviceEpoch }), /confirmed Desktop/);
+  }
+});
+
+test("Desktop child actions use current state, one CAS submit and the exact normal stop/restart plan", async t => {
+  const f = fixture(t);
+  const commands: unknown[] = [], previews: string[] = [];
+  let outcome = "succeeded", polls = 0;
+  const api = { ...f.api,
+    preview: async (request: { kind: string }, context: { expectedRevision: string }) => {
+      previews.push(request.kind); assert.equal(context.expectedRevision, f.state.revision);
+      return { id: "child-plan", kind: request.kind, scope: "space", destructive: false, affectedSpaceIds: ["coding"], taskActivity: "idle",
+        serviceEpoch: f.state.serviceEpoch, stateRevision: f.state.revision, expiresAt: new Date(Date.now() + 50000).toISOString() };
+    },
+    submit: async (command: unknown, requestId: string, context: { expectedRevision: string }) => {
+      commands.push(command); assert.equal(context.expectedRevision, f.state.revision);
+      if (outcome === "succeeded") f.state.spaces[1].status = previews.at(-1) === "space.stop" ? "stopped" : "running";
+      return { id: "child-job", requestId, status: outcome, message: "launch failed", error: outcome === "failed" ? { message: "original failure" } : undefined };
+    },
+    job: async () => { polls++; throw Error("read failed"); },
+  } as unknown as WorkbenchApi;
+  const request = { spaceId: "coding", action: "open" as const, serviceEpoch: f.state.serviceEpoch };
+  await runDesktopSpaceAction(api, request); assert.equal(commands.length, 0, "running means open without starting");
+  f.state.spaces[1].status = "stopped";
+  await runDesktopSpaceAction(api, request);
+  assert.deepEqual(commands, [{ kind: "space.start", spaceId: "coding" }]);
+  await runDesktopSpaceAction(api, { ...request, action: "stop" });
+  await runDesktopSpaceAction(api, { ...request, action: "restart" });
+  assert.deepEqual(previews, ["space.stop", "space.restart"]);
+  assert.deepEqual(commands.slice(1), [{ kind: "plan.execute", planId: "child-plan" }, { kind: "plan.execute", planId: "child-plan" }]);
+  outcome = "failed"; f.state.spaces[1].status = "stopped";
+  await assert.rejects(runDesktopSpaceAction(api, request), /original failure/);
+  assert.equal(commands.length, 4); assert.equal(polls, 0);
+  outcome = "running";
+  await assert.rejects(runDesktopSpaceAction(api, request), /read failed/);
+  assert.equal(commands.length, 5); assert.equal(polls, 1, "a failed observation never resubmits");
+});
+
+test("Desktop child actions reject protected targets, stale service, unavailable state and expanded plans", async t => {
+  const f = fixture(t), request = { spaceId: "coding", action: "restart" as const, serviceEpoch: f.state.serviceEpoch };
+  for (const spaceId of ["spaces-hub", "desktop", "web", "missing"]) await assert.rejects(runDesktopSpaceAction(f.api, { ...request, spaceId }), /managed child/);
+  await assert.rejects(runDesktopSpaceAction(f.api, { ...request, serviceEpoch: "f".repeat(64) }), /changed/);
+  f.state.maintenance = true; await assert.rejects(runDesktopSpaceAction(f.api, request), /unavailable/); f.state.maintenance = false;
+  f.state.writable = false; await assert.rejects(runDesktopSpaceAction(f.api, request), /read-only/); f.state.writable = true;
+  f.state.spaces[1].managed = false; await assert.rejects(runDesktopSpaceAction(f.api, request), /managed child/); f.state.spaces[1].managed = true;
+  await assert.rejects(runDesktopSpaceAction(f.api, request), /new review/);
+  assert.equal(f.counts().stops, 0);
+  for (const invalid of [{ ...request, action: "delete" }, { ...request, spaceId: "../coding" }, { ...request, extra: true }]) assert.equal(validDesktopSpaceAction(invalid), false);
+});
+
+test("an already starting child is observed without a duplicate start", async t => {
+  const f = fixture(t); f.state.spaces[1].status = "starting";
+  let reads = 0;
+  const api = { ...f.api, state: async () => { if (++reads === 2) f.state.spaces[1].status = "running"; return f.state; } };
+  await runDesktopSpaceAction(api, { spaceId: "coding", action: "open", serviceEpoch: f.state.serviceEpoch });
+  assert.equal(reads, 2); assert.equal(f.counts().stops, 0);
+});
+
+test("verified Desktop runtime attaches without bootstrap and excludes concurrent child requests", async t => {
+  const f = fixture(t);
+  const sdk = join(f.home, "node_modules/@deepseek-ai/dsh"), bin = join(sdk, "lib/bin.js");
+  mkdirSync(join(sdk, "lib"), { recursive: true }); writeFileSync(bin, "");
+  writeFileSync(join(sdk, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: COMPATIBLE_DSH_CLI_VERSION }));
+  const dir = join(f.home, "profiles/desktop"); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, "package.json"), "{}");
+  let starts = 0, reads = 0;
+  f.state.spaces[1].status = "stopped";
+  const api = { ...f.api, state: async () => { reads++; return f.state; }, submit: async (command: unknown, requestId: string) => {
+    assert.deepEqual(command, { kind: "space.start", spaceId: "coding" }); starts++; f.state.spaces[1].status = "running";
+    return { id: "start-job", requestId, status: "succeeded" };
+  } } as unknown as WorkbenchApi;
+  const runtime = new WorkbenchHostRuntime({ home: f.home, argv: [process.execPath, bin, "--profile", "desktop"], baseUrl: pathToFileURL(dir).href,
+    env: { DSH_HOME: f.home }, fetch: f.fetchState, connect: () => api, bootstrap: async () => { throw Error("must not bootstrap"); } });
+  const request = { spaceId: "coding", action: "open" as const, serviceEpoch: f.state.serviceEpoch };
+  const first = runtime.spaceAction(request);
+  await assert.rejects(runtime.spaceAction(request), /already in progress/);
+  assert.equal((await first).spaces.find(row => row.id === "coding")?.status, "running");
+  assert.equal(reads, 2, "one initial observation and one completion observation");
+  await runtime.spaceAction(request);
+  assert.equal(reads, 3, "an already-running open uses one authority read");
+  assert.equal(starts, 1);
+});
+
+test("explicit stop confirms durable completion without starting a replacement service", async t => {
+  const f = fixture(t), operation = f.operation(), preview = await operation.preview(true);
+  assert.equal(preview.action, "stop");
+  await assert.rejects(operation.execute(preview.confirmationId), /invalid or expired/);
+  const result = await operation.execute(preview.confirmationId, true);
+  assert.equal(result.ok, true); assert.equal(result.connected, false);
+  assert.deepEqual(f.counts(), { starts: 0, stops: 1, plans: 1 });
+  await assert.rejects(operation.execute(preview.confirmationId, true), /invalid or expired/);
+});
+
+test("welcome notice sharing only preserves an actual version acknowledgement", t => {
+  const f = fixture(t, false);
+  mkdirSync(join(f.home, "profiles", "desktop"), { recursive: true });
+  assert.equal(readWelcomeNotice(f.home), undefined);
+  writeWelcomeNotice(f.home, undefined);
+  assert.equal(readWelcomeNotice(f.home), undefined);
+  writeWelcomeNotice(f.home, "2026-09-28.1");
+  assert.equal(readWelcomeNotice(f.home), "2026-09-28.1");
+  writeWelcomeNotice(f.home, "2026-10-26.1");
+  assert.equal(readWelcomeNotice(f.home), "2026-10-26.1");
+});
+
+test("busy and unknown child tasks need generation-bound consent before a stop", async t => {
+  const f = fixture(t); let submitted = 0;
+  for (const taskActivity of ["busy", "unknown"] as const) {
+    const api = { ...f.api, preview: async () => ({ id: "impact", kind: "space.stop", scope: "space", destructive: false,
+      affectedSpaceIds: ["coding"], taskActivity, serviceEpoch: f.state.serviceEpoch, stateRevision: f.state.revision,
+      expiresAt: new Date(Date.now() + 50000).toISOString() }),
+      submit: async (_command: unknown, requestId: string) => { submitted++; f.state.spaces[1].status = "stopped";
+        return { id: "stopped", requestId, status: "succeeded" }; } } as unknown as WorkbenchApi;
+    f.state.spaces[1].status = "running";
+    const request = { spaceId: "coding", action: "stop" as const, serviceEpoch: f.state.serviceEpoch };
+    await assert.rejects(runDesktopSpaceAction(api, request), /confirm|确认/i);
+    const count = submitted;
+    await assert.rejects(runDesktopSpaceAction(api, { ...request, interruptAccepted: true, expectedGeneration: 9999 }), /changed|变化/i);
+    assert.equal(submitted, count);
+    await runDesktopSpaceAction(api, { ...request, interruptAccepted: true, expectedGeneration: f.state.spaces[1].generation! });
+    assert.equal(submitted, count + 1);
   }
 });

@@ -14,14 +14,16 @@
 import React, { useEffect, useState, type ReactElement } from "react";
 import type { LlmDescribeResult } from "../../../../../src/shared/llm-api";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { WorkbenchController, WorkbenchUiState } from "../store";
-import { copyRedacted, statusKey } from "./shared";
+import { statusKey } from "./shared";
 import { DshVersionSection } from "./dsh-version";
 import { IconPicker } from "./icon-picker";
 import { InlineErrors } from "../inline-error";
 import { PluginsSection } from "./plugin-section";
 import { SpaceBindingPanel } from "../llm/space-binding";
+import { LegacyConnectionSettings } from "../llm/legacy-settings";
 import { DiagnosticsSection } from "../product-ui";
 
 export function SpaceDetailPage({
@@ -67,16 +69,16 @@ export function SpaceDetailPage({
       <OverviewSection locale={locale} space={space} controller={controller} writable={writable} busy={busy} />
       <AppearanceSection locale={locale} space={space} controller={controller} writable={writable} manageable={manageable} />
       <PluginsSection locale={locale} space={space} controller={controller} writable={writable} busy={busy} ui={ui} />
-      <ModelsSection locale={locale} space={space} controller={controller} writable={writable} />
+      {space.base !== 'browser' ? <ModelsSection locale={locale} space={space} controller={controller} writable={writable} /> : null}
       <section className="dsh-wb-space-detail-card" data-space-section="dsh">
-        {space.managed && !controller.isManagerId(space.id) ? (
+        {space.base === 'browser' ? <><h3 className="dsh-wb-title">Browser {space.baseVersion}</h3><p className="dsh-wb-muted">{t(locale, 'create.browserBaseHint')}</p></> : space.managed && !controller.isManagerId(space.id) ? (
           <DshVersionSection key={`${space.id}:${space.dshVersion ?? ""}`} ui={ui} controller={controller} space={space} />
         ) : (
           <p className="dsh-wb-muted">{t(locale, "detail.dshNotPinned")}</p>
         )}
       </section>
       <section className="dsh-wb-space-detail-card" data-space-section="diagnostics">
-        <DiagnosticsSection ui={ui} locale={locale} onCopy={() => copyRedacted(controller.copyDiagnostics())} />
+        <DiagnosticsSection ui={ui} locale={locale} text={() => controller.copyDiagnostics()} />
       </section>
       <ExportSection locale={locale} space={space} controller={controller} />
       <section className="dsh-wb-space-detail-card dsh-wb-danger-zone" data-space-section="danger">
@@ -187,13 +189,31 @@ function AppearanceSection({
           >
             {t(locale, "app.save")}
           </button>
+          {dirty ? <span className="dsh-wb-muted">{t(locale, "detail.unsaved")}</span> : null}
         </div>
       ) : null}
     </section>
   );
 }
 
-function ModelsSection({
+function ModelsSection(props: {
+  locale: WorkbenchLocale;
+  space: WorkbenchSpace;
+  controller: WorkbenchController;
+  writable: boolean;
+}): ReactElement {
+  return (
+    <section className="dsh-wb-space-detail-card" data-space-section="models">
+      <h3 className="dsh-wb-title">{t(props.locale, "detail.models")}</h3>
+      <p className="dsh-wb-muted">{t(props.locale, "llm.modelSettingsHint")}</p>
+      <LegacyConnectionSettings key={props.space.id} locale={props.locale}>
+        <LegacySpaceModels {...props} />
+      </LegacyConnectionSettings>
+    </section>
+  );
+}
+
+function LegacySpaceModels({
   locale,
   space,
   controller,
@@ -222,9 +242,7 @@ function ModelsSection({
   }, [client]);
   const llmSpaces = controller.llmSpaces().filter((row) => row.spaceId === space.id);
   return (
-    <section className="dsh-wb-space-detail-card" data-space-section="models">
-      <h3 className="dsh-wb-title">{t(locale, "detail.models")}</h3>
-      <p className="dsh-wb-muted">{t(locale, "detail.modelHint")}</p>
+    <>
       {error ? <p className="dsh-wb-alert" role="alert">{error}</p> : null}
       {describe ? (
         <SpaceBindingPanel
@@ -242,7 +260,7 @@ function ModelsSection({
           {t(locale, "detail.modelOpen")}
         </button>
       </div>
-    </section>
+    </>
   );
 }
 
@@ -260,14 +278,16 @@ function ExportSection({
       <h3 className="dsh-wb-title">{t(locale, "detail.export")}</h3>
       <p className="dsh-wb-muted">{t(locale, "detail.exportHint")}</p>
       <div className="dsh-wb-actions">
-        <button
-          type="button"
-          className="dsh-wb-btn"
-          disabled={controller.isManagerId(space.id) || space.id === "web"}
-          onClick={() => controller.openBlueprintGenerate(space.id)}
-        >
-          {t(locale, "detail.exportTemplate")}
-        </button>
+        {!SPACES_BLUEPRINT_SEALED ? (
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            disabled={controller.isManagerId(space.id) || space.id === "web"}
+            onClick={() => controller.openBlueprintGenerate(space.id)}
+          >
+            {t(locale, "detail.exportTemplate")}
+          </button>
+        ) : null}
         <button
           type="button"
           className="dsh-wb-btn"

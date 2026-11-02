@@ -47,6 +47,12 @@ const PLUGIN_REQUIRED = [
   "README.md",
   "LICENSE",
   "cordis.patch.yml",
+  "icon.svg",
+  "llm-images.svg",
+  "locale/en.json",
+  "locale/zh.json",
+  "llm-images/locale/en.json",
+  "llm-images/locale/zh.json",
   "lib/index.js",
   "lib/client.js",
   "lib/typert.host.js",
@@ -60,6 +66,7 @@ const PLUGIN_REQUIRED = [
   "lib/view-bridge/lib/index.js",
   "lib/view-bridge/lib/client.js",
   "lib/view-bridge/lib/settings.js",
+  "lib/view-bridge/lib/typert.host.js",
   "lib/browser/package.json",
   "lib/browser/LICENSE",
   "lib/browser/cordis.patch.yml",
@@ -81,6 +88,7 @@ const VIEW_REQUIRED = [
   "lib/index.js",
   "lib/client.js",
   "lib/settings.js",
+  "lib/typert.host.js",
 ];
 
 const LLM_REQUIRED = [
@@ -194,7 +202,7 @@ function resolveNpmCli(nodeExe) {
   throw new Error("npm-cli.js not found. Use a Node install that ships npm, or put npm on PATH.");
 }
 
-function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun }) {
+function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun, env = process.env }) {
   const args = [
     npmCli,
     "pack",
@@ -211,7 +219,7 @@ function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun }) {
     timeout: PACK_MS,
     windowsHide: true,
     env: {
-      ...process.env,
+      ...env,
       npm_config_ignore_scripts: "true",
       npm_config_offline: "true",
       npm_config_fund: "false",

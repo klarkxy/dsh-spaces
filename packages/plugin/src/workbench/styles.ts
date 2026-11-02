@@ -25,4 +25,9 @@ export {
  * `import … from "./styles"` keeps resolving to this file and never to a
  * directory.
  */
-export const WORKBENCH_CSS = `${UI_TOKENS_CSS}${WORKBENCH_TOKENS_CSS}${WORKBENCH_BASE_CSS}${WORKBENCH_SHELL_CSS}${WORKBENCH_FEATURES_CSS}`;
+export const WORKBENCH_CSS = `${UI_TOKENS_CSS}${WORKBENCH_TOKENS_CSS}${WORKBENCH_BASE_CSS}${WORKBENCH_SHELL_CSS}${WORKBENCH_FEATURES_CSS}
+.dsh-wb-dialog.dsh-wb-create-dialog{display:flex;flex-direction:column;overflow:hidden;max-height:calc(100dvh - 48px)}
+.dsh-wb-create-dialog>.dsh-wb-title,.dsh-wb-create-dialog>.dsh-wb-actions{flex:none}
+.dsh-wb-create-fields{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 4px 8px}
+.dsh-wb-create-dialog>.dsh-wb-actions{padding-top:14px}
+`;

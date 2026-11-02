@@ -209,35 +209,41 @@ function PluginInstallArea({
   return (
     <>
       <h4 className="dsh-wb-title">{t(locale, "detail.pluginsInstall")}</h4>
-      <label className="dsh-wb-field">
-        {t(locale, "plugins.query")}
-        <input
-          ref={searchRef}
-          value={ui.pluginQuery}
-          onChange={(event) => controller.setPluginQuery(event.target.value)}
-          data-space-plugin-search="true"
-          autoComplete="off"
-        />
-      </label>
-      <div className="dsh-wb-actions">
-        <button
-          type="button"
-          className="dsh-wb-btn"
-          disabled={busy}
-          data-space-plugin-search-submit="true"
-          onClick={() => void controller.loadCatalog(ui.pluginQuery)}
-        >
-          {t(locale, "plugins.search")}
-        </button>
-        <button
-          type="button"
-          className="dsh-wb-btn"
-          disabled={!writable || busy}
-          onClick={controller.refreshCatalog}
-        >
-          {t(locale, "plugins.refresh")}
-        </button>
-      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void controller.loadCatalog(ui.pluginQuery);
+        }}
+      >
+        <label className="dsh-wb-field">
+          {t(locale, "plugins.query")}
+          <input
+            ref={searchRef}
+            value={ui.pluginQuery}
+            onChange={(event) => controller.setPluginQuery(event.target.value)}
+            data-space-plugin-search="true"
+            autoComplete="off"
+          />
+        </label>
+        <div className="dsh-wb-actions">
+          <button
+            type="submit"
+            className="dsh-wb-btn"
+            disabled={busy}
+            data-space-plugin-search-submit="true"
+          >
+            {t(locale, "plugins.search")}
+          </button>
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            disabled={!writable || busy}
+            onClick={controller.refreshCatalog}
+          >
+            {t(locale, "plugins.refresh")}
+          </button>
+        </div>
+      </form>
       {ui.catalogStatus === "error" ? (
         <p className="dsh-wb-alert" role="alert">{ui.readError.catalog ?? t(locale, "app.genericError")}</p>
       ) : null}
@@ -253,28 +259,32 @@ function PluginInstallArea({
         />
       ) : null}
       <div className="dsh-wb-product-list">
-        {entries.map((entry) => (
-          <div key={entry.id} className="dsh-wb-space-row dsh-wb-product-card">
-            <span>
-              <strong>{entry.id}</strong>
-              {entry.packageName ? ` · ${entry.packageName}` : ""}
-              <br />
-              <small>{entry.description || entry.summary || entry.tier}</small>
-            </span>
-            {installable(entry) ? (
-              <button
-                type="button"
-                className="dsh-wb-btn"
-                data-space-plugin-entry={entry.id}
-                onClick={() => controller.setPluginCatalog(entry.packageName ?? entry.id)}
-              >
-                {t(locale, "plugins.catalogId")}
-              </button>
-            ) : (
-              <small className="dsh-wb-muted">{t(locale, "plugins.notInstallable")}</small>
-            )}
-          </div>
-        ))}
+        {entries.map((entry) => {
+          const entrySelected = selected !== "" && (entry.packageName ?? entry.id) === selected;
+          return (
+            <div key={entry.id} className="dsh-wb-space-row dsh-wb-product-card" data-selected={entrySelected ? "true" : undefined}>
+              <span>
+                <strong>{entry.id}</strong>
+                {entry.packageName ? ` · ${entry.packageName}` : ""}
+                <br />
+                <small>{entry.description || entry.summary || entry.tier}</small>
+              </span>
+              {installable(entry) ? (
+                <button
+                  type="button"
+                  className="dsh-wb-btn"
+                  data-space-plugin-entry={entry.id}
+                  aria-pressed={entrySelected}
+                  onClick={() => controller.setPluginCatalog(entry.packageName ?? entry.id)}
+                >
+                  {t(locale, "plugins.catalogId")}
+                </button>
+              ) : (
+                <small className="dsh-wb-muted">{t(locale, "plugins.notInstallable")}</small>
+              )}
+            </div>
+          );
+        })}
       </div>
       <label className="dsh-wb-field">
         {t(locale, "plugins.version")}

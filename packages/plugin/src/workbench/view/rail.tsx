@@ -12,7 +12,7 @@ import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { LayoutIndicator } from "../../../../../src/shared/ui";
 import { SpaceGlyph } from "../space-glyph";
 import { t } from "../i18n";
-import type { WorkbenchViewProps } from "./shared";
+import { statusKey, type WorkbenchViewProps } from "./shared";
 
 /** Custom properties need a cast; React types only know the standard ones. */
 type SlotStyle = CSSProperties & { "--dsh-wb-rail-delay"?: string };
@@ -35,7 +35,7 @@ export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
         {spaces.map((space, index) => (
           <RailSlot key={space.id} active={ui.selected === space.id} delay={`${60 + index * 45}ms`}>
             <RailButton
-              label={space.displayName}
+              label={`${space.displayName} · ${t(locale, statusKey(space.status))}`}
               current={ui.selected === space.id}
               pending={ui.pendingId === space.id}
               status={space.status}
@@ -120,6 +120,7 @@ function RailButton({
       type="button"
       className={`dsh-wb-rail-btn${tool ? " tool" : ""}`}
       aria-label={label}
+      title={label}
       aria-current={current ? "true" : undefined}
       aria-busy={pending || undefined}
       data-pending={pending ? "true" : undefined}
@@ -147,7 +148,7 @@ function RailButton({
       }}
     >
       {glyph === "home" ? <HomeGlyph /> : glyph === "plus" ? <PlusGlyph /> : glyph === "gear" ? <GearGlyph /> : <SpaceGlyph icon={icon} spaceId={spaceId} />}
-      {status ? <span className="dsh-wb-status" data-status={status} /> : null}
+      {status ? <span className="dsh-wb-status" data-status={status} aria-hidden="true" /> : null}
       <span className="dsh-wb-sr">{label}</span>
     </button>
   );

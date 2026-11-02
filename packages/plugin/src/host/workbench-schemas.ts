@@ -55,7 +55,7 @@ const reasonsSchema = z.array(z.string().max(500)).max(32);
 export const serviceRestartPreviewSchema = z.object({
   confirmationId: hex64Schema,
   expiresAt: isoDateSchema,
-  action: z.enum(["start", "restart"]),
+  action: z.enum(["start", "restart", "stop"]),
   spaces: z.array(z.object({ id: spaceIdSchema, displayName: z.string().max(500), running: z.boolean() }).strict()).max(1000),
 }).strict();
 
@@ -72,6 +72,8 @@ export const workbenchSpaceSchema = z
     generation: z.number().int(),
     managed: z.boolean(),
     dshVersion: exactVersionSchema.nullable(),
+    base: z.enum(["web", "browser"]).optional(),
+    baseVersion: exactVersionSchema.optional(),
   })
   .strict();
 
@@ -134,6 +136,52 @@ export const workbenchJobSchema = z
     canCancel: z.boolean(),
     result: workbenchJobResultSchema.optional(),
     error: workbenchJobErrorSchema.optional(),
+  })
+  .strict();
+
+/** Empty before ownership; otherwise the same 64-hex epoch as currentServiceEpoch. */
+const startupServiceEpochSchema = z.string().regex(/^(?:[a-f0-9]{64})?$/);
+
+export const workbenchStartupFailureSchema = z
+  .object({
+    stage: z.string().max(64),
+    primaryReason: z.string().max(220),
+    cleanupReason: z.string().max(220).optional(),
+    instanceRetained: z.boolean(),
+  })
+  .strict();
+
+export const workbenchStartupStatusSchema = z
+  .object({
+    serviceEpoch: startupServiceEpochSchema,
+    managerId: z.union([spaceIdSchema, z.null()]),
+    phase: z.enum(["preparing", "starting", "ready", "failed"]),
+    reasons: reasonsSchema,
+    failure: z.union([workbenchStartupFailureSchema, z.null()]),
+  })
+  .strict();
+
+export const desktopLaunchPhaseSchema = z.enum([
+  "idle",
+  "discovering",
+  "preparing",
+  "launching",
+  "starting",
+  "connecting",
+  "ready",
+  "failed",
+  "stopped",
+]);
+
+/** Public Desktop launch snapshot. Every field is required; secrets and paths are not members. */
+export const desktopLaunchStateSchema = z
+  .object({
+    operationId: z.union([z.string().min(1).max(80), z.null()]),
+    phase: desktopLaunchPhaseSchema,
+    serviceEpoch: z.union([hex64Schema, z.null()]),
+    managerId: z.union([spaceIdSchema, z.null()]),
+    reasons: reasonsSchema,
+    failure: z.union([workbenchStartupFailureSchema, z.null()]),
   })
   .strict();
 
@@ -218,6 +266,8 @@ const createInputSchema = z
     useSharedLlm: z.boolean().optional(),
     modelSource: z.enum(['main','shared','local']).optional(),
     browser: z.boolean().optional(),
+    base: z.enum(["web", "browser"]).optional(),
+    baseVersion: exactVersionSchema.optional(),
   })
   .strict();
 
@@ -290,6 +340,7 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
 
 export const workbenchPlanSchema = z
   .object({
+    taskActivity: z.enum(["idle", "busy", "unknown"]).optional(),
     id: planIdSchema,
     kind: z.enum([
       "space.stop",

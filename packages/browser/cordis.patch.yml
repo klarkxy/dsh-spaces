@@ -1,4 +1,52 @@
+# Browser product base: DSH transport and plugin services, without agent, session or LLM rows.
 - insert:
+    - id: timer
+      name: '@deepseek-ai/cordis-plugin-timer'
+    - id: plugin-manager
+      name: '@deepseek-ai/dsh-plugin-manager'
+    - id: config-editor
+      name: '@deepseek-ai/dsh-config-editor'
+    - id: settings
+      name: '@deepseek-ai/dsh-settings'
+    - id: typert
+      name: '@deepseek-ai/dsh-typert-registry'
+    - id: typert-loader
+      name: '@deepseek-ai/dsh-typert-loader'
+    - id: typert-gateway
+      name: '@deepseek-ai/dsh-api-gateway'
+    - id: remote-access
+      name: '@deepseek-ai/dsh-api-remote-access'
+    - id: credentials
+      name: '@deepseek-ai/dsh-credentials-local'
+      inject: [profileContext]
+      config:
+        path: !!js dshHomePath('hub/' + ctx.profileContext.name + '/.credentials.yaml')
+    - id: web-startup
+      name: '@deepseek-ai/dsh-web-app/startup'
+    - id: webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      inject: [webStartup]
+      config:
+        host: !!js ctx.webStartup.host ?? '127.0.0.1'
+        port: !!js ctx.webStartup.port ?? 3080
+        tls: !!js ctx.webStartup.tls
+    - id: web-runtime
+      name: '@deepseek-ai/dsh-web-app'
+      inject: [webStartup]
+      config:
+        openBrowser: false
+        printUrl: true
+        publicUrl: !!js ctx.webStartup.publicUrl
+        surfaceContext: false
+    - id: modules
+      name: '@deepseek-ai/dsh-client-modules'
+    - id: connection
+      name: '@deepseek-ai/dsh-client-connection'
+      inject: [webStartup]
+      config:
+        trustedHosts: !!js ctx.webStartup.trustedHosts
+    - id: ui-renderer
+      name: '@deepseek-ai/dsh-client-ui-renderer'
     - id: dsh-spaces-browser
       name: '@dsh-spaces/browser'
       config:

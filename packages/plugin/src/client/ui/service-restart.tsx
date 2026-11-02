@@ -1,50 +1,66 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { WorkbenchServiceRestartPreview } from "../../types";
 import { publicGuideDetail } from "../guide-detail";
+import { inferSpacesLocale } from "../i18n";
 import type { NativeHostController } from "./native-controller";
+import { nativeTexts } from "./native-texts";
 import { PressButton } from "./press-button";
+import { NativeDialog } from "./native-dialog";
 
-/** Kept in the shell lifetime: returning to main does not abandon an accepted operation. */
-export function useServiceRestart(controller: NativeHostController, onRestarted: (next: NativeHostController) => void) {
+/** The Desktop owns the confirmation and survives the manager's normal shutdown. */
+export function useServiceRestart(controller: NativeHostController, onRestarted: (next: NativeHostController) => void, stopRequest = 0) {
   const [preview, setPreview] = useState<WorkbenchServiceRestartPreview | null>(null);
-  const [busy, setBusy] = useState<"preview" | "restart" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "start" | "restart" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const mounted = useRef(false), inFlight = useRef(false);
+  const mounted = useRef(false), inFlight = useRef(false), lastRequest = useRef(0);
+  const locale = inferSpacesLocale();
+  const texts = nativeTexts(locale);
   useEffect(() => {
     mounted.current = true;
-    setPreview(null); setBusy(null); setError(null);
+    setPreview(null); setBusy(null); setError(null); lastRequest.current = 0;
     return () => { mounted.current = false; };
   }, [controller]);
   const failure = (cause: unknown) => {
-    if (mounted.current) setError(publicGuideDetail(cause instanceof Error ? cause.message : String(cause)) || "手动操作失败，未自动重试。");
+    if (mounted.current) setError(publicGuideDetail(cause instanceof Error ? cause.message : String(cause)) || texts.serviceActionFailed);
   };
-  const prepare = async () => {
+  const prepare = async (stop = false) => {
     if (inFlight.current) return;
     inFlight.current = true; setBusy("preview"); setError(null); setPreview(null);
-    try { const value = await controller.previewServiceRestart(); if (mounted.current) setPreview(value); }
+    try { const value = await (stop ? controller.previewServiceStop() : controller.previewServiceRestart()); if (mounted.current) setPreview(value); }
     catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };
+  useEffect(() => {
+    if (stopRequest > lastRequest.current) { lastRequest.current = stopRequest; void prepare(true); }
+  }, [stopRequest, controller]);
   const confirm = async () => {
     if (!preview || inFlight.current) return;
-    inFlight.current = true; setBusy("restart"); setError(null);
-    const id = preview.confirmationId;
+    inFlight.current = true; setBusy(preview.action); setError(null);
+    const { confirmationId, action } = preview;
     setPreview(null);
-    try { const next = await controller.restartService(id); if (mounted.current) onRestarted(next); }
-    catch (cause) { failure(cause); }
+    try {
+      if (action === "stop") await controller.stopService(confirmationId);
+      else { const next = await controller.restartService(confirmationId); if (mounted.current) onRestarted(next); }
+    } catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };
-  if (!controller.supportsServiceRestart) return null;
-  return <section aria-label="手动启动或重启 Spaces 服务">
-    {busy && <p role="status">{busy === "preview" ? "正在读取服务和受影响空间…" : "正在正常停止旧服务并启动一次新服务…"}</p>}
-    {error && <p role="alert" className="dsh-host-detail">{error}</p>}
-    {preview ? <section aria-label="确认服务操作">
-      <h3>{preview.action === "restart" ? "确认重启 Spaces 服务" : "确认启动 Spaces 服务"}</h3>
-      <p>{preview.action === "restart" ? "将停止当前 Spaces 服务及以下空间，再启动管理服务。正在执行的子空间任务会中断；子空间保持停止，不自动继续任务。" : "当前没有存活的 Spaces 服务。将使用当前插件启动一次管理服务，不继续上次中断的任务。"}</p>
-      <p>当前 Desktop 和 main 会话保持打开。</p>
-      {preview.spaces.length > 0 && <ul>{preview.spaces.map(space => <li key={space.id}>{space.displayName}（{space.id}）{space.running ? " · 运行中，将停止" : " · 由此服务管理"}</li>)}</ul>}
-      <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => void confirm()}>{preview.action === "restart" ? "确认停止并重启服务" : "确认启动服务"}</PressButton>
-      <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => setPreview(null)}>取消</PressButton>
-    </section> : <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => void prepare()}>手动启动 / 重启 Spaces 服务…</PressButton>}
-  </section>;
+  const action = controller.supportsServiceRestart
+    ? <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => void prepare()}>{texts.serviceManual}</PressButton> : null;
+  const expiresAt = preview ? new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(preview.expiresAt)) : "";
+  const dialog = (preview || busy || error) ? <NativeDialog label={texts.serviceOperation} onCancel={busy ? undefined : () => { setPreview(null); setError(null); }}>
+      {busy && <p role="status">{busy === "preview" ? texts.servicePreviewReading : busy === "stop" ? texts.serviceStopping : busy === "start" ? texts.serviceStarting : texts.serviceRestarting}</p>}
+      {error && <><p role="alert">{error}</p><PressButton type="button" className="dsh-host-action" onClick={() => setError(null)}>{texts.closeNotice}</PressButton></>}
+      {preview && <>
+        <h3>{preview.action === "stop" ? texts.serviceStopTitle : preview.action === "restart" ? texts.serviceRestartTitle : texts.serviceStartTitle}</h3>
+        <p>{preview.action === "stop" ? texts.serviceStopBody : preview.action === "restart" ? texts.serviceRestartBody : texts.serviceStartBody}</p>
+        <p>{texts.serviceMainSpaceNote}</p>
+        {preview.spaces.length > 0 && <ul>{preview.spaces.map(space => <li key={space.id}>{space.displayName}{space.running ? ` · ${texts.serviceSpaceRunning}` : ` · ${texts.serviceSpaceManaged}`}</li>)}</ul>}
+        <details><summary>{texts.serviceConfirmDetails}</summary><p>{texts.serviceConfirmValid.replace("{time}", expiresAt)}</p></details>
+        <div className="dsh-native-confirm-actions">
+          <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => setPreview(null)}>{texts.cancel}</PressButton>
+          <PressButton type="button" className={`dsh-host-action${preview.action === "start" ? "" : " danger"}`} disabled={!!busy} onClick={() => void confirm()}>{preview.action === "stop" ? texts.serviceStopConfirm : preview.action === "restart" ? texts.serviceRestartConfirm : texts.serviceStartConfirm}</PressButton>
+        </div>
+      </>}
+  </NativeDialog> : null;
+  return { action, dialog };
 }

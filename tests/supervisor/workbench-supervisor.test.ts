@@ -75,6 +75,55 @@ function fakeHttpRuntime(originOf: () => string): WorkbenchHttpRuntime {
   };
 }
 
+test("sealed blueprint product reads and apply are unsupported without creating a job", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home);
+  for (const method of ["blueprint.source", "blueprint.generate", "blueprint.inspect", "blueprint.preview"]) {
+    await assert.rejects(
+      () => handle.runtime.product({ method } as never),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "workbench/unsupported", method);
+        return true;
+      },
+    );
+  }
+  const before = await handle.runtime.state();
+  await assert.rejects(
+    () => handle.runtime.submit(
+      { kind: "blueprint.apply", planId: "sealed-plan" },
+      "req-blueprint-sealed",
+      { serviceEpoch: before.serviceEpoch, expectedRevision: before.revision },
+    ),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, "workbench/unsupported");
+      return true;
+    },
+  );
+  const after = await handle.runtime.state();
+  assert.equal(after.jobs.some((job) => job.requestId === "req-blueprint-sealed"), false);
+  assert.equal((await handle.runtime.product({ method: "settings" })).method, "settings");
+});
+
+test("sealed Browser creation aliases and catalog cannot create jobs or profiles", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home);
+  const before = await handle.runtime.state();
+  const unsupported = (error: unknown) => {
+    assert.equal((error as { code?: string }).code, 'workbench/unsupported');
+    return true;
+  };
+  await assert.rejects(() => handle.runtime.product({ method: 'base.versions', base: 'browser' }), unsupported);
+  for (const input of [
+    { name: 'browser', browser: true },
+    { name: 'browser', base: 'browser' as const, baseVersion: '0.4.0' },
+    { name: 'browser', base: 'web' as const, baseVersion: '0.2.1-rc.2', browser: true },
+  ]) await assert.rejects(() => handle.runtime.submit({ kind: 'space.create', input }, 'req-browser-sealed',
+    { serviceEpoch: before.serviceEpoch, expectedRevision: before.revision }), unsupported);
+  const after = await handle.runtime.state();
+  assert.equal(after.jobs.some(job => job.requestId === 'req-browser-sealed'), false);
+  assert.equal(existsSync(join(home, 'profiles', 'space-browser')), false);
+});
+
 test("ordinary workbench methods keep the small body limit; product share.previewImport may exceed it", async () => {
   let origin = "http://127.0.0.1:9";
   const http = await startWorkbenchHttp(fakeHttpRuntime(() => origin), 0);
@@ -1164,6 +1213,15 @@ test("exact CLI versions are admitted; tags stay unbound; CLI flags stay Node-on
   assert.throws(() => parseSupervisorArgs(["--home", rc2Home]), /--bin/);
 });
 
+test("CLI parses and serializes --dev-checkout", () => {
+  const checkout = mkdtempSync(join(tmpdir(), "dsh-devcli-"));
+  temps.push(checkout);
+  const parsed = parseSupervisorArgs(["--home", checkout, "--bin", join(checkout, "bin.js"), "--dev-checkout", checkout]);
+  assert.equal(parsed.devCheckoutRoot, checkout);
+  assert.deepEqual(supervisorCliArgs(parsed).slice(-2), ["--dev-checkout", checkout]);
+  assert.equal(parseSupervisorArgs(["--home", checkout, "--bin", join(checkout, "bin.js")]).devCheckoutRoot, undefined);
+});
+
 test("CLI accepts --cli as an alias of --bin and writes a private endpoint file", async () => {
   const home = tempHome();
   const bin = writeFakeCli(home);
@@ -1785,6 +1843,7 @@ function writePayload(pluginRoot: string, marker = "payload"): ValidatedComponen
     ["lib/view-bridge/lib/index.js", "export {};\n"],
     ["lib/view-bridge/lib/client.js", "export {};\n"],
     ["lib/view-bridge/lib/settings.js", "export {};\n"],
+    ["lib/view-bridge/lib/typert.host.js", "export {};\n"],
     ["lib/browser/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.browser)],
     ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
     ["lib/browser/lib/index.js", "export {};\n"],
@@ -1793,6 +1852,7 @@ function writePayload(pluginRoot: string, marker = "payload"): ValidatedComponen
     ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], true)],
     ["lib/llm-bridge/cordis.patch.yml", `- insert:\n    - id: dsh-spaces-llm-bridge\n      name: '${COMPONENT_PAYLOAD_PACKAGES["llm-bridge"]}'\n      config: {}\n`],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
+    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
   ];
   for (const [rel, content] of files) {
     const abs = join(pluginRoot, rel);

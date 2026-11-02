@@ -1,6 +1,6 @@
 {
   "name": "@dsh-spaces/plugin",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "license": "MIT",
   "description": "Spaces for DeepSeek Harness — switch DSH workspaces like Discord servers.",
@@ -22,8 +22,13 @@
     "./client": "./packages/plugin/lib/client.js",
     "./cordis.patch.yml": "./packages/plugin/cordis.patch.yml",
     "./package.json": "./package.json",
-    "./llm-images": "./packages/plugin/lib/llm-images.js"
+    "./llm-images": "./packages/plugin/lib/llm-images.js",
+    "./icon": "./packages/plugin/icon.svg",
+    "./llm-images/icon": "./packages/plugin/llm-images.svg",
+    "./locale/*.json": "./packages/plugin/locale/*.json",
+    "./llm-images/locale/*.json": "./packages/plugin/llm-images/locale/*.json"
   },
+  "icon": "./packages/plugin/icon.svg",
   "dsh": {
     "client": {
       "inject": [
@@ -87,21 +92,22 @@
   },
   "scripts": {
     "dev:link": "node scripts/dev-dsh-web.mjs --link-only",
+    "dev:watch": "node scripts/dev-watch.mjs",
     "dev:web": "node scripts/dev-dsh-web.mjs",
     "build": "npm run build:spaces",
     "build:spaces": "node scripts/build-spaces.mjs",
     "typecheck:spaces": "tsc --noEmit -p tsconfig.spaces.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "test:spaces": "tsx --test tests/spaces/spaces-core.test.ts tests/home/spaces-lock.test.ts tests/spaces/spaces-host.test.ts tests/spaces/spaces-panel.test.tsx tests/maintenance/spaces-doctor.test.ts tests/products/compatible-dsh-cli.test.ts tests/profile/profile-settings.test.ts tests/profile/profile-alpha-migration.test.ts tests/profile/profile-02-transition.test.ts tests/payload/component-cli-02.test.ts",
-    "test:browser": "node --import tsx --test tests/native/browser-space.test.ts tests/native/browser-space-bus.test.ts",
+    "test:browser": "node --import tsx --test tests/native/browser-space.test.ts tests/native/browser-space-bus.test.ts tests/native/browser-base.test.ts",
     "test:llm": "tsx --test tests/llm/ tests/llm/llm-ui.test.tsx",
     "test:llm:integration": "tsx --test tests/llm/llm-multi-space.test.ts tests/llm/llm-stream.test.ts tests/integration/llm-integration.test.ts tests/llm/llm-delegation.test.ts",
     "test:llm:browser": "tsx --test tests/ui/llm-ui-dom.test.ts",
-    "test:blueprints": "npm run test:blueprint-plugin && tsx --test tests/blueprint/ tests/blueprint/workbench-blueprint-ui.test.tsx tests/blueprint/workbench-blueprint-v2-ui.test.tsx tests/blueprint/workbench-templates-ui.test.tsx tests/server/workbench-entry-clipboard.test.ts tests/llm/llm-packaging.test.ts",
+    "test:blueprints": "npm run test:blueprint-plugin && tsx --test tests/blueprint/ tests/blueprint/workbench-templates-ui.test.tsx tests/server/workbench-entry-clipboard.test.ts tests/llm/llm-packaging.test.ts",
     "validate:llm:secrets": "node scripts/validate-llm-secrets.mjs",
     "validate:llm:distribution": "node scripts/validate-llm-distribution.mjs",
-    "test:workbench": "tsx --test tests/native/browser-space.test.ts tests/native/browser-space-bus.test.ts tests/message-bus/space-message-bus.test.ts tests/message-bus/space-message-supervisor.test.ts tests/home/home-lease.test.ts tests/maintenance/workbench-jobs.test.ts tests/maintenance/workbench-log.test.ts tests/supervisor/workbench-supervisor.test.ts tests/maintenance/workbench-maintenance.test.ts tests/ui/workbench-ui.test.tsx tests/products/workbench-plugin.test.ts tests/maintenance/q-let-it-crash.test.ts tests/maintenance/sample-plugins.test.ts tests/server/workbench-protocol.test.ts tests/server/workbench-endpoint-v2.test.ts tests/server/workbench-forwarding-v2.test.ts tests/products/workbench-products.test.ts tests/products/space-recipe.test.ts tests/payload/component-payload.test.ts tests/payload/component-selection.test.ts tests/products/supervisor-pack.test.ts tests/runtime/runtime-installation.test.ts tests/server/workbench-http-port.test.ts tests/supervisor/supervisor-reopen.test.ts tests/diagnostics/supervisor-diagnostics.test.ts tests/payload/component-cli.test.ts tests/native/native-desktop.test.ts tests/home/service-restart.test.ts tests/native/portable-host.test.ts",
-    "test:workbench:browser": "tsx --test tests/ui/workbench-ui-dom.test.ts tests/ui/fit-icon-browser.test.ts tests/ui/portable-host-dom.test.ts",
+    "test:workbench": "tsx --test tests/native/browser-space.test.ts tests/native/browser-space-bus.test.ts tests/native/browser-base.test.ts tests/message-bus/space-message-bus.test.ts tests/message-bus/space-message-supervisor.test.ts tests/home/home-lease.test.ts tests/maintenance/workbench-jobs.test.ts tests/maintenance/workbench-log.test.ts tests/supervisor/workbench-supervisor.test.ts tests/supervisor/startup-status.test.ts tests/supervisor/startup-early-failure.test.ts tests/maintenance/workbench-maintenance.test.ts tests/ui/workbench-ui.test.tsx tests/ui/space-switch.test.ts tests/products/workbench-plugin.test.ts tests/maintenance/q-let-it-crash.test.ts tests/maintenance/sample-plugins.test.ts tests/server/workbench-protocol.test.ts tests/server/workbench-endpoint-v2.test.ts tests/server/workbench-forwarding-v2.test.ts tests/products/workbench-startup-api.test.ts tests/products/workbench-startup-observation.test.ts tests/products/desktop-launch.test.ts tests/products/desktop-launch-plugin.test.ts tests/products/workbench-products.test.ts tests/products/space-recipe.test.ts tests/payload/component-payload.test.ts tests/payload/component-selection.test.ts tests/payload/dev-checkout.test.ts tests/products/supervisor-pack.test.ts tests/runtime/runtime-installation.test.ts tests/server/workbench-http-port.test.ts tests/supervisor/supervisor-reopen.test.ts tests/diagnostics/supervisor-diagnostics.test.ts tests/payload/component-cli.test.ts tests/native/native-desktop.test.ts tests/native/nav-diag.test.ts tests/native/nav-diag-portal.test.ts tests/native/native-desktop-startup.test.ts tests/home/service-restart.test.ts tests/native/portable-host.test.ts",
+    "test:workbench:browser": "tsx --test tests/ui/workbench-ui-dom.test.ts tests/ui/fit-icon-browser.test.ts tests/ui/portable-host-dom.test.ts tests/ui/native-background-startup-dom.test.ts",
     "test:workbench:recovery": "tsx --test tests/maintenance/workbench-doctor.test.ts tests/runtime/cooperative-children.test.ts tests/maintenance/maintenance-responsiveness.test.ts tests/diagnostics/xp-compatibility.test.ts",
     "pack:plugin": "node scripts/build-spaces.mjs && node scripts/pack-spaces-plugin.mjs",
     "check:plugin-package": "node scripts/pack-spaces-plugin.mjs --preflight",
@@ -110,7 +116,7 @@
     "validate:plugin-install": "node --import tsx scripts/verify-plugin-standard-install.mjs",
     "validate:plugin-write-scope": "node --import tsx scripts/verify-plugin-install-write-scope.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "tsx --test tests/profile/profile-registry.test.ts tests/profile/patch-writer.test.ts tests/runtime/write-paths.test.ts tests/runtime/dsh-cli.test.ts tests/products/package-source.test.ts tests/runtime/toolchain.test.ts tests/home/i18n.test.ts tests/products/plugin-catalog.test.ts tests/products/plugin-ops.test.ts tests/products/plugin-library.test.ts tests/runtime/process-manager.test.ts tests/diagnostics/diagnostics.test.ts tests/runtime/runtime-store.test.ts tests/snapshots/snapshot-store.test.ts tests/maintenance/maintenance-gate.test.ts tests/runtime/terminate-process.test.ts tests/runtime/dsh-endpoint.test.ts tests/spaces/space-icon.test.ts tests/ui/fit-icon.test.ts tests/products/space-share.test.ts tests/spaces/batch.test.ts tests/products/space-templates.test.ts tests/maintenance/sample-plugins.test.ts tests/tooling/validate-isolation.test.mjs tests/llm/llm-share.test.ts tests/llm/llm-packaging.test.ts tests/spaces/space-avatars.test.tsx tests/tooling/root-plugin-link.test.mjs tests/tooling/check-all.test.mjs",
+    "test": "tsx --test tests/profile/profile-registry.test.ts tests/profile/patch-writer.test.ts tests/runtime/write-paths.test.ts tests/runtime/dsh-cli.test.ts tests/products/package-source.test.ts tests/runtime/toolchain.test.ts tests/home/i18n.test.ts tests/products/plugin-catalog.test.ts tests/products/plugin-ops.test.ts tests/products/plugin-library.test.ts tests/runtime/process-manager.test.ts tests/diagnostics/diagnostics.test.ts tests/runtime/runtime-store.test.ts tests/snapshots/snapshot-store.test.ts tests/maintenance/maintenance-gate.test.ts tests/runtime/terminate-process.test.ts tests/runtime/dsh-endpoint.test.ts tests/spaces/space-icon.test.ts tests/ui/fit-icon.test.ts tests/products/space-share.test.ts tests/spaces/batch.test.ts tests/products/space-templates.test.ts tests/maintenance/sample-plugins.test.ts tests/tooling/validate-isolation.test.mjs tests/llm/llm-share.test.ts tests/llm/llm-packaging.test.ts tests/spaces/space-avatars.test.tsx tests/tooling/root-plugin-link.test.mjs tests/tooling/plugin-display-meta.test.mjs tests/tooling/check-all.test.mjs tests/tooling/check-test-lists.test.mjs tests/tooling/validate-llm-secrets.test.mjs",
     "validate:isolation": "node scripts/validate-isolation.mjs --clean",
     "validate:lifecycle": "node scripts/verify-lifecycle.mjs",
     "validate:a8": "node --import tsx scripts/verify-a8.mjs",

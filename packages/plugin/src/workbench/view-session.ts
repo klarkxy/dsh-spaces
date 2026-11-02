@@ -276,7 +276,8 @@ export class ViewSession {
     const destroyed: string[] = [];
     for (const [spaceId, frame] of [...this.frames.entries()]) {
       const space = live.get(spaceId);
-      if (!space || space.generation !== frame.generation) {
+      if (!space || space.generation !== frame.generation ||
+          (frame.view && (space.status !== "running" || !space.hasWebApp || space.isHost))) {
         this.frames.delete(spaceId);
         if (this.visibleSpaceId === spaceId) this.visibleSpaceId = null;
         destroyed.push(spaceId);

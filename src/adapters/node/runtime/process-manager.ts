@@ -6,7 +6,8 @@ import { formatWorkbenchFailure } from "../../../shared/workbench";
 import type { ProfileStatus } from "../../../shared/types";
 import { ensureDshCli, runDsh, spawnNode } from "./dsh-cli";
 import { PatchWriter, PatchVerifyError } from "../profile/patch-writer";
-import { dshSessionCookie, dshSessionList, waitForDshEndpoint } from "./dsh-endpoint";
+import { dshSessionCookie, dshSessionList, dshBrowserReady, waitForDshEndpoint } from "./dsh-endpoint";
+import { StartFailureError } from "./start-failure";
 
 export type StatusListener = (
   name: string,
@@ -24,6 +25,7 @@ export interface ProcessRuntime {
   prepareHome: (home: string) => Promise<void>;
   fetch: typeof fetch;
   extraEnv?: (name: string) => NodeJS.ProcessEnv;
+  base?: (name: string) => 'web' | 'browser';
   kill: (pid: number, kind: KillKind) => Promise<void>;
   readyTimeoutMs: number;
   fetchTimeoutMs: number;
@@ -388,6 +390,7 @@ export class ProcessManager {
 
     this.errors.delete(name);
     let port: number | undefined;
+    let stage: "prepare" | "endpoint" | "auth" | "api" = "prepare";
 
     const ensureGen = () => {
       if (this.generationOf(name) !== gen) throw cancelledError();
@@ -453,9 +456,14 @@ export class ProcessManager {
       });
 
       const readyAt = Date.now();
+      stage = "endpoint";
       instance.url = await waitForDshEndpoint(child, port, abort.signal, this.runtime.readyTimeoutMs);
+      stage = "auth";
       const cookie = await dshSessionCookie(instance.url, this.runtime.fetch, fetchSignal(abort.signal, this.runtime.fetchTimeoutMs));
-      await this.waitForApi(port, abort.signal, Math.max(1, this.runtime.readyTimeoutMs - (Date.now() - readyAt)), cookie);
+      stage = "api";
+      if (this.runtime.base?.(name) === 'browser') {
+        await dshBrowserReady(port, this.runtime.fetch, fetchSignal(abort.signal, this.runtime.fetchTimeoutMs), cookie);
+      } else await this.waitForApi(port, abort.signal, Math.max(1, this.runtime.readyTimeoutMs - (Date.now() - readyAt)), cookie);
       ensureGen();
 
       const current = this.instances.get(name);
@@ -470,8 +478,30 @@ export class ProcessManager {
         isStartCancelled(err) ||
         isStartCancelled(abort.signal.reason) ||
         this.generationOf(name) !== gen;
-      await this.abandonStart(name, gen, port);
-      if (this.instances.get(name)?.gen === gen) {
+      const owned = this.instances.get(name);
+      const ownedInstance = owned?.gen === gen ? owned : undefined;
+      let cleanupFailed = false;
+      let cleanup: unknown;
+      try {
+        await this.abandonStart(name, gen, port);
+      } catch (cleanupErr) {
+        // `throw undefined` is a real second fault and must not look like success.
+        cleanupFailed = true;
+        cleanup = cleanupErr;
+      }
+      const current = this.instances.get(name);
+      const instanceRetained = ownedInstance !== undefined && current === ownedInstance;
+      // Any second fault, including cancellation, keeps both causes. A retained
+      // instance stays starting; its record is updated only while that same instance remains.
+      if (cleanupFailed) {
+        const failure = new StartFailureError({ stage, cause: err, cleanup, instanceRetained });
+        if (instanceRetained) this.errors.set(name, failure.message);
+        else if (current === undefined && !this.stopping.has(name) && this.generationOf(name) === gen) {
+          this.fail(name, failure.message);
+        }
+        throw failure;
+      }
+      if (instanceRetained) {
         throw err instanceof Error ? err : new Error(errorMessage(err));
       }
       if (cancelled) throw cancelledError();
@@ -549,12 +579,7 @@ export class ProcessManager {
   private async abandonStart(name: string, gen: number, port: number | undefined): Promise<void> {
     const instance = this.instances.get(name);
     if (instance && instance.gen === gen) {
-      try {
-        await this.terminate(instance);
-      } catch (err) {
-        this.errors.set(name, errorMessage(err));
-        throw err instanceof Error ? err : new Error(errorMessage(err));
-      }
+      await this.terminate(instance);
       if (this.instances.get(name) === instance) this.forgetInstance(instance);
       return;
     }

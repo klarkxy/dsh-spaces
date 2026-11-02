@@ -1,5 +1,7 @@
 # 检查失败修复与文件来源核对（2026-10-22）
 
+> 历史导航：本文件是 2026-10-22 的历史验收收口记录，只证明当时范围。现行架构见 [architecture.md](../../docs/architecture.md)；故障政策见 [let it crash](../let-it-crash.md)。文中与现行架构冲突的桌面壳、应用内升级、恢复、交接或旧 LLM 方案内容，仅作历史参考，不是当前合同或验收门槛。
+
 状态：已定位并修复，针对性 12 项 worker 测试及包预检通过；最终完整检查 **15/15 全部通过**，指定 Astra 独立复核 **READY（仅本轮检查收口）**。官方 SDK、node_modules 和产品运行时未修改；不提交、推送或发布。
 
 证据目录：`.sandbox/construction-20261021/verification-closeout-1/`。本轮基线 `BASELINE.json` 共 841 条：838 个现存文件、3 项已删除状态；HEAD `26aab5dc095bd97f132f5748aa727b800bb42916`。

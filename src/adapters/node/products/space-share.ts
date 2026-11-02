@@ -1,3 +1,5 @@
+import { parseSpaceBaseSelection, type SpaceBaseSelection } from '../../../shared/space-base';
+import { ProfileRegistry } from '../profile/profile-registry';
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isGitSpec } from "../../../shared/plugin";
@@ -48,10 +50,12 @@ const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "
 export { canonicalNpmInstallSpec, isNpmRangeOrExact, isSafeNpmPackageName, validateImportedPatch } from "../../../core/application/space-recipe";
 
 export interface SpaceSharePorts {
-  createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;
+  createSpace(input: { name: string; displayName: string; icon?: string } & SpaceBaseSelection): Promise<void>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
   listSpaceIds(): string[];
   dshVersion?: string | null;
+  base?: SpaceBaseSelection["base"];
+  baseVersion?: string;
   now?: () => Date;
   writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
 }
@@ -158,6 +162,8 @@ export function buildSpaceShare(input: {
   plugins: InstalledPlugin[];
   patch?: string | null;
   dshVersion?: string | null;
+  base?: SpaceBaseSelection["base"];
+  baseVersion?: string;
   includeConfig?: boolean;
   now?: Date;
   library?: PluginLibraryEntry[];
@@ -178,7 +184,7 @@ export function buildSpaceShare(input: {
       formatVersion: SPACE_SHARE_FORMAT_VERSION,
       kind: SPACE_SHARE_KIND,
       exportedAt: (input.now ?? new Date()).toISOString(),
-      source: { dshVersion: input.dshVersion ?? null },
+      source: { ...parseSpaceBaseSelection(input), dshVersion: input.dshVersion ?? null },
       space: { displayName: input.displayName, icon: input.icon },
     },
     plugins,
@@ -276,7 +282,7 @@ function assertShareManifest(value: unknown): SpaceShareManifest {
     formatVersion: SPACE_SHARE_FORMAT_VERSION,
     kind: SPACE_SHARE_KIND,
     exportedAt: row.exportedAt,
-    source: { dshVersion: typeof dshVersion === "string" ? dshVersion : null },
+    source: { ...parseSpaceBaseSelection(row.source as SpaceBaseSelection), dshVersion: typeof dshVersion === "string" ? dshVersion : null },
     space: {
       displayName: space.displayName,
       icon: typeof space.icon === "string" ? space.icon : undefined,
@@ -363,7 +369,9 @@ export function exportSpaceArchive(
   const plugins = listProfilePlugins(dshHome, spaceId);
   const patchPath = join(dshHome, "profiles", spaceId, "cordis.patch.yml");
   const patch = options.includeConfig && existsSync(patchPath) ? readFileSync(patchPath, "utf8") : null;
+  const meta = new ProfileRegistry(dshHome).readSpaces().meta[spaceId];
   const share = buildSpaceShare({
+    ...parseSpaceBaseSelection(meta ?? {}),
     displayName: options.displayName || spaceId,
     icon: options.icon,
     plugins,

@@ -4,7 +4,7 @@
  * Scans Supervisor/Host/jobs/credential-channel contracts.
  * Does not touch ~/.dsh or live keys.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +39,14 @@ const SECRET_SCAN = [
   "packages/plugin/src/workbench/llm/center.tsx",
   "packages/plugin/src/workbench/llm/client.ts",
 ];
+
+// The supervisor composition root was split into part modules under
+// src/adapters/node/supervisor/. Scanning the directory keeps the extracted
+// parts (and any future part) inside the secret scan, preserving the coverage
+// the monolithic workbench-supervisor.ts entry used to give.
+for (const name of readdirSync(join(REPO, "src/adapters/node/supervisor"))) {
+  if (name.endsWith(".ts")) SECRET_SCAN.push(`src/adapters/node/supervisor/${name}`);
+}
 
 const LIVE_KEY = /\bsk-[A-Za-z0-9_-]{8,}\b/;
 const PRODUCT_RECOVERY = /\b(autoRetry|retryFailed|rollback\(|restoreSnapshot|replayOperation|fallbackModel|installLlmPiAi)\b/;

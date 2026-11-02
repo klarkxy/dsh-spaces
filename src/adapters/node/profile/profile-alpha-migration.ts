@@ -178,6 +178,12 @@ export async function migrateProfileToAlpha(input: {
   home: string; profileId: string; payloadRoot: string;
   bin?: string; cliVersion?: string;
   install: (component: SpacesComponent) => Promise<void>;
+  /**
+   * Optional alignment check replacing the packaged byte comparison, e.g. a
+   * linked checkout matching by link identity. Must be consulted before
+   * ownedComponentRoot, which a link target outside the profile cannot pass.
+   */
+  matches?: (component: SpacesComponent) => boolean;
   dump: () => Promise<string>;
 }): Promise<void> {
   const { home, profileId, payloadRoot } = input;
@@ -208,10 +214,12 @@ export async function migrateProfileToAlpha(input: {
     || (row.id === "dsh-spaces-settings" && disabled(row)))) {
     throw new Error("The profile explicitly overrides scoped alpha settings isolation.");
   }
+  const matches = input.matches ?? ((component: SpacesComponent): boolean =>
+    componentFilesMatch(home, payloadRoot, component, ownedComponentRoot(home, profile, component)));
   const pending: SpacesComponent[] = [];
   const pendingCandidates = (component: SpacesComponent): void => {
+    if (matches(component)) return;
     const root = ownedComponentRoot(home, profile, component);
-    if (componentFilesMatch(home, payloadRoot, component, root)) return;
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     for (const file of ["package.json", "lib/index.js", "cordis.patch.yml"]) assertOwnedProfilePath(home, join(root, file));
     if (pkg.name !== `@dsh-spaces/${component}`) {
@@ -287,7 +295,7 @@ export async function migrateProfileToAlpha(input: {
   // Leave marker and partial results on every failure. Never restore or retry.
   for (const component of pending) {
     await input.install(component);
-    if (!componentFilesMatch(home, payloadRoot, component, ownedComponentRoot(home, profile, component))) {
+    if (!matches(component)) {
       throw new Error(`Alpha ${component} installation did not match the selected component.`);
     }
   }

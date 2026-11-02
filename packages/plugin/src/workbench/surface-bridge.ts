@@ -2,18 +2,21 @@ import type { WorkbenchController } from "./store";
 import type { SpaceSurfaceView as ViewHandshakeConfig } from "../../../../src/shared/space-host";
 import { isNativeSpaceTarget } from "../../../../src/shared/space-host";
 
-export interface SurfaceSelection { requestId: number; target: string | null }
+export interface SurfaceSelection { requestId: number; target: string | null; targetGeneration?: number }
 export function parseSurfaceSelection(event: { source: unknown; origin: string; data: unknown },
   parent: unknown, view: ViewHandshakeConfig): SurfaceSelection | null {
   if (!parent || event.source !== parent || event.origin !== view.parentOrigin || !event.data ||
       typeof event.data !== "object" || Array.isArray(event.data)) return null;
   const row = event.data as Record<string, unknown>;
-  if (Object.keys(row).sort().join(",") !== "channel,generation,requestId,serviceEpoch,source,spaceId,target,type" ||
+  if (!["channel,generation,requestId,serviceEpoch,source,spaceId,target,type",
+      "channel,generation,requestId,serviceEpoch,source,spaceId,target,targetGeneration,type"].includes(Object.keys(row).sort().join(",")) ||
       row.source !== "dsh-spaces-surface-parent" || row.type !== "select" ||
       row.serviceEpoch !== view.serviceEpoch || row.spaceId !== view.spaceId || row.generation !== view.generation ||
       row.channel !== view.channel || !Number.isSafeInteger(row.requestId) || (row.requestId as number) < 1 ||
-      !(row.target === null || isNativeSpaceTarget(row.target))) return null;
-  return { requestId: row.requestId as number, target: row.target as string | null };
+      !(row.target === null || isNativeSpaceTarget(row.target)) ||
+      ("targetGeneration" in row && (row.target === null || row.target === "@settings" || !Number.isSafeInteger(row.targetGeneration) || (row.targetGeneration as number) < 0))) return null;
+  return { requestId: row.requestId as number, target: row.target as string | null,
+    ...("targetGeneration" in row ? { targetGeneration: row.targetGeneration as number } : {}) };
 }
 
 export interface SurfaceIntent { requestId: number }
@@ -51,10 +54,13 @@ export function attachSurfaceBridge(controller: WorkbenchController, view: ViewH
     const ui = controller.getSnapshot(), request = pending;
     if (ui.boot === "loading") return;
     if (ui.state?.serviceEpoch !== view.serviceEpoch || ui.state?.managerId !== view.spaceId ||
-        ui.state?.availability === "unavailable" || ui.boot === "error" || ui.viewError?.spaceId === request.target) {
+        ui.state?.availability === "unavailable" || ui.boot === "error") {
       pending = null; answer(request, "selection-failed"); return;
     }
     if (selecting) return;
+    if (initiated && ui.viewError?.spaceId === request.target) {
+      pending = null; answer(request, "selection-failed"); return;
+    }
     if (!initiated) {
       initiated = true;
       if (request.target === "@settings") {
@@ -68,7 +74,7 @@ export function attachSurfaceBridge(controller: WorkbenchController, view: ViewH
         selecting = true;
         page = null;
         if (systemPage) { systemPage(null); controller.closeOverlay(); }
-        void Promise.resolve(controller.selectRunningSpace(request.target, () => !stopped && pending === request)).then(accepted => {
+        void Promise.resolve(controller.selectRunningSpace(request.target, () => !stopped && pending === request, request.targetGeneration)).then(accepted => {
           if (stopped || pending !== request) return;
           selecting = false;
           if (!accepted) { pending = null; answer(request, "selection-failed"); }

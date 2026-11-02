@@ -162,6 +162,7 @@ function writePayload(pluginRoot: string, marker = "payload"): string {
     ["lib/view-bridge/lib/index.js", "export {};\n"],
     ["lib/view-bridge/lib/client.js", "export {};\n"],
     ["lib/view-bridge/lib/settings.js", "export {};\n"],
+    ["lib/view-bridge/lib/typert.host.js", "export {};\n"],
     ["lib/browser/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.browser)],
     ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
     ["lib/browser/lib/index.js", "export {};\n"],
@@ -170,6 +171,7 @@ function writePayload(pluginRoot: string, marker = "payload"): string {
     ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
+    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   writeComponentPayloadManifest(join(pluginRoot, "lib"));
@@ -356,7 +358,7 @@ test("ordinary and corrupt profiles register only the guide Remote", () => {
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.equal(plugin.manager, null);
   assert.equal(plugin.spaces, null);
-  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "restartService", "role", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState"]);
   assert.equal(plugin.guide.typertRemote.namespace, "workbenchGuide");
 });
 
@@ -377,7 +379,7 @@ test("manager profile registers manager WorkbenchApi and compatibility reads, no
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.ok(plugin.manager);
   assert.ok(plugin.spaces);
-  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "restartService", "role", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState"]);
   assert.ok(methodsOf(plugin.manager!).includes("state"));
   assert.ok(methodsOf(plugin.manager!).includes("submit"));
   assert.ok(methodsOf(plugin.manager!).includes("product"));
@@ -1425,15 +1427,24 @@ for (const outcome of ["ready", "startup-failed", "registration-refused"] as con
     try {
       const runtime = new WorkbenchHostRuntime({
         ...identityInput(home, "notes"), supervisorTimeoutMs: 3000,
-        connect: () => ({ state: async () => {
-          const state = v2State(epochRef.value);
-          reads++;
-          if (outcome === "startup-failed") {
-            state.spaces[0].status = "crashed";
-            return { ...state, reasons: ["manager launch failed"] };
-          } else if (reads < 3) state.spaces[0].status = "starting";
-          return state;
-        } }) as never,
+        connect: () => ({
+          state: async () => {
+            const state = v2State(epochRef.value);
+            reads++;
+            if (outcome === "startup-failed") {
+              state.spaces[0].status = "crashed";
+              return { ...state, reasons: ["manager launch failed"] };
+            } else if (reads < 3) state.spaces[0].status = "starting";
+            return state;
+          },
+          startupStatus: async () => ({
+            serviceEpoch: epochRef.value,
+            managerId: "spaces-hub",
+            phase: "starting" as const,
+            reasons: [] as string[],
+            failure: null,
+          }),
+        }) as never,
       });
       runtime.onSupervisorAttached(async () => {
         registrations++;
@@ -1453,6 +1464,65 @@ for (const outcome of ["ready", "startup-failed", "registration-refused"] as con
         assert.equal(reads, count, "failure stops the readiness observation");
       }
     } finally { await fixture.close(); }
+  });
+}
+
+for (const firstRegistration of ["succeeded", "refused"] as const) {
+  test(`explicit initialization releases the previous epoch before registering with a replaced service: ${firstRegistration}`, async () => {
+    const home = tempDir("dsh-wb-main-replaced-");
+    writeProfile(home, "notes");
+    const bearer = "a".repeat(64), epochRef = { value: HEX64_A };
+    const fixtureA = await startFixture({ bearer, epochRef });
+    const handleA = leaseWeb(home, fixtureA.origin);
+    epochRef.value = deriveServiceEpoch(handleA.owner.nonce);
+    const endpointFile = join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE);
+    writeEndpointFile(endpointFile, v2Endpoint(home, fixtureA.origin, bearer, handleA.owner.nonce));
+    const events: string[] = [];
+    const runtime = new WorkbenchHostRuntime({
+      ...identityInput(home, "notes"), supervisorTimeoutMs: 3000,
+      connect: () => ({
+        state: async () => v2State(epochRef.value),
+        startupStatus: async () => ({
+          serviceEpoch: epochRef.value,
+          managerId: "spaces-hub",
+          phase: "ready" as const,
+          reasons: [] as string[],
+          failure: null,
+        }),
+      }) as never,
+    });
+    const epochA = epochRef.value;
+    runtime.onSupervisorAttached(async (endpoint) => {
+      events.push(`attach:${endpoint.serviceEpoch}`);
+      if (firstRegistration === "refused" && !events.some(e => e === `stopped:${epochA}`)) throw Error("MAIN_REGISTRATION_REFUSED:404");
+    }, async (previous) => { events.push(`stopped:${previous}`); });
+    try {
+      if (firstRegistration === "succeeded") {
+        await runtime.presentationSnapshot();
+        await runtime.presentationSnapshot();
+        assert.deepEqual(events, [`attach:${epochA}`]);
+      } else {
+        await assert.rejects(runtime.presentationSnapshot(), /MAIN_REGISTRATION_REFUSED:404/);
+      }
+      await fixtureA.close();
+      handleA.release();
+      const fixtureB = await startFixture({ bearer, epochRef });
+      const handleB = leaseWeb(home, fixtureB.origin);
+      epochRef.value = deriveServiceEpoch(handleB.owner.nonce);
+      writeEndpointFile(endpointFile, v2Endpoint(home, fixtureB.origin, bearer, handleB.owner.nonce));
+      try {
+        if (firstRegistration === "succeeded") {
+          const stale = await runtime.bootstrap();
+          assert.equal(stale.connected, false);
+          assert.deepEqual(events, [`attach:${epochA}`]);
+        }
+        const result = await runtime.initialize();
+        assert.equal(result.ok, true);
+        assert.equal(result.connected, true);
+        await runtime.presentationSnapshot();
+        assert.deepEqual(events, [`attach:${epochA}`, `stopped:${epochA}`, `attach:${epochRef.value}`]);
+      } finally { await fixtureB.close(); }
+    } finally { await fixtureA.close().catch(() => {}); }
   });
 }
 
@@ -1476,6 +1546,18 @@ test("portal entry waits for the already-running startup before minting a one-us
           const state = v2State(epochRef.value);
           if (++reads < 4) state.spaces[0].status = "starting";
           return new Response(JSON.stringify({ ok: true, value: state }), { status: 200 });
+        }
+        if (path === "/api/workbench/startupStatus") {
+          return new Response(JSON.stringify({
+            ok: true,
+            value: {
+              serviceEpoch: epochRef.value,
+              managerId: "spaces-hub",
+              phase: reads < 4 ? "starting" : "ready",
+              reasons: [],
+              failure: null,
+            },
+          }), { status: 200 });
         }
         if (path === "/internal/portal") {
           assert.ok(reads >= 4, "do not consume an entry while the manager is starting");

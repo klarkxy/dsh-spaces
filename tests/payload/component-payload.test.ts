@@ -75,6 +75,7 @@ function dummyTree(options: { skip?: string[] } = {}): { root: string; lib: stri
     ["lib/view-bridge/lib/index.js", "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
     ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
+    ["lib/view-bridge/lib/typert.host.js", "export {};\n"],
     ["lib/browser/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES.browser, "3.0.0")],
     ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
     ["lib/browser/LICENSE", "browser-license\n"],
@@ -85,6 +86,7 @@ function dummyTree(options: { skip?: string[] } = {}): { root: string; lib: stri
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
     ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
+    ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
     ["src/secret.ts", "should-not-copy\n"],
     ["node_modules/evil/index.js", "should-not-copy\n"],
   ];
@@ -155,6 +157,33 @@ test("write fails closed when the installation worker is missing", () => {
   const { lib } = dummyTree({ skip: ["lib/supervisor/snapshot-worker.mjs"] });
   assert.throws(() => writeComponentPayloadManifest(lib), ComponentPayloadError);
   assert.throws(() => writeComponentPayloadManifest(lib), /installation-worker|snapshot-worker/i);
+});
+
+test("auxiliary entry is required before manifest creation and after staging", () => {
+  const rel = "lib/llm-bridge/lib/auxiliary.js";
+  const missing = dummyTree({ skip: [rel] });
+  assert.throws(() => writeComponentPayloadManifest(missing.lib), /auxiliary\.js/);
+
+  const source = dummyTree();
+  const written = writeComponentPayloadManifest(source.lib);
+  const declared = written.files.find(file => file.path === rel);
+  assert.ok(declared, "auxiliary export must be covered by the runtime manifest");
+  const copied = copyComponentPayload(source.lib, join(tempDir("dsh-auxiliary-copy-"), "payload"));
+  assert.deepEqual(copied.files.find(file => file.path === rel), declared);
+  assert.deepEqual(readFileSync(join(copied.packageRoot, rel)), readFileSync(join(source.root, rel)));
+  writeRel(copied.packageRoot, rel, "export const auxiliary = 2;\n");
+  assert.throws(() => validateComponentPayload(copied.payloadRootLib), /sha256 does not match/);
+});
+
+test("a manifest omitting auxiliary is rejected before a destination is created", () => {
+  const source = dummyTree();
+  const manifest = writeComponentPayloadManifest(source.lib).manifest;
+  manifest.components["llm-bridge"].files = manifest.components["llm-bridge"].files
+    .filter(file => file.path !== "lib/llm-bridge/lib/auxiliary.js");
+  writeManifest(source.root, manifest);
+  const destination = join(tempDir("dsh-auxiliary-rejected-"), "payload");
+  assert.throws(() => copyComponentPayload(source.lib, destination), /auxiliary\.js/);
+  assert.equal(existsSync(destination), false);
 });
 
 test("validate rejects a v1 supervisor manifest", () => {

@@ -67,12 +67,16 @@ export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, read
     "lib/view-bridge/lib/index.js",
     "lib/view-bridge/lib/client.js",
     "lib/view-bridge/lib/settings.js",
+    "lib/view-bridge/lib/typert.host.js",
   ],
   browser: [
     "lib/browser/package.json", "lib/browser/cordis.patch.yml", "lib/browser/lib/index.js",
     "lib/browser/lib/client.js", "lib/browser/lib/typert.host.js",
   ],
-  "llm-bridge": ["lib/llm-bridge/package.json", "lib/llm-bridge/cordis.patch.yml", "lib/llm-bridge/lib/index.js"],
+  "llm-bridge": [
+    "lib/llm-bridge/package.json", "lib/llm-bridge/cordis.patch.yml",
+    "lib/llm-bridge/lib/index.js", "lib/llm-bridge/lib/auxiliary.js",
+  ],
   "installation-worker": ["lib/supervisor/snapshot-worker.mjs"],
 };
 

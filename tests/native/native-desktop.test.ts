@@ -12,10 +12,23 @@ import { renderPortalPage } from "../../src/adapters/node/server/workbench-porta
 import { bindDshCli, invocationProfile } from "../../src/adapters/node/products/spaces-service.ts";
 import { NativeHostController } from "../../packages/plugin/src/client/native-host.tsx";
 import { NativeBrowserHost } from "../../packages/plugin/src/client/native-browser-host.ts";
+import type { DesktopLaunchState } from "../../packages/plugin/src/types.ts";
 import { BROWSER_RELAY, BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, browserProtocolScript,
   type BrowserRelay } from "../../src/shared/browser-guest.ts";
+import { parseNavDiag } from "../../src/shared/nav-diag.ts";
 
 const browserIdentity = { spaceId: "browser", generation: 1, serviceEpoch: "a".repeat(64), origin: "http://127.0.0.1:3335", channel: "child-channel" };
+
+/** Ready host record for one fixture. Epoch and manager come from that fixture, not a hidden fallback. */
+function readyLaunchRecord(serviceEpoch: string, managerId: string | null): DesktopLaunchState {
+  return { operationId: "launch-one", phase: "ready", serviceEpoch, managerId, reasons: [], failure: null };
+}
+function readyLaunchApi(serviceEpoch: string, managerId: string | null, calls?: string[]) {
+  return {
+    beginDesktopLaunch: async () => { calls?.push("begin"); return readyLaunchRecord(serviceEpoch, managerId); },
+    desktopLaunchState: async () => readyLaunchRecord(serviceEpoch, managerId),
+  };
+}
 const browserPresent = (tabId = "tab-a"): Extract<BrowserRelay, { kind: "present" }> => ({ source: BROWSER_RELAY,
   requestId: "request-" + tabId, kind: "present", identity: browserIdentity, tabId, url: "https://example.com/",
   viewport: { x: 10, y: 80, width: 700, height: 500 } });
@@ -123,6 +136,9 @@ test("pending Browser acquisition is released when its presenter is disposed", a
 
 test("native navigation has closed variants, separate system IDs and bounded request IDs", () => {
   assert.deepEqual(parseNativeSpaceHash("#select/7/@settings"), { kind: "select", requestId: 7, target: "@settings" });
+  assert.deepEqual(parseNativeSpaceHash("#select/7/coding/2"), { kind: "select", requestId: 7, target: "coding", targetGeneration: 2 });
+  for (const hash of ["#select/1/@settings/1", "#selected/1/coding/1", "#select/1/coding/-1", "#select/1/coding/01", "#select/1/coding/9007199254740992"])
+    assert.equal(parseNativeSpaceHash(hash), null);
   assert.equal(parseNativeSpaceHash("#selected/8/coding")?.target, "coding");
   for (const value of ["#select/0/coding", "#select/1/../web", "#select/1/coding/extra", "#run/1/coding", "#select/1/@admin", "#select/999999999999999999/coding", "#select/1/%40settings"]) assert.equal(parseNativeSpaceHash(value), null);
 });
@@ -152,6 +168,7 @@ test("late native lease is released on plugin disposal; discovery never initiali
   const released: string[] = [], calls: string[] = [];
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
     returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }),
     bootstrap: async () => { throw Error("must not bootstrap"); }, initialize: async () => { calls.push("initialize"); throw Error(); },
@@ -165,6 +182,7 @@ test("rail click after a failed native start shows the recorded failure again an
   let roleCalls = 0, acquires = 0;
   const controller = new NativeHostController({
     role: async () => { roleCalls++; return { role: "workspace", profileId: "desktop", unavailable: true, reasons: ["manager-stopped"] }; },
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => { throw Error("must not read after failure"); },
   } as never, { acquire: async () => { acquires++; throw Error("must not acquire"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -178,38 +196,50 @@ test("rail click after a failed native start shows the recorded failure again an
   assert.equal(shown.pending, null); assert.equal(roleCalls, 1); assert.equal(acquires, 0);
 });
 
-test("opening with no live supervisor launches it once; a later failure never relaunches", async () => {
+test("opening with no live supervisor launches it once; a later failure never relaunches", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const calls: string[] = [];
-  let live = false, dies = false;
+  let dies = false;
+  const epoch = "a".repeat(64);
   const controller = new NativeHostController({
     role: async () => { calls.push("role"); return { role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }; },
+    ...readyLaunchApi(epoch, "hub", calls),
     presentationSnapshot: async () => {
       calls.push("directory");
-      if (!live || dies) throw Error("The workbench entry is not available yet.");
-      return { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] };
+      if (dies) throw Error("The workbench entry is not available yet.");
+      return { serviceEpoch: epoch, managerId: "hub", spaces: [] };
     },
-    initialize: async () => { calls.push("initialize"); live = true; return { ok: true, connected: true, unavailable: false, origin: null, path: null, managerId: "hub", reasons: [] }; },
+    initialize: async () => { calls.push("initialize"); throw Error("must not initialize"); },
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
-  assert.deepEqual(calls, ["role", "directory", "initialize", "directory"]);
+  assert.deepEqual(calls, ["role", "begin", "directory"]);
   assert.equal(controller.getSnapshot().phase, "ready");
   assert.equal(controller.getSnapshot().selected, "current");
   assert.equal(controller.getSnapshot().guide, false);
-  // The supervisor dies later in this session: the next poll fails terminally.
   dies = true;
-  await new Promise(resolve => setTimeout(resolve, 1600)); await tick();
+  t.mock.timers.tick(1500); await tick();
   assert.equal(controller.getSnapshot().phase, "failed");
   assert.equal(controller.getSnapshot().guide, false, "background polling must leave main visible");
-  assert.equal(calls.filter(call => call === "initialize").length, 1);
+  assert.equal(calls.filter(call => call === "begin").length, 1);
+  assert.equal(calls.filter(call => call === "initialize").length, 0);
+  const settled = calls.length;
+  await controller.start({} as HTMLElement);
+  controller.select("@settings");
+  controller.openCreate();
+  await tick();
+  assert.equal(calls.length, settled, "a terminal directory failure does not begin or initialize again");
   controller.stop();
 });
 
 test("registration 404 preserves main unless the user has opened Spaces; failure never reconnects", async () => {
   for (const openSettings of [false, true]) {
     let reject!: (error: Error) => void;
-    let reads = 0;
+    let reads = 0, begins = 0;
+    const epoch = "a".repeat(64);
     const controller = new NativeHostController({
       role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+      ...readyLaunchApi(epoch, "hub"),
+      beginDesktopLaunch: async () => { begins++; return readyLaunchRecord(epoch, "hub"); },
       presentationSnapshot: () => { reads++; return new Promise((_resolve, fail) => { reject = fail; }); },
       initialize: async () => { throw Error("must not relaunch"); },
     } as never, { acquire: async () => { throw Error("must not acquire"); }, release: async () => {} });
@@ -225,37 +255,62 @@ test("registration 404 preserves main unless the user has opened Spaces; failure
     assert.equal(controller.getSnapshot().guide, true);
     controller.showCurrent();
     assert.equal(controller.getSnapshot().guide, false);
-    await controller.initialize(); await tick();
+    await controller.start({} as HTMLElement);
+    controller.openCreate();
+    controller.select("@settings");
+    await tick();
     assert.equal(reads, 1);
+    assert.equal(begins, 1);
     assert.equal(controller.getSnapshot().detail, "MAIN_REGISTRATION_REFUSED:404");
     controller.stop();
   }
 });
 
 test("a failed launch on open is reported and not retried", async () => {
-  let initializes = 0;
+  let begins = 0, initializes = 0, reads = 0;
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
-    presentationSnapshot: async () => { throw Error("The workbench entry is not available yet."); },
-    initialize: async () => { initializes++; return { ok: false, connected: false, unavailable: false, origin: null, path: null, managerId: "hub", reasons: ["The supervisor process could not be started."] }; },
+    beginDesktopLaunch: async () => {
+      begins++;
+      return { operationId: "launch-one", phase: "failed", serviceEpoch: null, managerId: "hub", reasons: ["The supervisor process could not be started."], failure: null };
+    },
+    desktopLaunchState: async () => { throw Error("must not poll a failed begin"); },
+    presentationSnapshot: async () => { reads++; throw Error("The workbench entry is not available yet."); },
+    initialize: async () => { initializes++; throw Error("must not initialize"); },
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement); await tick();
   const snapshot = controller.getSnapshot();
   assert.equal(snapshot.phase, "failed"); assert.equal(snapshot.guide, false);
   assert.match(snapshot.detail ?? "", /could not be started/);
-  controller.select("@settings"); await controller.initialize(); await tick();
-  assert.equal(initializes, 1);
+  controller.select("@settings");
+  controller.openCreate();
+  await controller.start({} as HTMLElement); await tick();
+  assert.equal(begins, 1);
+  assert.equal(initializes, 0);
+  assert.equal(reads, 0);
+  assert.equal(snapshot.detail, controller.getSnapshot().detail);
 });
 
 test("other first-read failures stay terminal and never offer a launch", async () => {
+  let begins = 0, initializes = 0;
+  const epoch = "a".repeat(64);
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    beginDesktopLaunch: async () => { begins++; return readyLaunchRecord(epoch, "hub"); },
     presentationSnapshot: async () => { throw Error("Maintenance has stopped the manager. The owning service remains blocked."); },
-    initialize: async () => { throw Error("must not initialize"); },
+    initialize: async () => { initializes++; throw Error("must not initialize"); },
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
   assert.equal(controller.getSnapshot().phase, "failed");
-  await controller.initialize();
+  assert.equal(controller.getSnapshot().guide, false);
+  assert.match(controller.getSnapshot().detail ?? "", /Maintenance has stopped the manager/);
+  await controller.start({} as HTMLElement);
+  controller.select("@settings");
+  controller.openCreate();
+  await tick();
+  assert.equal(begins, 1);
+  assert.equal(initializes, 0);
   assert.equal(controller.getSnapshot().phase, "failed");
 });
 
@@ -264,6 +319,7 @@ test("superseded native navigation rejection does not close the latest selection
   let calls = 0;
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [{ id: "alpha", displayName: "Alpha", status: "running", generation: 1 }] }),
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -283,6 +339,7 @@ test("superseded native navigation rejection does not close the latest selection
 test("current native navigation failure terminates its connection", async () => {
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -291,6 +348,74 @@ test("current native navigation failure terminates its connection", async () => 
   controller.select("@settings"); await tick();
   assert.equal(controller.getSnapshot().phase, "failed");
   controller.stop();
+});
+
+test("Desktop clicking a stopped child starts once, ignores stale status and respects newer navigation", async t => {
+  const snapshot = { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [{ id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] };
+  let complete!: (value: typeof snapshot) => void, requests = 0;
+  const loaded: string[] = [];
+  const url = "http://127.0.0.1:3333/native/" + "a".repeat(32);
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(snapshot.serviceEpoch, snapshot.managerId),
+    presentationSnapshot: async () => structuredClone(snapshot),
+    spaceAction: async request => { requests++; assert.equal(request.action, "open"); return new Promise(resolve => { complete = resolve; }); },
+    bootstrap: async () => { throw Error("unused"); },
+    initialize: async () => { throw Error("unused"); },
+    returnTarget: async () => { throw Error("unused"); },
+  } as import("../../packages/plugin/src/types.ts").WorkbenchGuideApi, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  t.after(() => controller.stop());
+  await controller.start({} as HTMLElement);
+  Object.assign(controller, { opening: Promise.resolve(), nativeUrl: url,
+    guest: { loadURL: async (value: string) => { loaded.push(value); }, focus() {}, remove() {} } });
+  controller.select("coding"); controller.select("coding");
+  assert.equal(requests, 1); assert.equal(controller.getSnapshot().operation?.spaceId, "coding");
+  complete({ ...snapshot, spaces: [{ ...snapshot.spaces[0], status: "running", generation: 1 }] }); await tick();
+  assert.equal(loaded.length, 1); assert.match(loaded[0], /\/coding\/1$/);
+  assert.equal(controller.getSnapshot().inventory?.spaces[0].status, "running");
+  controller.select("coding"); controller.showCurrent();
+  complete({ ...snapshot, spaces: [{ ...snapshot.spaces[0], status: "running", generation: 1 }] }); await tick();
+  assert.equal(loaded.length, 1, "late successful launch must not steal main");
+  assert.equal(controller.getSnapshot().selected, "current");
+});
+
+test("running Desktop selections skip lifecycle reads and carry the observed generation", async t => {
+  const inventory = { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [
+    { id: "coding", displayName: "Coding", status: "running", generation: 3 },
+    { id: "other", displayName: "Other", status: "running", generation: 2 },
+  ] };
+  let reads = 0, actions = 0;
+  const loaded: string[] = [];
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(inventory.serviceEpoch, inventory.managerId),
+    presentationSnapshot: async () => { reads++; return inventory; },
+    spaceAction: async () => { actions++; throw Error("must not run lifecycle action"); },
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  t.after(() => controller.stop()); await controller.start({} as HTMLElement);
+  Object.assign(controller, { opening: Promise.resolve(), nativeUrl: "http://127.0.0.1:3333/native/" + "a".repeat(32),
+    guest: { loadURL: async (url: string) => { loaded.push(url); }, focus() {}, remove() {} } });
+  controller.select("coding"); await tick();
+  controller.select("other"); await tick();
+  controller.select("coding"); await tick();
+  assert.equal(actions, 0); assert.equal(reads, 1);
+  assert.deepEqual(loaded.map(url => parseNativeSpaceHash(new URL(url).hash)?.targetGeneration), [3, 2, 3]);
+  assert.equal(controller.getSnapshot().operation, null);
+});
+
+test("a failed Desktop child action reports its original failure without disabling main or retrying", async t => {
+  let requests = 0;
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
+    presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [{ id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] }),
+    spaceAction: async () => { requests++; throw Error("original launch failure"); },
+  } as never, { acquire: async () => { throw Error("must not open"); }, release: async () => {} });
+  t.after(() => controller.stop()); await controller.start({} as HTMLElement);
+  controller.select("coding"); await tick();
+  assert.equal(requests, 1); assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(controller.getSnapshot().operationError, "original launch failure");
+  assert.equal(controller.getSnapshot().selected, "current");
 });
 
 test("late native acknowledgement cannot overwrite a newer hash request", () => {
@@ -312,6 +437,7 @@ test("Electron loadURL rejection after exact page acknowledgement remains succes
   const url = "http://127.0.0.1:3333/native/" + "a".repeat(32);
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -329,6 +455,7 @@ test("committed native request still awaits its acknowledgement when Electron re
   let actual = url + "#select/1/@settings";
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -350,6 +477,7 @@ test("the desktop rail opens the settings page and hands over a create intent fo
   let actual = url;
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -444,30 +572,42 @@ snapshot=${JSON.stringify({ serviceEpoch: epoch, managerId: "hub", spaces: [] })
     "the portal forwards the selection and nothing else");
 });
 
-test("native guide shows sanitized initialize reasons after a failed start", async () => {
+test("native guide shows sanitized launch reasons after a failed automatic begin", async t => {
+  const previousNavigator = globalThis.navigator;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", languages: ["zh-CN"] } });
+  t.after(() => Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNavigator }));
+  let begins = 0;
+  const reasons = ["manager bootstrap failed Bearer abcdef0123456789abcdef0123456789", "see C:\\Users\\x\\.dsh\\logs\\supervisor.log"];
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: null, unavailable: false, reasons: [] }),
     presentationSnapshot: async () => { throw Error("unused"); },
     bootstrap: async () => { throw Error("unused"); },
     returnTarget: async () => { throw Error("unused"); },
-    initialize: async () => ({ ok: false, connected: false, unavailable: false, origin: null, path: null, managerId: null,
-      reasons: ["manager bootstrap failed Bearer abcdef0123456789abcdef0123456789", "see C:\\Users\\x\\.dsh\\logs\\supervisor.log"] }),
+    initialize: async () => { throw Error("must not initialize"); },
+    beginDesktopLaunch: async () => {
+      begins++;
+      return { operationId: "launch-one", phase: "failed", serviceEpoch: null, managerId: null, reasons, failure: null };
+    },
+    desktopLaunchState: async () => { throw Error("must not poll a failed begin"); },
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
-  assert.equal(controller.getSnapshot().phase, "initialize");
-  await controller.initialize();
   const snapshot = controller.getSnapshot();
   assert.equal(snapshot.phase, "failed");
   assert.match(snapshot.error!, /空间服务或页面不可用/);
   assert.ok(snapshot.detail!.includes("manager bootstrap failed Bearer [redacted]"));
   assert.ok(snapshot.detail!.includes("[path]"));
   assert.ok(!snapshot.detail!.includes("C:\\Users"));
+  await controller.start({} as HTMLElement);
+  controller.select("@settings");
+  controller.openCreate();
+  assert.equal(begins, 1);
   controller.stop();
 });
 
 test("native directory failure shows the sanitized snapshot error", async () => {
   const controller = new NativeHostController({
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => { throw Error("snapshot read at C:\\Users\\x\\.dsh\\hub\\spaces.json"); },
   } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   await controller.start({} as HTMLElement);
@@ -507,6 +647,8 @@ async function nativeFailureFixture() {
   const calls: string[] = [];
   const controller = new NativeHostController({
     role: async () => { calls.push("role"); return { role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }; },
+    ...readyLaunchApi("a".repeat(64), "hub"),
+    beginDesktopLaunch: async () => { calls.push("begin"); return readyLaunchRecord("a".repeat(64), "hub"); },
     presentationSnapshot: async () => { calls.push("directory"); return { serviceEpoch: "a".repeat(64), managerId: "hub",
       spaces: [{ id: "hub", displayName: "Manager", generation: 1, status: "running" }] }; },
     initialize: async () => { calls.push("initialize"); throw Error("must not relaunch"); },
@@ -536,12 +678,14 @@ test("native failure causes use the shared fixed text and remain terminal withou
     assert.deepEqual(snapshot.portalFailure, failure);
     assert.equal(snapshot.detail, portalFailureDetail(failure));
     assert.equal(snapshot.inventory, null);
-    f.controller.select("@settings"); await f.controller.initialize();
+    f.controller.select("@settings");
+    await f.controller.start({} as HTMLElement);
+    f.controller.openCreate();
     const displayed = f.controller.getSnapshot();
     assert.deepEqual(displayed, { ...snapshot, guide: true });
     f.observe(f.nativeUrl + "#selected/1/@settings"); await tick();
     assert.strictEqual(f.controller.getSnapshot(), displayed);
-    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+    assert.deepEqual(f.calls, ["role", "begin", "directory", "remove", "release"]);
   }
 });
 
@@ -553,7 +697,7 @@ test("native failure parsing follows exact trusted native origin/path and reject
     assert.equal(f.controller.getSnapshot().phase, "failed");
     assert.equal(f.controller.getSnapshot().portalFailure, null);
     assert.equal(f.controller.getSnapshot().detail, null);
-    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+    assert.deepEqual(f.calls, ["role", "begin", "directory", "remove", "release"]);
   }
   for (const url of ["http://127.0.0.1:3334/native/" + "a".repeat(32),
     "http://127.0.0.1:3333/native/" + "b".repeat(32),
@@ -566,7 +710,7 @@ test("native failure parsing follows exact trusted native origin/path and reject
     assert.equal(f.controller.getSnapshot().portalFailure, null);
     assert.equal(f.controller.getSnapshot().detail, null);
     assert.doesNotMatch(JSON.stringify(f.controller.getSnapshot()), /private|grant|user:/);
-    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+    assert.deepEqual(f.calls, ["role", "begin", "directory", "remove", "release"]);
   }
 });
 
@@ -597,6 +741,285 @@ test("actual native portal HTTP failure emits a safe fragment consumed by the tr
     assert.equal(f.controller.getSnapshot().detail, portalFailureDetail(failure));
     assert.deepEqual(f.controller.getSnapshot().portalFailure, failure);
     f.controller.select("@settings"); await tick();
-    assert.deepEqual(f.calls, ["role", "directory", "remove", "release"]);
+    assert.deepEqual(f.calls, ["role", "begin", "directory", "remove", "release"]);
   }
+});
+
+test("native first open prepares the portal alongside launch and only shows green after the page acknowledges", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const inventory = { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [{ id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] };
+  const loads: string[] = []; let handoffs = 0, complete!: (value: typeof inventory) => void;
+  class Guest extends EventTarget {
+    url = "about:blank"; className = "";
+    setAttribute() {} remove() {} focus() {} getURL() { return this.url; }
+    async loadURL(url: string) {
+      loads.push(url); const u = new URL(url);
+      this.url = u.pathname.startsWith("/bootstrap/") ? u.origin + "/native/" + u.searchParams.get("native") : url;
+    }
+  }
+  const guest = new Guest();
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => guest } });
+  t.after(() => Reflect.deleteProperty(globalThis, "document"));
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(inventory.serviceEpoch, inventory.managerId),
+    presentationSnapshot: async () => structuredClone(inventory),
+    returnTarget: async () => { handoffs++; return { available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }; },
+    spaceAction: () => new Promise(resolve => { complete = resolve; }),
+  } as never, { acquire: async () => ({ lease: "test", partition: "isolated" }), release: async () => {} });
+  t.after(() => controller.stop());
+  await controller.start({ append: () => queueMicrotask(() => {
+    guest.dispatchEvent(new Event("dom-ready"));
+    guest.dispatchEvent(new Event("did-finish-load"));
+    guest.dispatchEvent(new Event("did-stop-loading"));
+  }) } as unknown as HTMLElement);
+  assert.equal(controller.spaceStatus("coding"), "stopped"); controller.select("coding"); await tick();
+  assert.equal(controller.spaceStatus("coding"), "starting"); assert.equal(handoffs, 1); assert.equal(loads.length, 1);
+  assert.match(loads[0], /\/bootstrap\/[^?]+\?native=[a-f0-9]{32}$/);
+  inventory.spaces[0] = { ...inventory.spaces[0], status: "running", generation: 1 };
+  complete(structuredClone(inventory)); await tick();
+  assert.equal(controller.spaceStatus("coding"), "opening"); assert.equal(loads.length, 2);
+  const request = parseNativeSpaceHash(new URL(guest.url).hash)!;
+  guest.url = guest.url.split("#")[0] + `#selected/${request.requestId}/coding`;
+  guest.dispatchEvent(new Event("did-navigate-in-page"));
+  assert.equal(controller.spaceStatus("coding"), "running");
+  controller.showCurrent(); assert.equal(controller.spaceStatus("coding"), "running");
+  inventory.spaces[0].generation = 2; t.mock.timers.tick(1500); await tick();
+  assert.equal(controller.spaceStatus("coding"), "unopened", "a new process lifetime has not loaded its page");
+});
+
+const navToken = "b".repeat(32);
+function captureNavLines(throwAfterRecord = false) {
+  const lines: string[] = [];
+  const prior = console.log;
+  console.log = ((first: unknown, ...rest: unknown[]) => {
+    if (typeof first === "string" && first.startsWith("dsh-spaces-nav-diag ")) {
+      lines.push(first);
+      if (throwAfterRecord) throw new Error("diag sink");
+      return;
+    }
+    prior(first, ...rest);
+  }) as typeof console.log;
+  return { lines, restore: () => { console.log = prior; } };
+}
+function navRecords(lines: string[]) {
+  return lines.map(line => {
+    const row = parseNavDiag(line);
+    assert.ok(row, line);
+    return row;
+  });
+}
+/** Real first guest: bootstrap load rewrites the URL, and append signals dom-ready. */
+async function openSettingsGuest(t: import("node:test").TestContext, options?: { failBootstrap?: boolean; calls?: string[] }) {
+  const loads: string[] = [], released: string[] = [];
+  class Guest extends EventTarget {
+    url = "about:blank";
+    className = "";
+    setAttribute() {}
+    remove() {}
+    focus() {}
+    getURL() { return this.url; }
+    async loadURL(url: string) {
+      loads.push(url);
+      const parsed = new URL(url);
+      if (options?.failBootstrap && parsed.pathname.startsWith("/bootstrap/")) throw new Error("bootstrap refused");
+      this.url = parsed.pathname.startsWith("/bootstrap/") ? parsed.origin + "/native/" + parsed.searchParams.get("native") : url;
+    }
+  }
+  const guest = new Guest();
+  const epoch = "a".repeat(64);
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => guest } });
+  t.after(() => Reflect.deleteProperty(globalThis, "document"));
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub", options?.calls),
+    presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+    returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + navToken, reasons: [] }),
+    initialize: async () => { options?.calls?.push("initialize"); throw new Error("must not relaunch"); },
+  } as never, {
+    acquire: async () => ({ lease: "diag-lease", partition: "isolated" }),
+    release: async (id: string) => { released.push(id); },
+  });
+  t.after(() => controller.stop());
+  await controller.start({ append: () => queueMicrotask(() => {
+    guest.dispatchEvent(new Event("dom-ready"));
+    guest.dispatchEvent(new Event("did-finish-load"));
+    guest.dispatchEvent(new Event("did-stop-loading"));
+  }) } as unknown as HTMLElement);
+  return { controller, guest, loads, released, epoch };
+}
+
+test("first selected navigation logs once and a later selection keeps its original result when the log sink throws", async t => {
+  const captured = captureNavLines(true);
+  t.after(captured.restore);
+  const { controller, guest, loads } = await openSettingsGuest(t);
+  controller.select("@settings"); await tick();
+  assert.equal(loads.length, 2);
+  const request = parseNativeSpaceHash(new URL(guest.url).hash)!;
+  guest.url = guest.url.split("#")[0] + `#selected/${request.requestId}/@settings`;
+  guest.dispatchEvent(new Event("did-navigate-in-page"));
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(controller.getSnapshot().selected, "@settings");
+  assert.equal(controller.getSnapshot().pending, null);
+  const records = navRecords(captured.lines);
+  assert.equal(records.at(-1)!.ev, "ready");
+  assert.equal(records[0]!.targetKind, "settings");
+  assert.ok(records.some(row => row.ev === "bootstrap-load-complete"));
+  const logged = captured.lines.join("\n");
+  const channel = new URL(loads[0]!).searchParams.get("native")!;
+  assert.equal(logged.includes(channel), false);
+  assert.equal(logged.includes(navToken), false);
+  assert.equal(logged.includes("#selected"), false);
+  const closed = captured.lines.length;
+  guest.dispatchEvent(new Event("did-start-navigation"));
+  controller.select("@settings"); await tick();
+  assert.equal(captured.lines.length, closed, "diagnosis ended after the first selected result");
+  assert.equal(loads.length, 3);
+  assert.match(loads[2]!, /#select\/2\/@settings$/);
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(controller.getSnapshot().pending, "@settings");
+});
+
+test("ignored subframe and main-frame -3 stay pending, and another main-frame code fails with one release", async t => {
+  const captured = captureNavLines();
+  t.after(captured.restore);
+  const { controller, guest, loads, released } = await openSettingsGuest(t);
+  controller.select("@settings"); await tick();
+  assert.equal(loads.length, 2);
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  const secret = "http://user:secret-token@evil.example/private?channel=channel-secret#hash-secret";
+  guest.dispatchEvent(Object.assign(new Event("did-fail-load"), { isMainFrame: false, errorCode: -105, validatedURL: secret }));
+  guest.dispatchEvent(Object.assign(new Event("did-fail-load"), { isMainFrame: true, errorCode: -3, validatedURL: secret }));
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  assert.equal(loads.length, 2);
+  assert.deepEqual(released, []);
+  const ignored = navRecords(captured.lines).filter(row => row.ev === "did-fail-load");
+  assert.deepEqual(ignored.map(row => row.errorCode), [-105, -3]);
+  assert.ok(ignored.every(row => row.ignored === true));
+  const logged = captured.lines.join("\n");
+  for (const hidden of ["secret-token", "channel-secret", "hash-secret", "evil.example"]) assert.equal(logged.includes(hidden), false, hidden);
+  guest.dispatchEvent(Object.assign(new Event("did-fail-load"), { isMainFrame: true, errorCode: -2, validatedURL: secret }));
+  await tick();
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.equal(loads.length, 2);
+  assert.deepEqual(released, ["diag-lease"]);
+  assert.ok(navRecords(captured.lines).some(row => row.ev === "fail"));
+});
+
+test("the 45 second selection deadline still fails once and does not relaunch", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const captured = captureNavLines();
+  t.after(captured.restore);
+  const calls: string[] = [];
+  const { controller, loads } = await openSettingsGuest(t, { calls });
+  controller.select("@settings"); await tick();
+  assert.equal(loads.length, 2);
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  t.mock.timers.tick(44999); await tick();
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  t.mock.timers.tick(1); await tick();
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.equal(loads.length, 2);
+  const deadline = navRecords(captured.lines).find(row => row.ev === "deadline");
+  assert.equal(deadline?.stage, "selection");
+  assert.ok(navRecords(captured.lines).some(row => row.ev === "fail"));
+  const began = calls.filter(call => call === "begin").length;
+  controller.select("@settings");
+  controller.openCreate();
+  t.mock.timers.tick(45000); await tick();
+  assert.equal(calls.filter(call => call === "begin").length, began);
+  assert.equal(calls.includes("initialize"), false);
+  assert.equal(loads.length, 2);
+  assert.equal(controller.getSnapshot().phase, "failed");
+});
+
+test("a rejected bootstrap load is recorded once and still fails through the original path", async t => {
+  const captured = captureNavLines();
+  t.after(captured.restore);
+  const { controller, loads, released } = await openSettingsGuest(t, { failBootstrap: true });
+  controller.select("@settings"); await tick();
+  assert.deepEqual(loads.map(url => new URL(url).pathname.startsWith("/bootstrap/")), [true]);
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.deepEqual(released, ["diag-lease"]);
+  const names = navRecords(captured.lines).map(row => row.ev);
+  assert.ok(names.includes("bootstrap-load-reject"));
+  assert.ok(names.includes("fail"));
+  assert.equal(names.includes("bootstrap-load-complete"), false);
+  assert.equal(captured.lines.join("\n").includes("bootstrap refused"), false);
+  controller.select("@settings"); await tick();
+  assert.equal(loads.length, 1);
+});
+
+async function flushTurns() {
+  for (let i = 0; i < 8; i++) await tick();
+}
+
+test("initial about:blank must finish and stop before the first bootstrap loadURL", async t => {
+  const captured = captureNavLines();
+  t.after(captured.restore);
+  const loads: string[] = [];
+  let blankCycleDone = false;
+  let resolvedWhileBlank = false;
+  class Guest extends EventTarget {
+    url = "about:blank";
+    className = "";
+    setAttribute() {}
+    remove() {}
+    focus() {}
+    getURL() { return this.url; }
+    async loadURL(url: string) {
+      loads.push(url);
+      // Electron 44 can resolve a new loadURL from the previous blank finish/stop.
+      if (!blankCycleDone) {
+        this.url = "about:blank";
+        resolvedWhileBlank = true;
+        return;
+      }
+      const parsed = new URL(url);
+      this.url = parsed.pathname.startsWith("/bootstrap/") ? parsed.origin + "/native/" + parsed.searchParams.get("native") : url;
+    }
+  }
+  const guest = new Guest();
+  const epoch = "a".repeat(64);
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: () => guest } });
+  t.after(() => Reflect.deleteProperty(globalThis, "document"));
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+    returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + navToken, reasons: [] }),
+    initialize: async () => { throw new Error("must not relaunch"); },
+  } as never, { acquire: async () => ({ lease: "blank-lease", partition: "isolated" }), release: async () => {} });
+  t.after(() => controller.stop());
+  await controller.start({ append() {} } as unknown as HTMLElement);
+  controller.select("@settings");
+  await flushTurns();
+  assert.equal(loads.length, 0);
+  guest.dispatchEvent(new Event("dom-ready"));
+  await flushTurns();
+  assert.equal(loads.length, 0, "dom-ready must not start bootstrap");
+  guest.dispatchEvent(new Event("did-finish-load"));
+  await flushTurns();
+  assert.equal(loads.length, 0, "did-finish-load must not start bootstrap");
+  blankCycleDone = true;
+  guest.dispatchEvent(new Event("did-stop-loading"));
+  await flushTurns();
+  assert.equal(resolvedWhileBlank, false);
+  assert.equal(loads.length, 2);
+  assert.match(loads[0]!, /\/bootstrap\/[^?]+\?native=[a-f0-9]{32}$/);
+  assert.match(loads[1]!, /#select\/1\/@settings$/);
+  assert.equal(guest.getURL().startsWith("http://127.0.0.1:3333/native/"), true);
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  const records = navRecords(captured.lines);
+  const domReady = records.findIndex(row => row.ev === "guest-dom-ready");
+  const loadStopped = records.findIndex(row => row.ev === "guest-load-stopped");
+  const bootstrap = records.findIndex(row => row.ev === "bootstrap-load-start");
+  assert.ok(domReady >= 0);
+  assert.ok(loadStopped > domReady);
+  assert.ok(bootstrap > loadStopped);
+  assert.equal(records.filter(row => row.ev === "bootstrap-load-start").length, 1);
+  assert.equal(records.filter(row => row.ev === "select-load-start").length, 1);
 });

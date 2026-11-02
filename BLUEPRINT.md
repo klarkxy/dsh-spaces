@@ -1,37 +1,39 @@
 # DSH Blueprint 与 Spaces
 
-蓝图由本仓库的独立包 [`@klarkxy/dsh-blueprint`](packages/blueprint/README.zh-CN.md) 维护。它可单独安装在 DSH 0.2 中；Spaces 依赖蓝图的协议模块，负责把蓝图创建为隔离的新空间。蓝图插件不依赖 Spaces。
+> **Spaces 内蓝图工作流已于 2026-10-25 封存。** Spaces 的蓝图创建、生成、预览和应用入口及对应任务路径暂停，分享码导入导出也随之一并暂停；普通模板与 `.dshspace` 分享归档不受影响。独立的 `@klarkxy/dsh-blueprint` 包、DSHBP1/DSHBP2 协议、既有蓝图文件和历史记录继续保留。待 Spaces 核心系统稳定后再评估是否唤醒；唤醒时需要同时恢复入口、任务路径、界面和回归验证。下文是协议与历史设计合同，不表示 Spaces 当前仍开放这些操作。封存不设置专门的用户提示或说明入口；相关输入只按普通不支持的格式处理。
+
+蓝图由本仓库的独立包 [`@klarkxy/dsh-blueprint`](packages/blueprint/README.zh-CN.md) 维护。它可单独安装在 DSH 0.2 中。Spaces 保留蓝图协议消费与历史创建实现，但封存期间不开放蓝图创建；独立蓝图插件不依赖 Spaces。
+
+蓝图只描述插件组合或配置配方，不是环境备份：不携带凭据、会话、数据、运行实例或发送方授权，也不声称恢复某个环境。同一份蓝图在两种接收方式下语义不同。
 
 | 导出内容 | 格式 | 接收方式 |
 | --- | --- | --- |
-| 插件精确版本、来源与顺序 | DSHBP2 / JSON v2 | 独立插件的 Creator 合并，或 Spaces 创建新空间 |
-| 配置预设、设置、本机输入和插件组合 | DSHBP1 / JSON v1 | Spaces 原有预览与新空间创建流程 |
+| 插件精确版本、来源与顺序 | DSHBP2 / JSON v2 | 独立插件的 Creator 合并；Spaces 创建（当前封存） |
+| 配置预设、设置、本机输入和插件组合 | DSHBP1 / JSON v1 | Spaces 预览与新空间创建（当前封存） |
 
-在 Spaces 的空间列表选择“从蓝图创建空间”，可以粘贴上述任一种分享码或打开 JSON。空间的“生成蓝图”默认导出插件组合；需要预设时选择“含配置预设”。预览后创建，结果保持未启动。归档文件的数据导入导出是另一项操作，不改变为蓝图格式。
+封存前，Spaces 支持从蓝图创建空间、生成插件组合或含配置预设的蓝图，预览后创建且不自动启动。上述操作现已暂停；普通 `.dshspace` 归档导入导出仍是独立操作，不改变为蓝图格式。
 
 DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。`builtin` 表示接收端宿主提供的精确包身份，不会被改成 npm 安装。接收端缺少该包或版本不符时，在写入空间前报告失败。
 
-协议接口、独立使用与 v2 格式见[包说明](packages/blueprint/README.md)和[v2 协议](packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](tasks/archive/blueprint-migration-0.2.md)。下文保留完整 v1 合同。
+独立 Creator 的当前 profile 归并与封存前 Spaces 的新空间创建是不同执行语义，不能因共享格式而承诺得到相同结果：前者归并到用户正在使用的当前 profile 并保留未提及的本地 bundle；后者创建隔离的新空间。若以后唤醒，模型需求仍须由接收方显式映射，蓝图中不得携带主空间 token、实例、授权或凭据，也不证明任何这样的授权存在；未显式配置模型时按届时的创建策略处理。
+
+协议接口、独立使用与 v2 格式见[包说明](packages/blueprint/README.md)和[v2 协议](packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](tasks/archive/blueprint-migration-0.2.md)，只证明当时范围。下文是 **DSHBP1 / `formatVersion: 1` 的现行字段合同**；DSHBP2 的字段、来源、编码和执行语义由其独立协议定义，不能把两套格式当成仅差配置预设的同一结构。
 
 ## DSH Spaces 蓝图规范 v1
 
-状态：v1 规范与使用指南。蓝图功能已随 [0.4.0](https://github.com/klarkxy/dsh-spaces/releases/tag/v0.4.0) 发布。验证结果与限制见[蓝图实施记录](tasks/archive/blueprint-implementation.md)及[发布验收记录](tasks/archive/release-0.4.0.md)。
-
-日期：2026-09-21。规范标识：`dsh-blueprint`。JSON 格式版本：`1`。
+状态：v1 字段合同。DSHBP1 的 Spaces 预览与新建空间流程当前封存；DSHBP2 的独立执行策略见上表与协议文档。
 
 蓝图描述一套插件组合及其配置预设。接收者粘贴分享码或打开 JSON，查看组成，填写本机选项，再据此创建一个新空间。蓝图作者可以从已有空间生成蓝图，也可以直接编写 JSON。
 
-建议每位使用或开发 DSH Spaces 蓝图能力的人先阅读本页。用户从下面的操作说明开始；插件作者和工具开发者继续阅读字段定义、关系语义和验收场景。
-
-本规范中的“必须”“不得”是实现要求；“建议”允许有理由的替代。已有 `.dshspace`、`SpaceRecipe` 和模板功能不因此成为本规范的实现。故障处理遵循 [let it crash](docs/let-it-crash.md)。
+本规范中的"必须""不得"是实现要求；"建议"允许有理由的替代。既有 `.dshspace` 压缩分享、`SpaceRecipe` 和空间模板不因此成为本规范的实现。故障处理遵循 [let it crash](docs/let-it-crash.md)。
 
 ## 用户操作
 
-以下入口位于当前工作区的共享工作台；已发布版本是否包含这些入口，以对应版本说明为准。
+蓝图相关界面位于管理工作台。
 
-**使用别人分享的蓝图：** 在工作台打开“蓝图”，粘贴分享码或 JSON，也可以读取蓝图文件。选择“查看蓝图”，核对插件来源、版本、预设和已知组合问题。填写新空间名称及蓝图需要的本机选项，选择“预览创建”，确认后“创建空间”。完成后空间保持未启动，可从正常空间入口启动。
+**使用别人分享的蓝图：** 在工作台打开"蓝图"，粘贴分享码或 JSON，也可以读取蓝图文件。选择"查看蓝图"，核对插件来源、版本、预设和已知组合问题。填写新空间名称及蓝图需要的本机选项，选择"预览创建"，确认后"创建空间"。完成后空间保持未启动，可从正常空间入口启动。
 
-**分享自己的组合：** 从普通空间选择“生成蓝图”，勾选要分享的插件、配置预设和设置。查看无法分享的项目及原因；本机目录和模型应改成接收者输入。生成后可以“复制分享码”或“保存 JSON”。会话、附件和凭据不会因这一步被搬走。
+**分享自己的组合：** 从普通空间选择"生成蓝图"，勾选要分享的插件、配置预设和设置。查看无法分享的项目及原因；本机目录和模型应改成接收者输入。生成后可以"复制分享码"或"保存 JSON"。会话、附件和凭据不会因这一步被搬走。
 
 分享码可以直接发在聊天消息、帖子或项目说明中，接收者不需要先解压文件。接收端仍需具备基础运行环境，并能够访问蓝图引用的插件来源。
 
@@ -46,7 +48,7 @@ DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。
 
 工具开发者可使用仓库中的 [JSON Schema](schemas/blueprint-v1.schema.json) 做字段检查，再用运行时解析器校验跨字段关系、输入位置及编码规则。Schema 不是插件安全或运行兼容性的证明。
 
-在编辑器中关联该 Schema 即可；不要把 `$schema` 加入蓝图根对象，v1 根字段是封闭的。代码入口为 `src/core/domain/blueprint.ts` 的 `parseBlueprint` / `bindBlueprintInputs` / `diagnoseBlueprint`，以及 `src/adapters/node/blueprint/blueprint-codec.ts` 的 `decodeBlueprint` / `encodeBlueprint`。JSON 与分享码的解析都走同一份规则。仓库验收入口为 `npm run test:blueprints`。
+在编辑器中关联该 Schema 即可；不要把 `$schema` 加入蓝图根对象，v1 根字段是封闭的。格式校验、输入绑定、关系诊断与分享码编解码的规则是公开合同，由蓝图协议模块及其公开导出实现；JSON 与分享码的解析都走同一份规则。仓库验收入口为 `npm run test:blueprints`。
 
 ## 1. 产品边界
 
@@ -382,19 +384,7 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 
 现有 `.dshspace` ZIP、模板和 `SpaceRecipe` 保持原有身份；不得仅改扩展名或填入 `formatVersion: 1` 就当成蓝图。未来转换入口必须重新检查来源、版本、动态配置、受管组件和本机值；丢失信息要展示，不能静默转换。
 
-当前实现入口如下。蓝图复用既有任务、写入锁和官方安装路径；旧 ZIP 分享、recipe 和模板继续走各自入口。
-
-| 入口 | 职责 |
-| --- | --- |
-| `src/core/domain/blueprint.ts` | 格式检查、输入绑定和声明关系诊断 |
-| `src/adapters/node/blueprint/blueprint-codec.ts` | JSON 与 J/Z 分享码读取、编码及大小限制 |
-| `src/adapters/node/blueprint/blueprint-package.ts` | npm 制品下载、缓存字节、身份和摘要检查 |
-| `src/adapters/node/blueprint/blueprint-runtime.ts` | 从实际绑定的 DSH 读取宿主、bundle、组合和模块解析证据 |
-| `src/adapters/node/blueprint/blueprint-workbench.ts` | 来源选择、生成、预览、一次性计划和分阶段应用 |
-| `src/shared/workbench-blueprint.ts` | 工作台蓝图请求、预览和结果类型 |
-| `packages/plugin/src/workbench/blueprint-ui.tsx` | 桌面与浏览器共用的蓝图界面 |
-
-工作台增加 `blueprint.source`、`blueprint.generate`、`blueprint.inspect`、`blueprint.preview` 查询，以及 `blueprint.apply` 任务命令。预览计划保存在当前服务内存中，绑定服务 epoch、状态版本和输入观察；过期、被消费或服务结束后不能应用。现有鉴权、请求/响应校验和单写者机制继续约束这些入口。
+蓝图应用复用 Supervisor 的既有任务、写入锁和官方安装路径；旧 ZIP 分享、recipe 和模板继续走各自入口。工作台侧的蓝图入口、预览计划的存活期与适用范围见[包说明](packages/blueprint/README.md)与工作台文档，本文不重复实现细节。
 
 ## 12. 验收场景
 

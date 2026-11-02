@@ -4,12 +4,14 @@ export function attachHostLayout(anchor: HTMLElement): { cover(active: boolean):
   const frame = overlay?.parentElement;
   if (!overlay || !frame || frame.hasAttribute("data-spaces-host-rail")) throw new Error("Unsupported or occupied host layout seat.");
   frame.setAttribute("data-spaces-host-rail", "1");
-  const padding = frame.style.getPropertyValue("padding-left"), priority = frame.style.getPropertyPriority("padding-left");
-  const box = frame.style.getPropertyValue("box-sizing"), boxPriority = frame.style.getPropertyPriority("box-sizing");
-  const usedPadding = getComputedStyle(frame).paddingLeft;
-  frame.style.setProperty("padding-left", `calc(${usedPadding} + 72px)`);
-  const assignedPadding = frame.style.getPropertyValue("padding-left");
-  frame.style.setProperty("box-sizing", "border-box");
+  const margin = frame.style.getPropertyValue("margin-left"), marginPriority = frame.style.getPropertyPriority("margin-left");
+  const width = frame.style.getPropertyValue("width"), widthPriority = frame.style.getPropertyPriority("width");
+  const usedMargin = getComputedStyle(frame).marginLeft;
+  // AppFrame measures its border box and positions resize handles against its
+  // own columns. Reserve the rail outside that box so both stay in one coordinate system.
+  frame.style.setProperty("margin-left", `calc(${usedMargin} + 72px)`);
+  const assignedMargin = frame.style.getPropertyValue("margin-left");
+  frame.style.setProperty("width", "auto");
   const owned = new Map<HTMLElement, { inert: boolean; hidden: string | null }>();
   let disposed = false, covered = false;
   const collect = () => {
@@ -38,11 +40,11 @@ export function attachHostLayout(anchor: HTMLElement): { cover(active: boolean):
     if (disposed) return;
     cover(false); disposed = true; observer.disconnect();
     frame.removeAttribute("data-spaces-host-rail");
-    if (frame.style.getPropertyValue("padding-left") === assignedPadding) {
-      if (padding) frame.style.setProperty("padding-left", padding, priority); else frame.style.removeProperty("padding-left");
+    if (frame.style.getPropertyValue("margin-left") === assignedMargin) {
+      if (margin) frame.style.setProperty("margin-left", margin, marginPriority); else frame.style.removeProperty("margin-left");
     }
-    if (frame.style.getPropertyValue("box-sizing") === "border-box") {
-      if (box) frame.style.setProperty("box-sizing", box, boxPriority); else frame.style.removeProperty("box-sizing");
+    if (frame.style.getPropertyValue("width") === "auto") {
+      if (width) frame.style.setProperty("width", width, widthPriority); else frame.style.removeProperty("width");
     }
   } };
 }

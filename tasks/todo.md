@@ -1,4 +1,94 @@
+# 2026-11-02 首次导航诊断与入口加载竞态
+
+- [x] 补齐外壳、portal、child bootstrap 的有界脱敏阶段记录。实际发行包首开捕获到初始空白页完成事件提前结束下一次 `loadURL` 的竞态，同版本 Electron 独立对照确认。修复初始完整加载等待，回归在旧实现上失败、修复后通过。见 [诊断与修复记录](manager-navigation-diagnostics-20261102.md)。
+- [x] 最终完整检查：此前进程生命周期测试失败和串行复查卡死，根因是 Codex 桌面应用每秒约 1–2 次 `git diff` 后执行 `taskkill /T`，WMI 进程查询被大量取消（0x80041032），测试结束子进程失败。用户退出 Codex 后，WMI 查询 20/20、`taskkill /T` 5/5 正常；`check:all` 单次 14/14 通过（`.sandbox/manager-nav-diag-20261102/checks-after-wmi/result.json`）。卡死的串行复查进程已结束，其 `serial-checks/` 记录保留原状。
+- [ ] 最终构建的开发链接/发行包实测。
+- [ ] 此前两个管理页 35 秒就绪超时仍未确认根因；不将本次更早的入口竞态修复当作它们已解决。
+
+# 2026-11-02 前一轮首次管理页超时定位（未完成）
+
+- [ ] 根因与修复仍未确认。Grok 的局部探针及 Codex 的同版本 Electron、真实管理器、生产控制器对照未复现旧超时，未据猜测修改生产代码。用户补充实际点击后，开发链接与另一套全新发行包均显示创建表单，guest 创建到新建指令分别约 1.44 / 2.86 秒；输入工具点击无效不能当作旧超时原因。这些未改代码的成功样本不构成修复，修复后的验收尚未完成。见 [定位记录](manager-first-open-timeout-20261102.md)。
+
+# 2026-11-02 Desktop 后台启动的永久回归与现行文档
+
+- [x] 修正 `tests/native/native-desktop-startup.test.ts` 的两处误通过：epoch/manager 变体只改被测字段；确认式手动重启的新操作是 `launch-two` 和新的 service epoch，目录与之匹配，旧 controller 保持 failed。stopped 记录上的第二个 controller 只重新加入，不读目录、不打开 portal、不调用 initialize、不启动子空间。终态和首次目录情景拆成各自的测试。未改生产代码。
+- [x] 永久 Chromium：既有 `native-startup.tsx` 补上 ready 的 `beginDesktopLaunch` / `desktopLaunchState`，epoch 为 `aa` 重复 32 次，manager 为 hub。注册失败详情仍检查完整 `MAIN_REGISTRATION_REFUSED:404`，并包含可见标签“失败原因”。新增受控后台启动 DOM，覆盖 zh/en 的成功和失败、主输入节点、72px rail、用户点击后才显示原始原因/停止结果/记录保留、三种点击顺序，以及 stopped 记录的重复挂载。该夹具不证明真实宿主进程去重。
+- [x] 现行文档区分 Desktop 打开即后台启动和普通 Web 的显式初始化。见 [实现与检查](desktop-background-startup-20261101.md)。
+- [x] 本叶命令：`native-desktop-startup` 19/19。两份 DOM 首次并行 11/12，既有 stale rail 在 Playwright 30 秒动作超时，日志保留；该测试单独 1/1，两文件 `--test-concurrency=1` 为 12/12。`typecheck:tests` 退出码 0，`check:test-lists` 119/119。
+- [x] 根代理完成完整检查：首轮 `check:all` 12/14，两组打包失败使用独立缓存复查通过（LLM 131 项、包预检）；首轮失败保留。最终构建已通过隔离官方 Desktop 0.2.1-rc.2 的开发链接/发行包后台启动、健康复用、正常停止与重载、确认式重启/启动、冷重开和子空间保持停止；真实界面上的所有权拒绝及双重错误/脱敏也通过。见[完整检查与真实 Desktop 记录](desktop-background-startup-20261101.md)。官方 EXE/asar 未变，未提交、未发布、未更新日常安装或真实 Home。
+- [ ] 真实 Desktop 的首次管理页面导航尚未全绿：D、P 两个全新 Home 第一次新建超时，后续确认式新服务/重开成功，第三个全新发行包首次新建约 1.7 秒完成。根因未确认，未添加重试、放宽权限或延长超时；不能把后续成功算作原失败已修好。日志和现场保留，用户原始安装实例未更新。
+
+# 2026-10-29 源码仓库开发模式（dev-checkout）与子空间复制修复
+
+- [x] 子空间 iframe 补 `allow="clipboard-write <子空间 origin>"`（入口 origin 跳转到子空间 origin，只写 `clipboard-write` 不覆盖最终 origin）。"草稿已保存"来自安装版旧 view-bridge 副本，源码已无。
+- [x] 宿主插件解析到源码仓库时自动进入 dev-checkout：bootstrap 不暂存、不打包，Supervisor 以 `--dev-checkout` 从仓库运行（cwd 为 tools 目录，避免构建 EBUSY）；管理空间/子空间以 `link:` 安装 `packages/{plugin,view-bridge,llm-bridge}`（新 `pluginLinkDirectory`，`pluginAdd` 校验不放宽），按链接身份对齐。新增 `npm run dev:watch`。发行路径不变。
+- [x] 已通过：test-lists、三组类型、构建、npm test 282、test:workbench 631（2 跳过）、test:spaces 修正后通过。隔离 Home 实测：链接安装、无暂存/打包、dev:watch 与运行中 Supervisor 共存均通过；链接包的 client-hmr `rebuilt` 在原型 profile 实测通过。
+- [x] 子空间启动失败 `dsh-spaces-llm-bridge → SUPERVISOR_BOOTSTRAP_TIMEOUT`（开发链接与发行 tarball 均复现，`.sandbox/dev-checkout-e2e-20261029-5`、`-6`）。根因：Supervisor 8 ms 内已回复，但子进程同步加载模块超过 5 s，恢复后计时器阶段先于 IPC 回复执行。修复：5 s 到期后经一次 `setImmediate` 再判定超时，期间仍接收回复；阈值、单次 `hello`、各失败边界不变，`hello` 发送失败直接拒绝。新增 `tests/llm/llm-delegation-handshake.test.ts`，阻塞场景在旧实现上失败（`old-impl.log`），修复后 7/7（`new-impl.log`）。
+- [x] 隔离 Home 实测（`.sandbox/handshake-fix-20261030/`）：开发链接与发行包两条路径子空间均启动、LLM bridge 完成初始化、可读取主空间模型目录、iframe `allow="clipboard-write <子空间 origin>"` 生效；开发链接下子空间（view-bridge）与管理空间（plugin）的 client-hmr `rebuilt` 通过。复制按钮的框内权限 API 探测在该 Chromium 不可用，只验证了 `allow` 属性。`check:all` 13/14，`test:workbench:browser` 因 Chromium 拒绝端口 6665（`ERR_UNSAFE_PORT`）失败，单独复查 7/7，原失败保留。未提交，未在安装版 Desktop 实测。
+- [x] 子空间 `MAIN_NOT_GRANTED`（此前被握手超时掩盖）。复现确认（`.sandbox/main-not-granted-20261030/`）：同一 Web 宿主进程内，服务经 `service.shutdown` 计划停止后再由用户启动，新 Supervisor 的 `initialize` 返回 `MAIN_REGISTRATION_CHANGED`。原因是 `MainLlmService` 仍持有旧纪元端点，`afterSupervisorStopped` 只在 Desktop 手动停止/重启路径调用，主空间因此未在新服务注册。修复：`WorkbenchHostRuntime` 记录交给注册监听的纪元；`remember` 遇到不同服务纪元时，先释放旧纪元注册，再向新纪元注册一次。同纪元行为不变，不增加启动或重试。Desktop 停止/重启共用同一释放步骤。新增两项回归，旧实现失败，修复后通过；`test:workbench` 633（2 跳过）、`llm-delegation` 22/22，类型和构建通过。隔离实测（`.sandbox/main-replaced-20261030/`）：同一宿主第二次启动成功，空间 B 运行且模型策略可读。本项未重跑完整 `check:all`。未提交。
+
+# 2026-10-27 移除子空间草稿持久化
+
+- [x] 用户决定不再保存子空间草稿，接受退出 Desktop 后丢失未发送输入（10-26 验收问题 1 不再修复）。删除 view-bridge 的草稿前端、服务端、格式校验和输入框提示条；`typert.host` 保留为空调用表以维持打包清单；Browser base 不再写入 `drafts: false` 补丁；“运行与退出说明”改为明确告知退出后未发送输入和附件会丢失。已有的 `hub/<空间>/composer-drafts.json` 不删除。
+- [x] 已通过：test-lists、三组类型、构建、npm test 280、spaces 148（1 跳过）、workbench 623（2 跳过，少 3 项已删除的草稿测试）、browser 18、包预检。未提交，未在安装版 Desktop 实测。
+
+# 2026-10-27 前端人机交互友好性修复
+
+- [x] 确认框按操作类型显示本地化标题、说明和按钮，服务端原文移入“技术详情”；删除等操作用危险样式；三条已知服务端原因本地化。删除说明改为与实际一致（会话和存储保留）。名称规则统一为 33 字符并实时校验。复制按钮有成功／失败反馈；崩溃卡片补“启动”，去掉误导性复制。Workbench 对话框支持 Esc、焦点陷阱和焦点恢复，右键菜单与原生菜单共用键盘逻辑并去掉重复项。侧栏读屏名称包含状态。术语统一为“停止／异常退出／主空间”。Desktop 外壳文字移入 `native-texts.ts`（zh/en，按系统语言）。时间和大小改用 Intl 格式化。另含旧连接设置的去术语化、插件搜索支持回车、选中态、未保存提示。
+- [x] 已通过：test-lists、三组类型检查、构建、npm test 280、workbench 626（2 跳过）、spaces 148（1 跳过）、browser 18、workbench:browser 18（新测试首轮定位器错误，修正后单独通过）。llm 一项 `llm-stream` 传输错误，单独重跑 3/3 通过，原失败保留。recovery 和包预检未运行；未提交，也未在安装版 Desktop 上实测。
+
+# 2026-10-27 首次打开空间状态与速度
+
+- [x] 状态灯只在当前运行代次页面确认就绪后显示绿色；首次未打开为灰色，启动／打开中为黄色。停止及失效清除旧就绪状态。
+- [x] 页面认证与子空间启动并行，单次认证直接进入原生展示页，移除原生管理页面的重复首页。官方 Desktop 隔离实测首次打开 12,271 → 8,628 ms（本次对比减少 29.7%）；状态顺序、三层页面与官方文件未变均有实测证据。
+- [x] 定向 163/163；完整 14 组中 13 组通过，唯一并行进程测试提前退出，单独核查通过，保留原失败且不宣称完整全绿。测试服务已正常停止。见 [实现与验证](space-cold-open-20261027.md)。未更新日常安装、提交或发布。
+
+# 2026-10-27 已打开空间快速切换
+
+- [x] 已打开且有效的空间复用原页面，Desktop 运行中空间直接走展示通道，工作台核对服务纪元、运行代次、握手与挂载状态后立即切换；首次与失效路径保留必要检查，生命周期操作共用状态读取。
+- [x] 完整规定检查 14/14、Chromium 交互 17/17 通过；最后补充回归 147/147，以及最终类型、构建、包预检 4/4 通过。记录缓存失效、并发读取和原页面草稿保留证据，见 [实现与验证](space-switch-cache-20261027.md)。未更新安装版、提交或发布。
+
+# 2026-10-27 Browser 入口封存与 0.5.0 发布准备
+
+- [x] 根据用户新决定，隐藏 Browser 创建入口及 base 选择，保留 Web 版本与模型来源。封闭新旧 Browser 创建参数、版本目录、模板/分享创建、启动与原生展示转接；源码、组件和测试保留，界面不增加封存说明。
+- [x] 公开版本 0.4.0 → 候选 0.5.0，主要组件及锁文件同步；独立 Browser/蓝图版本保持。生成最终插件包、校验文件与候选发布说明；完整检查 14/14、凭据/发行检查及最终包隔离安装、真实 UI 创建/启停通过。未提交、推送、发布或更新用户安装版；详见 [发布准备记录](release-0.5.0.md)。
+
+# 2026-10-27 按 base 与对应版本创建空间
+
+- [x] 新建空间先选 Web / Browser，再选对应产品版本；Web 使用官方目录，Browser 使用独立版本并声明框架依赖。Browser 从空配置组合，默认不加载模型、Agent、会话与聊天，保留 DSH 插件管理和界面扩展；模板与分享保留 base 身份，不做旧空间迁移。
+- [x] 完整规定检查 14/14 通过；真实隔离 Supervisor 验证两种 base 的创建、启动与正常停止，Chromium 验证 Browser 页面和独立插件按钮。最终适配器类型/构建/打包和 Browser 17/17 补查通过。未更新安装版 Desktop，未提交、推送或发布；[实现与验收](base-creation-20261027.md)。
+
+# 2026-10-27 简化新建空间模型来源
+
+- [x] 新建空间仅保留“使用主空间模型”（默认）和“在此空间配置”。旧共享连接库及空间详情的绑定表单移入默认折叠的“旧连接兼容设置”，首次展开才读取，折叠保留编辑状态。用户确认没有旧空间，不做迁移；后端接口不变，完整模型设置重订不在本次范围。
+- [x] 已执行规定检查：清单、三组类型、构建、17 项浏览器交互通过；两项 npm 缓存 EEXIST 在独立缓存补查通过，原失败保留。完整工作台检查仍有 1 项既有草稿服务 `profileContext` 注入失败，未改动该独立工作流，不声明全套通过。详见 [验证记录](model-source-20261027.md)。不代表安装版 Desktop 已重载；未提交、发布或迁移。
+
+# 2026-10-26 Desktop 空间栏启动与快捷控制
+
+- [x] 用户明确点击空间即打开并按需启动：Desktop 先读取当前权威状态，运行中直接进入、已停止发起一次正常启动、启动中观察已有操作；侧栏补运行状态标识和右键启动／关闭／重启，支持键盘打开与关闭菜单。后台轮询只读，连续点击不重复提交，迟到结果不覆盖用户后续导航，主应用草稿保留。
+- [x] 单个子空间操作限身份已验证的 Desktop，沿用既有服务纪元、状态版本、计划及正常停机路径；主应用、管理空间、外来空间和维护状态被拒绝。原有完整未提交工作保留。详见 [实现与验证](desktop-rail-20261026.md)。
+- [x] 构建、三组类型、完整规定检查均已有通过证据；完整轮中的旧接口清单断言已修正，两项 npm 系统缓存 EEXIST 用独立空缓存复验通过，原失败保留。最终补充 54 项原生控制／浏览器交互全部通过。没有访问真实 Home，也未将这些结果标为当前安装版 Desktop 已重载验收；未提交、推送或发布。
+
+# 2026-10-25 Spaces 内蓝图功能封存
+
+- [x] 用户决定仅封存 Spaces 内蓝图功能，待 Spaces 核心系统稳定后再评估唤醒。新增统一封存开关，Supervisor 的 `blueprint.source` / `generate` / `inspect` / `preview` / `apply` 均在执行前返回 `workbench/unsupported` 且不创建任务；空间列表、创建对话框、右键菜单、空间详情、模板创建/导入/导出中的蓝图与分享码入口全部关闭。普通模板、`.dshspace` 分享、其他管理操作和历史任务读取不变；独立 `@klarkxy/dsh-blueprint` 包、协议、既有文件和 latent 实现保留，两个旧 UI 测试改名为 `.sealed.tsx` 泊档，不删除用户资产。封存对用户无专门提示或说明入口，蓝图文件只按普通不支持的输入处理，不出现“已封存”文案。
+- [x] 同步封存文档：架构、需求、工作台、管理协议、安装与包说明均标明 Spaces 蓝图工作流暂停，普通模板与 `.dshspace` 分享继续；独立 Creator 和 DSHBP1/DSHBP2 不受影响。唤醒必须同时恢复公共入口、任务执行、界面和完整回归，并重新核对模型映射与权限。独立后端复核无阻断：无 product/submit 绕过，历史 DTO/job 可读，普通创建与分享路径未误伤。
+- [x] 普通进程定向 67/67 通过（模板 7＋Supervisor 60），完整 `check:all` 13/14 组通过：默认 275、spaces 148（1 跳过）、workbench 575 通过／1 失败／2 跳过、recovery 31、LLM 124、blueprints 221（4 跳过）、browser 13、Chromium 15，测试清单、三组类型、构建和包预检通过。唯一失败为既有 portal maintenance 观察时序断言，随后同文件独立复查 50/50 通过，原失败保留于 `.sandbox/blueprint-sealed-check-20261025/`。沙箱 EPERM 的未执行记录保留。未操作真实 Home，未提交、推送或发布。
+
+- [x] 用户补充封存不需要被产品用户感知：删除专门的“蓝图已封存”中英文提示，蓝图文件只按普通不支持的输入处理，不增加说明入口；独立包、协议与内部封存标记仍保留。定向模板 7/7 通过；新一轮完整 `check:all` 13/14 组通过，唯一失败为 Chromium 等待宿主首页草稿输入框超时，随后同文件独立复查 7/7 通过，原失败保留于 `.sandbox/blueprint-sealed-silent-check-20261025/`。未提交、推送或发布。
+
+# 2026-10-25 现行文档统一与去代码化
+
+- [x] 用户明确仅统一文档，不修改产品实现；新增 [现行架构基线](../docs/architecture.md)，重写现行需求、管理工作台与管理合同，统一宿主、发行、外部进程、故障政策和包文档。桌面壳、应用内自我更新、启动器交接及旧 LLM 默认只保留在历史或排除项中；主空间继承、旧共享连接和本地/会话选择分别表述，普通既有桥接不再被描述为每次启动自动对齐。
+- [x] 删除现行文档中可直接由代码获得的源码路径、行号、内部类名、施工落点、重复 API/导出清单与实现研究；公开协议、公开 CLI、数据所有权和必要使用合同保留。蓝图区分 DSHBP1/DSHBP2、Creator 归并与 Spaces 新建空间；历史实施和验收正文保留，只补现行导航与取代关系。独立复核发现 view-bridge 消息职责遗漏、product 清单过期和 alpha 当前验收误标，均已修正。
+- [x] 最终 51 个变更/新增 Markdown 文件的相对链接与代码围栏检查通过，`git diff --check` 通过，现行文档内部源码引用扫描无命中。授权普通进程以隔离 Home 和仓库外临时目录执行完整 `check:all`，14/14 组通过：默认 275、spaces 148（1 跳过）、workbench 575（2 跳过）、recovery 31、LLM 124、blueprints 240（4 跳过）、browser 13、Chromium 15，类型、构建与包预检通过；机器结果见 `.sandbox/docs-alignment-check-20261025-ordinary/result.json`。早期不存在临时根与沙箱 esbuild EPERM 失败保留，不覆盖历史。未提交、推送或发布，未修改既有产品源码。
+
 # 2026-10-23 架构梳理与第一波重构
+
+- [x] 修复辅助压缩预设 `never started`：运行时组件必需文件清单补入 `auxiliary.js`；新增缺失／漏列／复制后篡改和实际 npm 包解包→启动复制→独立进程导入回归，CI 先构建后测试。真实包与官方加载器链路通过；全量 14 组中 13 组通过，浏览器组因随机禁用端口 5061 失败一次，单独复测 15/15 通过，原失败保留。见 [验收记录](auxiliary-payload-20261023.md)。未安装到真实 Home、重启、提交或发布。
+
+- [x] 独立审查三条 P2 修复：check-test-lists 分离全量清单与 Node 目录发现，TSX 必须显式登记；portable-host 工作流补齐迁移测试和拆分目录的触发路径；secrets 门禁自动扫描 supervisor/ 顶层 TS 部件，补回拆分前覆盖。两份回归测试登记到 npm test，子进程内模拟读取，不向源码树写探针；定向 7/7，两种实际 CLI TSX 漏登记负例均 exit 1。旧会话遗留 TSX 探针已可恢复清理。Astra 独立复核 READY（仅三条修复；49 个部件路径及 7 个直接执行测试匹配、补充 key/fallback 负例通过），不代表实际 GitHub 工作流已运行。
+- [x] 本轮完整 check:all 单次 14/14 通过：Node 26.10.0，仓库外临时根 H:/Code/dsh-spaces-checktmp，隔离 Home；测试清单 108/108，三组类型、构建与包预检通过，默认 274、spaces 148（1 跳过）、workbench 573（2 跳过）、recovery 31、LLM 123、blueprints 94＋239（4 跳过）、browser 13、Chromium 15 均通过。结果与完整日志在 `.sandbox/p2-closeout-20261023/`。补充 CLI 夹具首次漏模拟 stat 导致 ENOENT，原失败保留，修正夹具后通过，不重试运行时操作。未提交、推送或发布，真实 Home 未访问。
 
 - [x] 全仓只读架构测绘：包边界双向依赖（src↔packages）、shared 上指 core/domain、god 文件、supervisor/spaces-control 一词多义、WorkbenchApi 三处手写为主要别扭点；六边形分层在 src 内部成立、在包边界断裂。
 - [x] 既有 2026-10-20→22 工作流先落本地基线 `a213321`（用户授权本地提交；不推送）。

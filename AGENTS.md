@@ -39,3 +39,5 @@ Do not redirect Windows checks to `.sandbox/tmp`; use `--temp-root` with an
 existing external directory and an authorized ordinary process when the sandbox
 cannot write there. The runner rejects repository-local temp roots before
 starting checks and never retries a failed command. Node 24.21+ (24.x) and Node 26 are supported.
+`npm run dev:watch` builds once, then rebuilds on source changes for linked
+dev-checkout profiles (no retry after a failed build).

@@ -243,6 +243,8 @@ const shareManifestSchema = z
     source: z
       .object({
         dshVersion: z.union([exactVersionSchema, z.null()]).optional(),
+        base: z.enum(["web", "browser"]).optional(),
+        baseVersion: exactVersionSchema.optional(),
       })
       .strict(),
     space: z
@@ -280,6 +282,8 @@ const spaceRecipeSchema = z
     source: z
       .object({
         dshVersion: z.union([exactVersionSchema, z.null()]).optional(),
+        base: z.enum(["web", "browser"]).optional(),
+        baseVersion: exactVersionSchema.optional(),
       })
       .strict()
       .optional(),
@@ -688,6 +692,7 @@ export const workbenchProductRequestSchema: z.ZodType<WorkbenchProductRequest> =
   z.object({ method: z.literal("catalog"), query: z.string().max(200).optional() }).strict(),
   z.object({ method: z.literal("library") }).strict(),
   z.object({ method: z.literal("plugin.versions"), catalogId: pluginCatalogIdSchema }).strict(),
+  z.object({ method: z.literal("base.versions"), base: z.enum(["web", "browser"]) }).strict(),
   z.object({ method: z.literal("diagnostics"), spaceId: spaceIdSchema }).strict(),
   z.object({ method: z.literal("logs") }).strict(),
   z
@@ -782,6 +787,8 @@ export const workbenchProductResultSchema: z.ZodType<WorkbenchProductResult> = z
     .strict(),
   z.object({ method: z.literal("catalog"), catalog: catalogSnapshotSchema, observation: productObservationSchema }).strict(),
   z.object({ method: z.literal("library"), items: z.array(libraryItemSchema).max(256), observation: productObservationSchema }).strict(),
+  z.object({ method: z.literal('base.versions'), base: z.enum(['web', 'browser']),
+    versions: z.array(exactVersionSchema).max(1000), preferred: exactVersionSchema.nullable(), observation: workbenchMutationContextSchema }).strict(),
   z
     .object({
       method: z.literal("plugin.versions"),

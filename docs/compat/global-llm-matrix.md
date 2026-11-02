@@ -1,77 +1,65 @@
-# Global LLM compatibility matrix
+# 旧共享连接兼容矩阵（0.1.5-rc.2 历史测量）
 
-Pinned runtime for this feature: **`@deepseek-ai/dsh-*@0.1.5-rc.2`**.
+> **这是历史记录，不是当前版本矩阵。** 本表记录旧共享连接首版在 `@deepseek-ai/dsh-*@0.1.5-rc.2` 上核验过的扩展点、协议与隔离结果。它不证明任何当前 DSH 版本可用。
+> 当前架构：[现行架构](../architecture.md)。当前合同：[旧共享连接兼容合同](../plans/global-llm-connections.md)。历史验收：[首版验收](global-llm-acceptance.md)。
 
-Inspection used the published npm tarballs, not the upstream default-branch source. Master APIs that are not in this tarball are not claimed.
+## 1. 测量口径
 
-## Package versions
+- 运行时固定 `0.1.5-rc.2`，核对对象是已发布的 npm 包，不是上游默认分支源码。
+- 未出现在当时发布包中的上游能力一律不主张。
+- 下列扩展点均为当时的公开接口；是否仍存在、是否仍以相同语义工作，必须按当前版本重新核实。
 
-| Package | Version | Result |
+## 2. 当时的公开扩展点
+
+| 面 | 用途 | 当时结果 |
 |---|---|---|
-| `@deepseek-ai/dsh-settings` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-settings-file` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-credentials` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-credentials-local` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-llm` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-llm-pi-ai` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-agent-default-model` | 0.1.5-rc.2 | required |
-| `@deepseek-ai/dsh-client-connection` (repo peer) | 0.1.5-rc.2 | already pinned |
+| 设置路径 | 让空间指向自己的设置文档 | 通过 |
+| 设置分层 | 把共享路由注入基础层，不写用户层 | 通过 |
+| 设置安装 | 通过公开注册入口即可完成注入 | 通过 |
+| 设置写入 | 拒绝针对受管路由的写入 | 通过 |
+| 设置文件 | 识别保留前缀被本地配置劫持 | 通过 |
+| 凭据路径 | 让空间指向自己的本地凭据 | 通过 |
+| 凭据记录 | 共享 Key 保持为独立记录 | 通过 |
+| 凭据引用 | 受管引用不走环境变量兜底 | 通过（包装层） |
+| 模型适配协议枚举 | 判断哪些协议可被构造 | 通过 |
+| 默认模型 | 空间用户层可覆盖注入的全局默认 | 通过 |
 
-## Public extension points used
+## 3. 当时的协议范围
 
-| Seam | 0.1.5-rc.2 export | Used how | Status |
+| 协议 | 是否可被当时适配器构造 | 共享连接首版 |
+|---|---|---|
+| 兼容 Chat Completions 的协议 | 是 | 允许 |
+| 兼容 Responses 的协议 | 是 | 允许 |
+| 兼容 Anthropic Messages 的协议 | 是 | 允许 |
+| 仅兼容层支持、未进入协议枚举的变体 | 否 | 拒绝 |
+| 原生厂商适配器 | 仅在本地可用 | 不自动转换 |
+
+无认证连接当时未作为产品能力开放；原型可以投影，但不宣称已交付。
+
+## 4. 当时的隔离结果
+
+| 空间 | 设置 | 凭据 | 共享连接 |
 |---|---|---|---|
-| Settings path | `resolveSpec({ path, dshHome })` | per-Space `hub/<name>/settings.yaml` | pass |
-| Settings layers | `SettingsProvider.register(ns, schema, { base })` | inject shared routes into base | pass |
-| Settings install | `installSection` calls `this.register` | override `register` is enough | pass |
-| Settings writes | `update` / `replace` / `mutate` | reject managed routes | pass |
-| Settings file | `FileSettingsProvider` load/publish | detect reserved-prefix hijack | pass |
-| Credentials path | `LocalCredentialProvider.resolveSpec({ path })` | per-Space local store | pass |
-| Credential records | `readRecord` / `modifyRecord` / `describe` | shared keys stay on records | pass |
-| Credential refs | `resolve` env > file > dotenv | **must not** be used for `SPACES_LLM_*` | pass (wrapper) |
-| llm-pi-ai protocols | `supportedProtocols()` | `openai-completions`, `openai-responses`, `anthropic-messages` | pass |
-| Default model | `agent-default-model` settings | Space user layer overrides injected global default | pass |
+| `web` | 官方 Home 文件，未打隔离 patch | 官方 Home 文件 | 除非显式接入，否则不启用 |
+| 新建空间 | 独立路径 | 独立路径 | 启动时按策略取快照 |
+| 缺少新隔离行的既有空间 | 仍是 Home 文件，直到显式重写隔离 patch | 同左 | 不自动接入 |
 
-## Protocol matrix
+当时的启动校验只要求会话与存储根，因此旧空间仍可启动；设置与凭据路径是为新建与显式重写写入的。这一"校验范围小于隔离范围"的差异是当时已知状态，不是当前承诺。
 
-| Protocol | Constructed by `llm-pi-ai@0.1.5-rc.2` | Shared connection v1 |
+## 5. 当时的运行时版本行为
+
+| 运行时 | 共享连接 | 未接入的空间 |
 |---|---|---|
-| `openai-completions` | yes | allowed |
-| `openai-responses` | yes | allowed |
-| `anthropic-messages` | yes | allowed |
-| `azure-openai-responses` | compat-only, not in `supportedProtocols()` | refused |
-| `openai-codex-responses` | compat-only, not in `supportedProtocols()` | refused |
-| native `deepseek-official` / other adapters | local-only | not auto-converted |
+| `0.1.5-rc.2` | 启用 | 行为不变 |
+| `0.1.5-rc.1` | 拒绝该新能力 | 行为不变，不得破坏 |
+| 未知精确版本 | 拒绝该新能力 | 行为不变 |
 
-`none` authentication is not product-enabled until A25 passes. The prototype can project a `kind: "none"` connection but does not advertise keyless as delivered.
+## 6. 当时未运行的部分
 
-## Isolation matrix
+- 用完整官方 CLI 拉起 Web 应用并请求付费模型。
+- Windows 上凭据文件的 ACL 检查；POSIX 权限已核对。
+- 真实桌面安装包针对该功能的重建。
 
-| Space | Settings path | Credentials path | Shared LLM |
-|---|---|---|---|
-| web | official home `settings.yaml` (unpatched) | official home `.credentials.yaml` | off unless explicitly joined |
-| new workbench | `hub/<name>/settings.yaml` | `hub/<name>/.credentials.yaml` | policy-selected snapshot at start |
-| existing workbench without the new patch rows | still home files until the isolation patch is rewritten | same | not auto-joined |
+## 7. 之后的版本变化
 
-`PatchWriter.verify` still requires only session/storage roots so an old workbench can start. `applyIsolationPatch` now writes settings and credentials paths for new creates and explicit patch rewrites. `assertDumpConfigIsolated` is the full check used by P0 tests.
-
-## Runtime versions
-
-| CLI / SDK | Shared LLM | Unjoined Space |
-|---|---|---|
-| `0.1.5-rc.2` | enable; P0–P6 gates are in-repo | unchanged |
-| `0.1.5-rc.1` | refuse this new capability | unchanged; do not break |
-| unknown exact version | refuse this new capability | unchanged |
-
-## Evidence commands
-
-```sh
-npm run test:llm
-npm run test:llm:integration
-npm run test:llm:browser
-npm run validate:llm:secrets
-npm run validate:llm:distribution
-npm run typecheck:spaces
-```
-
-P6 evidence: unit + three-process official adapter stream + browser model-center + secret/distribution scanners. The multi-process proof uses three Node processes with published `0.1.5-rc.2` settings, credentials, `llm`, and `llm-pi-ai`. It did not spawn full `dsh --profile` web-app processes for a paid model request. Windows ACL inspection is not claimed from a POSIX agent. See [acceptance](global-llm-acceptance.md).
+前端默认来源已改为[主空间继承](../plans/llm-main-inheritance.md)，版本基线也已前移。本表只能作为 `0.1.5-rc.2` 的历史事实引用；当前兼容性需要当前版本上的重新测量，不能从本表推导。

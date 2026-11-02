@@ -11,6 +11,7 @@ import {
   validateComponentPayloadArtifacts,
   type ValidatedComponentPayload,
 } from "../payload/component-payload";
+import { detectDevCheckout } from "../payload/dev-checkout";
 import { WorkbenchPublicError } from "./errors";
 import type { BoundCli, WorkbenchSupervisorOptions } from "./types";
 
@@ -42,6 +43,26 @@ export function bindSupervisorComponentPayload(
   validated?: ValidatedComponentPayload,
 ): WorkbenchSupervisorOptions {
   const root = options.componentPayloadRoot;
+  if (options.devCheckoutRoot !== undefined) {
+    const checkout = typeof root === "string" ? detectDevCheckout(root) : undefined;
+    if (root === undefined || checkout === undefined || !samePath(checkout, options.devCheckoutRoot)) {
+      throw new WorkbenchPublicError(
+        "workbench/invalid-input",
+        "--dev-checkout must name the source checkout the --component-payload lib belongs to.",
+      );
+    }
+    if (
+      options.pluginArtifact !== undefined ||
+      options.viewBridgeArtifact !== undefined ||
+      options.llmBridgeArtifact !== undefined ||
+      options.browserArtifact !== undefined
+    ) {
+      throw new WorkbenchPublicError(
+        "workbench/invalid-input",
+        "--dev-checkout does not accept component artifacts; components link from the checkout.",
+      );
+    }
+  }
   if (root === undefined) return options;
   if (typeof root !== "string" || !root.trim()) {
     throw new WorkbenchPublicError("workbench/invalid-input", "--component-payload must be a filesystem path.");
@@ -106,6 +127,8 @@ export async function preflightSupervisorComponentPayload(
   const resolved: WorkbenchSupervisorOptions = { ...options };
   bindSupervisorComponentPayload(resolved, validated);
   if (resolved.componentPayloadRoot === undefined) return resolved;
+  // A linked checkout has no artifact tuple; bind already proved the root.
+  if (resolved.devCheckoutRoot !== undefined) return resolved;
   const pluginArtifact = resolved.pluginArtifact;
   const viewBridgeArtifact = resolved.viewBridgeArtifact;
   const llmBridgeArtifact = resolved.llmBridgeArtifact;

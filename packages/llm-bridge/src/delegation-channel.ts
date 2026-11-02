@@ -14,9 +14,11 @@ export async function connectOwnedLlmChannel(readImage: DelegatedImageReader, ca
   const hello={promise:new Promise<LlmDelegationBootstrap>((resolve,reject)=>{acceptHello=resolve;rejectHello=reject;}),resolve:(value:LlmDelegationBootstrap)=>acceptHello(value),reject:(error:Error)=>rejectHello(error)};
   const sessions=new Map<string,{resolve():void;reject(error:Error):void}>();
   const images=new Map<string,AbortController>();
-  const timer=setTimeout(()=>hello.reject(new Error('SUPERVISOR_BOOTSTRAP_TIMEOUT')),5000);
+  let confirm:ReturnType<typeof setImmediate>|undefined;
+  const stopTimeout=()=>{clearTimeout(timer);clearImmediate(confirm);};
+  const timer=setTimeout(()=>{confirm=setImmediate(()=>hello.reject(new Error('SUPERVISOR_BOOTSTRAP_TIMEOUT')));},5000);
   const fail=()=>{
-    if(closed)return;closed=true;clearTimeout(timer);hello.reject(new Error('SUPERVISOR_DISCONNECTED'));
+    if(closed)return;closed=true;stopTimeout();hello.reject(new Error('SUPERVISOR_DISCONNECTED'));
     process.off('message',receive);process.off('disconnect',fail);
     for(const p of sessions.values())p.reject(new Error('SUPERVISOR_DISCONNECTED'));sessions.clear();
     for(const c of images.values())c.abort();images.clear();
@@ -29,7 +31,7 @@ export async function connectOwnedLlmChannel(readImage: DelegatedImageReader, ca
         typeof m.spaceId!=='string'||typeof m.generation!=='number'||!Number.isInteger(m.generation)||m.generation<1||typeof m.serviceEpoch!=='string'||typeof m.instanceId!=='string'){
         hello.reject(new Error('INVALID_SUPERVISOR_BOOTSTRAP'));fail();return;
       }
-      clearTimeout(timer);hello.resolve(m as unknown as LlmDelegationBootstrap);
+      stopTimeout();hello.resolve(m as unknown as LlmDelegationBootstrap);
     }else if(m.kind==='catalog-updated'){catalogUpdated?.();}
     else if(m.kind==='refused'){hello.reject(new Error('SUPERVISOR_REFUSED'));}
     else if((m.kind==='session-granted'||m.kind==='session-refused')&&typeof m.requestId==='string'){
@@ -48,7 +50,7 @@ export async function connectOwnedLlmChannel(readImage: DelegatedImageReader, ca
     }
   };
   process.on('message',receive);process.once('disconnect',fail);
-  process.send({channel:LLM_DELEGATION_CHANNEL,kind:'hello'});
+  process.send({channel:LLM_DELEGATION_CHANNEL,kind:'hello'},error=>{if(error)hello.reject(error);});
   let bootstrap:LlmDelegationBootstrap;
   try{bootstrap=await hello.promise;}catch(error){fail();throw error;}
   return {bootstrap,dispose:fail,async grantSession(sessionId){

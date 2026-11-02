@@ -21,6 +21,7 @@
  */
 import React, { useState, type ReactElement } from "react";
 import { FadeIn, LayoutIndicator } from "../../../../../src/shared/ui";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import type { BlueprintMode } from "../blueprint-session";
 import { InlineErrors } from "../inline-error";
 import { t } from "../i18n";
@@ -77,8 +78,8 @@ export function SpaceTemplatesPage({
     <div
       className="dsh-wb-templates"
       data-templates="true"
-      data-blueprints="true"
-      data-blueprint-mode={mode}
+      data-blueprints={SPACES_BLUEPRINT_SEALED ? undefined : true}
+      data-blueprint-mode={SPACES_BLUEPRINT_SEALED ? undefined : mode}
       data-templates-section={section}
     >
       <FadeIn as="h2" className="dsh-wb-title">

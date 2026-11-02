@@ -1,11 +1,13 @@
 /* Host FaceModel descriptors for guide, manager, and compatibility-read Remotes. */
 import { z } from "zod";
-import { parseSpaceHostAudience } from "../../../src/shared/space-host";
+import { parseSpaceHostAudience, parsePortalSnapshot } from "../../../src/shared/space-host";
+import { validDesktopSpaceAction } from "./types";
 import { WORKBENCH_API, WORKBENCH_API_METHODS, type WorkbenchApiMethod } from "../../../src/shared/workbench";
 import { WORKBENCH_API_CODECS } from "./host/workbench-api";
 import {
   overviewSchema,
   spaceIdSchema,
+  desktopLaunchStateSchema,
   workbenchBootstrapResultSchema,
   serviceRestartPreviewSchema,
   workbenchGuideRoleSchema,
@@ -117,12 +119,19 @@ export const TYPERT = {
   schemas: [],
   invocations: [
     invocation("workbenchGuide", "role", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchGuideRole", workbenchGuideRoleSchema)),
+    invocation("workbenchGuide", "presentationSnapshot", guideFile, [], result("@dsh-spaces/plugin#PortalSnapshot", z.unknown().refine(value => parsePortalSnapshot(value) !== null))),
+    invocation("workbenchGuide", "spaceActivity", guideFile, [param("spaceId", spaceIdSchema, "string"), param("serviceEpoch", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("@dsh-spaces/plugin#SpaceActivity", z.object({ activity: z.enum(["idle", "busy", "unknown"]), generation: z.number().int().nonnegative() }).strict())),
+    invocation("workbenchGuide", "spaceAction", guideFile, [param("request", z.unknown().refine(validDesktopSpaceAction), "@dsh-spaces/plugin/types#DesktopSpaceAction")], result("@dsh-spaces/plugin#PortalSnapshot", z.unknown().refine(value => parsePortalSnapshot(value) !== null))),
     invocation("workbenchGuide", "bootstrap", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("workbenchGuide", "returnTarget", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
     invocation("workbenchGuide", "portalTarget", guideFile, [param("audience", z.object({ parentOrigin: z.string().max(128), channel: z.string().regex(/^[a-f0-9]{32}$/) }).strict().refine(value => parseSpaceHostAudience(value) !== null), "@dsh-spaces/plugin#SpaceHostAudience")], result("@dsh-spaces/plugin/types#WorkbenchReturnTarget", workbenchReturnTargetSchema)),
     invocation("workbenchGuide", "initialize", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchInitializeResult", workbenchInitializeResultSchema)),
     invocation("workbenchGuide", "previewServiceRestart", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchServiceRestartPreview", serviceRestartPreviewSchema)),
+    invocation("workbenchGuide", "previewServiceStop", guideFile, [], result("@dsh-spaces/plugin/types#WorkbenchServiceRestartPreview", serviceRestartPreviewSchema)),
+    invocation("workbenchGuide", "stopService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("@dsh-spaces/plugin/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("workbenchGuide", "restartService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("@dsh-spaces/plugin/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
+    invocation("workbenchGuide", "beginDesktopLaunch", guideFile, [], result("@dsh-spaces/plugin/types#DesktopLaunchState", desktopLaunchStateSchema)),
+    invocation("workbenchGuide", "desktopLaunchState", guideFile, [], result("@dsh-spaces/plugin/types#DesktopLaunchState", desktopLaunchStateSchema)),
     invocation("spaces", "overview", spacesFile, [], result("@dsh-spaces/plugin/types#SpacesOverview", overviewSchema)),
     invocation(
       "spaces",
@@ -140,7 +149,7 @@ export const TYPERT = {
   },
 };
 
-export const GUIDE_METHODS = ["role", "bootstrap", "returnTarget", "portalTarget", "initialize", "previewServiceRestart", "restartService"] as const;
+export const GUIDE_METHODS = ["role", "presentationSnapshot", "spaceAction", "bootstrap", "returnTarget", "portalTarget", "initialize", "previewServiceRestart", "restartService"] as const;
 /** The manager Remote's method names, in registration order. */
 export const MANAGER_METHODS = WORKBENCH_API_METHODS;
 export const SPACES_READ_METHODS = ["overview", "detail"] as const;

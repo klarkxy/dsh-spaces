@@ -11,13 +11,14 @@
 import React, { type ReactElement } from "react";
 import type { WorkbenchSnapshot } from "../../../../../src/shared/workbench";
 import { StaggerItem, springSoft } from "../../../../../src/shared/ui";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { SpaceTemplatesPage } from "../templates/page";
 import { SpaceGlyph } from "../space-glyph";
 import { EmptyState } from "../empty-state";
 import { InlineErrors } from "../inline-error";
-import { t, type WorkbenchLocale } from "../i18n";
+import { formatDateTime, formatMegabytes, t, type WorkbenchLocale } from "../i18n";
 import { requestOriginMounted, type WorkbenchController } from "../store";
-import { copyRedacted, statusKey, type WorkbenchViewProps } from "./shared";
+import { CopyButton, statusKey, type WorkbenchViewProps } from "./shared";
 import { JobsList } from "./jobs";
 import { SpaceDetailPage } from "./space-detail";
 
@@ -117,7 +118,7 @@ function OverviewTab({ ui, controller }: WorkbenchViewProps): ReactElement {
           <dd><code>{state.protocolVersion}</code></dd>
           <dt>{t(locale, "home.owner")}</dt>
           <dd>
-            {state.owner ? `${state.owner.kind} · ${state.owner.since}` : t(locale, "home.ownerNone")}
+            {state.owner ? `${state.owner.kind} · ${formatDateTime(locale, state.owner.since)}` : t(locale, "home.ownerNone")}
           </dd>
           <dt>{t(locale, "home.role")}</dt>
           <dd><code>{state.role}</code></dd>
@@ -169,21 +170,14 @@ function WorkbenchLogSection({ ui, controller }: WorkbenchViewProps): ReactEleme
       {ui.logsStatus === "ready" && ui.logs.length === 0 ? <p className="dsh-wb-muted">{t(locale, "logs.empty")}</p> : null}
       {ui.logs.map((entry, index) => (
         <pre key={`${entry.at}-${index}`} className="dsh-wb-log">
-          {entry.at} {t(locale, entry.level === "info" ? "logs.level.info" : entry.level === "warn" ? "logs.level.warn" : "logs.level.error")} {entry.area} {entry.event}
+          {formatDateTime(locale, entry.at)} {t(locale, entry.level === "info" ? "logs.level.info" : entry.level === "warn" ? "logs.level.warn" : "logs.level.error")} {entry.area} {entry.event}
           {entry.code ? ` ${entry.code}` : ""}
           {"\n"}
           {entry.message}
         </pre>
       ))}
       <div className="dsh-wb-actions">
-        <button
-          type="button"
-          className="dsh-wb-btn"
-          disabled={!text}
-          onClick={() => copyRedacted(text)}
-        >
-          {t(locale, "app.copyLogs")}
-        </button>
+        <CopyButton locale={locale} className="dsh-wb-btn" disabled={!text} text={text} label={t(locale, "app.copyLogs")} />
       </div>
     </section>
   );
@@ -199,9 +193,11 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
         <button type="button" className="dsh-wb-btn primary" disabled={!writable} onClick={controller.openCreate}>
           {t(locale, "app.newSpace")}
         </button>
-        <button type="button" className="dsh-wb-btn" disabled={!writable} onClick={controller.openBlueprintUse}>
-          {t(locale, "blueprints.createFrom")}
-        </button>
+        {!SPACES_BLUEPRINT_SEALED ? (
+          <button type="button" className="dsh-wb-btn" disabled={!writable} onClick={controller.openBlueprintUse}>
+            {t(locale, "blueprints.createFrom")}
+          </button>
+        ) : null}
       </div>
       <InlineErrors ui={ui} origin="spaces" />
       {spaces.length === 0 ? (
@@ -228,7 +224,7 @@ function SpacesTab({ ui, controller }: WorkbenchViewProps): ReactElement {
               </small>
             </span>
             <button type="button" className="dsh-wb-btn" onClick={() => controller.selectSpace(space.id)}>
-              {space.status === "running" ? space.displayName : t(locale, "app.start")}
+              {t(locale, "detail.enter")}
             </button>
             <button type="button" className="dsh-wb-btn" disabled={!writable || index === 0} onClick={() => controller.moveSpace(space.id, -1)}>
               {t(locale, "app.moveUp")}
@@ -309,7 +305,7 @@ function SnapshotRow({
   return (
     <div className="dsh-wb-space-row">
       <span>
-        {snapshot.createdAt} · DSH {snapshot.runtimeVersion} · {(snapshot.bytes / 1048576).toFixed(1)} MB
+        {formatDateTime(locale, snapshot.createdAt)} · DSH {snapshot.runtimeVersion} · {formatMegabytes(locale, snapshot.bytes)}
         <br />
         <small>
           {t(locale, "snapshots.spaces")}: {snapshot.spaceIds.map((id) => controller.space(id)?.displayName ?? id).join(", ") || "—"}

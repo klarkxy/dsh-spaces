@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { load as loadYaml } from "js-yaml";
-import { LLM_REQUIRED, PLUGIN_REQUIRED } from "../../scripts/pack-spaces-plugin.mjs";
+import { LLM_REQUIRED, PLUGIN_REQUIRED, resolveNpmCli, runNpmPack } from "../../scripts/pack-spaces-plugin.mjs";
+import { validateComponentPayload } from "../../src/adapters/node/payload/component-payload.ts";
+import { stageComponentPayload } from "../../src/adapters/node/payload/component-selection.ts";
+import { extractArchiveAsync } from "../../src/adapters/node/runtime/toolchain.ts";
 
 const repo = join(import.meta.dirname, "..", "..");
 const patchPath = join(repo, "packages/llm-bridge/cordis.patch.yml");
@@ -103,6 +106,46 @@ test("llm-bridge is a packable DSH plugin and is embedded in the plugin payload 
   assert.ok(PLUGIN_REQUIRED.includes("lib/llm-bridge/lib/index.js"));
   assert.ok(LLM_REQUIRED.includes("cordis.patch.yml"));
   assert.ok(LLM_REQUIRED.includes("lib/index.js"));
+});
+
+test("packed auxiliary export survives startup staging and imports from the staged package", { timeout: 120_000 }, async () => {
+  // Exercise the distribution unit, not the standalone bridge or an un-staged source directory.
+  const built = validateComponentPayload(join(repo, "packages/plugin/lib"));
+  const temp = mkdtempSync(join(tmpdir(), "dsh-auxiliary-package-"));
+  temps.push(temp);
+  const home = join(temp, "home"), tools = join(temp, "tools"), unpacked = join(temp, "unpacked");
+  for (const dir of [home, tools, unpacked]) mkdirSync(dir);
+  const packed = runNpmPack(process.execPath, resolveNpmCli(process.execPath), join(repo, "packages/plugin"), temp, {
+    dryRun: false, env: { ...process.env, npm_config_cache: join(temp, "npm-cache") },
+  });
+  await extractArchiveAsync(packed.path, unpacked);
+  const staged = stageComponentPayload(home, tools, join(unpacked, "package/lib"));
+  const rel = "lib/llm-bridge/lib/auxiliary.js";
+  assert.equal(staged.digest, built.digest);
+  assert.ok(staged.files.some(file => file.path === rel), "staged manifest must cover the auxiliary export");
+  assert.deepEqual(readFileSync(join(staged.packageRoot, rel)), readFileSync(join(built.packageRoot, rel)));
+
+  // Supply the real host SDK outside the immutable payload, as the DSH host does.
+  symlinkSync(join(repo, "node_modules"), join(temp, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+  const probe = join(temp, "probe.mjs");
+  writeFileSync(probe, `
+    import assert from 'node:assert/strict';
+    import { createRequire } from 'node:module';
+    import { pathToFileURL } from 'node:url';
+    const require = createRequire(process.argv[2]);
+    const entry = require.resolve('@dsh-spaces/llm-bridge/auxiliary');
+    assert.equal(entry, process.argv[3]);
+    const auxiliary = await import(pathToFileURL(entry).href);
+    assert.equal(auxiliary.default.name, 'spaces-auxiliary-services');
+    assert.equal(typeof auxiliary.default.apply, 'function');
+    console.log('staged auxiliary imported');
+  `);
+  const child = spawnSync(process.execPath, [probe, join(staged.packageRoot, "lib/llm-bridge/package.json"), join(staged.packageRoot, rel)], {
+    cwd: temp, encoding: "utf8", timeout: 30_000, windowsHide: true,
+    env: { ...process.env, DSH_HOME: home, DSH_SPACES_HOME: home, DSH_SPACES_WEB_HOME: home },
+  });
+  assert.equal(child.status, 0, child.stderr || child.error?.message);
+  assert.match(child.stdout, /staged auxiliary imported/);
 });
 
 test(

@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "./workbench-portal";
+import { NAV_DIAG_BOOTSTRAP_REPLACE_CALL, NAV_DIAG_BOOTSTRAP_SCRIPT_RUN } from "../../../shared/nav-diag";
 import { CONTAINED_MANAGEMENT_PARAM } from "../../../shared/space-host";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { redactPublicReason } from "../../../shared/public-reason";
@@ -202,7 +203,11 @@ async function handleRequest(
       const token = url.pathname.startsWith("/bootstrap/")
         ? decodeURIComponent(url.pathname.slice("/bootstrap/".length))
         : url.searchParams.get("token") ?? "";
-      exchangeBootstrap(host, req, res, token);
+      const native = url.searchParams.get("native");
+      if (native !== null && (!/^[a-f0-9]{32}$/.test(native) || url.searchParams.getAll("native").length !== 1)) {
+        deny(res, 400, "workbench/invalid-input", "Invalid native presentation channel."); return;
+      }
+      exchangeBootstrap(host, req, res, token, native);
       return;
     }
     if (url.pathname === "/" && url.searchParams.has("token")) {
@@ -433,6 +438,7 @@ function exchangeBootstrap(
   req: IncomingMessage,
   res: ServerResponse,
   token: string,
+  nativeChannel: string | null = null,
 ): void {
   if (req.headers["sec-fetch-site"] === "cross-site") {
     deny(res, 403, "workbench/forbidden", "Cross-site bootstrap is denied.");
@@ -448,7 +454,7 @@ function exchangeBootstrap(
     return;
   }
   res.writeHead(303, {
-    location: "/",
+    location: nativeChannel ? "/native/" + nativeChannel : "/",
     "cache-control": "no-store",
     "referrer-policy": "no-referrer",
     "set-cookie": `${host.cookieName()}=${host.sessionCookie()}; Path=/; HttpOnly; SameSite=Strict`,
@@ -709,7 +715,9 @@ function sendChildBootstrap(res: ServerResponse, minted: ViewBootstrap): void {
 </head>
 <body>
 <p>正在进入工作空间…</p>
-<script>location.replace(${JSON.stringify(dest)});</script>
+<script>${NAV_DIAG_BOOTSTRAP_SCRIPT_RUN}
+location.replace(${JSON.stringify(dest)});
+${NAV_DIAG_BOOTSTRAP_REPLACE_CALL}</script>
 </body>
 </html>`);
 }

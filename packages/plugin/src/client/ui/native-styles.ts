@@ -8,14 +8,51 @@
  * siblings of the container.
  */
 export const NATIVE_HOST_CSS = `
+.dsh-native-confirm-backdrop{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:#0006;padding:24px;pointer-events:auto}
+.dsh-native-confirm{width:min(520px,100%);max-height:85vh;overflow:auto;padding:24px;border-radius:16px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1f2328);box-shadow:0 16px 60px #0004;line-height:1.6}
+.dsh-native-confirm-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
+.dsh-native-confirm .dsh-host-action.danger{border-color:var(--host-danger,#d1242f);color:var(--host-danger,#d1242f)}
+.dsh-native-confirm .dsh-host-action.danger:hover:not(:disabled){background:color-mix(in srgb,var(--host-danger,#d1242f) 12%,transparent)}
+.dsh-native-operation-notice{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 110px);padding:12px 18px;border-radius:12px;z-index:1200;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1f2328);box-shadow:0 4px 20px #0002;border:1px solid var(--dsw-alias-border-l3,#ddd)}
 [data-windows-titlebar] .dsh-host-dock[data-spaces-native] { --dsh-frame-top-clearance: var(--dsh-windows-titlebar-height); }
 .dsh-host-dock[data-spaces-native] .dsh-host-rail {
   background: var(--host-rail-bg, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #f0f1f5)));
   border-color: var(--host-border, var(--dsw-alias-border-l3, #d6d8de));
 }
+.dsh-host-dock[data-spaces-native] .dsh-host-rail > .dsh-native-startup-status {
+  align-self: stretch;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  text-align: center;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--dsw-alias-label-primary, var(--host-text, currentColor));
+}
 .dsh-native-container { overflow: hidden; display: flex; }
 .dsh-native-container[hidden] { display: none; }
 .dsh-native-guest { display: flex; width: 100%; height: 100%; border: 0; }
+.dsh-host-rail-btn > .dsh-native-space-status { position:absolute; z-index:3; right:3px; bottom:3px; box-sizing:border-box; width:11px; height:11px; border:2px solid var(--host-rail-bg,#202127); border-radius:50%; background:#939ba8; pointer-events:none; }
+.dsh-native-space-status[data-status="running"] { background:#39bf83; }
+.dsh-native-space-status[data-status="crashed"], .dsh-native-space-status[data-status="failed"] { background:#ff7878; }
+.dsh-native-space-status[data-status="starting"], .dsh-native-space-status[data-status="stopping"], .dsh-native-space-status[data-status="opening"] { background:#edb95e; }
+.dsh-native-space-menu { position:fixed; z-index:20; pointer-events:auto; min-width:176px; max-width:calc(100vw - 16px); padding:6px; border:1px solid var(--host-border,#666); border-radius:10px; background:var(--host-bg,#202127); color:var(--host-text,#fff); box-shadow:0 8px 30px #0005; }
+.dsh-native-space-menu-title { padding:6px 10px 10px; overflow-wrap:anywhere; }
+.dsh-native-space-menu-title small { display:block; opacity:.7; }
+.dsh-native-space-menu button { display:block; width:100%; text-align:left; padding:8px 10px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.dsh-native-space-menu button:hover:not(:disabled), .dsh-native-space-menu button:focus-visible { background:color-mix(in srgb,currentColor 12%,transparent); outline:2px solid var(--host-accent,#5865f2); }
+.dsh-native-space-menu button:disabled { opacity:.4; cursor:default; }
+.dsh-native-operation-error { position:absolute; z-index:21; pointer-events:auto; top:calc(var(--dsh-frame-top-clearance,0px) + 12px); left:84px; right:12px; padding:10px 36px 10px 12px; border:1px solid var(--host-danger,#d1242f); border-radius:8px; background:var(--host-bg,#202127); color:var(--host-danger,#d1242f); overflow-wrap:anywhere; }
+.dsh-native-operation-error button { position:absolute; right:6px; top:6px; background:transparent; border:0; color:inherit; font-size:20px; cursor:pointer; }
 .dsh-host-rail button[aria-current="page"] { border-color: currentColor; background: color-mix(in srgb, currentColor 12%, transparent); }
 .dsh-host-dock[data-spaces-native] .dsh-host-rail-btn[aria-current="page"] { border-color: transparent; background: transparent; }
 .dsh-host-dock[data-spaces-native] .dsh-native-service-error { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--host-danger, #d1242f); color: #fff; font: bold 12px/16px system-ui; text-align: center; }

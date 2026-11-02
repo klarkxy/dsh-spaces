@@ -8,15 +8,17 @@
  * that reports a read, a write or an import that did not work stays readable
  * from the first frame.
  */
-import React, { type ReactElement } from "react";
+import React, { useRef, type ReactElement } from "react";
 import type { ThemePreference } from "../../../../src/shared/types";
 import type { SpaceImportResult, SpaceSharePreview } from "../../../../src/shared/space-share";
 import type { WorkbenchProductOutcome } from "../../../../src/shared/workbench-product";
-import { t, type WorkbenchLocale } from "./i18n";
+import { formatDateTime, t, type WorkbenchLocale } from "./i18n";
 import { BlueprintApplyResult } from "./blueprint-ui";
 import { InlineErrors } from "./inline-error";
 import { isBlueprintApplyOutcome } from "./blueprint-session";
 import type { ImportPreviewState, WorkbenchController, WorkbenchUiState } from "./store";
+import { CopyButton } from "./view/shared";
+import { useModalDialog } from "./view/use-modal-dialog";
 import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../src/shared/ui";
 import { PressableButton, VisibleScale, VisibleSlide } from "./feature-motion";
 
@@ -173,15 +175,21 @@ export function ImportPreviewDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }): ReactElement {
+  const panel = useRef<HTMLElement>(null);
+  const modal = useModalDialog(panel, { onCancel });
   return (
     <div className="dsh-wb-overlay">
       <VisibleScale
         as="div"
+        ref={panel}
         className="dsh-wb-dialog wide dsh-wb-glass"
         role="dialog"
+        aria-modal="true"
+        aria-labelledby="dsh-wb-import-title"
+        onKeyDown={modal.onKeyDown}
         data-import-preview="true"
       >
-        <h2 className="dsh-wb-title">{t(locale, "share.preview")}</h2>
+        <h2 id="dsh-wb-import-title" className="dsh-wb-title">{t(locale, "share.preview")}</h2>
         <SharePreviewBody locale={locale} preview={preview.preview} fileName={preview.fileName} />
         <label className="dsh-wb-field">
           {t(locale, "create.name")}
@@ -309,11 +317,12 @@ export function ImportResultCard({
 export function DiagnosticsSection({
   ui,
   locale,
-  onCopy,
+  text,
 }: {
   ui: WorkbenchUiState;
   locale: WorkbenchLocale;
-  onCopy: () => void;
+  /** The redacted diagnostics text, read at click time. */
+  text: () => string;
 }): ReactElement {
   const diag = ui.diagnostics;
   return (
@@ -346,16 +355,14 @@ export function DiagnosticsSection({
             transition={{ ...springSoft, delay: Math.min(index, 10) * 0.03 }}
           >
             <pre className="dsh-wb-log">
-              {entry.at} {entry.channel} {entry.text}
+              {formatDateTime(locale, entry.at)} {entry.channel} {entry.text}
             </pre>
           </StaggerItem>
         ))}
       </StaggerList>
       {diag?.logError ? <p className="dsh-wb-alert">{diag.logError}</p> : null}
       <div className="dsh-wb-actions">
-        <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={onCopy}>
-          {t(locale, "app.copyLogs")}
-        </PressableButton>
+        <CopyButton locale={locale} className="dsh-wb-btn" text={text} label={t(locale, "app.copyLogs")} />
       </div>
     </section>
   );

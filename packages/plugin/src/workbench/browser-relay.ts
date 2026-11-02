@@ -1,3 +1,4 @@
+import { SPACES_BROWSER_SEALED } from '../../../../src/shared/browser-sealed';
 import { BROWSER_HIDE, BROWSER_RELAY, BROWSER_RESULT, clipBrowserViewport, parseBrowserChild, parseBrowserObservations,
   type BrowserIdentity, type BrowserRelay, type BrowserGuestResult } from '../../../../src/shared/browser-guest';
 import type { WorkbenchController, WorkbenchUiState } from './store';
@@ -12,6 +13,7 @@ const identityOf = (frame: ViewFrameState): BrowserIdentity => ({ spaceId: frame
 const installed = new WeakMap<WorkbenchController, { references: number; close(): void }>();
 /** Multiple manager surfaces sharing a controller must not duplicate requests. */
 export function installBrowserRelay(controller: WorkbenchController): () => void {
+  if (SPACES_BROWSER_SEALED) return () => {};
   let entry = installed.get(controller);
   if (!entry) { entry = { references: 0, close: startBrowserRelay(controller) }; installed.set(controller, entry); }
   entry.references++;

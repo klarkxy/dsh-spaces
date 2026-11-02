@@ -1,62 +1,40 @@
-# Global LLM first-version acceptance
+# 旧共享连接首版验收（0.1.5-rc.2 历史测量）
 
-Pinned runtime: `@deepseek-ai/dsh-*@0.1.5-rc.2`. Fault policy: [docs/let-it-crash.md](../let-it-crash.md). Plan: [docs/plans/global-llm-connections.md](../plans/global-llm-connections.md).
+> **这是历史记录，不是当前版本认证。** 本文记录旧共享连接首版功能在固定运行时 `@deepseek-ai/dsh-*@0.1.5-rc.2` 上的当时验收结果。它不描述当前架构，也不证明任何当前 DSH 版本通过。
+> 当前架构：[现行架构](../architecture.md)。当前合同：[旧共享连接兼容合同](../plans/global-llm-connections.md)。
+> 故障政策：[let it crash](../let-it-crash.md)。
 
-A01–A24 and A26–A30 are first-version gates. A25 is not delivered.
+## 1. 当时的门槛
 
-## Commands
+首版门槛为 A01–A24 与 A26–A30；A25（无认证连接的对外能力）当时未交付。门槛编号保留原义，只作历史对照。
 
-```sh
-npm run test:llm
-npm run test:llm:integration
-npm run test:llm:browser
-npm run validate:llm:secrets
-npm run validate:llm:distribution
-```
+## 2. 当时的执行范围
 
-Homes are temporary directories or `.sandbox`. These commands do not read or write `~/.dsh`.
+- 运行时固定 `0.1.5-rc.2`，使用已发布的 npm 包，不参考上游默认分支源码。
+- 测试 Home 全部是临时目录或 `.sandbox`，不读写真实 `~/.dsh`。
+- 覆盖：单元测试、三进程设置/凭据/模型适配集成、界面测试、秘密与分发扫描。
 
-## Matrix
+## 3. 当时的结论摘要
 
-| ID | Result | Evidence |
-|---|---|---|
-| A01 | pass | `tests/llm/llm-multi-space.test.ts`, `tests/integration/llm-integration.test.ts`: web has no shared route; A/B consume one snapshot |
-| A02 | pass | `tests/llm/llm-multi-space.test.ts`: A/B/web theme writes stay in their own settings files |
-| A03 | pass | catalog is Home-level; UI copy and create-space submit `useSharedLlm` once (`tests/llm/llm-ui.test.tsx`, `tests/ui/llm-ui-dom.test.ts`) |
-| A04 | pass | `tests/llm/llm-multi-space.test.ts` plus `tests/llm/llm-default-resolution.test.ts` and `tests/llm/llm-space-settings.test.ts` |
-| A05 | pass | running instance `catalogRevision !== catalog.revision` is pending; apply is an explicit restart (`tests/llm/llm-api-auth.test.ts`, host `pendingRestart`) |
-| A06 | pass | `tests/llm/llm-stream.test.ts`, `tests/integration/llm-integration.test.ts`: frozen snapshot keeps the old endpoint after catalog rotation |
-| A07 | pass | `tests/llm/llm-stream.test.ts`: local same-name models stay on their own mocks |
-| A08 | pass | unsupported protocol refused; `requireOfficialLlmAdapter(null)` → `LLM_ADAPTER_MISSING`; supervisor never installs `llm-pi-ai` (`tests/llm/llm-gates.test.ts`) |
-| A09 | pass | `tests/llm/llm-settings-bridge.test.ts`, `tests/llm/llm-stream.test.ts`: missing record ignores same-name env |
-| A10 | pass | official settings write to a managed route is rejected (`tests/llm/llm-settings-bridge.test.ts`) |
-| A11 | pass | forged reserved-prefix user routes do not become the resolved endpoint (`tests/llm/llm-settings-bridge.test.ts`, stream hijack) |
-| A12 | pass | `tests/llm/llm-store.test.ts`, `tests/llm/llm-concurrency.test.ts`: one commit, stale revision conflicts |
-| A13 | pass | `tests/llm/llm-api-auth.test.ts`: read-only dispatch refused |
-| A14 | pass | leftover credential record reported; catalog stays original (`tests/llm/llm-store.test.ts`) |
-| A15 | pass | committed operation is not replayed; unknown stays unknown (`tests/llm/llm-api-auth.test.ts`) |
-| A16 | pass | new credential revision + frozen snapshot (`tests/integration/llm-integration.test.ts`) |
-| A17 | pass | `mode=all` and selected/disabled bindings block delete (`tests/llm/llm-store.test.ts`) |
-| A18 | pass | retired ids cannot be reused (`tests/llm/llm-store.test.ts`) |
-| A19 | pass | joined workers stream with no manager process; closing the Host does not spawn a control process (`tests/integration/llm-integration.test.ts`) |
-| A20 | pass | apply A keep / B fail / C skip (`tests/llm/llm-api-auth.test.ts`) |
-| A21 | pass | busy/unknown refuse apply before restart (`tests/llm/llm-api-auth.test.ts`) |
-| A22 | pass | `tests/llm/llm-share.test.ts`: secret-free `llm.json`, explicit mapping, source ids are not refs |
-| A23 | pass | `tests/llm/llm-secret-leaks.test.ts`, `tests/ui/llm-ui-dom.test.ts`, `validate:llm:secrets` |
-| A24 | pass | discovery redirect / 2 MiB / 1000-model bounds (`tests/llm/llm-api-auth.test.ts`) |
-| A25 | not delivered | `LLM_CAPABILITIES.keyless === false`; UI shows keyless unsupported |
-| A26 | pass | `tests/llm/llm-space-settings.test.ts`: non-LLM YAML comments and unknown sections kept |
-| A27 | pass | unknown catalog / snapshot / share / operations schema → `LLM_UNSUPPORTED_RUNTIME` |
-| A28 | pass | `validate:llm:distribution` and `tests/llm/llm-gates.test.ts` pack `@dsh-spaces/llm-bridge`. Desktop NSIS/electron installer is not this gate |
-| A29 | POSIX pass; Windows not run | official writer uses `mode: 384` / `dirMode: 448`; POSIX `stat` is `0600`/`0700` (`tests/llm/llm-credentials.test.ts`). Windows ACLs are not claimed |
-| A30 | pass | no retry/rollback/restore/silent adapter install on LLM feature paths (`tests/llm/llm-gates.test.ts`, `validate:llm:secrets`) |
+| 范围 | 结果 |
+|---|---|
+| A01–A24、A26–A28、A30 | 当时通过 |
+| A29（凭据文件权限） | POSIX 通过；Windows ACL 未运行、未主张 |
+| A25（无认证连接） | 未交付 |
+| `0.1.5-rc.1` 与未知精确版本 | 拒绝该新能力；未接入的空间行为不变 |
 
-## Residual limits (not claimed)
+通过的具体含义仅限于所列场景在当时固定版本上的行为，不延伸到其他 DSH 版本、其他平台或后续改动。
 
-- Full official `dsh --profile` web-app processes against a paid model.
-- Windows ACL inspection of the credential file.
-- A25 keyless authentication as a product capability.
-- npm publish of `@dsh-spaces/llm-bridge` or `@dsh-spaces/plugin`.
-- Desktop installer (NSIS / DMG / AppImage) rebuild for this feature.
+## 4. 当时明确未主张的部分
 
-`0.1.5-rc.1` and unknown exact CLI versions refuse this new capability and must not break unjoined Spaces.
+- 用完整官方 CLI 拉起 Web 应用并请求付费模型。
+- Windows 上凭据文件的 ACL 检查。
+- 无认证连接作为可交付产品能力。
+- 任何 npm 发布形态。
+- 针对该功能重建桌面安装包。
+
+## 5. 之后发生的变化
+
+- 新普通空间的默认来源已改为[主空间继承](../plans/llm-main-inheritance.md)；旧共享连接成为兼容路径，本文件中通过的能力不代表新空间默认流程。
+- 版本基线已前移。本文的 `0.1.5-rc.2` 结论**不能**被引用为当前运行时或当前构建的兼容证明。
+- 需要当前结论时，只能依据当前运行时上重新执行的检查，不能沿用本表逐条"继承通过"。

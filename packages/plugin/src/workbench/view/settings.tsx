@@ -13,6 +13,7 @@ import React, { useEffect, useRef, type ReactElement } from "react";
 import { LayoutIndicator, VisibleSlide } from "../../../../../src/shared/ui";
 import { PanelScale } from "./motion";
 import { LlmModelCenter } from "../llm/center";
+import { LegacyConnectionSettings } from "../llm/legacy-settings";
 import { HomeSettingsFields, ThemeSwitch } from "../product-ui";
 import { InlineErrors } from "../inline-error";
 import { t } from "../i18n";
@@ -38,7 +39,7 @@ const MAINTENANCE_TABS: Array<[SettingsTab, Parameters<typeof t>[1]]> = [
   ["advanced", "settings.nav.service"],
 ];
 
-export function SettingsDialog({ ui, controller, systemPage }: WorkbenchViewProps): ReactElement {
+export function SettingsDialog({ ui, controller, systemPage, requestServiceStop }: WorkbenchViewProps): ReactElement {
   const asPage = systemPage === "settings";
   const locale = ui.locale;
   const writable = controller.canMutate();
@@ -68,7 +69,7 @@ export function SettingsDialog({ ui, controller, systemPage }: WorkbenchViewProp
     if (ui.pendingPlan) return;
     if (event.key === "Escape") { event.preventDefault(); controller.closeOverlay(); }
     if (event.key === "Tab") {
-      const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]') ?? []).filter((el) => el.getClientRects().length > 0);
+      const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, a[href], [tabindex="0"]') ?? []).filter((el) => el.getClientRects().length > 0);
       const first = controls[0], last = controls[controls.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -162,10 +163,16 @@ export function SettingsDialog({ ui, controller, systemPage }: WorkbenchViewProp
               <p className="dsh-wb-muted">{t(locale, "settings.service.stopHint")}</p>
               <p className="dsh-wb-muted">{t(locale, "settings.shutdownVsExit")}</p>
               <InlineErrors ui={ui} origin="service" />
-              <div><button type="button" className="dsh-wb-btn danger" disabled={!writable || busy} onClick={() => controller.preview({ kind: "service.shutdown" })}>{t(locale, "settings.service.stop")}</button></div>
+              <div><button type="button" className="dsh-wb-btn danger" disabled={!writable || busy} onClick={requestServiceStop ?? (() => controller.preview({ kind: "service.shutdown" }))}>{t(locale, "settings.service.stop")}</button></div>
             </section>
           </>}
-          {ui.settingsTab === "llm" && <LlmModelCenter locale={locale} writable={writable} client={controller.llmClient()} spaces={controller.llmSpaces()} uuid={crypto.randomUUID.bind(crypto)} />}
+          {ui.settingsTab === "llm" && <>
+            <h3 className="dsh-wb-title">{t(locale, "settings.models")}</h3>
+            <p className="dsh-wb-muted">{t(locale, "llm.modelSettingsHint")}</p>
+            <LegacyConnectionSettings locale={locale}>
+              <LlmModelCenter locale={locale} writable={writable} client={controller.llmClient()} spaces={controller.llmSpaces()} uuid={crypto.randomUUID.bind(crypto)} />
+            </LegacyConnectionSettings>
+          </>}
           <ManagementContent ui={ui} controller={controller} />
         </VisibleSlide>
       </div>

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
@@ -373,7 +374,13 @@ test("Supervisor start admits the known transition under its writer lock before 
     resolveSpaceRuntime: () => ({ bin: f.input.bin, version: f.input.cliVersion }),
     processes: () => ({ start: async () => { steps.push("spawn"); } }),
     lock: { run: async (_name: string, action: () => Promise<void>) => { steps.push("lock"); await action(); steps.push("unlock"); } },
-    installArtifact: async (_id: string, artifact: string, archiveId: string) => { steps.push("install"); archiveIds.push(archiveId); await f.input.install(artifact.endsWith("view.tgz") ? "view-bridge" : "llm-bridge"); },
+    installComponent: async (_id: string, component: Bridge) => {
+      steps.push("install");
+      const artifact = component === "view-bridge" ? host.options.viewBridgeArtifact : host.options.llmBridgeArtifact;
+      const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
+      archiveIds.push(`dsh-spaces-${component}-${digest}`);
+      await f.input.install(component);
+    },
     readDump: f.input.dump,
   };
   const supervisor = { host };

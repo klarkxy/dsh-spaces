@@ -16,6 +16,7 @@ import {
   validateComponentPayload,
   type ValidatedComponentPayload,
 } from "../../../../src/adapters/node/payload/component-payload";
+import { detectDevCheckout } from "../../../../src/adapters/node/payload/dev-checkout";
 import { bindDshCli } from "../../../../src/adapters/node/products/spaces-service";
 import { authorizeProductHome } from "../../../../src/adapters/node/home/home-guard";
 import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeLease } from "../../../../src/adapters/node/home/home-lease";
@@ -56,6 +57,7 @@ export const SUPERVISOR_CLI_FLAGS = {
 
 /** Literal argv flag until primary SUPERVISOR_CLI_FLAGS / parseSupervisorArgs integration. */
 export const COMPONENT_PAYLOAD_ARGV_FLAG = "--component-payload";
+export const DEV_CHECKOUT_ARGV_FLAG = "--dev-checkout";
 
 export const DEFAULT_SUPERVISOR_TIMEOUT_MS = 240_000;
 export const DEFAULT_SUPERVISOR_POLL_MS = 100;
@@ -151,6 +153,7 @@ export async function bootstrapSupervisor(
           home,
           allowRealHome: options.allowRealHome === true,
           fetch: options.fetch,
+          timeoutMs: options.timeoutMs,
         });
   if ("endpoint" in attached) {
     return {
@@ -232,7 +235,7 @@ export async function bootstrapSupervisor(
       entered = true;
       // The initial discovery is bound to this launch. A failed competing launch
       // must not become a second automatic attempt by a waiter.
-      const current = await attachExistingSupervisor({ home, allowRealHome: access.allowRealHome, fetch: options.fetch });
+      const current = await attachExistingSupervisor({ home, allowRealHome: access.allowRealHome, fetch: options.fetch, timeoutMs: options.timeoutMs });
       if ("endpoint" in current) return { connected: true, origin: current.endpoint.origin, endpoint: current.endpoint, payloadDir: selectedPayloadDir ?? payloadRoot, toolsDir: toolsRoot };
       if (!("missing" in current)) return fail(current.reasons);
       if (readLaunchMarker(home, toolsRoot) !== initialLaunch) {
@@ -247,28 +250,33 @@ export async function bootstrapSupervisor(
       } catch (error) {
         return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
       }
-      let pointerDigest: string | undefined;
-      try {
-        pointerDigest = readSelectedPointerDigest(home, toolsRoot, access);
-      } catch (error) {
-        return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
-      }
-      let selected: ValidatedComponentPayload | undefined;
-      if (pointerDigest === bundled.digest) {
+      // A source checkout runs in place: components link instead of staging a
+      // copy, selecting a pointer, or packing tarballs.
+      const devCheckout = detectDevCheckout(payloadRoot);
+      let selected: ValidatedComponentPayload | undefined = bundled;
+      if (!devCheckout) {
+        let pointerDigest: string | undefined;
         try {
-          selected = readSelectedComponentPayload(home, toolsRoot, access);
+          pointerDigest = readSelectedPointerDigest(home, toolsRoot, access);
         } catch (error) {
           return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
         }
-      } else {
-        try {
-          const staged = stageComponentPayload(home, toolsRoot, payloadRoot, access);
-          selected = selectComponentPayload(home, toolsRoot, staged.digest, access);
-        } catch (error) {
-          return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
+        if (pointerDigest === bundled.digest) {
+          try {
+            selected = readSelectedComponentPayload(home, toolsRoot, access);
+          } catch (error) {
+            return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
+          }
+        } else {
+          try {
+            const staged = stageComponentPayload(home, toolsRoot, payloadRoot, access);
+            selected = selectComponentPayload(home, toolsRoot, staged.digest, access);
+          } catch (error) {
+            return fail(["Bundled component payload could not be staged.", reasonOf(error)]);
+          }
         }
+        if (!selected) return fail(["Selected component payload is missing."]);
       }
-      if (!selected) return fail(["Selected component payload is missing."]);
 
       const destEntry = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES.supervisor.split("/"));
       const destWorker = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES["installation-worker"].split("/"));
@@ -279,30 +287,45 @@ export async function bootstrapSupervisor(
         return fail(["Selected snapshot-worker.mjs is missing or not a real file."]);
       }
 
-      const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
-      const browserRoot = realDirectory(join(selected.payloadRootLib, BROWSER_PAYLOAD_DIRNAME));
-      const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
-      if (!viewRoot || !browserRoot || !llmRoot) {
-        return fail(["Installed plugin package, view-bridge, browser, or llm-bridge payload is missing."]);
-      }
-      const packedArtifacts = await packLocalArtifacts({
-        pluginPackageRoot: selected.packageRoot,
-        viewBridgeRoot: viewRoot,
-        browserRoot,
-        llmBridgeRoot: llmRoot,
-        artifactDir: join(toolsRoot, "artifacts"),
-        home,
-        execPath,
-        env,
-        timeoutMs: options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS,
-        pack: options.pack,
-      });
-      if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
-      if (!packedArtifacts.llmBridgeArtifact) {
-        return fail(["llm-bridge artifact was not packed from the selected payload."]);
-      }
-      if (!packedArtifacts.browserArtifact) {
-        return fail(["browser artifact was not packed from the selected payload."]);
+      const artifactArgv: string[] = [];
+      if (devCheckout) {
+        artifactArgv.push(DEV_CHECKOUT_ARGV_FLAG, devCheckout);
+      } else {
+        const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
+        const browserRoot = realDirectory(join(selected.payloadRootLib, BROWSER_PAYLOAD_DIRNAME));
+        const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
+        if (!viewRoot || !browserRoot || !llmRoot) {
+          return fail(["Installed plugin package, view-bridge, browser, or llm-bridge payload is missing."]);
+        }
+        const packedArtifacts = await packLocalArtifacts({
+          pluginPackageRoot: selected.packageRoot,
+          viewBridgeRoot: viewRoot,
+          browserRoot,
+          llmBridgeRoot: llmRoot,
+          artifactDir: join(toolsRoot, "artifacts"),
+          home,
+          execPath,
+          env,
+          timeoutMs: options.timeoutMs ?? DEFAULT_SUPERVISOR_TIMEOUT_MS,
+          pack: options.pack,
+        });
+        if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
+        if (!packedArtifacts.llmBridgeArtifact) {
+          return fail(["llm-bridge artifact was not packed from the selected payload."]);
+        }
+        if (!packedArtifacts.browserArtifact) {
+          return fail(["browser artifact was not packed from the selected payload."]);
+        }
+        artifactArgv.push(
+          SUPERVISOR_CLI_FLAGS.pluginArtifact,
+          packedArtifacts.pluginArtifact,
+          SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
+          packedArtifacts.viewBridgeArtifact,
+          SUPERVISOR_CLI_FLAGS.browserArtifact,
+          packedArtifacts.browserArtifact,
+          SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
+          packedArtifacts.llmBridgeArtifact,
+        );
       }
 
       const childArgv = [
@@ -313,14 +336,7 @@ export async function bootstrapSupervisor(
         runtime.bin,
         SUPERVISOR_CLI_FLAGS.node,
         execPath,
-        SUPERVISOR_CLI_FLAGS.pluginArtifact,
-        packedArtifacts.pluginArtifact,
-        SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
-        packedArtifacts.viewBridgeArtifact,
-        SUPERVISOR_CLI_FLAGS.browserArtifact,
-        packedArtifacts.browserArtifact,
-        SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
-        packedArtifacts.llmBridgeArtifact,
+        ...artifactArgv,
         SUPERVISOR_CLI_FLAGS.controlToolRoot,
         toolsRoot,
         SUPERVISOR_CLI_FLAGS.snapshotWorker,
@@ -337,7 +353,9 @@ export async function bootstrapSupervisor(
         execPath,
         entry: destEntry,
         argv: childArgv,
-        cwd: join(selected.payloadRootLib, SUPERVISOR_PAYLOAD_DIRNAME),
+        // A linked checkout must not pin the source lib as the process cwd;
+        // dev builds replace those files in place. toolsRoot is outside Home.
+        cwd: devCheckout ? toolsRoot : join(selected.payloadRootLib, SUPERVISOR_PAYLOAD_DIRNAME),
         env: { ...env, DSH_HOME: home, DSH_SPACES_SUPERVISOR_DIAGNOSTICS: diagnosticFile },
         });
       } catch (error) {
@@ -407,10 +425,13 @@ async function pollEndpoint(
   const preparation = new HomeOperationLock(toolsDir);
   while (now() < deadline) {
     if (observation?.failure) return fail([observation.failure, ...readSupervisorDiagnostics(observation.diagnosticFile)]);
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
     const attached: SupervisorAttachResult = await attachExistingSupervisor({
       home,
       allowRealHome: options.allowRealHome === true,
       fetch: options.fetch,
+      timeoutMs: remaining,
       ...(polledLease ? { lease: polledLease } : {}),
     });
     if ("endpoint" in attached) {
@@ -422,13 +443,18 @@ async function pollEndpoint(
         toolsDir,
       };
     }
+    // A failed or timed-out state read is terminal. An absent endpoint while the
+    // owned launch is still preparing stays a bounded observation.
+    if ("stale" in attached) return fail(attached.reasons);
     if (!observation && !preparation.inspect().held) {
       return fail(["The other startup ended without a ready supervisor. No second startup was attempted.",
         ...("reasons" in attached ? attached.reasons : []), ...readLastSupervisorDiagnostics(home, toolsDir)]);
     }
     const blocked = diagnoseEndpointResidue(endpointPath);
     if (blocked) reasons.push(blocked);
-    await sleep(pollMs);
+    const pause = Math.min(pollMs, deadline - now());
+    if (pause <= 0) break;
+    await sleep(pause);
   }
   reasons.push("Timed out waiting for an authenticated supervisor endpoint.");
   reasons.push(...(observation ? readSupervisorDiagnostics(observation.diagnosticFile) : readLastSupervisorDiagnostics(home, toolsDir)));

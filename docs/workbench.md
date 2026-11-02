@@ -1,188 +1,143 @@
-# DSH Spaces workbench
+# DSH Spaces 工作台
 
-**Presentation update:** [Host embedding](host/embedding.md) supersedes the old ordinary-host redirect restriction. Compatible top-level hosts now keep their application and mount an in-place rail; manager-only management RPC and embedded view-bridge ownership remain unchanged. The shipped iframe transport is same-site HTTP loopback only.
+> 现行使用与运维说明。架构和数据所有权见 [architecture.md](architecture.md)；管理协议见 [merge-contract-v2.md](../tasks/merge-contract-v2.md)；故障政策见 [let-it-crash.md](let-it-crash.md)。历史实施与验收记录不替代当前版本验证。
 
-> **This branch is still under construction and acceptance.** It is not a release.
+## 1. 工作台是什么
 
-Fault policy: [let it crash](let-it-crash.md). Current protocol contract: [tasks/merge-contract-v2.md](../tasks/merge-contract-v2.md) and [tasks/workbench-contract.md](../tasks/workbench-contract.md). Historical recovery text: [tasks/history-recovery.md](../tasks/history-recovery.md) — not the current gate.
+Spaces 安装在现有 DSH Web 或 Desktop 宿主中。初始化后，原应用保留，空间栏用于切换主应用、管理工作台和普通空间。
 
-**User install (ordinary Web):** [plugin-standard-install.md](plugin-standard-install.md) — `pnpm run pack:plugin`, then `dsh plugin --profile web add` of that tarball, `dsh web`, **初始化 Spaces**. That is the intended path. Installing the full plugin onto `coding` / `notes` is a misinstall. The package is not on npm.
+每个 Home 只有一个 Supervisor 持有 Spaces 管理写权。管理工作台由专用 `spaces-hub` profile 承载；普通空间使用独立 DSH 进程和轻量桥接，不会成为第二个管理器。
 
-One Supervisor on `127.0.0.1` holds Home run rights. Ordinary workspaces keep their data and get `@dsh-spaces/view-bridge`. They are not a second manager. Public restore commands fail. Error surfaces keep **查看错误详情** / **复制脱敏日志**.
+普通空间只能在 Spaces 中通过直接创建、普通模板或 `.dshspace` 分享导入产生。Spaces 不扫描、收养或修改其他 profile。蓝图创建工作流当前封存。
 
-Chinese: [中文](#dsh-spaces-工作台).
+## 2. 安装与初始化
 
-## What you get
+按 [标准安装](plugin-standard-install.md) 构建并安装宿主插件。普通 Web 打开 **工作台 / Workbench** 后，仍要点击 **初始化 Spaces / Initialize Spaces**。官方 Desktop 在应用打开时于后台初始化并启动管理服务，主界面保持可用，不因启动开始、成功或失败而自动进入设置、新建或子空间。
 
-- Protocol **2**. State includes `protocolVersion`, `serviceEpoch`, `revision`, `availability`. Writes use `{ serviceEpoch, expectedRevision }`. Old protocol or a mismatched epoch/revision is rejected. There is no public `controller.acquire`, `controller.release`, `recovery.*`, `snapshot.restore`, or `config.restore`.
-- One Supervisor per Home. A second client attaches to a healthy existing service. It does not start a second controller and does not take over a live or unclear lock.
-- Closing a tab or host window does not stop spaces or the Supervisor. Stopping all spaces and **stopping the service** (`service.shutdown`, preview then execute) are separate user actions.
-- Manager profile `spaces-hub` (or `spaces-hub-2`, …). Ordinary spaces use a 72px rail and their own iframe origin. A failed start keeps the previous view and marks this switch as failed.
-- A space exists only when created in Spaces — directly, or from a template, blueprint, or share import. Its profile directory is `profiles/space-<name>` and its data `hub/space-<name>`; membership is the `hub/spaces.json` entry. Spaces never scans, adopts, lists, or modifies other profile directories; profiles created by older versions or other tools are not migrated.
-- User-initiated Home backups: **create**, **list**, **delete**. Create stops owned spaces first. That is not restore.
+这次启动由宿主进程按当前 Home 保存终态。界面刷新或重新挂载只是重新加入该记录，不会再要一次启动。失败或正常停止后，同一宿主进程不会自动重启。正常再次打开应用是一份新启动。已有的确认式手动服务入口也会建立一份新操作。子空间仍只在用户点击后启动。
 
-New installations pin official **`0.2.1-rc.2`** (`DSH_DEFAULT_VERSION`). Every space pins an exact DSH version at creation (the host version). Switching happens from the space's details — downgrades are forbidden, no snapshot is created automatically, third-party plugins that do not support the target block the switch, and official plugins are built into the selected runtime and change with it; Spaces never installs them into a profile. The manager (`spaces-hub`) follows the host CLI. `SPACES_MIN_DSH_VERSION` is `0.2.0-rc.2`; spaces pinned below it refuse to start. Compatibility is required interfaces, not a permanent rc.1 / rc.2 allowlist.
+设置和新建在准备期间可以点击，只保留最后一次导航意图；回到主空间会取消这次跳转，不取消后台启动。失败详情在用户主动打开设置或新建后显示：原始错误、随后的停止结果和进程记录是否保留各自独立，并经过脱敏。已有健康服务直接连接。宿主缺少所需启动观察接口时，这是明确的兼容失败，不回退到旧的初始化流程，也不据此断定服务没有启动。
 
-## Isolated Home vs your Home
+- 已存在健康服务时，附着该服务；
+- 没有服务且运行环境允许时，正常启动一次；
+- 服务已停止本身不是错误，同一宿主进程内保持停止；
+- 启动失败、所有权冲突或配置不兼容会显示真实原因；
+- 后续打开页面不会自动补装、重试、恢复或续接失败请求。
 
-| | Development | Product Home |
-|---|---|---|
-| Purpose | Disposable directory | A Home you chose, often `~/.dsh` |
-| How | Absolute `--home` **without** `--allow-real-home`. `npm run dev:web` recreates `.sandbox/dsh-web-home` | Supervisor / doctor need `--home` **and** `--allow-real-home` |
-| Do not | Point experiments at `~/.dsh` | Use production as a tutorial Home |
+完整 Spaces 插件只需安装在受支持的宿主入口。普通空间不要重复安装完整管理插件。
 
-Browser callers never submit filesystem paths, CLI commands, or launch tokens.
+## 3. 空间与视图
 
-### Browser Web acceptance in an isolated Home
+- Desktop 点击空间会核实当前状态，已运行时进入，已停止时启动一次，启动中只等待已有操作；侧栏状态标识和右键菜单提供启动、关闭、重启。通用嵌入宿主的未运行空间仍从管理入口启动。
+- 已访问视图可以保留；目标停止或重启后，旧视图身份失效。
+- 新启动或切换失败时，保留仍可用的原视图并显示本次失败。
+- 管理操作通过认证管理链执行；Desktop 侧栏额外提供受限的单个子空间启停入口，普通子空间及通用嵌入页面不因此获得管理写权。
+- 关闭标签或宿主窗口不会停止空间或 Supervisor。
 
-After `npm run build:spaces`, pack the current group with `DSH_PACK_DEST=<absolute-output-dir> node scripts/pack-spaces-plugin.mjs`. Set `DSH_WEB_CLI` to an installed official `@deepseek-ai/dsh@0.2.1-rc.2` `lib/bin.js` and `DSH_WEB_ARTIFACT_DIR` to that output directory, then run `node --import tsx scripts/accept-browser-web.ts`. The script creates and removes a disposable DSH Home, creates two official Web profiles, installs the bundled view bridge and Browser plus a test-only caller plugin through official `dsh plugin add`, and launches two actual DSH Hosts with the private Space IPC router. It checks default denial, permission-filtered capabilities, cross-Space open/list, and authenticated Browser HTTP RPC. It prints no launch token.
+主应用、`spaces-hub` 和普通空间是不同角色。主应用不属于可删除、可停止的普通空间。
 
-The Browser create preset's command validation has fixture coverage, and the Supervisor's create path orders view-bridge installation before Browser installation. The acceptance script currently installs into its disposable profiles directly; it does not demonstrate a single production Supervisor create → cold-start path. `tests/native/browser-space.test.ts` verifies official slot election and server-rendered Browser-only root. Cloud Chromium GUI could not be exercised, so visual iframe rendering and site-specific embed behavior remain for local Web testing.
+新建空间当前使用 **Web**，选择官方 DSH 的精确版本，再选择跟随主空间模型或在此空间配置。版本目录读取失败会显示错误并阻止提交。
 
-Shared LLM connections are a Home-level catalog. Management uses `POST /api/workbench/llm` and `POST /api/workbench/llmCredential`. See [the global LLM plan](plans/global-llm-connections.md).
+Browser Space 入口当前封存：不显示创建选项，不接受 Browser 创建或启动，不开放原生浏览器展示转接。底座、版本契约和扩展实现保留，后续另行验收与启用；界面不显示封存提示。
 
-## Build, pack, start (from this repo)
+## 4. 启停与服务生命周期
 
-From the repository root after `npm install`. `npm run build:spaces` writes `packages/*/lib` including the v2 component manifest at `packages/plugin/lib/supervisor/manifest.json`. Pack **outside** the package trees.
+空间的 **启动 / 停止 / 重启** 是独立的用户操作，只影响目标空间。
 
-The manifest names six components: Supervisor, manager plugin, view-bridge, Browser, llm-bridge, installation worker (schemaVersion 2, exact versions, file sha256, `source: bundled`). Standard plugin install consumes that group. Missing components fail closed. On cold start the Supervisor selects the group bundled with the host plugin and reuses a previously selected group only when its digest matches; an old Home is never rewritten or migrated.
+**停止全部空间** 与 **停止 Spaces 服务** 不同。停止服务通过预览确认其影响，随后停止受管子进程并结束 Supervisor；只有正常停机完成后才释放运行权和端点。
 
-PowerShell (directories **without spaces**; every path absolute):
+关闭页面不是停止服务。服务失联后不会自动重启、重连、重发管理请求或接管锁。用户再次打开应用可以形成一次新的正常启动，但仍须满足所有权和维护证据规则。
 
-```powershell
-# Disposable Home — not ~/.dsh
-$root = "C:\dsh-workbench-dev"
-$spacesHome = "$root\home"
-$tools = "$root\tools"
-$artifacts = "$root\artifacts"
-$snapshots = "$root\snapshots"
-New-Item -ItemType Directory -Force -Path $spacesHome, $tools, $artifacts, $snapshots | Out-Null
+Desktop 错误页的有限手动服务启动/重启入口仅以 [let-it-crash.md](let-it-crash.md) 为准：先预览受影响空间并明确确认，不重启子空间、不续跑任务、不强制终止或清除证据。
 
-npm run build:spaces
-npm pack ./packages/plugin --ignore-scripts --pack-destination $artifacts
-npm pack ./packages/view-bridge --ignore-scripts --pack-destination $artifacts
-npm pack ./packages/browser --ignore-scripts --pack-destination $artifacts
-npm pack ./packages/llm-bridge --ignore-scripts --pack-destination $artifacts
+## 5. 任务、计划与批量操作
 
-node packages/plugin/lib/supervisor/index.js `
-  --home $spacesHome `
-  --bin C:\path\to\@deepseek-ai\dsh\lib\bin.js `
-  --node "$env:ProgramFiles\nodejs\node.exe" `
-  --plugin-artifact $artifacts\dsh-spaces-plugin-0.4.0.tgz `
-  --view-bridge-artifact $artifacts\dsh-spaces-view-bridge-0.4.0.tgz `
-  --browser-artifact $artifacts\dsh-spaces-browser-0.4.0.tgz `
-  --llm-bridge-artifact $artifacts\dsh-spaces-llm-bridge-0.4.0.tgz `
-  --control-tool-root $tools `
-  --component-payload "$(Resolve-Path packages\plugin\lib)" `
-  --snapshot-worker "$(Resolve-Path packages\plugin\lib\supervisor\snapshot-worker.mjs)" `
-  --snapshot-root $snapshots
-```
+普通变更携带当前服务纪元和状态版本。过期客户端、过期状态或同名不同内容的请求会被拒绝。
 
-Current Node entry is that argv: `--component-payload` plus **four archives** (plugin, view-bridge, Browser, llm-bridge) and the **same group's** `--snapshot-worker`. Product bootstrap from an installed plugin copies the immutable group outside Home and passes the same flags. Do not mix tarballs from different builds. There is no automatic repair, retry, restore, or lock reclaim.
+危险操作先预览再执行。计划绑定服务、状态和目标指纹，并有有效期；刷新只读取原任务，不重新执行。
 
-| Flag | Role |
-|---|---|
-| `--home` | Canonical DSH Home. Absolute. |
-| `--bin` (alias `--cli`) | Bound DSH `bin.js`. Adjacent `package.json` must be an exact version. |
-| `--node` | Node used to spawn DSH. Pass it explicitly. |
-| `--plugin-artifact` | Packed `@dsh-spaces/plugin`. |
-| `--view-bridge-artifact` | Packed `@dsh-spaces/view-bridge`. |
-| `--browser-artifact` | Packed `@dsh-spaces/browser` from the same build group. |
-| `--llm-bridge-artifact` | Packed `@dsh-spaces/llm-bridge` from the same build group. |
-| `--control-tool-root` | Tools **outside** `profiles` / `hub` / `sessions` / `storages`. Default sibling `{parent}/.dsh-spaces-tools`. |
-| `--snapshot-worker` | Same-group `packages/plugin/lib/supervisor/snapshot-worker.mjs` after `build:spaces`. Required for **normal snapshot create/delete** and remaining tree copy/rename/retarget IO. Runtime install lives in `runtime-installation.ts`; the worker only forwards. This is not restore. |
-| `--component-payload` | Immutable selected `lib` directory (product bootstrap sets this). Required. |
-
-Optional: `--port` / `--port 0`; `--snapshot-root` (default sibling of Home; create/list/delete backups only); `--allow-real-home` only for a Home you intend to manage.
-
-The process prints `origin=` and `bootstrap=`. Open `bootstrap=` once locally. It is Node-only: HttpOnly cookie, then 303 to `/`. Do not paste host bearer files or DSH launch tokens into the page.
-
-A manager profile that already has `@dsh-spaces/plugin` can attach to a live Supervisor, or cold-start with the same group. Ordinary workspaces never cold-start a second controller.
-
-## Using the workbench
-
-`/` stays up when `spaces-hub` is stopped **if this Supervisor is still alive**. Manager running: embed the manager. Manager failed: show the real failure. If the Supervisor itself is dead, use stderr / launcher / local logs. There is no watchdog and no rescue page.
-
-Read-only clients can query. They do not acquire the Home lock. Live or unclear owners stay blocked. Spaces does not clear locks.
-
-In the manager UI:
-
-- **启动** / **停止** / **重启** on a space. Restart is a new user command.
-- Closing a tab is not shutdown.
-- **预览关闭服务** uses `service.shutdown` (preview then execute). That stops the Supervisor after owned work is stopped. Closing a host window or tab is not shutdown.
-- Backups: create / list / preview-delete. No restore action.
-
-Do not document **救援入口**, **需要恢复**, **接管**, **移交写控制权**, **配置恢复**, or **整 Home 恢复** as current capability.
-
-### Errors
-
-Known cause:
+任务状态为：
 
 ```text
-空间 coding 启动失败
-
-阶段：加载插件
-插件：example-plugin@1.2.3
-原因：缺少服务 example.database
-退出码：1
-
-该次启动已失败。
-
-查看错误详情    复制脱敏日志
+queued → running → succeeded / failed / cancelled
 ```
 
-Unknown cause: report the observation, unknown root cause, and that the plugin could not be attributed. A plugin error while the host is still alive does not kill the host.
+进程中断后，任务保留失败或结果无法确认的现场，不续跑。批量操作在首个失败处停止：前面的成功保留，失败项留证，后续项不执行。
 
-### Jobs and backups
+管理读取可以是瞬时投影，不应把任务列表、日志或所有磁盘内容理解为同一全局一致性快照。
 
-Dangerous work is **preview → confirm plan → execute**. Plans expire in five minutes and are checked again at execute (`serviceEpoch` + `stateRevision`). Job states: `queued` → `running` → `succeeded` / `failed` / `cancelled`. Refresh reads the same job. Interrupted jobs are failed, not replayed.
+## 6. 模型与连接
 
-Batch: first failure ends that batch. Import records definition / plugin install / start separately.
+当前有三种模型来源：
 
-Home backups are ordinary management. `snapshot.restore` and `config.restore` stay unsupported. Do not delete user backups to prove restore is gone.
+| 来源 | 调用方式 | 主要生命周期依赖 |
+| --- | --- | --- |
+| 主空间继承 | 子空间经 Supervisor 使用主空间官方 LLM 服务 | 子空间、Supervisor、主空间均可用 |
+| 旧共享连接库 | 子空间按启动快照直接调用供应商 | 子空间、配置与凭据快照、供应商 |
+| 本地/会话选择 | 按该空间或会话的显式配置调用 | 对应空间及显式目标 |
 
-The **DSH 版本** page (in the 维护 group) lists installed DSH versions; there is no install entry there. A space's DSH version changes only through the **预览切换** plan in that space's detail page — no downgrade, no automatic snapshot, and official plugins are built into the chosen runtime and change with it; Spaces never installs them into a profile. **删除** on that page removes an installed version that no space pins.
+新 Web 空间默认可以跟随主空间模型，不复制主空间 Key。主空间退出后该路径不可用，不自动启动主空间或改用其他供应商。主空间的连接与默认仍由主空间官方设置拥有。Browser 不加载模型桥接。
 
-**Upgrading Spaces:** install the new host plugin with `dsh plugin --profile web add <new tarball>`, shut the service down from the manager UI, and reopen Spaces. The Supervisor selects the host plugin's component group and aligns the manager plugin before it starts; each space's bridges align at space start. Leftover `workbench-upgrade.json` / `.dsh-spaces-upgrade/journal.json` evidence from an interrupted older update still blocks writes.
+旧共享连接继续支持既有空间和连接资产。目录保存、空间待生效状态和实际运行版本是不同事实；需要重启时由用户明确执行。旧共享连接的详细兼容边界见 [global-llm-connections.md](plans/global-llm-connections.md)。
 
-**Real acceptance:** use `scripts/verify-plugin-standard-install.mjs`. The [merge acceptance record](../tasks/merge-execution.md) separates source tests, real CLI/browser flows and platform limits. Global `runtime.install` / `runtime.upgrade` acceptance is not a current product path.
+空间本地默认和会话显式选择保持独立。显式目标失效时失败，不自动切换来源。设置界面和导入映射尚未完成的收敛项见 [model-settings-redesign-20261022.md](plans/model-settings-redesign-20261022.md)，该方案不是已完成能力清单。
 
-### Logs and doctor
+## 7. 插件、普通模板与分享
 
-Workbench **诊断** is in-app diagnostics. Standalone doctor is **diagnose only** ([packages/doctor/README.md](../packages/doctor/README.md)):
+插件发现、制品下载、安装到空间、配置参与组合和实际运行是不同状态。未能读取实际版本时显示未知，不改用 `latest` 冒充确定版本。
 
-```powershell
-node packages/doctor/lib/index.js doctor --home <abs-disposable-home>
-```
+普通模板与 `.dshspace` 分享归档用于创建或分享空间配方，不是环境备份。配方保留 base 和其精确版本；导入先创建相同 base，再安装扩展，不可用的版本直接失败。Browser 配方当前不创建空间或安装扩展。定义、安装、配置和启动分别记录结果，导入不自动启动空间。
 
-Production Home: `--home` and `--allow-real-home`. Old recover / unlock / rollback commands are unsupported product surfaces (nonzero exit). Do not document them as how to use doctor.
+**Spaces 内蓝图工作流当前封存。** 蓝图创建、生成、预览、应用以及分享码导入导出暂停；普通模板和 `.dshspace` 分享不受影响。独立蓝图包、DSHBP1/DSHBP2 协议和既有文件保留，待 Spaces 核心系统稳定后再评估唤醒。协议与封存边界见 [BLUEPRINT.md](../BLUEPRINT.md)。
 
-## What not to do
+## 8. DSH 版本与 Spaces 升级
 
-- Do not `dsh --profile coding` + `dsh plugin add @dsh-spaces/plugin` to get a manager.
-- Do not pass `--home`, `--bin`, or tarball paths through the browser.
-- Do not point `--snapshot-root` or `--control-tool-root` at `profiles`, `hub`, `sessions`, `storages`, or `.dsh-spaces-restore`.
-- Do not mix component artifacts from different builds.
-- Do not treat restore, rescue, rollback, retry, lock reclaim, or client take-over as current product actions.
+每个普通空间固定一个精确 DSH 版本，禁止降级。官方基础插件随所选运行时变化，不由 Spaces 作为第三方插件安装进 profile。管理空间跟随宿主运行时。
 
-## Related
+Web 空间在空间详情中预览并切换官方版本；不自动创建快照，不兼容的第三方插件会阻止切换。Browser 的框架版本由其 base 发行版固定，不提供单独切换 DSH 的入口。未再被任何空间使用的运行时可以通过正常管理操作删除。
 
-- [Let it crash](let-it-crash.md)
-- [Root README](../README.md)
-- [Plugin roles](../packages/plugin/README.md)
-- [Supervisor CLI](../packages/supervisor/README.md)
-- [Doctor](../packages/doctor/README.md)
+升级 Spaces 本身：
+
+1. 通过官方插件管理更新宿主中的 Spaces 插件；
+2. 在管理工作台停止 Spaces 服务；
+3. 重新打开 Spaces。
+
+Supervisor 使用新宿主插件携带的同一组件组，管理插件在管理器启动前对齐。普通既有空间不能仅凭“已经装有桥接”就视为与新组件组版本一致；当前版本状态必须据实判断，不宣称每次启动都会自动重对齐。
+
+没有应用内自我更新、一次性启动器交接或升级失败回滚。
+
+## 9. 备份与诊断
+
+Home 备份支持 **创建 / 查看 / 删除**，不支持产品内恢复。创建备份会停止已知受管空间。
+
+未登记的手工 DSH 进程不可见也不可停止，因此备份只保证已知受管空间停止后的一致性范围，不能保证所有潜在外部写者都已停止。详见 [外部进程边界](../tasks/workbench-external-discovery.md)。
+
+工作台诊断提供有界、脱敏的错误与日志。独立 Doctor 只诊断，不解锁、不恢复、不回滚、不改写任务或配置。损坏、未知和未来格式的记录保留原证据。
+
+## 10. 错误处理
+
+已知原因时，错误应包含空间、阶段、已知插件或其他可归因对象、原因和退出信息。无法确定时明确写出未知，不能把最近安装的插件直接认定为根因。
+
+错误详情和复制日志必须脱敏，不包含 token、Cookie、凭据或聊天内容。
+
+用户主动启动、停止、重启、安装、卸载和配置仍是正常管理操作，但不包装成“一键修复”“恢复中断任务”或“检查并恢复”。完整边界以 [let-it-crash.md](let-it-crash.md) 为唯一权威。
+
+## 11. 支持边界
+
+- 普通 loopback Web 与已验收的官方 Desktop 使用各自受支持的展示适配。
+- 远程 HTTPS、任意第三方原生宿主和未验证布局不属于已认证范围。
+- Web iframe 可能受到站点嵌入限制；跨域导航可见性与 Desktop native guest 不同。
+- 空间隔离不是恶意插件沙箱；同一 Host 进程和同一 OS 用户属于信任边界。
+- 当前构建、真实宿主和平台验收状态以对应记录为准，不由本文推导。
 
 ---
 
-# DSH Spaces 工作台
+## English summary
 
-> **本分支仍在施工和验收，不是一次发布。** 现行合同：[tasks/merge-contract-v2.md](../tasks/merge-contract-v2.md)。历史恢复文档：[tasks/history-recovery.md](../tasks/history-recovery.md)。
+DSH Spaces uses one Supervisor per Home, a dedicated manager profile and independent ordinary-space processes. The original host remains in place; presentation never grants management authority.
 
-故障政策：[let it crash](let-it-crash.md)。**用户安装：** [plugin-standard-install.md](plugin-standard-install.md)。本包未发布到 npm。
+Use [the installation guide](plugin-standard-install.md) to install and initialize. Closing a tab does not stop the service. Mutations use protocol 2 epochs and revisions, dangerous operations use preview then execute, and interrupted jobs are never replayed.
 
-一个 Supervisor 持有 Home 运行权。协议版本 **2**，变更带 epoch 与 revision。没有公开的接管/释放运行权或恢复命令。关闭标签或宿主窗口不停止服务。停止全部空间和 `service.shutdown` 是两个操作。
+Main-model inheritance depends on the child, Supervisor and main host. Legacy shared connections retain frozen launch snapshots and direct provider calls. Local and session selections do not silently fall back to another source.
 
-构建清单覆盖六组件。启动需要 `--component-payload`、同组四份制品（plugin / view-bridge / Browser / llm-bridge）以及同组 `--snapshot-worker`（正常快照 create/delete 与树拷贝 IO）。运行时安装已抽到 `runtime-installation.ts`，worker 只转发。Spaces 跟随宿主插件升级：用 `dsh plugin --profile web add <新包>` 更新宿主插件，在管理界面停止服务后重新打开；Supervisor 选择宿主插件的组件组并在管理器启动前对齐管理插件，各空间启动时桥接对齐。
-
-管理 UI 里用预览关闭服务来停 Supervisor。备份可创建、查看、删除，不能恢复。Doctor 只诊断。不要把接管、救援、回滚写成当前能力。
+Upgrade Spaces by updating the host plugin, stopping the service and reopening it. Backups are create/list/delete only. Unregistered external DSH writers are outside the consistency guarantee. See [the current architecture](architecture.md) and [the fault policy](let-it-crash.md) for the authoritative boundaries.

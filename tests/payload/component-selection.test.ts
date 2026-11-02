@@ -60,6 +60,7 @@ function dummyPayload(): { root: string; lib: string } {
     ["lib/view-bridge/lib/index.js", "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
     ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
+    ["lib/view-bridge/lib/typert.host.js", "export {};\n"],
     ["lib/browser/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES.browser, version: "3.0.0" })}\n`],
     ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
     ["lib/browser/LICENSE", "browser-license\n"],
@@ -70,6 +71,7 @@ function dummyPayload(): { root: string; lib: string } {
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
     ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
+    ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
   ];
   for (const [rel, content] of files) writeRel(root, rel, content);
   return { root, lib: join(root, "lib") };
@@ -110,6 +112,7 @@ test("stage reads a validated payload from profiles/web inside the target Home",
     ["lib/view-bridge/lib/index.js", "export const view = 1;\n"],
     ["lib/view-bridge/lib/client.js", "export const viewClient = 1;\n"],
     ["lib/view-bridge/lib/settings.js", "export const viewSettings = 1;\n"],
+    ["lib/view-bridge/lib/typert.host.js", "export {};\n"],
     ["lib/browser/package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES.browser, version: "3.0.0" })}\n`],
     ["lib/browser/cordis.patch.yml", "browser: dummy\n"],
     ["lib/browser/LICENSE", "browser-license\n"],
@@ -120,6 +123,7 @@ test("stage reads a validated payload from profiles/web inside the target Home",
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
     ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
+    ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   const lib = join(pluginRoot, "lib");

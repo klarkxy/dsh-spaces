@@ -204,6 +204,7 @@ test("the page shows one section at a time and marks the open one", async () => 
 
   const create = html(ctrl);
   assert.ok(create.includes('data-templates="true"'));
+  assert.equal(create.includes('data-blueprints="true"'), false);
   assert.ok(create.includes('data-templates-section="create"'));
   assert.equal(create.includes('data-templates-section="import"'), false);
   assert.equal(create.includes('data-templates-section="export"'), false);
@@ -230,7 +231,7 @@ test("a blueprint session decides the section", () => {
   assert.equal(sectionForMode("generate"), "export");
 });
 
-test("a blueprint session in generate mode opens the export section", async () => {
+test("the export section keeps ordinary sharing but hides sealed blueprint generation", async () => {
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
   ctrl.blueprint.setMode("generate");
@@ -238,6 +239,7 @@ test("a blueprint session in generate mode opens the export section", async () =
   assert.ok(page.includes('data-templates-section="export"'));
   assert.ok(page.includes(t("zh", "share.export")));
   assert.ok(page.includes(t("zh", "share.includeConfig")));
+  assert.equal(page.includes('data-templates-action="share-code"'), false);
   assert.equal(page.includes('data-templates-dropzone="true"'), false);
 });
 
@@ -248,7 +250,8 @@ test("openBlueprintGenerate lands in the export section with the space preselect
   await flush();
   const page = html(ctrl);
   assert.equal(ctrl.getSnapshot().homeTab, "blueprints");
-  assert.ok(page.includes('data-blueprint-mode="generate"'));
+  assert.equal(page.includes('data-blueprint-mode="generate"'), false);
+  assert.equal(page.includes('data-templates-action="share-code"'), false);
   assert.ok(page.includes('data-templates-section="export"'));
   assert.ok(page.includes('<option value="beta" selected=""'));
   assert.equal(page.includes('data-templates-section="create"'), false);
@@ -297,10 +300,9 @@ test("a picked file goes to the flow it belongs to, and an unknown file is repor
     },
   );
   await flush();
-  assert.deepEqual(errors, [] as string[]);
-  assert.equal(ready, 1);
-  assert.ok(ctrl.getSnapshot().blueprint.inspect);
-  assert.equal(ctrl.getSnapshot().blueprint.mode, "use");
+  assert.deepEqual(errors, [t("zh", "templates.drop.unknown")]);
+  assert.equal(ready, 0);
+  assert.equal(ctrl.getSnapshot().blueprint.inspect, null);
 
   await importTemplateFile(
     file("notes.txt", new TextEncoder().encode("just a note")),
@@ -311,8 +313,8 @@ test("a picked file goes to the flow it belongs to, and an unknown file is repor
       ready += 1;
     },
   );
-  assert.deepEqual(errors, [t("zh", "templates.drop.unknown")]);
-  assert.equal(ready, 1);
+  assert.deepEqual(errors, [t("zh", "templates.drop.unknown"), t("zh", "templates.drop.unknown")]);
+  assert.equal(ready, 0);
 });
 
 test("a failure is visible in the first frame and carries no recovery action", async () => {
@@ -324,9 +326,7 @@ test("a failure is visible in the first frame and carries no recovery action", a
 
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
-  ctrl.blueprint.readFileBytes(new Uint8Array([0xff, 0xfe]), "broken.json");
   const page = html(ctrl, "import");
-  assert.ok(page.includes("data-templates-error=\"true\""));
-  assert.match(page, /<p class="dsh-wb-alert" role="alert" data-templates-error="true">[^<]+<\/p>/);
-  assert.equal(page.includes(t("zh", "templates.drop.unknown")), false);
+  assert.equal(page.includes('data-templates-paste="true"'), false);
+  assert.equal(page.includes(t("zh", "blueprints.paste")), false);
 });

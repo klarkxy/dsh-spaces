@@ -235,6 +235,10 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
       observation: OBSERVATION,
     };
   }
+  if (request.method === 'base.versions') {
+    const versions = request.base === 'browser' ? ['0.4.0'] : ['0.2.1-rc.2', '0.2.0-rc.2'];
+    return { method: 'base.versions', base: request.base, versions, preferred: versions[0]!, observation: OBSERVATION };
+  }
   if (request.method === "plugin.versions") {
     return {
       method: "plugin.versions",
@@ -506,7 +510,7 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
     },
     preview: async (request, context) => {
       calls.push({ method: "preview", arg: request, context });
-      return planOf(request);
+      return planOf(request, { taskActivity: "idle" });
     },
     product: async (request) => {
       calls.push({ method: "product", arg: request });
@@ -591,12 +595,13 @@ function ready(ctrl: WorkbenchController): string {
 test("native settings stays a page while creating a space and after cancelling the dialog", async () => {
   const ctrl = controller(); ctrl.start(); await flush(); ctrl.openSettings();
   const renderPage = () => renderToStaticMarkup(React.createElement(WorkbenchView, {
-    ui: ctrl.getSnapshot(), controller: ctrl, contained: true, nativeSurface: true, systemPage: "settings",
+    ui: ctrl.getSnapshot(), controller: ctrl, contained: true, nativeSurface: true, systemPage: "settings", homeUrl: "http://127.0.0.1:3101/home",
   }));
   assert.match(renderPage(), /class="dsh-wb-settings-page"/);
   ctrl.openCreate(); assert.match(renderPage(), /class="dsh-wb-settings-page"/);
   ctrl.closeOverlay(); assert.match(renderPage(), /class="dsh-wb-settings-page"/);
   assert.doesNotMatch(renderPage(), /data-settings-close/);
+  assert.doesNotMatch(renderPage(), /data-home-view/, "Desktop owns its original home; the native manager must not load another one");
 });
 
 test("native settings owns its creation notice and stops covering a selected space", async () => {
@@ -799,7 +804,7 @@ test("stale failed handshake does not hide the still-selected ready space", asyn
   assert.equal(ui.viewError?.spaceId, "beta");
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "app.errorDetails")));
-  assert.ok(html.includes(t("zh", "app.copyLogs")));
+  assert.ok(html.includes(t("zh", "app.copyError")));
   assert.ok(html.includes(t("zh", "app.openIndependent")));
   assert.ok(html.includes('data-space-id="alpha"'));
   assert.ok(html.includes('data-visible="true"'));
@@ -856,7 +861,7 @@ test("preview confirmation is required; preview errors do not look like success"
   html = renderToStaticMarkup(
     React.createElement(WorkbenchView, { ui: ctrl2.getSnapshot(), controller: ctrl2 }),
   );
-  assert.ok(html.includes(t("zh", "plan.title")));
+  assert.ok(html.includes(t("zh", "plan.title.spaceDelete", { name: "Alpha (alpha)" })));
   assert.ok(html.includes(t("zh", "plan.scope")));
   assert.ok(html.includes(t("zh", "plan.targets")));
   assert.ok(html.includes(t("zh", "plan.running")));
@@ -879,7 +884,7 @@ test("preview confirmation is required; preview errors do not look like success"
   assert.equal(api3.calls.filter((item) => item.method === "submit").length, 0);
 });
 
-test("D1: a stop or a restart runs from its preview, a destructive plan of the same kind still asks", async () => {
+test("D1: an idle stop or restart runs from its preview, a destructive plan of the same kind still asks", async () => {
   const api = fakeApi();
   const ctrl = controller(api);
   await ctrl.poll();
@@ -908,6 +913,18 @@ test("D1: a stop or a restart runs from its preview, a destructive plan of the s
   assert.ok(ctrl3.getSnapshot().pendingPlan, "a destructive stop still asks for a confirmation");
   assert.equal(destructive.calls.filter((item) => item.method === "submit").length, 0);
   assert.ok(ready(ctrl3).includes(t("zh", "plan.destructive")));
+});
+
+test("a busy or unknown task requires explicit interruption consent", async () => {
+  for (const taskActivity of ["busy", "unknown"] as const) {
+    const api = fakeApi({ preview: async (request: WorkbenchPlanRequest) => planOf(request, { taskActivity }) });
+    const ctrl = controller(api); await ctrl.poll();
+    ctrl.preview({ kind: "space.stop", spaceId: "alpha" }); await flush();
+    assert.equal(ctrl.getSnapshot().pendingPlan?.plan.taskActivity, taskActivity);
+    assert.equal(api.calls.filter(item => item.method === "submit").length, 0);
+    ctrl.confirmPlan(); await flush();
+    assert.equal(api.calls.filter(item => item.method === "submit").length, 1);
+  }
 });
 
 test("D1: a delete, a version switch and a service shutdown still ask for a confirmation", async () => {
@@ -1393,15 +1410,15 @@ test("settings space rows offer open, ordering and manage actions; lifecycle act
   await ctrl.poll();
   ctrl.setHomeTab("spaces");
   const html = ready(ctrl);
-  const [start, manage, up, down] = [
-    t("zh", "app.start"), t("zh", "detail.manage"), t("zh", "app.moveUp"), t("zh", "app.moveDown"),
+  const [enter, manage, up, down] = [
+    t("zh", "detail.enter"), t("zh", "detail.manage"), t("zh", "app.moveUp"), t("zh", "app.moveDown"),
   ];
   assert.ok(!html.includes('data-space-id="hub"'), "the manager has no settings row");
-  assert.deepEqual(rowButtons(html, "alpha"), ["Alpha", up, down, manage]);
-  assert.deepEqual(rowButtons(html, "beta"), [start, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "gamma"), [start, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "delta"), [start, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "rogue"), ["rogue", up, down, manage]);
+  assert.deepEqual(rowButtons(html, "alpha"), [enter, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "beta"), [enter, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "gamma"), [enter, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "delta"), [enter, up, down, manage]);
+  assert.deepEqual(rowButtons(html, "rogue"), [enter, up, down, manage]);
 });
 
 test("the space detail page offers the per-status actions and hides them for the manager and unmanaged spaces", async () => {
@@ -1504,12 +1521,15 @@ test("runtime tab shows pinned users and only offers removal for unused runtimes
   assert.equal(html.split(`>${t("zh", "runtime.remove")}<`).length - 1, 1, "remove only for the removable runtime");
 });
 
-test("create dialog shows the host DSH version", async () => {
+test("create dialog keeps Web version selection and hides sealed Browser entry points", async () => {
   const ctrl = controller();
   await ctrl.poll();
   ctrl.openCreate();
   const html = ready(ctrl);
-  assert.ok(html.includes(t("zh", "create.dshVersion", { version: "0.1.5-rc.1" })));
+  assert.ok(html.includes(t("zh", "create.webVersion")));
+  assert.ok(!html.includes('name="base"'));
+  assert.doesNotMatch(html, /Browser|浏览器空间|封存/);
+  assert.ok(html.includes('name="baseVersion"'));
 });
 
 test("workspace iframe src is only the authorized view and pending stays hidden", async () => {
@@ -1686,6 +1706,21 @@ test("pending click keeps committed home highlight and persist until ready", asy
   assert.ok(html.includes('aria-current="true"'));
   assert.ok(html.includes(`src="${viewSrc("alpha")}"`));
   assert.ok(html.includes("dsh-wb-frames"));
+});
+
+test("a child frame allows clipboard-write for the child origin only", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () => state({ spaces: [manager, space({ id: "alpha" })] }),
+  }));
+  await ctrl.poll();
+  ctrl.selectSpace("alpha");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes("dsh-wb-frames"));
+  const tag = html.match(/<iframe[^>]*data-space-id="alpha"[^>]*>/)?.[0] ?? "";
+  assert.ok(tag.includes(`src="${viewSrc("alpha")}"`));
+  assert.ok(tag.includes(`allow="clipboard-write ${CHILD_ORIGIN}"`));
+  assert.ok(!tag.includes("clipboard-write *"));
 });
 
 test("clicking a stopped space starts it; readonly cannot start", async () => {
@@ -2546,4 +2581,77 @@ test("the space detail does not show the internal generation and managed rows", 
   assert.ok(html.includes('data-space-detail="true"'));
   assert.equal(html.includes(t("zh", "detail.id")), true);
   assert.equal(html.includes(t("zh", "detail.status")), true);
+});
+
+test("the delete plan dialog is worded in the locale with the display name and a danger confirm", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.preview({ kind: "space.delete", spaceId: "alpha", removeData: false });
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes('id="dsh-wb-plan-title"'));
+  const heading = html.match(/<h2[^>]*id="dsh-wb-plan-title"[^>]*>([\s\S]*?)<\/h2>/)?.[1] ?? "";
+  assert.equal(heading, t("zh", "plan.title.spaceDelete", { name: "Alpha (alpha)" }));
+  assert.ok(!heading.includes("space.delete"), "the raw request kind is never the title");
+  assert.ok(html.includes(t("zh", "plan.body.spaceDelete")));
+  assert.ok(html.includes(t("zh", "plan.details")), "the server wording moves into collapsed details");
+  const confirm = html.match(/<button[^>]*data-plan-id="plan-1"[^>]*>([\s\S]*?)<\/button>/)?.[0] ?? "";
+  assert.ok(confirm.includes('class="dsh-wb-btn danger"'), "a delete confirmation is destructive");
+  assert.ok(confirm.includes(t("zh", "plan.confirm.deleteSpace")));
+  assert.equal(ctrl.getSnapshot().pendingPlan?.plan.destructive, true);
+});
+
+test("an install plan dialog lists the target spaces by display name", async () => {
+  const api = fakeApi();
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.preview({ kind: "plugin.install", spaceIds: ["alpha", "beta"], catalogId: "demo", version: "2.0.0" });
+  await flush();
+  const html = ready(ctrl);
+  const heading = html.match(/<h2[^>]*id="dsh-wb-plan-title"[^>]*>([\s\S]*?)<\/h2>/)?.[1] ?? "";
+  assert.equal(heading, t("zh", "plan.title.pluginInstall", { pkg: "demo", version: "2.0.0" }));
+  assert.ok(html.includes(t("zh", "plan.body.pluginInstall", { spaces: "Alpha (alpha), Beta (beta)" })));
+  const confirm = html.match(/<button[^>]*data-plan-id="plan-1"[^>]*>([\s\S]*?)<\/button>/)?.[0] ?? "";
+  assert.ok(confirm.includes('class="dsh-wb-btn primary"'), "an install confirmation is not destructive");
+  assert.ok(confirm.includes(t("zh", "plan.confirm.install")));
+});
+
+test("a crashed space card offers start and error details without a copy button", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () => state({ spaces: [manager, space({ id: "alpha", status: "crashed" })] }),
+  }));
+  await ctrl.poll();
+  const ui = { ...ctrl.getSnapshot(), selected: "alpha" };
+  const html = renderToStaticMarkup(React.createElement(WorkbenchView, { ui, controller: ctrl }));
+  assert.ok(html.includes(t("zh", "app.crashedTitle", { name: "alpha" })));
+  assert.ok(html.includes(t("zh", "app.crashedBody")));
+  assert.ok(html.includes(`>${t("zh", "app.start")}<`), "start stays available");
+  assert.ok(html.includes(`>${t("zh", "app.errorDetails")}<`));
+  assert.ok(!html.includes(t("zh", "app.copyLogs")));
+  assert.ok(!html.includes(t("zh", "app.copyError")));
+  assert.ok(!html.includes("alpha crashed"), "the misleading id+status copy is gone");
+});
+
+test("rail buttons name each space together with its status", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () =>
+      state({ spaces: [manager, space({ id: "alpha" }), space({ id: "gamma", displayName: "Gamma", status: "crashed" })] }),
+  }));
+  await ctrl.poll();
+  const html = ready(ctrl);
+  assert.ok(html.includes(`aria-label="alpha · ${t("zh", "app.status.running")}"`));
+  assert.ok(html.includes(`aria-label="Gamma · ${t("zh", "app.status.crashed")}"`));
+  assert.ok(html.includes(`title="Gamma · ${t("zh", "app.status.crashed")}"`));
+  assert.ok(html.includes('class="dsh-wb-status" data-status="crashed" aria-hidden="true"'));
+});
+
+test("known server preview-rejection reasons are localized", () => {
+  const localized = localizeError("zh", { code: "workbench/conflict", message: "The preview expired. Request a new preview." });
+  assert.ok(localized.includes(t("zh", "error.previewExpired")));
+  assert.ok(!localized.includes("The preview expired"));
+  const epoch = localizeError("zh", { code: "workbench/conflict", message: "The preview belongs to another service epoch." });
+  assert.ok(epoch.includes(t("zh", "error.epochChanged")));
+  const english = localizeError("en", { code: "workbench/conflict", message: "The target changed. Request a new preview." });
+  assert.ok(english.includes(t("en", "error.targetChanged")));
 });

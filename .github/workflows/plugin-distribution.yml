@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "26"
+          node-version: "26.10.0"
           cache: npm
       - run: npm ci
       - run: npm run typecheck:spaces
@@ -30,7 +30,7 @@ jobs:
       - name: Version must match the dispatch input
         env:
           EXPECTED: ${{ github.event.inputs.version }}
-        run: node -e "const fs=require('fs'); const plugin=JSON.parse(fs.readFileSync('packages/plugin/package.json','utf8')); const view=JSON.parse(fs.readFileSync('packages/view-bridge/package.json','utf8')); const expected=process.env.EXPECTED; if (plugin.version!==expected || view.version!==expected) { console.error('package.json', plugin.version, view.version, '!=', expected); process.exit(1) }"
+        run: node -e "const fs=require('fs'); const expected=process.env.EXPECTED; for (const path of ['package.json','packages/plugin/package.json','packages/supervisor/package.json','packages/view-bridge/package.json','packages/llm-bridge/package.json','packages/doctor/package.json']) { const pkg=JSON.parse(fs.readFileSync(path,'utf8')); if (pkg.version!==expected) { console.error(path,pkg.version,'!=',expected); process.exit(1) } }"
       - name: Pack preflight
         run: node scripts/pack-spaces-plugin.mjs --preflight
       - name: Pack outside the package trees
@@ -44,4 +44,4 @@ jobs:
             ${{ runner.temp }}/dsh-spaces-pack/*.tgz
             ${{ runner.temp }}/dsh-spaces-pack/pack-report.json
       - name: Not published
-        run: echo "Review artifact only. @dsh-spaces/plugin is not on npm. Do not treat this as a registry release. Desktop tags stay on the Release workflow."
+        run: echo "Review artifact only. No Git tag, GitHub release or npm publication was created. The plugin tarball is the user install unit; there is no standalone Desktop package."

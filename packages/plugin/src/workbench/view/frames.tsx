@@ -11,7 +11,7 @@ import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { PanelScale } from "./motion";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { ViewFrameState } from "../view-session";
-import { copyRedacted, type WorkbenchViewProps } from "./shared";
+import { CopyButton, type WorkbenchViewProps } from "./shared";
 
 export function WorkspaceFrames({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
@@ -60,13 +60,12 @@ export function WorkspaceChrome({ ui, controller }: WorkbenchViewProps): ReactEl
           <button type="button" className="dsh-wb-btn" onClick={() => controller.openDetail(ui.viewError!.spaceId)}>
             {t(locale, "app.errorDetails")}
           </button>
-          <button
-            type="button"
+          <CopyButton
+            locale={locale}
             className="dsh-wb-btn"
-            onClick={() => copyRedacted(ui.viewError?.message ?? t(locale, "app.viewFailed"))}
-          >
-            {t(locale, "app.copyLogs")}
-          </button>
+            text={() => ui.viewError?.message ?? t(locale, "app.viewFailed")}
+            label={t(locale, "app.copyError")}
+          />
           <button type="button" className="dsh-wb-btn" onClick={() => controller.openIndependent(ui.viewError!.spaceId)}>
             {t(locale, "app.openIndependent")}
           </button>
@@ -104,6 +103,7 @@ function WorkspaceFrame({
       data-generation={String(frame.generation)}
       data-visible={visible ? "true" : "false"}
       hidden={!visible}
+      allow={frame.view ? `clipboard-write ${frame.view.origin}` : undefined}
       referrerPolicy="no-referrer"
       onLoad={bind}
     />
@@ -138,32 +138,22 @@ function IdleCard({
     <div className="dsh-wb-idle">
       <PanelScale className="dsh-wb-dialog">
         <h2 className="dsh-wb-title">{t(locale, titleKey, { name: space.displayName })}</h2>
-        <p className="dsh-wb-muted">{crashed ? t(locale, "app.errorDetails") : t(locale, "app.idleBody")}</p>
+        <p className="dsh-wb-muted">{crashed ? t(locale, "app.crashedBody") : t(locale, "app.idleBody")}</p>
         {!space.managed && <p className="dsh-wb-notice">{t(locale, "app.unmanaged")}</p>}
         <div className="dsh-wb-actions">
+          <button
+            type="button"
+            className="dsh-wb-btn primary"
+            disabled={!writable || !space.managed || space.status === "starting" || space.status === "stopping"}
+            onClick={() => controller.startSpace(space.id)}
+          >
+            {t(locale, "app.start")}
+          </button>
           {crashed ? (
-            <>
-              <button type="button" className="dsh-wb-btn primary" onClick={() => controller.openDetail(space.id)}>
-                {t(locale, "app.errorDetails")}
-              </button>
-              <button
-                type="button"
-                className="dsh-wb-btn"
-                onClick={() => copyRedacted(`${space.id} ${space.status}`)}
-              >
-                {t(locale, "app.copyLogs")}
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="dsh-wb-btn primary"
-              disabled={!writable || !space.managed || space.status === "starting" || space.status === "stopping"}
-              onClick={() => controller.startSpace(space.id)}
-            >
-              {t(locale, "app.start")}
+            <button type="button" className="dsh-wb-btn" onClick={() => controller.openDetail(space.id)}>
+              {t(locale, "app.errorDetails")}
             </button>
-          )}
+          ) : null}
           <button type="button" className="dsh-wb-btn" onClick={() => controller.openRename(space.id)} disabled={!writable}>
             {t(locale, "app.rename")}
           </button>

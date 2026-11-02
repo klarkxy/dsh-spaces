@@ -10,8 +10,16 @@ import { BrowserAddressBar } from './ui/address-bar.js';
 import { BrowserFailurePanel } from './ui/failure-panel.js';
 import { BrowserTabStrip } from './ui/tab-strip.js';
 import { BROWSER_CSS } from './ui/styles.js';
+import { noSessionScope } from './ui/no-session-scope.js';
 
 type BrowserConnection = Pick<ConnectionHandle, 'rpc'>;
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'browser.toolbar': { kind: 'list'; scope: 'root' };
+    'browser.overlay': { kind: 'list'; scope: 'root' };
+  }
+}
 
 /** Tabs are append-only for this process; an older RPC snapshot must not unmount a newer tab. */
 export function mergeTabSnapshots(previous: readonly Tab[], incoming: readonly Tab[]): Tab[] {
@@ -25,11 +33,15 @@ export const inject = ['slots', 'connection'];
 /** Browser Space has its own root. It does not embed the DSH chat application. */
 export function apply(ctx: Context): void {
   const connection: BrowserConnection = ctx.get('connection');
-  ctx.slots.inject('root', () => ctx.slots.register({ name: 'root', priority: -2 },
-    () => createElement(BrowserApp, { connection })));
+  ctx.slots.installScope('session', noSessionScope);
+  ctx.slots.inject('root', () => ctx.slots.register({ name: 'root', priority: -2, children: {
+    'browser.toolbar': { kind: 'list', scope: 'root' },
+    'browser.overlay': { kind: 'list', scope: 'root' },
+  } }, ({ renderSlot }) => createElement(BrowserApp, { connection,
+    toolbar: renderSlot('browser.toolbar', {}), overlay: renderSlot('browser.overlay', {}) })));
 }
 
-export function BrowserApp({ connection }: { connection: BrowserConnection }): ReactElement {
+export function BrowserApp({ connection, toolbar, overlay }: { connection: BrowserConnection; toolbar?: React.ReactNode; overlay?: React.ReactNode }): ReactElement {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -128,6 +140,7 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
       <BrowserAddressBar value={draft} placeholder={active?.url ?? 'Enter a website address'}
         externalUrl={active?.url ?? null} pending={pending || booting}
         onChange={setDraft} onSubmit={() => { void open(draft); }} />
+      {toolbar}
       {!nativeDesktop && active?.requestedUrl && <p role="note" className="dsh-browser-hint">Web preview: some sites do not allow embedded pages. If the page is blank or shows a refusal, use Open externally. The Browser cannot determine the cause or track links and redirects inside a cross-origin page.</p>}
       {error && <BrowserFailurePanel message={error} />}
       <main ref={pageRef} className="dsh-browser-page">
@@ -137,6 +150,7 @@ export function BrowserApp({ connection }: { connection: BrowserConnection }): R
         {nativeDesktop && active?.requestedUrl && !error && <div className="dsh-browser-home">Opening native Browser page…</div>}
         {!active?.requestedUrl && <div className="dsh-browser-home">Enter an address to open a Browser tab.</div>}
       </main>
+      {overlay}
     </div>
   </MotionRoot>;
 }

@@ -8,6 +8,7 @@
  */
 import React, { useState, type ReactElement } from "react";
 import { t } from "../i18n";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import type { WorkbenchController, WorkbenchUiState } from "../store";
 import { GenerateBlueprintPanel } from "../blueprint/generate-panel";
 import { EmptyState } from "../empty-state";
@@ -143,32 +144,34 @@ export function TemplatesExportSection({
             </PressableButton>
           </div>
         </div>
-        <div className="dsh-wb-template-card" data-templates-action="share-code">
-          <h4 className="dsh-wb-title">{t(locale, "templates.export.shareCode")}</h4>
-          <div className="dsh-wb-actions">
-            <PressableButton
-              as="button"
-              type="button"
-              className="dsh-wb-btn"
-              onClick={() => {
-                controller.blueprint.setSourceSpaceId(spaceId);
-                controller.blueprint.setMode("generate");
-              }}
-            >
-              {t(locale, "templates.export.createShareCode")}
-            </PressableButton>
+        {!SPACES_BLUEPRINT_SEALED ? (
+          <div className="dsh-wb-template-card" data-templates-action="share-code">
+            <h4 className="dsh-wb-title">{t(locale, "templates.export.shareCode")}</h4>
+            <div className="dsh-wb-actions">
+              <PressableButton
+                as="button"
+                type="button"
+                className="dsh-wb-btn"
+                onClick={() => {
+                  controller.blueprint.setSourceSpaceId(spaceId);
+                  controller.blueprint.setMode("generate");
+                }}
+              >
+                {t(locale, "templates.export.createShareCode")}
+              </PressableButton>
+            </div>
+            <details className="dsh-wb-form" data-templates-advanced="true" open={generating}>
+              <summary>{t(locale, "templates.export.advanced")}</summary>
+              <GenerateBlueprintPanel
+                locale={locale}
+                ui={ui.blueprint}
+                controller={controller}
+                spaces={spaces}
+                showSource={false}
+              />
+            </details>
           </div>
-          <details className="dsh-wb-form" data-templates-advanced="true" open={generating}>
-            <summary>{t(locale, "templates.export.advanced")}</summary>
-            <GenerateBlueprintPanel
-              locale={locale}
-              ui={ui.blueprint}
-              controller={controller}
-              spaces={spaces}
-              showSource={false}
-            />
-          </details>
-        </div>
+        ) : null}
       </div>
     </section>
   );

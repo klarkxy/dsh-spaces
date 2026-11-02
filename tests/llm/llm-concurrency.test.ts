@@ -150,8 +150,9 @@ function activitySupervisor() {
   let beforeStop = async () => {};
   const host: SupervisorLlmHost = {
     home, runs, lifecycle, llmHost: () => llmHost, jobs: () => ({} as WorkbenchJobStore),
-    managerId: () => null, llmBridgeArtifact: () => undefined, observeChildWork: (action) => action(),
-    requireManaged: (id) => id, installArtifact: async () => {}, artifactDigest: () => "",
+    managerId: () => null, hasComponent: () => false, installComponent: async () => {},
+    componentAligned: () => false, devCheckout: () => undefined, observeChildWork: (action) => action(),
+    requireManaged: (id) => id,
     homeProfileNames: () => [activityIdentity.spaceId], publicStatus: () => status,
     currentServiceEpoch: () => activityIdentity.serviceEpoch,
     stopOwned: async () => {

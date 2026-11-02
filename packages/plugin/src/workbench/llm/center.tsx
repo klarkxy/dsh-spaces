@@ -82,7 +82,7 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
   return (
     <section className="dsh-wb-llm" data-llm-center="true">
       <FadeIn as="h3" className="dsh-wb-title">
-        {t(locale, "settings.models")}
+        {t(locale, "llm.legacyConnections")}
       </FadeIn>
       <p className="dsh-wb-notice">{t(locale, "llm.scope")}</p>
       {pending.length > 0 && (
@@ -172,7 +172,11 @@ export function LlmModelCenter({ locale, writable, client, spaces, uuid, initial
                     </td>
                     <td>{modelCount(connection)}</td>
                     <td>{authLabel(locale, connection)}</td>
-                    <td>{connection.usedBySpaceIds.join(", ") || t(locale, "plan.none")}</td>
+                    <td>
+                      {connection.usedBySpaceIds
+                        .map((id) => spaces.find((row) => row.spaceId === id)?.displayName ?? id)
+                        .join(", ") || t(locale, "plan.none")}
+                    </td>
                     <td>
                       {connection.revision}
                       {pending.some((id) => connection.usedBySpaceIds.includes(id))

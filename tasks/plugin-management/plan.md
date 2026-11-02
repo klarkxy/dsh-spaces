@@ -1,5 +1,7 @@
 # 插件管理与 Space 导入导出实施计划
 
+> 2026-09-15 历史实施计划。正文中的源码落点、待办和当时能力只作历史证据；现行架构见 [../../docs/architecture.md](../../docs/architecture.md)，现行需求见 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)，故障政策见 [../../docs/let-it-crash.md](../../docs/let-it-crash.md)。与现行设计冲突的内容不是当前合同或验收门槛。
+
 日期：2026-09-15。状态：按 [let it crash](../../docs/let-it-crash.md) 全项目贯彻。插件/空间允许自行崩溃；Spaces 只反馈错误，不提供自动或手动恢复。整 Home 快照恢复不是例外。
 
 代码基线：本轮文档修订对照 `main@c89dc05`。任务 01 已实测，见 [task-01-write-scope.md](task-01-write-scope.md)。该测量仍有效，但不再作为恢复模块的建设前置，也不默认留到以后继续做恢复。

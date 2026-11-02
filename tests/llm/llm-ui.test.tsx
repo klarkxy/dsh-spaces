@@ -142,8 +142,8 @@ test("model center lists redacted connections and required copy without secrets"
       initialDescribe={describeResult()}
     />,
   );
-  assert.match(html, /模型与连接/);
-  assert.match(html, /连接配置由 Spaces 共享/);
+  assert.match(html, /旧共享连接库/);
+  assert.match(html, /连接配置由所有空间共享/);
   assert.match(html, /已保存。1 个运行中空间仍使用旧配置/);
   assert.match(html, /共享接口/);
   assert.match(html, /openai-completions/);

@@ -136,6 +136,14 @@ test("junction data roots are rejected without touching foreign settings",async(
   assert.equal(readFileSync(join(foreign,"settings.yaml"),"utf8"),"private: fixture\n");
   assert.equal(existsSync(f.marker),false);assert.equal(f.calls.length,0);
 });
+test("a matches override accepts a linked component without an install or a marker", async () => {
+  const f = fixture(false);
+  writeFileSync(join(f.installed("view-bridge"), "lib/index.js"), "changed");
+  writeFileSync(join(f.installed("llm-bridge"), "lib/index.js"), "changed");
+  await migrateProfileToAlpha({ ...f.input, matches: () => true });
+  assert.equal(f.calls.length, 0);
+  assert.equal(existsSync(f.marker), false);
+});
 test("current alpha bytes that omit a file the payload does not ship are left in place", async () => {
   const f = fixture(false);
   for (const bridge of ["view-bridge", "llm-bridge"]) {

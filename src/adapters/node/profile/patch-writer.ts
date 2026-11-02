@@ -10,6 +10,8 @@ import {
 } from "../../../core/domain/isolation";
 import { atomicWrite } from "../atomic";
 import { runDsh } from "../runtime/dsh-cli";
+import { profileBase } from './space-base';
+import { assertBrowserDumpIsolated } from '../../../core/domain/isolation';
 
 export {
   SESSION_ROW_ID,
@@ -56,7 +58,8 @@ export class PatchWriter {
   async verify(name: string): Promise<void> {
     if (name === "web") return;
     const dump = await dumpConfig(this.dshHome, name);
-    assertDumpPatched(dump, name);
+    if (profileBase(this.dshHome, name) === 'browser') assertBrowserDumpIsolated(dump, name);
+    else assertDumpPatched(dump, name);
   }
 }
 

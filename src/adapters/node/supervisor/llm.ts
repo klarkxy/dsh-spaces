@@ -9,6 +9,7 @@ import { llmCatalogPath } from "../llm/llm-paths";
 import type { WorkbenchJobContext, WorkbenchJobStore } from "../maintenance/workbench-jobs";
 import { WorkbenchPublicError } from "./errors";
 import type { SupervisorLifecycle } from "./lifecycle";
+import type { SpacesComponent } from "../payload/dev-checkout";
 import { profileHasLlmBridge } from "./profile-probe";
 import type { SpaceRunRegistry } from "./space-runs";
 import {
@@ -37,14 +38,15 @@ export interface SupervisorLlmHost {
   jobs: () => WorkbenchJobStore | undefined;
   lifecycle: SupervisorLifecycle;
   managerId: () => string | null;
-  llmBridgeArtifact: () => string | undefined;
+  hasComponent: (component: SpacesComponent) => boolean;
+  installComponent: (profileId: string, component: SpacesComponent) => Promise<void>;
+  componentAligned: (profileId: string, component: SpacesComponent) => boolean;
+  devCheckout: () => string | undefined;
   runs: SpaceRunRegistry;
   observeChildWork: <T>(action: () => T) => T;
   requireManaged: (spaceId: string) => string;
   stopOwned: (spaceId: string) => Promise<void>;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
-  installArtifact: (profileId: string, artifact: string, id: string) => Promise<void>;
-  artifactDigest: (artifact: string) => string;
   homeProfileNames: () => string[];
   publicStatus: (id: string) => WorkbenchSpace["status"];
   currentServiceEpoch: () => string;
@@ -95,6 +97,23 @@ export class SupervisorLlm {
     return session && session.transport.connected &&
       session.identity.generation === this.host.runs.generation(spaceId) &&
       session.identity.serviceEpoch === this.host.currentServiceEpoch() ? session : undefined;
+  }
+
+  async observeTaskActivity(spaceId: string): Promise<LlmActivityStatus> {
+    if (["stopped", "crashed"].includes(this.host.publicStatus(spaceId))) return "idle";
+    const session = this.currentActivity(spaceId);
+    if (!session || session.cleanupFailure) return "unknown";
+    try {
+      const report = await this.requestActivity(session, "observe", randomUUID());
+      return this.currentActivity(spaceId) === session ? report.status : "unknown";
+    } catch { return "unknown"; } // No telemetry is never evidence of idleness.
+  }
+
+  async whileIdle<T>(spaceId: string, action: () => Promise<T>): Promise<T> {
+    if (["stopped", "crashed"].includes(this.host.publicStatus(spaceId))) return action();
+    const release = await this.reserveIdle(spaceId);
+    try { return await action(); }
+    finally { await release(); }
   }
 
   private requestActivity(
@@ -304,10 +323,11 @@ export class SupervisorLlm {
   }
 
   async ensureLlmBridge(profileId: string): Promise<void> {
-    const artifact = this.host.llmBridgeArtifact();
-    if (!artifact) return;
+    if (!this.host.hasComponent("llm-bridge")) return;
     if (profileId === "web" || profileId === this.host.managerId()) return;
-    if (profileHasLlmBridge(this.host.home, profileId)) return;
-    await this.host.installArtifact(profileId, artifact, `dsh-spaces-llm-bridge-${this.host.artifactDigest(artifact)}`);
+    if (this.host.devCheckout() !== undefined
+      ? this.host.componentAligned(profileId, "llm-bridge")
+      : profileHasLlmBridge(this.host.home, profileId)) return;
+    await this.host.installComponent(profileId, "llm-bridge");
   }
 }

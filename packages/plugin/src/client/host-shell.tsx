@@ -20,7 +20,7 @@ import { hostTexts } from "./ui/host-texts";
  */
 export const HOST_SHELL_CSS = `${UI_TOKENS_CSS}${HOST_UI_TOKEN_CSS}${HOST_LIGHT_MATERIAL_CSS}
 [data-spaces-host-rail] > [data-spaces-host-covered] { visibility: hidden !important; pointer-events: none !important; }
-.dsh-host-dock { position:absolute; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--host-text,var(--dsw-alias-label-primary,#202127)); }
+.dsh-host-dock { position:fixed; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--host-text,var(--dsw-alias-label-primary,#202127)); }
 .dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-bg-base,var(--host-rail-bg,#f0f1f5)); border-right:1px solid var(--dsw-alias-border-l3,var(--host-border,#d6d8de)); transition:box-shadow var(--host-dur-base) var(--host-ease-standard); }
 .dsh-host-rail[data-busy="true"] { box-shadow:inset -1px 0 0 0 color-mix(in srgb,var(--host-accent) 45%,transparent); }
 .dsh-host-rail-divider { flex:none; width:32px; height:2px; margin:2px 0; border-radius:1px; background:color-mix(in srgb,currentColor 18%,transparent); }

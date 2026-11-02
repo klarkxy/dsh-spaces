@@ -1,4 +1,5 @@
-import { applyIsolationPatch, patchTextLooksIsolated } from "../domain/isolation";
+import { parseSpaceBaseSelection, type SpaceBaseSelection } from '../../shared/space-base';
+import { applyBrowserIsolationPatch, applyIsolationPatch, patchTextLooksIsolated } from "../domain/isolation";
 import { assertShareSecretFree, parseLlmShareManifest, type LlmShareManifest } from "../../shared/llm-share";
 import { FULL_SPACES_PACKAGE, isFullSpacesManagerSpec, isUnresolvedPluginAlias } from "../../shared/plugin-spec";
 import { isGitSpec } from "../../shared/plugin";
@@ -20,7 +21,7 @@ const NPM_RANGE_RE = /^[~^=]?v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\+[0-9A-Za-z.]
 const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "unknown"]);
 
 export interface SpaceRecipePorts {
-  createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;
+  createSpace(input: { name: string; displayName: string; icon?: string } & SpaceBaseSelection): Promise<void>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
   writePatch?(spaceId: string, patch: string): void;
   writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
@@ -52,13 +53,13 @@ export function canonicalNpmInstallSpec(plugin: SpaceSharePlugin): string | null
   return expected;
 }
 
-export function validateImportedPatch(patch: string, spaceId: string): string {
+export function validateImportedPatch(patch: string, spaceId: string, base: 'web'|'browser' = 'web'): string {
   if (spaceId === "web") throw new Error("The web space cannot be imported onto.");
   if ((RESERVED_PROFILE_NAMES as readonly string[]).includes(spaceId)) {
     throw new Error(`The ${spaceId} space cannot be imported onto.`);
   }
-  const applied = applyIsolationPatch(patch, spaceId, "profile.patch.yml");
-  if (!patchTextLooksIsolated(applied, spaceId)) {
+  const applied = base === "browser" ? applyBrowserIsolationPatch(patch, spaceId) : applyIsolationPatch(patch, spaceId, "profile.patch.yml");
+  if (base === "web" && !patchTextLooksIsolated(applied, spaceId)) {
     throw new Error("The imported config does not isolate this space.");
   }
   if (/dshHomePath\s*\(\s*['"][^'"]*\.\./i.test(applied)) {
@@ -103,7 +104,7 @@ export function parseSpaceRecipe(value: unknown): SpaceRecipe {
       throw new Error("The space recipe has an invalid DSH version. Original bytes were left unchanged.");
     }
   }
-  const source = row.source as { dshVersion?: string | null } | undefined;
+  const source = row.source as ({ dshVersion?: string | null } & SpaceBaseSelection) | undefined;
   const recipe: SpaceRecipe = {
     schemaVersion: SPACE_RECIPE_SCHEMA_VERSION,
     displayName: row.displayName,
@@ -112,7 +113,7 @@ export function parseSpaceRecipe(value: unknown): SpaceRecipe {
     patch: typeof row.patch === "string" ? row.patch : undefined,
     llm,
     source: source
-      ? { dshVersion: typeof source.dshVersion === "string" ? source.dshVersion : source.dshVersion === null ? null : undefined }
+      ? { ...parseSpaceBaseSelection(source), dshVersion: typeof source.dshVersion === "string" ? source.dshVersion : source.dshVersion === null ? null : undefined }
       : undefined,
   };
   assertRecipeSecretFree(recipe);
@@ -125,7 +126,7 @@ export function recipeFromShareParts(input: {
   plugins: SpaceSharePlugin[];
   patch?: string;
   llm?: LlmShareManifest;
-  source?: { dshVersion?: string | null };
+  source?: ({ dshVersion?: string | null } & SpaceBaseSelection);
 }): SpaceRecipe {
   return parseSpaceRecipe({
     schemaVersion: SPACE_RECIPE_SCHEMA_VERSION,
@@ -223,7 +224,7 @@ export async function applySpaceRecipe(
   let isolatedPatch: string | undefined;
   if (parsed.patch) {
     try {
-      isolatedPatch = validateImportedPatch(parsed.patch, spaceId);
+      isolatedPatch = validateImportedPatch(parsed.patch, spaceId, parsed.source?.base);
     } catch (error) {
       return definitionFailed(error);
     }
@@ -234,6 +235,7 @@ export async function applySpaceRecipe(
       name,
       displayName: options.displayName?.trim() || parsed.displayName,
       icon: parsed.icon,
+      ...parseSpaceBaseSelection(parsed.source ?? {}),
     });
   } catch (error) {
     return definitionFailed(error);

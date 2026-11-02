@@ -2,10 +2,14 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Context } from "@deepseek-ai/cordis";
+import { canonicalHome } from "../../../../src/adapters/node/home/home-operation-lock";
 import { bindDshCli, isCompatibleDshCliVersion } from "../../../../src/adapters/node/products/spaces-service";
-import type { WorkbenchApi } from "../../../../src/shared/workbench";
+import { publicReason } from "../../../../src/adapters/node/runtime/start-failure";
+import type { WorkbenchStartupFailure } from "../../../../src/shared/workbench-startup";
+import type { WorkbenchApi, WorkbenchState } from "../../../../src/shared/workbench";
 import { WORKBENCH_ENTRY_UNAVAILABLE } from "../../../../src/shared/workbench-errors";
 import type {
+  DesktopLaunchState,
   WorkbenchBootstrapResult,
   WorkbenchGuideRole,
   WorkbenchHostHint,
@@ -14,7 +18,31 @@ import type {
 } from "../types";
 import { resolveHostIdentity, type HostIdentity, type HostIdentityInput } from "./identity";
 import { DesktopServiceRestart } from "./service-restart";
+import { runDesktopSpaceAction } from "./space-action";
+import { validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
 import { createWorkbenchHttpClient, mintSupervisorHandoff, mintSupervisorPortal, type WorkbenchHttpClientOptions } from "./workbench-http";
+import {
+  copyFailure,
+  joinLaunch,
+  launchIsBusy,
+  readLaunch,
+  replaceLaunch,
+  snapshotLaunch,
+  updateLaunch,
+  type DesktopLaunchRecord,
+} from "./desktop-launch";
+import {
+  isStartupStatusUnsupported,
+  observeStartupRead,
+  publicObservationReason,
+  STARTUP_EPOCH_MISMATCH,
+  STARTUP_READY_INCONSISTENT,
+  STARTUP_STATUS_UNSUPPORTED,
+  startupFailureReasons,
+  type StartupObservationReader,
+  type StartupWatch,
+  type StartupWatchEvent,
+} from "./startup-observation";
 import { attachExistingSupervisor, pingSupervisorState, type SupervisorAttachResult } from "./supervisor-attach";
 import {
   bootstrapSupervisor,
@@ -28,6 +56,7 @@ import { parseSpaceHostAudience, parsePortalSnapshot, type PortalSnapshot, type 
 
 const inflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
+const spaceActions = new Set<string>();
 
 const IDENTITY_DAMAGED = "Manager identity is damaged or ambiguous and cannot be guessed.";
 const HANDOFF_FAILED = "The workbench entry handoff could not be minted.";
@@ -53,9 +82,22 @@ export class WorkbenchHostRuntime {
   private serviceRestart?: DesktopServiceRestart;
   private restarting = false;
   private connectionGeneration = 0;
+  private attachedEpoch: string | null = null;
+  private acceptingListeners = false;
+  private pendingEndpoint: SupervisorEndpoint | null = null;
+  private deliveredTo = new WeakSet<(endpoint: SupervisorEndpoint) => Promise<void>>();
+  private attachmentFlight: Promise<void> | null = null;
+  private attachmentFlightEpoch: string | null = null;
+  private attachmentBusy = 0;
+  private attachmentIdle: (() => void) | undefined;
   onSupervisorAttached(listener:(endpoint:SupervisorEndpoint)=>Promise<void>, stopped?: (previousEpoch: string | null) => Promise<void>):()=>void {
     this.attachedListeners.add(listener);
     if (stopped) this.stoppedListeners.add(stopped);
+    const endpoint = this.endpoint ?? this.pendingEndpoint;
+    if (this.acceptingListeners && endpoint) {
+      const generation = this.connectionGeneration;
+      void this.callListenerOnce(listener, endpoint).catch((error) => this.failLateAttachment(error, generation));
+    }
     return () => { this.attachedListeners.delete(listener); if (stopped) this.stoppedListeners.delete(stopped); };
   }
   private readonly options: WorkbenchHostRuntimeOptions;
@@ -78,6 +120,10 @@ export class WorkbenchHostRuntime {
     return this.identity.role === "manager";
   }
 
+  qualifiesForAutomaticDesktopLaunch(): boolean {
+    return this.desktopIdentityRejection() === null;
+  }
+
   hint(): WorkbenchHostHint {
     return {
       role: this.identity.role,
@@ -97,16 +143,24 @@ export class WorkbenchHostRuntime {
 
   /** Attach and read only. Never bootstrap, initialize or retire an owner during discovery. */
   async presentationSnapshot(): Promise<PortalSnapshot> {
+    return this.snapshotFromState(await this.readPresentationState());
+  }
+
+  private async readPresentationState(): Promise<WorkbenchState> {
     this.assertNotRestarting();
     const identity = this.identity;
     if (!identity.confirmed || identity.recoveryRequired || !identity.home) throw new Error(ENTRY_UNAVAILABLE);
+    if (this.endpoint && this.retiredByCurrentLaunch()) await this.supervisorReplaced(this.endpoint.serviceEpoch);
     if (!this.api || !this.endpoint) {
-      const attached = await attachExistingSupervisor({ home: identity.home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch });
+      const attached = await attachExistingSupervisor({ home: identity.home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch, timeoutMs: this.options.supervisorTimeoutMs });
       if (!("endpoint" in attached)) throw new Error(ENTRY_UNAVAILABLE);
       await this.remember(attached.endpoint);
 
     }
-    const state = await this.api!.state();
+    return this.api!.state();
+  }
+
+  private snapshotFromState(state: WorkbenchState): PortalSnapshot {
     const failure = [...state.jobs].reverse().find(job => job.kind === "plan.execute");
     if (state.maintenance && failure?.status === "failed") {
       throw new Error([failure?.error?.message, ...state.reasons].filter(Boolean).join(" ") || "Maintenance has stopped the manager. The owning service remains blocked.");
@@ -115,6 +169,32 @@ export class WorkbenchHostRuntime {
       spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) });
     if (!snapshot) throw new Error(ENTRY_UNAVAILABLE);
     return snapshot;
+  }
+
+  async spaceAction(request: DesktopSpaceAction): Promise<PortalSnapshot> {
+    this.assertNotRestarting();
+    if (!validDesktopSpaceAction(request)) throw Error("Invalid space action.");
+    // Reuse the same verified Desktop identity gate as explicit service control.
+    this.restartOperation();
+    const key = resolve(this.identity.home!) + ":" + request.spaceId;
+    if (spaceActions.has(key)) throw Error("A space operation is already in progress.");
+    spaceActions.add(key);
+    try {
+      const state = await this.readPresentationState(); // attach read-only; never launch the service here
+      this.snapshotFromState(state);
+      const final = await runDesktopSpaceAction(this.api!, request, this.options.supervisorTimeoutMs, state);
+      return this.snapshotFromState(final);
+    } finally { spaceActions.delete(key); }
+  }
+
+  async spaceActivity(spaceId: string, serviceEpoch: string): Promise<{ activity: "idle" | "busy" | "unknown"; generation: number }> {
+    this.assertNotRestarting(); this.restartOperation();
+    const state = await this.readPresentationState();
+    this.snapshotFromState(state);
+    const space = state.spaces.find(row => row.id === spaceId);
+    if (state.serviceEpoch !== serviceEpoch || !space || !space.managed || space.isHost || spaceId === state.managerId || ["desktop", "web"].includes(spaceId)) throw Error("空间状态已变化，无法确认操作影响。");
+    const plan = await this.api!.preview({ kind: "space.stop", spaceId }, { serviceEpoch, expectedRevision: state.revision });
+    return { activity: plan.taskActivity ?? "unknown", generation: space.generation };
   }
 
   async bootstrap(): Promise<WorkbenchBootstrapResult> {
@@ -138,13 +218,35 @@ export class WorkbenchHostRuntime {
         reasons: this.identity.reasons.length ? this.identity.reasons : ["Host identity could not be confirmed."],
       };
     }
-    if (this.endpoint && this.api && (await pingSupervisorState(this.endpoint, this.options.fetch))) {
+    if (this.endpoint && this.api) {
+      const origin = this.endpoint.origin;
+      try {
+        if (await pingSupervisorState(this.endpoint, this.options.fetch, this.options.supervisorTimeoutMs)) {
+          return {
+            ok: true,
+            connected: true,
+            unavailable: false,
+            origin,
+            reasons: [],
+          };
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          connected: false,
+          unavailable: false,
+          origin,
+          reasons: [publicObservationReason(error)],
+        };
+      }
+      // A legal HTTP state whose epoch or protocol does not match is terminal.
+      // Do not discover or launch again.
       return {
-        ok: true,
-        connected: true,
+        ok: false,
+        connected: false,
         unavailable: false,
-        origin: this.endpoint.origin,
-        reasons: [],
+        origin,
+        reasons: [STARTUP_EPOCH_MISMATCH],
       };
     }
     const key = resolve(home);
@@ -193,6 +295,7 @@ export class WorkbenchHostRuntime {
     this.assertNotRestarting();
     const denied = this.deniedInitialize();
     if (denied) return denied;
+    if (this.qualifiesForAutomaticDesktopLaunch()) return this.initializeThroughLaunch();
     const home = this.identity.home;
     if (!home) {
       return this.initializeFailure(this.identity.reasons.length ? this.identity.reasons : ["Host identity could not be confirmed."]);
@@ -210,7 +313,7 @@ export class WorkbenchHostRuntime {
     if (!boot.connected) return this.initializeFailure(boot.reasons, boot.unavailable);
     // Share startup, never a single-use handoff token across browser requests.
     if (!this.endpoint) {
-      const attached = await attachExistingSupervisor({ home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch });
+      const attached = await attachExistingSupervisor({ home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch, timeoutMs: this.options.supervisorTimeoutMs });
       if (!("endpoint" in attached)) return this.initializeFailure([ENTRY_UNAVAILABLE]);
       await this.remember(attached.endpoint);
     }
@@ -219,23 +322,78 @@ export class WorkbenchHostRuntime {
     return this.finishInitialize(this.currentManagerId());
   }
 
-  private async waitForManager(api = this.api!, endpoint = this.endpoint): Promise<WorkbenchInitializeResult | null> {
+  private async waitForManager(
+    api: StartupObservationReader = this.api!,
+    endpoint: { serviceEpoch: string } | null = this.endpoint,
+    watch?: StartupWatch,
+  ): Promise<WorkbenchInitializeResult | null> {
     const deadline = Date.now() + (this.options.supervisorTimeoutMs ?? 240_000);
     let reasons = ["The manager did not become ready before the startup deadline."];
+    let seen: import("../../../../src/shared/workbench-startup").WorkbenchStartupStatus | null = null;
+    const read = <T>(load: (signal: AbortSignal) => Promise<T>): Promise<T> => observeStartupRead(load, deadline - Date.now());
+    const fail = (
+      next: string[],
+      failure: WorkbenchStartupFailure | null,
+      state: WorkbenchState | null,
+      status: import("../../../../src/shared/workbench-startup").WorkbenchStartupStatus | null,
+    ) => this.finishWait(watch, next, failure, publicLaunchEpoch(status?.serviceEpoch ?? state?.serviceEpoch ?? endpoint?.serviceEpoch), publicLaunchManagerId(status?.managerId ?? state?.managerId), status);
     while (Date.now() < deadline) {
+      let state: WorkbenchState;
       try {
-        const state = await api.state();
-        if (state.reasons.length) reasons = state.reasons;
-        const manager = state.spaces.find(space => space.id === state.managerId);
-        if ((state.maintenance && [...state.jobs].reverse().find(job => job.kind === "plan.execute")?.status === "failed") || state.availability === "unavailable" || state.serviceEpoch !== endpoint?.serviceEpoch || manager?.status === "crashed") {
-          return this.initializeFailure(state.reasons.length ? reasons : ["The manager launch or its owning service is unavailable."]);
-        }
-        if (state.role === "manager" && manager?.status === "running") return null;
-      } catch {
-        return this.initializeFailure([ENTRY_UNAVAILABLE]);
+        state = await read((signal) => api.state(signal));
+      } catch (error) {
+        const reason = publicObservationReason(error);
+        return fail([reason], null, null, seen);
       }
-      await delay(250);
+      if (state.reasons.length) reasons = [...state.reasons];
+      const manager = state.spaces.find(space => space.id === state.managerId);
+      if ((state.maintenance && [...state.jobs].reverse().find(job => job.kind === "plan.execute")?.status === "failed") || state.availability === "unavailable" || state.serviceEpoch !== endpoint?.serviceEpoch || manager?.status === "crashed") {
+        const next = state.reasons.length ? reasons : ["The manager launch or its owning service is unavailable."];
+        return fail(next, null, state, seen);
+      }
+      // An already-running manager is healthy on its own. Do not call startupStatus.
+      if (state.role === "manager" && manager?.status === "running") {
+        watch?.({ kind: "state", state });
+        return null;
+      }
+      if (typeof api.startupStatus !== "function") {
+        return fail([STARTUP_STATUS_UNSUPPORTED], null, state, null);
+      }
+      let status: import("../../../../src/shared/workbench-startup").WorkbenchStartupStatus;
+      try {
+        status = await read((signal) => api.startupStatus!(signal));
+      } catch (error) {
+        const reason = isStartupStatusUnsupported(error) ? STARTUP_STATUS_UNSUPPORTED : publicObservationReason(error);
+        return fail([reason], null, state, null);
+      }
+      seen = status;
+      if (status.serviceEpoch !== endpoint?.serviceEpoch) {
+        return fail([STARTUP_EPOCH_MISMATCH], null, state, status);
+      }
+      if (status.phase === "failed") {
+        return fail(startupFailureReasons(status), status.failure, state, status);
+      }
+      if (status.phase === "ready") {
+        return fail([STARTUP_READY_INCONSISTENT], null, state, status);
+      }
+      watch?.({ kind: "status", status });
+      if (status.reasons.length) reasons = [...status.reasons];
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await delay(Math.min(250, remaining));
     }
+    return fail(reasons, null, null, seen);
+  }
+
+  private finishWait(
+    watch: StartupWatch | undefined,
+    reasons: string[],
+    failure: WorkbenchStartupFailure | null,
+    serviceEpoch: string | null,
+    managerId: string | null,
+    status: import("../../../../src/shared/workbench-startup").WorkbenchStartupStatus | null,
+  ): WorkbenchInitializeResult {
+    watch?.({ kind: "terminal", failure, reasons: [...reasons], serviceEpoch, managerId, status });
     return this.initializeFailure(reasons);
   }
 
@@ -243,8 +401,15 @@ export class WorkbenchHostRuntime {
     if (!this.shouldRegisterManager) {
       throw new Error("workbench/forbidden");
     }
-    if (this.api && this.endpoint && (await pingSupervisorState(this.endpoint, this.options.fetch))) {
-      return this.api;
+    if (this.api && this.endpoint) {
+      let matched = false;
+      try {
+        matched = await pingSupervisorState(this.endpoint, this.options.fetch, this.options.supervisorTimeoutMs);
+      } catch (error) {
+        throw new Error(publicObservationReason(error));
+      }
+      if (matched) return this.api;
+      throw new Error(STARTUP_EPOCH_MISMATCH);
     }
     const home = this.identity.home;
     if (!home) throw new Error("workbench/unavailable");
@@ -257,6 +422,7 @@ export class WorkbenchHostRuntime {
       home,
       allowRealHome: this.options.allowRealHome === true,
       fetch: this.options.fetch,
+      timeoutMs: this.options.supervisorTimeoutMs,
     });
     if ("endpoint" in attached) {
       await this.remember(attached.endpoint);
@@ -270,6 +436,7 @@ export class WorkbenchHostRuntime {
       home,
       allowRealHome: this.options.allowRealHome === true,
       fetch: this.options.fetch,
+      timeoutMs: this.options.supervisorTimeoutMs,
     });
     if ("endpoint" in attached) {
       await this.remember(attached.endpoint);
@@ -375,7 +542,7 @@ export class WorkbenchHostRuntime {
     };
   }
 
-  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult): Promise<WorkbenchBootstrapResult> {
+  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult, record?: DesktopLaunchRecord): Promise<WorkbenchBootstrapResult> {
     const home = this.identity.home;
     if (!home) {
       return {
@@ -386,13 +553,9 @@ export class WorkbenchHostRuntime {
         reasons: ["Host identity could not be confirmed."],
       };
     }
-    const attached = priorDiscovery ?? await attachExistingSupervisor({
-      home,
-      allowRealHome: this.options.allowRealHome === true,
-      fetch: this.options.fetch,
-    });
+    const attached = priorDiscovery ?? await this.discoverForLaunch(record);
     if ("endpoint" in attached) {
-      await this.remember(attached.endpoint);
+      await this.remember(attached.endpoint, record);
       return {
         ok: true,
         connected: true,
@@ -424,6 +587,12 @@ export class WorkbenchHostRuntime {
       priorDiscovery: attached,
       timeoutMs: this.options.supervisorTimeoutMs,
       fetch: this.options.fetch,
+      progress: record ? (stage) => {
+        updateLaunch(record, (row) => {
+          if (row.phase === "failed" || row.phase === "stopped" || row.phase === "ready" || row.phase === "connecting" || row.phase === "starting") return;
+          row.phase = stage === "prepare" ? "preparing" : "launching";
+        });
+      } : undefined,
     });
     if (!result.connected) {
       return {
@@ -434,7 +603,7 @@ export class WorkbenchHostRuntime {
         reasons: result.reasons,
       };
     }
-    await this.remember(result.endpoint);
+    await this.remember(result.endpoint, record);
 
     return {
       ok: true,
@@ -445,27 +614,63 @@ export class WorkbenchHostRuntime {
     };
   }
 
-  private async remember(endpoint: SupervisorEndpoint): Promise<void> {
+  private async supervisorReplaced(previousEpoch: string | null): Promise<void> {
+    this.connectionGeneration++;
+    this.endpoint = null;
+    this.api = null;
+    this.attachedEpoch = null;
+    this.acceptingListeners = false;
+    this.pendingEndpoint = null;
+    this.deliveredTo = new WeakSet();
+    this.attachmentFlight = null;
+    this.attachmentFlightEpoch = null;
+    for (const listener of this.stoppedListeners) await listener(previousEpoch);
+  }
+
+  private async remember(endpoint: SupervisorEndpoint, record?: DesktopLaunchRecord): Promise<void> {
+    if (this.attachedEpoch !== null && this.attachedEpoch !== endpoint.serviceEpoch) await this.supervisorReplaced(this.attachedEpoch);
     const generation = this.connectionGeneration;
     const api = (this.options.connect ?? createWorkbenchHttpClient)({
       endpoint,
       fetch: this.options.fetch,
     });
-    // The endpoint is published before initialization finishes. Main registration
-    // is a mutation: observe manager readiness before sending it for the first
-    // time. Manager hosts have no attachment listeners and must not wait on their
-    // own startup. Publish the connection only after attachment succeeds.
-    if (this.attachedListeners.size) {
-      const failure = await this.waitForManager(api, endpoint);
-      if (failure) throw new Error(failure.reasons.join("\n") || ENTRY_UNAVAILABLE);
-      for (const listener of this.attachedListeners) await listener(endpoint);
+    // Manager hosts have no attachment listeners and must not wait on their own
+    // startup. A Desktop launch always waits, then registers main once.
+    if (record || this.attachedListeners.size) {
+      if (this.attachmentFlight && this.attachmentFlightEpoch === endpoint.serviceEpoch) await this.attachmentFlight;
+      else if (!(this.attachedEpoch === endpoint.serviceEpoch && this.acceptingListeners)) {
+        this.attachmentFlightEpoch = endpoint.serviceEpoch;
+        const work = this.attachReady(endpoint, api, generation, record);
+        this.attachmentFlight = work;
+        try { await work; }
+        finally { if (this.attachmentFlight === work) this.attachmentFlight = null; }
+      }
     }
     if (generation !== this.connectionGeneration) throw new Error("The connection belongs to the service being manually restarted.");
-    this.endpoint = endpoint;
-    this.api = api;
+    if (!this.endpoint) {
+      this.endpoint = endpoint;
+      this.api = api;
+    }
+    if (record) this.markReady(record, endpoint);
   }
 
   previewServiceRestart() { this.assertNotRestarting(); return this.restartOperation().preview(); }
+
+  previewServiceStop() { this.assertNotRestarting(); return this.restartOperation().preview(true); }
+
+  async stopService(confirmationId: string): Promise<WorkbenchBootstrapResult> {
+    this.assertNotRestarting();
+    const operation = this.restartOperation();
+    this.restarting = true;
+    try {
+      const previousEpoch = this.endpoint?.serviceEpoch ?? null;
+      const result = await operation.execute(confirmationId, true);
+      const record = readLaunch(this.launchHomeKey());
+      if (record) updateLaunch(record, (row) => { row.phase = "stopped"; });
+      await this.supervisorReplaced(previousEpoch);
+      return result;
+    } finally { this.restarting = false; }
+  }
 
   async restartService(confirmationId: string): Promise<WorkbenchBootstrapResult> {
     this.assertNotRestarting();
@@ -485,7 +690,7 @@ export class WorkbenchHostRuntime {
       if (!identity.confirmed || identity.recoveryRequired || identity.profileId !== "desktop" || identity.role !== "workspace" || !identity.home) {
         throw new Error("Only the confirmed Desktop host can manually restart the Spaces service.");
       }
-      if (inflight.has(resolve(identity.home)) || initializeInflight.has(resolve(identity.home))) throw new Error("The current launch has not finished.");
+      if (launchIsBusy(canonicalHome(identity.home, { allowRealHome: this.options.allowRealHome === true })) || inflight.has(resolve(identity.home)) || initializeInflight.has(resolve(identity.home))) throw new Error("The current launch has not finished.");
       const denied = this.deniedInitialize();
       if (denied) throw new Error(denied.reasons.join("\n"));
     };
@@ -494,15 +699,276 @@ export class WorkbenchHostRuntime {
       home: this.identity.home!, allowRealHome: this.options.allowRealHome === true,
       assertDesktop, connect: this.options.connect, fetch: this.options.fetch, timeoutMs: this.options.supervisorTimeoutMs,
       launch: async (previousEpoch, missing) => {
-        this.connectionGeneration++;
-        this.endpoint = null; this.api = null;
-        for (const listener of this.stoppedListeners) await listener(previousEpoch);
-        const result = await this.connectSupervisor(true, missing);
+        await this.supervisorReplaced(previousEpoch);
+        const record = replaceLaunch(this.launchHomeKey());
+        const result = await this.runLaunch(record, missing);
         if (result.connected && (this.endpoint as SupervisorEndpoint | null)?.serviceEpoch === previousEpoch) throw new Error("The previous service is still active.");
         return result;
       },
     });
   }
+
+  async beginDesktopLaunch(): Promise<DesktopLaunchState> {
+    this.assertNotRestarting();
+    const denied = this.desktopIdentityRejection();
+    if (denied) throw new Error(denied);
+    const { record, created } = joinLaunch(this.launchHomeKey());
+    if (created) void this.runLaunch(record).catch(() => undefined);
+    return snapshotLaunch(record);
+  }
+
+  async desktopLaunchState(): Promise<DesktopLaunchState> {
+    const denied = this.desktopIdentityRejection();
+    if (denied) throw new Error(denied);
+    return snapshotLaunch(readLaunch(this.launchHomeKey()));
+  }
+
+  private desktopIdentityRejection(): string | null {
+    const identity = this.identity;
+    if (!identity.confirmed || identity.recoveryRequired || identity.profileId !== "desktop" || identity.role !== "workspace" || !identity.home) {
+      return "Only the confirmed Desktop host can launch the Spaces service.";
+    }
+    const denied = this.deniedInitialize();
+    return denied ? denied.reasons.join("\n") : null;
+  }
+
+  private launchHomeKey(): string {
+    const home = this.identity.home;
+    if (!home) throw new Error("Only the confirmed Desktop host can launch the Spaces service.");
+    return canonicalHome(home, { allowRealHome: this.options.allowRealHome === true });
+  }
+
+  private async initializeThroughLaunch(): Promise<WorkbenchInitializeResult> {
+    const snapshot = await this.beginDesktopLaunch();
+    const homeKey = this.launchHomeKey();
+    const joined = readLaunch(homeKey);
+    if (joined?.operationId === snapshot.operationId) await joined.done;
+    const current = readLaunch(homeKey);
+    if (!current || current.operationId !== snapshot.operationId || current.phase !== "ready") {
+      const reasons = current?.operationId === snapshot.operationId && current.reasons.length
+        ? [...current.reasons]
+        : ["The Desktop launch is not ready."];
+      return this.initializeFailure(reasons);
+    }
+    if (!this.endpoint) {
+      try {
+        const attached = await attachExistingSupervisor({
+          home: this.identity.home!,
+          allowRealHome: this.options.allowRealHome === true,
+          fetch: this.options.fetch,
+          timeoutMs: this.options.supervisorTimeoutMs,
+        });
+        if (!("endpoint" in attached)) return this.initializeFailure([ENTRY_UNAVAILABLE]);
+        await this.remember(attached.endpoint);
+      } catch (error) {
+        return this.initializeFailure([publicReason(error)]);
+      }
+    }
+    if (!this.endpoint) return this.initializeFailure([ENTRY_UNAVAILABLE]);
+    return this.finishInitialize(current.managerId ?? this.currentManagerId());
+  }
+
+  private async runLaunch(record: DesktopLaunchRecord, priorDiscovery?: SupervisorAttachResult): Promise<WorkbenchBootstrapResult> {
+    try {
+      const result = await this.connectSupervisor(true, priorDiscovery, record);
+      if (!result.connected) this.failRecord(record, result.reasons);
+      return result;
+    } catch (error) {
+      this.failRecord(record, error);
+      throw error;
+    } finally {
+      record.settle();
+    }
+  }
+
+  private async discoverForLaunch(record?: DesktopLaunchRecord): Promise<SupervisorAttachResult> {
+    const home = this.identity.home;
+    if (!home) return { blocked: true, reasons: ["Host identity could not be confirmed."] };
+    if (record) {
+      updateLaunch(record, (row) => {
+        if (row.phase === "failed" || row.phase === "stopped" || row.phase === "ready" || row.phase === "connecting" || row.phase === "starting") return;
+        row.phase = "discovering";
+      });
+    }
+    return attachExistingSupervisor({
+      home,
+      allowRealHome: this.options.allowRealHome === true,
+      fetch: this.options.fetch,
+      timeoutMs: this.options.supervisorTimeoutMs,
+    });
+  }
+
+  private async attachReady(endpoint: SupervisorEndpoint, api: WorkbenchApi, generation: number, record?: DesktopLaunchRecord): Promise<void> {
+    if (record) {
+      updateLaunch(record, (row) => {
+        if (row.phase === "failed" || row.phase === "stopped" || row.phase === "ready") return;
+        row.phase = "starting";
+      });
+    }
+    const waiting = await this.waitForManager(api, endpoint, (event) => this.observeLaunch(record, event));
+    if (generation !== this.connectionGeneration) throw new Error("The connection belongs to the service being manually restarted.");
+    if (waiting) throw new Error(waiting.reasons.join("\n") || "The manager did not become ready.");
+    if (record) {
+      updateLaunch(record, (row) => {
+        if (row.phase === "failed" || row.phase === "stopped" || row.phase === "ready") return;
+        row.phase = "connecting";
+      });
+    }
+    this.attachedEpoch = endpoint.serviceEpoch;
+    this.pendingEndpoint = endpoint;
+    this.acceptingListeners = true;
+    try {
+      while (generation === this.connectionGeneration) {
+        const pending = [...this.attachedListeners].filter((listener) => !this.deliveredTo.has(listener));
+        if (pending.length) {
+          for (const listener of pending) {
+            if (generation !== this.connectionGeneration) break;
+            await this.callListenerOnce(listener, endpoint);
+          }
+          continue;
+        }
+        if (this.attachmentBusy === 0) break;
+        await new Promise<void>((resolve) => { this.attachmentIdle = resolve; });
+      }
+      if (generation !== this.connectionGeneration) throw new Error("The connection belongs to the service being manually restarted.");
+      if (!this.endpoint) {
+        this.endpoint = endpoint;
+        this.api = api;
+      }
+      this.pendingEndpoint = null;
+    } catch (error) {
+      if (generation !== this.connectionGeneration) throw error;
+      this.acceptingListeners = false;
+      this.pendingEndpoint = null;
+      if (record) this.failRecord(record, error);
+      throw error;
+    }
+  }
+
+  private async callListenerOnce(listener: (endpoint: SupervisorEndpoint) => Promise<void>, endpoint: SupervisorEndpoint): Promise<void> {
+    if (this.deliveredTo.has(listener)) return;
+    this.deliveredTo.add(listener);
+    this.attachmentBusy++;
+    try { await listener(endpoint); }
+    finally {
+      this.attachmentBusy--;
+      if (this.attachmentBusy === 0 && this.attachmentIdle) {
+        const done = this.attachmentIdle;
+        this.attachmentIdle = undefined;
+        done();
+      }
+    }
+  }
+
+  private retiredByCurrentLaunch(): boolean {
+    const home = this.identity.home;
+    if (!home || !this.endpoint) return false;
+    let record: DesktopLaunchRecord | undefined;
+    try { record = readLaunch(canonicalHome(home, { allowRealHome: this.options.allowRealHome === true })); }
+    catch { return false; }
+    return record?.phase === "ready" && !!record.serviceEpoch && record.serviceEpoch !== this.endpoint.serviceEpoch;
+  }
+
+  private failLateAttachment(error: unknown, generation: number): void {
+    if (generation !== this.connectionGeneration) return;
+    this.acceptingListeners = false;
+    const home = this.identity.home;
+    if (!home) return;
+    let record: DesktopLaunchRecord | undefined;
+    try { record = readLaunch(canonicalHome(home, { allowRealHome: this.options.allowRealHome === true })); }
+    catch { return; }
+    if (!record || (record.phase !== "ready" && record.phase !== "connecting")) return;
+    this.failRecord(record, error);
+  }
+
+  private markReady(record: DesktopLaunchRecord, endpoint: SupervisorEndpoint): void {
+    updateLaunch(record, (row) => {
+      if (row.phase === "failed" || row.phase === "stopped") return;
+      row.phase = "ready";
+      const epoch = publicLaunchEpoch(endpoint.serviceEpoch);
+      if (epoch) row.serviceEpoch = epoch;
+      if (!row.managerId) {
+        const managerId = publicLaunchManagerId(this.identity.managerId);
+        if (managerId) row.managerId = managerId;
+      }
+      row.reasons = [];
+      row.failure = null;
+    });
+  }
+
+  private observeLaunch(record: DesktopLaunchRecord | undefined, event: StartupWatchEvent): void {
+    if (!record) return;
+    if (event.kind === "terminal") {
+      updateLaunch(record, (row) => {
+        if (row.phase === "failed" || row.phase === "stopped") return;
+        row.phase = "failed";
+        if (event.serviceEpoch) row.serviceEpoch = event.serviceEpoch;
+        if (event.managerId) row.managerId = event.managerId;
+        row.reasons = launchReasons(event.reasons);
+        row.failure = event.failure ? copyFailure(cleanLaunchFailure(event.failure)) : null;
+      });
+      return;
+    }
+    updateLaunch(record, (row) => {
+      if (row.phase === "failed" || row.phase === "stopped" || row.phase === "ready") return;
+      if (event.kind === "state") {
+        const epoch = publicLaunchEpoch(event.state.serviceEpoch);
+        const managerId = publicLaunchManagerId(event.state.managerId);
+        if (epoch) row.serviceEpoch = epoch;
+        if (managerId) row.managerId = managerId;
+        return;
+      }
+      if (row.phase === "connecting") return;
+      if (event.status.phase === "preparing" || event.status.phase === "starting") row.phase = event.status.phase;
+      const epoch = publicLaunchEpoch(event.status.serviceEpoch);
+      const managerId = publicLaunchManagerId(event.status.managerId);
+      if (epoch) row.serviceEpoch = epoch;
+      if (managerId) row.managerId = managerId;
+      if (event.status.reasons.length) row.reasons = launchReasons(event.status.reasons);
+    });
+  }
+
+  private failRecord(record: DesktopLaunchRecord, source: unknown, failure: WorkbenchStartupFailure | null = null): void {
+    updateLaunch(record, (row) => {
+      if (row.phase === "failed" || row.phase === "stopped") return;
+      row.phase = "failed";
+      row.reasons = launchReasons(source);
+      row.failure = failure ? copyFailure(cleanLaunchFailure(failure)) : null;
+    });
+  }
+}
+
+function publicLaunchEpoch(id: string | null | undefined): string | null {
+  return typeof id === "string" && /^[a-f0-9]{64}$/.test(id) ? id : null;
+}
+
+function publicLaunchManagerId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  if (id === "web" || /^[a-z0-9][a-z0-9-]{0,38}$/.test(id)) return id;
+  return null;
+}
+
+function cleanLaunchFailure(failure: WorkbenchStartupFailure): WorkbenchStartupFailure {
+  const stage = publicReason(failure.stage).slice(0, 64);
+  const primaryReason = publicReason(failure.primaryReason);
+  const cleanupReason = failure.cleanupReason ? publicReason(failure.cleanupReason) : undefined;
+  return {
+    stage,
+    primaryReason,
+    ...(cleanupReason ? { cleanupReason } : {}),
+    instanceRetained: failure.instanceRetained === true,
+  };
+}
+
+function launchReasons(source: unknown): string[] {
+  const values = Array.isArray(source) ? source : [source];
+  const reasons: string[] = [];
+  for (const value of values) {
+    const reason = publicReason(value);
+    if (!reason || reasons.includes(reason)) continue;
+    reasons.push(reason);
+  }
+  return reasons.slice(0, 32);
 }
 
 export function runtimeFromContext(ctx: Context, config: { snapshotRoot?: string } = {}): WorkbenchHostRuntime {

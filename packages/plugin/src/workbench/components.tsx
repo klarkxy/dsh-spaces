@@ -29,7 +29,7 @@ export { Overlays } from "./view/dialogs";
 export { SettingsDialog } from "./view/settings";
 export { SpaceMenu } from "./view/menu";
 
-export function WorkbenchView({ ui, controller, homeUrl, contained = false, nativeSurface = false, systemPage }: WorkbenchViewProps): ReactElement {
+export function WorkbenchView({ ui, controller, homeUrl, contained = false, nativeSurface = false, systemPage, requestServiceStop }: WorkbenchViewProps): ReactElement {
   useEffect(() => installBrowserRelay(controller), [controller]);
   const locale = ui.locale;
   const visibleSystemPage = ui.selected === "home" ? systemPage : null;
@@ -43,7 +43,7 @@ export function WorkbenchView({ ui, controller, homeUrl, contained = false, nati
           <button type="button" className="dsh-wb-btn" onClick={controller.openSettings}>{t(locale, "app.settings")}</button>
         </nav> : <Rail ui={ui} controller={controller} />}
         <div className="dsh-wb-main" inert={ui.overlay?.type === "settings" || undefined}>
-          {homeUrl && <iframe className="dsh-wb-frame dsh-wb-home-frame" title="DSH" src={homeUrl} data-home-view="true" allow="clipboard-write" hidden={ui.selected !== "home"} referrerPolicy="no-referrer" />}
+          {!nativeSurface && homeUrl && <iframe className="dsh-wb-frame dsh-wb-home-frame" title="DSH" src={homeUrl} data-home-view="true" allow="clipboard-write" hidden={ui.selected !== "home"} referrerPolicy="no-referrer" />}
           <WorkspaceFrames ui={ui} controller={controller} />
           {ui.boot === "loading" && (
             <div className="dsh-wb-boot" role="status">
@@ -64,7 +64,7 @@ export function WorkbenchView({ ui, controller, homeUrl, contained = false, nati
           <WorkspaceChrome ui={ui} controller={controller} />
           {ui.overlay?.type !== "settings" && visibleSystemPage !== "settings" && <div className="dsh-wb-global-status"><StatusBanners ui={ui} /></div>}
         </div>
-        <Overlays ui={ui} controller={controller} systemPage={visibleSystemPage} />
+        <Overlays ui={ui} controller={controller} systemPage={visibleSystemPage} requestServiceStop={requestServiceStop} />
       </div>
     </MotionRoot>
   );

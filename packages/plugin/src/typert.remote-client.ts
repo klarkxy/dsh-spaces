@@ -1,4 +1,5 @@
-import type { SpaceHostAudience } from "../../../src/shared/space-host";
+import type { PortalSnapshot, SpaceHostAudience } from "../../../src/shared/space-host";
+import type { DesktopSpaceAction } from "./types";
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 import type { SpaceDetail, SpacesOverview } from "../../../src/shared/spaces-control";
 import type {
@@ -7,6 +8,7 @@ import type {
   WorkbenchApiResult,
 } from "../../../src/shared/workbench";
 import type {
+  DesktopLaunchState,
   WorkbenchBootstrapResult,
   WorkbenchGuideRole,
   WorkbenchInitializeResult,
@@ -34,13 +36,20 @@ type WorkbenchRemoteMapEntries = {
 
 declare module "@deepseek-ai/dsh-typert-protocol" {
   interface TypertRemoteNamespace$workbenchGuide {
+    spaceActivity: (spaceId: string, serviceEpoch: string) => Promise<RemoteResult<{ activity: "idle" | "busy" | "unknown"; generation: number }>>;
+    presentationSnapshot: () => Promise<RemoteResult<PortalSnapshot>>;
+    spaceAction: (request: DesktopSpaceAction) => Promise<RemoteResult<PortalSnapshot>>;
     role: () => Promise<RemoteResult<WorkbenchGuideRole>>;
     bootstrap: () => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     returnTarget: () => Promise<RemoteResult<WorkbenchReturnTarget>>;
     portalTarget: (audience: SpaceHostAudience) => Promise<RemoteResult<WorkbenchReturnTarget>>;
     initialize: () => Promise<RemoteResult<WorkbenchInitializeResult>>;
     previewServiceRestart: () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
+    previewServiceStop: () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
+    stopService: (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     restartService: (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
+    beginDesktopLaunch: () => Promise<RemoteResult<DesktopLaunchState>>;
+    desktopLaunchState: () => Promise<RemoteResult<DesktopLaunchState>>;
   }
   interface TypertRemoteNamespace$spaces {
     overview: () => Promise<RemoteResult<SpacesOverview>>;
@@ -48,13 +57,20 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
   }
   interface TypertRemoteNamespace$workbench extends WorkbenchRemoteNamespace {}
   interface TypertRemoteMap extends WorkbenchRemoteMapEntries {
+    "workbenchGuide/spaceActivity": (spaceId: string, serviceEpoch: string) => Promise<RemoteResult<{ activity: "idle" | "busy" | "unknown"; generation: number }>>;
+    "workbenchGuide/presentationSnapshot": () => Promise<RemoteResult<PortalSnapshot>>;
+    "workbenchGuide/spaceAction": (request: DesktopSpaceAction) => Promise<RemoteResult<PortalSnapshot>>;
     "workbenchGuide/role": () => Promise<RemoteResult<WorkbenchGuideRole>>;
     "workbenchGuide/bootstrap": () => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     "workbenchGuide/returnTarget": () => Promise<RemoteResult<WorkbenchReturnTarget>>;
     "workbenchGuide/portalTarget": (audience: SpaceHostAudience) => Promise<RemoteResult<WorkbenchReturnTarget>>;
     "workbenchGuide/initialize": () => Promise<RemoteResult<WorkbenchInitializeResult>>;
     "workbenchGuide/previewServiceRestart": () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
+    "workbenchGuide/previewServiceStop": () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
+    "workbenchGuide/stopService": (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     "workbenchGuide/restartService": (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
+    "workbenchGuide/beginDesktopLaunch": () => Promise<RemoteResult<DesktopLaunchState>>;
+    "workbenchGuide/desktopLaunchState": () => Promise<RemoteResult<DesktopLaunchState>>;
     "spaces/overview": () => Promise<RemoteResult<SpacesOverview>>;
     "spaces/detail": (id: string) => Promise<RemoteResult<SpaceDetail>>;
   }

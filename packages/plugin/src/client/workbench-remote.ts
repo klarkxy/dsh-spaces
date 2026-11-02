@@ -11,6 +11,7 @@ import {
   publicWorkbenchErrorMessage,
 } from "../../../../src/shared/workbench-errors";
 import type {
+  DesktopLaunchState,
   WorkbenchBootstrapResult,
   WorkbenchGuideApi,
   WorkbenchGuideRole,
@@ -98,6 +99,7 @@ function callWorkbench<K extends WorkbenchApiMethod>(
 export function createWorkbenchRemote(connection: WorkbenchConnection): WorkbenchApi {
   return {
     state: () => callWorkbench(connection, "state", []),
+    startupStatus: () => callWorkbench(connection, "startupStatus", []),
     detail: (spaceId) => callWorkbench(connection, "detail", [spaceId]),
     submit: (command, requestId, context) => callWorkbench(connection, "submit", [command, requestId, context]),
     job: (id) => callWorkbench(connection, "job", [id]),
@@ -118,13 +120,19 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
 export function createWorkbenchGuideRemote(connection: WorkbenchConnection): WorkbenchGuideApi {
   return {
     presentationSnapshot: () => callRemote<import("../../../../src/shared/space-host").PortalSnapshot>(connection, "workbenchGuide/presentationSnapshot", {}),
+    spaceActivity: (spaceId, serviceEpoch) => callRemote<{ activity: "idle" | "busy" | "unknown"; generation: number }>(connection, "workbenchGuide/spaceActivity", { spaceId, serviceEpoch }),
+    spaceAction: request => callRemote<import("../../../../src/shared/space-host").PortalSnapshot>(connection, "workbenchGuide/spaceAction", { request }),
     role: () => callRemote<WorkbenchGuideRole>(connection, "workbenchGuide/role", {}),
     bootstrap: () => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/bootstrap", {}),
     returnTarget: () => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/returnTarget", {}),
     portalTarget: audience => callRemote<WorkbenchReturnTarget>(connection, "workbenchGuide/portalTarget", { audience }),
     initialize: () => callRemote<WorkbenchInitializeResult>(connection, "workbenchGuide/initialize", {}),
     previewServiceRestart: () => callRemote<import("../types").WorkbenchServiceRestartPreview>(connection, "workbenchGuide/previewServiceRestart", {}),
+    previewServiceStop: () => callRemote<import("../types").WorkbenchServiceRestartPreview>(connection, "workbenchGuide/previewServiceStop", {}),
+    stopService: confirmationId => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/stopService", { confirmationId }),
     restartService: confirmationId => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/restartService", { confirmationId }),
+    beginDesktopLaunch: () => callRemote<DesktopLaunchState>(connection, "workbenchGuide/beginDesktopLaunch", {}),
+    desktopLaunchState: () => callRemote<DesktopLaunchState>(connection, "workbenchGuide/desktopLaunchState", {}),
   };
 }
 

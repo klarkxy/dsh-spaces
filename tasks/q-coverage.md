@@ -1,5 +1,7 @@
 # Q coverage E01–E18 (2026-09-15)
 
+> Historical verification record. It covers only the listed run; it is not the current coverage matrix or acceptance gate. Current architecture: [../docs/architecture.md](../docs/architecture.md). Fault policy: [../docs/let-it-crash.md](../docs/let-it-crash.md).
+
 Disposable Homes only. Official DSH CLI was not present in this run.
 
 Covered on shipped entry points: E01, E06, E08, E10, E11, E12, E13, E14, E15, E16, plus unit-level E02/E03/E05/E09/E18.

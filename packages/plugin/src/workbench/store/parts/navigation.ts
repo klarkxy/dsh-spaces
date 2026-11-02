@@ -10,6 +10,7 @@ import { reportedOrFallback } from "../../../../../../src/shared/public-reason";
 import type { WorkbenchSpace, WorkbenchState, WorkbenchView } from "../../../../../../src/shared/workbench";
 import { acceptViewMessage, authorizedViewSrc, type ViewFrameState, type ViewMessageEvent } from "../../view-session";
 import { errorCode } from "../errors";
+import { localizeError } from "../../i18n";
 import { workbenchRequestOrigin } from "../origin";
 import { PersistencePart } from "./persistence";
 
@@ -49,27 +50,56 @@ export abstract class NavigationPart extends PersistencePart {
   };
 
   /** Presentation-only navigation: a stopped or foreign entry never becomes an implicit start. */
-  selectRunningSpace = async (spaceId: string, isCurrent: () => boolean = () => true): Promise<boolean> => {
-    if (this.stateReadFailed) return false;
+  selectRunningSpace = async (spaceId: string, isCurrent: () => boolean = () => true, targetGeneration?: number): Promise<boolean> => {
+    if (this.stateReadFailed || this.shutdownRequested || !isCurrent()) return false;
     const cycle = this.cycle, intent = ++this.navigationIntent;
+    const cached = this.views.get(spaceId), known = this.space(spaceId), current = this.ui.state;
+    if ((targetGeneration === undefined || cached?.generation === targetGeneration) &&
+        (cached?.status === "failed" || cached?.status === "reconnecting")) return false;
+    // Only an already authenticated, mounted page can bypass the read. Both
+    // observers must agree on its lifetime; polling and view events invalidate it.
+    if (targetGeneration !== undefined && known?.generation === targetGeneration &&
+        known.status === "running" && known.hasWebApp && !known.isHost && current?.managerId !== spaceId &&
+        current?.protocolVersion === 2 && current.availability !== "unavailable" && !current.maintenance &&
+        cached?.status === "ready" && cached.src && cached.generation === targetGeneration &&
+        cached.view?.serviceEpoch === current.serviceEpoch && this.iframeWindows.has(`${spaceId}:${targetGeneration}`)) {
+      this.beginSpace(known, false);
+      return true;
+    }
     try {
       // The outer host has its own inventory. A normal selection reads current
       // authority once instead of rejecting from this iframe's older poll.
-      const state = await this.api.state();
-      if (this.stateReadFailed || !this.stillOpen(cycle) || !isCurrent() || intent !== this.navigationIntent || state.serviceEpoch !== this.ui.state?.serviceEpoch) return false;
+      const observation = this.stateObservation;
+      ++this.stateGeneration;
+      let state = await this.api.state();
+      if (this.stateReadFailed || !this.stillOpen(cycle) || !isCurrent() || intent !== this.navigationIntent) return false;
+      // A newer observation must not be replaced by this delayed response.
+      if (observation !== this.stateObservation) state = this.ui.state!;
+      else this.applyState(state);
+      if (!isCurrent() || intent !== this.navigationIntent || state.serviceEpoch !== current?.serviceEpoch) return false;
       const space = state.spaces.find(item => item.id === spaceId);
-      if (!space || space.status !== "running" || !space.hasWebApp || space.isHost || state.managerId === spaceId || state.availability === "unavailable") return false;
-      ++this.stateGeneration; // older in-flight polls cannot overwrite this selection's state
-      this.applyState(state);
-      if (!isCurrent() || intent !== this.navigationIntent) return false;
+      if (!space || space.status !== "running" || !space.hasWebApp || space.isHost || state.managerId === spaceId || state.availability === "unavailable" || state.maintenance) return false;
       const frame = this.views.get(spaceId);
+      if (frame?.status === "failed" || frame?.status === "reconnecting") return false;
       if (this.views.pendingSpaceId === spaceId && frame?.generation === space.generation &&
           (frame.status === "loading" || frame.status === "pending")) {
         // Adjacent clicks share the existing authorization request and handshake.
         this.continuePending(state);
       } else this.beginSpace(space, false);
       return true;
-    } catch { return false; }
+    } catch (error) {
+      if (this.stillOpen(cycle)) {
+        this.stateReadFailed = true;
+        if (this.pollTimer !== null) this.env.clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+        this.patch({ error: localizeError(this.ui.locale, errorCode(error)) });
+      }
+      return false;
+    } finally {
+      // A selection can supersede an in-flight poll; keep observation alive
+      // after a successful read, but never schedule after a discovery failure.
+      if (this.stillOpen(cycle)) this.schedulePoll();
+    }
   };
 
   openBlueprintUse = (): void => {

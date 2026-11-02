@@ -1,57 +1,45 @@
-# Global LLM config source table
+# 旧共享连接的配置来源表（0.1.5-rc.2 历史测量）
 
-Measured against `klarkxy/dsh-spaces` `be9b7a59` (includes plan baseline `861cf4e9`) and the published npm packages at **`0.1.5-rc.2`**. This table is about where configuration actually comes from. It is not inferred from Home, `sessions/`, or `storages/` layout.
+> **这是历史记录，不是当前版本认证。** 本表记录旧共享连接首版在 `@deepseek-ai/dsh-*@0.1.5-rc.2` 上测得"配置实际从哪里来"，用于解释当时的数据所有权。它不描述当前版本的文件解析行为。
+> 当前架构：[现行架构](../architecture.md)。当前合同：[旧共享连接兼容合同](../plans/global-llm-connections.md)。
 
-## Launch path
+## 1. 测量对象与边界
 
-`ProcessManager.start` still spawns `dsh --profile <name>` with the **same** `DSH_HOME` for `web` and every workbench. That only proves the process environment. It does not prove the settings or credentials document path.
+- 运行时：`0.1.5-rc.2`，使用已发布的 npm 包。
+- 测量问题：设置与凭据文档实际由谁决定路径，而不是从 Home 目录结构推断。
+- 当时未能证明的部分：进程环境相同不等于文档路径相同，因此单独核对了两类提供者自身的路径解析。
 
-Official `0.1.5-rc.2` providers resolve those documents themselves:
+## 2. 当时的结论
 
-| Provider | Package | Default path | Custom path |
-|---|---|---|---|
-| Settings | `@deepseek-ai/dsh-settings-file` | `<dshHome>/settings.yaml` | `config.path` wins (`resolveSpec`) |
-| Credentials | `@deepseek-ai/dsh-credentials-local` | `<dshHome>/.credentials.yaml` | `config.path` wins (`resolveSpec`) |
+1. **同 Home 不等于已隔离。** 各 profile 共用同一个 Home 时，设置与凭据文档默认指向同一个 Home 级文件；会话与存储的隔离并不自动带来设置与凭据的隔离。
+2. **路径由提供者自己解析。** 设置与凭据各有默认路径，且均可被显式配置覆盖。要让空间拥有独立设置与凭据，必须显式改写路径，不能依赖 Home 共享。
+3. **共享连接不复制 provider 文档。** 共享路由只存在于运行时内存的受管层，不存在每空间的共享 provider 副本。
 
-`dsh --dump-config` on this repo's captured web tree shows the plugins with **no path override**:
+## 3. 当时的数据归属
 
-```text
-- id: settings
-  name: '@deepseek-ai/dsh-settings-file'
-- id: credentials
-  name: '@deepseek-ai/dsh-credentials-local'
-- id: llm-pi-ai
-  name: '@deepseek-ai/dsh-llm-pi-ai'
-- id: agent-default-model
-  name: '@deepseek-ai/dsh-agent-default-model'
-```
+| 数据 | 归属层级 |
+|---|---|
+| 共享连接与模型目录 | Home 级连接目录 |
+| 共享 Key | Home 级独立凭据存储，只由专用秘密入口写入 |
+| 空间绑定策略 | 该空间自己的策略 |
+| 空间本地设置与本地凭据 | 该空间独立路径 |
+| `web` 的设置与凭据 | 官方 Home 级文件，不写隔离 patch |
+| 空间默认模型 | 该空间的默认模型设置 |
+| 会话模型 | 会话原有状态 |
+| 已生效版本 | 实例运行状态，由管理界面读取 |
 
-So before this change, every profile that shared `DSH_HOME` shared one settings document and one credential document. Session and storage isolation did not separate them.
+这张表在当时用于证明"共享的是连接，不是整份设置文档"。
 
-## Authority after P0
+## 4. 当时的接入层次
 
-| Data | Authority | Consumer | Writer |
-|---|---|---|---|
-| Shared connections and model catalog | `<home>/.dsh-spaces-control/llm/catalog.json` | Joined Spaces | Home write owner |
-| Shared keys | `<home>/.dsh-spaces-control/llm/credentials.yaml` | Host-side llm-bridge | Secret-only `llmCredential` API |
-| Space binding | `<space data root>/llm-policy.json` | That Space's bridge | Authorized policy update |
-| Workbench local settings | `hub/<name>/settings.yaml` | That Space | Official settings writes in that Space |
-| Workbench local credentials | `hub/<name>/.credentials.yaml` | That Space | Official local credential writes |
-| web settings / credentials | official home files | web | official web UI / API |
-| Space default model | Space `agent-default-model` user section | That Space | Space settings |
-| Session model | existing session state | agent / session | session operations |
-| Applied catalog/policy revision | instance runtime status | management UI | launcher / instance report |
+官方设置按"结构默认 → 组合基础层 → 用户层"解析。旧共享连接选择把选中的共享路由合并进基础层，而不是写进该空间的用户层，从而避免把共享数据复制到本地。该层次关系是当时的设计前提；当前实现是否仍按同样层次解析，需要按当前版本重新核实。
 
-There is no per-Space copy of the shared provider document. Shared routes exist only in the in-memory settings **base**.
+## 5. 当时未运行的部分
 
-## Composition layers used by the prototype
+- 用完整官方 CLI 拉起 Web 应用并请求付费模型。
+- Windows 上凭据文件的 ACL 检查；POSIX 权限已核对。
+- `rc.1` 上的共享连接启用；未接入空间保持原有非 LLM 行为。
 
-Official `SettingsProvider` resolves `schema defaults → composition base → user section`.
+## 6. 之后的版本变化
 
-`llm-pi-ai@0.1.5-rc.2` calls `settings.installSection(...)`, which registers with `base: entry`. `SpacesFileSettingsProvider` overrides the public `register()` method and merges selected shared routes into that base for `llm-pi-ai` (and the applicable global default into `agent-default-model`). Other namespaces pass through.
-
-## What this matrix did not run
-
-- Full official CLI `dsh --profile` web-app processes talking to a paid model.
-- Windows ACL inspection of the credential file. POSIX mode `0600` / directory `0700` is proven against the official writer.
-- `rc.1` shared-LLM enablement. Unjoined Spaces on any exact CLI version keep their previous non-LLM behavior.
+本文结论绑定 `0.1.5-rc.2`。参照的运行时、SDK 与 Space 数据布局后来都已变化，且默认模型来源已改为[主空间继承](../plans/llm-main-inheritance.md)。**不要用本表逐条推断当前版本的文件路径或隔离状态。**

@@ -75,3 +75,18 @@ export async function dshSessionList(port: number, fetchImpl: typeof fetch, sign
   }
   throw new Error("DSH session list endpoint is unavailable.");
 }
+
+/** The Browser base has its own authenticated readiness API and no session service. */
+export async function dshBrowserReady(port: number, fetchImpl: typeof fetch, signal: AbortSignal, cookie?: string): Promise<void> {
+  const origin = `http://127.0.0.1:${port}`;
+  const method = 'spacesBrowser/listTabs';
+  const response = await fetchImpl(`${origin}/api/${method}`, {
+    method: 'POST', signal,
+    headers: { 'content-type': 'application/json', origin, connection: 'close', ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method, payload: { args: {} } }),
+  });
+  const body = await response.json() as { result?: { ok?: boolean; value?: unknown } };
+  if (!response.ok || body.result?.ok !== true || !Array.isArray(body.result.value)) {
+    throw new Error(`Browser readiness failed (HTTP ${response.status}).`);
+  }
+}

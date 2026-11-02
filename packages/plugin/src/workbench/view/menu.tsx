@@ -5,9 +5,11 @@
  * list of menu items.
  */
 
-import React, { type ReactElement } from "react";
+import React, { useRef, type ReactElement } from "react";
 import { PanelScale } from "./motion";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { t } from "../i18n";
+import { useMenuKeyboard } from "../use-menu-keyboard";
 import type { WorkbenchViewProps } from "./shared";
 
 export function SpaceMenu({
@@ -25,14 +27,19 @@ export function SpaceMenu({
   const starting = space?.status === "starting";
   const crashed = space?.status === "crashed";
   const manager = controller.isManagerId(spaceId);
+  const menu = useRef<HTMLElement>(null);
+  const keyboard = useMenuKeyboard(menu, { x, y, onClose: controller.closeOverlay });
   return (
     <div className="dsh-wb-overlay dsh-wb-overlay-menu" onClick={controller.closeOverlay}>
       <PanelScale
+        ref={menu}
         className="dsh-wb-menu"
         role="menu"
         aria-label={t(locale, "app.menu")}
+        tabIndex={-1}
         style={{ left: x, top: y }}
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={keyboard.onKeyDown}
       >
         <button
           type="button"
@@ -81,20 +88,19 @@ export function SpaceMenu({
         <button type="button" role="menuitem" onClick={() => controller.openDetail(spaceId)}>
           {t(locale, "detail.manage")}
         </button>
-        <button type="button" role="menuitem" onClick={() => controller.openDetail(spaceId)}>
-          {t(locale, "app.diagnose")}
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          disabled={manager || spaceId === "web"}
-          onClick={() => {
-            controller.closeOverlay();
-            controller.openBlueprintGenerate(spaceId);
-          }}
-        >
-          {t(locale, "blueprints.generate")}
-        </button>
+        {!SPACES_BLUEPRINT_SEALED ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={manager || spaceId === "web"}
+            onClick={() => {
+              controller.closeOverlay();
+              controller.openBlueprintGenerate(spaceId);
+            }}
+          >
+            {t(locale, "blueprints.generate")}
+          </button>
+        ) : null}
         <button
           type="button"
           role="menuitem"

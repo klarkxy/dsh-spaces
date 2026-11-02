@@ -28,12 +28,15 @@ export function parseNativeCreateIntent(hash: string): number | null {
 export function isNativeSpaceTarget(value: unknown): value is NativeSpaceTarget {
   return value === "@settings" || typeof value === "string" && PORTAL_SPACE_RE.test(value);
 }
-export interface NativeSpaceNavigation { kind: "select" | "selected" | "rejected"; requestId: number; target: NativeSpaceTarget }
+export interface NativeSpaceNavigation { kind: "select" | "selected" | "rejected"; requestId: number; target: NativeSpaceTarget; targetGeneration?: number }
 /** A fragment carries presentation only. The document still needs its operator session. */
 export function parseNativeSpaceHash(hash: string): NativeSpaceNavigation | null {
-  const match = /^#(select|selected|rejected)\/([1-9][0-9]{0,9})\/(@settings|[a-z0-9][a-z0-9-]{0,38})$/.exec(hash);
+  const match = /^#(select|selected|rejected)\/([1-9][0-9]{0,9})\/(@settings|[a-z0-9][a-z0-9-]{0,38})(?:\/(0|[1-9][0-9]{0,15}))?$/.exec(hash);
   if (!match) return null;
-  return { kind: match[1] as NativeSpaceNavigation["kind"], requestId: Number(match[2]), target: match[3] };
+  const targetGeneration = match[4] === undefined ? undefined : Number(match[4]);
+  if (targetGeneration !== undefined && (match[1] !== "select" || match[3] === "@settings" || !Number.isSafeInteger(targetGeneration))) return null;
+  return { kind: match[1] as NativeSpaceNavigation["kind"], requestId: Number(match[2]), target: match[3],
+    ...(targetGeneration === undefined ? {} : { targetGeneration }) };
 }
 export interface SpaceHostAudience { parentOrigin: string; channel: string }
 export interface PortalSpace { id: string; displayName: string; status: string; generation: number; icon?: string }

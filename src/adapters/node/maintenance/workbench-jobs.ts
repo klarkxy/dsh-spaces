@@ -1000,18 +1000,26 @@ function assertCommandHasNoSecrets(value: unknown): void {
   }
 }
 
-function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean } {
+function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } {
   if (!isPlainObject(input)) throw new WorkbenchJobError("workbench/invalid-input");
-  expectKeys(input, ["name"], ["displayName", "icon", "useSharedLlm", "modelSource", "browser"]);
+  expectKeys(input, ["name"], ["displayName", "icon", "useSharedLlm", "modelSource", "browser", "base", "baseVersion"]);
   const name = parseOptionalString(input.name);
   if (!name) throw new WorkbenchJobError("workbench/invalid-input");
-  const parsed: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean } = { name };
+  const parsed: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } = { name };
   if(input.modelSource!==undefined){if(!['main','shared','local'].includes(String(input.modelSource))||input.useSharedLlm!==undefined)throw new WorkbenchJobError('workbench/invalid-input');parsed.modelSource=input.modelSource as 'main'|'shared'|'local';}
   if (input.displayName !== undefined) parsed.displayName = parseOptionalString(input.displayName);
   if (input.icon !== undefined) parsed.icon = parseOptionalString(input.icon);
   if (input.useSharedLlm !== undefined) {
     if (typeof input.useSharedLlm !== "boolean") throw new WorkbenchJobError("workbench/invalid-input");
     parsed.useSharedLlm = input.useSharedLlm;
+  }
+  if (input.base !== undefined) {
+    if (input.base !== 'web' && input.base !== 'browser') throw new WorkbenchJobError('workbench/invalid-input');
+    parsed.base = input.base;
+  }
+  if (input.baseVersion !== undefined) {
+    if (typeof input.baseVersion !== 'string' || !isExactRuntimeVersion(input.baseVersion)) throw new WorkbenchJobError('workbench/invalid-input');
+    parsed.baseVersion = input.baseVersion;
   }
   if (input.browser !== undefined) {
     if (typeof input.browser !== "boolean") throw new WorkbenchJobError("workbench/invalid-input");

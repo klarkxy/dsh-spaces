@@ -9,6 +9,7 @@
  */
 import React, { useState, type ReactElement } from "react";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../../../src/shared/workbench-product";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { bytesToBase64, decodeBlueprintFileBytes } from "../blueprint-session";
 import { InlineErrors } from "../inline-error";
 import { t, type WorkbenchLocale, type WorkbenchMessageKey } from "../i18n";
@@ -56,35 +57,37 @@ export function TemplatesImportSection({
       ) : null}
       {error ? <TemplatesError message={error} /> : null}
       <InlineErrors ui={ui} origin="templates:import" />
-      <details className="dsh-wb-form" data-templates-paste="true">
-        <summary>{t(locale, "blueprints.paste")}</summary>
-        <div className="dsh-wb-field">
-          <textarea
-            rows={6}
-            value={ui.blueprint.content}
-            aria-label={t(locale, "blueprints.paste")}
-            spellCheck={false}
-            onChange={(event) => controller.blueprint.setContent(event.target.value)}
-          />
-        </div>
-        <div className="dsh-wb-actions">
-          <PressableButton
-            as="button"
-            type="button"
-            className="dsh-wb-btn primary"
-            disabled={ui.blueprint.inspectStatus === "loading"}
-            onClick={() => {
-              controller.blueprint.setMode("use");
-              controller.blueprint.inspect();
-              onBlueprintReady();
-            }}
-          >
-            {t(locale, "blueprints.inspect")}
-          </PressableButton>
-        </div>
-        {ui.blueprint.contentError ? <TemplatesError message={ui.blueprint.contentError} /> : null}
-        {ui.blueprint.inspectError ? <TemplatesError message={ui.blueprint.inspectError} /> : null}
-      </details>
+      {!SPACES_BLUEPRINT_SEALED ? (
+        <details className="dsh-wb-form" data-templates-paste="true">
+          <summary>{t(locale, "blueprints.paste")}</summary>
+          <div className="dsh-wb-field">
+            <textarea
+              rows={6}
+              value={ui.blueprint.content}
+              aria-label={t(locale, "blueprints.paste")}
+              spellCheck={false}
+              onChange={(event) => controller.blueprint.setContent(event.target.value)}
+            />
+          </div>
+          <div className="dsh-wb-actions">
+            <PressableButton
+              as="button"
+              type="button"
+              className="dsh-wb-btn primary"
+              disabled={ui.blueprint.inspectStatus === "loading"}
+              onClick={() => {
+                controller.blueprint.setMode("use");
+                controller.blueprint.inspect();
+                onBlueprintReady();
+              }}
+            >
+              {t(locale, "blueprints.inspect")}
+            </PressableButton>
+          </div>
+          {ui.blueprint.contentError ? <TemplatesError message={ui.blueprint.contentError} /> : null}
+          {ui.blueprint.inspectError ? <TemplatesError message={ui.blueprint.inspectError} /> : null}
+        </details>
+      ) : null}
     </section>
   );
 }
@@ -122,7 +125,7 @@ export async function importTemplateFile(
       controller.previewImportArchive(base64, file.name);
       return;
     }
-    if (kind === "blueprint") {
+    if (kind === "blueprint" && !SPACES_BLUEPRINT_SEALED) {
       const decoded = decodeBlueprintFileBytes(bytes);
       if (!decoded.ok) {
         onError(t(locale, decodeMessageKey(decoded.code)));

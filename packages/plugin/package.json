@@ -1,8 +1,8 @@
 {
   "name": "@dsh-spaces/plugin",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
-  "description": "DSH Host plugin for observing and verifying non-host spaces",
+  "description": "Spaces for DeepSeek Harness — switch DSH workspaces like Discord servers.",
   "author": "dsh-spaces",
   "repository": {
     "type": "git",
@@ -29,7 +29,11 @@
     "lib",
     "README.md",
     "LICENSE",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "icon.svg",
+    "llm-images.svg",
+    "locale/*.json",
+    "llm-images/locale/*.json"
   ],
   "exports": {
     ".": "./lib/index.js",
@@ -37,9 +41,14 @@
     "./typert": "./lib/typert.host.js",
     "./remote": "./lib/typert.remote-client.js",
     "./client": "./lib/client.js",
+    "./icon": "./icon.svg",
+    "./llm-images/icon": "./llm-images.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./llm-images/locale/*.json": "./llm-images/locale/*.json",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
+  "icon": "./icon.svg",
   "dsh": {
     "client": {
       "inject": [

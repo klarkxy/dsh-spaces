@@ -36,5 +36,7 @@ export function WorkbenchApp({ api, env, homeUrl, contained = false, nativeSurfa
     }, nativeSurface ? setSystemPage : undefined);
   }, [controller, contained, surfaceView, nativeSurface]);
   return <WorkbenchView contained={contained} nativeSurface={nativeSurface} systemPage={systemPage} ui={ui} controller={controller}
+    requestServiceStop={nativeSurface && surfaceView ? () => window.parent.postMessage({ source: "dsh-spaces-surface", type: "service-stop-preview",
+      serviceEpoch: surfaceView.serviceEpoch, spaceId: surfaceView.spaceId, generation: surfaceView.generation, channel: surfaceView.channel }, surfaceView.parentOrigin) : undefined}
     homeUrl={homeUrl} />;
 }

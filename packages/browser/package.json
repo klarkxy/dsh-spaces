@@ -47,6 +47,10 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "spacesBase": {
+      "id": "browser",
+      "runtimeVersion": "0.2.1-rc.2"
     }
   },
   "peerDependencies": {

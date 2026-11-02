@@ -1,3 +1,5 @@
+import { SpaceBaseCreation } from './supervisor/base-creation';
+import { profileBase } from './profile/space-base';
 import { lstatSync } from "../../shared/node/filesystem";
 import { assertSupportedNode } from "../../shared/node-version";
 import { randomBytes } from "node:crypto";
@@ -40,7 +42,10 @@ import type {
   WorkbenchState,
   WorkbenchView,
 } from "../../shared/workbench";
+import type { WorkbenchStartupStatus } from "../../shared/workbench-startup";
 import { isWorkbenchProductCommand } from "../../shared/workbench-product";
+import { isSpacesBlueprintMethod, SPACES_BLUEPRINT_SEALED } from "../../shared/blueprint-sealed";
+import { requestsBrowserSpace, SPACES_BROWSER_SEALED } from "../../shared/browser-sealed";
 import type {
   WorkbenchHomeSettings,
   WorkbenchProductCommand,
@@ -93,6 +98,8 @@ import {
 import { SupervisorInstanceRecords } from "./supervisor/instance-records";
 import { silentJobContext } from "./supervisor/job-context";
 import { SupervisorLifecycle } from "./supervisor/lifecycle";
+import { SupervisorStartup } from "./supervisor/startup";
+import { publicReason, startupFailureFrom } from "./runtime/start-failure";
 import { SupervisorLlm } from "./supervisor/llm";
 import { SupervisorLlmDelegation } from "./llm/delegation";
 import { SupervisorMaintenanceGate } from "./supervisor/maintenance";
@@ -107,7 +114,7 @@ import { SupervisorSpaceLifecycle } from "./supervisor/space-lifecycle";
 import { SpaceRunRegistry } from "./supervisor/space-runs";
 import { SupervisorSpaces } from "./supervisor/spaces";
 import { SupervisorState } from "./supervisor/state";
-import { SupervisorToolchain, VIEW_BRIDGE_ID } from "./supervisor/toolchain";
+import { SupervisorToolchain } from "./supervisor/toolchain";
 import type {
   BoundCli,
   WorkbenchMaintenance,
@@ -141,7 +148,12 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.delete",
   "service.shutdown",
 ]);
-const REMOVED_COMMAND_KINDS = new Set(["controller.acquire", "recovery.resume", "space.verify"]);
+const REMOVED_COMMAND_KINDS = new Set([
+  "controller.acquire",
+  "recovery.resume",
+  "space.verify",
+  ...(SPACES_BLUEPRINT_SEALED ? ["blueprint.apply"] : []),
+]);
 const REMOVED_PLAN_KINDS = new Set(["controller.release", "controller.shutdown", "snapshot.restore", "config.restore", "workbench.upgrade", "runtime.install", "runtime.upgrade"]);
 
 /**
@@ -174,6 +186,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
   private readonly lifecycle = new SupervisorLifecycle(() => this.spaceInventory.assertRegistryReadable());
+  private readonly startup = new SupervisorStartup();
   private jobs: WorkbenchJobStore | undefined;
   private processes: ProcessManager | undefined;
   private spaces: NodeSpacesService | undefined;
@@ -197,6 +210,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly llmDelegation: SupervisorLlmDelegation;
   private readonly spaceInventory: SupervisorSpaces;
   private readonly spaceLifecycle: SupervisorSpaceLifecycle;
+  private readonly bases: SpaceBaseCreation;
   private readonly spaceCommands: SupervisorSpaceCommands;
   private readonly stateModel: SupervisorState;
   private readonly maintenanceGate: SupervisorMaintenanceGate;
@@ -249,13 +263,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       requireServiceEpoch: () => this.stateModel.requireServiceEpoch(),
       ensureViewBridge: (profileId) => this.toolchain.ensureViewBridge(profileId),
       ensureLlmBridge: (profileId) => this.llmOps.ensureLlmBridge(profileId),
-      installArtifact: (profileId, artifact, id) => this.toolchain.installArtifact(profileId, artifact, id),
-      artifactDigest: (artifact) => this.toolchain.artifactDigest(artifact),
+      installComponent: (profileId, component) => this.toolchain.installComponent(profileId, component),
+      componentAligned: (profileId, component) => this.toolchain.componentAligned(profileId, component),
       readDump: (profile) => this.toolchain.readDump(profile),
       pinnedDshVersion: (spaceId) => this.toolchain.pinnedDshVersion(spaceId),
       resolveSpaceRuntime: (spaceId) => this.toolchain.resolveSpaceRuntime(spaceId),
     });
+    this.bases = new SpaceBaseCreation({ home: this.home, nodeExe: this.nodeExe, options: this.options, cli: () => this.cli, runtimes: () => this.runtimeStore });
     this.spaceCommands = new SupervisorSpaceCommands({
+      bases: this.bases,
       home: this.home,
       lock: this.lock,
       registry: this.registry,
@@ -267,8 +283,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       protectSpecial: (id, protectOptions) => this.spaceInventory.protectSpecial(id, protectOptions),
       ensureViewBridge: (profileId) => this.toolchain.ensureViewBridge(profileId),
       ensureLlmBridge: (profileId) => this.llmOps.ensureLlmBridge(profileId),
-      installArtifact: (profileId, artifact, id) => this.toolchain.installArtifact(profileId, artifact, id),
-      artifactDigest: (artifact) => this.toolchain.artifactDigest(artifact),
+      hasComponent: (component) => this.toolchain.hasComponent(component),
     });
     this.stateModel = new SupervisorState({
       home: this.home,
@@ -336,6 +351,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       observeChildWork: (action) => this.observeChildWork(action),
     });
     this.supervisorPlans = new SupervisorPlans({
+      whileIdle: (id, action) => this.llmOps.whileIdle(id, action),
       home: this.home,
       lifecycle: this.lifecycle,
       runs: this.runs,
@@ -375,14 +391,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       jobs: () => this.jobs,
       lifecycle: this.lifecycle,
       managerId: () => this.managerId,
-      llmBridgeArtifact: () => this.options.llmBridgeArtifact,
+      hasComponent: (component) => this.toolchain.hasComponent(component),
+      installComponent: (profileId, component) => this.toolchain.installComponent(profileId, component),
+      componentAligned: (profileId, component) => this.toolchain.componentAligned(profileId, component),
+      devCheckout: () => this.options.devCheckoutRoot,
       runs: this.runs,
       observeChildWork: (action) => this.observeChildWork(action),
       requireManaged: (spaceId) => this.spaceInventory.requireManaged(spaceId),
       stopOwned: (spaceId) => this.spaceLifecycle.stopOwned(spaceId),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
-      installArtifact: (profileId, artifact, id) => this.toolchain.installArtifact(profileId, artifact, id),
-      artifactDigest: (artifact) => this.toolchain.artifactDigest(artifact),
       homeProfileNames: () => this.spaceInventory.homeProfileNames(),
       publicStatus: (id) => this.spaceInventory.publicStatus(id),
       currentServiceEpoch: () => this.stateModel.currentServiceEpoch(),
@@ -495,10 +512,20 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return `${this.origin}/bootstrap/${token}`;
   }
 
+  async startupStatus(): Promise<WorkbenchStartupStatus> {
+    return this.startup.snapshot({
+      serviceEpoch: this.stateModel.currentServiceEpoch(),
+      managerId: this.managerId,
+    });
+  }
+
   async tryOwn(): Promise<void> {
     const inspection = this.lease.inspect();
     if (inspection.held) {
       this.lifecycle.reasons = this.heldReasons(inspection);
+      this.startup.fail(this.lifecycle.reasons[0] ?? "Another controller holds run rights. This entry stays read-only.", "ownership", {
+        reasons: this.lifecycle.reasons,
+      });
       return;
     }
     try {
@@ -506,23 +533,36 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } catch (error) {
       if (error instanceof HomeControlBusyError) {
         this.lifecycle.reasons = this.heldReasons(error.inspection);
+        this.startup.fail(this.lifecycle.reasons[0] ?? error, "ownership", { reasons: this.lifecycle.reasons });
         return;
       }
       this.lifecycle.blocked = true;
       this.lifecycle.reasons = [WRITABLE_STARTUP_FAILED_REASON];
+      this.startup.fail(error, "acquire", { reasons: [WRITABLE_STARTUP_FAILED_REASON] });
       return;
     }
-    this.writeHostBearer();
-    this.writeEndpointFile();
-    this.lifecycle.initializing = true;
     try {
-      await this.initWritable();
-    } catch {
+      this.writeHostBearer();
+      this.writeEndpointFile();
+    } catch (error) {
       this.lifecycle.blocked = true;
       this.lifecycle.reasons = [
         ...this.lifecycle.reasons,
         WRITABLE_STARTUP_FAILED_REASON,
       ];
+      this.startup.fail(error, "prepare", { reasons: [WRITABLE_STARTUP_FAILED_REASON] });
+      return;
+    }
+    this.lifecycle.initializing = true;
+    try {
+      await this.initWritable();
+    } catch (error) {
+      this.lifecycle.blocked = true;
+      this.lifecycle.reasons = [
+        ...this.lifecycle.reasons,
+        WRITABLE_STARTUP_FAILED_REASON,
+      ];
+      this.startup.fail(error, "prepare", { reasons: [WRITABLE_STARTUP_FAILED_REASON] });
     } finally {
       this.lifecycle.initializing = false;
     }
@@ -562,6 +602,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       case "state":
         expectKeys(body, []);
         return this.state();
+      case "startupStatus":
+        expectKeys(body, []);
+        return this.startupStatus();
       case "detail":
         expectKeys(body, ["spaceId"]);
         return this.detail(parseSpaceName(body.spaceId));
@@ -712,6 +755,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
 
   async submit(command: WorkbenchCommand, requestId: string, context: WorkbenchMutationContext): Promise<WorkbenchJob> {
     const parsedContext = parseMutationContext(context);
+    if (SPACES_BROWSER_SEALED && command?.kind === 'space.create' && requestsBrowserSpace(command.input)) {
+      throw new WorkbenchPublicError('workbench/unsupported');
+    }
     if (REMOVED_COMMAND_KINDS.has((command as { kind?: string }).kind ?? "")) {
       throw new WorkbenchPublicError("workbench/unsupported");
     }
@@ -780,12 +826,19 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ("spaceIds" in parsed && parsed.spaceIds.includes("desktop"))) {
       throw new WorkbenchPublicError("workbench/protected");
     }
-    if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) return this.supervisorPlans.previewLocal(parsed);
+    if (SUPERVISOR_PLAN_KINDS.has(parsed.kind)) {
+      const activity = parsed.kind === "space.stop" || parsed.kind === "space.restart"
+        ? await this.llmOps.observeTaskActivity(parsed.spaceId) : undefined;
+      return this.supervisorPlans.previewLocal(parsed, activity);
+    }
     if (!this.maintenance) throw new WorkbenchPublicError("workbench/maintenance");
     return this.maintenance.preview(parsed);
   }
 
   async product(request: WorkbenchProductRequest): Promise<Awaited<ReturnType<WorkbenchApi["product"]>>> {
+    if (SPACES_BLUEPRINT_SEALED && isSpacesBlueprintMethod((request as { method?: string }).method ?? "")) {
+      throw new WorkbenchPublicError("workbench/unsupported");
+    }
     if (!this.products) throw new WorkbenchPublicError("workbench/read-only");
     return this.products.read(parseWorkbenchProductRequest(request));
   }
@@ -826,6 +879,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.maintenanceGate.hasMaintenanceEvidence() || this.lock.inspect().held || this.runs.unmanaged.size) {
       this.maintenance = this.maintenanceGate.createMaintenance();
       this.stateModel.refreshAvailability();
+      const reasons = [
+        ...(this.maintenanceGate.hasMaintenanceEvidence() || this.lock.inspect().held
+          ? ["Unfinished Home maintenance journal is present."]
+          : []),
+        ...(this.runs.unmanaged.size ? ["Leftover processes were not adopted."] : []),
+      ];
+      this.startup.fail(reasons[0] ?? "The start failed.", "maintenance", { reasons });
       return;
     }
     if (this.managerInstall === "ordinary") {
@@ -834,12 +894,14 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         "The reserved manager name already belongs to an ordinary profile. It was not overwritten.",
       ];
       this.stateModel.refreshAvailability();
+      this.startup.fail(this.lifecycle.reasons[0] ?? "The reserved manager name already belongs to an ordinary profile. It was not overwritten.", "profile");
       return;
     }
     if (this.managerInstall === "damaged") {
       this.lifecycle.blocked = true;
       this.lifecycle.reasons = ["The manager profile record is damaged and was not rebuilt."];
       this.stateModel.refreshAvailability();
+      this.startup.fail(this.lifecycle.reasons[0] ?? "The manager profile record is damaged and was not rebuilt.", "manager");
       return;
     }
     let managerDump: string | undefined;
@@ -848,6 +910,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.lifecycle.blocked = true;
         this.lifecycle.reasons = ["A compatible DSH CLI is required before the manager profile can be created."];
         this.stateModel.refreshAvailability();
+        this.startup.fail(this.lifecycle.reasons[0] ?? "A compatible DSH CLI is required before the manager profile can be created.", "cli");
         return;
       }
       try {
@@ -855,12 +918,20 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
         this.lifecycle.blocked = true;
-        this.lifecycle.managerBootstrapFailure = "Manager initialization did not complete. Its local diagnostic record is available.";
+        this.lifecycle.managerBootstrapFailure = "Manager initialization did not complete.";
         this.lifecycle.reasons = [this.lifecycle.managerBootstrapFailure];
-        atomicWrite(join(this.controlDir, "manager-bootstrap-error.json"), `${JSON.stringify({
-          version: 1, at: this.now().toISOString(),
-          detail: sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 4000),
-        })}\n`);
+        this.startup.fail(error, "bootstrap", { reasons: [this.lifecycle.managerBootstrapFailure] });
+        try {
+          atomicWrite(join(this.controlDir, "manager-bootstrap-error.json"), `${JSON.stringify({
+            version: 1, at: this.now().toISOString(),
+            detail: sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 4000),
+          })}\n`);
+        } catch (diagnostic) {
+          const detail = publicReason(diagnostic, "The diagnostic record could not be written.");
+          const labelled = publicReason(`Diagnostic write: ${detail}`, "Diagnostic write: The diagnostic record could not be written.");
+          this.lifecycle.addReason(labelled);
+          this.startup.note(labelled);
+        }
         return;
       }
     }
@@ -873,7 +944,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } catch {
       this.lifecycle.reasons.push("Maintenance could not be composed.");
     }
-    if (this.managerInstall === "manager" && this.selectedPayload && this.options.pluginArtifact) {
+    if (this.managerInstall === "manager" && this.selectedPayload && this.toolchain.hasComponent("plugin")) {
       try {
         await this.toolchain.alignManagerPlugin(identity.profileId);
       } catch (error) {
@@ -881,6 +952,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
         this.lifecycle.managerStartFailure = `The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim();
         this.lifecycle.reasons.push(this.lifecycle.managerStartFailure);
+        this.startup.fail(error, "align", {
+          reasons: ["The manager plugin could not be aligned with the selected Spaces version."],
+        });
       }
     }
     // Initialization and alignment have settled before admitting normal work,
@@ -889,15 +963,23 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.stateModel.refreshAvailability();
 
     if (this.managerInstall === "manager" && this.cli && !this.lifecycle.blocked && !this.runs.unmanaged.has(identity.profileId)) {
+      this.startup.starting();
       try {
         await this.spaceLifecycle.startSpace(identity.profileId, silentJobContext());
+        this.startup.ready();
       } catch (error) {
         this.lifecycle.blocked = true;
-        const detail = (error instanceof Error && error.message
-          ? error.message
-          : "The manager process could not be started.").slice(0, 400);
-        this.lifecycle.reasons.push(`${detail} The stable entry is still available.`);
+        const failure = startupFailureFrom(error, "start");
+        const status = this.processes?.statusOf(identity.profileId);
+        const retained = failure.instanceRetained || status === "starting" || status === "running";
+        this.lifecycle.addReason(failure.primaryReason);
+        if (failure.cleanupReason) this.lifecycle.addReason(`Cleanup: ${failure.cleanupReason}`);
+        this.lifecycle.addReason("The stable entry is still available.");
+        this.startup.fail(error, "start", { instanceRetained: retained });
       }
+    } else {
+      const reason = this.lifecycle.reasons[0] ?? "The start failed.";
+      this.startup.fail(reason, this.cli ? "prepare" : "cli", { reasons: this.lifecycle.reasons });
     }
   }
 
@@ -983,11 +1065,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.patchWriter.ensureWorkbenchPatch(profileId);
       const dump = await this.toolchain.readDump(profileId);
       if (dump) extractRoot(dump, SESSION_ROW_ID);
-      if (this.options.pluginArtifact) {
-        await this.toolchain.installArtifact(profileId, this.options.pluginArtifact, `dsh-spaces-plugin-${this.toolchain.artifactDigest(this.options.pluginArtifact)}`);
+      if (this.toolchain.hasComponent("plugin")) {
+        await this.toolchain.installComponent(profileId, "plugin");
       }
-      if (this.options.viewBridgeArtifact) {
-        await this.toolchain.installArtifact(profileId, this.options.viewBridgeArtifact, `${VIEW_BRIDGE_ID}-${this.toolchain.artifactDigest(this.options.viewBridgeArtifact)}`);
+      if (this.toolchain.hasComponent("view-bridge")) {
+        await this.toolchain.installComponent(profileId, "view-bridge");
       }
       if (inspectManagerInstall(this.home, profileId) !== "manager") {
         throw new WorkbenchPublicError(
@@ -1072,6 +1154,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       // can materialize files in the user's default web profile.
       prepareHome: injected.prepareHome ?? (async () => undefined),
       fetch: injected.fetch ?? this.fetchImpl,
+      base: name => profileBase(this.home, name),
       kill: async (pid: number, kind: KillKind) => {
         if (kind === "kill") throw new Error(STOP_NOT_FORCED);
         if (injected.kill) return injected.kill(pid, "term");
@@ -1126,7 +1209,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
     switch (command.kind) {
       case "space.create":
-        return this.spaceCommands.createSpace({...command.input,...command.input.modelSource===undefined&&command.input.useSharedLlm===undefined&&!command.input.browser?{modelSource:'main' as const}:{}}, ctx);
+        return this.spaceCommands.createSpace({...command.input,...command.input.modelSource===undefined&&command.input.useSharedLlm===undefined&&!command.input.browser&&command.input.base!=='browser'?{modelSource:'main' as const}:{}}, ctx);
       case "space.update":
         return this.spaceCommands.updateSpace(command, ctx);
       case "space.reorder":
@@ -1199,6 +1282,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private bindProductService(): void {
     this.homeSettings = this.stateModel.readHomeSettings();
     this.products = new WorkbenchProductService({
+      baseVersions: base => this.bases.versions(base),
       home: this.home,
       observation: () => this.stateModel.productObservation(),
       managerId: () => this.managerId,
@@ -1210,7 +1294,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       },
       llm: (request) => this.llmOps.dispatchLlmAdmitted(request),
       llmAdmitted: (request) => this.llmOps.dispatchLlmAdmitted(request),
-      llmBridgeAvailable: () => Boolean(this.options.llmBridgeArtifact),
+      llmBridgeAvailable: () => this.toolchain.hasComponent("llm-bridge"),
       dshVersion: () => this.cli?.version ?? null,
       spacesVersion: () => {
         const version = this.selectedPayload?.manifest.version;

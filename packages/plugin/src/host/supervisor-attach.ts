@@ -8,6 +8,7 @@ import {
   type HomeControlOwner,
 } from "../../../../src/adapters/node/home/home-lease";
 import { workbenchStateSchema } from "./workbench-schemas";
+import { observeStartupRead } from "./startup-observation";
 import { workbenchPost, type WorkbenchHttpFetch } from "./workbench-http";
 import {
   endpointHomeId,
@@ -31,6 +32,11 @@ export interface SupervisorAttachOptions {
   fetch?: WorkbenchHttpFetch;
   /** Reusable discovery handle; inspect() always re-reads on-disk state. */
   lease?: HomeLease;
+  /**
+   * Budget for the one state read. The read uses min(5s, timeoutMs).
+   * Omitted means 5s. This does not change mutation timeouts.
+   */
+  timeoutMs?: number;
 }
 
 const HELD_NO_ENDPOINT = "A controller holds the Home lease but no supervisor endpoint was found.";
@@ -50,22 +56,23 @@ const HOME_UNAVAILABLE = "The DSH home could not be opened safely.";
 export async function pingSupervisorState(
   endpoint: SupervisorEndpoint,
   doFetch?: WorkbenchHttpFetch,
+  timeoutMs?: number,
 ): Promise<boolean> {
-  try {
-    const state = await workbenchPost(
+  const state = await observeStartupRead(
+    (signal) => workbenchPost(
       doFetch ?? fetch,
       endpoint.origin,
       endpoint.bearer,
       "state",
       {},
       workbenchStateSchema,
-    );
-    if (state.protocolVersion !== 2) return false;
-    if (state.serviceEpoch !== endpoint.serviceEpoch) return false;
-    return true;
-  } catch {
-    return false;
-  }
+      { signal },
+    ),
+    timeoutMs,
+  );
+  if (state.protocolVersion !== 2) return false;
+  if (state.serviceEpoch !== endpoint.serviceEpoch) return false;
+  return true;
 }
 
 export async function attachExistingSupervisor(
@@ -113,13 +120,17 @@ export async function attachExistingSupervisor(
 
   let state;
   try {
-    state = await workbenchPost(
-      options.fetch ?? fetch,
-      endpoint.origin,
-      endpoint.bearer,
-      "state",
-      {},
-      workbenchStateSchema,
+    state = await observeStartupRead(
+      (signal) => workbenchPost(
+        options.fetch ?? fetch,
+        endpoint.origin,
+        endpoint.bearer,
+        "state",
+        {},
+        workbenchStateSchema,
+        { signal },
+      ),
+      options.timeoutMs,
     );
   } catch {
     return { stale: true, reasons: [STALE_PING] };

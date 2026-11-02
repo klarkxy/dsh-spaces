@@ -1,5 +1,7 @@
 # DSH Spaces 分支合并与架构收敛计划
 
+> 历史导航：本文件是 2026-09-20 的历史设计/实施计划记录，只证明当时范围。现行架构见 [architecture.md](../../docs/architecture.md)；故障政策见 [let it crash](../let-it-crash.md)。文中与现行架构冲突的桌面壳、应用内升级、恢复或旧 LLM 方案内容，仅作历史参考，不是当前合同或验收门槛。
+
 日期：2026-09-20。状态：用户已授权实施，A0/A1 进行中。依据：[合并方案分析](chatgpt-conversation://6aafa53c-d87c-83ec-97cc-83046bbb8940)及本次远端源码核对。执行分支：`codex/spaces-reconcile`。本次前后端均由 Agent Bridge Grok 施工，使用 CLI 默认配置；用户明确排除 Kimi，主 Agent 编排、集成和验收。
 
 目标是把两条分支接回一条开发线，并收敛到一个 Home、一个 Supervisor、一套管理业务与工作台能力。以当前 `main` 为实现基线，先审计遗漏并接续历史，再逐阶段统一后台、客户端与分发。历史归并是检查点，不能代替架构收敛验收。

@@ -1,0 +1,91 @@
+import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
+/** Dev-checkout linking: components installed as link: specs straight into a source checkout. */
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { samePath } from "../home/home-guard";
+
+export type SpacesComponent = "plugin" | "view-bridge" | "llm-bridge" | "browser";
+
+export const DEV_COMPONENT_DIRS: Record<SpacesComponent, string> = {
+  plugin: "packages/plugin",
+  "view-bridge": "packages/view-bridge",
+  "llm-bridge": "packages/llm-bridge",
+  browser: "packages/browser",
+};
+
+/**
+ * Checkout root iff `payloadRootLib` is `<root>/packages/plugin/lib` of a
+ * source checkout (private root manifest named @dsh-spaces/plugin), else
+ * undefined. A packed or staged install never qualifies: staged copies live
+ * under a tools `components/` tree and standard installs live under
+ * node_modules, whose root manifest is neither private nor the plugin package.
+ */
+export function detectDevCheckout(payloadRootLib: string): string | undefined {
+  if (typeof payloadRootLib !== "string" || !payloadRootLib.trim()) return undefined;
+  let real: string;
+  try {
+    real = realpathSync(resolve(payloadRootLib));
+  } catch {
+    return undefined;
+  }
+  if (real.split(/[\\/]+/).includes("node_modules")) return undefined;
+  const root = resolve(real, "..", "..", "..");
+  try {
+    if (!samePath(realpathSync(join(root, "packages", "plugin", "lib")), real)) return undefined;
+  } catch {
+    return undefined;
+  }
+  let manifest: { name?: unknown; private?: unknown };
+  try {
+    manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      name?: unknown;
+      private?: unknown;
+    };
+  } catch {
+    return undefined;
+  }
+  if (manifest.name !== "@dsh-spaces/plugin" || manifest.private !== true) return undefined;
+  return root;
+}
+
+/** The checkout directory linked into a profile for one component. */
+export function devComponentDir(checkout: string, component: SpacesComponent): string {
+  return join(checkout, ...DEV_COMPONENT_DIRS[component].split("/"));
+}
+
+/**
+ * True iff the profile's `@dsh-spaces/<component>` dependency is recorded as a
+ * `link:` spec, its node_modules entry is a symlink/junction, and that link
+ * resolves to this checkout's component directory.
+ */
+export function devComponentLinked(
+  home: string,
+  profileId: string,
+  checkout: string,
+  component: SpacesComponent,
+): boolean {
+  const profileDir = join(home, "profiles", profileId);
+  let spec: unknown;
+  try {
+    const manifest = JSON.parse(readFileSync(join(profileDir, "package.json"), "utf8")) as {
+      dependencies?: Record<string, unknown>;
+    };
+    spec = manifest.dependencies?.[`@dsh-spaces/${component}`];
+  } catch {
+    return false;
+  }
+  if (typeof spec !== "string" || !spec.startsWith("link:")) return false;
+  const link = join(profileDir, "node_modules", "@dsh-spaces", component);
+  let stat;
+  try {
+    stat = lstatSync(link);
+  } catch {
+    return false;
+  }
+  if (!stat.isSymbolicLink()) return false;
+  try {
+    return samePath(realpathSync(link), realpathSync(devComponentDir(checkout, component)));
+  } catch {
+    return false;
+  }
+}

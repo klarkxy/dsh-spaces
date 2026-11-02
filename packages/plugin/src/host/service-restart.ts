@@ -11,7 +11,7 @@ import { SUPERVISOR_ENDPOINT_FILE, type SupervisorEndpoint } from "../../../../s
 import { createWorkbenchHttpClient, type WorkbenchHttpClientOptions } from "./workbench-http";
 
 type Missing = Extract<SupervisorAttachResult, { missing: true }>;
-type Confirmation = { id: string; expires: number; discovery: { endpoint: SupervisorEndpoint } | Missing; plan?: WorkbenchPlan };
+type Confirmation = { id: string; expires: number; discovery: { endpoint: SupervisorEndpoint } | Missing; plan?: WorkbenchPlan; stopOnly: boolean };
 const active = new Set<string>();
 const CHANGED = "The service or affected spaces changed. Review a new restart confirmation.";
 
@@ -32,12 +32,13 @@ export class DesktopServiceRestart {
   private readonly key: string;
   constructor(private readonly options: ServiceRestartOptions) { this.key = resolve(options.home); }
 
-  async preview(): Promise<WorkbenchServiceRestartPreview> {
+  async preview(stopOnly = false): Promise<WorkbenchServiceRestartPreview> {
     this.options.assertDesktop();
     if (active.has(this.key)) throw Error("A manual service restart is already in progress.");
     this.confirmation = undefined;
     const discovery = await this.discover();
     if (!("endpoint" in discovery) && !("missing" in discovery)) throw Error(discovery.reasons.join("\n"));
+    if (stopOnly && !("endpoint" in discovery)) throw Error("There is no running Spaces service to stop.");
     let plan: WorkbenchPlan | undefined;
     let spaces: WorkbenchServiceRestartPreview["spaces"] = [];
     if ("endpoint" in discovery) {
@@ -54,14 +55,14 @@ export class DesktopServiceRestart {
     const expires = Math.min(Date.now() + 5 * 60_000, plan ? Date.parse(plan.expiresAt) : Infinity);
     if (!Number.isFinite(expires) || expires <= Date.now()) throw Error("The restart confirmation expired.");
     const id = randomBytes(32).toString("hex");
-    this.confirmation = { id, expires, discovery, plan };
-    return { confirmationId: id, expiresAt: new Date(expires).toISOString(), action: plan ? "restart" : "start", spaces };
+    this.confirmation = { id, expires, discovery, plan, stopOnly };
+    return { confirmationId: id, expiresAt: new Date(expires).toISOString(), action: stopOnly ? "stop" : plan ? "restart" : "start", spaces };
   }
 
-  async execute(confirmationId: string): Promise<WorkbenchBootstrapResult> {
+  async execute(confirmationId: string, stopOnly = false): Promise<WorkbenchBootstrapResult> {
     this.options.assertDesktop();
     const confirmed = this.confirmation;
-    if (!confirmed || confirmed.id !== confirmationId || confirmed.expires <= Date.now()) throw Error("The restart confirmation is invalid or expired.");
+    if (!confirmed || confirmed.stopOnly !== stopOnly || confirmed.id !== confirmationId || confirmed.expires <= Date.now()) throw Error("The service confirmation is invalid or expired.");
     if (active.has(this.key)) throw Error("A manual service restart is already in progress.");
     // Consume before I/O. Duplicate clicks and a lost response cannot replay this operation.
     this.confirmation = undefined;
@@ -86,6 +87,7 @@ export class DesktopServiceRestart {
         missing = current;
       }
       this.options.assertDesktop();
+      if (stopOnly) return { ok: true, connected: false, unavailable: false, origin: null, reasons: [] };
       return await this.options.launch(previousEpoch, missing);
     } finally { active.delete(this.key); }
   }

@@ -3,9 +3,9 @@
 本文定义当前实现的蓝图数据、文本编码和导入语义。协议标识为 **DSHBP2**，
 JSON 的 `formatVersion` 为 **2**。这是插件组合分享协议，不是环境备份或设置迁移协议。
 
-参考实现：`blueprint.mjs`（数据校验）、`codec.mjs`（文本编解码）、
-`core.mjs`（协议操作与只读导出）。三个层次分别负责结构、编码和操作，
-解码成功不等于数据符合蓝图结构，更不等于可以直接执行。
+一份实现可以分成结构校验、文本编解码和协议操作三层；解码成功不等于数据符合蓝图结构，
+更不等于可以直接执行。DSHBP1（`formatVersion: 1`）另由 Spaces 的蓝图文档合同定义，
+本文件不定义它的字段，也不把它的字段当作 DSHBP2 的扩展。
 
 ## 1. 数据结构
 
@@ -92,12 +92,12 @@ DSHBP2:<payload>
 - 不支持的前缀、编码、协议版本、文档类型、字段、包来源或不明确版本均拒绝；不做格式猜测或迁移。
 - 宿主传输层可以另有请求体限制，协议上限不保证所有宿主接受同样大小的 RPC 请求。
 
-## 5. 使用参考实现生成与验证
+## 5. 生成与验证
+
+工具应当先校验文档结构、再进行编码；解码之后必须重新校验，然后才规划任何原生操作。
+下列示意只表达调用顺序，不绑定具体入口名：
 
 ```js
-import { validate } from '@klarkxy/dsh-blueprint/core';
-import { encode, decode } from '@klarkxy/dsh-blueprint/codec';
-
 const document = validate({
   kind: 'dsh-blueprint',
   formatVersion: 2,
@@ -109,9 +109,8 @@ const code = encode(document);             // 生成唯一格式的蓝图码
 const checked = validate(decode(code));   // 解码之后仍须校验文档
 ```
 
-`encode`／`decode` 负责 JSON 和编码安全边界，`validate` 负责蓝图结构。
-制作工具应在编码前、解码后调用 `validate`。随后还需要核实当前宿主的包身份、权限与实际生效结果；
-不要把生成蓝图码当作执行授权。
+编解码负责 JSON 和编码安全边界，校验负责蓝图结构。制作工具应在编码前、解码后调用校验。
+随后还需要核实当前宿主的包身份、权限与实际生效结果；不要把生成蓝图码当作执行授权。
 
 ## English summary
 

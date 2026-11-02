@@ -637,7 +637,10 @@ test("valid config is isolated in memory then written only after the space exist
   assert.match(patches[0] ?? "", /hub\/space-with-config\/sessions/);
 });
 
-test("Browser sharing retains a visible manual requirement instead of silently exporting plain web",()=>{
- const row=pluginToShare({name:COMPONENT_PAYLOAD_PACKAGES.browser,requestedSpec:"file:H:/private/browser.tgz",resolvedVersion:"0.4.0",protected:false});
- assert.ok(row); assert.equal(row.requestedSpec,undefined); assert.equal(row.installSpec,undefined); assert.notEqual(row.source,"npm");
+test("Browser shares identify the base release instead of a manual installation of the base package", () => {
+  const plugin = { name: COMPONENT_PAYLOAD_PACKAGES.browser, requestedSpec: "file:H:/private/browser.tgz", resolvedVersion: "0.4.0", protected: false };
+  assert.equal(pluginToShare(plugin), null);
+  const share = buildSpaceShare({ displayName: 'Browser', plugins: [plugin], base: 'browser', baseVersion: '0.4.0', dshVersion: '0.2.1-rc.2' });
+  assert.deepEqual(share.manifest.source, { base: 'browser', baseVersion: '0.4.0', dshVersion: '0.2.1-rc.2' });
+  assert.deepEqual(share.plugins, []);
 });

@@ -1,6 +1,8 @@
 # Minimal static capability queries
 
-This second increment adds target-specific static declarations to the private bus.
+> Current capability contract; see [the current architecture](../architecture.md) for channel ownership and availability. Dated verification at the end is historical evidence, not a current full-host acceptance claim.
+
+This increment adds target-specific static declarations to the private bus.
 It is not a central/dynamic registry: no all-Space scan, subscription, broadcast,
 persistence, automatic binding or new credential exists.
 

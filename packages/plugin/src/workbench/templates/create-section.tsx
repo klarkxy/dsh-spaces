@@ -10,6 +10,7 @@
 import React, { useState, type ReactElement } from "react";
 import { blueprintRecipe } from "@klarkxy/dsh-blueprint/document";
 import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { validateBlueprintSpaceName } from "../blueprint-session";
 import { BlueprintCreateFlow } from "../blueprint/create-flow";
 import { EmptyState } from "../empty-state";
@@ -37,8 +38,8 @@ export function TemplatesCreateSection({
   onGoToExport: () => void;
 }): ReactElement {
   const locale = ui.locale;
-  const recipe = ui.blueprint.inspect ? blueprintRecipe(ui.blueprint.inspect.blueprint) : null;
-  const showBlueprint = selected === BLUEPRINT_SELECTION || (selected === null && recipe !== null);
+  const recipe = SPACES_BLUEPRINT_SEALED ? null : ui.blueprint.inspect ? blueprintRecipe(ui.blueprint.inspect.blueprint) : null;
+  const showBlueprint = !SPACES_BLUEPRINT_SEALED && (selected === BLUEPRINT_SELECTION || (selected === null && recipe !== null));
   const templateId = selected && selected !== BLUEPRINT_SELECTION ? selected : null;
   const template = templateId ? ui.templates.find((row) => row.id === templateId) ?? null : null;
   const empty = ui.templates.length === 0 && recipe === null;

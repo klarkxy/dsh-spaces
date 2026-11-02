@@ -1,3 +1,5 @@
+import type { SpaceBaseSelection } from '../../../shared/space-base';
+import { ProfileRegistry } from '../profile/profile-registry';
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +26,7 @@ import type { LlmShareManifest } from "../../../shared/llm-share";
 export const SPACE_TEMPLATES_FILE = "space-templates.json";
 
 export interface SpaceTemplatePorts {
-  createSpace(input: { name: string; displayName: string; icon?: string }): Promise<void>;
+  createSpace(input: { name: string; displayName: string; icon?: string } & SpaceBaseSelection): Promise<void>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
   writePatch?(spaceId: string, patch: string): void;
   writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
@@ -159,7 +161,9 @@ export function saveSpaceTemplate(
   const patchPath = join(dshHome, "profiles", spaceId, "cordis.patch.yml");
   const patch =
     options.includeConfig && existsSync(patchPath) ? readFileSync(patchPath, "utf8") : undefined;
+  const meta = new ProfileRegistry(dshHome).readSpaces().meta[spaceId];
   const recipe: SpaceRecipe = parseSpaceRecipe({
+    source: meta ? { base: meta.base, baseVersion: meta.baseVersion, dshVersion: meta.dshVersion } : undefined,
     schemaVersion: SPACE_RECIPE_SCHEMA_VERSION,
     displayName: options.displayName || name,
     plugins,

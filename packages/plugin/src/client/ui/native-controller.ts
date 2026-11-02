@@ -2,10 +2,16 @@ import { isNativeSpaceTarget, parseNativeSpaceHash, parseNativePortalFailureHash
   parsePortalSnapshot, nativeCreateIntentHash, parseNativeCreateIntent,
   type NativeSpaceTarget, type PortalSnapshot, type PortalFailure } from "../../../../../src/shared/space-host";
 import { BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, type BrowserRelay } from "../../../../../src/shared/browser-guest";
-import type { WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
+import type { DesktopSpaceAction, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
 import { publicGuideDetail } from "../guide-detail";
-import { WORKBENCH_ENTRY_UNAVAILABLE } from "../../../../../src/shared/workbench-errors";
 import { NativeBrowserHost } from "../native-browser-host";
+import { SPACES_BROWSER_SEALED } from "../../../../../src/shared/browser-sealed";
+import type { DesktopLaunchState } from "../../types";
+import { nativeTexts } from "./native-texts";
+import { createNavDiag } from "../../../../../src/shared/nav-diag";
+
+const LAUNCH_POLL_MS = 1500;
+const LAUNCH_BUSY = new Set<DesktopLaunchState["phase"]>(["discovering", "preparing", "launching", "starting", "connecting"]);
 
 /**
  * The desktop (Electron) host controller.
@@ -34,19 +40,39 @@ export function desktopBrowserBridge(root: typeof globalThis = globalThis): Desk
     carrier?.protocolVersion === 1 && typeof carrier.browser?.acquire === "function" && typeof carrier.browser.release === "function" ? carrier.browser : null;
 }
 
-type NativeState = { phase: "loading" | "launching" | "initialize" | "ready" | "failed"; inventory: PortalSnapshot | null;
+type NativeLaunchPhase = DesktopLaunchState["phase"];
+type NativeNavigationIntent = "settings" | "create";
+type NativeState = { phase: "loading" | NativeLaunchPhase | "ready" | "stopping" | "service-stopped" | "failed"; inventory: PortalSnapshot | null;
   selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; detail: string | null;
-  portalFailure: PortalFailure | null; guide: boolean };
+  cleanupDetail: string | null; instanceRetained: boolean | null;
+  portalFailure: PortalFailure | null; guide: boolean;
+  navigationIntent: NativeNavigationIntent | null; createHandoff: boolean;
+  operation: { spaceId: string; action: DesktopSpaceAction["action"] } | null; operationError: string | null;
+  notice: string | null; serviceStopRequest: number;
+  spaceConfirmation: { request: DesktopSpaceAction; activity: "busy" | "unknown" } | null };
 
 /** One native guest, one lifetime. It has no Node API or product script execution channel. */
 export class NativeHostController {
-  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, portalFailure: null, guide: false };
+  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null };
   private listeners = new Set<() => void>();
   private stopped = false;
+  private started = false;
   private lifetime = new AbortController();
   private pollTimer?: ReturnType<typeof setTimeout>;
+  private launchTimer?: ReturnType<typeof setTimeout>;
   private selectionTimer?: ReturnType<typeof setTimeout>;
+  private noticeTimer?: ReturnType<typeof setTimeout>;
   private sequence = 0;
+  /** Non-zero while a navigation still wants the native guest. Main clears it. */
+  private desiredGuest = 0;
+  private directoryVersion = 0;
+  private launchGeneration = 0;
+  private launchSettled = false;
+  private launchOperationId: string | null = null;
+  private launchEpoch: string | null = null;
+  private launchManagerId: string | null = null;
+  /** Set only for the settings selection that openCreate is performing. */
+  private selectingCreate = false;
   private guest?: Guest;
   private lease?: string;
   private opening?: Promise<void>;
@@ -54,90 +80,228 @@ export class NativeHostController {
   private nativeUrl?: string;
   private browser?: NativeBrowserHost;
   private browserRequest?: string;
+  private readySpaces = new Map<string, number>();
+  private failedSpaces = new Map<string, number>();
+  private navigationGeneration?: number;
   private channel = Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, "0")).join("");
   /** Set while the next settings selection must also open the create dialog. */
   private createIntent = false;
+  /** Latest settings or create choice. Main, failure and stop clear it. */
+  private intent: "settings" | "create" | null = null;
   /** Monotonic id of the last create intent handed to the portal page. */
   private intentSequence = 0;
+  /** First-navigation diagnosis. Calls must not change navigation. */
+  private navDiag = createNavDiag("controller");
+  private navNavigateNoted = false;
+  private navOutcomeNoted = false;
   constructor(private guideApi: WorkbenchGuideApi, private bridge: DesktopBrowserBridge) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
+  get supportsSpaceActions() { return !!this.guideApi.spaceAction; }
+  spaceStatus = (spaceId: string): string => {
+    const row = this.state.inventory?.spaces.find(space => space.id === spaceId);
+    if (!row) return "unknown";
+    if (this.state.operation?.spaceId === spaceId) return this.state.operation.action === "stop" ? "stopping" : row.status === "running" ? "opening" : "starting";
+    if (row.status !== "running") return row.status;
+    if (this.state.pending === spaceId) return "opening";
+    if (this.failedSpaces.get(spaceId) === row.generation) return "failed";
+    return this.readySpaces.get(spaceId) === row.generation ? "running" : "unopened";
+  };
+  dismissOperationError = () => this.patch({ operationError: null });
   get supportsServiceRestart() { return !!this.guideApi.previewServiceRestart && !!this.guideApi.restartService; }
+  previewServiceStop = () => {
+    if (!this.guideApi.previewServiceStop || this.state.phase !== "ready" || this.state.operation) throw Error(nativeTexts().serviceCannotStop);
+    return this.guideApi.previewServiceStop();
+  };
+  stopService = async (confirmationId: string) => {
+    if (!this.guideApi.stopService || this.state.phase !== "ready" || this.state.operation) throw Error(nativeTexts().serviceCannotStop);
+    // End discovery before submission. Only the exact host-side operation decides
+    // success; the guest disappearing during this shutdown cannot declare failure.
+    this.patch({ phase: "stopping", guide: true, pending: null, selected: "current", error: null, detail: null });
+    this.stop();
+    try {
+      const result = await this.guideApi.stopService(confirmationId);
+      if (!result.ok || result.connected) throw Error(this.reasonText(result.reasons) ?? nativeTexts().serviceStopUnconfirmed);
+      this.patch({ phase: "service-stopped", inventory: null });
+    } catch (error) {
+      this.patch({ phase: "failed", inventory: null, error: nativeTexts().serviceStopFailed, detail: this.detailOf(error) });
+      throw error;
+    }
+  };
   previewServiceRestart = () => {
-    if (!this.supportsServiceRestart || this.state.phase !== "failed") throw Error("Manual service restart is unavailable.");
+    if (!this.supportsServiceRestart || !["failed", "service-stopped"].includes(this.state.phase)) throw Error(nativeTexts().restartUnavailable);
     return this.guideApi.previewServiceRestart!();
   };
   restartService = async (confirmationId: string): Promise<NativeHostController> => {
-    if (!this.supportsServiceRestart || this.state.phase !== "failed") throw Error("Manual service restart is unavailable.");
+    if (!this.supportsServiceRestart || !["failed", "service-stopped"].includes(this.state.phase)) throw Error(nativeTexts().restartUnavailable);
     const result = await this.guideApi.restartService!(confirmationId);
-    if (!result.ok || !result.connected) throw Error(this.reasonText(result.reasons) ?? "The manual service restart failed.");
+    if (!result.ok || !result.connected) throw Error(this.reasonText(result.reasons) ?? nativeTexts().restartFailed);
     // The failed controller stays terminal. A confirmed new service gets a new
     // controller, so old async responses and guest events cannot affect it.
-    return new NativeHostController(this.guideApi, this.bridge);
+    const next = new NativeHostController(this.guideApi, this.bridge);
+    next.notify(nativeTexts().serviceStartedNotice);
+    return next;
   };
-  private patch(change: Partial<NativeState>) { this.state = { ...this.state, ...change }; for (const fn of this.listeners) fn(); }
+  private notify(notice: string) {
+    clearTimeout(this.noticeTimer); this.patch({ notice });
+    this.noticeTimer = setTimeout(() => this.patch({ notice: null }), 8000);
+  }
+  private patch(change: Partial<NativeState>) {
+    if ("inventory" in change) {
+      for (const table of [this.readySpaces, this.failedSpaces]) {
+        for (const [id, generation] of table) {
+          if (!change.inventory?.spaces.some(row => row.id === id && row.status === "running" && row.generation === generation) ||
+              change.inventory.serviceEpoch !== this.state.inventory?.serviceEpoch) table.delete(id);
+        }
+      }
+    }
+    this.state = { ...this.state, ...change }; for (const fn of this.listeners) fn();
+  }
   private detailOf(error: unknown): string | null {
     const detail = publicGuideDetail(error instanceof Error ? error.message : String(error ?? ""));
     return detail || null;
   }
   private reasonText(reasons: string[] | undefined): string | null {
-    const detail = (reasons ?? []).map(publicGuideDetail).filter(Boolean).join(" ");
+    return this.reasonLines(reasons);
+  }
+  private reasonLines(reasons: string[] | undefined): string | null {
+    const lines = (reasons ?? []).map(item => publicGuideDetail(item)).filter(Boolean);
+    return lines.length ? lines.join("\n") : null;
+  }
+  private bounded(text: string | undefined): string | null {
+    if (!text) return null;
+    const detail = publicGuideDetail(text);
     return detail || null;
   }
   async start(container: HTMLElement) {
+    if (this.started) return;
+    this.started = true;
     this.container = container;
-    this.browser = new NativeBrowserHost(this.bridge, container);
+    if (!SPACES_BROWSER_SEALED) this.browser = new NativeBrowserHost(this.bridge, container);
+    const generation = ++this.launchGeneration;
     try {
-      const role = await this.guideApi.role(); if (this.stopped) return;
+      const role = await this.guideApi.role();
+      if (this.stopped || generation !== this.launchGeneration) return;
       if (role.unavailable || !role.profileId || !this.guideApi.presentationSnapshot) return this.fail(this.reasonText(role.reasons));
-      if (!role.managerId) { this.patch({ phase: "initialize" }); return; }
-      await this.readDirectory(true);
-    } catch (error) { this.fail(this.detailOf(error)); }
+      if (!this.guideApi.beginDesktopLaunch || !this.guideApi.desktopLaunchState) return this.fail(nativeTexts().desktopLaunchUnsupported);
+      const snapshot = await this.guideApi.beginDesktopLaunch();
+      if (this.stopped || generation !== this.launchGeneration) return;
+      await this.applyLaunch(snapshot, generation);
+    } catch (error) {
+      if (!this.stopped && generation === this.launchGeneration) this.fail(this.detailOf(error));
+    }
   }
-  initialize = async () => {
-    if (this.stopped || this.state.phase !== "initialize") return;
-    this.patch({ phase: "loading", error: null, detail: null, guide: true });
-    try {
-      const result = await this.guideApi.initialize(); if (this.stopped) return;
-      if (!result.ok) return this.fail(this.reasonText(result.reasons));
-      await this.readDirectory();
-      if (!this.stopped) this.select("@settings");
-    } catch (error) { this.fail(this.detailOf(error)); }
-  };
-  private async readDirectory(firstRead = false) {
-    if (this.stopped) return;
+  private async readDirectory() {
+    if (this.stopped || this.launchSettled === false || this.state.phase === "failed" || this.state.phase === "service-stopped") return;
+    const version = this.directoryVersion;
     try {
       const snapshot = parsePortalSnapshot(await this.guideApi.presentationSnapshot!());
       if (this.stopped) return;
       if (!snapshot) throw Error("presentation snapshot rejected");
+      if (this.acceptedDirectoryMismatch(snapshot)) { this.fail(nativeTexts().launchObservationEnded); return; }
       if (this.state.inventory && snapshot.serviceEpoch !== this.state.inventory.serviceEpoch) throw Error("presentation snapshot epoch changed");
-      this.patch({ phase: "ready", inventory: snapshot });
-      this.pollTimer = setTimeout(() => { void this.readDirectory(); }, 1500);
+      if (version === this.directoryVersion) this.patch({ phase: "ready", inventory: snapshot });
+      this.pollTimer = setTimeout(() => { void this.readDirectory(); }, LAUNCH_POLL_MS);
+    } catch (error) { this.fail(this.detailOf(error)); }
+  }
+  private async applyLaunch(snapshot: DesktopLaunchState, generation: number) {
+    if (this.stopped || generation !== this.launchGeneration) return;
+    // A live observer reports the change and stops. A replaced generation never reaches here.
+    if (!this.acceptsLaunch(snapshot)) { this.fail(nativeTexts().launchObservationEnded); return; }
+    const phase = snapshot.phase;
+    if (LAUNCH_BUSY.has(phase)) {
+      this.patch({ phase });
+      this.scheduleLaunchPoll(generation);
+      return;
+    }
+    this.launchSettled = true;
+    clearTimeout(this.launchTimer);
+    if (phase === "ready") {
+      await this.readDirectory();
+      if (this.stopped || generation !== this.launchGeneration || this.state.phase !== "ready") return;
+      this.consumeIntent();
+      return;
+    }
+    if (phase === "failed") { this.failLaunch(snapshot); return; }
+    if (phase === "stopped") { this.finishStopped(snapshot); return; }
+    if (phase === "idle") { this.patch({ phase: "idle" }); return; }
+    this.fail(nativeTexts().desktopLaunchUnsupported);
+  }
+  private acceptsLaunch(snapshot: DesktopLaunchState): boolean {
+    if (snapshot.operationId) {
+      if (this.launchOperationId && snapshot.operationId !== this.launchOperationId) return false;
+      this.launchOperationId = snapshot.operationId;
+    }
+    if (snapshot.serviceEpoch) {
+      if (this.launchEpoch && snapshot.serviceEpoch !== this.launchEpoch) return false;
+      this.launchEpoch = snapshot.serviceEpoch;
+    }
+    if (snapshot.managerId) {
+      if (this.launchManagerId && snapshot.managerId !== this.launchManagerId) return false;
+      this.launchManagerId = snapshot.managerId;
+    }
+    return true;
+  }
+  /** First and later inventories stay on the launch epoch and manager already accepted. */
+  private acceptedDirectoryMismatch(snapshot: PortalSnapshot): boolean {
+    return (this.launchEpoch !== null && snapshot.serviceEpoch !== this.launchEpoch) ||
+      (this.launchManagerId !== null && snapshot.managerId !== this.launchManagerId);
+  }
+  private scheduleLaunchPoll(generation: number) {
+    clearTimeout(this.launchTimer);
+    this.launchTimer = setTimeout(() => { void this.pollLaunch(generation); }, LAUNCH_POLL_MS);
+  }
+  private async pollLaunch(generation: number) {
+    if (this.stopped || this.launchSettled || generation !== this.launchGeneration || !this.guideApi.desktopLaunchState) return;
+    try {
+      const snapshot = await this.guideApi.desktopLaunchState();
+      if (this.stopped || this.launchSettled || generation !== this.launchGeneration) return;
+      await this.applyLaunch(snapshot, generation);
     } catch (error) {
-      // Opening the application is a new user-requested launch. When read-only
-      // discovery finds no live supervisor on that first read, this launch starts
-      // it exactly once; the guarded launch retires only a provably dead owner.
-      // A later failure in this session never launches again.
-      const message = error instanceof Error ? error.message : String(error ?? "");
-      if (firstRead && !this.state.inventory && message === WORKBENCH_ENTRY_UNAVAILABLE) {
-        await this.launchOnOpen(); return;
-      }
-      this.fail(this.detailOf(error));
+      if (!this.stopped && !this.launchSettled && generation === this.launchGeneration) this.fail(this.detailOf(error));
     }
   }
-  private async launchOnOpen() {
-    this.patch({ phase: "launching" });
-    try {
-      const result = await this.guideApi.initialize(); if (this.stopped) return;
-      if (!result.ok) return this.fail(this.reasonText(result.reasons));
-      await this.readDirectory();
-    } catch (error) { this.fail(this.detailOf(error)); }
+  private launchDiagnostics(snapshot: DesktopLaunchState): { detail: string | null; cleanupDetail: string | null; instanceRetained: boolean | null } {
+    const failure = snapshot.failure;
+    if (!failure) return { detail: this.reasonLines(snapshot.reasons), cleanupDetail: null, instanceRetained: null };
+    return {
+      detail: this.bounded(failure.primaryReason),
+      cleanupDetail: this.bounded(failure.cleanupReason),
+      instanceRetained: failure.instanceRetained === true,
+    };
+  }
+  private failLaunch(snapshot: DesktopLaunchState) {
+    const diagnostics = this.launchDiagnostics(snapshot);
+    this.fail(diagnostics.detail, null, diagnostics);
+  }
+  private finishStopped(snapshot: DesktopLaunchState) {
+    const diagnostics = this.launchDiagnostics(snapshot);
+    this.intent = null; this.createIntent = false; this.desiredGuest = 0;
+    this.patch({ phase: "service-stopped", guide: false, selected: "current", pending: null, navigationIntent: null, createHandoff: false,
+      error: null, detail: diagnostics.detail, cleanupDetail: diagnostics.cleanupDetail, instanceRetained: diagnostics.instanceRetained, inventory: null });
+  }
+  private consumeIntent() {
+    const intent = this.intent;
+    if (!intent || this.stopped || this.state.phase !== "ready") return;
+    this.intent = null;
+    this.patch({ navigationIntent: null });
+    if (intent === "create") {
+      this.createIntent = true;
+      this.selectingCreate = true;
+      this.patch({ createHandoff: true });
+      this.select("@settings");
+      this.selectingCreate = false;
+      return;
+    }
+    this.createIntent = false;
+    this.patch({ createHandoff: false });
+    this.select("@settings");
   }
   showCurrent = () => {
     this.browserRequest = undefined; this.browser?.hide();
-    this.sequence++; clearTimeout(this.selectionTimer);
-    this.createIntent = false;
-    this.patch({ selected: "current", pending: null, guide: false });
+    this.sequence++; this.desiredGuest = 0; clearTimeout(this.selectionTimer);
+    this.createIntent = false; this.intent = null;
+    this.patch({ selected: "current", pending: null, guide: false, navigationIntent: null, createHandoff: false });
   };
 
   /**
@@ -149,30 +313,152 @@ export class NativeHostController {
    * guest, which opens its own create dialog on top of the settings page.
    */
   openCreate = () => {
+    if (this.stopped) { this.clearNavigationIntent(); this.select("@settings"); return; }
+    if (this.state.phase === "failed" || this.state.phase === "service-stopped" || this.state.phase === "stopping") {
+      this.clearNavigationIntent();
+      if (this.state.phase !== "stopping") this.select("@settings");
+      return;
+    }
     this.createIntent = true;
+    this.intent = "create";
+    this.patch({ navigationIntent: "create", createHandoff: true, ...(this.state.phase === "ready" ? {} : { guide: true }) });
+    if (this.state.phase !== "ready") return;
+    this.selectingCreate = true;
     this.select("@settings");
+    this.selectingCreate = false;
   };
   select = (target: NativeSpaceTarget) => {
     if (!isNativeSpaceTarget(target)) return;
     // After a failure this controller is stopped for good (let it crash). A
     // later click shows the recorded failure again instead of doing nothing;
     // it never reconnects or retries.
-    if (this.stopped) { if (this.state.phase === "failed" && !this.state.guide) this.patch({ guide: true }); return; }
-    if (this.state.phase === "initialize") { this.patch({ guide: true }); return; }
-    if (this.state.phase !== "ready") { this.patch({ guide: true }); return; }
-    this.browserRequest = undefined; this.browser?.hide();
-    const inventory = this.state.inventory;
-    if (!target.startsWith("@") && !inventory?.spaces.some(s => s.id === target && s.id !== inventory.managerId && s.status === "running")) {
-      this.patch({ guide: true, error: "该空间尚未运行。请在设置中明确启动。", detail: null }); return;
+    if (this.stopped) { if (["failed", "service-stopped", "stopping"].includes(this.state.phase) && !this.state.guide) this.patch({ guide: true }); return; }
+    if (this.state.phase === "stopping") return;
+    if (this.state.phase !== "ready") {
+      if (target !== "@settings" || this.selectingCreate) return;
+      this.createIntent = false;
+      this.intent = this.state.phase === "failed" || this.state.phase === "service-stopped" ? null : "settings";
+      this.patch({ navigationIntent: this.intent, createHandoff: false, guide: true });
+      return;
     }
+    if (target === "@settings" && !this.selectingCreate) {
+      this.createIntent = false;
+      this.intent = null;
+      this.patch({ navigationIntent: null, createHandoff: false });
+    }
+    if (this.state.operation) return;
+    const inventory = this.state.inventory;
+    const running = inventory?.spaces.some(s => s.id === target && s.id !== inventory.managerId && s.status === "running");
+    // Navigation to a live child is presentation only. The manager owns the
+    // ready-frame cache and validates its identity before acknowledging it.
+    if (!target.startsWith("@") && !running && this.guideApi.spaceAction) {
+      void this.spaceAction(target, "open"); return;
+    }
+    this.browserRequest = undefined; this.browser?.hide();
+    if (!target.startsWith("@") && !running) {
+      this.patch({ guide: true, error: nativeTexts().spaceNotRunning, detail: null }); return;
+    }
+    this.navigate(target);
+  };
+
+  cancelSpaceAction = () => this.patch({ spaceConfirmation: null });
+  confirmSpaceAction = () => {
+    const confirmed = this.state.spaceConfirmation;
+    if (!confirmed) return;
+    this.patch({ spaceConfirmation: null });
+    void this.spaceAction(confirmed.request.spaceId, confirmed.request.action, confirmed.request);
+  };
+  spaceAction = async (spaceId: string, action: DesktopSpaceAction["action"], confirmed?: DesktopSpaceAction) => {
+    const inventory = this.state.inventory;
+    if (this.stopped || this.state.phase !== "ready" || this.state.operation || !this.guideApi.spaceAction ||
+        !inventory || !inventory.spaces.some(row => row.id === spaceId && row.id !== inventory.managerId && row.id !== "desktop")) return;
+    let request: DesktopSpaceAction = { spaceId, action, serviceEpoch: inventory.serviceEpoch };
+    if (action === "stop" || action === "restart") {
+      if (confirmed) {
+        if (confirmed.serviceEpoch !== inventory.serviceEpoch || confirmed.expectedGeneration !== inventory.spaces.find(row => row.id === spaceId)?.generation) {
+          this.patch({ operationError: nativeTexts().spaceChangedRetry }); return;
+        }
+        request = confirmed;
+      } else {
+        this.patch({ operation: { spaceId, action }, operationError: null });
+        try {
+          const activity = this.guideApi.spaceActivity ? await this.guideApi.spaceActivity(spaceId, inventory.serviceEpoch)
+            : { activity: "unknown" as const, generation: inventory.spaces.find(row => row.id === spaceId)!.generation };
+          if (this.stopped) return;
+          request.expectedGeneration = activity.generation;
+          if (activity.activity !== "idle") {
+            this.patch({ operation: null, spaceConfirmation: { request: { ...request, interruptAccepted: true }, activity: activity.activity } }); return;
+          }
+        } catch (error) {
+          if (!this.stopped) this.patch({ operation: null, operationError: this.detailOf(error) }); return;
+        }
+      }
+    }
+    const enter = action === "open" || action === "start" || (action === "restart" && this.state.selected === spaceId);
+    if (action === "stop" || action === "restart") { this.readySpaces.delete(spaceId); this.failedSpaces.delete(spaceId); }
+    if ((action === "stop" || action === "restart") && (this.state.selected === spaceId || this.state.pending === spaceId)) this.showCurrent();
+    const intent = enter ? ++this.sequence : this.sequence;
+    if (enter) this.desiredGuest = intent;
+    if (enter) clearTimeout(this.selectionTimer);
+    this.patch({ ...(enter ? { pending: null } : {}), operation: { spaceId, action }, operationError: null });
+    // This explicit open owns both operations. Preparing the authenticated
+    // presentation can run alongside the child launch; it never starts a child.
+    const preparation = enter ? this.open().then(() => null, error => ({ error })) : null;
+    try {
+      const snapshot = parsePortalSnapshot(await this.guideApi.spaceAction(request));
+      if (this.stopped) return;
+      if (!snapshot || snapshot.serviceEpoch !== inventory.serviceEpoch) throw Error("The space service changed during the operation.");
+      this.directoryVersion++;
+      this.patch({ inventory: snapshot, operation: null, ...(enter && intent === this.sequence ? { pending: spaceId } : {}) });
+      const name = snapshot.spaces.find(row => row.id === spaceId)?.displayName ?? spaceId;
+      if (action === "stop") this.notify(nativeTexts().spaceStoppedNotice.replace("{name}", name));
+      else if (action === "restart") this.notify(nativeTexts().spaceRestartedNotice.replace("{name}", name));
+      else if (inventory.spaces.find(row => row.id === spaceId)?.status !== "running") this.notify(nativeTexts().spaceStartedNotice.replace("{name}", name));
+      if (enter && intent === this.sequence) {
+        const prepared = await preparation;
+        if (this.stopped || intent !== this.sequence) return;
+        if (prepared) { this.fail(this.detailOf(prepared.error)); return; }
+        this.navigate(spaceId);
+      }
+    } catch (error) {
+      if (!this.stopped) this.patch({ operation: null, operationError: this.detailOf(error) ?? nativeTexts().spaceActionFailed });
+    }
+  };
+
+  private navNote(ev: string, extra?: object) {
+    try { this.navDiag(ev, extra); } catch { /* diagnosis never changes navigation */ }
+  }
+  private navEnd() {
+    try { this.navDiag.end(); } catch { /* diagnosis never changes navigation */ }
+  }
+  /** First selected, rejected, or portal failure closes the diagnosis. */
+  private navOutcome(ev: "ready" | "fail", endNow: boolean) {
+    if (this.navOutcomeNoted) return;
+    this.navOutcomeNoted = true;
+    this.navNote(ev);
+    if (endNow) this.navEnd();
+  }
+  private navigate(target: NativeSpaceTarget) {
+    if (!this.navNavigateNoted) {
+      this.navNavigateNoted = true;
+      this.navNote("user-select", { targetKind: target === "@settings" ? "settings" : "space" });
+    }
+    this.browserRequest = undefined; this.browser?.hide();
     const requestId = ++this.sequence;
+    this.desiredGuest = requestId;
+    const generation = target.startsWith("@") ? undefined : this.state.inventory?.spaces.find(row => row.id === target)?.generation;
+    this.navigationGeneration = generation;
+    const fragment = "#select/" + requestId + "/" + target + (generation === undefined ? "" : "/" + generation);
     this.patch({ pending: target, error: null, detail: null, guide: false });
     clearTimeout(this.selectionTimer);
-    this.selectionTimer = setTimeout(() => { if (this.sequence === requestId) this.fail(); }, 45000);
+    this.selectionTimer = setTimeout(() => { if (this.sequence === requestId) { this.navNote("deadline", { stage: "selection" }); this.fail(); } }, 45000);
     void this.open().then(async () => {
       if (this.stopped || requestId !== this.sequence) return;
-      await this.guest!.loadURL(this.nativeUrl! + "#select/" + requestId + "/" + target);
+      this.navNote("select-load-start");
+      await this.guest!.loadURL(this.nativeUrl! + fragment);
+      this.navNote("select-load-complete");
     }).catch(() => {
+      this.navNote("select-load-reject");
       if (this.stopped || requestId !== this.sequence || this.state.pending !== target) return;
       // Electron can reject the request URL after the page has already acknowledged
       // the same-document navigation. Read that exact acknowledgement before failing.
@@ -182,46 +468,94 @@ export class NativeHostController {
         // The fragment is already committed even when Electron rejects loadURL.
         // Keep waiting for its bounded acknowledgement; do not send it again.
         if (!this.stopped && this.state.pending === target &&
-          actual !== this.nativeUrl + "#select/" + requestId + "/" + target) this.fail();
+          actual !== this.nativeUrl + fragment) this.fail();
       } catch (error) { this.fail(this.detailOf(error)); }
     });
-  };
+  }
   private open(): Promise<void> {
     if (this.opening) return this.opening;
     this.opening = this.createGuest(); return this.opening;
   }
   private async createGuest() {
     const target: WorkbenchReturnTarget = await this.guideApi.returnTarget();
-    if (this.stopped) return;
+    this.navNote("return-target");
+    if (this.stopped || this.desiredGuest === 0) { this.opening = undefined; return; }
     const origin = new URL(target.origin ?? "about:blank");
     if (!target.available || origin.origin !== target.origin || origin.protocol !== "http:" || origin.hostname !== "127.0.0.1" ||
       origin.username || origin.password || !/^\/bootstrap\/[A-Za-z0-9_-]{16,128}$/.test(target.path ?? "")) throw Error("return target rejected");
     const reservation = await this.bridge.acquire("dsh-spaces:" + target.origin + ":" + this.channel);
-    if (this.stopped) { await this.bridge.release(reservation.lease); return; }
+    this.navNote("bridge-acquired");
+    if (this.stopped || this.desiredGuest === 0) {
+      this.opening = undefined;
+      await this.bridge.release(reservation.lease).catch(() => console.error("Spaces native guest release failed."));
+      return;
+    }
     this.lease = reservation.lease;
     const element = document.createElement("webview") as Guest; this.guest = element;
+    this.navNote("guest-created");
     element.className = "dsh-native-guest";
     element.setAttribute("partition", reservation.partition);
     element.setAttribute("name", reservation.lease);
     element.setAttribute("src", "about:blank#" + reservation.lease);
-    element.setAttribute("aria-label", "空间内容");
+    element.setAttribute("aria-label", nativeTexts().guestContent);
     const ready = new Promise<void>((resolve, reject) => {
-      const finish = (error = false) => { clearTimeout(timeout); this.lifetime.signal.removeEventListener("abort", aborted); error ? reject(Error()) : resolve(); };
+      let settled = false;
+      let initialFinished = false;
+      const finish = (error = false) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.lifetime.signal.removeEventListener("abort", aborted);
+        element.removeEventListener("did-stop-loading", onStop);
+        error ? reject(Error()) : resolve();
+      };
       const aborted = () => finish(true);
       const timeout = setTimeout(() => finish(true), 15000);
       this.lifetime.signal.addEventListener("abort", aborted, { once: true });
-      element.addEventListener("dom-ready", () => finish(), { once: true });
+      // dom-ready is only an observation. Electron can settle the next loadURL
+      // on this blank page's did-finish-load or did-stop-loading, so bootstrap
+      // waits until that finish has been seen and its stop has arrived.
+      element.addEventListener("dom-ready", () => { this.navNote("guest-dom-ready"); }, { once: true });
+      element.addEventListener("did-finish-load", () => { initialFinished = true; }, { once: true });
+      const onStop = () => {
+        if (settled || !initialFinished) return;
+        this.navNote("guest-load-stopped");
+        finish();
+      };
+      element.addEventListener("did-stop-loading", onStop);
     });
-    element.addEventListener("did-fail-load", event => { const failure = event as Event & { errorCode?: number; isMainFrame?: boolean }; if (failure.isMainFrame !== false && failure.errorCode !== -3) this.fail(); });
+    element.addEventListener("did-fail-load", event => {
+      const failure = event as Event & { errorCode?: number; isMainFrame?: boolean; validatedURL?: string };
+      try {
+        this.navDiag("did-fail-load", {
+          url: failure.validatedURL, isMainFrame: failure.isMainFrame, errorCode: failure.errorCode,
+          ignored: failure.isMainFrame === false || failure.errorCode === -3,
+        });
+      } catch { /* diagnosis never changes the failure decision */ }
+      if (failure.isMainFrame !== false && failure.errorCode !== -3) this.fail();
+    });
+    element.addEventListener("did-start-navigation", event => { this.navNote("did-start-navigation", event); });
+    element.addEventListener("did-frame-navigate", event => { this.navNote("did-frame-navigate", event); });
     element.addEventListener("render-process-gone", () => this.fail());
-    element.addEventListener("did-navigate-in-page", () => this.observed());
+    element.addEventListener("did-navigate-in-page", event => { this.navNote("did-navigate-in-page", event); this.observed(); });
     this.container!.append(element); await ready;
-    if (this.stopped) return;
-    await element.loadURL(target.origin + target.path);
-    if (this.stopped) return;
-    if (element.getURL() !== target.origin + "/") throw Error("bootstrap entry rejected");
+    if (this.stopped || this.desiredGuest === 0) {
+      element.remove(); this.guest = undefined; this.opening = undefined;
+      const lease = this.lease; this.lease = undefined;
+      if (lease) await this.bridge.release(lease).catch(() => console.error("Spaces native guest release failed."));
+      return;
+    }
     this.nativeUrl = target.origin + "/native/" + this.channel;
-    await element.loadURL(this.nativeUrl);
+    // Exchange the single-use token directly into the native portal. Visiting
+    // the ordinary root first also mounts a manager UI that is then discarded.
+    this.navNote("bootstrap-load-start");
+    try {
+      await element.loadURL(target.origin + target.path + "?native=" + this.channel);
+    } catch (error) {
+      this.navNote("bootstrap-load-reject");
+      throw error;
+    }
+    this.navNote("bootstrap-load-complete");
     if (!this.stopped && element.getURL() !== this.nativeUrl) throw Error("native channel rejected");
     element.addEventListener("did-navigate", () => { if (!this.stopped && !element.getURL().startsWith(this.nativeUrl! + "#") && element.getURL() !== this.nativeUrl) this.fail(); });
   }
@@ -231,6 +565,11 @@ export class NativeHostController {
     try { url = new URL(observedUrl ?? this.guest.getURL()); }
     catch { this.fail(); return; }
     if (url.origin + url.pathname !== this.nativeUrl || url.search || url.username || url["password"]) { this.fail(); return; }
+    if (/^#service-stop-preview\/[1-9][0-9]{0,9}$/.test(url.hash)) {
+      if (this.state.phase === "ready" && this.state.selected === "@settings" && !this.state.pending && !this.state.operation)
+        this.patch({ serviceStopRequest: this.state.serviceStopRequest + 1 });
+      return;
+    }
     if (url.hash === "#failed") { this.fail(); return; }
     if (url.hash.startsWith("#failed")) {
       const failure = parseNativePortalFailureHash(url.hash);
@@ -250,12 +589,20 @@ export class NativeHostController {
     const answer = parseNativeSpaceHash(url.hash);
     if (!answer || answer.kind === "select" || answer.requestId !== this.sequence || answer.target !== this.state.pending) return;
     clearTimeout(this.selectionTimer);
-    if (answer.kind === "rejected") { this.patch({ pending: null, guide: true, error: "空间页面未能打开，该次操作已失败。", detail: null }); return; }
+    const row = this.state.inventory?.spaces.find(space => space.id === answer.target);
+    if (answer.kind === "rejected") {
+      this.readySpaces.delete(answer.target);
+      if (row) this.failedSpaces.set(row.id, row.generation);
+      this.patch({ pending: null, guide: true, error: nativeTexts().spaceViewFailed, detail: null });
+      this.navOutcome("fail", true); return;
+    }
+    if (row?.status === "running" && row.generation === this.navigationGeneration) { this.readySpaces.set(row.id, row.generation); this.failedSpaces.delete(row.id); }
     this.patch({ selected: answer.target, pending: null, guide: false }); this.guest.focus();
     if (this.createIntent && answer.target === "@settings") {
       this.createIntent = false;
       this.handOverCreateIntent();
     }
+    this.navOutcome("ready", true);
   }
   /**
    * The manager guest lives in another origin than this shell. The portal
@@ -270,8 +617,8 @@ export class NativeHostController {
     // never fails this shell.
     void this.guest!.loadURL(intent).catch(() => {
       try {
-        if (this.guest?.getURL() !== intent) this.patch({ guide: true, error: "新建空间对话框未能打开，该次操作已失败。", detail: null });
-      } catch { this.patch({ guide: true, error: "新建空间对话框未能打开，该次操作已失败。", detail: null }); }
+        if (this.guest?.getURL() !== intent) this.patch({ guide: true, error: nativeTexts().createDialogFailed, detail: null });
+      } catch { this.patch({ guide: true, error: nativeTexts().createDialogFailed, detail: null }); }
     });
   }
   private async presentBrowser(request: BrowserRelay, requestUrl: string) {
@@ -289,22 +636,34 @@ export class NativeHostController {
     try { await this.guest.loadURL(responseUrl); }
     catch { if (!this.stopped && this.guest?.getURL() !== responseUrl && this.browserRequest === request.requestId) this.fail(); }
   }
-  private fail(detail: string | null = null, portalFailure: PortalFailure | null = null) {
+  private clearNavigationIntent() {
+    this.intent = null; this.createIntent = false;
+    if (this.state.navigationIntent || this.state.createHandoff) this.patch({ navigationIntent: null, createHandoff: false });
+  }
+  private fail(detail: string | null = null, portalFailure: PortalFailure | null = null, diagnostics?: { cleanupDetail: string | null; instanceRetained: boolean | null }) {
     if (this.stopped) return;
+    this.navOutcome("fail", false);
     // Background discovery must not cover the main application. Keep the
     // failure terminal and inspectable; show it immediately only when the user
     // is already using or opening a Spaces surface.
+    this.launchSettled = true;
+    this.intent = null; this.createIntent = false; this.desiredGuest = 0;
     const guide = this.state.guide || this.state.selected !== "current" || this.state.pending !== null;
-    this.patch({ phase: "failed", pending: null, inventory: null, selected: "current", guide,
-      error: "空间服务或页面不可用。该次连接已停止，当前应用仍可使用。", detail, portalFailure });
+    this.patch({ phase: "failed", pending: null, operation: null, inventory: null, selected: "current", guide,
+      navigationIntent: null, createHandoff: false, error: nativeTexts().serviceUnavailable, detail,
+      cleanupDetail: diagnostics?.cleanupDetail ?? null, instanceRetained: diagnostics?.instanceRetained ?? null, portalFailure });
     this.stop();
   }
   stop = () => {
     if (this.stopped) return;
-    this.stopped = true; this.lifetime.abort(); this.sequence++; clearTimeout(this.pollTimer); clearTimeout(this.selectionTimer);
+    this.stopped = true; this.lifetime.abort(); this.launchGeneration++; this.launchSettled = true; this.desiredGuest = 0;
+    this.sequence++; clearTimeout(this.pollTimer); clearTimeout(this.launchTimer); clearTimeout(this.selectionTimer);
+    clearTimeout(this.noticeTimer);
     this.browserRequest = undefined; this.browser?.stop();
     this.guest?.remove(); this.guest = undefined;
     const lease = this.lease; this.lease = undefined;
     if (lease) void this.bridge.release(lease).catch(() => console.error("Spaces native guest release failed."));
+    this.navNote("destroyed");
+    this.navEnd();
   };
 }

@@ -6,13 +6,14 @@ import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, test } from "node:test";
 import { applyAppLocale } from "../../src/shared/i18n/index.ts";
-import type { PatchWriter } from "../../src/adapters/node/profile/patch-writer.ts";
+import { PatchVerifyError, type PatchWriter } from "../../src/adapters/node/profile/patch-writer.ts";
 import {
   isStartCancelled,
   LOG_LINE_OMITTED,
   ProcessManager,
   type ProcessRuntime,
 } from "../../src/adapters/node/runtime/process-manager.ts";
+import { StartFailureError } from "../../src/adapters/node/runtime/start-failure.ts";
 
 applyAppLocale("en");
 
@@ -720,4 +721,204 @@ http.createServer((req, res) => {
       }),
     },
   );
+});
+
+function idleChild(): ChildProcess {
+  const child = new EventEmitter() as unknown as ChildProcess;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  Object.assign(child, { pid: 424242, exitCode: null, signalCode: null });
+  return child;
+}
+
+function markExited(child: ChildProcess, code = 0): void {
+  Object.assign(child, { exitCode: code });
+  child.emit("exit", code, null);
+}
+
+test("single start failure keeps the original error when cleanup succeeds", async () => {
+  const original = new Error("spawn socket failed");
+  let spawns = 0;
+  let child: ChildProcess | undefined;
+  const kills: string[] = [];
+  await withManager(async (processes) => {
+    const states: string[] = [];
+    processes.onStatus((_name, status) => states.push(status));
+    await assert.rejects(processes.start("web"), (err: unknown) => err === original);
+    assert.equal(processes.statusOf("web"), "crashed");
+    assert.equal(processes.portOf("web"), undefined);
+    assert.equal(processes.lastError("web"), original.message);
+    assert.equal(processes.lastError("web")?.includes("Cleanup"), false);
+    assert.equal(spawns, 1);
+    assert.deepEqual(kills, ["term"]);
+    assert.equal(states.includes("crashed"), true);
+    assert.equal(states.includes("stopped"), false);
+  }, {
+    runtime: runtime("ok", {
+      spawn: () => {
+        spawns += 1;
+        child = idleChild();
+        queueMicrotask(() => child?.emit("error", original));
+        return child;
+      },
+      kill: async (_pid, kind) => {
+        kills.push(kind);
+        if (child) markExited(child);
+      },
+      readyTimeoutMs: 400,
+      gracefulWaitMs: 20,
+      forceWaitMs: 20,
+    }),
+  });
+});
+
+test("early exit keeps the original failure without a second cause", async () => {
+  let spawns = 0;
+  const kills: string[] = [];
+  await withManager(async (processes) => {
+    await assert.rejects(processes.start("web"), (err: unknown) => {
+      assert.equal(err instanceof StartFailureError, false);
+      assert.match(String(err), /closed before it finished starting/);
+      return true;
+    });
+    assert.equal(processes.statusOf("web"), "crashed");
+    assert.equal(processes.portOf("web"), undefined);
+    assert.match(processes.lastError("web") ?? "", /closed before it finished starting/);
+    assert.equal(processes.lastError("web")?.includes("Cleanup"), false);
+    assert.equal(spawns, 1);
+    assert.deepEqual(kills, []);
+  }, {
+    runtime: runtime("ok", {
+      spawn: () => {
+        spawns += 1;
+        const child = idleChild();
+        Object.assign(child, { exitCode: 2 });
+        return child;
+      },
+      kill: async (_pid, kind) => {
+        kills.push(kind);
+      },
+      readyTimeoutMs: 400,
+      gracefulWaitMs: 20,
+      forceWaitMs: 20,
+    }),
+  });
+});
+
+test("cancelled start keeps both causes when cleanup fails", async () => {
+  let spawns = 0;
+  let child: ChildProcess | undefined;
+  await withManager(async (processes) => {
+    const states: string[] = [];
+    processes.onStatus((_name, status) => states.push(status));
+    const started = processes.start("web");
+    void started.catch(() => undefined);
+    await waitStatus(processes, "web", "starting");
+    const port = processes.portOf("web");
+    const stopped = processes.stop("web");
+    await assert.rejects(started, (err: unknown) => {
+      assert.ok(err instanceof StartFailureError);
+      assert.equal(isStartCancelled(err.cause), true);
+      assert.equal(err.instanceRetained, true);
+      assert.match(err.message, /cancelled/i);
+      assert.match(err.message, /Cleanup/);
+      assert.match(err.message, /SECOND_STOP_FAILURE/);
+      return true;
+    });
+    await assert.rejects(stopped, /SECOND_STOP_FAILURE/);
+    const recorded = processes.lastError("web") ?? "";
+    assert.match(recorded, /cancelled/i);
+    assert.match(recorded, /Cleanup/);
+    assert.match(recorded, /SECOND_STOP_FAILURE/);
+    assert.equal(typeof port, "number");
+    assert.equal(processes.portOf("web"), port);
+    assert.equal(processes.statusOf("web"), "starting");
+    assert.equal(spawns, 1);
+    assert.equal(states.includes("stopped"), false);
+    assert.equal(states.includes("crashed"), false);
+  }, {
+    runtime: runtime("ok", {
+      spawn: () => {
+        spawns += 1;
+        child = idleChild();
+        return child;
+      },
+      kill: async (_pid, kind) => {
+        void child;
+        if (kind === "kill") throw new Error("SECOND_STOP_FAILURE: force-stop refused; retained");
+      },
+      readyTimeoutMs: 400,
+      gracefulWaitMs: 5,
+      forceWaitMs: 5,
+    }),
+  });
+});
+
+test("patch verification failure keeps PatchVerifyError", async () => {
+  const reason = new PatchVerifyError("catalog drifted");
+  let spawns = 0;
+  const processes = new ProcessManager("unused-in-this-test", {
+    verify: async () => {
+      throw reason;
+    },
+  } as Pick<PatchWriter, "verify"> as PatchWriter, 3100, 3199, runtime("ok", {
+    spawn: () => {
+      spawns += 1;
+      return idleChild();
+    },
+  }));
+  await assert.rejects(processes.start("notes"), (err: unknown) => err === reason);
+  assert.equal(spawns, 0);
+  assert.equal(processes.statusOf("notes"), "crashed");
+  assert.match(processes.lastError("notes") ?? "", /catalog drifted/);
+  assert.equal(processes.lastError("notes")?.includes("Cleanup"), false);
+});
+
+test("startup failure keeps both causes when cleanup fails", async () => {
+  const original = new Error("FIRST_STARTUP_FAILURE token=fixture-secret");
+  let spawns = 0;
+  let child: ChildProcess | undefined;
+  const kills: string[] = [];
+  await withManager(async (processes) => {
+    const states: string[] = [];
+    processes.onStatus((_name, status) => states.push(status));
+    await assert.rejects(processes.start("web"), (err: unknown) => {
+      assert.ok(err instanceof StartFailureError);
+      assert.equal(err.cause, original);
+      assert.equal(err.stage, "endpoint");
+      assert.equal(err.instanceRetained, true);
+      assert.match(err.message, /FIRST_STARTUP_FAILURE/);
+      assert.match(err.message, /Cleanup: /);
+      assert.match(err.message, /SECOND_STOP_FAILURE/);
+      assert.equal(err.message.includes("fixture-secret"), false);
+      return true;
+    });
+    const recorded = processes.lastError("web") ?? "";
+    assert.match(recorded, /FIRST_STARTUP_FAILURE/);
+    assert.match(recorded, /Cleanup: /);
+    assert.match(recorded, /SECOND_STOP_FAILURE/);
+    assert.equal(recorded.includes("fixture-secret"), false);
+    assert.equal(spawns, 1);
+    assert.deepEqual(kills, ["term", "kill"]);
+    assert.equal(processes.statusOf("web"), "starting");
+    assert.equal(typeof processes.portOf("web"), "number");
+    assert.equal(states.includes("stopped"), false);
+    assert.equal(states.includes("crashed"), false);
+  }, {
+    runtime: runtime("ok", {
+      spawn: () => {
+        spawns += 1;
+        child = idleChild();
+        queueMicrotask(() => child?.emit("error", original));
+        return child;
+      },
+      kill: async (_pid, kind) => {
+        kills.push(kind);
+        if (kind === "kill") throw new Error("SECOND_STOP_FAILURE token=fixture-secret");
+      },
+      readyTimeoutMs: 400,
+      gracefulWaitMs: 5,
+      forceWaitMs: 5,
+    }),
+  });
 });

@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { browserProtocolScript } from "../../../shared/browser-guest";
+import { navDiagPortalPrelude } from "../../../shared/nav-diag";
 import { parseSpaceHostAudience, parsePortalSnapshot, parsePortalFailure, nativePortalFailureHash,
-  parseNativeCreateIntent, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
+  parseNativeCreateIntent, parseNativeSpaceHash, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
   type SpaceHostAudience } from "../../../shared/space-host";
 
 /** Bounded, process-local, audience-bound entry grants. No disk state or cross-restart replay. */
@@ -61,6 +62,10 @@ export function renderPortalPage(audience: SpaceHostAudience, managerOrigin: str
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Spaces presentation</title>
 <style>html,body{margin:0;width:100%;height:100%;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}#status{font:14px system-ui;padding:20px}</style></head><body><div id="status" role="status">Spaces</div><script>
 "use strict";
+${navDiagPortalPrelude()}
+const navEmit = (ev, extra) => { try { emitNavDiag(ev, extra); } catch (e) {} };
+const navEnd = () => { try { emitNavDiag.end(); } catch (e) {} };
+const diagApi = new Set();
 const audience = ${config};
 const native = ${JSON.stringify(native)};
 const failureCodes = ${JSON.stringify(PORTAL_FAILURE_CODES)};
@@ -71,8 +76,9 @@ const parsePortalFailure = ${parsePortalFailure.toString()};
 const nativePortalFailureHash = ${nativePortalFailureHash.toString()};
 const parseSnapshot = ${parsePortalSnapshot.toString()};
 const parseNativeCreateIntent = ${parseNativeCreateIntent.toString()};
+const parseNativeSpaceHash = ${parseNativeSpaceHash.toString()};
 ${browserProtocolScript()}
-let lastNativeRequest = 0, lastNativeIntent = 0;
+let lastNativeRequest = 0, lastNativeIntent = 0, serviceStopPreview = 0;
 let lastNativeTarget = null;
 let browserRequest = null;
 let stopped = false, reading = false, preparing = false, timer, selectionTimer, readyTimer;
@@ -84,12 +90,16 @@ const send = (type, extra = {}) => {
     if (type === "failed") location.replace(nativePortalFailureHash(extra.failure) || "#failed");
     else if (type === "selected" || type === "selection-failed") {
       const target = extra.spaceId ?? pending?.spaceId;
-      if (target && location.hash === "#select/" + extra.requestId + "/" + target) location.replace("#" + (type === "selected" ? "selected" : "rejected") + "/" + extra.requestId + "/" + target);
+      const request = parseNativeSpaceHash(location.hash);
+      if (target && request?.kind === "select" && request.requestId === extra.requestId && request.target === target) location.replace("#" + (type === "selected" ? "selected" : "rejected") + "/" + extra.requestId + "/" + target);
     }
   } else parent.postMessage({ source: "dsh-spaces-portal", channel: audience.channel, type, ...extra }, audience.parentOrigin);
 };
 const fail = (reason, diagnostic = {}) => {
   if (stopped) return;
+  navEmit("fail", { reason, code: diagnostic.code, status: diagnostic.status });
+  navEmit("terminal");
+  navEnd();
   send("failed", { failure: { reason,
     ...(failureCodes.includes(diagnostic.code) ? { code: diagnostic.code } : {}),
     ...(Number.isInteger(diagnostic.status) && diagnostic.status >= 100 && diagnostic.status <= 599 ? { status: diagnostic.status } : {}) } });
@@ -101,6 +111,8 @@ class RequestFailure extends Error {
 async function api(method, payload) {
   const deadline = AbortSignal.timeout(10000);
   let status;
+  const diag = (method === "state" || method === "view") && !diagApi.has(method);
+  if (diag) { diagApi.add(method); navEmit("api-request", { stage: method }); }
   try {
   const response = await fetch("/api/workbench/" + method, {
     method: "POST", credentials: "include", redirect: "error",
@@ -130,8 +142,12 @@ async function api(method, payload) {
     throw new RequestFailure({ status, ...(failureCodes.includes(data?.error?.code) ? { code: data.error.code } : {}) });
   }
   if (!data || data.ok !== true || !Object.hasOwn(data, "value")) throw new RequestFailure({ status, code: "portal/response-invalid" });
+  if (diag) navEmit("api-result", { stage: method, status, ok: true });
   return data.value;
   } catch (error) {
+    if (diag) navEmit("api-result", error instanceof RequestFailure
+      ? { stage: method, ok: false, status: error.diagnostic && error.diagnostic.status, code: error.diagnostic && error.diagnostic.code }
+      : { stage: method, ok: false, ...(status === undefined ? {} : { status }), code: deadline.aborted ? "portal/request-deadline" : "portal/transport-failed" });
     if (error instanceof RequestFailure) throw error;
     throw new RequestFailure({ ...(status === undefined ? {} : { status }),
       code: deadline.aborted ? "portal/request-deadline" : "portal/transport-failed" });
@@ -163,7 +179,7 @@ async function refresh() {
     if (state.availability === "unavailable") { fail("state-request", { code: "workbench/unavailable" }); return; }
     snapshot = { ...all, spaces: all.spaces.filter(row => state.spaces.find(item => item.id === row.id).hasWebApp) };
     send("state", { snapshot });
-    if (native) nativeSelection();
+    if (native) { nativeSelection(); void ensureManager(); }
   } catch (error) { fail(error instanceof RequestFailure && error.diagnostic.code !== "portal/response-invalid" ? "state-request" : "state-invalid",
     error instanceof RequestFailure ? error.diagnostic : {}); } finally { reading = false; }
 }
@@ -172,11 +188,20 @@ function forwardSelection() {
   if (!managerReady || !frame || !pending || stopped || forwarded === pending) return;
   const request = pending;
   forwarded = request;
+  navEmit("select-forward");
   frame.contentWindow.postMessage({ source: "dsh-spaces-surface-parent", type: "select", requestId: request.requestId,
     serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
-    channel: managerView.channel, target: request.spaceId }, audience.managerOrigin);
+    channel: managerView.channel, target: request.spaceId,
+    ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }) }, audience.managerOrigin);
   clearTimeout(selectionTimer);
-  selectionTimer = setTimeout(() => { if (pending === request) { pending = null; rejected(request.requestId, request.spaceId); } }, 35000);
+  selectionTimer = setTimeout(() => {
+    if (pending === request) {
+      navEmit("deadline", { stage: "selection" });
+      navEmit("select-result", { result: "rejected" });
+      navEnd();
+      pending = null; rejected(request.requestId, request.spaceId);
+    }
+  }, 35000);
 }
 async function ensureManager() {
   if (frame || preparing || stopped) return;
@@ -199,12 +224,14 @@ async function ensureManager() {
     frame.allow = "clipboard-write " + view.origin;
     frame.src = view.entryOrigin + view.entryPath + "?epoch=" + encodeURIComponent(view.serviceEpoch) + "&dsh-spaces-contained=1" + (native ? "&dsh-spaces-native=1" : "");
     frame.addEventListener("load", () => {
+      navEmit("iframe-load");
       if (stopped) return;
       frame.contentWindow.postMessage({ source: "dsh-spaces-view-parent", type: "ping", serviceEpoch: view.serviceEpoch,
         spaceId: view.spaceId, generation: view.generation, channel: view.channel }, view.origin);
     });
+    navEmit("iframe-append");
     document.getElementById("status").remove(); document.body.append(frame);
-    readyTimer = setTimeout(() => { if (!managerReady) fail("view-ready-timeout"); }, 35000);
+    readyTimer = setTimeout(() => { if (!managerReady) { navEmit("deadline", { stage: "view" }); fail("view-ready-timeout"); } }, 35000);
   } catch (error) { fail(error instanceof RequestFailure && error.diagnostic.code !== "portal/response-invalid" ? "manager-view-request" : "manager-view-invalid",
     error instanceof RequestFailure ? error.diagnostic : {}); } finally { preparing = false; }
 }
@@ -236,24 +263,33 @@ window.addEventListener("message", event => {
   if (frame && event.source === frame.contentWindow && event.origin === audience.managerOrigin && managerView &&
       message.serviceEpoch === managerView.serviceEpoch && message.spaceId === managerView.spaceId &&
       message.generation === managerView.generation && message.channel === managerView.channel) {
+    // A request to SHOW a Desktop confirmation, never authority to stop anything.
+    if (native && managerReady && !pending && lastNativeTarget === "@settings" &&
+        message.source === "dsh-spaces-surface" && message.type === "service-stop-preview" &&
+        Object.keys(message).sort().join(",") === "channel,generation,serviceEpoch,source,spaceId,type") {
+      location.replace("#service-stop-preview/" + (++serviceStopPreview)); return;
+    }
     if (message.source === "dsh-spaces-view") {
       const keys = Object.keys(message).sort().join(",");
       if (!["channel,generation,serviceEpoch,source,spaceId,state", "channel,generation,message,serviceEpoch,source,spaceId,state"].includes(keys) ||
           ("message" in message && typeof message.message !== "string")) return;
-      if (message.state === "ready") { viewReady = true; managerReady = surfaceReady; if (managerReady) { clearTimeout(readyTimer); forwardSelection(); } }
+      if (message.state === "ready") { navEmit("view-ready", { accepted: true }); viewReady = true; managerReady = surfaceReady; if (managerReady) { clearTimeout(readyTimer); forwardSelection(); } }
       else if (message.state === "failed") fail("manager-view-failed");
       else if (message.state === "disconnected") fail("manager-disconnected");
     } else if (message.source === "dsh-spaces-surface" && message.type === "ready") {
       if (Object.keys(message).sort().join(",") !== "channel,generation,serviceEpoch,source,spaceId,type") return;
+      navEmit("surface-ready", { accepted: true });
       surfaceReady = true; managerReady = viewReady;
       if (managerReady) { clearTimeout(readyTimer); forwardSelection(); }
     } else if (message.source === "dsh-spaces-surface" && pending && message.requestId === pending.requestId) {
       if (Object.keys(message).sort().join(",") !== "channel,generation,requestId,serviceEpoch,source,spaceId,target,type") return;
       if (message.type === "selected" && message.target === pending.spaceId) {
+        navEmit("select-result", { result: "selected" }); navEnd();
         send("selected", { requestId: pending.requestId, spaceId: pending.spaceId });
         // The completed selection decides which further fragment may follow.
         lastNativeTarget = pending.spaceId; pending = null; clearTimeout(selectionTimer);
       } else if (message.type === "selection-failed") {
+        navEmit("select-result", { result: "rejected" }); navEnd();
         rejected(pending.requestId); lastNativeTarget = null; pending = null; clearTimeout(selectionTimer);
       }
     }
@@ -282,14 +318,14 @@ function nativeSelection() {
   }
   const intent = parseNativeCreateIntent(location.hash);
   if (intent !== null) { forwardCreateIntent(intent); return; }
-  const match = location.hash.split("/");
-  if (match.length !== 3 || match[0] !== "#select" || !/^[1-9][0-9]{0,9}$/.test(match[1]) ||
-      !/^(@settings|[a-z0-9][a-z0-9-]{0,38})$/.test(match[2]) || Number(match[1]) <= lastNativeRequest) return;
-  const requestId = Number(match[1]), target = match[2]; lastNativeRequest = requestId;
+  const request = parseNativeSpaceHash(location.hash);
+  if (!request || request.kind !== "select" || request.requestId <= lastNativeRequest) return;
+  const { requestId, target, targetGeneration } = request; lastNativeRequest = requestId;
   browserRequest = null;
   const allowed = target === "@settings" || snapshot.spaces.some(row => row.id === target && row.id !== snapshot.managerId);
   if (!allowed) { send("selection-failed", {requestId, spaceId: target}); return; }
-  pending = {requestId, spaceId: target};
+  navEmit("select-receive");
+  pending = {requestId, spaceId: target, targetGeneration};
   if (managerReady) forwardSelection(); else void ensureManager();
 }
 /**
@@ -307,7 +343,7 @@ function forwardCreateIntent(requestId) {
     channel: managerView.channel }, audience.managerOrigin);
 }
 if (native) window.addEventListener("hashchange", nativeSelection);
-window.addEventListener("pagehide", () => { stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
+window.addEventListener("pagehide", () => { navEmit("terminal"); navEnd(); stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
 void refresh();
 timer = setInterval(() => { void refresh(); }, 1500);
 </script></body></html>`;

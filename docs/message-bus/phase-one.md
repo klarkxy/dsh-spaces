@@ -1,6 +1,6 @@
 # Cross-Space request/response: phase one
 
-> Historical phase-one acceptance record. The current branch also includes [static capabilities](./static-capabilities.md) and Browser Space; current status and remaining local acceptance are in [the task checklist](../../tasks/todo.md). Phase-one stop/publishing notes below describe that earlier checkpoint.
+> Historical phase-one design and acceptance record. For the current architecture see [architecture.md](../architecture.md); the branch also includes [static capabilities](./static-capabilities.md) and Browser Space. The protocol boundaries below remain useful, but dated test results and stop/publishing notes describe only that checkpoint.
 
 ## Scope
 

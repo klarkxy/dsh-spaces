@@ -297,6 +297,10 @@ export const WORKBENCH_FEATURES_CSS = `
   box-shadow: var(--wb-elev-md, 0 6px 18px -8px rgba(0,0,0,0.55));
   border-color: color-mix(in srgb, var(--wb-accent, #5865f2) 40%, var(--wb-border, transparent));
 }
+.dsh-wb-space-row.dsh-wb-product-card[data-selected="true"] {
+  border-color: var(--wb-accent, #5865f2);
+  box-shadow: inset 0 0 0 1px var(--wb-accent, #5865f2), var(--wb-elev-sm, 0 1px 2px rgba(0,0,0,0.32));
+}
 .dsh-wb-glass {
   background: var(--wb-glass-bg, rgba(24,25,29,0.72));
   backdrop-filter: var(--wb-glass-blur, blur(18px) saturate(140%));

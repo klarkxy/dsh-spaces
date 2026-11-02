@@ -1,3 +1,5 @@
+import type { SpaceBase, SpaceBaseVersions, SpaceBaseSelection } from '../../../shared/space-base';
+import { SPACES_BROWSER_SEALED } from '../../../shared/browser-sealed';
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -88,13 +90,14 @@ const LIBRARY_SOURCES = new Set<PluginLibrarySource>(["catalog", "manual", "inst
 
 export type WorkbenchProductFetcher = CatalogFetcher & PluginFetcher;
 
-export type WorkbenchProductCreateInput = {
+export type WorkbenchProductCreateInput = SpaceBaseSelection & {
   name: string;
   displayName?: string;
   icon?: string;
 };
 
 export interface WorkbenchProductPorts {
+  baseVersions?(base: SpaceBase): Promise<SpaceBaseVersions>;
   home: string;
   observation(): WorkbenchProductObservation;
   managerId(): string | null;
@@ -157,6 +160,11 @@ export class WorkbenchProductService {
   async read(request: WorkbenchProductRequest): Promise<WorkbenchProductResult> {
     const observation = this.ports.observation();
     switch (request.method) {
+      case 'base.versions': {
+        if (SPACES_BROWSER_SEALED && request.base === 'browser') throw new WorkbenchPublicError('workbench/unsupported');
+        if (!this.ports.baseVersions) throw new WorkbenchPublicError('workbench/unavailable');
+        return { method: 'base.versions', ...await this.ports.baseVersions(request.base), observation };
+      }
       case "settings":
         return { method: "settings", ...this.readSettings(), observation };
       case "catalog":
@@ -554,7 +562,7 @@ export class WorkbenchProductService {
 
   private recipePorts(ctx: WorkbenchJobContext) {
     return {
-      createSpace: async (input: { name: string; displayName: string; icon?: string }) => {
+      createSpace: async (input: { name: string; displayName: string; icon?: string } & SpaceBaseSelection) => {
         await this.ports.createSpace(input, ctx);
       },
       installPlugin: (spaceId: string, spec: string) => this.ports.installPlugin(spaceId, spec),
