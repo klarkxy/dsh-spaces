@@ -2,22 +2,16 @@
 
 import { createConnection, createServer } from "node:net";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { isSupportedNodeVersion } from "../../src/shared/node-version.ts";
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ISOLATION_MODULE = join(REPO, "src", "core", "domain", "isolation.ts");
 const REAL_HOME = join(homedir(), ".dsh");
 const HOST = "127.0.0.1";
 const DEFAULT_BIN =
@@ -29,7 +23,6 @@ const REGISTRY = "https://registry.npmmirror.com";
 const DUMP_MS = 180_000;
 const PLUGIN_MS = 180_000;
 const BOOT_MS = 90_000;
-const RPC_MS = 15_000;
 const STOP_MS = 15_000;
 const PORT_MS = 10_000;
 const LAUNCH_RING = 16_384;
@@ -63,12 +56,6 @@ function writeJson(path, value) {
 
 function sha256File(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
-}
-
-function resolveNode() {
-  if (!isSupportedNodeVersion(process.versions.node)) throw new Error("DSH Spaces acceptance requires Node.js 24.21+ (24.x) or 26.x.");
-  info(`node ${process.execPath}`);
-  return process.execPath;
 }
 
 function resolveNpmCli(nodeExe) {
@@ -192,10 +179,6 @@ function runDshRetry(nodeExe, bin, home, tooling, args, timeoutMs, label, logPat
   }
 }
 
-async function importIsolation() {
-  return import(pathToFileURL(ISOLATION_MODULE).href);
-}
-
 function ephemeralPort() {
   return new Promise((resolvePort, reject) => {
     const server = createServer();
@@ -306,77 +289,18 @@ function captureLaunchUrl(child, port, timeoutMs) {
   });
 }
 
-async function sessionCookie(launchUrl) {
-  if (!launchUrl.searchParams.has("token")) return undefined;
-  const response = await fetch(launchUrl.href, { redirect: "manual", signal: AbortSignal.timeout(RPC_MS) });
-  const cookies = response.headers.getSetCookie();
-  await response.body?.cancel();
-  const cookie = cookies.map((value) => value.split(";", 1)[0]).find((value) => /^dsh-auth-[^=]+=.+$/.test(value));
-  if (response.status !== 303 || !["/", "./"].includes(response.headers.get("location") ?? "") || !cookie) {
-    throw new Error("DSH browser authentication failed");
-  }
-  return cookie;
-}
-
-async function rpc(port, cookie, method, args, timeoutMs = RPC_MS) {
-  const origin = `http://${HOST}:${port}`;
-  const response = await fetch(`${origin}/api/${method}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      origin,
-      connection: "close",
-      ...(cookie ? { cookie } : {}),
-    },
-    body: JSON.stringify({
-      type: "client-request",
-      rpcId: randomUUID(),
-      method,
-      payload: { args },
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await response.text();
-  let body = null;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = null;
-  }
-  return { status: response.status, body, text: redact(text.slice(0, 200)) };
-}
-
-function assertRpcOk(call, label) {
-  if (call.status !== 200) throw new Error(`${label} HTTP ${call.status}: ${call.text}`);
-  if (!call.body?.result?.ok) {
-    throw new Error(`${label} RPC rejected: ${redact(JSON.stringify(call.body?.result?.error ?? call.body).slice(0, 300))}`);
-  }
-  return call.body.result.value;
-}
-
-function rpcAvailable(call) {
-  return call.status === 200 && call.body?.result?.ok === true;
-}
-
-
 export {
   HOST,
-  DEFAULT_BIN,
-  TOOLCHAIN_PNPM,
-  REGISTRY,
   DUMP_MS,
   PLUGIN_MS,
   BOOT_MS,
-  RPC_MS,
   STOP_MS,
   PORT_MS,
-  LAUNCH_RING,
   redact,
   samePath,
   refuseRealHome,
   writeJson,
   sha256File,
-  resolveNode,
   resolveNpmCli,
   resolvePnpmCjs,
   dshBin,
@@ -386,14 +310,8 @@ export {
   isolatedEnv,
   runDsh,
   runDshRetry,
-  importIsolation,
   ephemeralPort,
-  portClosed,
   waitPortClosed,
   stopOwned,
   captureLaunchUrl,
-  sessionCookie,
-  rpc,
-  assertRpcOk,
-  rpcAvailable,
 };
