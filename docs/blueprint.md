@@ -2,7 +2,7 @@
 
 > **Spaces 内蓝图工作流已于 2026-10-25 封存。** Spaces 的蓝图创建、生成、预览和应用入口及对应任务路径暂停，分享码导入导出也随之一并暂停；普通模板与 `.dshspace` 分享归档不受影响。独立的 `@klarkxy/dsh-blueprint` 包、DSHBP1/DSHBP2 协议、既有蓝图文件和历史记录继续保留。待 Spaces 核心系统稳定后再评估是否唤醒；唤醒时需要同时恢复入口、任务路径、界面和回归验证。下文是协议与历史设计合同，不表示 Spaces 当前仍开放这些操作。封存不设置专门的用户提示或说明入口；相关输入只按普通不支持的格式处理。
 
-蓝图由本仓库的独立包 [`@klarkxy/dsh-blueprint`](packages/blueprint/README.zh-CN.md) 维护。它可单独安装在 DSH 0.2 中。Spaces 保留蓝图协议消费与历史创建实现，但封存期间不开放蓝图创建；独立蓝图插件不依赖 Spaces。
+蓝图由本仓库的独立包 [`@klarkxy/dsh-blueprint`](../packages/blueprint/README.zh-CN.md) 维护。它可单独安装在 DSH 0.2 中。Spaces 保留蓝图协议消费与历史创建实现，但封存期间不开放蓝图创建；独立蓝图插件不依赖 Spaces。
 
 蓝图只描述插件组合或配置配方，不是环境备份：不携带凭据、会话、数据、运行实例或发送方授权，也不声称恢复某个环境。同一份蓝图在两种接收方式下语义不同。
 
@@ -17,7 +17,7 @@ DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。
 
 独立 Creator 的当前 profile 归并与封存前 Spaces 的新空间创建是不同执行语义，不能因共享格式而承诺得到相同结果：前者归并到用户正在使用的当前 profile 并保留未提及的本地 bundle；后者创建隔离的新空间。若以后唤醒，模型需求仍须由接收方显式映射，蓝图中不得携带主空间 token、实例、授权或凭据，也不证明任何这样的授权存在；未显式配置模型时按届时的创建策略处理。
 
-协议接口、独立使用与 v2 格式见[包说明](packages/blueprint/README.md)和[v2 协议](packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](tasks/archive/blueprint-migration-0.2.md)，只证明当时范围。下文是 **DSHBP1 / `formatVersion: 1` 的现行字段合同**；DSHBP2 的字段、来源、编码和执行语义由其独立协议定义，不能把两套格式当成仅差配置预设的同一结构。
+协议接口、独立使用与 v2 格式见[包说明](../packages/blueprint/README.md)和[v2 协议](../packages/blueprint/PROTOCOL.md)。本次迁移与 DSH 0.2 验收见[迁移记录](../tasks/archive/blueprint-migration-0.2.md)，只证明当时范围。下文是 **DSHBP1 / `formatVersion: 1` 的现行字段合同**；DSHBP2 的字段、来源、编码和执行语义由其独立协议定义，不能把两套格式当成仅差配置预设的同一结构。
 
 ## DSH Spaces 蓝图规范 v1
 
@@ -25,7 +25,7 @@ DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。
 
 蓝图描述一套插件组合及其配置预设。接收者粘贴分享码或打开 JSON，查看组成，填写本机选项，再据此创建一个新空间。蓝图作者可以从已有空间生成蓝图，也可以直接编写 JSON。
 
-本规范中的"必须""不得"是实现要求；"建议"允许有理由的替代。既有 `.dshspace` 压缩分享、`SpaceRecipe` 和空间模板不因此成为本规范的实现。故障处理遵循 [let it crash](docs/let-it-crash.md)。
+本规范中的"必须""不得"是实现要求；"建议"允许有理由的替代。既有 `.dshspace` 压缩分享、`SpaceRecipe` 和空间模板不因此成为本规范的实现。故障处理遵循 [let it crash](let-it-crash.md)。
 
 ## 用户操作
 
@@ -39,20 +39,20 @@ DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。
 
 ## 开发者操作
 
-1. 从[最小 JSON](docs/examples/blueprints/minimal.dsh-blueprint.json)开始；[写作样例](docs/examples/blueprints/writing.dsh-blueprint.json)展示较完整结构，但其中包名与配置是教学数据。
+1. 从[最小 JSON](examples/blueprints/minimal.dsh-blueprint.json)开始；[写作样例](examples/blueprints/writing.dsh-blueprint.json)展示较完整结构，但其中包名与配置是教学数据。
 2. 发布符合官方 bundle 约定的插件，填入精确来源和版本；把希望参与运行的层按顺序列入 `profile.bundles`。
 3. 填写可分享预设，使用 `inputs` / `bindings` 表达本机选择，并说明已知依赖和互斥。
 4. 按本规范校验 JSON，再在隔离测试 Home 中走接收者的实际流程。记录实际验证结果后分发 JSON 或分享码。
 
 格式与运行语义共同构成标准：JSON Schema 通过不能代替安装、组合或实际功能验证。后文给出确定的编码与错误规则，第三方工具可据此生成同一种蓝图。
 
-工具开发者可使用仓库中的 [JSON Schema](schemas/blueprint-v1.schema.json) 做字段检查，再用运行时解析器校验跨字段关系、输入位置及编码规则。Schema 不是插件安全或运行兼容性的证明。
+工具开发者可使用仓库中的 [JSON Schema](../schemas/blueprint-v1.schema.json) 做字段检查，再用运行时解析器校验跨字段关系、输入位置及编码规则。Schema 不是插件安全或运行兼容性的证明。
 
 在编辑器中关联该 Schema 即可；不要把 `$schema` 加入蓝图根对象，v1 根字段是封闭的。格式校验、输入绑定、关系诊断与分享码编解码的规则是公开合同，由蓝图协议模块及其公开导出实现；JSON 与分享码的解析都走同一份规则。仓库验收入口为 `npm run test:blueprints`。
 
 ## 1. 产品边界
 
-蓝图处于空间创建与配置层，不绑定安装 Spaces 的外层应用。宿主内空间栏和 WebUI 容器遵循 [宿主嵌入合同](docs/host/embedding.md)；这些展示适配不改变 v1 的 JSON、包选择或新建目标语义。
+蓝图处于空间创建与配置层，不绑定安装 Spaces 的外层应用。宿主内空间栏和 WebUI 容器遵循 [宿主嵌入合同](host/embedding.md)；这些展示适配不改变 v1 的 JSON、包选择或新建目标语义。
 
 蓝图分发的是环境配方。插件代码及随插件发布的主题、模板等资源，通过声明的包来源安装；小型提示词、规则和设置可以作为 JSON 配置值携带。
 
@@ -371,10 +371,10 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 
 可直接读取的文档样例：
 
-- [minimal.dsh-blueprint.json](docs/examples/blueprints/minimal.dsh-blueprint.json)：上述最小对象。
-- [minimal.share.txt](docs/examples/blueprints/minimal.share.txt)：同一对象的真实 `J` 编码，供解码往返核对。
-- [writing.dsh-blueprint.json](docs/examples/blueprints/writing.dsh-blueprint.json)：主题选择、顺序、配置、本机目录和模型绑定的完整示意。包名、版本和插件配置为虚构教学数据，不是可安装产品或兼容验证记录。
-- [zhuqing.dsh-blueprint.json](docs/examples/blueprints/zhuqing.dsh-blueprint.json)：引用已发布的 `dsh-theme-plugin@0.3.3`，并记录实际制品的 SHA-512 摘要，可用于验证联网安装。实际功能验证范围见[实施记录](tasks/archive/blueprint-implementation.md)；这里不添加未经验证的 `testedWith`。
+- [minimal.dsh-blueprint.json](examples/blueprints/minimal.dsh-blueprint.json)：上述最小对象。
+- [minimal.share.txt](examples/blueprints/minimal.share.txt)：同一对象的真实 `J` 编码，供解码往返核对。
+- [writing.dsh-blueprint.json](examples/blueprints/writing.dsh-blueprint.json)：主题选择、顺序、配置、本机目录和模型绑定的完整示意。包名、版本和插件配置为虚构教学数据，不是可安装产品或兼容验证记录。
+- [zhuqing.dsh-blueprint.json](examples/blueprints/zhuqing.dsh-blueprint.json)：引用已发布的 `dsh-theme-plugin@0.3.3`，并记录实际制品的 SHA-512 摘要，可用于验证联网安装。实际功能验证范围见[实施记录](../tasks/archive/blueprint-implementation.md)；这里不添加未经验证的 `testedWith`。
 
 写作样例同时列出两个主题包，只有纸张主题进入 `bundles`；运行依赖明确指向该主题。用户选定输出目录和模型后创建新的写作空间。替代主题的互斥声明可保留，但未参与组合不等于当前就发生冲突。
 
@@ -384,7 +384,7 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 
 现有 `.dshspace` ZIP、模板和 `SpaceRecipe` 保持原有身份；不得仅改扩展名或填入 `formatVersion: 1` 就当成蓝图。未来转换入口必须重新检查来源、版本、动态配置、受管组件和本机值；丢失信息要展示，不能静默转换。
 
-蓝图应用复用 Supervisor 的既有任务、写入锁和官方安装路径；旧 ZIP 分享、recipe 和模板继续走各自入口。工作台侧的蓝图入口、预览计划的存活期与适用范围见[包说明](packages/blueprint/README.md)与工作台文档，本文不重复实现细节。
+蓝图应用复用 Supervisor 的既有任务、写入锁和官方安装路径；旧 ZIP 分享、recipe 和模板继续走各自入口。工作台侧的蓝图入口、预览计划的存活期与适用范围见[包说明](../packages/blueprint/README.md)与工作台文档，本文不重复实现细节。
 
 ## 12. 验收场景
 
@@ -411,7 +411,7 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 | 生成及应用蓝图前后比较保护区 | `web`、其它空间和默认 sessions/storages 不被改写 |
 | 用最终发布制品在干净测试 Home 创建 | 接收者无需手工修改 profile 内部文件；作者实际功能可独立验收 |
 
-这些场景定义验收要求，逐项证据与未验证范围见[实施记录](tasks/archive/blueprint-implementation.md)。文档样例解析和编码往返不等于安装、启动或真实用户流程通过。
+这些场景定义验收要求，逐项证据与未验证范围见[实施记录](../tasks/archive/blueprint-implementation.md)。文档样例解析和编码往返不等于安装、启动或真实用户流程通过。
 
 ## 13. 依据
 
@@ -425,4 +425,4 @@ entry ID 重复和同名服务只在相应作用域及证据足够时报告确�
 - [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)：raw DEFLATE。
 - [RFC 6901](https://www.rfc-editor.org/rfc/rfc6901)：JSON Pointer。
 
-上游资料提供设计背景。当前实现另外针对本机选定的官方运行时验证 patch、模块解析和安装行为；具体版本、真实流程结果及证据限制见[实施记录](tasks/archive/blueprint-implementation.md)，不从上游文档推定兼容性。
+上游资料提供设计背景。当前实现另外针对本机选定的官方运行时验证 patch、模块解析和安装行为；具体版本、真实流程结果及证据限制见[实施记录](../tasks/archive/blueprint-implementation.md)，不从上游文档推定兼容性。

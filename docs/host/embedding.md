@@ -1,6 +1,6 @@
 # Spaces 宿主嵌入合同 / Host embedding contract
 
-状态：现行产品合同。官方 Windows Desktop 与普通 Web 宿主已在隔离 Home 完成实测，见 [当前验收](../../tasks/node24-desktop-20261020.md)；早期原生实验记录和 Web 首批实现保留作历史。当前架构基线见 [现行架构](../architecture.md)，安装与操作见 [标准安装](../plugin-standard-install.md)，故障政策以 [let it crash](../let-it-crash.md) 为唯一权威。本合同不改变管理权限和故障政策。
+状态：现行产品合同。官方 Windows Desktop 与普通 Web 宿主已在隔离 Home 完成实测，见 [当前验收](../../tasks/archive/node24-desktop-20261020.md)；早期原生实验记录和 Web 首批实现保留作历史。当前架构基线见 [现行架构](../architecture.md)，安装与操作见 [标准安装](../plugin-standard-install.md)，故障政策以 [let it crash](../let-it-crash.md) 为唯一权威。本合同不改变管理权限和故障政策。
 
 ## 产品边界
 

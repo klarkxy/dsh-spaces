@@ -1,6 +1,6 @@
 # Q coverage E01–E18 (2026-09-15)
 
-> Historical verification record. It covers only the listed run; it is not the current coverage matrix or acceptance gate. Current architecture: [../docs/architecture.md](../docs/architecture.md). Fault policy: [../docs/let-it-crash.md](../docs/let-it-crash.md).
+> Historical verification record. It covers only the listed run; it is not the current coverage matrix or acceptance gate. Current architecture: [../docs/architecture.md](../../docs/architecture.md). Fault policy: [../docs/let-it-crash.md](../../docs/let-it-crash.md).
 
 Disposable Homes only. Official DSH CLI was not present in this run.
 

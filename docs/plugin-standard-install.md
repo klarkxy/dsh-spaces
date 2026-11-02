@@ -1,6 +1,6 @@
 # Standard plugin install
 
-支持 **Node.js 24.21 及以上的 24.x，以及 26.x**：DSH 宿主、Supervisor、托管运行时和开发工具均接受这两个范围。官方 Desktop 0.2.1-rc.2 使用 Electron 44.7.0 内置的 Node 24.21.0，无需替换桌面版运行时。新安装的托管工具链仍默认 Node 26.10.0，已有受支持工具链保留；不自动升级或替换已有工具链。当前隔离桌面验收见 [Node 24 兼容记录](../tasks/node24-desktop-20261020.md)。
+支持 **Node.js 24.21 及以上的 24.x，以及 26.x**：DSH 宿主、Supervisor、托管运行时和开发工具均接受这两个范围。官方 Desktop 0.2.1-rc.2 使用 Electron 44.7.0 内置的 Node 24.21.0，无需替换桌面版运行时。新安装的托管工具链仍默认 Node 26.10.0，已有受支持工具链保留；不自动升级或替换已有工具链。当前隔离桌面验收见 [Node 24 兼容记录](../tasks/archive/node24-desktop-20261020.md)。
 
 展示合同见 [宿主嵌入](host/embedding.md)，当前架构基线见 [现行架构](architecture.md)：初始化后留在原应用，空间栏在宿主内展开，右侧嵌入实际管理工作台及空间 WebUI。官方 Windows Desktop 0.2.1-rc.2 已通过本机隔离 Home 验收，该历史记录也覆盖当时的原生 Browser Space；当前 Browser 入口封存，远程宿主未验收。下面的发行状态和旧验收记录不自动构成本批通过证据。
 

@@ -4,7 +4,7 @@
 
 ## 1. 产品边界
 
-DSH Spaces 是安装进兼容 DSH Web 或 Desktop 的多空间插件，没有独立客户端，也不修改官方 SDK。插件 tarball 是 Spaces 的唯一发行单元；蓝图协议包可以独立安装和使用的边界见 [BLUEPRINT](../BLUEPRINT.md)。
+DSH Spaces 是安装进兼容 DSH Web 或 Desktop 的多空间插件，没有独立客户端，也不修改官方 SDK。插件 tarball 是 Spaces 的唯一发行单元；蓝图协议包可以独立安装和使用的边界见 [BLUEPRINT](blueprint.md)。
 
 产品面向单机、单用户和同一 OS 用户信任域。空间隔离用于分离插件组合、会话、工作数据和管理权限，不构成恶意插件沙箱、多租户隔离或跨机器高可用。
 

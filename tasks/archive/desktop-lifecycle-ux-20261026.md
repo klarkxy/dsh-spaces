@@ -11,7 +11,7 @@
 - 用户明确指定本机 Magpie。实时模型目录确认 `minimax-code/MiniMax-M3.1-Flash`；配置 `http://127.0.0.1:3425`，仅本地占位认证、零模型自动重试。
 - GUI 点击、输入与截图使用 Windows Computer Use。Electron 启动工具只负责启动、身份核对、只读诊断及首轮配置前的正常退出，不替代界面交互验收。
 - 首次无模型配置时停在官方欢迎页，未进行认证操作；配置用户指定的本地模型后正常进入主界面。
-- 证据目录：[`.sandbox/desktop-ux-20261026`](../.sandbox/desktop-ux-20261026)。运行原始记录：`H:/Code/dsh-spaces-checktmp/desktop-ux-20261026/run-2026-10-26T10-59-03-699Z/`。
+- 证据目录：[`.sandbox/desktop-ux-20261026`](../../.sandbox/desktop-ux-20261026)。运行原始记录：`H:/Code/dsh-spaces-checktmp/desktop-ux-20261026/run-2026-10-26T10-59-03-699Z/`。
 
 ## 已完成的真实流程
 
@@ -82,5 +82,5 @@
 - 4 次测试 Desktop 进程均正常退出，退出码 0；最终测试服务正常 shutdown，端点与所有权目录均不存在。测试数据及全部证据保留，无强杀、自动恢复或失败重试。
 - 官方 EXE/ASAR SHA-256 前后一致；最终无 `profiles/web`、Home 根 `sessions` / `storages`。
 - 开始和结束只读进程核对中，原有 8 个官方 Desktop 相关进程的 PID、父 PID、创建时间一致。
-- [最终隔离核对](../.sandbox/desktop-ux-20261026/final-isolation-audit.json)。本次为 GUI 与真实模型验收，不以旧自动测试结果代替。本轮没有更改产品实现，未重跑整套源码回归。
+- [最终隔离核对](../../.sandbox/desktop-ux-20261026/final-isolation-audit.json)。本次为 GUI 与真实模型验收，不以旧自动测试结果代替。本轮没有更改产品实现，未重跑整套源码回归。
 - 未覆盖操作系统重启、运行中模型任务强行中断、真实进程崩溃、长期运行、活服务故障状态下的“一键服务重启”分支。已覆盖正常空间重启，以及整个服务明确停止后手动启动的完整循环。

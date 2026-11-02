@@ -71,7 +71,7 @@ DSHBP2 只传输插件组合：精确包身份加请求启用的 bundle 顺序�
 
 上面的包名只用于展示协议结构。设置、凭据、组件行状态和嵌套蓝图不随蓝图码传输。蓝图码是固定前缀 `DSHBP2:` 加上 raw-DEFLATE 压缩的 UTF-8 JSON，再编码为无填充的规范 Base64url。上限：输入 2 MiB，解压后的 JSON 1 MiB，容器最多 64 层。严格解析会拒绝重复成员、不安全数字、原型键、非法 Unicode、非规范 Base64url 以及压缩数据后的尾随字节。
 
-本包的公开能力分为协议操作、双格式文档处理，以及旧格式兼容三层。协议字段与编码以 [PROTOCOL.md](PROTOCOL.md) 和 [BLUEPRINT.md](../../BLUEPRINT.md) 为准；此处不复制入口导出清单。
+本包的公开能力分为协议操作、双格式文档处理，以及旧格式兼容三层。协议字段与编码以 [PROTOCOL.md](PROTOCOL.md) 和 [docs/blueprint.md](../../docs/blueprint.md) 为准；此处不复制入口导出清单。
 
 ## 开发与安装源码包
 

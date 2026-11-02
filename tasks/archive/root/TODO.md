@@ -1,10 +1,10 @@
 # DSH Spaces — 执行 TODO 清单
 
-> **唯一活动任务账本是 [tasks/todo.md](tasks/todo.md)。** 本文件是导航和历史摘要，不再维护另一份互相矛盾的未完成列表。
+> **唯一活动任务账本是 [tasks/todo.md](../../todo.md)。** 本文件是导航和历史摘要，不再维护另一份互相矛盾的未完成列表。
 >
-> 现行故障政策：[docs/let-it-crash.md](docs/let-it-crash.md)。开发入口：[AGENTS.md](AGENTS.md)、[CONTRIBUTING.md](CONTRIBUTING.md)。
+> 现行故障政策：[docs/let-it-crash.md](../../../docs/let-it-crash.md)。开发入口：[AGENTS.md](../../../AGENTS.md)、[CONTRIBUTING.md](../../../CONTRIBUTING.md)。
 >
-> 2026-09-15：恢复、修补、失败回退类待办已撤销。R1–R6 / Q / 插件 02–03、07–11 已在活动账本勾选。未在本机用官方 CLI/浏览器跑完的项见 [tasks/q-coverage.md](tasks/q-coverage.md)。
+> 2026-09-15：恢复、修补、失败回退类待办已撤销。R1–R6 / Q / 插件 02–03、07–11 已在活动账本勾选。未在本机用官方 CLI/浏览器跑完的项见 [tasks/q-coverage.md](../q-coverage.md)。
 >
 > 配套文档：`REQUIREMENTS.md`（需求与验收）、`IMPLEMENTATION_PLAN.md`（阶段计划与技术栈，早期记录）。
 > 历史阶段按当时完成情况保留勾选。禁止跳过隔离阶段。
@@ -169,4 +169,4 @@
 5. 阶段出口判据没过 → 不进下一阶段。阶段 0 的隔离断言失败 → 停止一切开发，报告根因。
 6. UI 拿不准的细节 → 按 Discord 服务器栏的行为抄。
 7. 名字保留字：`web`、`hub`、`headless`、`node_modules` 不允许作为新工作台名。
-8. **let it crash**：报告真实失败，不要恢复它。不要用 catch、默认值、重试、补偿掩盖故障。不要把文档完成当成运行时迁移完成。现行任务只看 [tasks/todo.md](tasks/todo.md)。
+8. **let it crash**：报告真实失败，不要恢复它。不要用 catch、默认值、重试、补偿掩盖故障。不要把文档完成当成运行时迁移完成。现行任务只看 [tasks/todo.md](../../todo.md)。

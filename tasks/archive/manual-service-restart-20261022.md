@@ -52,7 +52,7 @@ Node `26.10.0`、版本匹配的 rc.2 SDK、仓库外临时根运行完整 15 �
 
 新协调器的 15 项用例覆盖确认、取消前无副作用、重复确认、并发、过期、身份和版本变化、停机失败/取消/超时/不可读、所有权未释放、维护和 Desktop 权限。另有主委派重置和 Chromium 成功/失败/保留 main 用例。
 
-完整原始结果：[result.json](../.sandbox/manual-service-restart-checks-20261022/result.json)；修正后整组日志：[test-spaces-recheck.log](../.sandbox/manual-service-restart-checks-20261022/test-spaces-recheck.log)；[补充汇总](../.sandbox/manual-service-restart-checks-20261022/final-summary.json)。这是各必需组最终通过，不是一次全绿的原始运行。
+完整原始结果：[result.json](../../.sandbox/manual-service-restart-checks-20261022/result.json)；修正后整组日志：[test-spaces-recheck.log](../../.sandbox/manual-service-restart-checks-20261022/test-spaces-recheck.log)；[补充汇总](../../.sandbox/manual-service-restart-checks-20261022/final-summary.json)。这是各必需组最终通过，不是一次全绿的原始运行。
 
 ## 隔离与清理
 
@@ -60,4 +60,4 @@ Node `26.10.0`、版本匹配的 rc.2 SDK、仓库外临时根运行完整 15 �
 
 最早快照中的 7 个用户进程有 5 个在手动功能验收前已改变，不能将最早快照宣称为全程不变，也不推断变化原因。手动功能验收期间记录的 7 个非测试进程，最终 PID 与创建时间全部一致；本次测试进程均已退出。首轮审计因最早快照不匹配返回非零并保留；补充审计准确区分上述时间窗口，且修正了审计脚本中的所有权目录和构建产物路径。
 
-[最终隔离审计](../.sandbox/main-startup-desktop-20261022/link-isolation-audit-final.json) 保存进程身份、服务纪元、空间状态、注册结果与构建摘要。本报告是本次启动与手动操作的有界验收，不替代历史 S1/P0/P1 全部门槛或长期运行验证。
+[最终隔离审计](../../.sandbox/main-startup-desktop-20261022/link-isolation-audit-final.json) 保存进程身份、服务纪元、空间状态、注册结果与构建摘要。本报告是本次启动与手动操作的有界验收，不替代历史 S1/P0/P1 全部门槛或长期运行验证。

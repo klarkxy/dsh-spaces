@@ -1,6 +1,6 @@
 /**
  * Panel copy for zh/en. Locale selection is documented in
- * `tasks/pluginization-localization.md`: browser language, then a visible
+ * `tasks/archive/pluginization-localization.md`: browser language, then a visible
  * 中文/English switch. Host `ctx.locale` is not used — the locale plugin is
  * not in this package's inject/peers, and declaring `locale:` on a slot
  * throws if the face is missing.

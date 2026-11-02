@@ -13,7 +13,7 @@ It adds a space rail to the existing application, runs each ordinary space in it
 - [Standard installation](docs/plugin-standard-install.md) — installation, linked development and removal.
 - [Management contract](tasks/merge-contract-v2.md) — protocol 2, tasks, plans and concurrency.
 - [Fault policy](docs/let-it-crash.md) — the sole authority for failure and recovery behavior.
-- [Blueprint](BLUEPRINT.md) — DSHBP1/DSHBP2 protocols. Spaces blueprint workflows are currently sealed; the independent package remains available.
+- [Blueprint](docs/blueprint.md) — DSHBP1/DSHBP2 protocols. Spaces blueprint workflows are currently sealed; the independent package remains available.
 
 ## Data and identity
 
@@ -84,7 +84,7 @@ MIT. See [LICENSE](LICENSE).
 - [标准安装](docs/plugin-standard-install.md)：安装、链接开发与卸载。
 - [管理合同](tasks/merge-contract-v2.md)：协议 2、任务、计划与并发。
 - [故障政策](docs/let-it-crash.md)：唯一的失败与恢复边界。
-- [蓝图](BLUEPRINT.md)：DSHBP1/DSHBP2 协议。Spaces 内蓝图工作流当前已封存，独立蓝图包保留。
+- [蓝图](docs/blueprint.md)：DSHBP1/DSHBP2 协议。Spaces 内蓝图工作流当前已封存，独立蓝图包保留。
 
 ## 数据与身份
 

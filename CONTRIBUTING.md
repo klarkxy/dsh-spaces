@@ -42,7 +42,7 @@ The runner gives child processes a fresh temporary directory and non-real DSH Ho
 npm run check:all -- --temp-root "$env:LOCALAPPDATA\Temp"
 ```
 
-Use an authorized ordinary shell if the restricted shell cannot write there. Do not redirect these Windows checks to `.sandbox/tmp`, disable other applications, or add rename retries to make a run pass. Temporary fixtures and evidence are retained by the runner; individual tests still release their own resources. See [the investigation](tasks/runtime-eperm-20261020.md) for the observed conflict and verification limits.
+Use an authorized ordinary shell if the restricted shell cannot write there. Do not redirect these Windows checks to `.sandbox/tmp`, disable other applications, or add rename retries to make a run pass. Temporary fixtures and evidence are retained by the runner; individual tests still release their own resources. See [the investigation](tasks/archive/runtime-eperm-20261020.md) for the observed conflict and verification limits.
 
 ## Phase gates
 

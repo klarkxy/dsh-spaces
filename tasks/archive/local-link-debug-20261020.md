@@ -23,7 +23,7 @@
 - 隔离 Home 中实跑了根目录 `add .`；随后不指定测试 CLI，`npm run dev:link` 正确发现本机全局官方 0.2.1-rc.2。重复准备链接后，profile manifest 摘要、目录链接时间及开发者数据标记不变；重新构建的客户端文件通过同一链接可见，未重新安装或应用模板。结果在 `repeat-result.json`、`manual-add-dot.log` 和 `repeat-dev-link.log`。
 - 最后对最终脚本重跑两项链接检查，均通过；源码空白检查通过。本轮只验证官方 Web 的加载入口，没有宣称安装版 Desktop 或完整初始化/空间生命周期验收。
 
-调试入口说明见[本地链接调试](../docs/plugin-standard-install.md#local-linked-development)。旧 `dev:web` 曾清空调试 Home 和安装 tarball 的历史记录不代表现行行为。
+调试入口说明见[本地链接调试](../../docs/plugin-standard-install.md#local-linked-development)。旧 `dev:web` 曾清空调试 Home 和安装 tarball 的历史记录不代表现行行为。
 
 ## 追加：软链接完整生命周期验收
 

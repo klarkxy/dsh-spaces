@@ -39,7 +39,7 @@
 | `src/adapters/node/workbench-maintenance.ts` | 仍有正常快照创建、删除；恢复命令明确失败，不能把两者一起删除 |
 | `package.json` | `workbench-package-upgrade.test.ts` 未进入默认 test 或 test:workbench，需显式运行并接入合适测试入口 |
 
-规则来源是远端 `AGENTS.md`、`docs/let-it-crash.md`、`tasks/todo.md`。执行时先读最新版本。历史完成记录不是本次测试证据；`tasks/q-coverage.md` 和全局 LLM 验收文档中的未跑项继续保留。
+规则来源是远端 `AGENTS.md`、`docs/let-it-crash.md`、`tasks/todo.md`。执行时先读最新版本。历史完成记录不是本次测试证据；`tasks/archive/q-coverage.md` 和全局 LLM 验收文档中的未跑项继续保留。
 
 ## 2. 设计取舍
 

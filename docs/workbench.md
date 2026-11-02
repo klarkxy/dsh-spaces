@@ -88,7 +88,7 @@ queued → running → succeeded / failed / cancelled
 
 普通模板与 `.dshspace` 分享归档用于创建或分享空间配方，不是环境备份。配方保留 base 和其精确版本；导入先创建相同 base，再安装扩展，不可用的版本直接失败。Browser 配方当前不创建空间或安装扩展。定义、安装、配置和启动分别记录结果，导入不自动启动空间。
 
-**Spaces 内蓝图工作流当前封存。** 蓝图创建、生成、预览、应用以及分享码导入导出暂停；普通模板和 `.dshspace` 分享不受影响。独立蓝图包、DSHBP1/DSHBP2 协议和既有文件保留，待 Spaces 核心系统稳定后再评估唤醒。协议与封存边界见 [BLUEPRINT.md](../BLUEPRINT.md)。
+**Spaces 内蓝图工作流当前封存。** 蓝图创建、生成、预览、应用以及分享码导入导出暂停；普通模板和 `.dshspace` 分享不受影响。独立蓝图包、DSHBP1/DSHBP2 协议和既有文件保留，待 Spaces 核心系统稳定后再评估唤醒。协议与封存边界见 [blueprint.md](blueprint.md)。
 
 ## 8. DSH 版本与 Spaces 升级
 

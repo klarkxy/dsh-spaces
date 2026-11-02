@@ -1,6 +1,6 @@
 # Acceptance record
 
-> Historical acceptance evidence. Each section proves only its dated package and scope; it is not the current release certification. Current protocol and usage are defined by [README.md](README.md), [PROTOCOL.md](PROTOCOL.md) and [../../BLUEPRINT.md](../../BLUEPRINT.md).
+> Historical acceptance evidence. Each section proves only its dated package and scope; it is not the current release certification. Current protocol and usage are defined by [README.md](README.md), [PROTOCOL.md](PROTOCOL.md) and [../../docs/blueprint.md](../../docs/blueprint.md).
 
 ## Spaces repository migration — 2026-10-09
 

@@ -71,7 +71,7 @@ DSHBP2 transports a plugin combination: exact package identities plus a requeste
 
 The package name above is illustrative. Settings, credentials, row states and nested blueprints are not transported. A code is the literal prefix `DSHBP2:` followed by raw-DEFLATE UTF-8 JSON in unpadded canonical Base64url. Limits: 2 MiB input, 1 MiB decoded JSON, 64 container levels. Strict parsing rejects duplicate members, unsafe numbers, prototype keys, malformed Unicode, noncanonical Base64url and trailing compressed data.
 
-The public capabilities cover protocol operations, dual-format document handling and legacy-format compatibility. [PROTOCOL.md](PROTOCOL.md) and [BLUEPRINT.md](../../BLUEPRINT.md) own the field and encoding contracts; this README does not duplicate the export inventory.
+The public capabilities cover protocol operations, dual-format document handling and legacy-format compatibility. [PROTOCOL.md](PROTOCOL.md) and [docs/blueprint.md](../../docs/blueprint.md) own the field and encoding contracts; this README does not duplicate the export inventory.
 
 ## Development and source installation
 

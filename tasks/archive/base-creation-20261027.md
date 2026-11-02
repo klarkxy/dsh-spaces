@@ -17,11 +17,11 @@
 
 环境：Windows、Node 26.10.0、官方 DSH 0.2.1-rc.2 SDK；所有测试使用独立 Home，Windows 改名检查使用仓库外 `H:/Code/dsh-spaces-checktmp`。官方 SDK 未修改。
 
-- [完整检查](../.sandbox/base-create-20261027/checks-2/result.json)：清单、三组类型、构建、全部规定测试组、包预检和 Chromium 交互共 14 项全部通过；测试 1,431 通过，7 项既有条件跳过。最终无会话适配器补充通过 `typecheck:spaces`、构建/打包及 [Browser 17/17](../.sandbox/base-create-20261027/browser-final.log)。
-- [真实 Supervisor Browser 验收](../.sandbox/base-create-20261027/supervisor-4/result.json)：公共 create/start/stop、版本元数据、组合配置隔离、认证入口、浏览器根页面、输入网站地址并创建 iframe、无聊天控件、无页面异常、正常停止均通过。
-- [真实 Web 与 Browser 验收](../.sandbox/base-create-20261027/supervisor-web-1/result.json)：同一隔离 Supervisor 中分别创建两种 base，Web 按指定 0.2.1-rc.2 创建并正常启动/停止；Browser 产品版本保持 0.4.0。
-- [插件扩展验收](../.sandbox/base-create-20261027/extension-1/result.json)：本地测试插件通过官方 CLI 安装到独立 Browser profile，真实 Chromium 显示工具栏按钮并响应点击；[截图](../.sandbox/base-create-20261027/extension-1/extension.png)。此项证明标准 DSH 插件安装与插槽交互，不是 npm 目录发布验收。
-- [Web 实际版本目录](../.sandbox/base-create-20261027/web-catalog.json)：从配置的官方包注册源读到 10 个兼容版本，默认选当前宿主 0.2.1-rc.2；未伪造 Browser 历史版本。
+- [完整检查](../../.sandbox/base-create-20261027/checks-2/result.json)：清单、三组类型、构建、全部规定测试组、包预检和 Chromium 交互共 14 项全部通过；测试 1,431 通过，7 项既有条件跳过。最终无会话适配器补充通过 `typecheck:spaces`、构建/打包及 [Browser 17/17](../../.sandbox/base-create-20261027/browser-final.log)。
+- [真实 Supervisor Browser 验收](../../.sandbox/base-create-20261027/supervisor-4/result.json)：公共 create/start/stop、版本元数据、组合配置隔离、认证入口、浏览器根页面、输入网站地址并创建 iframe、无聊天控件、无页面异常、正常停止均通过。
+- [真实 Web 与 Browser 验收](../../.sandbox/base-create-20261027/supervisor-web-1/result.json)：同一隔离 Supervisor 中分别创建两种 base，Web 按指定 0.2.1-rc.2 创建并正常启动/停止；Browser 产品版本保持 0.4.0。
+- [插件扩展验收](../../.sandbox/base-create-20261027/extension-1/result.json)：本地测试插件通过官方 CLI 安装到独立 Browser profile，真实 Chromium 显示工具栏按钮并响应点击；[截图](../../.sandbox/base-create-20261027/extension-1/extension.png)。此项证明标准 DSH 插件安装与插槽交互，不是 npm 目录发布验收。
+- [Web 实际版本目录](../../.sandbox/base-create-20261027/web-catalog.json)：从配置的官方包注册源读到 10 个兼容版本，默认选当前宿主 0.2.1-rc.2；未伪造 Browser 历史版本。
 
 首轮检查的旧断言、临时缓存/受限进程 EPERM、蓝图测试偶遇 Node 禁止端口及初期 Browser 缺少 credentials / session scope 的实际失败均保留在 `.sandbox/base-create-20261027/`。修正后使用新的独立测试实例验证，没有在产品内加入自动重试或恢复。
 

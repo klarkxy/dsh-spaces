@@ -15,7 +15,7 @@
 - 修复包安装后的 client、host、Supervisor 与 manifest 四个文件均和当前构建哈希一致；旧服务场景升级后的 profile 也重新核对一致。
 - `cordis.patch.yml` 保留官方 `!!js` 标签，仅给测试 Home 以文本追加观察插件。观察器只记录注册操作时间、状态码及受限错误原因，不修改响应，不记录 bearer 或请求载荷。
 
-所有相对证据位于 [调试目录](../.sandbox/main-startup-desktop-20261022/)：
+所有相对证据位于 [调试目录](../../.sandbox/main-startup-desktop-20261022)：
 
 | 实例 | 用途 | 关键证据 |
 | --- | --- | --- |
@@ -24,12 +24,12 @@
 | `run-2026-10-22T13-32-06-467Z` | 修复包首次初始化及正常重开 | `registration-observations.json`、`loaded-payload.json`、`supervisor-before-reopen.json`、`reopen-02-settled-main.png` |
 | `run-2026-10-22T13-37-05-421Z` | 旧 Supervisor + 新插件，真实 404 | `old-supervisor-before-upgrade.json`、`upgrade-payload.json`、`registration-observations.json`、`reopen-03-404-details.png`、`reopen-04-main-after-details.png` |
 
-各实例的 `shutdown-complete.json` 记录正常关闭成功。最终 [隔离审计](../.sandbox/main-startup-desktop-20261022/isolation-audit.json) 确认：6 次测试 Desktop 启动均使用指定隔离目录且进程已退出；4 个测试 Supervisor 正常停止、端点移除；`profiles/web`、根 `sessions`、根 `storages` 均未创建；官方 EXE / ASAR 哈希未变；开始前已有的 7 个 Desktop 相关进程 PID 与创建时间均保持一致。
+各实例的 `shutdown-complete.json` 记录正常关闭成功。最终 [隔离审计](../../.sandbox/main-startup-desktop-20261022/isolation-audit.json) 确认：6 次测试 Desktop 启动均使用指定隔离目录且进程已退出；4 个测试 Supervisor 正常停止、端点移除；`profiles/web`、根 `sessions`、根 `storages` 均未创建；官方 EXE / ASAR 哈希未变；开始前已有的 7 个 Desktop 相关进程 PID 与创建时间均保持一致。
 
 ## 源码验证与限制
 
 - 针对注册就绪／启动失败／注册拒绝及既有入口等待的专项 9/9。
 - Node 26.10.0、官方 rc.2 SDK、外部临时根下执行完整 15 组：14 组通过；默认测试 269 通过、1 项子进程提前退出。该原测试不改超时和实现，单独复查 1/1 通过。不能把首轮描述成全绿。
-- 工作台 558 通过／2 条件跳过，LLM 122/122，Chromium 13/13；清单、三组类型检查、构建和包预检均通过。[完整结果](../.sandbox/main-startup-desktop-checks-final-20261022/result.json)、[单项复查](../.sandbox/main-startup-desktop-checks-final-20261022/process-manager-recheck.log)。
+- 工作台 558 通过／2 条件跳过，LLM 122/122，Chromium 13/13；清单、三组类型检查、构建和包预检均通过。[完整结果](../../.sandbox/main-startup-desktop-checks-final-20261022/result.json)、[单项复查](../../.sandbox/main-startup-desktop-checks-final-20261022/process-manager-recheck.log)。
 - 初轮新增测试的空数组类型推断错误已修；原检查目录保留。隐藏窗口下 Playwright 截图曾超时，后来通过同一隔离进程的 `webContents.capturePage()` 取图；实际截图和可访问性树均已检查。
 - 本次没有配置模型、发送模型请求或验证所有子空间能力，也没有修改用户当前运行的实例；不关闭其它 S1/P0/P1 或长期运行验收项。
