@@ -13,7 +13,7 @@ import {
   validateImportedPatch,
 } from "../../src/core/application/space-recipe.ts";
 import { LLM_SHARE_NOTE, type LlmShareManifest } from "../../src/shared/llm-share.ts";
-import { SPACE_TEMPLATES_FILE, createSpaceFromTemplate, listSpaceTemplates } from "../../src/adapters/node/products/space-templates.ts";
+import { SPACE_TEMPLATES_FILE, listSpaceTemplates } from "../../src/adapters/node/products/space-templates.ts";
 import {
   FULL_SPACES_PACKAGE,
   isFullSpacesManagerSpec,
@@ -254,40 +254,6 @@ test("web and reserved names cannot be recipe targets", async () => {
   assert.throws(() => validateImportedPatch("- id: x\n", "web"), /web/);
 });
 
-test("old templates.json without schemaVersion or recipe still lists and creates", async () => {
-  const dir = home();
-  mkdirSync(join(dir, "hub"), { recursive: true });
-  const original = `${JSON.stringify({
-    templates: [
-      {
-        id: "dev",
-        name: "Dev",
-        displayName: "Dev box",
-        plugins: [outline],
-        createdAt: "2026-09-15T00:00:00.000Z",
-      },
-    ],
-  })}\n`;
-  const path = join(dir, "hub", SPACE_TEMPLATES_FILE);
-  writeFileSync(path, original);
-  const listed = listSpaceTemplates(dir);
-  assert.equal(listed.length, 1);
-  assert.equal(listed[0]?.recipe, undefined);
-  assert.equal(readFileSync(path, "utf8"), original);
-  const created: string[] = [];
-  const installed: string[] = [];
-  const result = await createSpaceFromTemplate(listed[0]!, "lab", {
-    createSpace: async (input) => {
-      created.push(input.name);
-    },
-    installPlugin: async (_spaceId, spec) => {
-      installed.push(spec);
-    },
-  });
-  assert.deepEqual(created, ["lab"]);
-  assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
-  assert.equal(result.plugins, "completed");
-});
 
 test("recipes refuse secret config instead of stripping it", () => {
   assert.throws(

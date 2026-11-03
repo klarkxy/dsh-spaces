@@ -126,10 +126,6 @@ export function parseCatalog(value: unknown): { meta: PluginCatalogMeta; entries
 
 const DSH_TOPICS = new Set(["dsh-plugin", "dsh", "deepseek-harness", "deepseekharness"]);
 const OWNER_REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-const GITHUB_HEADERS = {
-  accept: "application/vnd.github+json",
-  "user-agent": "dsh-spaces",
-};
 
 function topicsOf(value: unknown): string[] {
   return strings(value).map((item) => item.toLowerCase());
@@ -266,59 +262,8 @@ export function readLocalPluginCatalog(
   return { ...seedCatalog(), source: "seed", url };
 }
 
-function rememberEntries(dshHome: string, extras: PluginCatalogEntry[]): void {
-  if (extras.length === 0) return;
-  const current = readCachedCatalog(dshHome) ?? seedCatalog();
-  const unique = new Map(current.entries.map((entry) => [entry.id, entry]));
-  for (const entry of extras) unique.set(entry.id, entry);
-  const entries = [...unique.values()];
-  writeCache(dshHome, {
-    meta: { ...current.meta, count: entries.length },
-    entries,
-  });
-}
 
-function githubJson(fetchImpl: CatalogFetcher, url: string): Promise<unknown> {
-  return fetchImpl(url, { headers: GITHUB_HEADERS }).then(async (response) => {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  });
-}
 
-export async function searchPluginCatalog(
-  dshHome: string,
-  query: string,
-  options: { fetchImpl?: CatalogFetcher } = {},
-): Promise<PluginCatalogEntry[]> {
-  assertNotRealHome(dshHome);
-  const q = query.trim();
-  if (!q || q.length > 80) return [];
-  const fetchImpl =
-    options.fetchImpl ??
-    (async (target, init) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 20_000);
-      try {
-        return await fetch(target, { headers: init?.headers, signal: controller.signal });
-      } finally {
-        clearTimeout(timer);
-      }
-    });
-  const extras: PluginCatalogEntry[] = [];
-  if (OWNER_REPO_RE.test(q)) {
-    const [owner, repo] = q.split("/");
-    try {
-      const entry = parseGitHubRepo(
-        await githubJson(fetchImpl, `https://api.github.com/repos/${owner}/${repo}`),
-      );
-      if (entry) extras.push(entry);
-    } catch {
-      // keep local catalog matches
-    }
-  }
-  rememberEntries(dshHome, extras);
-  return extras;
-}
 
 function writeCache(
   dshHome: string,

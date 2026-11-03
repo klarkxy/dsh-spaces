@@ -9,7 +9,6 @@ import {
   SPACE_SHARE_FORMAT_VERSION,
   SPACE_SHARE_KIND,
   type SpaceExportOptions,
-  type SpaceImportResult,
   type SpaceShareManifest,
   type SpaceSharePlugin,
   type SpaceSharePluginSource,
@@ -23,15 +22,11 @@ import {
   type LlmShareManifest,
 } from "../../../shared/llm-share";
 import {
-  applySpaceRecipe,
   isNpmRangeOrExact,
   isSafeNpmPackageName,
-  recipeFromShareParts,
 } from "../../../core/application/space-recipe";
 import {
   PROTECTED_PLUGIN_PACKAGES,
-  SPACE_NAME_RE,
-  spaceIdFromName,
   type InstalledPlugin,
   type PluginLibraryEntry,
 } from "../../../shared/types";
@@ -386,57 +381,5 @@ export function exportSpaceArchive(
   return packSpaceShare(share);
 }
 
-export function uniqueSpaceName(displayName: string, taken: string[]): string {
-  const base = displayName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32) || "space";
-  const slug = SPACE_NAME_RE.test(base) ? base : `import-${base.replace(/[^a-z0-9]/g, "").slice(0, 24) || "space"}`;
-  const used = new Set(taken);
-  if (!used.has(spaceIdFromName(slug)) && slug !== "web" && slug !== "hub") return slug;
-  for (let i = 2; i < 1000; i += 1) {
-    const candidate = `${slug.slice(0, 30)}-${i}`.slice(0, 33);
-    if (!used.has(spaceIdFromName(candidate)) && SPACE_NAME_RE.test(candidate)) return candidate;
-  }
-  throw new Error("Could not allocate a space name.");
-}
 
-export async function importSpaceArchive(
-  archive: Buffer,
-  ports: SpaceSharePorts,
-  options: { writePatch?: (spaceId: string, patch: string) => void } = {},
-): Promise<SpaceImportResult> {
-  let parsed: ReturnType<typeof parseSpaceShare>;
-  try {
-    parsed = parseSpaceShare(archive);
-  } catch (error) {
-    return {
-      definition: "failed",
-      plugins: "not-run",
-      start: "not-run",
-      errors: [error instanceof Error ? error.message : String(error)],
-      pendingManual: [],
-    };
-  }
-
-  const name = uniqueSpaceName(parsed.manifest.space.displayName, ports.listSpaceIds());
-  return applySpaceRecipe(
-    recipeFromShareParts({
-      displayName: parsed.manifest.space.displayName,
-      icon: parsed.manifest.space.icon,
-      plugins: parsed.plugins,
-      patch: parsed.patch,
-      llm: parsed.llm,
-      source: parsed.manifest.source,
-    }),
-    {
-      createSpace: ports.createSpace,
-      installPlugin: ports.installPlugin,
-      writePatch: options.writePatch,
-      writeLlmShare: ports.writeLlmShare,
-    },
-    { name, displayName: parsed.manifest.space.displayName },
-  );
-}
 

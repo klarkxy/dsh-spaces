@@ -24,7 +24,6 @@ import {
   lookupLibraryEntry,
   removeLibraryEntry,
   spacesUsingPlugin,
-  syncLibraryFromProfiles,
   upsertLibraryEntry,
 } from "./plugin-library";
 import { currentPackageSource, npmCliJs, nodeExecutable, runProcess, toolchainEnv } from "../runtime/toolchain";
@@ -306,12 +305,6 @@ export async function resolveInstallSpec(
   return spec;
 }
 
-export function listPluginLibrary(
-  dshHome: string,
-  profileNames: string[],
-): PluginLibraryEntry[] {
-  return syncLibraryFromProfiles(dshHome, listAllProfilePlugins(dshHome, profileNames));
-}
 
 function defaultFetcher(limits?: { metadataMaxBytes?: number; archiveMaxBytes?: number }): PluginFetcher {
   const metadataMaxBytes = limits?.metadataMaxBytes ?? DOWNLOAD_METADATA_MAX_BYTES;

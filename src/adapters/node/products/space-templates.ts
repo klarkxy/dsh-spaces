@@ -10,16 +10,13 @@ import { readPluginLibrary } from "./plugin-library";
 import { pluginToShare } from "./space-share";
 import {
   SPACE_RECIPE_SCHEMA_VERSION,
-  type CreateFromTemplateResult,
   type SpaceRecipe,
   type SpaceSharePlugin,
   type SpaceTemplate,
 } from "../../../shared/space-share";
 import {
-  applySpaceRecipe,
   assertSharePluginsSecretFree,
   parseSpaceRecipe,
-  recipeFromTemplate,
 } from "../../../core/application/space-recipe";
 import type { LlmShareManifest } from "../../../shared/llm-share";
 
@@ -189,26 +186,3 @@ export function saveSpaceTemplate(
   return template;
 }
 
-export async function createSpaceFromTemplate(
-  template: SpaceTemplate,
-  spaceId: string,
-  ports: SpaceTemplatePorts,
-): Promise<CreateFromTemplateResult> {
-  const imported = await applySpaceRecipe(recipeFromTemplate(template), ports, {
-    name: spaceId,
-    displayName: template.displayName,
-  });
-  if (imported.definition !== "imported" || !imported.spaceId) {
-    throw new Error(imported.errors[0] || "The template could not create a space.");
-  }
-  if (imported.plugins === "failed") {
-    return { spaceId: imported.spaceId, plugins: "failed", errors: imported.errors };
-  }
-  if (imported.plugins === "pending-manual") {
-    return { spaceId: imported.spaceId, plugins: "pending-manual", errors: imported.errors };
-  }
-  if (imported.plugins === "not-run") {
-    return { spaceId: imported.spaceId, plugins: "failed", errors: imported.errors };
-  }
-  return { spaceId: imported.spaceId, plugins: "completed", errors: imported.errors };
-}

@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   SPACE_TEMPLATES_FILE,
-  createSpaceFromTemplate,
   listSpaceTemplates,
   saveSpaceTemplate,
   spaceTemplateId,
@@ -89,47 +88,8 @@ test("saved templates omit bundled bridges and keep local plugins pending withou
     templates: listed,
     observation: { serviceEpoch: "a".repeat(64), expectedRevision: "b".repeat(64) },
   }).success, true);
-  const installed: string[] = [];
-  const result = await createSpaceFromTemplate(listed[0]!, "portable", {
-    createSpace: async () => undefined,
-    installPlugin: async (_spaceId, spec) => { installed.push(spec); },
-  });
-  assert.equal(result.plugins, "pending-manual");
-  assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
 });
 
-test("creating from a template copies plugins onto a new space only", async () => {
-  const installed: string[] = [];
-  const created: string[] = [];
-  const result = await createSpaceFromTemplate(
-    {
-      id: "dev",
-      name: "Dev",
-      displayName: "Dev box",
-      plugins: [
-        {
-          packageName: "dsh-outline",
-          resolvedVersion: "1.2.3",
-          source: "npm",
-          installSpec: "dsh-outline@1.2.3",
-        },
-      ],
-      createdAt: "2026-09-15T00:00:00.000Z",
-    },
-    "lab",
-    {
-      createSpace: async (input) => {
-        created.push(input.name);
-      },
-      installPlugin: async (_spaceId, spec) => {
-        installed.push(spec);
-      },
-    },
-  );
-  assert.deepEqual(created, ["lab"]);
-  assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
-  assert.equal(result.plugins, "completed");
-});
 
 test("corrupt template bytes fail instead of returning empty and are not overwritten", () => {
   const dir = home();
@@ -179,30 +139,6 @@ test("saving the same logical template name updates that template only", () => {
   assert.equal(listed[0]?.displayName, "Updated");
 });
 
-test("template creation does not execute a mismatched installSpec", async () => {
-  const installed: string[] = [];
-  const result = await createSpaceFromTemplate(
-    {
-      id: "dev",
-      name: "Dev",
-      displayName: "Dev box",
-      plugins: [
-        { packageName: "good", resolvedVersion: "1.0.0", source: "npm", installSpec: "evil@1.0.0" },
-        { packageName: "ok", resolvedVersion: "1.0.0", source: "npm", installSpec: "ok@1.0.0" },
-      ],
-      createdAt: "2026-09-15T00:00:00.000Z",
-    },
-    "lab",
-    {
-      createSpace: async () => undefined,
-      installPlugin: async (_spaceId, spec) => {
-        installed.push(spec);
-      },
-    },
-  );
-  assert.deepEqual(installed, ["ok@1.0.0"]);
-  assert.equal(result.plugins, "pending-manual");
-});
 
 test("unknown templates schema keeps original bytes", () => {
   const dir = home();
@@ -227,48 +163,4 @@ test("saving a template with secret config is rejected and original bytes stay",
   assert.equal(readFileSync(path, "utf8").includes("fake-test-secret-123"), false);
 });
 
-test("non-secret template config is kept and written back on create", async () => {
-  const dir = home();
-  writeProfile(dir, "coding");
-  writeFileSync(join(dir, "profiles", "coding", "cordis.patch.yml"), "- id: example\n  config:\n    foo: 1\n");
-  const template = saveSpaceTemplate(dir, "coding", "Dev", { displayName: "Dev box", includeConfig: true });
-  assert.match(template.recipe?.patch ?? "", /foo: 1/);
-  assert.equal((template.recipe?.patch ?? "").includes("apiKey"), false);
-  const patches: string[] = [];
-  const result = await createSpaceFromTemplate(template, "lab", {
-    createSpace: async () => undefined,
-    installPlugin: async () => undefined,
-    writePatch: (_spaceId, patch) => {
-      patches.push(patch);
-    },
-  });
-  assert.equal(result.plugins, "completed");
-  assert.equal(patches.length, 1);
-  assert.match(patches[0] ?? "", /hub\/space-lab\/sessions/);
-  assert.match(patches[0] ?? "", /foo: 1/);
-});
 
-test("template install failure is reported and does not rewrite other spaces", async () => {
-  const result = await createSpaceFromTemplate(
-    {
-      id: "dev",
-      name: "Dev",
-      displayName: "Dev box",
-      plugins: [
-        { packageName: "good", resolvedVersion: "1.0.0", source: "npm", installSpec: "good@1.0.0" },
-        { packageName: "bad", resolvedVersion: "1.0.0", source: "npm", installSpec: "bad@1.0.0" },
-      ],
-      createdAt: "2026-09-15T00:00:00.000Z",
-    },
-    "lab",
-    {
-      createSpace: async () => undefined,
-      installPlugin: async (_spaceId, spec) => {
-        if (spec.startsWith("bad@")) throw new Error("template plugin failed");
-      },
-    },
-  );
-  assert.equal(result.spaceId, "space-lab");
-  assert.equal(result.plugins, "failed");
-  assert.match(result.errors.join("\n"), /template plugin failed/);
-});

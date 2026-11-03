@@ -23,7 +23,6 @@ import { FileLlmPolicyStore } from "../../src/adapters/node/llm/llm-policy-store
 import {
   buildSpaceShare,
   exportSpaceArchive,
-  importSpaceArchive,
   packSpaceShare,
   parseSpaceShare,
 } from "../../src/adapters/node/products/space-share.ts";
@@ -183,27 +182,6 @@ test("export archive includes secret-free llm.json and import does not copy sour
   const parsed = parseSpaceShare(archive);
   assert.ok(parsed.llm);
   assert.equal(parsed.llm?.requirements[0].requirementId, "11111111-1111-4111-8111-111111111111");
-  const created: string[] = [];
-  const written: unknown[] = [];
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => ["web"],
-    createSpace: async (input) => {
-      created.push(input.name);
-    },
-    installPlugin: async (_spaceId, spec) => {
-      if (/llm-bridge|llm-pi-ai|dsh-llm/i.test(spec)) {
-        throw new Error("should not auto-install adapters");
-      }
-    },
-    writeLlmShare: (spaceId, next) => {
-      written.push({ spaceId, next });
-    },
-  });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.llm?.mappingRequired, true);
-  assert.equal(result.llm?.mapped, false);
-  assert.equal(created.length, 1);
-  assert.equal((written[0] as { next: { requirements: { requirementId: string }[] } }).next.requirements[0].requirementId, "11111111-1111-4111-8111-111111111111");
 });
 
 test("leaving shared access does not delete the Home catalog", async () => {
@@ -218,23 +196,6 @@ test("leaving shared access does not delete the Home catalog", async () => {
   assert.match(readFileSync(join(dir, ".dsh-spaces-control", "llm", "catalog.json"), "utf8"), /共享接口/);
 });
 
-test("legacy share without llm.json still imports and does not invent a mapping", async () => {
-  const share = buildSpaceShare({
-    displayName: "Legacy",
-    plugins: [{ name: "dsh-outline", requestedSpec: "1.2.3", resolvedVersion: "1.2.3", version: "1.2.3", protected: false }] satisfies InstalledPlugin[],
-  });
-  const archive = packZip([
-    { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest)}\n`) },
-    { name: "plugins.json", data: Buffer.from(`${JSON.stringify(share.plugins)}\n`) },
-  ]);
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => ["web"],
-    createSpace: async () => undefined,
-    installPlugin: async () => undefined,
-  });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.llm, undefined);
-});
 
 test("packSpaceShare refuses a patch that embeds a live key", () => {
   assert.throws(

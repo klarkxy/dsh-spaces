@@ -7,7 +7,7 @@ import { main as doctorMain } from "../../packages/doctor/src/index.ts";
 import { WorkbenchJobStore } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import { runBatch } from "../../src/shared/batch.ts";
 import { formatWorkbenchFailure } from "../../src/shared/workbench.ts";
-import { importSpaceArchive, parseSpaceShare } from "../../src/adapters/node/products/space-share.ts";
+import { parseSpaceShare } from "../../src/adapters/node/products/space-share.ts";
 import { packZip } from "../../src/adapters/node/products/space-share-zip.ts";
 import { SPACE_SHARE_FORMAT_VERSION, SPACE_SHARE_KIND } from "../../src/shared/space-share.ts";
 
@@ -99,45 +99,6 @@ test("E11 unreadable job bytes stay and do not look succeeded", () => {
   assert.equal(readFileSync(join(jobsDir, "bad.json"), "utf8"), raw);
 });
 
-test("E14 import of an incompatible combo keeps the space and does not start it", async () => {
-  const archive = packZip([
-    {
-      name: "manifest.json",
-      data: Buffer.from(`${JSON.stringify({
-        formatVersion: SPACE_SHARE_FORMAT_VERSION,
-        kind: SPACE_SHARE_KIND,
-        exportedAt: "2026-09-15T00:00:00.000Z",
-        source: {},
-        space: { displayName: "Combo" },
-      })}\n`),
-    },
-    {
-      name: "plugins.json",
-      data: Buffer.from(`${JSON.stringify([
-        { packageName: "good", resolvedVersion: "1.0.0", source: "npm", installSpec: "good@1.0.0" },
-        { packageName: "bad", resolvedVersion: "1.0.0", source: "npm", installSpec: "bad@1.0.0" },
-      ])}\n`),
-    },
-  ]);
-  parseSpaceShare(archive);
-  const created: string[] = [];
-  const installed: string[] = [];
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => [],
-    createSpace: async (input) => {
-      created.push(input.name);
-    },
-    installPlugin: async (_id, spec) => {
-      if (spec.startsWith("bad@")) throw new Error("incompatible");
-      installed.push(spec);
-    },
-  });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.plugins, "failed");
-  assert.equal(result.start, "not-run");
-  assert.equal(created.length, 1);
-  assert.deepEqual(installed, ["good@1.0.0"]);
-});
 
 test("E16 doctor inspect does not clear leftover jobs", async () => {
   const home = tempHome();

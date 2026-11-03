@@ -24,7 +24,6 @@ import {
   type HomeLockOwner,
   type UnlockDeadResult,
 } from "../../src/adapters/node/home/home-operation-lock.ts";
-import { MaintenanceGate } from "../../src/core/application/maintenance-gate.ts";
 import { realDshHome } from "../../src/adapters/node/home/home-guard.ts";
 
 const temps: string[] = [];
@@ -307,76 +306,7 @@ test("async child after release cannot inherit ownership past a new holder", asy
   assert.equal(await hold, "held");
 });
 
-test("MaintenanceGate with HomeOperationLock holds the home lock for mutations and maintenance", async () => {
-  const home = tempHome();
-  const lock = new HomeOperationLock(home);
-  const gate = new MaintenanceGate(lock);
-  assert.equal(gate.busy, false);
 
-  let releaseMutate!: () => void;
-  let mutateInside = false;
-  const mutating = gate.runMutation(async () => {
-    mutateInside = true;
-    assert.equal(gate.mutations, 1);
-    assert.equal(gate.busy, false);
-    const info = lock.inspect();
-    assert.ok("owner" in info && info.held);
-    assert.equal(info.owner.label, "mutation");
-    await new Promise<void>((resolveHold) => {
-      releaseMutate = resolveHold;
-    });
-    return "mut";
-  });
-  assert.equal(gate.mutations, 1);
-  while (!mutateInside) await delay(5);
-  await assert.rejects(new HomeOperationLock(home).run("host-create", async () => "no"), HomeLockBusyError);
-  await assert.rejects(
-    new MaintenanceGate(new HomeOperationLock(home)).run("startup-recovery", async () => "no"),
-    /already running|held by pid|busy/,
-  );
-  releaseMutate();
-  assert.equal(await mutating, "mut");
-  assert.equal(gate.mutations, 0);
-  assert.equal(lock.inspect().held, false);
-
-  let recoveryInside = false;
-  const recovery = gate.run("startup-recovery", async () => {
-    recoveryInside = true;
-    assert.equal(gate.busy, true);
-    assert.equal(gate.current, "startup-recovery");
-    const info = lock.inspect();
-    assert.ok("owner" in info && info.held);
-    assert.equal(info.owner.label, "startup-recovery");
-    await delay(30);
-    return "recovered";
-  });
-  assert.equal(gate.current, "startup-recovery");
-  while (!recoveryInside) await delay(5);
-  await assert.rejects(
-    new MaintenanceGate(new HomeOperationLock(home)).runMutation(async () => "no"),
-    (error: unknown) => {
-      assert.match(String(error), /while maintenance is running|held by pid|busy/);
-      return true;
-    },
-  );
-  assert.equal(await recovery, "recovered");
-  assert.equal(gate.busy, false);
-  assert.equal(lock.inspect().held, false);
-});
-
-test("failed mutation releases both the gate and the home lock", async () => {
-  const lock = new HomeOperationLock(tempHome());
-  const gate = new MaintenanceGate(lock);
-  await assert.rejects(
-    gate.runMutation(async () => {
-      throw new Error("write failed");
-    }),
-    /write failed/,
-  );
-  assert.equal(gate.mutations, 0);
-  assert.equal(lock.inspect().held, false);
-  assert.equal(await gate.runMutation(async () => "ok"), "ok");
-});
 
 test("reclaim guard blocks acquire and unlockDead cannot steal an incomplete lock", async () => {
   const home = tempHome();

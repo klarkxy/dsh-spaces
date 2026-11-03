@@ -1,9 +1,6 @@
 import {
   INSTALLABLE_PLUGIN_TIERS,
-  type InstalledPlugin,
   type PluginCatalogEntry,
-  type PluginLibraryEntry,
-  type PluginManageRow,
 } from "./types";
 
 export function isSafeSpec(spec: string): boolean {
@@ -62,14 +59,6 @@ export function isInstallableEntry(entry: PluginCatalogEntry): boolean {
   );
 }
 
-export function formatCount(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return "0";
-  if (n < 1000) return String(Math.round(n));
-  const value = n < 1_000_000 ? n / 1000 : n / 1_000_000;
-  const suffix = n < 1_000_000 ? "k" : "m";
-  const text = value.toFixed(1);
-  return `${text.endsWith(".0") ? text.slice(0, -2) : text}${suffix}`;
-}
 
 export function pluginDisplayName(entry: Pick<PluginCatalogEntry, "packageName" | "repo" | "id">): string {
   const raw = entry.packageName || entry.repo || entry.id;
@@ -87,62 +76,4 @@ export function pluginAliases(entry: { spec: string; packageName: string }): str
   return [...new Set(names.filter(Boolean))];
 }
 
-export function findInstalled(
-  installed: InstalledPlugin[],
-  entry: { spec: string; packageName: string },
-): InstalledPlugin | undefined {
-  const names = new Set(pluginAliases(entry));
-  return installed.find((item) => names.has(item.name));
-}
 
-export function buildManageRows(
-  library: PluginLibraryEntry[],
-  installed: InstalledPlugin[],
-): PluginManageRow[] {
-  const rows: PluginManageRow[] = [];
-  const seen = new Set<string>();
-  for (const item of installed.filter((plugin) => plugin.protected)) {
-    if (seen.has(item.name)) continue;
-    seen.add(item.name);
-    rows.push({
-      id: item.name,
-      packageName: item.name,
-      title: item.name,
-      version: item.version,
-      protected: true,
-      enabled: true,
-      inLibrary: false,
-    });
-  }
-  for (const entry of library) {
-    const hit = findInstalled(installed, entry);
-    if (hit && seen.has(hit.name)) continue;
-    if (seen.has(entry.id) || seen.has(entry.packageName)) continue;
-    seen.add(entry.id);
-    seen.add(entry.packageName);
-    if (hit) seen.add(hit.name);
-    rows.push({
-      id: entry.id,
-      packageName: hit?.name ?? entry.packageName,
-      title: entry.title || entry.packageName,
-      version: hit?.version,
-      protected: false,
-      enabled: Boolean(hit),
-      inLibrary: true,
-    });
-  }
-  for (const item of installed) {
-    if (item.protected || seen.has(item.name)) continue;
-    seen.add(item.name);
-    rows.push({
-      id: item.name,
-      packageName: item.name,
-      title: item.name,
-      version: item.version,
-      protected: false,
-      enabled: true,
-      inLibrary: false,
-    });
-  }
-  return rows;
-}

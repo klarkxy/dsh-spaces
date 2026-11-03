@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, test } from "node:test";
-import { buildManageRows } from "../../src/shared/plugin.ts";
 import {
   archiveAbsPath,
   archiveRelPath,
@@ -15,9 +14,7 @@ import {
   upsertLibraryEntry,
 } from "../../src/adapters/node/products/plugin-library.ts";
 import {
-  downloadPlugin,
-  listPluginLibrary,
-  listProfilePlugins,
+  downloadPlugin,  listProfilePlugins,
   removeDownloadedPlugin,
   setSpacePlugin,
 } from "../../src/adapters/node/products/plugin-ops.ts";
@@ -67,33 +64,6 @@ function writeLibraryTarball(dshHome: string, id: string, bytes = "candidate"): 
   return rel;
 }
 
-test("buildManageRows puts locked official plugins first then library checkboxes", () => {
-  const rows = buildManageRows(
-    [
-      {
-        id: "urzeye/dsh-outline",
-        spec: "dsh-outline",
-        packageName: "dsh-outline",
-        title: "dsh-outline",
-        source: "catalog",
-        downloadedAt: "t",
-      },
-    ],
-    [
-      { name: "@deepseek-ai/dsh-base", version: "1", protected: true },
-      { name: "dsh-outline", version: "2", protected: false },
-      { name: "extra-dep", version: "3", protected: false },
-    ],
-  );
-  assert.deepEqual(
-    rows.map((row) => ({ id: row.id, enabled: row.enabled, protected: row.protected })),
-    [
-      { id: "@deepseek-ai/dsh-base", enabled: true, protected: true },
-      { id: "urzeye/dsh-outline", enabled: true, protected: false },
-      { id: "extra-dep", enabled: true, protected: false },
-    ],
-  );
-});
 
 test("library upsert and archive path stay inside hub/plugins", () => {
   const dir = home();
@@ -117,22 +87,6 @@ test("library upsert and archive path stay inside hub/plugins", () => {
   assert.equal(hit?.title, "Outline");
 });
 
-test("syncLibraryFromProfiles records extra installed plugins", () => {
-  const dir = home();
-  writeProfile(
-    dir,
-    "coding",
-    ["@deepseek-ai/dsh-base", "dsh-outline"],
-    { "@deepseek-ai/dsh-base": "1", "dsh-outline": "2" },
-  );
-  const list = listPluginLibrary(dir, ["coding"]);
-  assert.equal(list.some((item) => item.packageName === "dsh-outline"), true);
-  assert.equal(list.some((item) => item.packageName === "@deepseek-ai/dsh-base"), false);
-  const again = syncLibraryFromProfiles(dir, {
-    coding: listProfilePlugins(dir, "coding"),
-  });
-  assert.equal(again.filter((item) => item.packageName === "dsh-outline").length, 1);
-});
 
 test("downloadPlugin fetches an npm tarball into the hub library", async () => {
   const dir = home();

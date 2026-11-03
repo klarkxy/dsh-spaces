@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { MaintenanceGate } from "../../src/core/application/maintenance-gate.ts";
 import {
   PatchForbiddenError,
   PatchVerifyError,
@@ -49,9 +48,7 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
   const files = [
     "domain/isolation.ts",
     "domain/registry.ts",
-    "domain/llm-resolution.ts",
-    "application/maintenance-gate.ts",
-    "application/global-llm-service.ts",
+    "domain/llm-resolution.ts",    "application/global-llm-service.ts",
     "ports/operation-lock.ts",
     "ports/llm-store.ts",
   ];
@@ -145,90 +142,5 @@ test("registry domain validates names and orders workbench records", () => {
   });
 });
 
-test("MaintenanceGate no-arg still acquires synchronously and drains mutations", async () => {
-  const gate = new MaintenanceGate();
-  const order: string[] = [];
-  let releaseMutation: (() => void) | undefined;
-  const mutation = gate.runMutation(
-    () =>
-      new Promise<string>((resolveMutation) => {
-        order.push("mutation-start");
-        releaseMutation = () => {
-          order.push("mutation-end");
-          resolveMutation("mut");
-        };
-      }),
-  );
-  const upgrade = gate.run("upgrade", async () => {
-    order.push("upgrade");
-    return "up";
-  });
-  assert.equal(gate.busy, true);
-  assert.throws(() => gate.run("restore", async () => "no"), /already running \(upgrade\)/);
-  assert.throws(() => gate.runMutation(async () => "late"), /while maintenance is running/);
-  releaseMutation?.();
-  assert.equal(await mutation, "mut");
-  assert.equal(await upgrade, "up");
-  assert.deepEqual(order, ["mutation-start", "mutation-end", "upgrade"]);
-});
 
-test("without a lock, admitted mutations for different spaces overlap", async () => {
-  const gate = new MaintenanceGate();
-  let releaseA: (() => void) | undefined;
-  let releaseB: (() => void) | undefined;
-  const a = gate.runMutation(
-    () =>
-      new Promise<string>((resolve) => {
-        releaseA = () => resolve("a");
-      }),
-  );
-  const b = gate.runMutation(
-    () =>
-      new Promise<string>((resolve) => {
-        releaseB = () => resolve("b");
-      }),
-  );
-  assert.equal(gate.mutations, 2);
-  releaseB?.();
-  releaseA?.();
-  assert.deepEqual(await Promise.all([a, b]), ["a", "b"]);
-});
 
-test("optional OperationLock serializes admitted maintenance and mutations", async () => {
-  const seen: string[] = [];
-  let active = 0;
-  let maxActive = 0;
-  let chain = Promise.resolve();
-  const lock: OperationLock = {
-    run<T>(label: string, action: () => Promise<T>): Promise<T> {
-      const next = chain.then(async () => {
-        seen.push(`enter:${label}`);
-        active += 1;
-        maxActive = Math.max(maxActive, active);
-        try {
-          return await action();
-        } finally {
-          active -= 1;
-          seen.push(`leave:${label}`);
-        }
-      });
-      chain = next.then(
-        () => undefined,
-        () => undefined,
-      );
-      return next;
-    },
-  };
-  const gate = new MaintenanceGate(lock);
-  const first = gate.runMutation(async () => {
-    await delay(20);
-    return 1;
-  });
-  const second = gate.runMutation(async () => 2);
-  assert.equal(await first, 1);
-  assert.equal(await second, 2);
-  assert.equal(await gate.run("upgrade", async () => "up"), "up");
-  assert.equal(maxActive, 1);
-  assert.ok(seen.includes("enter:mutation"));
-  assert.ok(seen.includes("enter:upgrade"));
-});

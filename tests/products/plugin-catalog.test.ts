@@ -13,15 +13,11 @@ import {
   parseCatalog,
   parseGitHubRepo,
   readLocalPluginCatalog,
-  resolveCatalogUrl,
-  searchPluginCatalog,
-  seedCatalog,
+  resolveCatalogUrl,  seedCatalog,
   type CatalogFetcher,
 } from "../../src/adapters/node/products/plugin-catalog.ts";
 import { parseCatalogUrl, readSettings, writeSettings as saveSettings } from "../../src/adapters/node/home/hub-settings.ts";
-import {
-  formatCount,
-  isBareNpmPackageName,
+import {  isBareNpmPackageName,
   isGitSpec,
   matchesPluginQuery,
   pluginDisplayName,
@@ -57,21 +53,6 @@ test("git specs are the github: shorthand", () => {
   assert.equal(isGitSpec("dsh-outline"), false);
 });
 
-test("formatCount and pluginDisplayName match store-style cards", () => {
-  assert.equal(formatCount(12), "12");
-  assert.equal(formatCount(3395), "3.4k");
-  assert.equal(formatCount(2353), "2.4k");
-  assert.equal(formatCount(158200), "158.2k");
-  assert.equal(
-    pluginDisplayName({
-      id: "linxin666/dsh-web-ui",
-      repo: "linxin666/dsh-web-ui",
-      packageName: "@linxin666/dsh-web-ui-all",
-    }),
-    "dsh-web-ui-all",
-  );
-  assert.equal(pluginDisplayName({ id: "liustack/modlens", repo: "liustack/modlens" }), "modlens");
-});
 
 test("isBareNpmPackageName accepts names and rejects tags or git specs", () => {
   assert.equal(isBareNpmPackageName("dsh-outline"), true);
@@ -221,31 +202,6 @@ test("topic dump catalogs map GitHub repos into git install specs", () => {
   assert.equal(isInstallableEntry(parsed.entries[0]), true);
 });
 
-test("searchPluginCatalog fetches an owner/repo that has the dsh-plugin topic", async () => {
-  const dir = home();
-  const fetchImpl: CatalogFetcher = async (url) => {
-    assert.match(url, /api\.github\.com\/repos\/klarkxy\/dsh-plugins$/);
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => null },
-      json: async () => ({
-        full_name: "klarkxy/dsh-plugins",
-        html_url: "https://github.com/klarkxy/dsh-plugins",
-        description: "Small, independently installable plugins for DeepSeek Harness.",
-        stargazers_count: 0,
-        owner: { login: "klarkxy" },
-        topics: ["dsh-plugin", "deepseek-harness"],
-        archived: false,
-        disabled: false,
-      }),
-    };
-  };
-  const hits = await searchPluginCatalog(dir, "klarkxy/dsh-plugins", { fetchImpl });
-  assert.equal(hits.length, 1);
-  assert.equal(hits[0].id, "klarkxy/dsh-plugins");
-  assert.equal(parseGitHubRepo({ full_name: "facebook/react", html_url: "https://github.com/facebook/react", topics: ["react"] }), undefined);
-});
 
 test("settings persist catalogUrl", () => {
   const dir = home();

@@ -7,11 +7,9 @@ import {
   buildSpaceShare,
   canonicalNpmInstallSpec,
   exportSpaceArchive,
-  importSpaceArchive,
   parseSpaceShare,
   pluginToShare,
   previewSpaceShare,
-  uniqueSpaceName,
 } from "../../src/adapters/node/products/space-share.ts";
 import { PLUGIN_LIBRARY_FILE } from "../../src/adapters/node/products/plugin-library.ts";
 import { packZip, unpackZip } from "../../src/adapters/node/products/space-share-zip.ts";
@@ -175,16 +173,6 @@ test("export strips nonportable sources without turning local packages into npm 
     preview,
     observation: { serviceEpoch: "a".repeat(64), expectedRevision: "b".repeat(64) },
   }).success, true);
-  const installed: string[] = [];
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => [],
-    createSpace: async () => undefined,
-    installPlugin: async (_spaceId, spec) => { installed.push(spec); },
-  });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.plugins, "pending-manual");
-  assert.deepEqual(result.pendingManual, preview.plugins.map(({ requestedSpec: _requestedSpec, installSpec: _installSpec, ...row }) => row));
-  assert.deepEqual(installed, []);
 });
 
 test("public GitHub coordinates remain visible and require manual installation", () => {
@@ -246,123 +234,10 @@ test("preview lists unknown sources without treating the share as whole-Home rec
   assert.equal(preview.hasConfig, false);
 });
 
-test("import splits definition, plugins, and start and does not start the space", async () => {
-  const created: string[] = [];
-  const installed: string[] = [];
-  const share = buildSpaceShare({ displayName: "Imported Lab", plugins: samplePlugins });
-  const archive = packZip([
-    { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest)}\n`) },
-    { name: "plugins.json", data: Buffer.from(`${JSON.stringify(share.plugins)}\n`) },
-  ]);
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => ["web", "coding"],
-    createSpace: async (input) => {
-      created.push(input.name);
-    },
-    installPlugin: async (_spaceId, spec) => {
-      installed.push(spec);
-    },
-  });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.plugins, "pending-manual");
-  assert.equal(result.start, "not-run");
-  assert.equal(created.length, 1);
-  assert.deepEqual(installed, ["dsh-outline@1.2.3"]);
-  assert.equal(result.pendingManual[0]?.packageName, "custom-git");
-  assert.equal(result.spaceId, `space-${created[0]}`);
-});
 
-test("import keeps the space when a legal plugin combo fails to install", async () => {
-  const created: string[] = [];
-  const installed: string[] = [];
-  const share = buildSpaceShare({
-    displayName: "Broken Combo",
-    plugins: [
-      {
-        name: "good-plugin",
-        requestedSpec: "1.0.0",
-        resolvedVersion: "1.0.0",
-        version: "1.0.0",
-        protected: false,
-      },
-      {
-        name: "bad-plugin",
-        requestedSpec: "1.0.0",
-        resolvedVersion: "1.0.0",
-        version: "1.0.0",
-        protected: false,
-      },
-    ],
-  });
-  const archive = packZip([
-    { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest)}\n`) },
-    { name: "plugins.json", data: Buffer.from(`${JSON.stringify(share.plugins)}\n`) },
-  ]);
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => [],
-    createSpace: async (input) => {
-      created.push(input.name);
-    },
-    installPlugin: async (_spaceId, spec) => {
-      if (spec.includes("bad-plugin")) throw new Error("incompatible");
-      installed.push(spec);
-    },
-  });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.plugins, "failed");
-  assert.equal(result.start, "not-run");
-  assert.equal(created.length, 1);
-  assert.deepEqual(installed, ["good-plugin@1.0.0"]);
-  assert.match(result.errors.join("\n"), /incompatible/);
-});
 
-test("invalid archive does not create a space", async () => {
-  let created = 0;
-  const result = await importSpaceArchive(Buffer.from("not-a-zip"), {
-    listSpaceIds: () => [],
-    createSpace: async () => {
-      created += 1;
-    },
-    installPlugin: async () => undefined,
-  });
-  assert.equal(result.definition, "failed");
-  assert.equal(result.plugins, "not-run");
-  assert.equal(result.start, "not-run");
-  assert.equal(created, 0);
-});
 
-test("invalid manifest field types do not escape the import result", async () => {
-  let created = 0;
-  const archive = packZip([
-    {
-      name: "manifest.json",
-      data: Buffer.from(JSON.stringify({
-        formatVersion: 1,
-        kind: "dsh-space",
-        exportedAt: "2026-09-15T00:00:00.000Z",
-        source: {},
-        space: { displayName: { unexpected: true } },
-      })),
-    },
-    { name: "plugins.json", data: Buffer.from("[]") },
-  ]);
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => [],
-    createSpace: async () => {
-      created += 1;
-    },
-    installPlugin: async () => undefined,
-  });
-  assert.equal(result.definition, "failed");
-  assert.equal(result.plugins, "not-run");
-  assert.equal(created, 0);
-});
 
-test("uniqueSpaceName avoids web and existing ids", () => {
-  assert.equal(uniqueSpaceName("Coding", []), "coding");
-  assert.equal(uniqueSpaceName("Coding", ["space-coding"]), "coding-2");
-  assert.notEqual(uniqueSpaceName("Web", ["web"]), "web");
-});
 
 test("npm range requested specs round-trip as exact packageName@version", () => {
   const caret = pluginToShare({
@@ -470,172 +345,10 @@ test("exportSpaceArchive keeps bundle order for range and hub-cache plugins", ()
   assert.equal(parsed.plugins[1]?.installSpec, "beta-plugin@2.0.1");
 });
 
-test("import does not execute latest, git, other packages, or mismatched installSpec", async () => {
-  const installed: string[] = [];
-  const share = {
-    manifest: {
-      formatVersion: 1 as const,
-      kind: "dsh-space" as const,
-      exportedAt: "2026-09-15T00:00:00.000Z",
-      source: {},
-      space: { displayName: "Pinned" },
-    },
-    plugins: [
-      { packageName: "good", resolvedVersion: "1.0.0", source: "npm" as const, installSpec: "good@latest" },
-      { packageName: "also-good", resolvedVersion: "1.0.0", source: "npm" as const, installSpec: "evil@1.0.0" },
-      {
-        packageName: "from-git",
-        resolvedVersion: "1.0.0",
-        source: "git" as const,
-        installSpec: "github:example/from-git",
-      },
-      { packageName: "ok", resolvedVersion: "1.0.0", source: "npm" as const, installSpec: "ok@1.0.0" },
-    ],
-  };
-  const result = await importSpaceArchive(
-    packZip([
-      { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest)}\n`) },
-      { name: "plugins.json", data: Buffer.from(`${JSON.stringify(share.plugins)}\n`) },
-    ]),
-    {
-      listSpaceIds: () => [],
-      createSpace: async () => undefined,
-      installPlugin: async (_spaceId, spec) => {
-        installed.push(spec);
-      },
-    },
-  );
-  assert.equal(result.definition, "imported");
-  assert.equal(result.plugins, "pending-manual");
-  assert.deepEqual(installed, ["ok@1.0.0"]);
-  assert.deepEqual(
-    result.pendingManual.map((row) => row.packageName),
-    ["good", "also-good", "from-git"],
-  );
-});
 
-test("import does not auto-install the full Spaces manager", async () => {
-  const installed: string[] = [];
-  const result = await importSpaceArchive(
-    packZip([
-      {
-        name: "manifest.json",
-        data: Buffer.from(`${JSON.stringify({
-          formatVersion: 1,
-          kind: "dsh-space",
-          exportedAt: "2026-09-15T00:00:00.000Z",
-          source: {},
-          space: { displayName: "Hub" },
-        })}\n`),
-      },
-      {
-        name: "plugins.json",
-        data: Buffer.from(`${JSON.stringify([
-          {
-            packageName: "@dsh-spaces/plugin",
-            resolvedVersion: "0.3.0",
-            source: "npm",
-            installSpec: "@dsh-spaces/plugin@0.3.0",
-          },
-        ])}\n`),
-      },
-    ]),
-    {
-      listSpaceIds: () => [],
-      createSpace: async () => undefined,
-      installPlugin: async (_spaceId, spec) => {
-        installed.push(spec);
-      },
-    },
-  );
-  assert.equal(result.definition, "imported");
-  assert.equal(result.plugins, "pending-manual");
-  assert.deepEqual(installed, []);
-  assert.equal(result.pendingManual[0]?.packageName, "@dsh-spaces/plugin");
-});
 
-test("invalid config is rejected before creating a space or installing plugins", async () => {
-  let created = 0;
-  let installed = 0;
-  let wrotePatch = 0;
-  const share = buildSpaceShare({ displayName: "Broken Patch", plugins: samplePlugins });
-  const result = await importSpaceArchive(
-    packZip([
-      { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest)}\n`) },
-      { name: "plugins.json", data: Buffer.from(`${JSON.stringify(share.plugins)}\n`) },
-      { name: "profile.patch.yml", data: Buffer.from("isolation: keep\nuser: setting\n") },
-    ]),
-    {
-      listSpaceIds: () => [],
-      createSpace: async () => {
-        created += 1;
-      },
-      installPlugin: async () => {
-        installed += 1;
-      },
-    },
-    {
-      writePatch: () => {
-        wrotePatch += 1;
-      },
-    },
-  );
-  assert.equal(result.definition, "failed");
-  assert.equal(result.plugins, "not-run");
-  assert.equal(result.start, "not-run");
-  assert.equal(created, 0);
-  assert.equal(installed, 0);
-  assert.equal(wrotePatch, 0);
-  assert.equal(result.spaceId, undefined);
-});
 
-test("zip path traversal is rejected and original bytes are not imported", async () => {
-  let created = 0;
-  const archive = packZip([{ name: "../hub/settings.json", data: Buffer.from("stolen") }]);
-  const result = await importSpaceArchive(archive, {
-    listSpaceIds: () => [],
-    createSpace: async () => {
-      created += 1;
-    },
-    installPlugin: async () => undefined,
-  });
-  assert.equal(result.definition, "failed");
-  assert.equal(created, 0);
-  assert.match(result.errors.join("\n"), /unsafe path/i);
-});
 
-test("valid config is isolated in memory then written only after the space exists", async () => {
-  const created: string[] = [];
-  const patches: string[] = [];
-  const share = buildSpaceShare({ displayName: "With Config", plugins: [] });
-  const result = await importSpaceArchive(
-    packZip([
-      { name: "manifest.json", data: Buffer.from(`${JSON.stringify(share.manifest)}\n`) },
-      { name: "plugins.json", data: Buffer.from(`${JSON.stringify(share.plugins)}\n`) },
-      {
-        name: "profile.patch.yml",
-        data: Buffer.from("- id: example\n  config:\n    foo: 1\n"),
-      },
-    ]),
-    {
-      listSpaceIds: () => [],
-      createSpace: async (input) => {
-        created.push(input.name);
-      },
-      installPlugin: async () => undefined,
-    },
-    {
-      writePatch: (spaceId, patch) => {
-        assert.equal(spaceId, `space-${created[0]}`);
-        patches.push(patch);
-      },
-    },
-  );
-  assert.equal(result.definition, "imported");
-  assert.equal(created.length, 1);
-  assert.equal(patches.length, 1);
-  assert.match(patches[0] ?? "", /hub\/space-with-config\/sessions/);
-});
 
 test("Browser shares identify the base release instead of a manual installation of the base package", () => {
   const plugin = { name: COMPONENT_PAYLOAD_PACKAGES.browser, requestedSpec: "file:H:/private/browser.tgz", resolvedVersion: "0.4.0", protected: false };
