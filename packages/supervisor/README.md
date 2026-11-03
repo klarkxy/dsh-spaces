@@ -16,7 +16,7 @@ Public restore APIs fail explicitly. The snapshot worker is required for normal 
 
 - Dedicated manager profile `spaces-hub` (or `spaces-hub-N`). Existing ordinary profiles are attached in place; an ordinary profile already using the reserved name is **not** overwritten.
 - The manager plugin on the manager only; the view bridge on ordinary spaces.
-- Stable entry at `origin`. Closing a browser tab does not stop instances. Stopping the manager does not stop this process — if the entry is still alive it can show the manager’s real failure (**查看错误详情**, **复制脱敏日志**). If this process itself dies, use stderr / existing logs. There is no watchdog.
+- Stable entry at `origin`. Closing a tab does not stop spaces or the Supervisor. A Supervisor launched by the official Desktop follows that Desktop: when the Desktop host process ends, the Supervisor performs one normal shutdown (stops the spaces it owns, releases run rights, exits). If that shutdown fails it stays as it is with run rights kept; it is not force-killed or retried. A Supervisor launched by Web is unaffected, and attaching from Desktop does not change an existing Supervisor's lifetime. Stopping the manager does not stop this process — if the entry is still alive it can show the manager’s real failure (**查看错误详情**, **复制脱敏日志**). If this process itself dies, use stderr / existing logs. There is no watchdog.
 - One writer per Home. A second client attaches to a healthy existing service. Live or unclear owners are refused. There is no take-over.
 
 New installations pin official DSH **`0.2.1-rc.2`**; existing runtimes require an explicit upgrade. Any exact installed CLI can bind. This repo builds against SDK `0.2.1-rc.2`; plugin peers retain their existing lower bound and explicitly admit this prerelease, rather than defining a CLI allowlist. Unregistered manual DSH is not discovered — [external discovery](../../tasks/workbench-external-discovery.md).
@@ -70,6 +70,7 @@ Ordinary workspaces only attach; they do not cold-start a second controller. A f
 | `--llm-bridge-artifact` | File path of the packed LLM bridge. Required. Same build group. |
 | `--component-payload` | Selected component directory of the same group. Required for product cold start. |
 | `--snapshot-worker` | Same-group worker for snapshot create/delete and remaining tree IO. Runtime installation is extracted; the worker only forwards. Not restore. |
+| `--exit-with-host` | No value. Passed only by the Desktop host, paired with an IPC channel. |
 | `--snapshot-root` | Directory the current binary may still use for snapshot files. Must stay outside `profiles` / `hub` / `sessions` / `storages`. Applying snapshots as disaster recovery is revoked. |
 | `--allow-real-home` | Flag with no value. Opt in for a Home you intend to manage. |
 
@@ -108,7 +109,7 @@ Build from the repository root with `npm run build:spaces`.
 
 开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。快照目录必须在 Home 之外；启动需要 `--component-payload`、四份同组制品和同组 worker（正常快照与树 IO）。这不是恢复产品。没有自动修复或重试。
 
-关标签不停实例；管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。新安装默认固定官方 `0.2.1-rc.2`；已有运行时通过正常升级操作更新。未登记的手工 DSH 不会被接管。
+关闭标签不会停止空间或 Supervisor。由官方 Desktop 启动的 Supervisor 跟随该 Desktop 退出：Desktop 宿主进程结束时，Supervisor 执行一次正常关闭（停止它管理的空间、释放运行权后退出）；关闭失败时保持原样并保留运行权，不强杀、不重试。由 Web 启动的 Supervisor 不受影响；Desktop 附着到已有 Supervisor 时不改变它的生命周期。管理 profile 停掉后，入口若仍在线只显示真实失败，不提供救援页或“检查并恢复”。浏览器不得提交这些路径。新安装默认固定官方 `0.2.1-rc.2`；已有运行时通过正常升级操作更新。未登记的手工 DSH 不会被接管。
 
 管理插件在管理器启动前与当前组件组对齐，对齐失败即阻止管理器启动。普通空间只在缺少桥接时获得随组桥接；既有空间桥接不会自动重新对齐，界面必须据实展示桥接状态。
 

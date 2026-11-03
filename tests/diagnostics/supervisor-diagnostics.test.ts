@@ -33,6 +33,7 @@ const diagnosticsModule = fileURLToPath(
   new URL("../../src/adapters/node/diagnostics/supervisor-diagnostics.ts", import.meta.url),
 );
 const supervisorCli = fileURLToPath(new URL("../../packages/supervisor/src/index.ts", import.meta.url));
+const supervisorLifetime = fileURLToPath(new URL("../../packages/supervisor/src/lifetime.ts", import.meta.url));
 
 const temps: string[] = [];
 const children: ChildProcess[] = [];
@@ -489,11 +490,19 @@ test("supervisor CLI binds diagnostics before main and does not restart on failu
   assert.ok(mainCallAt >= 0);
   assert.ok(bindAt < mainCallAt);
   assert.ok(startingAt < mainCallAt);
-  const stopFn = source.slice(source.indexOf("const stop = async"), source.indexOf("const onSignal"));
-  const closeAt = stopFn.indexOf("await handle.close()");
-  const recordedStopAt = stopFn.indexOf("recordNormalStop");
-  assert.ok(closeAt >= 0);
-  assert.ok(recordedStopAt > closeAt);
+  const lifetimeSource = readFileSync(supervisorLifetime, "utf8");
+  const lifetimeBody = lifetimeSource.slice(lifetimeSource.indexOf("export function bindSupervisorLifetime"));
+  const hostExitStart = lifetimeBody.indexOf(`signal === "host-exit"`);
+  const hostExitEnd = lifetimeBody.indexOf("return;", hostExitStart);
+  const hostExitBranch = lifetimeBody.slice(hostExitStart, hostExitEnd);
+  const hostCloseAt = hostExitBranch.indexOf("await target.close()");
+  assert.ok(hostCloseAt >= 0);
+  assert.ok(hostExitBranch.indexOf("recordNormalStop") > hostCloseAt);
+  const signalBranch = lifetimeBody.slice(hostExitEnd + "return;".length);
+  const signalCloseAt = signalBranch.indexOf("await target.close()");
+  assert.ok(signalCloseAt >= 0);
+  assert.ok(signalBranch.indexOf("recordNormalStop") > signalCloseAt);
+  assert.equal(/setInterval|setTimeout|restart\(/.test(lifetimeSource), false);
   assert.match(source, /recordReady/);
   assert.match(diagnosticsSource, /uncaughtExceptionMonitor/);
   assert.match(diagnosticsSource, /process\.on\(\s*"exit"/);

@@ -27,6 +27,11 @@
 - [x] 隔离 Home 实测（`.sandbox/handshake-fix-20261030/`）：开发链接与发行包两条路径子空间均启动、LLM bridge 完成初始化、可读取主空间模型目录、iframe `allow="clipboard-write <子空间 origin>"` 生效；开发链接下子空间（view-bridge）与管理空间（plugin）的 client-hmr `rebuilt` 通过。复制按钮的框内权限 API 探测在该 Chromium 不可用，只验证了 `allow` 属性。`check:all` 13/14，`test:workbench:browser` 因 Chromium 拒绝端口 6665（`ERR_UNSAFE_PORT`）失败，单独复查 7/7，原失败保留。未提交，未在安装版 Desktop 实测。
 - [x] 子空间 `MAIN_NOT_GRANTED`（此前被握手超时掩盖）。复现确认（`.sandbox/main-not-granted-20261030/`）：同一 Web 宿主进程内，服务经 `service.shutdown` 计划停止后再由用户启动，新 Supervisor 的 `initialize` 返回 `MAIN_REGISTRATION_CHANGED`。原因是 `MainLlmService` 仍持有旧纪元端点，`afterSupervisorStopped` 只在 Desktop 手动停止/重启路径调用，主空间因此未在新服务注册。修复：`WorkbenchHostRuntime` 记录交给注册监听的纪元；`remember` 遇到不同服务纪元时，先释放旧纪元注册，再向新纪元注册一次。同纪元行为不变，不增加启动或重试。Desktop 停止/重启共用同一释放步骤。新增两项回归，旧实现失败，修复后通过；`test:workbench` 633（2 跳过）、`llm-delegation` 22/22，类型和构建通过。隔离实测（`.sandbox/main-replaced-20261030/`）：同一宿主第二次启动成功，空间 B 运行且模型策略可读。本项未重跑完整 `check:all`。未提交。
 
+# 2026-11-03 Supervisor 跟随官方 Desktop 退出
+
+- [x] Supervisor 生命周期支持 `--exit-with-host`：宿主侧经 IPC 通道，disconnect 时执行一次正常关闭（停止空间、释放运行权后退出）；关闭失败保持原样不强杀。仅官方 Desktop workspace 身份冷启动传入；Web 与附着路径不变。
+- [x] 真实 Desktop 验收（隔离 Home，`H:/Code/dsh-spaces-checktmp/host-exit-20261103/`，脚本在 `.sandbox/host-exit-acceptance-20261103/`）：开发链接与发行包冷启动的 Supervisor 都带 `--exit-with-host`，父进程为 dsh-desktop-host；同宿主重载后 PID 与纪元不变；正常退出 Desktop 后约 1.0–1.3 s 内以 `exit 0 / host-exit` 停止，端点与租约记录移除，无遗留子进程；同一 Home 重开只启动一次新服务；单独结束 desktop-host 进程后约 2.9 s 内同样正常停止。官方 EXE 与 app.asar 摘要不变，隔离 Home 未出现 `profiles/web`、`sessions`、`storages`。关闭失败保持原样的路径只有单元测试覆盖，未在真实宿主上制造。
+
 # 旧阶段仍未关闭的条目
 
 原文与上下文见 [archive/todo-2026-10.md](archive/todo-2026-10.md)；以下逐条照抄，未重新评估。

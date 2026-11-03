@@ -663,3 +663,30 @@ test("manager host bootstrap does not wait for its own startup", async () => {
   assert.equal(reads, 0);
   assert.equal(runtime.qualifiesForAutomaticDesktopLaunch(), false);
 });
+
+test("desktop workspace identity passes exitWithHost to the cold-start bootstrap; other profiles do not", async () => {
+  const home = freshHome("exit-host-");
+  const seen: Array<boolean | undefined> = [];
+  const bootstrap = async (request: { exitWithHost?: boolean }) => {
+    seen.push(request.exitWithHost);
+    return {
+      connected: true, origin: "http://127.0.0.1:9", payloadDir: home, toolsDir: home,
+      endpoint: { origin: "http://127.0.0.1:9", bearer: "b".repeat(32), protocolVersion: 2 as const, homeId: "h".repeat(64), serviceEpoch: "a".repeat(64) },
+    };
+  };
+  const desktop = new WorkbenchHostRuntime(desktopOptions(home, { bootstrap: bootstrap as never }));
+  assert.equal((await desktop.bootstrap()).connected, true);
+  assert.equal(seen.at(-1), true);
+
+  const coding = join(home, "profiles", "coding");
+  mkdirSync(coding, { recursive: true });
+  writeFileSync(join(coding, "package.json"), JSON.stringify({ name: "isolated-coding-fixture" }));
+  const bin = join(home, "bin.js");
+  const other = new WorkbenchHostRuntime(desktopOptions(home, {
+    argv: [process.execPath, bin, "--profile", "coding"],
+    baseUrl: pathToFileURL(coding).href + "/",
+    bootstrap: bootstrap as never,
+  }));
+  assert.equal((await other.bootstrap()).connected, true);
+  assert.equal(seen.at(-1), false);
+});

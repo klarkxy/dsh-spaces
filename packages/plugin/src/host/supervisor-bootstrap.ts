@@ -53,6 +53,7 @@ export const SUPERVISOR_CLI_FLAGS = {
   snapshotWorker: "--snapshot-worker",
   snapshotRoot: "--snapshot-root",
   llmBridgeArtifact: "--llm-bridge-artifact",
+  exitWithHost: "--exit-with-host",
 } as const;
 
 /** Literal argv flag until primary SUPERVISOR_CLI_FLAGS / parseSupervisorArgs integration. */
@@ -84,6 +85,7 @@ export interface SupervisorSpawnRequest {
   argv: readonly string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
+  ipc: boolean;
 }
 
 export interface SupervisorBootstrapOptions {
@@ -96,6 +98,7 @@ export interface SupervisorBootstrapOptions {
   snapshotRoot?: string;
   allowRealHome?: boolean;
   allowColdStart?: boolean;
+  exitWithHost?: boolean;
   timeoutMs?: number;
   pollMs?: number;
   fetch?: WorkbenchHttpFetch;
@@ -330,6 +333,7 @@ export async function bootstrapSupervisor(
 
       const childArgv = [
         ...(options.allowRealHome ? ["--allow-real-home"] : []),
+        ...(options.exitWithHost === true ? [SUPERVISOR_CLI_FLAGS.exitWithHost] : []),
         SUPERVISOR_CLI_FLAGS.home,
         home,
         SUPERVISOR_CLI_FLAGS.bin,
@@ -357,6 +361,7 @@ export async function bootstrapSupervisor(
         // dev builds replace those files in place. toolsRoot is outside Home.
         cwd: devCheckout ? toolsRoot : join(selected.payloadRootLib, SUPERVISOR_PAYLOAD_DIRNAME),
         env: { ...env, DSH_HOME: home, DSH_SPACES_SUPERVISOR_DIAGNOSTICS: diagnosticFile },
+        ipc: options.exitWithHost === true,
         });
       } catch (error) {
         reportSupervisorLaunchFailure(diagnosticFile, reasonOf(error));
@@ -372,7 +377,10 @@ export async function bootstrapSupervisor(
           reportSupervisorExit(observation.diagnosticFile, code, signal);
         });
       }
-      if (spawned) spawned.unref();
+      if (spawned) {
+        spawned.unref();
+        spawned.channel?.unref();
+      }
       options.progress?.("launch");
       return await pollEndpoint(home, selected.payloadRootLib, toolsRoot, options, [], observation);
     });
@@ -464,14 +472,14 @@ async function pollEndpoint(
   return fail(unique(reasons));
 }
 
-function defaultSpawn(request: SupervisorSpawnRequest): ChildProcess {
+export function defaultSpawn(request: SupervisorSpawnRequest): ChildProcess {
   const child = spawn(request.execPath, [request.entry, ...request.argv], {
     cwd: request.cwd,
     env: request.env,
     detached: true,
     // The Supervisor owns its durable diagnostics; parent-owned pipes would
     // lose output and outlive (or break when exiting) the desktop shell.
-    stdio: "ignore",
+    stdio: request.ipc ? ["ignore", "ignore", "ignore", "ipc"] : "ignore",
     windowsHide: true,
     shell: false,
   });

@@ -66,6 +66,7 @@ export interface WorkbenchSupervisorOptions {
 export interface SupervisorCliOptions extends WorkbenchSupervisorOptions {
   home: string;
   bin: string;
+  exitWithHost?: boolean;
 }
 
 export interface WorkbenchSupervisorHandle {

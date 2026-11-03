@@ -7,6 +7,7 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--allow-real-home") { flags.allowRealHome = "1"; continue; }
+    if (token === "--exit-with-host") { flags.exitWithHost = "1"; continue; }
     const mapped = flagName(token);
     if (!mapped) throw new WorkbenchPublicError("workbench/invalid-input", `Unknown flag: ${token}`);
     const value = argv[i + 1];
@@ -21,6 +22,7 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   const bin = requirePath(flags.bin ?? flags.cli, binFlag);
   const options: SupervisorCliOptions = { home, bin };
   if (flags.allowRealHome === "1") options.allowRealHome = true;
+  if (flags.exitWithHost === "1") options.exitWithHost = true;
   if (flags.node) options.nodeExe = requirePath(flags.node, "--node");
   if (flags.port) {
     const port = Number(flags.port);
@@ -55,6 +57,7 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
 export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   const args = ["--home", options.home, "--bin", options.bin];
   if (options.allowRealHome) args.push("--allow-real-home");
+  if (options.exitWithHost) args.push("--exit-with-host");
   if (options.nodeExe) args.push("--node", options.nodeExe);
   if (options.port !== undefined) args.push("--port", String(options.port));
   if (options.controlToolRoot) args.push("--control-tool-root", options.controlToolRoot);

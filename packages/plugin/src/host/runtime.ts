@@ -584,6 +584,11 @@ export class WorkbenchHostRuntime {
       snapshotRoot: this.snapshotRoot,
       allowRealHome: this.options.allowRealHome === true,
       allowColdStart,
+      exitWithHost:
+        this.identity.confirmed &&
+        !this.identity.recoveryRequired &&
+        this.identity.profileId === "desktop" &&
+        this.identity.role === "workspace",
       priorDiscovery: attached,
       timeoutMs: this.options.supervisorTimeoutMs,
       fetch: this.options.fetch,

@@ -18,6 +18,7 @@ import {
   type WorkbenchSupervisorHandle,
 } from "../../../src/adapters/node/workbench-supervisor.ts";
 import type { ValidatedComponentPayload } from "../../../src/adapters/node/payload/component-payload.ts";
+import { bindSupervisorLifetime, requireHostChannel, type HostChannel } from "./lifetime.ts";
 
 export {
   bindSupervisorComponentPayload,
@@ -40,6 +41,10 @@ export async function main(
 ): Promise<number> {
   assertSupportedNode();
   const options = parseSupervisorArgs(argv);
+  let hostChannel: HostChannel | undefined;
+  if (options.exitWithHost) {
+    hostChannel = requireHostChannel(process.send ? process : undefined);
+  }
   // Validate the selected component payload once per launch and thread the
   // conclusion through bind/preflight/runtime construction. Every non-hash
   // check still runs in each stage; only the manifest read and file hashing
@@ -57,38 +62,34 @@ export async function main(
     const packed = join(dirname(fileURLToPath(import.meta.url)), "../lib/snapshot-worker.mjs");
     if (existsSync(packed)) options.snapshotWorkerFile = packed;
   }
-  const handle: WorkbenchSupervisorHandle = await createWorkbenchSupervisor({
+  const handlePromise: Promise<WorkbenchSupervisorHandle> = createWorkbenchSupervisor({
     ...options,
     onNormalExit: () => {
       recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: 0 }));
       process.exit(0);
     },
   }, selectedPayload());
+  const lifetime = bindSupervisorLifetime({
+    handle: handlePromise,
+    hostChannel,
+    deps: {
+      exit: (code) => process.exit(code),
+      diagnostics,
+      writeStderr: (text) => {
+        try {
+          process.stderr.write(text);
+        } catch {
+          /* ignore */
+        }
+      },
+    },
+  });
+  const handle = await handlePromise;
   process.stdout.write(`origin=${handle.origin}\n`);
   process.stdout.write(`bootstrap=${handle.bootstrapUrl}\n`);
   recordQuietly(diagnostics, (reporter) => reporter.recordReady());
-  let stopping = false;
-  const stop = async (signal?: string) => {
-    if (stopping) return;
-    stopping = true;
-    await handle.close();
-    recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: 0, signal: signal ?? null }));
-    process.exit(0);
-  };
-  const onSignal = (signal: string) => {
-    void stop(signal).catch((error) => {
-      recordQuietly(diagnostics, (reporter) => reporter.recordFailure(error, { exit: 1, signal }));
-      const message = error instanceof Error ? error.message : "supervisor stop failed";
-      try {
-        process.stderr.write(`${message}\n`);
-      } catch {
-        /* ignore */
-      }
-      process.exit(1);
-    });
-  };
-  process.on("SIGINT", () => onSignal("SIGINT"));
-  process.on("SIGTERM", () => onSignal("SIGTERM"));
+  process.on("SIGINT", () => lifetime.onSignal("SIGINT"));
+  process.on("SIGTERM", () => lifetime.onSignal("SIGTERM"));
   await new Promise(() => undefined);
   return 0;
 }

@@ -1222,6 +1222,17 @@ test("CLI parses and serializes --dev-checkout", () => {
   assert.equal(parseSupervisorArgs(["--home", checkout, "--bin", join(checkout, "bin.js")]).devCheckoutRoot, undefined);
 });
 
+test("CLI parses and serializes --exit-with-host", () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-exithost-"));
+  temps.push(home);
+  const bin = join(home, "bin.js");
+  const parsed = parseSupervisorArgs(["--home", home, "--bin", bin, "--exit-with-host"]);
+  assert.equal(parsed.exitWithHost, true);
+  assert.deepEqual(supervisorCliArgs(parsed).slice(-1), ["--exit-with-host"]);
+  assert.equal(parseSupervisorArgs(["--home", home, "--bin", bin]).exitWithHost, undefined);
+  assert.throws(() => parseSupervisorArgs(["--home", home, "--bin", bin, "--exit-with-host", "1"]), /Unknown flag/);
+});
+
 test("CLI accepts --cli as an alias of --bin and writes a private endpoint file", async () => {
   const home = tempHome();
   const bin = writeFakeCli(home);
