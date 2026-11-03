@@ -27,7 +27,6 @@
   "include": [
     "src/shared/**/*",
     "src/core/domain/llm-resolution.ts",
-    "src/core/domain/blueprint.ts",
     "packages/plugin/src/workbench/**/*"
   ]
 }

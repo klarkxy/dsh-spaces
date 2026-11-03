@@ -1,5 +1,5 @@
 import type { BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import { BLUEPRINT_ARCH, BLUEPRINT_OS, type BlueprintArch, type BlueprintBinding, type BlueprintDiagnostic, type BlueprintInputValues, type BlueprintJson, type BlueprintOs, type BlueprintPackageEvidence, type BlueprintPatch, type BlueprintSettings } from "../../../../shared/blueprint";
+import { BLUEPRINT_ARCH, BLUEPRINT_OS, type BlueprintArch, type BlueprintBinding, type BlueprintDiagnostic, type BlueprintInputValues, type BlueprintJson, type BlueprintOs, type BlueprintPackageEvidence, type BlueprintPatch, type BlueprintSettings } from "@klarkxy/dsh-blueprint/v1/types";
 import { scanShareEntries } from "../../../../shared/llm-share";
 import type { BlueprintHostVersions, BlueprintPreviewInput } from "../../../../shared/workbench-blueprint";
 import { HOST_PACKAGE_SET, CONTROL_PACKAGE_SET, MANAGED_ENTRY_SET, FORBIDDEN_SETTINGS, GITHUB_APPLY_MESSAGE } from "./constants";

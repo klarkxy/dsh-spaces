@@ -9,13 +9,13 @@ import {
   diagnoseBlueprint,
   parseBlueprint,
   parseBlueprintJson,
-} from "../../src/core/domain/blueprint.ts";
+} from "@klarkxy/dsh-blueprint/v1";
 import {
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
   type Blueprint,
   type BlueprintDiagnostic,
-} from "../../src/shared/blueprint.ts";
+} from "@klarkxy/dsh-blueprint/v1/types";
 import {
   parseWorkbenchProductCommand,
   parseWorkbenchProductOutcome,

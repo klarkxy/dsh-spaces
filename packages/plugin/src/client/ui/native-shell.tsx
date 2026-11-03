@@ -6,7 +6,7 @@ import { attachHostLayout } from "../host-layout";
 import type { NativeHostController } from "./native-controller";
 import { HostLoadingPill } from "./host-guide";
 import { HostRail, HostRailButton, HostRailDivider, HostRailList } from "./host-rail";
-import { PressButton } from "./press-button";
+import { PressButton } from "../../../../../src/shared/ui/motion";
 import { useServiceRestart } from "./service-restart";
 import { NativeSpaceMenu } from "./native-space-menu";
 import { nativeStartupLabel, nativeStatusText, nativeTexts } from "./native-texts";

@@ -13,12 +13,12 @@ import {
   BlueprintError,
   parseBlueprint,
   parseBlueprintJson,
-} from "../../src/core/domain/blueprint.ts";
+} from "@klarkxy/dsh-blueprint/v1";
 import {
   decodeBlueprint,
   encodeBlueprint,
   stringifyBlueprint,
-} from "../../src/adapters/node/blueprint/blueprint-codec.ts";
+} from "@klarkxy/dsh-blueprint/v1/codec";
 
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "../../docs/examples/blueprints");

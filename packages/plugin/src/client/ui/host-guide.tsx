@@ -2,7 +2,7 @@ import React, { useSyncExternalStore, type ReactElement } from "react";
 import { FadeIn } from "../../../../../src/shared/ui/motion";
 import type { HostShellController } from "../host-shell-state";
 import { hostTexts } from "./host-texts";
-import { PressButton } from "./press-button";
+import { PressButton } from "../../../../../src/shared/ui/motion";
 
 /**
  * The guide of the space dock.

@@ -13,13 +13,13 @@ import type { ThemePreference } from "../../../../src/shared/types";
 import type { SpaceImportResult, SpaceSharePreview } from "../../../../src/shared/space-share";
 import type { WorkbenchProductOutcome } from "../../../../src/shared/workbench-product";
 import { formatDateTime, t, type WorkbenchLocale } from "./i18n";
-import { BlueprintApplyResult } from "./blueprint-ui";
+import { BlueprintApplyResult } from "./blueprint/apply";
 import { InlineErrors } from "./inline-error";
 import { isBlueprintApplyOutcome } from "./blueprint-session";
 import type { ImportPreviewState, WorkbenchController, WorkbenchUiState } from "./store";
 import { CopyButton } from "./view/shared";
 import { useModalDialog } from "./view/use-modal-dialog";
-import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../src/shared/ui";
+import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../src/shared/ui/motion";
 import { PressableButton, VisibleScale, VisibleSlide } from "./feature-motion";
 
 export function ThemeSwitch({

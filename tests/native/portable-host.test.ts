@@ -359,7 +359,6 @@ test("the native surface opens the create dialog only for a valid create intent"
 test("host surfaces take background and text color from DSH 0.2 theme tokens", async () => {
   const { HOST_SHELL_CSS } = await import("../../packages/plugin/src/client/host-shell.tsx");
   const clientIndex = await readFile(new URL("../../packages/plugin/src/client/index.tsx", import.meta.url), "utf8");
-  const clientStyles = await readFile(new URL("../../packages/plugin/src/client/styles.ts", import.meta.url), "utf8");
   const rule = (name: string) => HOST_SHELL_CSS.split(`${name} {`)[1]?.split("}")[0] ?? "";
   for (const name of [".dsh-host-surface", ".dsh-host-loading"]) {
     assert.ok(rule(name).includes("--dsw-alias-bg-base"), name);
@@ -369,8 +368,7 @@ test("host surfaces take background and text color from DSH 0.2 theme tokens", a
   assert.ok(rule(".dsh-host-rail").includes("--dsw-alias-bg-base"));
   assert.ok(clientIndex.includes('background: "var(--dsw-alias-bg-base'));
   assert.ok(clientIndex.includes('color: "var(--dsw-alias-label-primary'));
-  assert.ok(clientStyles.includes("background: var(--dsw-alias-bg-base"));
-  for (const text of [HOST_SHELL_CSS, clientIndex, clientStyles]) assert.ok(!text.includes("--dsw-alias-app-bg"));
+  for (const text of [HOST_SHELL_CSS, clientIndex]) assert.ok(!text.includes("--dsw-alias-app-bg"));
 });
 
 test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () => {

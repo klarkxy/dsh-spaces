@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { isMap, isScalar } from "yaml";
-import type { BlueprintJson, BlueprintPatch } from "../../../../shared/blueprint";
+import type { BlueprintJson, BlueprintPatch } from "@klarkxy/dsh-blueprint/v1/types";
 import { isBareNpmPackageName, isGitSpec } from "../../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
 import { BLUEPRINT_ORIGIN_FILE, type BlueprintEligibility, type BlueprintLocalObservation, type BlueprintSourceBundle, type BlueprintSourceNamespace, type BlueprintSourcePackage, type BlueprintSourcePatchInfo } from "../../../../shared/workbench-blueprint";

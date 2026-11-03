@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import type { BlueprintPatch } from "../../../../shared/blueprint";
+import type { BlueprintPatch } from "@klarkxy/dsh-blueprint/v1/types";
 import { SPACE_NAME_RE, spaceIdFromName } from "../../../../shared/types";
 import type { BlueprintHostVersions } from "../../../../shared/workbench-blueprint";
 import { assertNotRealHome } from "../../home/home-guard";

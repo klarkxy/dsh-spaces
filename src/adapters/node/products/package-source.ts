@@ -1,7 +1,6 @@
 import type { PackageSource } from "../../../shared/types";
 
 export const NODE_VERSION = "26.10.0";
-export const PNPM_VERSION = "10.29.2";
 
 export function nodeArchiveName(platform = process.platform, arch = process.arch): string {
   const cpu = arch === "arm64" ? "arm64" : "x64";

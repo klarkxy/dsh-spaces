@@ -11,7 +11,9 @@ import { mountStaticClientStyle } from "./client-style";
 import { readViewHint } from "../../../view-bridge/src/env";
 import { CONTAINED_MANAGEMENT_PARAM } from "../../../../src/shared/space-host";
 import { HostShellController } from "./host-shell-state";
-import { desktopBrowserBridge, NativeHostController, NativeHostShell, NATIVE_HOST_CSS, NATIVE_BROWSER_CSS } from "./native-host";
+import { desktopBrowserBridge, NativeHostController } from "./ui/native-controller";
+import { NativeHostShell } from "./ui/native-shell";
+import { NATIVE_HOST_CSS, NATIVE_BROWSER_CSS } from "./ui/native-styles";
 import { PortableHostShell, HostShellPanel, HOST_SHELL_CSS } from "./host-shell";
 import { homeViewUrl, isHomeView } from "./home-view";
 import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
@@ -23,8 +25,6 @@ import {
   createWorkbenchRemote,
   readHostHint,
 } from "./workbench-remote";
-import type { WorkbenchGuideRole } from "../types";
-
 /** Panel identity shared by the sidebar entry and the main panel key. */
 export const SPACES_PANEL_ID = "dsh-spaces";
 /** English fallback; live sidebar text comes from the label thunk. */
@@ -233,20 +233,6 @@ export function GuidePanelView({
 /** In-place panel sharing the rail's presentation client; never navigates the outer document. */
 export function ReturnToWorkbenchPanel({ host }: { host: HostShellController }): ReactElement {
   return createElement(HostShellPanel, { controller: host });
-}
-
-export function guideMode(
-  role: WorkbenchGuideRole | null,
-  busy: "role" | "enter" | "initialize" | null,
-  error: string | null,
-): GuidePanelMode {
-  if (busy === "role" && !role) return "loading";
-  if (role?.unavailable) return "blocked";
-  if (!role && error) return "failed";
-  if (role && error) return role.managerId ? "enter-failed" : "init-failed";
-  if (role?.managerId) return "enter";
-  if (role) return "init";
-  return "loading";
 }
 
 function guideTitle(locale: SpacesLocale, mode: GuidePanelMode): string {

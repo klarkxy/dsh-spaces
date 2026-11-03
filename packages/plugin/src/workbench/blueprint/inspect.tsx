@@ -7,10 +7,10 @@
  */
 import React, { type ReactElement } from "react";
 import type { BlueprintRecipe } from "@klarkxy/dsh-blueprint/document";
-import type { BlueprintDiagnostic } from "../../../../../src/shared/blueprint";
+import type { BlueprintDiagnostic } from "@klarkxy/dsh-blueprint/v1/types";
 import { t, type WorkbenchLocale } from "../i18n";
 import { blueprintHasGithub } from "../blueprint-session";
-import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { VisibleSlide } from "../feature-motion";
 import { DiagnosticList, SafeLink } from "./shared";
 

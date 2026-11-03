@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { applyIsolationPatch, patchTextLooksConfigIsolated } from "../../../../core/domain/isolation";
-import type { BlueprintPatch } from "../../../../shared/blueprint";
+import type { BlueprintPatch } from "@klarkxy/dsh-blueprint/v1/types";
 import { atomicWrite } from "../../atomic";
 import { publicError, isPublicError, modelWriteFailureReason, asDescribe, asSpacePolicy } from "./errors";
 import { assertPatchSafeToApply, defeatsIsolation } from "./isolation-config";

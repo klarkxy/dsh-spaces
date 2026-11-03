@@ -10,7 +10,7 @@ import type {
 } from "../../../src/shared/workbench";
 import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../src/shared/workbench-product";
 import type { SpaceSharePreview } from "../../../src/shared/space-share";
-import type { Blueprint } from "../../../src/shared/blueprint";
+import type { Blueprint } from "@klarkxy/dsh-blueprint/v1/types";
 import { WorkbenchApp } from "../../../packages/plugin/src/workbench/app";
 import { WorkbenchView as WorkbenchRoot } from "../../../packages/plugin/src/workbench/components";
 import { WorkbenchController } from "../../../packages/plugin/src/workbench/store";

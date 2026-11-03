@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { stringifyBlueprint } from "../../src/adapters/node/blueprint/blueprint-codec.ts";
+import { stringifyBlueprint } from "@klarkxy/dsh-blueprint/v1/codec";
 import { HomeOperationLock } from "../../src/adapters/node/home/home-operation-lock.ts";
 import {
   INTERRUPTED_JOB_MESSAGE,
@@ -23,7 +23,7 @@ import {
   WorkbenchJobStore,
 } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import { WorkbenchProductService, type WorkbenchProductPorts } from "../../src/adapters/node/products/workbench-products.ts";
-import { parseBlueprint } from "../../src/core/domain/blueprint.ts";
+import { parseBlueprint } from "@klarkxy/dsh-blueprint/v1";
 import type { LlmApiResult } from "../../src/shared/llm-api.ts";
 import type { WorkbenchCommand, WorkbenchJob, WorkbenchSpace } from "../../src/shared/workbench.ts";
 import { spaceIdFromName } from "../../src/shared/types.ts";

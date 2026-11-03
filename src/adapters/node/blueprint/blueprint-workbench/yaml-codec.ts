@@ -1,6 +1,6 @@
 import { parseDocument, isMap, isScalar, isSeq, Scalar } from "yaml";
 import { CREDENTIALS_ROW_ID, configPathExpr, isolationExpr, isExpectedIsolationPath, isExpectedIsolationRoot, SESSION_ROW_ID, SETTINGS_ROW_ID, STORAGE_ROW_ID } from "../../../../core/domain/isolation";
-import type { BlueprintJson, BlueprintJsonObject, BlueprintPatch, BlueprintPatchEntry, BlueprintPatchInsert } from "../../../../shared/blueprint";
+import type { BlueprintJson, BlueprintJsonObject, BlueprintPatch, BlueprintPatchEntry, BlueprintPatchInsert } from "@klarkxy/dsh-blueprint/v1/types";
 import type { BlueprintLocalObservation } from "../../../../shared/workbench-blueprint";
 import { MANAGED_ENTRY_SET, JS_TAG, CREDENTIAL_KEY_RE } from "./constants";
 import { looksLikeModulePath, looksLikeLocalPath } from "./utils";

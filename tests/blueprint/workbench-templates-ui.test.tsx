@@ -13,7 +13,7 @@ import type {
   WorkbenchProductRequest,
   WorkbenchProductResult,
 } from "../../src/shared/workbench-product.ts";
-import type { Blueprint } from "../../src/shared/blueprint.ts";
+import type { Blueprint } from "@klarkxy/dsh-blueprint/v1/types";
 import { SpaceTemplatesPage, sectionForMode } from "../../packages/plugin/src/workbench/templates/page.tsx";
 import { detectTemplateFile } from "../../packages/plugin/src/workbench/templates/detect.ts";
 import { importTemplateFile } from "../../packages/plugin/src/workbench/templates/import-section.tsx";

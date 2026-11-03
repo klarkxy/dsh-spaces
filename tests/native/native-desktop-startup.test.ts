@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
 import { parseNativeCreateIntent, type PortalSnapshot } from "../../src/shared/space-host.ts";
-import { NativeHostController } from "../../packages/plugin/src/client/native-host.tsx";
+import { NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
 import { nativeTexts } from "../../packages/plugin/src/client/ui/native-texts.ts";
 import type { DesktopLaunchPhase, DesktopLaunchState, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../packages/plugin/src/types.ts";
 

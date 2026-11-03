@@ -1,7 +1,7 @@
-import { parseBlueprint } from "../../../../core/domain/blueprint";
+import { parseBlueprint } from "@klarkxy/dsh-blueprint/v1";
 import { blueprintRecipe, type BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
 import { decodeBlueprintDocument } from "@klarkxy/dsh-blueprint/document-codec";
-import type { BlueprintBinding, BlueprintInput, BlueprintJson, BlueprintJsonObject, BlueprintPackage, BlueprintPatch, BlueprintSettings } from "../../../../shared/blueprint";
+import type { BlueprintBinding, BlueprintInput, BlueprintJson, BlueprintJsonObject, BlueprintPackage, BlueprintPatch, BlueprintSettings } from "@klarkxy/dsh-blueprint/v1/types";
 import type { BlueprintGenerateBindingOverride, BlueprintGenerateSelection, BlueprintOriginRecord } from "../../../../shared/workbench-blueprint";
 import { readPluginLibrary } from "../../products/plugin-library";
 import type { OriginRecipe } from "./types";

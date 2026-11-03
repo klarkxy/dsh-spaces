@@ -10,7 +10,7 @@ import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { BlueprintUiState } from "../blueprint-session";
 import type { WorkbenchController } from "../store";
-import { FadeIn, LayoutIndicator } from "../../../../../src/shared/ui";
+import { FadeIn, LayoutIndicator } from "../../../../../src/shared/ui/motion";
 import { GenerateBlueprintPanel } from "./generate-panel";
 import { UseBlueprintPanel } from "./use-panel";
 

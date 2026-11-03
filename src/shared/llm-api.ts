@@ -19,28 +19,6 @@ export type RedactedConnection = Omit<SharedConnection, "auth"> & {
   routeId: string;
 };
 
-export const LLM_API_METHODS = [
-  "describe",
-  "previewChange",
-  "saveConnection",
-  "setDefault",
-  "previewDelete",
-  "deleteConnection",
-  "discoverModels",
-  "testConnection",
-  "spacePolicy",
-  "updateSpacePolicy",
-  "spaceDefault",
-  "updateSpaceDefault",
-  "listLocalCandidates",
-  "adoptLocal",
-  "previewShare",
-  "importedRequirements",
-  "mapImported",
-  "applyPlan",
-  "operationStatus",
-] as const;
-
 export const LLM_WRITE_API_METHODS = [
   "saveConnection",
   "setDefault",

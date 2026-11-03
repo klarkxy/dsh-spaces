@@ -13,8 +13,8 @@ import {
   diagnoseBlueprint,
   parseBlueprint,
   parseBlueprintJson,
-} from "../../src/core/domain/blueprint.ts";
-import type { Blueprint, BlueprintInputValues } from "../../src/shared/blueprint.ts";
+} from "@klarkxy/dsh-blueprint/v1";
+import type { Blueprint, BlueprintInputValues } from "@klarkxy/dsh-blueprint/v1/types";
 
 const examples = join(dirname(fileURLToPath(import.meta.url)), "../../docs/examples/blueprints");
 const schemaPath = join(dirname(fileURLToPath(import.meta.url)), "../../packages/blueprint/schemas/blueprint-v1.schema.json");
@@ -1135,7 +1135,7 @@ test("JSON nesting limit counts the root object as depth 1", () => {
 });
 
 test("domain module does not import Node fs or zlib", () => {
-  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/core/domain/blueprint.ts"), "utf8");
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../packages/blueprint/src/v1/domain.ts"), "utf8");
   assert.equal(/from ["']node:(fs|zlib)["']/.test(source), false);
   assert.equal(/from ["']node:fs\/promises["']/.test(source), false);
 });

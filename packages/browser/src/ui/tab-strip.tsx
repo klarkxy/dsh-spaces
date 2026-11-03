@@ -1,6 +1,6 @@
 import React, { type ReactElement } from 'react';
 import { motion } from 'motion/react';
-import { LayoutIndicator, Presence, spring } from '../../../../src/shared/ui/index.js';
+import { LayoutIndicator, Presence, spring } from '../../../../src/shared/ui/motion.js';
 import type { Tab } from '../remote-client.js';
 
 export interface BrowserTabStripProps {

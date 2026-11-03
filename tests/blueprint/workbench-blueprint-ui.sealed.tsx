@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Blueprint } from "../../src/shared/blueprint.ts";
+import type { Blueprint } from "@klarkxy/dsh-blueprint/v1/types";
 import type {
   WorkbenchApi,
   WorkbenchJob,
@@ -16,7 +16,7 @@ import type {
 } from "../../src/shared/workbench-product.ts";
 import type { WorkbenchBlueprintApplyOutcome } from "../../src/shared/workbench-blueprint.ts";
 import { WorkbenchView } from "../../packages/plugin/src/workbench/components.tsx";
-import { BlueprintApplyResult } from "../../packages/plugin/src/workbench/blueprint-ui.tsx";
+import { BlueprintApplyResult } from "../../packages/plugin/src/workbench/blueprint/apply.tsx";
 import { SpaceTemplatesPage } from "../../packages/plugin/src/workbench/templates/page.tsx";
 import {
   WorkbenchController,

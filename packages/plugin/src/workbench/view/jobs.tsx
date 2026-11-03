@@ -11,8 +11,8 @@
 
 import React, { type ReactElement } from "react";
 import type { JobStatus, WorkbenchJob } from "../../../../../src/shared/workbench";
-import { StaggerItem, springSoft } from "../../../../../src/shared/ui";
-import { BlueprintJobResult } from "../blueprint-ui";
+import { StaggerItem, springSoft } from "../../../../../src/shared/ui/motion";
+import { BlueprintJobResult } from "../blueprint/apply";
 import { EmptyState } from "../empty-state";
 import { ImportResultCard } from "../product-ui";
 import { t, type WorkbenchLocale, type WorkbenchMessageKey } from "../i18n";

@@ -6,7 +6,7 @@ import {
   BLUEPRINT_INPUT_ID_RE,
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
-} from "./blueprint";
+} from "@klarkxy/dsh-blueprint/v1/types";
 import { MAX_SPACE_ICON_DATA_URL_CHARS } from "./space-icon";
 import { isExactRuntimeVersion } from "./runtime";
 import { SPACE_NAME_RE } from "./types";

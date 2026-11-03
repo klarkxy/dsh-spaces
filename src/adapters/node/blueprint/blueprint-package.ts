@@ -21,7 +21,7 @@ import {
 import {
   type BlueprintPackage,
   type BlueprintPackageSource,
-} from "../../../shared/blueprint";
+} from "@klarkxy/dsh-blueprint/v1/types";
 import { isBareNpmPackageName } from "../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../shared/runtime";
 

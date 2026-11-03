@@ -3,7 +3,6 @@ import type { Messages } from "./en";
 export const zh: Messages = {
   "cli.downloadingNode": "正在下载 Node {version}…",
   "cli.extractingNode": "正在解压 Node…",
-  "cli.installingPnpmVersion": "正在安装 pnpm {version}…",
 
   "errors.iconInvalid": "这个文件不能当图标用。",
   "errors.iconTooLarge": "请选一张更小的图片（不超过 2 MB）。",
@@ -53,7 +52,6 @@ export const zh: Messages = {
   "errors.nodeExtractFailed": "Node 解压失败；期望二进制位于 {dest}",
   "errors.nodeMissing": "尚未安装 Node",
   "errors.npmMissing": "托管 Node 旁未找到自带的 npm",
-  "errors.pnpmInstallFailed": "pnpm 安装失败（{code}）：{detail}",
   "errors.installExited": "安装退出码 {code}",
 
   "queue.pluginAddSpec": "安装 {spec} → {name}",

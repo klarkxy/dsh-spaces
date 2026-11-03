@@ -1,5 +1,5 @@
 import type { BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import type { BlueprintInputValues, BlueprintPackage } from "../../../../shared/blueprint";
+import type { BlueprintInputValues, BlueprintPackage } from "@klarkxy/dsh-blueprint/v1/types";
 import type { LlmApiRequest, LlmApiResult } from "../../../../shared/llm-api";
 import type { WorkbenchSpace } from "../../../../shared/workbench";
 import type { WorkbenchProductObservation } from "../../../../shared/workbench-product";

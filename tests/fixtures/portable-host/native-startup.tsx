@@ -1,6 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { NativeHostController, NativeHostShell, NATIVE_HOST_CSS } from "../../../packages/plugin/src/client/native-host";
+import { NativeHostController } from "../../../packages/plugin/src/client/ui/native-controller";
+import { NativeHostShell } from "../../../packages/plugin/src/client/ui/native-shell";
+import { NATIVE_HOST_CSS } from "../../../packages/plugin/src/client/ui/native-styles";
 import { HOST_SHELL_CSS } from "../../../packages/plugin/src/client/host-shell";
 
 const readyLaunch = {

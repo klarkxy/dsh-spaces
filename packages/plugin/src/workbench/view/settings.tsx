@@ -10,8 +10,7 @@
  */
 
 import React, { useEffect, useRef, type ReactElement } from "react";
-import { LayoutIndicator, VisibleSlide } from "../../../../../src/shared/ui";
-import { PanelScale } from "./motion";
+import { LayoutIndicator, VisibleScale, VisibleSlide } from "../../../../../src/shared/ui/motion";
 import { LlmModelCenter } from "../llm/center";
 import { LegacyConnectionSettings } from "../llm/legacy-settings";
 import { HomeSettingsFields, ThemeSwitch } from "../product-ui";
@@ -196,7 +195,7 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
   }
   return (
     <div className="dsh-wb-overlay" onClick={onBackdrop}>
-      <PanelScale
+      <VisibleScale
         ref={dialog}
         className="dsh-wb-dialog dsh-wb-settings"
         role="dialog"
@@ -206,7 +205,7 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
         onKeyDown={onKeyDown}
       >
         {panel}
-      </PanelScale>
+      </VisibleScale>
     </div>
   );
 }

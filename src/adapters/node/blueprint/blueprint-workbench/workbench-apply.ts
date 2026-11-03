@@ -1,5 +1,5 @@
 import { bindDocumentInputs } from "@klarkxy/dsh-blueprint/document";
-import type { BlueprintPackage } from "../../../../shared/blueprint";
+import type { BlueprintPackage } from "@klarkxy/dsh-blueprint/v1/types";
 import { spaceIdFromName } from "../../../../shared/types";
 import type { WorkbenchJobResult } from "../../../../shared/workbench";
 import type { BlueprintApplyStage, BlueprintHostVersions, BlueprintInstalledIdentity, BlueprintPackageResult, BlueprintWriteKind, BlueprintWriteResult, WorkbenchBlueprintApplyOutcome } from "../../../../shared/workbench-blueprint";

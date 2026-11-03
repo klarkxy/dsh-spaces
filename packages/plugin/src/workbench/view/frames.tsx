@@ -8,7 +8,7 @@
 
 import React, { useRef, type ReactElement } from "react";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
-import { PanelScale } from "./motion";
+import { VisibleScale } from "../../../../../src/shared/ui/motion";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { ViewFrameState } from "../view-session";
 import { CopyButton, type WorkbenchViewProps } from "./shared";
@@ -136,7 +136,7 @@ function IdleCard({
   const crashed = space.status === "crashed";
   return (
     <div className="dsh-wb-idle">
-      <PanelScale className="dsh-wb-dialog">
+      <VisibleScale className="dsh-wb-dialog">
         <h2 className="dsh-wb-title">{t(locale, titleKey, { name: space.displayName })}</h2>
         <p className="dsh-wb-muted">{crashed ? t(locale, "app.crashedBody") : t(locale, "app.idleBody")}</p>
         {!space.managed && <p className="dsh-wb-notice">{t(locale, "app.unmanaged")}</p>}
@@ -166,7 +166,7 @@ function IdleCard({
             {t(locale, "app.delete")}
           </button>
         </div>
-      </PanelScale>
+      </VisibleScale>
     </div>
   );
 }

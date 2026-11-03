@@ -9,7 +9,7 @@
 
 import React, { type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
-import { LayoutIndicator } from "../../../../../src/shared/ui";
+import { LayoutIndicator } from "../../../../../src/shared/ui/motion";
 import { SpaceGlyph } from "../space-glyph";
 import { t } from "../i18n";
 import { statusKey, type WorkbenchViewProps } from "./shared";

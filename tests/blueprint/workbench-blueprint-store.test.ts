@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import type { Blueprint } from "../../src/shared/blueprint.ts";
+import type { Blueprint } from "@klarkxy/dsh-blueprint/v1/types";
 import type {
   WorkbenchApi,
   WorkbenchCommand,

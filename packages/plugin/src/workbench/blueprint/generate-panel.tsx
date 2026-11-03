@@ -11,7 +11,7 @@ import { t, type WorkbenchLocale } from "../i18n";
 import type { BlueprintUiState } from "../blueprint-session";
 import type { WorkbenchController } from "../store";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
-import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { CollapseSection, PressableButton, VisibleSlide } from "../feature-motion";
 import { BindingEditor } from "./bindings";
 import { DiagnosticList } from "./shared";

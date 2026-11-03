@@ -13,8 +13,7 @@
 import React, { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { motion } from "motion/react";
 import type { WorkbenchPlan, WorkbenchPlanRequest, WorkbenchSpace } from "../../../../../src/shared/workbench";
-import { springSoft } from "../../../../../src/shared/ui";
-import { PanelScale } from "./motion";
+import { springSoft, VisibleScale } from "../../../../../src/shared/ui/motion";
 import { SPACE_AVATARS } from "../../../../../src/shared/space-avatars";
 import { SPACE_NAME_RE } from "../../../../../src/shared/types";
 import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
@@ -171,7 +170,7 @@ function PlanDialog({
   const danger = plan.destructive || PLAN_DANGER_KINDS.has(kind);
   return (
     <div className="dsh-wb-overlay">
-      <PanelScale ref={panel} className="dsh-wb-dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-wb-plan-title" onKeyDown={modal.onKeyDown}>
+      <VisibleScale ref={panel} className="dsh-wb-dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-wb-plan-title" onKeyDown={modal.onKeyDown}>
         <h2 id="dsh-wb-plan-title" className="dsh-wb-title">
           {title}
         </h2>
@@ -207,7 +206,7 @@ function PlanDialog({
             {confirmLabel}
           </button>
         </div>
-      </PanelScale>
+      </VisibleScale>
     </div>
   );
 }
@@ -424,7 +423,7 @@ function IconDialog({
   };
   return (
     <div className="dsh-wb-overlay">
-      <PanelScale ref={panel} className="dsh-wb-dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-wb-icon-title" onKeyDown={modal.onKeyDown}>
+      <VisibleScale ref={panel} className="dsh-wb-dialog" role="dialog" aria-modal="true" aria-labelledby="dsh-wb-icon-title" onKeyDown={modal.onKeyDown}>
         <h2 id="dsh-wb-icon-title" className="dsh-wb-title">{t(locale, "icon.title")}</h2>
         {error ? <p className="dsh-wb-alert" role="alert" data-icon-error="true">{error}</p> : null}
         <IconPicker locale={locale} value={space.icon} spaceId={space.id} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
@@ -444,7 +443,7 @@ function IconDialog({
             {t(locale, "app.save")}
           </button>
         </div>
-      </PanelScale>
+      </VisibleScale>
     </div>
   );
 }

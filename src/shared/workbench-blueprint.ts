@@ -7,7 +7,7 @@ import {
   type BlueprintInputType,
   type BlueprintInputValue,
   type BlueprintInputValues,
-} from "./blueprint";
+} from "@klarkxy/dsh-blueprint/v1/types";
 import type { BlueprintDocument as Blueprint } from "@klarkxy/dsh-blueprint/document";
 
 export const BLUEPRINT_PLAN_TTL_MS = 5 * 60_000;
@@ -23,16 +23,6 @@ export const BLUEPRINT_ORIGIN_FILE = "blueprint-origin.json";
 export const BLUEPRINT_LOCAL_FILE = "blueprint-local.json";
 export const BLUEPRINT_ORIGIN_SCHEMA_VERSION = 1 as const;
 
-export const BLUEPRINT_PRODUCT_METHODS = [
-  "blueprint.source",
-  "blueprint.generate",
-  "blueprint.inspect",
-  "blueprint.preview",
-] as const;
-
-export type BlueprintProductMethod = (typeof BLUEPRINT_PRODUCT_METHODS)[number];
-
-export const BLUEPRINT_APPLY_STAGES = ["space-create", "packages", "presets", "start"] as const;
 export type BlueprintStageStatus = "succeeded" | "failed" | "not-run";
 
 export type BlueprintPackageSourceKind = "npm" | "builtin" | "local" | "unknown";

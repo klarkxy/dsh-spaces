@@ -1,7 +1,6 @@
 /** Bounded first-navigation diagnostics. Console only; never credentials, URLs, or product control. */
 
 export const NAV_DIAG_TAG = "dsh-spaces-nav-diag";
-export const NAV_DIAG_LIMIT = 96;
 export const NAV_DIAG_VERSION = 1;
 
 const SOURCES = ["controller", "portal", "bootstrap"] as const;

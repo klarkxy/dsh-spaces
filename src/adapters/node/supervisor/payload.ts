@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { samePath } from "../home/home-guard";
 import { bindDshCli, isCompatibleDshCliVersion } from "../products/spaces-service";
@@ -200,11 +200,6 @@ export function sameRealPath(left: string, right: string): boolean {
   } catch {
     return false;
   }
-}
-
-export function pathInsideHome(home: string, path: string): boolean {
-  const rel = relative(resolve(home), resolve(path));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 export function bindSelectedCli(bin: string): BoundCli {

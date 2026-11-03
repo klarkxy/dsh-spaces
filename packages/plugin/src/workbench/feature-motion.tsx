@@ -21,7 +21,7 @@ import {
   type MotionPrimitiveProps,
   type PressButtonProps,
   type VisibleMotionProps,
-} from "../../../../src/shared/ui";
+} from "../../../../src/shared/ui/motion";
 
 /** Spring for panels that move into place inside the workbench. */
 const featureSpring: Transition = { type: "spring", stiffness: 320, damping: 34, mass: 0.8 };

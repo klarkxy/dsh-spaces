@@ -82,15 +82,6 @@ export function dshPeerRangesFromPackages(packageJsonPaths: readonly string[]): 
   return ranges;
 }
 
-export function dshPeerRangesFromProfile(profileDir: string): Record<string, string> {
-  const modules = join(profileDir, "node_modules", "@dsh-spaces");
-  return dshPeerRangesFromPackages([
-    join(modules, "plugin", "package.json"),
-    join(modules, "view-bridge", "package.json"),
-    join(modules, "llm-bridge", "package.json"),
-  ]);
-}
-
 /** Names and ranges the recorded CLI version does not satisfy. */
 export function unmetDshPeers(version: string, ranges: Record<string, string>): string[] {
   const unmet: string[] = [];

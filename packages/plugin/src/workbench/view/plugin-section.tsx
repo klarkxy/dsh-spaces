@@ -16,7 +16,7 @@
 
 import React, { useRef, type ReactElement } from "react";
 import { gt as semverGt, valid as semverValid } from "semver";
-import { StaggerItem, springSoft } from "../../../../../src/shared/ui";
+import { StaggerItem, springSoft } from "../../../../../src/shared/ui/motion";
 import type { PluginCatalogEntry } from "../../../../../src/shared/types";
 import type { WorkbenchPlugin, WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { EmptyState } from "../empty-state";

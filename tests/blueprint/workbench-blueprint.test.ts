@@ -29,9 +29,9 @@ import {
 } from "../../src/adapters/node/blueprint/blueprint-runtime.ts";
 import { WorkbenchProductService, type WorkbenchProductPorts } from "../../src/adapters/node/products/workbench-products.ts";
 import type { WorkbenchJobContext } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
-import { stringifyBlueprint } from "../../src/adapters/node/blueprint/blueprint-codec.ts";
-import { parseBlueprint } from "../../src/core/domain/blueprint.ts";
-import type { Blueprint } from "../../src/shared/blueprint.ts";
+import { stringifyBlueprint } from "@klarkxy/dsh-blueprint/v1/codec";
+import { parseBlueprint } from "@klarkxy/dsh-blueprint/v1";
+import type { Blueprint } from "@klarkxy/dsh-blueprint/v1/types";
 import { GlobalLlmHost } from "../../src/core/application/global-llm-host.ts";
 import { BlueprintPackageError } from "../../src/adapters/node/blueprint/blueprint-package.ts";
 import { GlobalLlmService } from "../../src/core/application/global-llm-service.ts";

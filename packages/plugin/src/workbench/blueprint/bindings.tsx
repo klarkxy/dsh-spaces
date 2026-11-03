@@ -6,7 +6,7 @@
  * reasons next to them are eligibility notes, not failures.
  */
 import React, { type ReactElement } from "react";
-import type { BlueprintInputType } from "../../../../../src/shared/blueprint";
+import type { BlueprintInputType } from "@klarkxy/dsh-blueprint/v1/types";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { BlueprintBindingDraft } from "../blueprint-session";
 

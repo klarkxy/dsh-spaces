@@ -1,7 +1,6 @@
 import { lstatSync, realpathSync } from "../../../src/shared/node/filesystem";
 
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve, sep } from "node:path";
 
 export const STDOUT_LIMIT = 256 * 1024;
 export const MUTATION_JOURNAL = ".dsh-spaces-mutation.json";
@@ -9,7 +8,6 @@ export const UPGRADE_STAGE_DIR = ".dsh-spaces-upgrade";
 export const UPGRADE_JOURNAL_FILE = "journal.json";
 export const CONTROL_TOOLCHAIN_FILE = "toolchain.json";
 export const CONTROL_INSTANCES_DIR = "instances";
-export const CONTROL_PLANS_DIR = "plans";
 export const PLUGIN_MUTATION_FILE = "plugin-mutation.json";
 export const PLUGIN_MUTATION_FILES_DIR = "plugin-mutation-files";
 
@@ -137,37 +135,4 @@ export function inspectNamedFile(path: string): "ok" | "missing" | "unreadable" 
   return "ok";
 }
 
-export function doctorEntryPath(): string | undefined {
-  try {
-    return realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return undefined;
-  }
-}
 
-export function runningToolPaths(): string[] {
-  const paths: string[] = [];
-  try {
-    paths.push(realpathSync(process.execPath));
-  } catch {
-    paths.push(resolve(process.execPath));
-  }
-  const entry = process.argv[1];
-  if (entry) {
-    try {
-      paths.push(realpathSync(resolve(entry)));
-    } catch {
-      if (isAbsolute(entry)) paths.push(resolve(entry));
-    }
-  }
-  const self = doctorEntryPath();
-  if (self) {
-    paths.push(self);
-    paths.push(dirname(self));
-  }
-  return paths;
-}
-
-export function pathInsideAny(target: string, candidates: string[]): boolean {
-  return candidates.some((candidate) => inside(target, candidate));
-}

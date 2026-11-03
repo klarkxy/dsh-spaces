@@ -1,5 +1,5 @@
 import React, { type ReactElement } from 'react';
-import { FadeIn } from '../../../../src/shared/ui/index.js';
+import { FadeIn } from '../../../../src/shared/ui/motion.js';
 
 /**
  * The navigation failure panel.

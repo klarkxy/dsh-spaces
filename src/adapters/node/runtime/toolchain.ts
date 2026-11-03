@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { rm as rmAsync } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { type ChildProcess } from "node:child_process";
@@ -14,7 +14,6 @@ import { atomicWrite, renameDirectoryAsync } from "../atomic";
 import { ProcessTerminationError, terminateProcessTree } from "./terminate-process";
 import {
   NODE_VERSION,
-  PNPM_VERSION,
   nodeArchiveName,
   nodeDownloadUrl,
   npmRegistry,
@@ -295,26 +294,6 @@ export async function extractArchiveAsync(archive: string, dest: string): Promis
   }
 }
 
-function writePnpmShim(nodePath: string, pnpmJs: string): void {
-  const dir = shimDir();
-  mkdirSync(dir, { recursive: true });
-  if (process.platform === "win32") {
-    writeFileSync(
-      join(dir, "pnpm.cmd"),
-      `@echo off\r\n"${nodePath}" "${pnpmJs}" %*\r\n`,
-      "utf8",
-    );
-    writeFileSync(
-      join(dir, "pnpm.ps1"),
-      `& "${nodePath}" "${pnpmJs}" @args\r\n`,
-      "utf8",
-    );
-    return;
-  }
-  const shim = join(dir, "pnpm");
-  writeFileSync(shim, `#!/bin/sh\nexec "${nodePath}" "${pnpmJs}" "$@"\n`, { encoding: "utf8", mode: 0o755 });
-}
-
 export async function ensureNode(onLine?: (line: string) => void): Promise<string> {
   const existing = nodeExecutable();
   if (existing) {
@@ -370,35 +349,4 @@ async function supportsCliEntry(node: string): Promise<boolean> {
   }
 }
 
-export async function ensurePnpm(onLine?: (line: string) => void): Promise<string> {
-  const existing = pnpmCjs();
-  const node = nodeExecutable();
-  if (!node) throw new Error(t("errors.nodeMissing"));
-  if (existing) {
-    writePnpmShim(node, existing);
-    return existing;
-  }
-  const npmJs = npmCliJs();
-  if (!npmJs) throw new Error(t("errors.npmMissing"));
-  const prefix = join(toolchainRoot(), "pnpm");
-  mkdirSync(prefix, { recursive: true });
-  onLine?.(t("cli.installingPnpmVersion", { version: PNPM_VERSION }));
-  const result = await runProcess(
-    node,
-    [npmJs, "install", "--prefix", prefix, "--no-fund", "--no-audit", `pnpm@${PNPM_VERSION}`],
-    { onLine, env: toolchainEnv() },
-  );
-  const pnpmJs = pnpmCjs();
-  if (!pnpmJs) {
-    throw new Error(
-      t("errors.pnpmInstallFailed", {
-        code: result.code,
-        detail: (result.stderr || result.stdout).slice(0, 800),
-      }),
-    );
-  }
-  writePnpmShim(node, pnpmJs);
-  writeToolchainConfig({ pnpmVersion: PNPM_VERSION });
-  return pnpmJs;
-}
 

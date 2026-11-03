@@ -4,7 +4,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import { readViewHint } from '../../view-bridge/src/env';
 import { BROWSER_HIDE, BROWSER_PRESENT, BROWSER_RESULT, type BrowserChildRequest, type BrowserGuestResult } from '../../../src/shared/browser-guest';
-import { MotionRoot } from '../../../src/shared/ui/index.js';
+import { MotionRoot } from '../../../src/shared/ui/motion.js';
 import { displayBrowserFailure, listTabs, openURL, observe, type Tab } from './remote-client';
 import { BrowserAddressBar } from './ui/address-bar.js';
 import { BrowserFailurePanel } from './ui/failure-panel.js';

@@ -1,7 +1,6 @@
 export const en = {
   "cli.downloadingNode": "Downloading Node {version}…",
   "cli.extractingNode": "Extracting Node…",
-  "cli.installingPnpmVersion": "Installing pnpm {version}…",
 
   "errors.iconInvalid": "That file isn't a usable image.",
   "errors.iconTooLarge": "Choose a smaller image (under 2 MB).",
@@ -51,7 +50,6 @@ export const en = {
   "errors.nodeExtractFailed": "Node extract failed; expected binary under {dest}",
   "errors.nodeMissing": "Node is not installed",
   "errors.npmMissing": "Bundled npm not found next to managed Node",
-  "errors.pnpmInstallFailed": "pnpm install failed ({code}): {detail}",
   "errors.installExited": "Install exited {code}",
 
   "queue.pluginAddSpec": "Installing {spec} on {name}",

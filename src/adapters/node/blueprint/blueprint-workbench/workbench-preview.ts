@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { bindDocumentInputs, diagnoseDocument, type BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import { BLUEPRINT_CODE, BlueprintError, type BlueprintDiagnostic, type BlueprintInputValues } from "../../../../shared/blueprint";
+import { BLUEPRINT_CODE, BlueprintError, type BlueprintDiagnostic, type BlueprintInputValues } from "@klarkxy/dsh-blueprint/v1/types";
 import { BLUEPRINT_PLAN_MAX_COUNT, BLUEPRINT_PLAN_MAX_TOTAL_BYTES, BLUEPRINT_PLAN_TTL_MS, type WorkbenchBlueprintInspectPayload, type WorkbenchBlueprintPreviewPayload } from "../../../../shared/workbench-blueprint";
 import type { PlanObservation, StagedPlan } from "./types";
 import { INSPECT_RUNTIME_FAILED } from "./constants";

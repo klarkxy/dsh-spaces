@@ -25,39 +25,6 @@ const HOST_SYSTEM = ':where(html[data-ds-theme-source="system"], html:not([data-
 /** The host is not painting the dark palette. */
 const HOST_NOT_DARK = ':where(body:not([data-ds-dark-theme]))';
 
-/** Spaces panel tokens: host palette first, shared material as the layer on top. */
-export const SPACES_UI_TOKEN_CSS = uiTokenMixin(".dsh-spaces", {
-  "--sp-text": "var(--dsw-alias-label-primary, #1f2328)",
-  "--sp-muted": "var(--dsw-alias-label-secondary, #59636e)",
-  "--sp-bg": "var(--dsw-alias-bg-base, #ffffff)",
-  "--sp-surface": "var(--dsw-alias-bg-layer-1, #f6f7f9)",
-  "--sp-border": "var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12))",
-  "--sp-hover": "var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06))",
-  "--sp-active": "var(--dsw-alias-interactive-bg-active, rgba(0, 0, 0, 0.1))",
-  "--sp-accent": "var(--dsw-alias-button-primary-fill, #5865f2)",
-  "--sp-accent-ink": "var(--dsw-alias-label-primary-inverted, #ffffff)",
-  "--sp-danger": "var(--dsw-alias-label-error, #d1242f)",
-  "--sp-ok": "var(--dsw-alias-state-success-primary, #1a7f37)",
-  "--sp-warn": "var(--dsw-alias-state-warn-primary, #9a6700)",
-  "--sp-elev-sm": "var(--dsh-ui-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.2))",
-  "--sp-elev-md": "var(--dsh-ui-shadow-md, 0 10px 26px -14px rgba(0, 0, 0, 0.45))",
-  "--sp-elev-lg": "var(--dsh-ui-shadow-lg, 0 24px 48px -20px rgba(0, 0, 0, 0.55))",
-  "--sp-glow": "var(--dsh-ui-glow, 0 0 24px -6px rgba(88, 101, 242, 0.6))",
-  "--sp-glass": "color-mix(in srgb, var(--sp-bg) 76%, transparent)",
-  "--sp-glass-blur": "var(--dsh-ui-glass-blur, blur(16px) saturate(140%))",
-  "--sp-radius-sm": "var(--dsh-ui-radius-sm, 8px)",
-  "--sp-radius-md": "var(--dsh-ui-radius-md, 12px)",
-  "--sp-radius-lg": "var(--dsh-ui-radius-lg, 16px)",
-  "--sp-radius-pill": "var(--dsh-ui-radius-pill, 999px)",
-  "--sp-dur-fast": "var(--dsh-ui-dur-fast, 120ms)",
-  "--sp-dur-base": "var(--dsh-ui-dur-base, 200ms)",
-  "--sp-dur-slow": "var(--dsh-ui-dur-slow, 360ms)",
-  "--sp-ease-standard": "var(--dsh-ui-ease-standard, cubic-bezier(0.2, 0, 0, 1))",
-  "--sp-ease-spring": "var(--dsh-ui-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1))",
-  "--sp-accent-gradient": "var(--dsh-ui-accent-gradient, linear-gradient(135deg, #5865f2 0%, #8b5cf6 100%))",
-  "--sp-shimmer": "linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--sp-text) 12%, transparent) 42%, transparent 64%)",
-});
-
 /** Space dock tokens: same host palette, shared material on top. */
 export const HOST_UI_TOKEN_CSS = uiTokenMixin(".dsh-host-dock", {
   "--host-text": "var(--dsw-alias-label-primary, #202127)",

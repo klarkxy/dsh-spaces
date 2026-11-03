@@ -3,7 +3,7 @@ import type { LlmDescribeResult, RedactedConnection } from "../../../../../src/s
 import { localizeError, t, type WorkbenchLocale } from "../i18n";
 import { newOperationId, type LlmUiClient, type LlmUiSpace } from "./client";
 import { SpaceBindingPanel } from "./space-binding";
-import { FadeIn, Presence, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { FadeIn, Presence, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { EmptyState } from "../empty-state";
 import { PressableButton, VisibleSlide } from "../feature-motion";
 

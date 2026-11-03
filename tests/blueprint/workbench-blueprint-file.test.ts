@@ -4,7 +4,7 @@ import {
   BLUEPRINT_JSON_MAX_BYTES,
   BLUEPRINT_SHARE_MAX_BYTES,
   type Blueprint,
-} from "../../src/shared/blueprint.ts";
+} from "@klarkxy/dsh-blueprint/v1/types";
 import {
   bytesToBase64,
   collectBlueprintValues,

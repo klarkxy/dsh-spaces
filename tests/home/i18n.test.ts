@@ -12,7 +12,6 @@ import {
   t,
   zh,
 } from "../../src/shared/i18n/index.ts";
-import { resolveColorScheme } from "../../src/shared/theme.ts";
 import { readSettings, writeSettings } from "../../src/adapters/node/home/hub-settings.ts";
 import { DEFAULT_HUB_SETTINGS } from "../../src/shared/types.ts";
 
@@ -28,13 +27,6 @@ test("infers zh from Chinese locales and en otherwise", () => {
   assert.equal(inferAppLocale("zh"), "zh");
   assert.equal(inferAppLocale("en-US"), "en");
   assert.equal(inferAppLocale("ja-JP"), "en");
-});
-
-test("resolveColorScheme honors explicit appearance over the system", () => {
-  assert.equal(resolveColorScheme("light", true), "light");
-  assert.equal(resolveColorScheme("dark", false), "dark");
-  assert.equal(resolveColorScheme("system", true), "dark");
-  assert.equal(resolveColorScheme("system", false), "light");
 });
 
 test("resolveLocale honors explicit preference over the system", () => {

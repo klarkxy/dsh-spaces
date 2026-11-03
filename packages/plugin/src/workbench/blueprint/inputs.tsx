@@ -6,11 +6,11 @@
  * read failure, so the failure text is never part of an entrance animation.
  */
 import React, { type ReactElement } from "react";
-import type { BlueprintInput } from "../../../../../src/shared/blueprint";
+import type { BlueprintInput } from "@klarkxy/dsh-blueprint/v1/types";
 import type { BlueprintRecipe } from "@klarkxy/dsh-blueprint/document";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { BlueprintUiState } from "../blueprint-session";
-import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { VisibleSlide } from "../feature-motion";
 
 /** The local input fields of an inspected blueprint. */

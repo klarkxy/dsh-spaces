@@ -6,7 +6,7 @@
  */
 
 import React, { useRef, type ReactElement } from "react";
-import { PanelScale } from "./motion";
+import { VisibleScale } from "../../../../../src/shared/ui/motion";
 import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { t } from "../i18n";
 import { useMenuKeyboard } from "../use-menu-keyboard";
@@ -31,7 +31,7 @@ export function SpaceMenu({
   const keyboard = useMenuKeyboard(menu, { x, y, onClose: controller.closeOverlay });
   return (
     <div className="dsh-wb-overlay dsh-wb-overlay-menu" onClick={controller.closeOverlay}>
-      <PanelScale
+      <VisibleScale
         ref={menu}
         className="dsh-wb-menu"
         role="menu"
@@ -112,7 +112,7 @@ export function SpaceMenu({
         >
           {t(locale, "app.delete")}
         </button>
-      </PanelScale>
+      </VisibleScale>
     </div>
   );
 }

@@ -10,7 +10,7 @@ import type { BlueprintPreviewInput } from "../../../../../src/shared/workbench-
 import { t, type WorkbenchLocale } from "../i18n";
 import type { BlueprintUiState } from "../blueprint-session";
 import { previewIsExpired, previewPlanMatchesApply } from "../blueprint-session";
-import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { VisibleSlide } from "../feature-motion";
 import { DiagnosticList } from "./shared";
 

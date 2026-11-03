@@ -5,7 +5,7 @@
  * panel, so they live here instead of being copied into every panel.
  */
 import React, { type ReactElement } from "react";
-import type { BlueprintDiagnostic } from "../../../../../src/shared/blueprint";
+import type { BlueprintDiagnostic } from "@klarkxy/dsh-blueprint/v1/types";
 import { t, type WorkbenchLocale } from "../i18n";
 import { isHttpsHref } from "../blueprint-session";
 

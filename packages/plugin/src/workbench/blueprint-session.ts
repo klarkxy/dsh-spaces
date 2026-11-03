@@ -6,7 +6,7 @@ import {
   type BlueprintInput,
   type BlueprintInputType,
   type BlueprintInputValues,
-} from "../../../../src/shared/blueprint";
+} from "@klarkxy/dsh-blueprint/v1/types";
 import { blueprintRecipe, type BlueprintDocument, type BlueprintRecipe } from "@klarkxy/dsh-blueprint/document";
 import type { LlmDescribeResult } from "../../../../src/shared/llm-api";
 import type { WorkbenchJob } from "../../../../src/shared/workbench";

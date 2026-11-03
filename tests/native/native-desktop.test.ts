@@ -10,7 +10,7 @@ import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailure
   type PortalFailure } from "../../src/shared/space-host.ts";
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 import { bindDshCli, invocationProfile } from "../../src/adapters/node/products/spaces-service.ts";
-import { NativeHostController } from "../../packages/plugin/src/client/native-host.tsx";
+import { NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
 import { NativeBrowserHost } from "../../packages/plugin/src/client/native-browser-host.ts";
 import type { DesktopLaunchState } from "../../packages/plugin/src/types.ts";
 import { BROWSER_RELAY, BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, browserProtocolScript,

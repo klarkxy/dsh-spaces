@@ -9,7 +9,7 @@ import type {
 } from "../../../../../src/shared/llm-api";
 import { localizeError, t, type WorkbenchLocale } from "../i18n";
 import { newOperationId, type LlmUiClient, type LlmUiSpace } from "./client";
-import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { PressableButton } from "../feature-motion";
 
 function errorText(locale: WorkbenchLocale, error: unknown): string {

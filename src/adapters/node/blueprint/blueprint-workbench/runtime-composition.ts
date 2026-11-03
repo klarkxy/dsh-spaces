@@ -1,5 +1,5 @@
 import type { BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import type { BlueprintPatch } from "../../../../shared/blueprint";
+import type { BlueprintPatch } from "@klarkxy/dsh-blueprint/v1/types";
 import type { BlueprintRuntimeInspect, BlueprintRuntimeLayerIdentity, BlueprintRuntimeCompose, BlueprintRuntimeModule, ModuleIdentityEvidence } from "./types";
 import { CONTROL_PACKAGE_SET, MANAGED_ENTRY_SET } from "./constants";
 import { unique, isOwnedBridgeName } from "./utils";

@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, type ReactElement } from "react";
-import { MotionRoot } from "../../../../src/shared/ui";
+import { MotionRoot } from "../../../../src/shared/ui/motion";
 import { installBrowserRelay } from "./browser-relay";
 import { t } from "./i18n";
 import { WORKBENCH_CSS } from "./styles";

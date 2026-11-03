@@ -10,7 +10,7 @@
 
 import React, { type ReactElement } from "react";
 import type { WorkbenchSnapshot } from "../../../../../src/shared/workbench";
-import { StaggerItem, springSoft } from "../../../../../src/shared/ui";
+import { StaggerItem, springSoft } from "../../../../../src/shared/ui/motion";
 import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { SpaceTemplatesPage } from "../templates/page";
 import { SpaceGlyph } from "../space-glyph";

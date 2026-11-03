@@ -8,7 +8,8 @@ import { parsePortalSnapshot } from "../../src/shared/space-host.ts";
 import { validateWorkbenchIcon } from "../../packages/plugin/src/workbench/icons.ts";
 import { SpaceGlyph } from "../../packages/plugin/src/workbench/space-glyph.tsx";
 import { IconPicker } from "../../packages/plugin/src/workbench/components.tsx";
-import { NativeHostController, NativeHostShell } from "../../packages/plugin/src/client/native-host.tsx";
+import { NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
+import { NativeHostShell } from "../../packages/plugin/src/client/ui/native-shell.tsx";
 
 test("20 unique bundled avatars round-trip through client, stored icon and host presentation", () => {
   assert.equal(SPACE_AVATARS.length, 20);

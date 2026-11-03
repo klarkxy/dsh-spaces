@@ -20,7 +20,7 @@
  * itself carries `data-templates-panel`.
  */
 import React, { useState, type ReactElement } from "react";
-import { FadeIn, LayoutIndicator } from "../../../../../src/shared/ui";
+import { FadeIn, LayoutIndicator } from "../../../../../src/shared/ui/motion";
 import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import type { BlueprintMode } from "../blueprint-session";
 import { InlineErrors } from "../inline-error";

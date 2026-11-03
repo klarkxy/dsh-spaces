@@ -1,10 +1,11 @@
 # Shared UI foundation
 
-Browser-only building blocks shared by the Workbench, the host Spaces panel
+Browser-only building blocks shared by the Workbench, the Desktop host shell
 and the Browser space client.
 
 ```ts
-import { UI_TOKENS_CSS, MotionRoot, FadeIn, spring } from "../../shared/ui";
+import { UI_TOKENS_CSS } from "../../shared/ui/tokens";
+import { MotionRoot, FadeIn, spring } from "../../shared/ui/motion";
 ```
 
 `src/shared/ui` is covered by `tsconfig.web.json` and `tsconfig.spaces.json`
@@ -45,7 +46,7 @@ Shared keyframes are prefixed `dsh-ui-`: `dsh-ui-fade-in`, `dsh-ui-scale-in`,
 Surfaces keep their own variable names. `uiTokenMixin` writes the mapping:
 
 ```ts
-import { uiTokenMixin } from "../../shared/ui";
+import { uiTokenMixin } from "../../shared/ui/tokens";
 
 const MAPPING = uiTokenMixin(".dsh-workbench", {
   "--wb-elev-md": "var(--dsh-ui-shadow-md)",

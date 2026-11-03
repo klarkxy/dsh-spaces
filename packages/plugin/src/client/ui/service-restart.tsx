@@ -4,7 +4,7 @@ import { publicGuideDetail } from "../guide-detail";
 import { inferSpacesLocale } from "../i18n";
 import type { NativeHostController } from "./native-controller";
 import { nativeTexts } from "./native-texts";
-import { PressButton } from "./press-button";
+import { PressButton } from "../../../../../src/shared/ui/motion";
 import { NativeDialog } from "./native-dialog";
 
 /** The Desktop owns the confirmation and survives the manager's normal shutdown. */

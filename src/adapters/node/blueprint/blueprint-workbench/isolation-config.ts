@@ -2,7 +2,7 @@ import { lstatSync, realpathSync } from "../../../../shared/node/filesystem";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { blueprintRecipe, parseBlueprintDocument, type BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import type { BlueprintBinding, BlueprintInput, BlueprintInputValues, BlueprintJson, BlueprintPatch, BlueprintSettings } from "../../../../shared/blueprint";
+import type { BlueprintBinding, BlueprintInput, BlueprintInputValues, BlueprintJson, BlueprintPatch, BlueprintSettings } from "@klarkxy/dsh-blueprint/v1/types";
 import { BLUEPRINT_LOCAL_FILE, BLUEPRINT_ORIGIN_FILE, BLUEPRINT_ORIGIN_SCHEMA_VERSION, type BlueprintOriginRecord } from "../../../../shared/workbench-blueprint";
 import { atomicWrite } from "../../atomic";
 import { realDshHome } from "../../home/home-guard";

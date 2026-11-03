@@ -1,6 +1,6 @@
 import { BROWSER_RESULT, boundedBrowserTitle, browserUrl, clipBrowserViewport,
   type BrowserGuestObservation, type BrowserGuestResult, type BrowserIdentity, type BrowserRelay } from '../../../../src/shared/browser-guest';
-import type { DesktopBrowserBridge } from './native-host';
+import type { DesktopBrowserBridge } from './ui/native-controller';
 
 interface BrowserGuest extends HTMLElement {
   loadURL(url: string): Promise<void>;

@@ -9,7 +9,7 @@
  */
 import React, { useState, type ReactElement } from "react";
 import { blueprintRecipe } from "@klarkxy/dsh-blueprint/document";
-import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui";
+import { springSoft, StaggerItem, StaggerList } from "../../../../../src/shared/ui/motion";
 import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { validateBlueprintSpaceName } from "../blueprint-session";
 import { BlueprintCreateFlow } from "../blueprint/create-flow";

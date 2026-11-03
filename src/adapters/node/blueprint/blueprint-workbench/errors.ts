@@ -1,5 +1,5 @@
 import { lstatSync } from "../../../../shared/node/filesystem";
-import { BlueprintError } from "../../../../shared/blueprint";
+import { BlueprintError } from "@klarkxy/dsh-blueprint/v1/types";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../../../shared/types";
 import { LLM_ERROR, LlmConfigError } from "../../../../shared/llm-connections";
 import type { LlmApiResult, LlmDescribeResult, LlmSpacePolicyResult } from "../../../../shared/llm-api";

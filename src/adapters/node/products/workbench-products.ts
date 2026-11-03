@@ -79,7 +79,7 @@ import {
   type BlueprintWorkbenchPorts,
 } from "../blueprint/blueprint-workbench";
 import type { PreparedBlueprintPackage } from "../blueprint/blueprint-package";
-import type { BlueprintPackage } from "../../../shared/blueprint";
+import type { BlueprintPackage } from "@klarkxy/dsh-blueprint/v1/types";
 
 const MAX_PENDING_IMPORTS = 16;
 const PLUGIN_LIBRARY_SCHEMA_VERSION = 1;

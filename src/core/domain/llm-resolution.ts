@@ -157,15 +157,6 @@ export function userSectionHasManagedRoutes(section: unknown): boolean {
   return Object.keys(providers).some((key) => isManagedRouteId(key));
 }
 
-export function stripManagedRoutesFromUserSection(section: Record<string, unknown>): Record<string, unknown> {
-  const providers = isPlainObject(section.providers) ? { ...section.providers } : undefined;
-  if (!providers) return { ...section };
-  for (const key of Object.keys(providers)) {
-    if (isManagedRouteId(key)) delete providers[key];
-  }
-  return { ...section, providers };
-}
-
 export function collectManagedWritePaths(section: unknown): string[] {
   if (!isPlainObject(section)) return [];
   const providers = section.providers;
