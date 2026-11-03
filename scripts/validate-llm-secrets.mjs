@@ -48,6 +48,10 @@ for (const name of readdirSync(join(REPO, "src/adapters/node/supervisor"))) {
   if (name.endsWith(".ts")) SECRET_SCAN.push(`src/adapters/node/supervisor/${name}`);
 }
 
+for (const name of readdirSync(join(REPO, "src/adapters/node/maintenance/workbench-jobs"))) {
+  if (name.endsWith(".ts")) SECRET_SCAN.push(`src/adapters/node/maintenance/workbench-jobs/${name}`);
+}
+
 const LIVE_KEY = /\bsk-[A-Za-z0-9_-]{8,}\b/;
 const PRODUCT_RECOVERY = /\b(autoRetry|retryFailed|rollback\(|restoreSnapshot|replayOperation|fallbackModel|installLlmPiAi)\b/;
 
@@ -57,7 +61,7 @@ for (const rel of SECRET_SCAN) {
   if (PRODUCT_RECOVERY.test(text)) fail(`${rel} contains a recovery/fallback product path`);
 }
 
-const jobs = readFileSync(join(REPO, "src/adapters/node/maintenance/workbench-jobs.ts"), "utf8");
+const jobs = readFileSync(join(REPO, "src/adapters/node/maintenance/workbench-jobs/command.ts"), "utf8");
 for (const key of ["key", "apiKey", "secret", "credential", "token", "authorization"]) {
   if (!jobs.includes(`"${key}"`)) fail(`StoredJob secret denylist is missing ${key}`);
 }

@@ -214,31 +214,3 @@ export function removeLibraryEntry(dshHome: string, id: string): PluginLibraryEn
   }
   return writePluginLibrary(dshHome, next);
 }
-
-export function syncLibraryFromProfiles(
-  dshHome: string,
-  installed: Record<string, InstalledPlugin[]>,
-): PluginLibraryEntry[] {
-  const library = readPluginLibrary(dshHome);
-  const known = new Set(library.flatMap((entry) => pluginAliases(entry)));
-  let changed = false;
-  const now = new Date().toISOString();
-  for (const list of Object.values(installed)) {
-    for (const item of list) {
-      if (item.protected || known.has(item.name)) continue;
-      known.add(item.name);
-      library.push({
-        id: item.name.toLowerCase(),
-        spec: item.name,
-        packageName: item.name,
-        title: item.name,
-        source: "installed",
-        downloadedAt: now,
-      });
-      changed = true;
-    }
-  }
-  if (!changed) return library;
-  library.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
-  return writePluginLibrary(dshHome, library);
-}

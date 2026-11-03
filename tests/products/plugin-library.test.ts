@@ -10,7 +10,6 @@ import {
   isHubPluginArchive,
   lookupLibraryEntry,
   readPluginLibrary,
-  syncLibraryFromProfiles,
   upsertLibraryEntry,
 } from "../../src/adapters/node/products/plugin-library.ts";
 import {

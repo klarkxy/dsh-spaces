@@ -4,132 +4,64 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "../atomic";
-import { isExactRuntimeVersion } from "../../../shared/runtime";
-import { redactPublicReason } from "../../../shared/public-reason";
 import type {
-  JobStatus,
   WorkbenchCommand,
-  WorkbenchFailureContext,
   WorkbenchJob,
   WorkbenchJobErrorInfo,
-  WorkbenchView,
 } from "../../../shared/workbench";
-import { isWorkbenchProductCommand } from "../../../shared/workbench-product";
-import { parseWorkbenchProductCommand, parseWorkbenchProductOutcome } from "../../../shared/workbench-product-schemas";
-import { LLM_ERROR, LlmConfigError, type LlmErrorCode } from "../../../shared/llm-connections";
 import { canonicalHome } from "../home/home-operation-lock";
+import {
+  INTERRUPTED_JOB_MESSAGE,
+  WORKBENCH_CONTROL_DIR_NAME,
+  WORKBENCH_JOB_ERROR,
+  WORKBENCH_JOBS_DIR_NAME,
+  WorkbenchJobError,
+  type WorkbenchJobContext,
+  type WorkbenchJobErrorCode,
+  type WorkbenchJobHandler,
+  type WorkbenchJobResult,
+  type WorkbenchJobSettle,
+  type WorkbenchJobsInject,
+  type WorkbenchJobsOptions,
+} from "./workbench-jobs/contract";
+import { affectedSpaceIds, parseCommand } from "./workbench-jobs/command";
+import {
+  SCHEMA_VERSION,
+  publicErrorFromUnknown,
+  publicJob,
+  publicResult,
+  parseStoredJob,
+  stableRecordJson,
+  unreadableStub,
+  type StoredJob,
+} from "./workbench-jobs/record";
+import { REQUEST_ID_RE, canonicalize, isPlainObject, sanitizeJobText } from "./workbench-jobs/util";
+
+export {
+  WORKBENCH_CONTROL_DIR_NAME,
+  WORKBENCH_JOBS_DIR_NAME,
+  WORKBENCH_JOB_ERROR,
+  INTERRUPTED_JOB_MESSAGE,
+  WorkbenchJobError,
+  WorkbenchJobAbortError,
+} from "./workbench-jobs/contract";
+export { publicJobKeys } from "./workbench-jobs/record";
+export { sanitizeJobText } from "./workbench-jobs/util";
+export type {
+  WorkbenchJobErrorCode,
+  WorkbenchJobResult,
+  WorkbenchJobsInject,
+  WorkbenchJobSettleStatus,
+  WorkbenchJobSettle,
+  WorkbenchJobContext,
+  WorkbenchJobHandler,
+  WorkbenchJobsOptions,
+} from "./workbench-jobs/contract";
 
 type ExclusiveAdmission = { store: WorkbenchJobStore; active: boolean };
 /** Per-execution token. ALS store identity alone is not admission: late timer descendants stay bound after the callback ends. */
 const exclusiveContext = new AsyncLocalStorage<ExclusiveAdmission>();
 
-export const WORKBENCH_CONTROL_DIR_NAME = ".dsh-spaces-control";
-export const WORKBENCH_JOBS_DIR_NAME = "jobs";
-
-export const WORKBENCH_JOB_ERROR = {
-  "workbench/invalid-input": "The request is not a valid workbench job.",
-  "workbench/conflict": "A job with this request id already exists for a different command.",
-  "workbench/not-found": "That job was not found.",
-  "workbench/not-cancellable": "This job cannot be cancelled in its current phase.",
-  "workbench/persist-failed": "The job could not be saved. The operation was not accepted.",
-  "workbench/failed": "The job failed.",
-  "workbench/unreadable": "The job record could not be read. Original bytes were left unchanged.",
-  "workbench/unsupported": "That command is not supported.",
-  "workbench/unavailable": "The workbench cannot accept this request.",
-} as const;
-
-export const INTERRUPTED_JOB_MESSAGE =
-  "The previous run was interrupted. The result is unconfirmed; some changes may already have happened. The command was not replayed.";
-
-export type WorkbenchJobErrorCode = keyof typeof WORKBENCH_JOB_ERROR;
-
-const REQUEST_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const ENTITY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const SCHEMA_VERSION = 1;
-const PUBLIC_JOB_KEYS = [
-  "id",
-  "requestId",
-  "kind",
-  "status",
-  "phase",
-  "message",
-  "affectedSpaceIds",
-  "createdAt",
-  "updatedAt",
-  "canCancel",
-  "result",
-  "error",
-] as const;
-
-export type WorkbenchJobResult = NonNullable<WorkbenchJob["result"]>;
-export type WorkbenchJobsInject = (op: string, detail?: string) => void;
-export type WorkbenchJobSettleStatus = "succeeded" | "failed" | "cancelled";
-
-export interface WorkbenchJobSettle {
-  status: WorkbenchJobSettleStatus;
-  result?: WorkbenchJobResult;
-  message?: string;
-}
-
-export class WorkbenchJobError extends Error {
-  readonly name = "WorkbenchJobError";
-  constructor(
-    readonly code: WorkbenchJobErrorCode,
-    message: string = WORKBENCH_JOB_ERROR[code],
-    readonly context?: WorkbenchFailureContext,
-  ) {
-    super(visibleJobMessage(code, message));
-  }
-}
-
-function visibleJobMessage(code: WorkbenchJobErrorCode | LlmErrorCode, message: string): string {
-  const fallback = isJobErrorCode(code) ? WORKBENCH_JOB_ERROR[code] : "The job failed.";
-  const cleaned = sanitizeJobText(message).trim().slice(0, 500);
-  return cleaned || fallback;
-}
-
-export class WorkbenchJobAbortError extends Error {
-  readonly name = "AbortError";
-  constructor(message = "The job was aborted.") {
-    super(message);
-  }
-}
-
-export interface WorkbenchJobContext {
-  readonly signal: AbortSignal;
-  phase(phase: string): void;
-  message(message: string): void;
-  cancellable(value: boolean): void;
-  result(value: WorkbenchJobResult): void;
-}
-
-export type WorkbenchJobHandler = (context: WorkbenchJobContext) => Promise<WorkbenchJobResult | void>;
-
-export interface WorkbenchJobsOptions {
-  home: string;
-  /** Test seam for write failures. Not a general filesystem mock. */
-  inject?: WorkbenchJobsInject;
-  now?: () => Date;
-}
-
-interface StoredJob {
-  schemaVersion: 1;
-  id: string;
-  requestId: string;
-  kind: string;
-  command: WorkbenchCommand | null;
-  commandCanonical: string | null;
-  status: JobStatus;
-  phase: string;
-  message: string;
-  affectedSpaceIds: string[];
-  createdAt: string;
-  updatedAt: string;
-  canCancel: boolean;
-  result?: WorkbenchJobResult;
-  error?: WorkbenchJobErrorInfo;
-}
 
 /**
  * Combined job store and single-process serial runner.
@@ -638,412 +570,11 @@ export class WorkbenchJobStore {
   }
 }
 
-function publicJob(record: StoredJob): WorkbenchJob {
-  const job: WorkbenchJob = {
-    id: record.id,
-    requestId: record.requestId,
-    kind: record.kind,
-    status: record.status,
-    phase: record.phase,
-    message: sanitizeJobText(record.message),
-    affectedSpaceIds: [...record.affectedSpaceIds],
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    canCancel: record.canCancel,
-  };
-  if (record.result) job.result = publicResult(record.result);
-  if (record.error) {
-    job.error = publicErrorFromStored(record.error as unknown as Record<string, unknown>);
-    if (record.error.spaceId) job.error.spaceId = record.error.spaceId;
-    if (record.error.stage) job.error.stage = record.error.stage;
-    if (record.error.packageName) job.error.packageName = record.error.packageName;
-    if (record.error.pluginAttribution) job.error.pluginAttribution = record.error.pluginAttribution;
-    if (record.error.exitCode !== undefined) job.error.exitCode = record.error.exitCode;
-    if (record.error.signal !== undefined) job.error.signal = record.error.signal;
-  }
-  return job;
-}
-
-function publicResult(value: unknown): WorkbenchJobResult | undefined {
-  if (!isPlainObject(value)) return undefined;
-  const result: WorkbenchJobResult = {};
-  if (typeof value.spaceId === "string" && ENTITY_ID_RE.test(value.spaceId)) result.spaceId = value.spaceId;
-  if (typeof value.snapshotId === "string" && ENTITY_ID_RE.test(value.snapshotId)) {
-    result.snapshotId = value.snapshotId;
-  }
-  if (typeof value.runtimeVersion === "string" && isExactRuntimeVersion(value.runtimeVersion)) {
-    result.runtimeVersion = value.runtimeVersion;
-  }
-  if (typeof value.dshVersion === "string" && isExactRuntimeVersion(value.dshVersion)) {
-    result.dshVersion = value.dshVersion;
-  }
-  if (value.view !== undefined) {
-    const view = publicView(value.view);
-    if (view) result.view = view;
-  }
-  if (value.product !== undefined) {
-    try {
-      result.product = parseWorkbenchProductOutcome(value.product);
-    } catch {
-      /* drop unsafe product payloads instead of persisting them */
-    }
-  }
-  return result;
-}
-
-function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
-  if (!isPlainObject(value)) return undefined;
-  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "dshVersion", "view", "product"]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
-  if (value.spaceId !== undefined && (typeof value.spaceId !== "string" || !ENTITY_ID_RE.test(value.spaceId))) {
-    return undefined;
-  }
-  if (value.snapshotId !== undefined && (typeof value.snapshotId !== "string" || !ENTITY_ID_RE.test(value.snapshotId))) {
-    return undefined;
-  }
-  if (value.runtimeVersion !== undefined) {
-    if (typeof value.runtimeVersion !== "string" || !isExactRuntimeVersion(value.runtimeVersion)) return undefined;
-  }
-  if (value.dshVersion !== undefined) {
-    if (typeof value.dshVersion !== "string" || !isExactRuntimeVersion(value.dshVersion)) return undefined;
-  }
-  if (value.view !== undefined && !publicView(value.view)) return undefined;
-  if (value.product !== undefined) {
-    try {
-      parseWorkbenchProductOutcome(value.product);
-    } catch {
-      return undefined;
-    }
-  }
-  return publicResult(value) ?? {};
-}
-
-function publicView(value: unknown): WorkbenchView | undefined {
-  if (!isPlainObject(value)) return undefined;
-  if (typeof value.spaceId !== "string" || !ENTITY_ID_RE.test(value.spaceId)) return undefined;
-  if (typeof value.generation !== "number" || !Number.isInteger(value.generation) || value.generation < 0) {
-    return undefined;
-  }
-  if (typeof value.origin !== "string" || !isLoopbackOrigin(value.origin)) return undefined;
-  if (typeof value.entryOrigin !== "string" || !isLoopbackOrigin(value.entryOrigin)) return undefined;
-  if (typeof value.entryPath !== "string" || !isSupervisorEntryPath(value.entryPath)) return undefined;
-  if (typeof value.channel !== "string" || !ENTITY_ID_RE.test(value.channel)) return undefined;
-  if (typeof value.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(value.serviceEpoch)) return undefined;
-  return {
-    serviceEpoch: value.serviceEpoch,
-    spaceId: value.spaceId,
-    generation: value.generation,
-    origin: value.origin,
-    entryOrigin: value.entryOrigin,
-    entryPath: value.entryPath,
-    channel: value.channel,
-  };
-}
-
-function publicErrorFromUnknown(error: unknown): WorkbenchJobErrorInfo {
-  if (error instanceof LlmConfigError) {
-    return {
-      code: error.code,
-      message: sanitizeJobText(error.message),
-      ...(typeof error.details.spaceId === "string" ? { spaceId: error.details.spaceId, stage: "apply" } : { stage: "apply" }),
-    };
-  }
-  if (error instanceof WorkbenchJobError) {
-    const code = isJobErrorCode(error.code) ? error.code : "workbench/failed";
-    const info: WorkbenchJobErrorInfo = {
-      code,
-      message: sanitizeJobText(error.message).trim().slice(0, 500) || WORKBENCH_JOB_ERROR[code] || "The job failed.",
-    };
-    if (error.context) {
-      if (error.context.spaceId) info.spaceId = error.context.spaceId;
-      if (error.context.stage) info.stage = error.context.stage;
-      if (error.context.packageName) info.packageName = error.context.packageName;
-      if (error.context.pluginAttribution) info.pluginAttribution = error.context.pluginAttribution;
-      if (error.context.exitCode !== undefined) info.exitCode = error.context.exitCode;
-      if (error.context.signal !== undefined) info.signal = error.context.signal;
-    }
-    return info;
-  }
-  if (error && typeof error === "object") {
-    const reported = error as { code?: unknown; message?: unknown };
-    const code = typeof reported.code === "string" && isJobErrorCode(reported.code) ? reported.code : "workbench/failed";
-    if (typeof reported.message === "string" || (typeof reported.code === "string" && isJobErrorCode(reported.code))) {
-      return {
-        code,
-        message: visibleJobMessage(code, typeof reported.message === "string" ? reported.message : ""),
-        ...(code === "workbench/failed" ? { pluginAttribution: "unknown" as const } : {}),
-      };
-    }
-  }
-  return {
-    code: "workbench/failed",
-    message: WORKBENCH_JOB_ERROR["workbench/failed"],
-    pluginAttribution: "unknown",
-  };
-}
-
-function parseStoredJob(value: unknown, filenameId: string): StoredJob | null {
-  if (!REQUEST_ID_RE.test(filenameId) || !isPlainObject(value)) return null;
-  if (value.schemaVersion !== SCHEMA_VERSION) return null;
-  if (value.id !== filenameId || value.requestId !== filenameId) return null;
-  if (typeof value.kind !== "string" || !value.kind.trim()) return null;
-  if (typeof value.status !== "string") return null;
-  const status = parseStatus(value.status);
-  if (!status) return null;
-  if (typeof value.phase !== "string" || !value.phase.trim() || value.phase.length > 120) return null;
-  if (typeof value.message !== "string" || value.message.length > 2000) return null;
-  if (typeof value.canCancel !== "boolean") return null;
-  if (typeof value.createdAt !== "string" || !ISO_DATE_RE.test(value.createdAt)) return null;
-  if (typeof value.updatedAt !== "string" || !ISO_DATE_RE.test(value.updatedAt)) return null;
-  const spaceIds = parseStringArray(value.affectedSpaceIds);
-  if (!spaceIds || spaceIds.some((item) => !ENTITY_ID_RE.test(item))) return null;
-
-  let command: WorkbenchCommand;
-  try {
-    command = parseCommand(value.command);
-  } catch {
-    return null;
-  }
-  if (command.kind !== value.kind) return null;
-
-  if (value.result !== undefined && parseStrictResult(value.result) === undefined) return null;
-  if (value.error !== undefined) {
-    if (!isPlainObject(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string") {
-      return null;
-    }
-  }
-  if (status === "succeeded" && value.error !== undefined) return null;
-  if (status === "failed" && value.error === undefined) return null;
-  if (status === "cancelled" && (value.result !== undefined || value.error !== undefined)) return null;
-
-  const result = value.result !== undefined ? publicResult(value.result) : undefined;
-  const error = isPlainObject(value.error) && typeof value.error.code === "string"
-    ? publicErrorFromStored(value.error)
-    : undefined;
-
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    id: filenameId,
-    requestId: filenameId,
-    kind: command.kind,
-    command,
-    commandCanonical: canonicalize(command),
-    status,
-    phase: value.phase,
-    message: value.message,
-    affectedSpaceIds: spaceIds,
-    createdAt: value.createdAt,
-    updatedAt: value.updatedAt,
-    canCancel: status === "queued" || status === "running" ? value.canCancel : false,
-    result,
-    error,
-  };
-}
-
-function publicErrorFromStored(value: Record<string, unknown>): WorkbenchJobErrorInfo {
-  const code = typeof value.code === "string" && (isJobErrorCode(value.code) || isLlmErrorCode(value.code))
-    ? value.code : "workbench/failed";
-  const info: WorkbenchJobErrorInfo = {
-    code,
-    message: typeof value.message === "string" ? visibleJobMessage(code, value.message) : "The job failed.",
-  };
-  if (typeof value.spaceId === "string" && ENTITY_ID_RE.test(value.spaceId)) info.spaceId = value.spaceId;
-  if (typeof value.stage === "string" && value.stage.trim()) info.stage = value.stage.slice(0, 120);
-  if (typeof value.packageName === "string" && value.packageName.trim()) info.packageName = value.packageName.slice(0, 200);
-  if (value.pluginAttribution === "known" || value.pluginAttribution === "unknown") {
-    info.pluginAttribution = value.pluginAttribution;
-  }
-  if (typeof value.exitCode === "number" && Number.isInteger(value.exitCode)) info.exitCode = value.exitCode;
-  if (typeof value.signal === "string" && value.signal.trim()) info.signal = value.signal.slice(0, 32);
-  return info;
-}
-
-function unreadableStub(id: string, phase: string, timestamp: string): StoredJob {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    id,
-    requestId: id,
-    kind: "unknown",
-    command: null,
-    commandCanonical: null,
-    status: "failed",
-    phase,
-    message: WORKBENCH_JOB_ERROR["workbench/unreadable"],
-    affectedSpaceIds: [],
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    canCancel: false,
-    error: {
-      code: "workbench/unreadable",
-      message: WORKBENCH_JOB_ERROR["workbench/unreadable"],
-      pluginAttribution: "unknown",
-      stage: phase,
-    },
-  };
-}
-
-const SECRET_COMMAND_KEYS = new Set(["key", "apiKey", "secret", "credential", "token", "authorization"]);
-
-function parseCommand(input: unknown): WorkbenchCommand {
-  if (!isPlainObject(input)) throw new WorkbenchJobError("workbench/invalid-input");
-  assertCommandHasNoSecrets(input);
-  const kind = input.kind;
-  switch (kind) {
-    case "space.create": {
-      expectKeys(input, ["kind", "input"]);
-      return { kind, input: parseCreateInput(input.input) };
-    }
-    case "space.update": {
-      expectKeys(input, ["kind", "spaceId"], ["displayName", "icon"]);
-      return {
-        kind,
-        spaceId: parseEntityId(input.spaceId),
-        ...(input.displayName !== undefined ? { displayName: parseOptionalString(input.displayName) } : {}),
-        ...(input.icon !== undefined ? { icon: parseOptionalString(input.icon) } : {}),
-      };
-    }
-    case "space.reorder": {
-      expectKeys(input, ["kind", "spaceIds"]);
-      const spaceIds = parseStringArray(input.spaceIds);
-      if (!spaceIds) throw new WorkbenchJobError("workbench/invalid-input");
-      for (const spaceId of spaceIds) parseEntityId(spaceId);
-      return { kind, spaceIds };
-    }
-    case "space.start": {
-      expectKeys(input, ["kind", "spaceId"]);
-      return { kind, spaceId: parseEntityId(input.spaceId) };
-    }
-    case "plan.execute": {
-      expectKeys(input, ["kind", "planId"]);
-      return { kind, planId: parseEntityId(input.planId) };
-    }
-    case "controller.acquire":
-    case "recovery.resume":
-    case "space.verify":
-      throw new WorkbenchJobError("workbench/unsupported");
-    case "llm.apply": {
-      expectKeys(input, ["kind", "spaceIds", "catalogRevision", "observations"]);
-      const spaceIds = parseStringArray(input.spaceIds);
-      if (!spaceIds || spaceIds.length === 0) throw new WorkbenchJobError("workbench/invalid-input");
-      for (const spaceId of spaceIds) parseEntityId(spaceId);
-      if (!Number.isInteger(input.catalogRevision) || Number(input.catalogRevision) < 0) {
-        throw new WorkbenchJobError("workbench/invalid-input");
-      }
-      const observations = parseApplyObservations(input.observations);
-      return {
-        kind,
-        spaceIds,
-        catalogRevision: Number(input.catalogRevision),
-        observations,
-      };
-    }
-    default:
-      if (typeof kind === "string" && isWorkbenchProductCommand({ kind })) {
-        try {
-          return parseWorkbenchProductCommand(input);
-        } catch {
-          throw new WorkbenchJobError("workbench/invalid-input");
-        }
-      }
-      throw new WorkbenchJobError("workbench/invalid-input");
-  }
-}
-
-function parseApplyObservations(value: unknown): Extract<WorkbenchCommand, { kind: "llm.apply" }>["observations"] {
-  if (!Array.isArray(value)) throw new WorkbenchJobError("workbench/invalid-input");
-  return value.map((item) => {
-    if (!isPlainObject(item)) throw new WorkbenchJobError("workbench/invalid-input");
-    expectKeys(item, ["spaceId", "status", "generation", "catalogRevision", "busy", "serviceEpoch"]);
-    parseEntityId(item.spaceId);
-    const status = item.status;
-    if (
-      status !== "running" &&
-      status !== "starting" &&
-      status !== "stopping" &&
-      status !== "stopped" &&
-      status !== "crashed" &&
-      status !== "unknown"
-    ) {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    if (typeof item.busy !== "boolean" || !Number.isInteger(item.generation)) {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    if (item.catalogRevision !== null && (!Number.isInteger(item.catalogRevision) || Number(item.catalogRevision) < 0)) {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    if (typeof item.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(item.serviceEpoch)) {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    return {
-      spaceId: String(item.spaceId),
-      status,
-      generation: Number(item.generation),
-      catalogRevision: item.catalogRevision === null ? null : Number(item.catalogRevision),
-      busy: item.busy,
-      serviceEpoch: item.serviceEpoch,
-    };
-  });
-}
-
-function assertCommandHasNoSecrets(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const item of value) assertCommandHasNoSecrets(item);
-    return;
-  }
-  if (!isPlainObject(value)) return;
-  for (const [key, nested] of Object.entries(value)) {
-    if (SECRET_COMMAND_KEYS.has(key)) {
-      throw new WorkbenchJobError("workbench/invalid-input");
-    }
-    assertCommandHasNoSecrets(nested);
-  }
-}
-
-function parseCreateInput(input: unknown): { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } {
-  if (!isPlainObject(input)) throw new WorkbenchJobError("workbench/invalid-input");
-  expectKeys(input, ["name"], ["displayName", "icon", "useSharedLlm", "modelSource", "browser", "base", "baseVersion"]);
-  const name = parseOptionalString(input.name);
-  if (!name) throw new WorkbenchJobError("workbench/invalid-input");
-  const parsed: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } = { name };
-  if(input.modelSource!==undefined){if(!['main','shared','local'].includes(String(input.modelSource))||input.useSharedLlm!==undefined)throw new WorkbenchJobError('workbench/invalid-input');parsed.modelSource=input.modelSource as 'main'|'shared'|'local';}
-  if (input.displayName !== undefined) parsed.displayName = parseOptionalString(input.displayName);
-  if (input.icon !== undefined) parsed.icon = parseOptionalString(input.icon);
-  if (input.useSharedLlm !== undefined) {
-    if (typeof input.useSharedLlm !== "boolean") throw new WorkbenchJobError("workbench/invalid-input");
-    parsed.useSharedLlm = input.useSharedLlm;
-  }
-  if (input.base !== undefined) {
-    if (input.base !== 'web' && input.base !== 'browser') throw new WorkbenchJobError('workbench/invalid-input');
-    parsed.base = input.base;
-  }
-  if (input.baseVersion !== undefined) {
-    if (typeof input.baseVersion !== 'string' || !isExactRuntimeVersion(input.baseVersion)) throw new WorkbenchJobError('workbench/invalid-input');
-    parsed.baseVersion = input.baseVersion;
-  }
-  if (input.browser !== undefined) {
-    if (typeof input.browser !== "boolean") throw new WorkbenchJobError("workbench/invalid-input");
-    parsed.browser = input.browser;
-  }
-  return parsed;
-}
 
 function parseRequestId(value: unknown): string {
   if (typeof value !== "string" || !REQUEST_ID_RE.test(value)) {
     throw new WorkbenchJobError("workbench/invalid-input");
   }
-  return value;
-}
-
-function parseEntityId(value: unknown): string {
-  if (typeof value !== "string" || !ENTITY_ID_RE.test(value)) {
-    throw new WorkbenchJobError("workbench/invalid-input");
-  }
-  return value;
-}
-
-function parseOptionalString(value: unknown): string {
-  if (typeof value !== "string") throw new WorkbenchJobError("workbench/invalid-input");
   return value;
 }
 
@@ -1061,72 +592,6 @@ function parseMessage(value: unknown): string {
   return value;
 }
 
-function parseStatus(value: unknown): JobStatus | undefined {
-  if (
-    value === "queued" ||
-    value === "running" ||
-    value === "succeeded" ||
-    value === "failed" ||
-    value === "cancelled"
-  ) {
-    return value;
-  }
-  return undefined;
-}
-
-function parseStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return undefined;
-  return [...value];
-}
-
-function expectKeys(
-  value: Record<string, unknown>,
-  required: string[],
-  optional: string[] = [],
-): void {
-  const allowed = new Set([...required, ...optional]);
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw new WorkbenchJobError("workbench/invalid-input");
-  }
-  for (const key of required) {
-    if (!(key in value)) throw new WorkbenchJobError("workbench/invalid-input");
-  }
-}
-
-function affectedSpaceIds(command: WorkbenchCommand): string[] {
-  switch (command.kind) {
-    case "space.update":
-    case "space.start":
-    case "template.save":
-      return [command.spaceId];
-    case "space.reorder":
-      return [...command.spaceIds];
-    case "llm.apply":
-      return [...command.spaceIds];
-    default:
-      return [];
-  }
-}
-
-function canonicalize(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (isPlainObject(value)) {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value).sort()) out[key] = sortKeys(value[key]);
-    return out;
-  }
-  return value;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
 
 function isAbortError(error: unknown): boolean {
   return Boolean(
@@ -1141,66 +606,3 @@ function isEnoent(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "ENOENT");
 }
 
-function isJobErrorCode(value: string): value is WorkbenchJobErrorCode {
-  return Object.prototype.hasOwnProperty.call(WORKBENCH_JOB_ERROR, value);
-}
-
-function isLlmErrorCode(value: string): value is LlmErrorCode {
-  return Object.values(LLM_ERROR).some(code => code === value);
-}
-
-function isLoopbackOrigin(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "http:") return false;
-  if (url.hostname !== "127.0.0.1") return false;
-  if (url.username !== "" || url.password !== "") return false;
-  if (url.search !== "" || url.hash !== "") return false;
-  if (url.port === "") return false;
-  return value === `http://127.0.0.1:${url.port}`;
-}
-
-function isSupervisorEntryPath(value: string): boolean {
-  if (!value.startsWith("/") || value.startsWith("//")) return false;
-  if (value.includes("\\") || value.includes("://") || value.includes("..")) return false;
-  let url: URL;
-  try {
-    url = new URL(value, "http://127.0.0.1");
-  } catch {
-    return false;
-  }
-  if (url.origin !== "http://127.0.0.1") return false;
-  if (url.username !== "" || url.password !== "") return false;
-  if (url.search !== "" || url.hash !== "") return false;
-  return value === url.pathname;
-}
-
-function stableRecordJson(record: StoredJob): string {
-  return JSON.stringify(record);
-}
-
-export function sanitizeJobText(text: string): string {
-  if (!text) return "";
-  // DSH appends an install suggestion to this diagnostic. Keep the failure,
-  // without presenting the upstream suggestion as a Spaces recovery workflow.
-  if (/^dsh: cannot resolve profile bundle\b/.test(text)) {
-    text = text.replace(/\s*;?\s+run ['"]dsh plugin --profile [^'"\r\n]+ install['"] if its dependency is not installed\.?\s*$/i, "");
-  }
-  return redactPublicReason(text, 2000)
-    .replace(/\b(authorization|cookie|set-cookie|token)\s*[:=]\s*[^\s;]+/gi, "$1=[redacted]")
-    .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
-    .replace(/file:\/+[^\s"'\\]+/gi, "[path]")
-    .replace(/\b[A-Za-z]:\\[^\s"'`]+/g, "[path]")
-    .replace(/\\\\[^\s"'`]+/g, "[path]")
-    .replace(/(?:^|[\s"'`(])(\/(?:[\w.+-]+\/)+[\w.+-]+)/g, (full, path: string) =>
-      full.replace(path, "[path]"),
-    );
-}
-
-export function publicJobKeys(): readonly string[] {
-  return PUBLIC_JOB_KEYS;
-}

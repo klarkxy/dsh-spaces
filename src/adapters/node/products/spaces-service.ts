@@ -1,10 +1,7 @@
 import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
-import { type ChildProcess } from "node:child_process";
-import { spawnObserved } from "../runtime/owned-process-record";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   compareScannedProfiles,
   defaultSpaceMeta,
@@ -20,11 +17,8 @@ import {
   SESSION_ROW_ID,
   STORAGE_ROW_ID,
   assertDumpPatched,
-  isExpectedIsolationRoot,
 } from "../profile/patch-writer";
 import { ProfileRegistry } from "../profile/profile-registry";
-import { terminateProcessTree } from "../runtime/terminate-process";
-import { isExactRuntimeVersion } from "../../../shared/runtime";
 import { SNAPSHOT_ID_RE } from "../../../shared/snapshots";
 import type {
   CreateSpaceInput,
@@ -35,103 +29,68 @@ import type {
   SpacesMode,
   SpacesOverview,
 } from "../../../shared/spaces-control";
-import { PROFILE_NAME_RE, SPACE_ID_RE, SPACE_NAME_RE, RESERVED_PROFILE_NAMES, spaceIdFromName, type SpaceMeta } from "../../../shared/types";
+import { SPACE_ID_RE, spaceIdFromName, type SpaceMeta } from "../../../shared/types";
 import {
-  HomeLockBusyError,
   HomeOperationLock,
   type HomeLockInspect,
 } from "../home/home-operation-lock";
+import {
+  CliInterruptedError,
+  DEFAULT_CLI_TIMEOUT_MS,
+  bindDshCli,
+  invocationProfile,
+  isCompatibleDshCliVersion,
+  spawnBoundCli,
+  type BoundCliResult,
+  type BoundCliRunner,
+  type BoundRuntime,
+} from "./spaces-service/cli";
+import {
+  DIAGNOSTIC,
+  SpacesPublicError,
+  parseCreateInput,
+  parseSpaceId,
+  toPublic,
+} from "./spaces-service/public-errors";
+import {
+  assertLexicalInside,
+  canonicalExisting,
+  formatLiveRoot,
+  inside,
+  isDefaultIsolationRoot,
+  lexists,
+  matchesIsolation,
+  profileDirFromBaseUrl,
+  projectedInside,
+  publicPluginName,
+  publicPluginVersion,
+  readSnapshotManifest,
+  safeDisplayName,
+  sameContainedPath,
+  samePath,
+} from "./spaces-service/paths";
 
-/** Fixture exact version for tests. Not a product allowlist. */
-export const COMPATIBLE_DSH_CLI_VERSION = "0.1.5-rc.1";
+export {
+  COMPATIBLE_DSH_CLI_VERSION,
+  isCompatibleDshCliVersion,
+  DSH_CLI_PACKAGE,
+  CLI_OUTPUT_CAP,
+  DEFAULT_CLI_TIMEOUT_MS,
+  invocationProfile,
+  bindDshCli,
+  spawnBoundCli,
+} from "./spaces-service/cli";
+export type { BoundCliResult, BoundCliRunner } from "./spaces-service/cli";
+export {
+  PUBLIC_ERROR,
+  DIAGNOSTIC,
+  SpacesPublicError,
+  parseCreateInput,
+  parseSpaceId,
+} from "./spaces-service/public-errors";
+export type { SpacesErrorCode } from "./spaces-service/public-errors";
 
-/** Any exact npm version can bind. Tags, ranges, and junk stay out. */
-export function isCompatibleDshCliVersion(version: string): boolean {
-  return isExactRuntimeVersion(version);
-}
-
-export const DSH_CLI_PACKAGE = "@deepseek-ai/dsh";
 export const MUTATION_JOURNAL_NAME = ".dsh-spaces-mutation.json";
-export const CLI_OUTPUT_CAP = 256 * 1024;
-export const DEFAULT_CLI_TIMEOUT_MS = 60_000;
-
-export const PUBLIC_ERROR = {
-  "spaces/invalid-input": "The request is not a valid space operation.",
-  "spaces/not-found": "That space was not found.",
-  "spaces/host-denied": "The current host space cannot be modified this way.",
-  "spaces/read-only": "Spaces are read-only until the host identity and runtime are confirmed.",
-  "spaces/unavailable": "A previous space operation did not finish. Recovery is required.",
-  "spaces/locked": "Another space operation is already running.",
-  "spaces/already-exists": "A space with that name already exists.",
-} as const;
-
-export type SpacesErrorCode = keyof typeof PUBLIC_ERROR;
-
-export const DIAGNOSTIC = {
-  hostIdentityUnconfirmed: {
-    code: "HOST_IDENTITY_UNCONFIRMED",
-    message: "Host identity could not be confirmed from DSH home, loader root, and invocation profile.",
-  },
-  runtimeUnbound: {
-    code: "RUNTIME_UNBOUND",
-    message: "The bound DSH CLI could not be validated from the current process.",
-  },
-  runtimeIncompatible: {
-    code: "RUNTIME_INCOMPATIBLE",
-    message: "The bound DSH CLI is not an exact installed version.",
-  },
-  loaderMissing: {
-    code: "LOADER_MISSING",
-    message: "Required loader service is not available.",
-  },
-  liveConfigUnverified: {
-    code: "LIVE_CONFIG_UNVERIFIED",
-    message: "Current host configuration roots could not be verified.",
-  },
-  recoveryNeeded: {
-    code: "RECOVERY_NEEDED",
-    message: "A previous space mutation did not finish.",
-  },
-  lockHeld: {
-    code: "LOCK_HELD",
-    message: "A home operation lock is already held.",
-  },
-  lockResidue: {
-    code: "LOCK_RESIDUE",
-    message: "A home operation lock is incomplete or ambiguous and was not stolen.",
-  },
-  snapshotsUnavailable: {
-    code: "SNAPSHOTS_UNAVAILABLE",
-    message: "Snapshot metadata is unavailable because no snapshot root is configured.",
-  },
-  snapshotsUnreadable: {
-    code: "SNAPSHOTS_UNREADABLE",
-    message: "Configured snapshot root could not be read safely.",
-  },
-  registryCorrupt: {
-    code: "REGISTRY_CORRUPT",
-    message: "The spaces registry could not be read safely.",
-  },
-} as const;
-
-const DISPLAY_NAME_MAX = 80;
-const DSH_HOME_PATH_RE = /^dshHomePath\(\s*(['"])([^'"]+)\1\s*\)$/;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const UNCREATABLE = new Set<string>([...RESERVED_PROFILE_NAMES, "desktop", "acp", "sdk", "sdk-minimal"]);
-
-export class SpacesPublicError extends Error {
-  readonly name = "SpacesPublicError";
-  constructor(
-    readonly code: SpacesErrorCode,
-    message: string = PUBLIC_ERROR[code],
-  ) {
-    super(message);
-  }
-}
-
-class CliInterruptedError extends Error {
-  readonly name = "CliInterruptedError";
-}
 
 export interface SpacesLoaderEntry {
   id?: string;
@@ -149,13 +108,6 @@ export interface SpacesLoaderView {
   entries(): Iterable<SpacesLoaderEntry>;
 }
 
-export interface BoundCliResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-export type BoundCliRunner = (args: readonly string[]) => Promise<BoundCliResult>;
 
 /** Trusted Supervisor-only creation recipe; paths and executable selection never come from RPC. */
 export interface SpaceCreationRecipe {
@@ -197,10 +149,6 @@ interface MutationJournal {
 
 type JournalState = { kind: "absent" } | { kind: "blocked" } | { kind: "record"; record: MutationJournal };
 
-interface BoundRuntime {
-  bin: string;
-  version: string;
-}
 
 interface HostIdentity {
   home: string | null;
@@ -215,6 +163,7 @@ interface SafeProfile {
 }
 
 type IsolationOutcome = "valid" | "invalid" | "interrupted";
+
 
 /**
  * Node control-plane for Host and tests. Binds CLI to process.argv[1] only.
@@ -875,354 +824,3 @@ export class NodeSpacesService implements SpacesApi {
   }
 }
 
-export function parseCreateInput(input: CreateSpaceInput): { name: string; displayName: string } {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    throw new SpacesPublicError("spaces/invalid-input");
-  }
-  const keys = Object.keys(input as object);
-  for (const key of keys) {
-    if (key !== "name" && key !== "displayName") {
-      throw new SpacesPublicError("spaces/invalid-input", "The request contains unsupported fields.");
-    }
-  }
-  if (typeof input.name !== "string") throw new SpacesPublicError("spaces/invalid-input");
-  const name = input.name;
-  if (!SPACE_NAME_RE.test(name) || name.trim() !== name || UNCREATABLE.has(name) ||
-    (process.platform === "win32" && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))) {
-    throw new SpacesPublicError("spaces/invalid-input");
-  }
-  if (input.displayName !== undefined) {
-    if (typeof input.displayName !== "string") throw new SpacesPublicError("spaces/invalid-input");
-    const displayName = input.displayName.trim();
-    if (!displayName || displayName.length > DISPLAY_NAME_MAX || /[\u0000-\u001f\\/]/.test(displayName)) {
-      throw new SpacesPublicError("spaces/invalid-input");
-    }
-    return { name, displayName };
-  }
-  return { name, displayName: name };
-}
-
-export function parseSpaceId(id: string): string {
-  if (typeof id !== "string" || id.includes("/") || id.includes("\\") || id.includes("..") || id.includes("\0")) {
-    throw new SpacesPublicError("spaces/not-found");
-  }
-  if (id !== "web" && !PROFILE_NAME_RE.test(id)) throw new SpacesPublicError("spaces/not-found");
-  return id;
-}
-
-export function invocationProfile(argv: readonly string[]): string | null {
-  const desktop = desktopHostRuntime(argv[1] ?? "");
-  if (desktop) {
-    try {
-      if (argv.length < 4 || realpathSync(argv[2]) !== desktop.root ||
-          !/[/\\]profiles[/\\]desktop$/.test(resolve(argv[3]))) return null;
-      return "desktop";
-    } catch { return null; }
-  }
-  const args = argv.slice(2);
-  for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === "--profile") {
-      const name = args[i + 1];
-      if (!name || name.startsWith("-")) return null;
-      return name;
-    }
-  }
-  if (args[0] === "web") return "web";
-  return null;
-}
-
-export function bindDshCli(argv1: string): BoundRuntime | null {
-  const desktop = desktopHostRuntime(argv1);
-  if (desktop) {
-    const cli = bindDshCli(join(desktop.root, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
-    return cli?.version === desktop.version ? cli : null;
-  }
-  try {
-    const bin = resolve(argv1);
-    const realBin = realpathSync(bin);
-    if (!lstatSync(realBin).isFile()) return null;
-    const manifestPath = join(dirname(bin), "..", "package.json");
-    const manifestStat = lstatSync(manifestPath);
-    if (manifestStat.isSymbolicLink() || !manifestStat.isFile()) return null;
-    const realManifest = realpathSync(manifestPath);
-    const pkg = JSON.parse(readFileSync(realManifest, "utf8")) as { name?: unknown; version?: unknown };
-    if (pkg.name !== DSH_CLI_PACKAGE) return null;
-    if (typeof pkg.version !== "string" || !isExactRuntimeVersion(pkg.version)) return null;
-    return { bin: realBin, version: pkg.version };
-  } catch {
-    return null;
-  }
-}
-
-/** Official Desktop's own argv entry and bundled runtime, never a renderer brand flag. */
-function desktopHostRuntime(entry: string): { root: string; version: string } | null {
-  try {
-    const bin = realpathSync(resolve(entry));
-    if (!bin.endsWith(join("dsh-desktop-host", "lib", "index.js")) || !lstatSync(bin).isFile()) return null;
-    const manifest = join(dirname(bin), "..", "package.json");
-    if (lstatSync(manifest).isSymbolicLink()) return null;
-    const pkg = JSON.parse(readFileSync(manifest, "utf8"));
-    if (pkg.name !== "@deepseek-ai/dsh-desktop-host" || !isExactRuntimeVersion(pkg.version)) return null;
-    const root = realpathSync(resolve(dirname(bin), "../../../.."));
-    return { root, version: pkg.version };
-  } catch { return null; }
-}
-
-export function spawnBoundCli(
-  execPath: string,
-  bin: string,
-  home: string,
-  env: NodeJS.ProcessEnv,
-  args: readonly string[],
-  timeoutMs = DEFAULT_CLI_TIMEOUT_MS,
-): Promise<BoundCliResult> {
-  return new Promise((resolveRun, reject) => {
-    const child = spawnObserved(execPath, [bin, ...args], {
-      env: { ...env, DSH_HOME: home },
-      windowsHide: true,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      void finishInterrupted(child);
-    }, timeoutMs);
-    const take = (current: string, chunk: Buffer): string => {
-      if (current.length >= CLI_OUTPUT_CAP) return current;
-      const text = chunk.toString("utf8");
-      const room = CLI_OUTPUT_CAP - current.length;
-      return current + (text.length > room ? text.slice(0, room) : text);
-    };
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout = take(stdout, chunk);
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr = take(stderr, chunk);
-    });
-    child.on("error", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new CliInterruptedError());
-    });
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (timedOut) reject(new CliInterruptedError());
-      else resolveRun({ stdout, stderr, code: code ?? 1 });
-    });
-
-    async function finishInterrupted(owned: ChildProcess): Promise<void> {
-      try {
-        await terminateProcessTree(owned);
-      } catch {
-        try {
-          owned.kill();
-        } catch {
-          /* still wait for close */
-        }
-      }
-      if (owned.exitCode !== null || owned.signalCode !== null) {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          reject(new CliInterruptedError());
-        }
-        return;
-      }
-      owned.once("close", () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(new CliInterruptedError());
-      });
-    }
-  });
-}
-
-function toPublic(error: unknown, fallback: SpacesErrorCode): SpacesPublicError {
-  if (error instanceof SpacesPublicError) return error;
-  if (error instanceof HomeLockBusyError) return new SpacesPublicError("spaces/locked");
-  if (error instanceof CliInterruptedError) return new SpacesPublicError("spaces/unavailable");
-  return new SpacesPublicError(fallback);
-}
-
-function profileDirFromBaseUrl(baseUrl: string | undefined): string | null {
-  if (typeof baseUrl !== "string" || !baseUrl.trim()) return null;
-  try {
-    const asUrl = baseUrl.includes("://") ? fileURLToPath(baseUrl) : resolve(baseUrl);
-    const resolved = resolve(asUrl);
-    return existsSync(resolved) ? realpathSync(resolved) : resolved;
-  } catch {
-    return null;
-  }
-}
-
-function sameContainedPath(expected: string, actual: string, home: string): boolean {
-  try {
-    const left = existsSync(expected) ? realpathSync(expected) : resolve(expected);
-    const right = existsSync(actual) ? realpathSync(actual) : resolve(actual);
-    if (!inside(home, left) || !inside(home, right)) return false;
-    return samePath(left, right);
-  } catch {
-    return false;
-  }
-}
-
-function assertLexicalInside(root: string, target: string): void {
-  if (!inside(root, resolve(target))) throw new SpacesPublicError("spaces/invalid-input");
-}
-
-function inside(root: string, target: string): boolean {
-  const r = comparablePath(root);
-  const t = comparablePath(target);
-  if (samePath(r, t)) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return t.startsWith(prefix);
-}
-
-function comparablePath(path: string): string {
-  const normalized = resolve(path);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
-}
-
-function samePath(a: string, b: string): boolean { return comparablePath(a) === comparablePath(b); }
-
-function lexists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-function canonicalExisting(root: string, target: string): string | null {
-  try {
-    const resolved = resolve(target);
-    if (!inside(root, resolved) && !samePath(root, resolved)) return null;
-    if (!lexists(resolved)) return null;
-    const real = realpathSync(resolved);
-    if (!inside(root, real) && !samePath(root, real)) return null;
-    return real;
-  } catch {
-    return null;
-  }
-}
-
-function projectedInside(root: string, target: string): boolean {
-  try {
-    const resolved = resolve(target);
-    if (!inside(root, resolved)) return false;
-    let current = resolved;
-    while (!lexists(current)) {
-      const parent = dirname(current);
-      if (parent === current) return false;
-      current = parent;
-    }
-    const realAncestor = realpathSync(current);
-    if (!inside(root, realAncestor) && !samePath(root, realAncestor)) return false;
-    const suffix = resolved.slice(resolve(current).length);
-    const projected = join(realAncestor, suffix.replace(/^[\\/]/, ""));
-    return inside(root, projected) || samePath(root, projected);
-  } catch {
-    return false;
-  }
-}
-
-function formatLiveRoot(root: unknown): string | null {
-  if (typeof root === "string") {
-    if (root.startsWith("!!js ")) return root;
-    if (DSH_HOME_PATH_RE.test(root.trim())) return `!!js ${root.trim()}`;
-    return JSON.stringify(root);
-  }
-  if (root && typeof root === "object" && "__jsExpr" in root && typeof (root as { __jsExpr: unknown }).__jsExpr === "string") {
-    return `!!js ${(root as { __jsExpr: string }).__jsExpr}`;
-  }
-  return null;
-}
-
-function isDefaultIsolationRoot(actual: string, kind: "sessions" | "storages", home: string | null): boolean {
-  if (actual.startsWith("!!js ")) {
-    const match = actual.slice(5).trim().match(DSH_HOME_PATH_RE);
-    return match?.[2] === kind;
-  }
-  if (!home) return false;
-  try {
-    const path = actual.startsWith('"') ? (JSON.parse(actual) as string) : actual;
-    return samePath(path, join(home, kind));
-  } catch {
-    return false;
-  }
-}
-
-function matchesIsolation(
-  actual: string,
-  name: string,
-  kind: "sessions" | "storages",
-  home: string | null,
-): boolean {
-  if (isExpectedIsolationRoot(actual, name, kind)) return true;
-  if (!home) return false;
-  try {
-    const path = actual.startsWith('"') ? (JSON.parse(actual) as string) : actual;
-    return samePath(path, join(home, "hub", name, kind));
-  } catch {
-    return false;
-  }
-}
-
-function publicPluginName(name: string): string | null {
-  if (!/^(@[a-z0-9-~._]+\/)?[a-z0-9-~._]+$/i.test(name)) return null;
-  if (name.includes("..") || name.includes("\\") || name.includes(":")) return null;
-  return name;
-}
-
-function publicPluginVersion(spec: unknown): string | null {
-  if (typeof spec !== "string") return null;
-  if (/[\\/]|file:|git\+|github:|:\/\/|token|password|login/i.test(spec)) return null;
-  return isExactRuntimeVersion(spec) ? spec : null;
-}
-
-function safeDisplayName(value: string, fallback: string): string {
-  const text = value.trim();
-  if (!text || text.length > DISPLAY_NAME_MAX || /[\u0000-\u001f\\/]/.test(text)) return fallback;
-  return text;
-}
-
-function isIsoTimestamp(value: string): boolean {
-  return ISO_DATE_RE.test(value) && !Number.isNaN(Date.parse(value));
-}
-
-function readSnapshotManifest(
-  raw: string,
-  id: string,
-  home: string,
-  spaceId: string,
-): { id: string; createdAt: string; runtimeVersion: string | null } | null {
-  try {
-    const parsed = JSON.parse(raw) as {
-      id?: unknown;
-      createdAt?: unknown;
-      runtimeVersion?: unknown;
-      home?: unknown;
-      profiles?: unknown;
-    };
-    if (typeof parsed.home !== "string" || !samePath(parsed.home, home)) return null;
-    if (!Array.isArray(parsed.profiles) || !parsed.profiles.includes(spaceId)) return null;
-    if (typeof parsed.createdAt !== "string" || !isIsoTimestamp(parsed.createdAt)) return null;
-    const runtimeVersion =
-      typeof parsed.runtimeVersion === "string" && isExactRuntimeVersion(parsed.runtimeVersion)
-        ? parsed.runtimeVersion
-        : null;
-    return { id, createdAt: parsed.createdAt, runtimeVersion };
-  } catch {
-    return null;
-  }
-}
