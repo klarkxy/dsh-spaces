@@ -434,7 +434,10 @@ export class ProcessManager {
       this.emit(name, "starting", { port });
 
       const child = this.runtime.spawn(
-        [bin, "--profile", name, "--no-open", "--host", "127.0.0.1", "--port", String(port)],
+        // The official Desktop host runs DSH with --expose-internals; without it
+        // dsh-hmr/cordis-plugin-loader fall back to node-addon-require-builtin,
+        // which blocks the child event loop for seconds right after it announces its URL.
+        ["--expose-internals", bin, "--profile", name, "--no-open", "--host", "127.0.0.1", "--port", String(port)],
         {
           env: { DSH_HOME: this.dshHome, ...this.runtime.extraEnv?.(name) },
           stdio: ["ignore", "pipe", "pipe"],
@@ -459,7 +462,7 @@ export class ProcessManager {
       stage = "endpoint";
       instance.url = await waitForDshEndpoint(child, port, abort.signal, this.runtime.readyTimeoutMs);
       stage = "auth";
-      const cookie = await dshSessionCookie(instance.url, this.runtime.fetch, fetchSignal(abort.signal, this.runtime.fetchTimeoutMs));
+      const cookie = await dshSessionCookie(instance.url, this.runtime.fetch, fetchSignal(abort.signal, Math.max(1, this.runtime.readyTimeoutMs - (Date.now() - readyAt))));
       stage = "api";
       if (this.runtime.base?.(name) === 'browser') {
         await dshBrowserReady(port, this.runtime.fetch, fetchSignal(abort.signal, this.runtime.fetchTimeoutMs), cookie);

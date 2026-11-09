@@ -31,22 +31,30 @@ if (mode === "hang") {
       process.stderr.write("y".repeat(32) + "\\n");
     }, 10);
   }
+  const authed = mode === "auth" || mode === "slow-auth";
   const server = http.createServer((req, res) => {
     if (mode === "slow-api") return;
-    if (mode === "auth" && req.url === '/?token=fixture-launch-secret') {
-      res.writeHead(303, { location: '/', 'set-cookie': 'dsh-auth-fixture=session-cookie; HttpOnly; Path=/' });
-      return res.end();
+    if (authed && req.url === '/?token=fixture-launch-secret') {
+      const respond = () => {
+        res.writeHead(303, { location: '/', 'set-cookie': 'dsh-auth-fixture=session-cookie; HttpOnly; Path=/' });
+        res.end();
+      };
+      if (mode === "slow-auth") {
+        console.log('token-request');
+        return setTimeout(respond, Number(process.env.DSH_TEST_AUTH_DELAY_MS) || 0);
+      }
+      return respond();
     }
-    if (mode === "auth" && req.headers.cookie !== 'dsh-auth-fixture=session-cookie') {
+    if (authed && req.headers.cookie !== 'dsh-auth-fixture=session-cookie') {
       res.writeHead(401); return res.end('authentication required');
     }
-    if (mode === "auth" && req.url === '/api/session.list') {
+    if (authed && req.url === '/api/session.list') {
       res.writeHead(404); return res.end('not found');
     }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ result: { ok: true } }));
   });
-  server.listen(port, "127.0.0.1", () => console.log('dsh web: http://127.0.0.1:' + port + (mode === "auth" ? '/?token=fixture-launch-secret' : '')));
+  server.listen(port, "127.0.0.1", () => console.log('dsh web: http://127.0.0.1:' + port + (authed ? '/?token=fixture-launch-secret' : '')));
 }
 `;
 
@@ -163,6 +171,56 @@ test("authenticated runtime exchanges its launch token and keeps it out of statu
     await processes.stop("web");
     assert.equal(processes.urlOf("web"), undefined);
   }, { mode: "auth" });
+});
+
+test("launch token exchange slower than the fetch timeout completes within the readiness deadline", async () => {
+  await withManager(async processes => {
+    const logs: string[] = [];
+    processes.onLog((_name, _stream, text) => logs.push(text));
+    await processes.start("web");
+    assert.equal(processes.statusOf("web"), "running");
+    assert.equal(logs.filter(line => line.includes("token-request")).length, 1);
+  }, {
+    mode: "slow-auth",
+    runtime: runtime("slow-auth", {
+      fetchTimeoutMs: 400,
+      readyTimeoutMs: 5_000,
+      extraEnv: () => ({ DSH_TEST_AUTH_DELAY_MS: "900" }),
+    }),
+  });
+});
+
+test("launch token exchange is one request bounded by the remaining readiness time", async () => {
+  await withManager(async processes => {
+    const logs: string[] = [];
+    processes.onLog((_name, _stream, text) => logs.push(text));
+    await assert.rejects(processes.start("web"));
+    assert.notEqual(processes.statusOf("web"), "running");
+    assert.equal(logs.filter(line => line.includes("token-request")).length, 1);
+  }, {
+    mode: "slow-auth",
+    runtime: runtime("slow-auth", {
+      fetchTimeoutMs: 400,
+      readyTimeoutMs: 1_500,
+      extraEnv: () => ({ DSH_TEST_AUTH_DELAY_MS: "4000" }),
+    }),
+  });
+});
+
+test("DSH children are launched with --expose-internals before the CLI script", async () => {
+  let seen: string[] = [];
+  await withManager(async processes => {
+    await processes.start("web");
+    assert.equal(processes.statusOf("web"), "running");
+  }, {
+    runtime: runtime("ok", {
+      spawn: (args, options) => {
+        seen = args.slice();
+        return spawnMode("ok")(args, options);
+      },
+    }),
+  });
+  assert.deepEqual(seen.slice(0, 2), ["--expose-internals", "bin.js"]);
 });
 
 test("parallel spaces share dependency preparation and maintenance invalidates it", async () => {
