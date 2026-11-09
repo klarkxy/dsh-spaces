@@ -11,15 +11,12 @@ import {
 } from "../../../src/adapters/node/maintenance/workbench-jobs.ts";
 import { HomeOperationLock, type HomeLockInspect } from "../../../src/adapters/node/home/home-operation-lock.ts";
 import { normalizeSpacesFile } from "../../../src/core/domain/registry.ts";
-import { RESTORE_STAGE_DIR } from "../../../src/shared/snapshots.ts";
 import { PROFILE_NAME_RE, type SpacesFile } from "../../../src/shared/types.ts";
 import {
   CONTROL_INSTANCES_DIR,
   MUTATION_JOURNAL,
   PLUGIN_MUTATION_FILE,
   PLUGIN_MUTATION_FILES_DIR,
-  UPGRADE_JOURNAL_FILE,
-  UPGRADE_STAGE_DIR,
   containedPath,
   exactChildDir,
   inspectNamedDir,
@@ -95,45 +92,6 @@ export function readMutationJournal(home: string): Json | null {
     return { present: true, op, phase, spaceId };
   } catch {
     return { present: true, unreadable: true };
-  }
-}
-
-export function readRestoreJournal(home: string): Json {
-  const stage = join(home, RESTORE_STAGE_DIR);
-  const dirState = inspectNamedDir(stage);
-  if (dirState === "missing" && inspectNamedFile(join(stage, "journal.json")) === "missing") return { needed: false };
-  if (dirState === "unreadable") return { needed: true, unreadable: true, code: "UNREADABLE" };
-  if (dirState !== "ok" && dirState !== "missing") return { needed: true, unreadable: true };
-  const file = containedPath(home, [RESTORE_STAGE_DIR, "journal.json"], "file");
-  if (!file) {
-    const journalState = inspectNamedFile(join(stage, "journal.json"));
-    if (journalState === "missing") return { needed: false };
-    return { needed: true, unreadable: true };
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { phase?: unknown };
-    const phase =
-      parsed.phase === "copying" || parsed.phase === "swapping" || parsed.phase === "swapped" ? parsed.phase : "unknown";
-    return phase === "unknown" ? { needed: true, phase, unreadable: true } : { needed: true, phase };
-  } catch {
-    return { needed: true, unreadable: true };
-  }
-}
-
-export function readUpgradeJournal(home: string): Json {
-  const path = join(home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
-  const dirState = inspectNamedDir(join(home, UPGRADE_STAGE_DIR));
-  if (dirState === "missing" && inspectNamedFile(path) === "missing") return { needed: false };
-  if (dirState === "unreadable") return { needed: true, unreadable: true, code: "UNREADABLE" };
-  const fileState = inspectNamedFile(path);
-  if (fileState === "missing") return { needed: false };
-  if (fileState !== "ok") return { needed: true, unreadable: true, code: fileState.toUpperCase() };
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as { phase?: unknown };
-    if (parsed.phase === "preparing" || parsed.phase === "committing") return { needed: true, phase: parsed.phase };
-    return { needed: true, phase: "unknown", unreadable: true };
-  } catch {
-    return { needed: true, unreadable: true };
   }
 }
 
@@ -312,8 +270,6 @@ export function readInstances(home: string): { public: Json; rows: InstanceRow[]
 }
 
 export function findingsFromInspect(input: {
-  restore: Json;
-  upgrade: Json;
   plugin: Json;
   lock: Json;
   control: Json;
@@ -323,20 +279,6 @@ export function findingsFromInspect(input: {
   toolchain: Json;
 }): string[] {
   const findings: string[] = [];
-  if (input.restore.needed === true) {
-    findings.push(
-      input.restore.unreadable
-        ? "A restore journal is present and unreadable. Original bytes were left in place."
-        : "A whole-home restore journal is unfinished.",
-    );
-  }
-  if (input.upgrade.needed === true) {
-    findings.push(
-      input.upgrade.unreadable
-        ? "An upgrade journal is present and unreadable. Original bytes were left in place."
-        : "An upgrade journal is unfinished.",
-    );
-  }
   if (input.plugin.present === true) {
     findings.push(
       input.plugin.unreadable
@@ -368,8 +310,6 @@ export function inspectHome(
   cliError?: ResolvedResources["cliError"],
 ): Json {
   const lease = new HomeLease(lock.home);
-  const restore = readRestoreJournal(lock.home);
-  const upgrade = readUpgradeJournal(lock.home);
   const plugin = readPluginMutation(lock.home);
   const control = publicControl(lease.inspect());
   const manager = readManager(lease);
@@ -377,7 +317,7 @@ export function inspectHome(
   const instances = readInstances(lock.home);
   const body = {
     registry: readRegistry(lock.home),
-    journals: { mutation: readMutationJournal(lock.home), restore, upgrade, pluginMutation: plugin },
+    journals: { mutation: readMutationJournal(lock.home), pluginMutation: plugin },
     lock: publicLock(lock.inspect()),
     control,
     manager,
@@ -388,8 +328,6 @@ export function inspectHome(
     findings: [] as string[],
   };
   body.findings = findingsFromInspect({
-    restore,
-    upgrade,
     plugin,
     lock: body.lock,
     control,

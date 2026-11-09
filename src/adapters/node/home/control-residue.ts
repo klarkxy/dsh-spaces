@@ -5,8 +5,6 @@ import { HOME_CONTROL_DIR_NAME } from "./home-lease";
 import { readRuntimeRef } from "../runtime/runtime-descriptor";
 
 export const CONTROL_TOOLCHAIN_FILE = "toolchain.json";
-export const HOME_UPGRADE_STAGE_DIR = ".dsh-spaces-upgrade";
-export const HOME_UPGRADE_JOURNAL_FILE = "journal.json";
 export const HOME_MUTATION_JOURNAL = ".dsh-spaces-mutation.json";
 
 
@@ -53,9 +51,6 @@ export function hasUnfinishedMaintenance(home: string, snapshotRoot?: string): b
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
   }
   return [
-    join(root, "pending-restore.json"),
-    join(home, ".dsh-spaces-restore", "journal.json"),
-    join(home, HOME_UPGRADE_STAGE_DIR, HOME_UPGRADE_JOURNAL_FILE),
     join(home, HOME_MUTATION_JOURNAL),
     join(home, HOME_CONTROL_DIR_NAME, "plugin-mutation.json"),
     join(home, HOME_CONTROL_DIR_NAME, "workbench-upgrade.json"),

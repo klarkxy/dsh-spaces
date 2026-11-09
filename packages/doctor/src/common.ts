@@ -4,8 +4,6 @@ import { join, resolve, sep } from "node:path";
 
 export const STDOUT_LIMIT = 256 * 1024;
 export const MUTATION_JOURNAL = ".dsh-spaces-mutation.json";
-export const UPGRADE_STAGE_DIR = ".dsh-spaces-upgrade";
-export const UPGRADE_JOURNAL_FILE = "journal.json";
 export const CONTROL_TOOLCHAIN_FILE = "toolchain.json";
 export const CONTROL_INSTANCES_DIR = "instances";
 export const PLUGIN_MUTATION_FILE = "plugin-mutation.json";

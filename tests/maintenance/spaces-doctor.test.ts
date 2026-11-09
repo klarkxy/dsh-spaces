@@ -19,7 +19,6 @@ import {
   HOME_RECLAIM_DIR_NAME,
 } from "../../src/adapters/node/home/home-operation-lock.ts";
 import { MUTATION_JOURNAL_NAME } from "../../src/adapters/node/products/spaces-service.ts";
-import { RESTORE_STAGE_DIR } from "../../src/shared/snapshots.ts";
 
 const root = dirname(fileURLToPath(new URL("..", import.meta.url)));
 const cliEntry = join(root, "packages", "doctor", "src", "index.ts");
@@ -128,11 +127,6 @@ test("doctor reports registry, journals, lock, and optional CLI metadata", async
     join(home, MUTATION_JOURNAL_NAME),
     `${JSON.stringify({ version: 1, op: "create", spaceId: "coding", phase: "patch", startedAt: "2026-01-01T00:00:00.000Z" })}\n`,
   );
-  mkdirSync(join(home, RESTORE_STAGE_DIR), { recursive: true });
-  writeFileSync(
-    join(home, RESTORE_STAGE_DIR, "journal.json"),
-    `${JSON.stringify({ phase: "swapping", snapshotId: "11111111-1111-1111-1111-111111111111" })}\n`,
-  );
   const cli = writeCli(tempDir("dsh-doctor-cli-"), "0.1.5-rc.1", goodDump);
   const result = await runDoctor(["doctor", "--home", home, "--cli", cli]);
   assert.equal(result.code, 0);
@@ -141,8 +135,6 @@ test("doctor reports registry, journals, lock, and optional CLI metadata", async
   assert.deepEqual(body.registry, { status: "ok", version: 1, order: ["coding"] });
   assert.deepEqual(body.journals, {
     mutation: { present: true, op: "create", phase: "patch", spaceId: "coding" },
-    restore: { needed: true, phase: "swapping" },
-    upgrade: { needed: false },
     pluginMutation: { present: false },
   });
   assert.deepEqual(body.lock, { held: false });
@@ -156,8 +148,8 @@ test("unlock recover and rollback are unsupported and do not change Home bytes",
   mkdirSync(join(home, HOME_LOCK_DIR_NAME));
   const owner = `${JSON.stringify({ pid: 999_999_999, nonce: "dead", startedAt: "2026-01-01T00:00:00.000Z", label: "stale" })}\n`;
   writeFileSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE), owner);
-  mkdirSync(join(home, RESTORE_STAGE_DIR), { recursive: true });
-  writeFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "{}\n");
+  mkdirSync(join(home), { recursive: true });
+  writeFileSync(join(home, "journal.json"), "{}\n");
 
   for (const command of ["unlock", "recover", "rollback"] as const) {
     const result = await runDoctor([command, "--home", home]);
@@ -167,7 +159,7 @@ test("unlock recover and rollback are unsupported and do not change Home bytes",
     assert.equal(body.command, command);
   }
   assert.equal(readFileSync(join(home, HOME_LOCK_DIR_NAME, HOME_LOCK_OWNER_FILE), "utf8"), owner);
-  assert.equal(readFileSync(join(home, RESTORE_STAGE_DIR, "journal.json"), "utf8"), "{}\n");
+  assert.equal(readFileSync(join(home, "journal.json"), "utf8"), "{}\n");
 });
 
 test("verify refuses paths, web, relative cli, non-exact versions, and held locks", async () => {
