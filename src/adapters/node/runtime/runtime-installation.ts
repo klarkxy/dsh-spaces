@@ -3,7 +3,7 @@ import { assertNotRealHome } from "../home/home-guard";
 import { RuntimeStore, type RunProcessFn } from "./runtime-store";
 import { ProcessTerminationError } from "./terminate-process";
 import { setToolchainRoot } from "./toolchain";
-import type { InstalledRuntime, RuntimeRef } from "../../../shared/runtime";
+import type { InstalledRuntime } from "../../../shared/runtime";
 import type { PackageSource } from "../../../shared/types";
 
 export interface RuntimeInstallationInput {
@@ -12,7 +12,6 @@ export interface RuntimeInstallationInput {
   version: string;
   packageSource: PackageSource;
   snapshotRoot?: string;
-  legacy?: RuntimeRef;
   toolchainRoot?: string;
   /** Tests inject npm/CLI IO. Production worker omits this and uses the toolchain. */
   run?: RunProcessFn;
@@ -27,7 +26,6 @@ export async function runRuntimeInstallation(input: RuntimeInstallationInput): P
     root: input.runtimeRoot,
     snapshotRoot: input.snapshotRoot,
     source: () => input.packageSource,
-    legacy: () => input.legacy,
     run: input.run,
   });
   let journalFailed = false;

@@ -89,7 +89,6 @@ function mockRun(options: {
 function store(options: {
   root?: string;
   source?: PackageSource;
-  legacy?: { bin: string; version: string };
   run?: RunProcessFn;
   fetch?: RegistryFetcher;
 } = {}): { runtime: RuntimeStore; root: string } {
@@ -99,7 +98,6 @@ function store(options: {
     runtime: new RuntimeStore({
       root,
       source: () => options.source ?? "official",
-      legacy: () => options.legacy,
       run: options.run ?? mockRun(),
       fetch: options.fetch,
     }),
@@ -146,39 +144,12 @@ test("rejects tags, paths, and shell fragments as install versions", () => {
   assert.equal(isExactRuntimeVersion("1.0.0|id"), false);
 });
 
-test("restored runtime reports snapshot origin, including older system-labelled pointers", () => {
-  const base = tempDir("dsh-snapshot-origin-");
-  const root = join(base, "runtimes");
-  const snapshotRoot = join(base, "snapshots");
-  const bin = writeFakeCli(join(snapshotRoot, "backup", "runtime"), "1.2.3");
-  const runtime = new RuntimeStore({ root, snapshotRoot, source: () => "official", legacy: () => undefined, run: mockRun() });
-  mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "current.json"), JSON.stringify({ bin, version: "1.2.3", origin: "system" }));
-  assert.equal(runtime.current()?.origin, "snapshot");
-  const outside = writeFakeCli(join(base, "snapshots-other"), "1.2.3");
-  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: outside, version: "1.2.3", origin: "system" }));
-  assert.equal(runtime.current()?.origin, "system");
-});
-
-test("current uses legacy when the store has no selection", () => {
-  const prefix = tempDir("dsh-legacy-");
-  const bin = writeFakeCli(prefix, "0.1.1-rc.2");
-  const { runtime } = store({ legacy: { bin, version: "0.1.1-rc.2" } });
-  const current = runtime.current();
-  assert.ok(current);
-  assert.equal(current.bin, bin);
-  assert.equal(current.version, "0.1.1-rc.2");
-  assert.equal(current.origin, "system");
-  assert.deepEqual(runtime.inventory().installed, []);
-});
-
-test("install verifies the exact version and does not change current", async () => {
+test("install verifies the exact version", async () => {
   const commands: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
   const { runtime } = store({ source: "china", run: mockRun({ commands }) });
   const installed = await runtime.install("0.1.1-rc.2");
   assert.equal(installed.version, "0.1.1-rc.2");
   assert.ok(existsSync(installed.bin));
-  assert.equal(runtime.current(), undefined);
   const npm = commands.find((item) => item.args.includes("install"));
   assert.ok(npm);
   assert.ok(Array.isArray(npm.args));
@@ -195,12 +166,8 @@ test("install verifies the exact version and does not change current", async () 
 test("install failure keeps the previous selection", async () => {
   const { runtime, root } = store();
   const installed = await runtime.install("0.1.1-rc.2");
-  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: installed.bin, version: "0.1.1-rc.2", origin: "store" }));
-  const before = runtime.current();
   const failing = store({ root, run: mockRun({ failInstall: true }) }).runtime;
   await assert.rejects(() => failing.install("0.2.0"), /npm failed|exited/);
-  const after = runtime.current();
-  assert.deepEqual(after, before);
   assert.equal(runtime.inventory().installed.length, 1);
   assert.equal(runtime.inventory().installed[0].version, "0.1.1-rc.2");
   assert.ok(!existsSync(join(root, "versions", "0.2.0")));
@@ -211,7 +178,6 @@ test("rejects an install whose --version does not match the requested version", 
     run: mockRun({ reportedVersion: () => "0.0.1-rc.1" }),
   });
   await assert.rejects(() => runtime.install("0.1.1-rc.2"), /--version reported 0\.0\.1-rc\.1/);
-  assert.equal(runtime.current(), undefined);
   assert.deepEqual(runtime.inventory().installed, []);
 });
 
@@ -222,33 +188,6 @@ test("forged versions never reach npm", async () => {
   await assert.rejects(() => runtime.install("1.0.0; rm -rf /"), /invalid runtime version/);
   await assert.rejects(() => runtime.install("..\\0.1.0"), /invalid runtime version/);
   assert.deepEqual(installs, []);
-});
-
-test("a damaged stored selection fails instead of falling back", async () => {
-  const prefix = tempDir("dsh-legacy-");
-  const legacyBin = writeFakeCli(prefix, "0.1.0");
-  const { runtime, root } = store({
-    legacy: { bin: legacyBin, version: "0.1.0" },
-    run: mockRun(),
-  });
-  await runtime.install("0.1.1-rc.2");
-  const installed = await runtime.install("0.2.0");
-  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: installed.bin, version: "0.2.0", origin: "store" }));
-  const recorded = runtime.recordedRef();
-  assert.equal(recorded?.version, "0.2.0");
-  rmSync(join(root, "versions", "0.2.0"), { recursive: true, force: true });
-  assert.throws(() => runtime.current(), /selected runtime is missing/);
-  assert.throws(() => runtime.inventory(), /selected runtime is missing/);
-  assert.equal(runtime.recordedRef()?.version, "0.2.0");
-  assert.equal(runtime.recordedRef()?.bin, recorded?.bin);
-});
-
-test("recordedRef ignores a damaged pointer file", () => {
-  const { runtime, root } = store();
-  mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "current.json"), "{not-json");
-  assert.equal(runtime.recordedRef(), undefined);
-  assert.throws(() => runtime.current(), /unreadable|damaged/);
 });
 
 test("concurrent installs of the same version share one write", async () => {
@@ -283,14 +222,12 @@ test("catalog fetches the user-selected official or china registry", async () =>
   const china = new RuntimeStore({
     root: tempDir("dsh-runtime-"),
     source: () => "china",
-    legacy: () => undefined,
     run: mockRun(),
     fetch: fetchImpl,
   });
   const official = new RuntimeStore({
     root: tempDir("dsh-runtime-"),
     source: () => "official",
-    legacy: () => undefined,
     run: mockRun(),
     fetch: fetchImpl,
   });
@@ -300,7 +237,6 @@ test("catalog fetches the user-selected official or china registry", async () =>
   assert.equal(catalog.distTags.latest, "0.0.1-rc.1");
   assert.ok(catalog.versions.some((row) => row.version === "0.1.1-rc.2"));
   assert.equal(preferredTaggedVersion(catalog), "0.0.1-rc.1");
-  assert.equal(china.current(), undefined);
   await official.catalog();
   assert.equal(seen[1], npmPackumentUrl("official", "@deepseek-ai/dsh"));
 });
@@ -334,14 +270,11 @@ test("catalog makes exactly one fetch attempt and surfaces the failure", async (
 test("npm non-zero exit is rejected even when a complete package is left behind", async () => {
   const { runtime, root } = store();
   const installed = await runtime.install("0.1.1-rc.2");
-  writeFileSync(join(root, "current.json"), JSON.stringify({ bin: installed.bin, version: "0.1.1-rc.2", origin: "store" }));
-  const before = runtime.current();
   const failing = store({
     root,
     run: mockRun({ failInstall: true, leavePackageOnInstallFail: true }),
   }).runtime;
   await assert.rejects(() => failing.install("0.2.0"), /npm failed|exited/);
-  assert.deepEqual(runtime.current(), before);
   assert.ok(!existsSync(join(root, "versions", "0.2.0")));
   assert.deepEqual(leftoverStaging(root), []);
 });
@@ -349,24 +282,8 @@ test("npm non-zero exit is rejected even when a complete package is left behind"
 test("probe non-zero exit is rejected even when stdout contains the version", async () => {
   const { runtime, root } = store({ run: mockRun({ versionCode: 1 }) });
   await assert.rejects(() => runtime.install("0.1.1-rc.2"), /Could not parse|无法解析/);
-  assert.equal(runtime.current(), undefined);
   assert.deepEqual(runtime.inventory().installed, []);
   assert.deepEqual(leftoverStaging(root), []);
-});
-
-test("explicit managed or system current is invalid if package.json is gone", () => {
-  const home = tempDir("dsh-managed-");
-  const prefix = join(home, "dsh-spaces", "dsh-cli");
-  const bin = writeFakeCli(prefix, "0.1.1-rc.2");
-  const { runtime, root } = store({
-    legacy: { bin: writeFakeCli(tempDir("dsh-legacy-"), "0.1.0"), version: "0.1.0" },
-  });
-  mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "current.json"), JSON.stringify({ bin, version: "0.1.1-rc.2", origin: "managed" }));
-  assert.equal(runtime.current()?.version, "0.1.1-rc.2");
-  rmSync(join(prefix, "node_modules", "@deepseek-ai", "dsh", "package.json"));
-  assert.throws(() => runtime.current(), /metadata is unreadable/);
-  assert.throws(() => runtime.inventory(), /metadata is unreadable/);
 });
 
 test("remove deletes an installed runtime directory and refuses invalid or linked paths", () => {

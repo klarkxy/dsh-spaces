@@ -8,23 +8,9 @@ export const DSH_DEFAULT_CHANNEL = "latest";
 /** Oldest DSH runtime a space may be pinned to and still start. */
 export const SPACES_MIN_DSH_VERSION = "0.2.0-rc.2";
 
-/** Where the active CLI binary came from. Independent of npm dist-tags. */
-export type RuntimeOrigin = "store" | "managed" | "system" | "snapshot";
-
 export interface RuntimeRef {
   bin: string;
   version: string;
-}
-
-/**
- * Active CLI as verified from files next to the binary.
- * `current()` is sync and does not re-run `--version`; it reports a version
- * only when `package.json` beside the selected bin is readable and matches
- * the stored pointer. A missing or corrupt file is damage, not a valid current.
- * Live `--version` (exit 0) is the `selectExisting` / `install` probe.
- */
-export interface RuntimeCurrent extends RuntimeRef {
-  origin: RuntimeOrigin;
 }
 
 export interface InstalledRuntime {
@@ -35,7 +21,6 @@ export interface InstalledRuntime {
 
 export interface RuntimeInventory {
   installed: InstalledRuntime[];
-  current?: RuntimeCurrent;
 }
 
 export interface RuntimeCatalogEntry {

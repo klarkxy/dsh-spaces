@@ -79,7 +79,7 @@ function spawnHolder(home: string): { child: ChildProcess; waitFor: (text: strin
   writeFileSync(
     script,
     `import { HomeLease } from ${JSON.stringify(controlModuleHref())};
-const handle = new HomeLease(process.argv[2]).acquire("desktop");
+const handle = new HomeLease(process.argv[2]).acquire("web");
 process.stdout.write("HELD\\n");
 await new Promise((resolve) => {
   process.stdin.resume();
@@ -304,7 +304,7 @@ test("ensureManager takes the home transaction lock; acquire does not", async ()
   const lease = new HomeLease(home);
   await lock.run("hold-transaction", async () => {
     await assert.rejects(new HomeLease(home).ensureManager(), HomeLockBusyError);
-    const handle = lease.acquire("desktop");
+    const handle = lease.acquire("web");
     assert.equal(lock.inspect().held, true);
     handle.release();
   });
@@ -317,12 +317,12 @@ test("ensureManager takes the home transaction lock; acquire does not", async ()
 
 test("acquire writes pid+nonce+timestamp owner and releases only that nonce", () => {
   const lease = new HomeLease(tempHome());
-  const handle = lease.acquire("desktop", "http://127.0.0.1:3100");
+  const handle = lease.acquire("web", "http://127.0.0.1:3100");
   const info = lease.inspect();
   assert.equal(info.held, true);
   assert.ok("owner" in info);
   assert.equal(info.owner.pid, process.pid);
-  assert.equal(info.owner.kind, "desktop");
+  assert.equal(info.owner.kind, "web");
   assert.equal(info.owner.endpoint, "http://127.0.0.1:3100/");
   assert.equal(info.liveness, "alive");
   assert.match(info.owner.nonce, /^[0-9a-f]{32}$/);
@@ -342,7 +342,7 @@ test("independent instances contend for runtime ownership without stealing", () 
   const home = tempHome();
   const a = new HomeLease(home);
   const b = new HomeLease(home);
-  const held = a.acquire("desktop");
+  const held = a.acquire("web");
   assert.throws(() => b.acquire("web"), (error: unknown) => {
     assert.ok(error instanceof HomeControlBusyError);
     assert.match(error.message, /held by pid/);
@@ -375,7 +375,7 @@ test("real child process acquire stays exclusive until release", async () => {
 test("release nonce mismatch leaves the foreign owner in place", () => {
   const home = tempHome();
   const lease = new HomeLease(home);
-  const handle = lease.acquire("desktop");
+  const handle = lease.acquire("web");
   const foreign: HomeControlOwner = {
     pid: process.pid,
     nonce: "aa".repeat(16),
@@ -399,7 +399,7 @@ test("reclaimDead recovers only a provably dead owner and does not auto-preempt"
     pid: 2_147_483_647,
     nonce: "deaddeaddeaddeaddeaddeaddeaddead",
     startedAt: new Date().toISOString(),
-    kind: "desktop",
+    kind: "web",
   };
   writeFileSync(join(lease.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify(owner)}\n`);
   const info = lease.inspect();
@@ -419,7 +419,7 @@ test("reclaimDead recovers only a provably dead owner and does not auto-preempt"
 
 test("live owner is not treated as dead and is not killed", () => {
   const lease = new HomeLease(tempHome());
-  const handle = lease.acquire("desktop");
+  const handle = lease.acquire("web");
   assert.deepEqual(lease.reclaimDead(), {
     reclaimed: false,
     reason: "owner-alive",
@@ -441,21 +441,21 @@ test("incomplete or reclaiming owner is recovery and is not stolen", () => {
   assert.equal(incomplete.held, true);
   assert.ok("incomplete" in incomplete && incomplete.incomplete);
   assert.deepEqual(lease.reclaimDead(), { reclaimed: false, reason: "incomplete" });
-  assert.throws(() => lease.acquire("desktop"), /incomplete/);
+  assert.throws(() => lease.acquire("web"), /incomplete/);
   writeFileSync(
     join(lease.runDir, HOME_CONTROL_OWNER_FILE),
     `${JSON.stringify({
       pid: 2_147_483_647,
       nonce: "deaddeaddeaddeaddeaddeaddeaddead",
       startedAt: new Date().toISOString(),
-      kind: "desktop",
+      kind: "web",
     } satisfies HomeControlOwner)}\n`,
   );
   mkdirSync(lease.reclaimDir);
   const blocked = lease.inspect();
   assert.ok("reclaim" in blocked && blocked.reclaim);
   assert.deepEqual(lease.reclaimDead(), { reclaimed: false, reason: "reclaim-in-progress" });
-  assert.throws(() => lease.acquire("desktop"), /reclaim/);
+  assert.throws(() => lease.acquire("web"), /reclaim/);
 });
 
 test("PID reuse is ambiguous and is not reclaimed or stolen", () => {
@@ -471,7 +471,7 @@ test("PID reuse is ambiguous and is not reclaimed or stolen", () => {
       pid: process.pid,
       nonce: "cafecafecafecafecafecafecafecafe",
       startedAt: new Date().toISOString(),
-      kind: "desktop",
+      kind: "web",
     } satisfies HomeControlOwner)}\n`,
   );
   const info = lease.inspect();
@@ -525,7 +525,7 @@ test("symlink run path is ambiguous and is not stolen", (t) => {
     reason: "ambiguous",
     detail: "run directory is a symlink",
   });
-  assert.throws(() => lease.acquire("desktop"), /ambiguous|symlink/);
+  assert.throws(() => lease.acquire("web"), /ambiguous|symlink/);
 });
 
 test("symlink control directory is rejected instead of following an alias", async (t) => {
@@ -543,7 +543,7 @@ test("symlink control directory is rejected instead of following an alias", asyn
   const info = lease.inspect();
   assert.ok("ambiguous" in info && info.held);
   await assert.rejects(lease.ensureManager(), HomeControlPathError);
-  assert.throws(() => lease.acquire("desktop"), HomeControlBusyError);
+  assert.throws(() => lease.acquire("web"), HomeControlBusyError);
 });
 
 test("concurrent child reclaimDead uses the reclaim guard so only one succeeds", async () => {
@@ -557,7 +557,7 @@ test("concurrent child reclaimDead uses the reclaim guard so only one succeeds",
       pid: 2_147_483_647,
       nonce: "cafecafecafecafecafecafecafecafe",
       startedAt: new Date().toISOString(),
-      kind: "desktop",
+      kind: "web",
     } satisfies HomeControlOwner)}\n`,
   );
   const script = join(home, "reclaim-dead.mts");
@@ -610,7 +610,7 @@ test("same-process concurrent acquire has a single owner", async () => {
   const attempts = Array.from({ length: 8 }, () =>
     Promise.resolve().then(() => {
       try {
-        return new HomeLease(home).acquire("desktop");
+        return new HomeLease(home).acquire("web");
       } catch (error) {
         if (error instanceof HomeControlBusyError) return null;
         throw error;
@@ -633,7 +633,7 @@ test("clean 127.0.0.1 endpoints are accepted and dirty URLs are rejected", () =>
   assert.throws(() => parseControlEndpoint("http://127.0.0.1:3100/?token=x"), /query or fragment/);
   assert.throws(() => parseControlEndpoint("http://127.0.0.1:3100/#x"), /query or fragment/);
   const lease = new HomeLease(tempHome());
-  assert.throws(() => lease.acquire("desktop", "http://localhost:3100/"), /127\.0\.0\.1/);
+  assert.throws(() => lease.acquire("web", "http://localhost:3100/"), /127\.0\.0\.1/);
   assert.equal(lease.inspect().held, false);
 });
 
@@ -677,7 +677,7 @@ test("unknown or corrupt new owner records stay held/ambiguous with original byt
         pid: process.pid,
         nonce: "bb".repeat(16),
         startedAt: new Date().toISOString(),
-        kind: "desktop",
+        kind: "web",
       },
     })}\n`,
     `${JSON.stringify({
@@ -695,7 +695,7 @@ test("unknown or corrupt new owner records stay held/ambiguous with original byt
         pid: process.pid,
         nonce: "bb".repeat(16),
         startedAt: new Date().toISOString(),
-        kind: "desktop",
+        kind: "web",
       },
     })}\n`,
   ];

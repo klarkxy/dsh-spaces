@@ -182,7 +182,7 @@ function verdictOf(
 
 function isDeadLaunchOwner(inspection: HomeControlInspect): inspection is Extract<HomeControlInspect, { owner: HomeControlOwner }> {
   return inspection.held && "owner" in inspection && !("handoff" in inspection) &&
-    (inspection.owner.kind === "web" || (inspection.owner.kind === "desktop" && !inspection.owner.endpoint)) &&
+    inspection.owner.kind === "web" &&
     inspection.liveness === "dead" && validLaunchOwner(inspection.owner);
 }
 

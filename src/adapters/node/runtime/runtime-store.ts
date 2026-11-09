@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rename, rm } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { t } from "../../../shared/i18n";
 import {
   DSH_RUNTIME_PACKAGE,
@@ -9,10 +9,7 @@ import {
   type InstalledRuntime,
   type RuntimeCatalog,
   type RuntimeCatalogEntry,
-  type RuntimeCurrent,
   type RuntimeInventory,
-  type RuntimeOrigin,
-  type RuntimeRef,
 } from "../../../shared/runtime";
 import type { PackageSource } from "../../../shared/types";
 import { atomicWrite } from "../atomic";
@@ -60,25 +57,12 @@ export interface RuntimeStoreOptions {
   root: string;
   snapshotRoot?: string;
   source: () => PackageSource;
-  legacy: () => RuntimeRef | undefined;
   run?: RunProcessFn;
   fetch?: RegistryFetcher;
 }
 
-interface CurrentPointer {
-  version: string;
-  bin: string;
-  origin: RuntimeOrigin;
-}
-
 function parseVersionText(text: string): string | undefined {
   return text.match(/(\d+\.\d+\.\d+(?:-[\w.]+)?)/)?.[1];
-}
-
-function isInside(root: string, file: string): boolean {
-  const rel = relative(resolve(root), resolve(file));
-  if (!rel || isAbsolute(rel)) return false;
-  return !rel.split(/[/\\]/).includes("..");
 }
 
 function binUnder(prefix: string): string {
@@ -120,16 +104,13 @@ function defaultFetch(url: string, init?: { signal?: AbortSignal; headers?: Reco
 
 /**
  * Installed DSH CLI versions live under `root/versions/<version>`.
- * A stored `current.json` pointer is legacy read-only evidence used to pin
- * spaces to the runtime they actually ran on.
- * This module does not call findDshBin; a stored pointer is never replaced
- * by a cached system/managed lookup.
+ * This module does not call findDshBin; the bound host CLI is the only
+ * non-store runtime a space can run on.
  */
 export class RuntimeStore {
   private readonly root: string;
   private readonly snapshotRoot?: string;
   private readonly source: () => PackageSource;
-  private readonly legacy: () => RuntimeRef | undefined;
   private readonly run: RunProcessFn;
   private readonly fetchImpl: RegistryFetcher;
   private readonly customRun: boolean;
@@ -141,7 +122,6 @@ export class RuntimeStore {
     this.snapshotRoot = options.snapshotRoot ? resolve(options.snapshotRoot) : undefined;
     assertNotRealHome(this.root);
     this.source = options.source;
-    this.legacy = options.legacy;
     this.customRun = Boolean(options.run);
     this.installWorker = options.installWorker;
     this.run = options.run ?? runProcess;
@@ -149,32 +129,7 @@ export class RuntimeStore {
   }
 
   inventory(): RuntimeInventory {
-    return { installed: this.listInstalled(), current: this.current() };
-  }
-
-  current(): RuntimeCurrent | undefined {
-    const pointer = this.readPointer();
-    if (pointer) return this.resolvePointer(pointer);
-    const legacy = this.legacy();
-    if (!legacy) return undefined;
-    if (!existsSync(legacy.bin) || !isExactRuntimeVersion(legacy.version)) return undefined;
-    const actual = readPackageVersion(legacy.bin);
-    if (actual !== legacy.version) return undefined;
-    return {
-      bin: resolve(legacy.bin),
-      version: actual,
-      origin: this.originOf(legacy.bin),
-    };
-  }
-
-  /** Pointer version/bin without resolving files. Damaged JSON is treated as unknown. */
-  recordedRef(): RuntimeRef | undefined {
-    try {
-      const pointer = this.readPointer();
-      return pointer ? { bin: pointer.bin, version: pointer.version } : undefined;
-    } catch {
-      return undefined;
-    }
+    return { installed: this.listInstalled() };
   }
 
   async catalog(): Promise<RuntimeCatalog> {
@@ -204,7 +159,7 @@ export class RuntimeStore {
         operation: "runtimeInstall", home: this.installWorker.home,
         allowProductHome: isAuthorizedProductHome(this.installWorker.home),
         root: this.snapshotRoot, runtimeRoot: this.root, version: exact,
-        packageSource: this.source(), legacy: this.legacy(), toolchainRoot: toolchainRoot(),
+        packageSource: this.source(), toolchainRoot: toolchainRoot(),
       })
       : this.installOnce(exact);
     const pending = work.finally(() => {
@@ -241,10 +196,6 @@ export class RuntimeStore {
     return join(this.root, "versions");
   }
 
-  private pointerPath(): string {
-    return join(this.root, "current.json");
-  }
-
   private requireVersion(version: string): string {
     if (!isExactRuntimeVersion(version)) {
       throw new Error(`invalid runtime version: ${version}`);
@@ -271,51 +222,6 @@ export class RuntimeStore {
     const actual = readPackageVersion(bin);
     if (actual !== version) return undefined;
     return { version, bin, dir };
-  }
-
-  private readPointer(): CurrentPointer | undefined {
-    const path = this.pointerPath();
-    if (!existsSync(path)) return undefined;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
-      throw new Error("runtime current pointer is unreadable");
-    }
-    if (!parsed || typeof parsed !== "object") throw new Error("runtime current pointer is damaged");
-    const row = parsed as Record<string, unknown>;
-    if (typeof row.bin !== "string" || !row.bin) throw new Error("runtime current pointer is damaged");
-    if (typeof row.version !== "string" || !isExactRuntimeVersion(row.version)) {
-      throw new Error("runtime current pointer is damaged");
-    }
-    const actualOrigin = this.originOf(row.bin);
-    const origin: RuntimeOrigin = actualOrigin === "snapshot" ? actualOrigin :
-      row.origin === "store" || row.origin === "managed" || row.origin === "system"
-        ? row.origin
-        : actualOrigin;
-    return { version: row.version, bin: resolve(row.bin), origin };
-  }
-
-  private resolvePointer(pointer: CurrentPointer): RuntimeCurrent {
-    if (!existsSync(pointer.bin)) {
-      throw new Error(`selected runtime is missing: ${pointer.bin}`);
-    }
-    const actual = readPackageVersion(pointer.bin);
-    if (!actual) {
-      throw new Error(`selected runtime metadata is unreadable: ${pointer.bin}`);
-    }
-    if (actual !== pointer.version) {
-      throw new Error(`selected runtime reports ${actual}, expected ${pointer.version}`);
-    }
-    return { bin: pointer.bin, version: actual, origin: pointer.origin };
-  }
-
-  private originOf(bin: string): RuntimeOrigin {
-    if (isInside(this.versionsDir(), bin)) return "store";
-    if (this.snapshotRoot && isInside(this.snapshotRoot, bin)) return "snapshot";
-    const normalized = resolve(bin).split(/[/\\]/).join(sep).toLowerCase();
-    if (normalized.includes(`${sep}dsh-spaces${sep}dsh-cli${sep}`)) return "managed";
-    return "system";
   }
 
   private nodeBin(): string {

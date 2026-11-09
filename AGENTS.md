@@ -15,8 +15,6 @@ the exact, provably dead Supervisor lease and its matching endpoint under the
 ownership guard, preserving failure evidence. Read-only discovery never clears
 records; an in-session failure never automatically triggers another launch. Live, ambiguous,
 foreign and handoff ownership, and interrupted maintenance, remain protected.
-An intact dead legacy desktop lease is also eligible only when both its bound
-endpoint and the endpoint file are absent.
 Historical recovery plans and tests are not current requirements.
 Documentation completion is not runtime migration completion.
 

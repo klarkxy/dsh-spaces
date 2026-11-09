@@ -9,7 +9,6 @@ import {
   selectComponentPayload,
   stageComponentPayload,
   coldStartLockLabel,
-  COLD_START_LOCK_NAME,
 } from "../../../../src/adapters/node/payload/component-selection";
 import {
   COMPONENT_PAYLOAD_ENTRIES,
@@ -209,10 +208,6 @@ export async function bootstrapSupervisor(
     return fail(["Selected component payload pointer is invalid.", reasonOf(error)]);
   }
 
-  // A legacy ownerless reservation cannot safely be declared dead by its age.
-  if (pathExists(join(toolsRoot, COLD_START_LOCK_NAME))) {
-    return fail(["A legacy startup reservation has no process identity. Ownership could not be verified."]);
-  }
   const reservation = new HomeOperationLock(toolsRoot);
   if (initiallyPreparing) {
     return await pollEndpoint(home, selectedPayloadDir ?? payloadRoot, toolsRoot, options, [
@@ -488,16 +483,6 @@ export function defaultSpawn(request: SupervisorSpawnRequest): ChildProcess {
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
-}
-
-function pathExists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 function fail(reasons: string[]): SupervisorBootstrapDiagnosis {

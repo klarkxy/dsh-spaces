@@ -15,7 +15,7 @@ export const HOME_CONTROL_OWNER_FILE = "owner.json";
 export const HOME_CONTROL_RECLAIM_DIR_NAME = "reclaim";
 export const MANAGER_PROFILE_BASE = "spaces-hub";
 
-export type ControlKind = "desktop" | "web";
+export type ControlKind = "web";
 export type ProfileRole = "manager" | "workspace" | "uninitialized";
 export type PidLiveness = "alive" | "dead" | "ambiguous";
 export type PidAliveFn = (pid: number, startedAt: string) => PidLiveness;
@@ -428,8 +428,8 @@ export function defaultPidAlive(pid: number, startedAt: string): PidLiveness {
 }
 
 function requireKind(kind: string): ControlKind {
-  if (kind === "desktop" || kind === "web") return kind;
-  throw new Error("control kind must be desktop or web");
+  if (kind === "web") return kind;
+  throw new Error("control kind must be web");
 }
 
 function requireProfileId(profileId: string): string {
@@ -605,7 +605,7 @@ type OwnerFileState =
   | { state: "missing" }
   | { state: "symlink" }
   | { state: "unknown"; reason: string }
-  | { state: "legacy"; owner: HomeControlOwner }
+  | { state: "owner"; owner: HomeControlOwner }
   | { state: "handoff"; occupant: HomeControlOwner; disk: HandoffDiskRecord };
 
 const HEX32 = /^[0-9a-f]{32}$/;
@@ -661,16 +661,16 @@ function parseOwnerRecord(raw: string): OwnerFileState {
   if (row.version !== undefined && row.version !== 1) {
     return { state: "unknown", reason: "control owner record uses an unknown schema" };
   }
-  const owner = parseLegacyOwner(row);
+  const owner = parseOwner(row);
   if (!owner) return { state: "missing" };
-  return { state: "legacy", owner };
+  return { state: "owner", owner };
 }
 
-function parseLegacyOwner(row: Record<string, unknown>): HomeControlOwner | undefined {
+function parseOwner(row: Record<string, unknown>): HomeControlOwner | undefined {
   if (!Number.isInteger(row.pid) || (row.pid as number) <= 0) return undefined;
   if (typeof row.nonce !== "string" || !row.nonce) return undefined;
   if (typeof row.startedAt !== "string" || !row.startedAt) return undefined;
-  if (row.kind !== "desktop" && row.kind !== "web") return undefined;
+  if (row.kind !== "web") return undefined;
   const owner: HomeControlOwner = {
     pid: row.pid as number,
     nonce: row.nonce,
@@ -699,7 +699,7 @@ function parseHandoffRecord(row: Record<string, unknown>): HandoffDiskRecord | u
   if (typeof row.secretHash !== "string" || !HEX64.test(row.secretHash)) return undefined;
   if (!row.original || typeof row.original !== "object" || Array.isArray(row.original)) return undefined;
   const originalRow = row.original as Record<string, unknown>;
-  const original = parseLegacyOwner({
+  const original = parseOwner({
     pid: originalRow.pid,
     nonce: originalRow.nonce,
     startedAt: originalRow.startedAt,
@@ -739,7 +739,7 @@ function parseHandoffRecord(row: Record<string, unknown>): HandoffDiskRecord | u
   };
 }
 
-function serializeLegacyOwner(owner: HomeControlOwner): HomeControlOwner {
+function serializeOwner(owner: HomeControlOwner): HomeControlOwner {
   const payload: HomeControlOwner = {
     pid: owner.pid,
     nonce: owner.nonce,
@@ -751,7 +751,7 @@ function serializeLegacyOwner(owner: HomeControlOwner): HomeControlOwner {
 }
 
 function writeOwnerFile(ownerFile: string, owner: HomeControlOwner): void {
-  writeFileSync(ownerFile, `${JSON.stringify(serializeLegacyOwner(owner))}\n`, {
+  writeFileSync(ownerFile, `${JSON.stringify(serializeOwner(owner))}\n`, {
     encoding: "utf8",
     flag: "wx",
   });
@@ -762,7 +762,7 @@ export function sameControlOwner(a: HomeControlOwner, b: HomeControlOwner): bool
     a.startedAt === b.startedAt && a.endpoint === b.endpoint;
 }
 
-/** Narrow eligibility for new-launch retirement; legacy inspection stays read-only. */
+/** Narrow eligibility for new-launch retirement; inspection stays read-only. */
 export function validLaunchOwner(owner: { pid: number; nonce: string; startedAt: string }): boolean {
   return Number.isSafeInteger(owner.pid) && owner.pid > 0 && /^[a-f0-9]{32}$/.test(owner.nonce) &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(owner.startedAt) &&

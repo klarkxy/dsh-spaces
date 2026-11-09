@@ -16,7 +16,7 @@ export function retirePreviousSupervisor(home: string, previousOwner: HomeContro
   if (!inspection.held && !previousOwner) return;
   if (!inspection.held) throw new Error("The observed controller was already retired by another launch.");
   if (!previousOwner || !("owner" in inspection) || "handoff" in inspection ||
-      (inspection.owner.kind !== "web" && !(inspection.owner.kind === "desktop" && !inspection.owner.endpoint)) ||
+      inspection.owner.kind !== "web" ||
       inspection.liveness !== "dead" || !validLaunchOwner(inspection.owner) ||
       !sameControlOwner(inspection.owner, previousOwner)) {
     throw new Error("Controller ownership changed since this launch began. No second startup was attempted.");
@@ -31,7 +31,6 @@ export function retirePreviousSupervisor(home: string, previousOwner: HomeContro
       const recorded = readEndpointFile(endpointPath);
       if ("invalid" in recorded) throw new Error(recorded.reasons.join(" "));
       if ("endpoint" in recorded && (
-        owner.kind === "desktop" ||
         recorded.endpoint.homeId !== endpointHomeId(home, { allowRealHome }) ||
         recorded.endpoint.serviceEpoch !== endpointServiceEpoch(owner.nonce) ||
         !owner.endpoint || recorded.endpoint.origin !== new URL(parseControlEndpoint(owner.endpoint)).origin

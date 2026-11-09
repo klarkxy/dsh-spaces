@@ -89,10 +89,10 @@ function probeNpmGlobalRoot(): string | undefined {
 }
 
 export function findDshBin(profile?: string): string | undefined {
-  return selectedBin ? selectedBin(profile) : findLegacyDshBin();
+  return selectedBin ? selectedBin(profile) : discoverDshBin();
 }
 
-export function findLegacyDshBin(): string | undefined {
+export function discoverDshBin(): string | undefined {
   if (cachedBin && existsSync(cachedBin)) return cachedBin;
   const candidates = dshBinCandidates({ npmGlobalRoot: probeNpmGlobalRoot() });
   const found = candidates.find((path) => existsSync(path));

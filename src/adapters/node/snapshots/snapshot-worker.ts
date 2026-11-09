@@ -12,7 +12,6 @@ import {
   SnapshotStore,
 } from "./snapshot-store";
 import type { SnapshotRuntime } from "../../../shared/snapshots";
-import type { RuntimeRef } from "../../../shared/runtime";
 import type { PackageSource } from "../../../shared/types";
 import { ProcessTerminationError } from "../runtime/terminate-process";
 
@@ -45,7 +44,6 @@ const input = workerData as {
   runtimeRoot?: string;
   version?: string;
   packageSource?: PackageSource;
-  legacy?: RuntimeRef;
   toolchainRoot?: string;
 };
 
@@ -70,7 +68,6 @@ function dispatch(data: typeof input): unknown {
       version: data.version!,
       packageSource: data.packageSource!,
       snapshotRoot: data.root,
-      legacy: data.legacy,
       toolchainRoot: data.toolchainRoot,
     });
   }
