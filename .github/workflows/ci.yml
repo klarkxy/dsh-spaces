@@ -38,10 +38,10 @@ jobs:
       - run: npm run validate:llm:distribution
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
-      - name: Install official DSH CLI (0.2.1-rc.2)
+      - name: Install official DSH CLI (0.2.2-rc.1)
         run: |
           pnpm --version
-          npm install -g @deepseek-ai/dsh@0.2.1-rc.2
+          npm install -g @deepseek-ai/dsh@0.2.2-rc.1
           dsh --version
       - name: Official CLI integration check
         shell: pwsh
@@ -82,7 +82,7 @@ jobs:
         run: node --import tsx --test tests/ui/fit-icon-browser.test.ts
       - run: npm run test:llm:browser
       - name: Install official DSH 0.2 CLI and package manager for acceptance
-        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.2.1-rc.2 pnpm@10.29.2 --no-audit --no-fund
+        run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.2.2-rc.1 pnpm@10.29.2 --no-audit --no-fund
       - name: Blueprint and official model bridge regressions
         env:
           DSH_TEST_CLI_BIN: ${{ runner.temp }}/plugin-tools/node_modules/@deepseek-ai/dsh/lib/bin.js

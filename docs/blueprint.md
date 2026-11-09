@@ -46,7 +46,7 @@ DSHBP2 的原始文档不会转换成 DSHBP1；执行视图只供内部使用。
 
 格式与运行语义共同构成标准：JSON Schema 通过不能代替安装、组合或实际功能验证。后文给出确定的编码与错误规则，第三方工具可据此生成同一种蓝图。
 
-工具开发者可使用仓库中的 [JSON Schema](../schemas/blueprint-v1.schema.json) 做字段检查，再用运行时解析器校验跨字段关系、输入位置及编码规则。Schema 不是插件安全或运行兼容性的证明。
+工具开发者可使用仓库中的 [JSON Schema](../packages/blueprint/schemas/blueprint-v1.schema.json) 做字段检查，再用运行时解析器校验跨字段关系、输入位置及编码规则。Schema 不是插件安全或运行兼容性的证明。
 
 在编辑器中关联该 Schema 即可；不要把 `$schema` 加入蓝图根对象，v1 根字段是封闭的。格式校验、输入绑定、关系诊断与分享码编解码的规则是公开合同，由蓝图协议模块及其公开导出实现；JSON 与分享码的解析都走同一份规则。仓库验收入口为 `npm run test:blueprints`。
 
