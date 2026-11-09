@@ -8,7 +8,6 @@ import {
   type BlueprintInputValues,
 } from "@klarkxy/dsh-blueprint/v1/types";
 import { blueprintRecipe, type BlueprintDocument, type BlueprintRecipe } from "@klarkxy/dsh-blueprint/document";
-import type { LlmDescribeResult } from "../../../../src/shared/llm-api";
 import type { WorkbenchJob } from "../../../../src/shared/workbench";
 import type {
   WorkbenchProductObservation,
@@ -122,7 +121,6 @@ export interface BlueprintUiState {
 export interface BlueprintHost {
   product(request: WorkbenchProductRequest): Promise<WorkbenchProductResult>;
   submitApply(planId: string, observation: WorkbenchProductObservation): Promise<void>;
-  describeLlm(): Promise<LlmDescribeResult>;
   uuid(): string;
   now(): number;
   downloadFile(fileName: string, archiveBase64: string): void;
@@ -166,7 +164,7 @@ export function createBlueprintUiState(): BlueprintUiState {
     displayName: "",
     inputDrafts: {},
     models: [],
-    modelsStatus: "idle",
+    modelsStatus: "ready",
     modelsError: null,
     previewStatus: "idle",
     preview: null,
@@ -285,30 +283,6 @@ export function limitDecodedText(text: string): BlueprintDecodeResult {
     return { ok: false, code: "too-large-json", text };
   }
   return { ok: true, text, kind: "json" };
-}
-
-export function listedProviderModels(describe: LlmDescribeResult): BlueprintListedModel[] {
-  const listed: BlueprintListedModel[] = [];
-  for (const connection of describe.connections) {
-    if (!connection.enabled) continue;
-    if (connection.auth.kind === "api-key" && connection.auth.configured !== true) continue;
-    const models = connection.providerConfig.models;
-    if (!Array.isArray(models)) continue;
-    for (const item of models) {
-      let modelId = "";
-      if (typeof item === "string") modelId = item;
-      else if (item && typeof item === "object" && "id" in item && typeof item.id === "string") {
-        modelId = item.id;
-      }
-      if (!modelId) continue;
-      listed.push({
-        connectionId: connection.id,
-        connectionName: connection.displayName,
-        modelId,
-      });
-    }
-  }
-  return listed;
 }
 
 export function parseFiniteNumber(text: string): number | null {
@@ -460,7 +434,6 @@ export class BlueprintSession {
     } else {
       this.begin("inspect");
       this.begin("preview");
-      this.begin("models");
     }
     this.patch({ mode, copyError: null, downloadError: null, copied: false });
     if (mode === "generate" && this.snapshot.sourceSpaceId) void this.loadSource();
@@ -582,7 +555,6 @@ export class BlueprintSession {
         previewStatus: "idle",
         previewInvalid: true,
       });
-      if (blueprintRecipe(result.blueprint).inputs.some((input) => input.type === "model")) void this.loadModels();
     });
   };
 
@@ -1015,21 +987,6 @@ export class BlueprintSession {
     if (this.snapshot.applyStatus === "submitting" || this.snapshot.applyStatus === "running") return false;
     if (previewPlanMatchesApply(this.snapshot)) return false;
     return true;
-  }
-
-  private loadModels(): void {
-    const { token, signal } = this.begin("models");
-    this.patch({ modelsStatus: "loading", modelsError: null });
-    void this.run("models", token, signal, async () => {
-      const describe = await this.host.describeLlm();
-      if (this.stale("models", token, signal)) return;
-      if (this.snapshot.mode !== "use") return;
-      this.patch({
-        models: listedProviderModels(describe),
-        modelsStatus: "ready",
-        modelsError: null,
-      });
-    });
   }
 
   private collectBindingOverrides(): BlueprintGenerateBindingOverride[] {

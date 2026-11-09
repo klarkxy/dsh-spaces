@@ -24,6 +24,7 @@ import {
   copyComponentPayload,
   listTarEntries,
   readTarEntry,
+  UI_ENGINE_PACKAGE_VERSION,
   validateComponentPayload,
   writeComponentPayloadManifest,
   type ComponentPayloadManifest,
@@ -87,6 +88,11 @@ function dummyTree(options: { skip?: string[] } = {}): { root: string; lib: stri
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
     ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
+    ["lib/space-control.js", "export const control = 1;\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", pkg("playwright-core", UI_ENGINE_PACKAGE_VERSION)],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export const chromium = {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/lib/server/core.js", "module.exports = {};\n"],
     ["src/secret.ts", "should-not-copy\n"],
     ["node_modules/evil/index.js", "should-not-copy\n"],
   ];
@@ -384,6 +390,56 @@ test("pack-spaces-plugin required list includes the v2 manifest and llm assets",
   ]) {
     assert.ok(PLUGIN_REQUIRED.includes(rel), `PLUGIN_REQUIRED missing ${rel}`);
   }
+  // The bundled UI engine must be a packed file, not an npm-installable dep.
+  assert.ok(PLUGIN_REQUIRED.includes("lib/supervisor/ui-engine/node_modules/playwright-core/package.json"));
+  assert.ok(PLUGIN_REQUIRED.includes("lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs"));
+  assert.ok(PLUGIN_REQUIRED.includes("lib/supervisor/ui-engine/node_modules/playwright-core/index.js"));
+});
+
+test("the supervisor payload covers the whole ui-engine tree and the staged copy imports it", () => {
+  const source = dummyTree();
+  const written = writeComponentPayloadManifest(source.lib);
+  const supervisorFiles = written.manifest.components.supervisor.files.map((file) => file.path);
+  for (const rel of [
+    "lib/supervisor/ui-engine/node_modules/playwright-core/package.json",
+    "lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs",
+    "lib/supervisor/ui-engine/node_modules/playwright-core/index.js",
+    "lib/supervisor/ui-engine/node_modules/playwright-core/lib/server/core.js",
+  ]) {
+    assert.ok(supervisorFiles.includes(rel), `supervisor files missing ${rel}`);
+  }
+  // The digest covers the engine, and staging copies it verbatim.
+  const dest = join(tempDir("dsh-engine-copy-"), "pkg");
+  const copied = copyComponentPayload(source.lib, dest);
+  assert.equal(copied.digest, written.digest);
+  assert.equal(
+    readFileSync(join(dest, "lib/supervisor/ui-engine/node_modules/playwright-core/lib/server/core.js"), "utf8"),
+    "module.exports = {};\n",
+  );
+});
+
+test("a wrong ui-engine version fails the manifest write", () => {
+  const { root, lib } = dummyTree();
+  writeFileSync(
+    join(root, "lib/supervisor/ui-engine/node_modules/playwright-core/package.json"),
+    `${JSON.stringify({ name: "playwright-core", version: "1.60.0" })}\n`,
+  );
+  assert.throws(() => writeComponentPayloadManifest(lib), /playwright-core@1\.62\.1.*1\.60\.0/);
+  writeFileSync(
+    join(root, "lib/supervisor/ui-engine/node_modules/playwright-core/package.json"),
+    `${JSON.stringify({ name: "@dsh-spaces/other", version: UI_ENGINE_PACKAGE_VERSION })}\n`,
+  );
+  assert.throws(() => writeComponentPayloadManifest(lib), ComponentPayloadError);
+});
+
+test("a missing ui-engine entry fails the manifest write and validation", () => {
+  const rel = "lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs";
+  const missing = dummyTree({ skip: [rel] });
+  assert.throws(() => writeComponentPayloadManifest(missing.lib), /index\.mjs|missing/i);
+  const { lib } = dummyTree();
+  writeComponentPayloadManifest(lib);
+  rmSync(join(lib, "supervisor", "ui-engine", "node_modules", "playwright-core", "index.mjs"));
+  assert.throws(() => validateComponentPayload(lib), /missing|index\.mjs/i);
 });
 
 test("build-spaces generates the v2 manifest after view-bridge copy via the Node module", () => {

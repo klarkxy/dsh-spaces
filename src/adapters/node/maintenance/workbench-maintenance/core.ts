@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { lstatSync } from "../../../../shared/node/filesystem";
 import { isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases, pluginDisplayName } from "../../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
 import { PROFILE_NAME_RE, type PackageSource, type PluginCatalogEntry, type PluginLibraryEntry } from "../../../../shared/types";
@@ -36,8 +35,6 @@ import {
   PLAN_SCHEMA,
   PROFILE_FILE_NAMES,
   REMOVED_DISK_COMMANDS,
-  UPGRADE_JOURNAL_FILE,
-  UPGRADE_STAGE_DIR,
   WORKBENCH_MAINTENANCE_ERROR,
   WORKBENCH_PLANS_DIR_NAME,
   WORKBENCH_PLUGIN_MUTATION_FILE,
@@ -176,43 +173,6 @@ export class MaintenanceCore {
     }
   }
 
-  protected inspectPendingRestore(): {
-    status: "none" | "pending" | "unreadable";
-    value?: ReturnType<WorkbenchMaintenancePorts["snapshots"]["pendingRestore"]>;
-    error?: unknown;
-  } {
-    try {
-      const pending = this.ports.snapshots.pendingRestore() ?? this.ports.snapshots.restoreJournal?.();
-      return pending ? { status: "pending", value: pending } : { status: "none" };
-    } catch (error) {
-      this.log("pendingRestore", error);
-      return { status: "unreadable", error };
-    }
-  }
-
-  private readUpgradeJournal(): {
-    status: "none" | "preparing" | "committing" | "unreadable" | "unknown";
-    planId?: string;
-    error?: unknown;
-  } {
-    const path = join(this.ports.home, UPGRADE_STAGE_DIR, UPGRADE_JOURNAL_FILE);
-    try {
-      const st = lstatSync(path);
-      if (st.isSymbolicLink() || !st.isFile()) return { status: "unreadable" };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "none" };
-      return { status: "unreadable", error };
-    }
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as { phase?: unknown; planId?: unknown };
-      if (parsed.phase !== "preparing" && parsed.phase !== "committing") return { status: "unknown" };
-      const planId = typeof parsed.planId === "string" && PLAN_ID_RE.test(parsed.planId) ? parsed.planId : undefined;
-      return { status: parsed.phase, planId };
-    } catch (error) {
-      return { status: "unreadable", error };
-    }
-  }
-
   protected storeable(
     id: string,
     createdAt: string,
@@ -240,18 +200,12 @@ export class MaintenanceCore {
   }
 
   private fingerprintFor(command: ResolvedCommand): string {
-    const pending = this.inspectPendingRestore();
-    if (pending.status === "unreadable") throw new WorkbenchMaintenanceError("workbench/failed");
-    const journal = this.readUpgradeJournal();
-    if (journal.status === "unreadable") throw new WorkbenchMaintenanceError("workbench/failed");
     const spaces = this.spaceFingerprint(affectedFromCommand(command));
     const payload = {
       command,
       managerId: this.ports.managerId(),
       spaces,
       runtime: this.currentVersionLabel(),
-      pendingRestore: pending.status === "pending" ? pending.value?.snapshotId ?? null : null,
-      upgradeJournal: journal.status,
       snapshot: "snapshotId" in command ? snapshotFingerprint(this.requireSnapshot(command.snapshotId)) : null,
     };
     return createHash("sha256").update(JSON.stringify(sortKeys(payload))).digest("hex");

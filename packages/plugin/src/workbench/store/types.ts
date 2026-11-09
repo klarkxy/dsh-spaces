@@ -44,6 +44,7 @@ export type OverlayKind =
   | { type: "settings" }
   | { type: "import" }
   | { type: "menu"; spaceId: string; x: number; y: number }
+  | { type: "creation-failed"; jobId: string }
   | null;
 
 export interface SettingsDraft {
@@ -122,7 +123,7 @@ export interface WorkbenchUiState {
   commandPending: boolean;
   readError: Partial<Record<WorkbenchReadSurface, string>>;
   homeTab: HomeTab;
-  settingsTab: "general" | "llm" | "advanced" | HomeTab;
+  settingsTab: "general" | "advanced" | HomeTab;
   /** The space whose detail page is open inside the spaces tab. */
   detailSpaceId: string | null;
   /** The maintenance group of the settings navigation, remembered for this session. */

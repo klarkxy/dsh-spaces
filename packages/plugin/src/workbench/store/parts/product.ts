@@ -11,29 +11,11 @@ import type { WorkbenchPlugin } from "../../../../../../src/shared/workbench";
 import type { WorkbenchDiagnostics } from "../../../../../../src/shared/workbench-product";
 import type { WorkbenchLogEntry } from "../../../../../../src/shared/workbench-log";
 import { localizeError } from "../../i18n";
-import { createWorkbenchLlmClient, type LlmUiClient, type LlmUiSpace } from "../../llm/client";
 import { errorCode, wrongProduct } from "../errors";
 import type { WorkbenchUiState } from "../types";
 import { JobPart } from "./jobs";
 
 export abstract class ProductPart extends JobPart {
-  protected cachedLlmClient: LlmUiClient | null = null;
-
-  llmClient = (): LlmUiClient => {
-    this.cachedLlmClient ??= createWorkbenchLlmClient(this.api, this.env.uuid);
-    return this.cachedLlmClient;
-  };
-
-  llmSpaces = (): LlmUiSpace[] => {
-    const epoch = this.ui.state?.serviceEpoch ?? "";
-    return (this.ui.state?.spaces ?? []).map((space) => ({
-      spaceId: space.id,
-      displayName: space.displayName,
-      status: space.status,
-      generation: space.generation,
-      serviceEpoch: epoch,
-    }));
-  };
 
   setPluginQuery = (pluginQuery: string): void => this.patch({ pluginQuery });
 

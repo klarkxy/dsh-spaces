@@ -44,7 +44,6 @@ const JOB_KIND_KEYS: Record<string, WorkbenchMessageKey> = {
   "catalog.refresh": "jobs.kind.catalog.refresh",
   "blueprint.apply": "jobs.kind.blueprint.apply",
   "plan.execute": "jobs.kind.plan.execute",
-  "llm.apply": "jobs.kind.llm.apply",
 };
 
 const JOB_STATUS_KEYS: Record<JobStatus, WorkbenchMessageKey> = {
@@ -57,7 +56,11 @@ const JOB_STATUS_KEYS: Record<JobStatus, WorkbenchMessageKey> = {
 
 const JOB_PHASE_KEYS: Record<string, WorkbenchMessageKey> = {
   queued: "jobs.phase.queued",
+  create: "jobs.phase.create",
   prepare: "jobs.phase.prepare",
+  "view-bridge": "jobs.phase.viewBridge",
+  "llm-bridge": "jobs.phase.llmBridge",
+  "llm-policy": "jobs.phase.llmPolicy",
   start: "jobs.phase.start",
   stop: "jobs.phase.stop",
   install: "jobs.phase.install",

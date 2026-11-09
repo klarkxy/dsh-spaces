@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { XP_EMBED_COMPATIBILITY_NOTE, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from "../../diagnostics/xp-compatibility";
+import type { ExactPluginSource } from "../../../../shared/plugin-source";
+import { parsePluginSource, PluginSourceError } from "../../../../shared/plugin-source";
+import { pinDetailFor } from "../../products/plugin-exact-source";
 import type { WorkbenchPlanRequest } from "../../../../shared/workbench";
 import { MaintenanceRuntime } from "./runtime";
 import { FULL_SPACES_PACKAGE, WORKBENCH_PLAN_TTL_MS } from "./constants";
@@ -20,6 +23,8 @@ export class MaintenancePlans extends MaintenanceRuntime {
     switch (request.kind) {
       case "plugin.install":
         return this.planPluginInstall(id, createdAt, expiresAt, request);
+      case "plugin.install.spec":
+        return this.planPluginInstallSpec(id, createdAt, expiresAt, request);
       case "plugin.remove":
         return this.planPluginRemove(id, createdAt, expiresAt, request);
       case "plugin.toggle":
@@ -72,6 +77,58 @@ export class MaintenancePlans extends MaintenanceRuntime {
       title: `Install ${packageName}@${version}`,
       scope: "space",
       affectedSpaceIds: spaceIds,
+      runningSpaceIds,
+      changes,
+      destructive: false,
+      expiresAt,
+    });
+  }
+
+  /**
+   * Exact-source install (D4): the control channel's closed npm/github pin.
+   * `rejectRawSpec` stays untouched — this kind carries the normalized source
+   * itself, so a raw spec or non-exact pin can never slip through the parse
+   * boundary. The install writes the caller's allowBuilds verbatim before
+   * adding and verifies the read-back against the pinned source afterwards.
+   */
+  private async planPluginInstallSpec(
+    id: string,
+    createdAt: string,
+    expiresAt: string,
+    request: Extract<WorkbenchPlanRequest, { kind: "plugin.install.spec" }>,
+  ): Promise<StoredPlan> {
+    const spaceId = this.targetSpace(request.spaceId, false);
+    let plugin: ExactPluginSource;
+    try {
+      plugin = parsePluginSource(request.source);
+    } catch (error) {
+      if (error instanceof PluginSourceError) throw new WorkbenchMaintenanceError("workbench/invalid-input");
+      throw error;
+    }
+    assertGuardedPackage(plugin.packageName);
+    const runningSpaceIds = this.runningOf([spaceId]);
+    const command: ResolvedCommand = { kind: "plugin.install.spec", spaceId, plugin };
+    const changes = [
+      `Install ${pinDetailFor(plugin)} into ${spaceId} from the pinned source.`,
+      ...(plugin.approvedBuilds.length
+        ? [`Build scripts approved for: ${plugin.approvedBuilds.join(", ")}. Other build scripts stay denied.`]
+        : ["No build scripts are approved; deny-by-default build policy is written before install."]),
+      plugin.kind === "github"
+        ? `The installed package is verified against ${plugin.owner}/${plugin.repo}${plugin.path ? `/${plugin.path}` : ""}#${plugin.commit} via the lockfile.`
+        : `The installed package must resolve to ${plugin.packageName}@${plugin.version}.`,
+      runningSpaceIds.length
+        ? `Stop and restart running workspace: ${spaceId}.`
+        : "The workspace is stopped and stays stopped.",
+      "The plugin change is not a hot reload; restart is required.",
+      ...(plugin.kind === "npm" && plugin.packageName === XP_PACKAGE_NAME && plugin.version === XP_SUPPORTED_VERSION
+        ? [XP_EMBED_COMPATIBILITY_NOTE]
+        : []),
+    ];
+    return this.storeable(id, createdAt, expiresAt, command, {
+      kind: "plugin.install.spec",
+      title: `Install ${pinDetailFor(plugin)}`,
+      scope: "space",
+      affectedSpaceIds: [spaceId],
       runningSpaceIds,
       changes,
       destructive: false,

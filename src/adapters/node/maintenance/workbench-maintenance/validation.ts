@@ -1,5 +1,6 @@
 import { isGitSpec, isSafeSpec } from "../../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
+import { PluginSourceError, parsePluginSource, pluginSourceSpecOf } from "../../../../shared/plugin-source";
 import { PROFILE_NAME_RE } from "../../../../shared/types";
 import type { WorkbenchPlanRequest } from "../../../../shared/workbench";
 import { isProtectedPlugin } from "../../products/plugin-ops";
@@ -30,6 +31,15 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
         catalogId: parseCatalogId(input.catalogId),
         version: requireExactVersion(input.version),
       };
+    }
+    case "plugin.install.spec": {
+      expectKeys(input, ["kind", "spaceId", "source"]);
+      try {
+        return { kind, spaceId: parseSpaceId(input.spaceId), source: pluginSourceSpecOf(parsePluginSource(input.source)) };
+      } catch (error) {
+        if (error instanceof PluginSourceError) throw new WorkbenchMaintenanceError("workbench/invalid-input");
+        throw error;
+      }
     }
     case "plugin.remove": {
       expectKeys(input, ["kind", "spaceId", "packageName"]);
@@ -87,6 +97,8 @@ export function requestFromCommand(command: ResolvedCommand): WorkbenchPlanReque
   switch (command.kind) {
     case "plugin.install":
       return { kind: command.kind, spaceIds: command.spaceIds, catalogId: command.catalogId, version: command.version };
+    case "plugin.install.spec":
+      return { kind: command.kind, spaceId: command.spaceId, source: pluginSourceSpecOf(command.plugin) };
     case "plugin.remove":
       return { kind: command.kind, spaceId: command.spaceId, packageName: command.packageName };
     case "plugin.toggle":
@@ -108,6 +120,8 @@ export function affectedFromCommand(command: ResolvedCommand): string[] {
   switch (command.kind) {
     case "plugin.install":
       return command.spaceIds;
+    case "plugin.install.spec":
+      return [command.spaceId];
     case "plugin.remove":
     case "plugin.toggle":
     case "plugin.cleanup-manager":

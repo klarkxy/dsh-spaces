@@ -10,12 +10,10 @@ import {
   collectBlueprintValues,
   decodeBlueprintFileBytes,
   limitDecodedText,
-  listedProviderModels,
   parseFiniteNumber,
   utf8ToBase64,
   type BlueprintInputDraft,
 } from "../../packages/plugin/src/workbench/blueprint-session.ts";
-import type { LlmDescribeResult } from "../../src/shared/llm-api.ts";
 
 function blueprintWithInputs(): Blueprint {
   return {
@@ -123,49 +121,3 @@ test("utf8ToBase64 encodes non-ASCII without dropping characters", () => {
   assert.equal(roundTrip, encoded);
 });
 
-test("listedProviderModels keeps enabled configured connections and listed models only", () => {
-  const describe: LlmDescribeResult = {
-    revision: 1,
-    defaultModel: null,
-    pendingRestartSpaceIds: [],
-    capabilities: {
-      adapter: "llm-pi-ai",
-      adapterVersion: "0.2.1-rc.2",
-      protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
-      keyless: false,
-    },
-    connections: [
-      {
-        id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        revision: 1,
-        displayName: "On",
-        enabled: true,
-        backend: "llm-pi-ai",
-        providerConfig: { models: [{ id: "m1" }, { id: "m2" }] },
-        auth: { kind: "api-key", configured: true },
-        createdAt: "2026-09-21T00:00:00.000Z",
-        updatedAt: "2026-09-21T00:00:00.000Z",
-        usedBySpaceIds: [],
-        routeId: "r1",
-      },
-      {
-        id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        revision: 1,
-        displayName: "Off",
-        enabled: false,
-        backend: "llm-pi-ai",
-        providerConfig: { models: [{ id: "hidden" }] },
-        auth: { kind: "api-key", configured: true },
-        createdAt: "2026-09-21T00:00:00.000Z",
-        updatedAt: "2026-09-21T00:00:00.000Z",
-        usedBySpaceIds: [],
-        routeId: "r2",
-      },
-    ],
-  };
-  const listed = listedProviderModels(describe);
-  assert.deepEqual(
-    listed.map((row) => `${row.connectionId}:${row.modelId}`),
-    ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:m1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:m2"],
-  );
-});

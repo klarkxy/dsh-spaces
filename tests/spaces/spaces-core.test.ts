@@ -48,15 +48,13 @@ test("core stays free of Node fs/process, Electron, React, and Cordis", () => {
   const files = [
     "domain/isolation.ts",
     "domain/registry.ts",
-    "domain/llm-resolution.ts",    "application/global-llm-service.ts",
     "ports/operation-lock.ts",
-    "ports/llm-store.ts",
   ];
   const forbidden = /from ["'](?:node:fs|node:process|electron|react|react\/jsx-runtime|cordis)/;
   for (const file of files) {
     assert.equal(forbidden.test(coreSource(file)), false, file);
   }
-  for (const file of ["llm-connections.ts", "llm-share.ts"]) {
+  for (const file of ["llm-connections.ts"]) {
     assert.equal(forbidden.test(sharedSource(file)), false, file);
   }
 });

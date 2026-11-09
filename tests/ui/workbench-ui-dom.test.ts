@@ -295,19 +295,6 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "模型与连接", exact: true }).click();
-  const legacy = page.locator("[data-llm-legacy-settings]");
-  assert.equal(await legacy.evaluate(el => (el as HTMLDetailsElement).open), false);
-  assert.equal(await page.locator("[data-llm-center]").count(), 0, "the legacy library is not loaded in ordinary settings");
-  await legacy.locator("summary").focus();
-  await page.keyboard.press("Tab");
-  assert.equal(await page.locator("[data-settings-close]").evaluate(el => el === document.activeElement), true);
-  await page.keyboard.press("Shift+Tab");
-  assert.equal(await legacy.locator("summary").evaluate(el => el === document.activeElement), true);
-  await page.keyboard.press("Enter");
-  await page.locator("[data-llm-center]").waitFor({ state: "visible" });
-  await legacy.locator("summary").click();
-  assert.equal(await page.locator("[data-llm-center]").count(), 1, "folding keeps the compatibility editor mounted");
   await page.getByRole("button", { name: "维护", exact: true }).click();
   await page.getByRole("tab", { name: "服务" }).click();
   await page.locator("[data-settings-home]").waitFor({ state: "visible", timeout: 15_000 });
@@ -440,9 +427,6 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
   await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
-  const modelSettings = page.locator('[data-space-section="models"]');
-  assert.equal(await modelSettings.locator("[data-llm-legacy-settings]").evaluate(el => (el as HTMLDetailsElement).open), false);
-  assert.equal(await modelSettings.locator("[data-llm-spaces]").count(), 0);
   const select = page.locator("[data-dsh-target=\"true\"]");
   await select.waitFor({ state: "visible", timeout: 15_000 });
   await select.selectOption("0.2.0");

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {Context} from '@deepseek-ai/cordis';
 import {MainLlmFacade} from '../../packages/llm-bridge/src/main-facade.ts';
-import {installModelSelection,type ModelSelectionRef} from '@deepseek-ai/dsh-agent';
+import {AgentModel,type ModelSelection,type ModelSelectionProjectionState} from '@deepseek-ai/dsh-agent';
 import {ReasoningEffortId} from '@deepseek-ai/dsh-llm';
+import type {} from '@deepseek-ai/dsh-compaction-basic';
 import {Session,SessionId,pluginRecordOf} from '@deepseek-ai/dsh-session';
 import {guardedCompaction} from '../../packages/llm-bridge/src/automatic-compaction.ts';
 const ctx=new Context(),before={message:process.listenerCount('message'),disconnect:process.listenerCount('disconnect')};
@@ -56,11 +57,23 @@ try{
       if(input===local)assert.strictEqual(resolved,local);
       else{assert.equal(resolved.temperature,0.25);assert.equal(resolved.maxTokens,17);assert.deepEqual(resolved.stop,['END']);const prepared=await facade.prepareCall(resolved);assert.equal(prepared.config.maxTokens,17);}
     }
-    const selection:ModelSelectionRef={current:{provider:'spaces-main:chosen',model:'assembled',reasoningEffort:'high' as never},assembled:undefined};
-    const disposeSelection=installModelSelection(ctx,selection);
+    let projection:ModelSelectionProjectionState={lastUsed:null,pending:{provider:'spaces-main:chosen',model:'assembled',reasoningEffort:ReasoningEffortId('high')}};
+    const model=new AgentModel(()=>projection,agent.session,agent.options as never);
+    // Mirror the retired ModelSelectionRef contract: prompt assembly snapshots
+    // the selection, request routing applies the assembled value. The rc.1
+    // AgentModel records durable choices but no longer couples them to the
+    // agent/request waterfall, so the fixture reproduces the captured step.
+    const selection:{current:ModelSelection|undefined;assembled:ModelSelection|undefined}={current:{provider:'spaces-main:chosen',model:'assembled',reasoningEffort:ReasoningEffortId('high')},assembled:undefined};
+    const disposeSelection=ctx.on('agent/request',async(_payload,next)=>{
+      const resolved=await next();
+      const selected=selection.assembled;
+      if(selected===void 0)return resolved;
+      const {reasoningEffort:_inherited,...without}=resolved as unknown as Record<string,unknown>;
+      return {...without,provider:selected.provider,model:selected.model,...selected.reasoningEffort===undefined?{}:{reasoningEffort:selected.reasoningEffort}};
+    });
     let release!:()=>void;const gate=new Promise<void>(r=>release=r);let entered!:()=>void;const paused=new Promise<void>(r=>entered=r);
-    const assembling=(ctx.waterfall as any)('system-prompt/assemble',{}, {},async()=>{entered();await gate;return {variables:{}};});
-    await paused;selection.current={provider:'spaces-main',model:'default'};release();await assembling;
+    const assembling=(ctx.waterfall as any)('system-prompt/assemble',{}, {},async()=>{entered();selection.assembled=selection.current;await gate;return {variables:{}};});
+    await paused;model.select({provider:'spaces-main',model:'default'});selection.current={provider:'spaces-main',model:'default'};release();await assembling;
     const config=await ctx.waterfall('agent/request',{agent} as never,()=>Promise.resolve({...proposal,provider:'spaces-main',model:'default'}));
     assert.equal(config.provider,'spaces-main:chosen');assert.equal(config.model,'assembled');assert.equal(config.reasoningEffort,'high');
     await facade.prepareCall(config);disposeSelection();

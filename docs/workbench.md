@@ -38,6 +38,8 @@ Spaces 安装在现有 DSH Web 或 Desktop 宿主中。初始化后，原应用�
 
 新建空间当前使用 **Web**，选择官方 DSH 的精确版本，再选择跟随主空间模型或在此空间配置。版本目录读取失败会显示错误并阻止提交。
 
+主空间（web/desktop）在 Creator（`cordis` preset）下可用四个宿主工具：`spaces_context`（服务纪元/版本/可写性/忙闲/可用模型源）、`spaces_create_preview`（冻结一次性计划）、`spaces_create_execute`（单次审批后按 requestId 执行单个组合作业）、`spaces_job`（按作业 id 读结果）。执行是一个串行作业：prepare/运行时安装 → create → view-bridge → llm-policy → 逐项插件安装并读回 → 可选 start；首处失败即停止，partial 结果如实记录，不重试、不回滚。插件只接受 npm 精确版本或 GitHub 完整 commit，install script 仅在审批明确列出的 allowBuilds 键下运行。工具经独立 Creator scope 调用，不授予其他管理命令，也不依赖 LLM 服务。
+
 Browser Space 入口当前封存：不显示创建选项，不接受 Browser 创建或启动，不开放原生浏览器展示转接。底座、版本契约和扩展实现保留，后续另行验收与启用；界面不显示封存提示。
 
 ## 4. 启停与服务生命周期
@@ -68,19 +70,16 @@ queued → running → succeeded / failed / cancelled
 
 ## 6. 模型与连接
 
-当前有三种模型来源：
+当前有两种模型来源：
 
 | 来源 | 调用方式 | 主要生命周期依赖 |
 | --- | --- | --- |
 | 主空间继承 | 子空间经 Supervisor 使用主空间官方 LLM 服务 | 子空间、Supervisor、主空间均可用 |
-| 旧共享连接库 | 子空间按启动快照直接调用供应商 | 子空间、配置与凭据快照、供应商 |
 | 本地/会话选择 | 按该空间或会话的显式配置调用 | 对应空间及显式目标 |
 
 新 Web 空间默认可以跟随主空间模型，不复制主空间 Key。主空间退出后该路径不可用，不自动启动主空间或改用其他供应商。主空间的连接与默认仍由主空间官方设置拥有。Browser 不加载模型桥接。
 
-旧共享连接继续支持既有空间和连接资产。目录保存、空间待生效状态和实际运行版本是不同事实；需要重启时由用户明确执行。旧共享连接的详细兼容边界见 [global-llm-connections.md](plans/global-llm-connections.md)。
-
-空间本地默认和会话显式选择保持独立。显式目标失效时失败，不自动切换来源。设置界面和导入映射尚未完成的收敛项见 [model-settings-redesign-20261022.md](plans/model-settings-redesign-20261022.md)，该方案不是已完成能力清单。
+空间本地默认和会话显式选择保持独立。显式目标失效时失败，不自动切换来源。设置界面剩余的收敛项见 [model-settings-redesign-20261022.md](plans/model-settings-redesign-20261022.md)，该方案不是已完成能力清单。
 
 ## 7. 插件、普通模板与分享
 
@@ -92,7 +91,9 @@ queued → running → succeeded / failed / cancelled
 
 ## 8. DSH 版本与 Spaces 升级
 
-每个普通空间固定一个精确 DSH 版本，禁止降级。官方基础插件随所选运行时变化，不由 Spaces 作为第三方插件安装进 profile。管理空间跟随宿主运行时。
+每个普通空间固定一个精确 DSH 版本，禁止降级。官方基础插件随所选运行时变化，不由 Spaces 作为第三方插件安装进 profile。管理空间跟随宿主运行时。当前基线 SDK 为 `@deepseek-ai/dsh` **0.2.2-rc.1**（Cordis 4.1.0；宿主 Node ≥24.9，本项目 engines 为 Node 24.21+ 的 24.x 或 26.x）；官方升级指南目前只覆盖到 v0.2.2-alpha.3，rc.1 接缝以版本锁定源码为准。
+
+`@klarkxy/dsh-dev-index` 随宿主插件和 view bridge 的组合 patch 以同一行 id 预装：主空间和每个 Web 子空间可用；Browser 的 profile patch 显式禁用它，普通模板与 `.dshspace` 分享不改变这个边界。
 
 Web 空间在空间详情中预览并切换官方版本；不自动创建快照，不兼容的第三方插件会阻止切换。Browser 的框架版本由其 base 发行版固定，不提供单独切换 DSH 的入口。未再被任何空间使用的运行时可以通过正常管理操作删除。
 

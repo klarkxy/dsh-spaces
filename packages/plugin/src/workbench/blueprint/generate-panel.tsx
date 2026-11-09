@@ -197,7 +197,7 @@ export function GenerateBlueprintPanel({
           </label>
           <div className="dsh-wb-actions">
             <PressableButton
-              as="button"
+              
               type="button"
               className="dsh-wb-btn primary"
               disabled={ui.generateStatus === "loading"}
@@ -241,10 +241,10 @@ function GeneratedOutput({
         {generate.shareCode}
       </p>
       <div className="dsh-wb-actions">
-        <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={() => session.copyShareCode()}>
+        <PressableButton type="button" className="dsh-wb-btn" onClick={() => session.copyShareCode()}>
           {t(locale, "blueprints.copyShare")}
         </PressableButton>
-        <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={() => session.saveJson()}>
+        <PressableButton type="button" className="dsh-wb-btn" onClick={() => session.saveJson()}>
           {t(locale, "blueprints.saveJson")}
         </PressableButton>
       </div>

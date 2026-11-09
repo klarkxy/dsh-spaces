@@ -9,7 +9,7 @@
 export const NAME_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 export const RESERVED = new Set(["web", "hub", "headless", "node_modules", "spaces-hub"]);
 export const ACTIVE_JOB = new Set(["queued", "running"]);
-export const CREATE_JOB = new Set(["space.create", "template.create", "space.import"]);
+export const CREATE_JOB = new Set(["space.create", "creator.create", "template.create", "space.import"]);
 
 /**
  * D1 confirmation tiers.

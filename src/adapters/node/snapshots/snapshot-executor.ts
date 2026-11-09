@@ -4,8 +4,6 @@ import { isAuthorizedProductHome } from "../home/home-guard";
 import { ProcessTerminationError } from "../runtime/terminate-process";
 import { SnapshotStore, type SnapshotStoreOptions } from "./snapshot-store";
 import type {
-  PendingRestore,
-  RestoreJournal,
   SnapshotMeta,
   SnapshotRuntime,
 } from "../../../shared/snapshots";
@@ -37,8 +35,6 @@ export class SnapshotExecutor {
   preview(id: string): SnapshotMeta { return this.store.preview(id); }
   runtimeBin(id: string): string { return this.store.runtimeBin(id); }
   runtimeRoot(id: string): string { return this.store.runtimeRoot(id); }
-  pendingRestore(): PendingRestore | undefined { return this.store.pendingRestore(); }
-  restoreJournal(): RestoreJournal | undefined { return this.store.restoreJournal(); }
   create(runtime: SnapshotRuntime, reason?: string): Promise<SnapshotMeta> { return this.run("create", { runtime, reason }); }
   async delete(id: string): Promise<void> {
     if (this.options.inUse?.(id)) throw new Error("The active snapshot cannot be deleted.");

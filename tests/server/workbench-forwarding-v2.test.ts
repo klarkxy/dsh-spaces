@@ -365,7 +365,7 @@ test("LLM public errors pass through the Host client without leaking details", a
       async () => new Response(JSON.stringify({ ok: false, error })),
       ORIGIN,
       BEARER,
-      "llm",
+      "backups",
       {},
       identity,
     );
@@ -373,14 +373,14 @@ test("LLM public errors pass through the Host client without leaking details", a
   await assert.rejects(
     () =>
       postError({
-        code: "LLM_REVISION_CONFLICT",
-        message: "catalog revision moved",
-        details: { expected: 0, actual: 1 },
+        code: "LLM_SPACE_BUSY",
+        message: "space busy",
+        details: { spaceId: "alpha" },
       }),
     (error: unknown) => {
       assert.ok(error instanceof RemoteError);
-      assert.equal(error.code, "LLM_REVISION_CONFLICT");
-      assert.equal(error.message, "catalog revision moved");
+      assert.equal(error.code, "LLM_SPACE_BUSY");
+      assert.equal(error.message, "space busy");
       assert.deepEqual(error.details, {});
       return true;
     },

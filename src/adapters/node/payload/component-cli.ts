@@ -200,15 +200,20 @@ export function cliLoadError(version: string, unmet: readonly string[]): string 
   return `Recorded CLI ${version} cannot load this component: ${unmet.join(", ")}.`;
 }
 
-/** Regular component files shipped in one selected bridge. Extra installed files are ignored. */
+/**
+ * Regular component files shipped in one selected bridge. Extra installed
+ * files are ignored. A top-level node_modules is never component content,
+ * but lib/…/node_modules/… is: the supervisor's bundled UI engine lives
+ * under lib/<component>/ui-engine/node_modules and must stay comparable.
+ */
 export function payloadBridgeFiles(payloadRoot: string, bridge: string): string[] {
   const root = join(payloadRoot, bridge);
   if (!existsSync(root)) return [];
   const found: string[] = [];
   const walk = (dir: string, prefix: string): void => {
     for (const name of readdirSync(dir)) {
-      if (name === "node_modules") continue;
       const rel = prefix ? `${prefix}/${name}` : name;
+      if (rel === "node_modules") continue;
       const abs = join(dir, name);
       const stat = lstatSync(abs);
       if (stat.isSymbolicLink()) continue;

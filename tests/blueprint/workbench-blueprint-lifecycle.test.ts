@@ -24,7 +24,6 @@ import {
 } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import { WorkbenchProductService, type WorkbenchProductPorts } from "../../src/adapters/node/products/workbench-products.ts";
 import { parseBlueprint } from "@klarkxy/dsh-blueprint/v1";
-import type { LlmApiResult } from "../../src/shared/llm-api.ts";
 import type { WorkbenchCommand, WorkbenchJob, WorkbenchSpace } from "../../src/shared/workbench.ts";
 import { spaceIdFromName } from "../../src/shared/types.ts";
 import {
@@ -142,10 +141,6 @@ async function waitRunningPhase(jobs: WorkbenchJobStore, id: string, phase: stri
   throw new Error(`timed out waiting for ${id} phase ${phase} (status=${job.status} phase=${job.phase})`);
 }
 
-function emptyLlm(): LlmApiResult {
-  return { revision: 0, connections: [], defaultModel: null } as LlmApiResult;
-}
-
 type Clock = { now: () => Date; set: (ms: number) => void };
 
 function clockAt(ms: number): Clock {
@@ -189,16 +184,13 @@ function openStack(
     },
     installPlugin: async () => {
       throw new Error("plugin execution is not part of this fixture");
-    },
-    llm: async () => emptyLlm(),
-    diagnostics: (spaceId) => ({ spaceId, status: "stopped", logs: [], backups: [] }),
+    },    diagnostics: (spaceId) => ({ spaceId, status: "stopped", logs: [], backups: [] }),
     withWrite: (label, action) => lock.run(label, action),
     now: () => clock.now(),
     fetchImpl: forbidden,
     prepareBlueprintPackage: forbidden,
     dshVersion: () => "0.1.5-rc.2",
     spacesVersion: () => "0.3.1",
-    llmBridgeAvailable: () => true,
     runtimeBin: () => join(dshHome, "bin.js"),
     inspectRuntime: async () => ({
       versions: { dsh: "0.1.5-rc.2", base: "0.1.5-rc.2", webApp: "0.1.5-rc.2" },

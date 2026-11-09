@@ -11,13 +11,10 @@ import { CATALOG_CACHE_FILE } from "../../src/adapters/node/products/plugin-cata
 import { packSpaceShare, pluginToShare } from "../../src/adapters/node/products/space-share.ts";
 import { packZip } from "../../src/adapters/node/products/space-share-zip.ts";
 import { SPACE_TEMPLATES_FILE } from "../../src/adapters/node/products/space-templates.ts";
-import { emptyCatalog, emptyPolicy } from "../../src/shared/llm-connections.ts";
-import { buildLlmShareManifest } from "../../src/shared/llm-share.ts";
 import {
   parseWorkbenchProductRequest,
   parseWorkbenchProductResult,
 } from "../../src/shared/workbench-product-schemas.ts";
-import type { LlmApiResult } from "../../src/shared/llm-api.ts";
 import type { WorkbenchSpace } from "../../src/shared/workbench.ts";
 import {
   MAX_WORKBENCH_SHARE_BYTES,
@@ -64,7 +61,6 @@ function writeProfile(
   }
 }
 
-const emptyLlm = buildLlmShareManifest({ catalog: emptyCatalog(), policy: emptyPolicy() });
 
 function jobCtx(): { ctx: WorkbenchJobContext; recorded: unknown[] } {
   const recorded: unknown[] = [];
@@ -131,7 +127,6 @@ function createService(
       (async (_spaceId, spec) => {
         installed.push(spec);
       }),
-    llm: overrides.llm ?? (async () => emptyLlm as LlmApiResult),
     diagnostics:
       overrides.diagnostics ??
       ((spaceId) => ({
@@ -146,7 +141,6 @@ function createService(
     fetchImpl: overrides.fetchImpl,
     packGit: overrides.packGit,
     writePatch: overrides.writePatch,
-    writeLlmShare: overrides.writeLlmShare,
   };
   return new WorkbenchProductService(ports);
 }
@@ -578,7 +572,6 @@ test("share export returns a secret-free archive and a safe filename", async () 
   );
   const service = createService(dir, {
     spaces: [space("coding", { displayName: "My Coding" })],
-    llm: async () => ({ ...emptyLlm, spaceId: "coding" }) as LlmApiResult,
   });
   const result = await service.read({ method: "share.export", spaceId: "coding" });
   assert.equal(result.method, "share.export");

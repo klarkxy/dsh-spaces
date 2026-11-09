@@ -91,6 +91,7 @@ function writePendingRestore(root: string, snapshotId: string): void {
     `${JSON.stringify({
       snapshotId,
       beforeRestoreId: snapshotId,
+      planId: "ae95e8a4-691a-4aeb-852b-876076372daa",
       runtimeVersion: "0.1.5-rc.1",
       binRelative: "node_modules/@deepseek-ai/dsh/lib/bin.js",
       startedAt: new Date().toISOString(),
@@ -338,7 +339,6 @@ test("truncated job bytes stay in place and are not settled", async () => {
     readFileSync(join(home, HOME_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME, "other-snap-job.json"), "utf8"),
   ) as { status: string };
   assert.equal(other.status, "running");
-  assert.ok(store.pendingRestore()?.snapshotId);
   assert.doesNotMatch(result.stdout, /Offline recovery finished/);
 });
 
@@ -362,7 +362,6 @@ test("recover does not complete a pending SnapshotStore restore", async () => {
     toolchainRoot: join(runtimeRoot, "toolchain"),
   });
   writePendingRestore(snapshotRoot, snap.id);
-  assert.ok(store.pendingRestore());
   assert.equal(readFileSync(join(home, "settings.yaml"), "utf8"), "dirty-settings\n");
 
   const beforeSettings = readFileSync(join(home, "settings.yaml"));
@@ -370,7 +369,6 @@ test("recover does not complete a pending SnapshotStore restore", async () => {
   const result = await runDoctor(["recover", "--home", home]);
   assert.equal(result.code, 7);
   assert.equal(jsonOf(result.stdout).code, "UNSUPPORTED");
-  assert.ok(store.pendingRestore());
   assert.deepEqual(readFileSync(join(home, "settings.yaml")), beforeSettings);
   assert.deepEqual(readFileSync(join(home, ".credentials.yaml")), beforeCreds);
   assert.doesNotMatch(result.stdout, /secret-key/);

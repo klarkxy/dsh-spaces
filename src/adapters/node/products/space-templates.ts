@@ -18,7 +18,6 @@ import {
   assertSharePluginsSecretFree,
   parseSpaceRecipe,
 } from "../../../core/application/space-recipe";
-import type { LlmShareManifest } from "../../../shared/llm-share";
 
 export const SPACE_TEMPLATES_FILE = "space-templates.json";
 
@@ -26,7 +25,6 @@ export interface SpaceTemplatePorts {
   createSpace(input: { name: string; displayName: string; icon?: string } & SpaceBaseSelection): Promise<void>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
   writePatch?(spaceId: string, patch: string): void;
-  writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
 }
 
 function templatesPath(dshHome: string): string {
@@ -147,7 +145,6 @@ export function saveSpaceTemplate(
     displayName?: string;
     now?: Date;
     includeConfig?: boolean;
-    llm?: LlmShareManifest;
   } = {},
 ): SpaceTemplate {
   if (spaceId === "web") throw new Error("The web space cannot be saved as a template.");
@@ -165,7 +162,6 @@ export function saveSpaceTemplate(
     displayName: options.displayName || name,
     plugins,
     patch,
-    llm: options.llm,
   });
   const template: SpaceTemplate = {
     id: spaceTemplateId(name),

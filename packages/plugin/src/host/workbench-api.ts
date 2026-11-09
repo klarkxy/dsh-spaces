@@ -12,9 +12,6 @@ import type { WorkbenchApiArgNames, WorkbenchApiMethod } from "../../../../src/s
 import {
   backupsResultSchema,
   jobIdSchema,
-  llmApiRequestSchema,
-  llmApiResultSchema,
-  llmCredentialRequestSchema,
   mutationContextSchema,
   pluginsQuerySchema,
   requestIdSchema,
@@ -131,17 +128,5 @@ export const WORKBENCH_API_CODECS: {
       spaceId: { schema: spaceIdSchema, typeSymbol: "@dsh-spaces/plugin#workbench/backups:spaceId" },
     },
     result: { schema: backupsResultSchema, typeSymbol: "@dsh-spaces/plugin/types#WorkbenchBackup[]" },
-  },
-  llm: {
-    params: {
-      request: { schema: llmApiRequestSchema, typeSymbol: "@dsh-spaces/plugin/types#LlmApiRequest" },
-    },
-    result: { schema: llmApiResultSchema, typeSymbol: "@dsh-spaces/plugin/types#LlmApiResult" },
-  },
-  llmCredential: {
-    params: {
-      request: { schema: llmCredentialRequestSchema, typeSymbol: "@dsh-spaces/plugin/types#LlmCredentialRequest" },
-    },
-    result: { schema: llmApiResultSchema, typeSymbol: "@dsh-spaces/plugin/types#LlmApiResult" },
   },
 };

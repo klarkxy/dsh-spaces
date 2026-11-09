@@ -12,7 +12,6 @@ import {
   recipeFromTemplate,
   validateImportedPatch,
 } from "../../src/core/application/space-recipe.ts";
-import { LLM_SHARE_NOTE, type LlmShareManifest } from "../../src/shared/llm-share.ts";
 import { SPACE_TEMPLATES_FILE, listSpaceTemplates } from "../../src/adapters/node/products/space-templates.ts";
 import {
   FULL_SPACES_PACKAGE,
@@ -174,43 +173,6 @@ test("invalid isolation is rejected before create", async () => {
   assert.equal(result.plugins, "not-run");
 });
 
-test("LLM requirements stay unmapped and do not carry sender bindings", async () => {
-  const written: unknown[] = [];
-  const llm: LlmShareManifest = {
-    schemaVersion: 1 as const,
-    kind: "dsh-space-llm-requirements" as const,
-    sourceSharedMode: "all" as const,
-    requirements: [
-      {
-        requirementId: "req-1",
-        displayName: "Shared",
-        protocol: "openai-completions",
-        endpoint: "http://127.0.0.1:9/v1",
-        modelIds: ["demo-large"],
-        authKind: "api-key" as const,
-        usedAsDefault: true,
-      },
-    ],
-    defaultRequirementId: "req-1",
-    adapterRequired: "llm-pi-ai" as const,
-    note: LLM_SHARE_NOTE,
-  };
-  const result = await applySpaceRecipe(recipe({ plugins: [], llm }), {
-    createSpace: async () => undefined,
-    installPlugin: async () => undefined,
-    writeLlmShare: async (_spaceId, manifest) => {
-      written.push(manifest);
-    },
-  }, { name: "lab" });
-  assert.equal(result.definition, "imported");
-  assert.equal(result.llm?.mappingRequired, true);
-  assert.equal(result.llm?.mapped, false);
-  assert.equal(result.llm?.requirements[0]?.requirementId, "req-1");
-  const payload = JSON.stringify(written);
-  assert.equal(payload.includes("conn-"), false);
-  assert.equal(payload.includes("SPACES_LLM_"), false);
-  assert.equal(payload.includes("apiKey"), false);
-});
 
 test("share parts from formatVersion 1 round-trip as a recipe", () => {
   const parsed = recipeFromShareParts({

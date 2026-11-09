@@ -1,13 +1,10 @@
 import { lstatSync } from "../../../shared/node/filesystem";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { isAlias, isMap, isScalar, isSeq, parseDocument, visit, YAMLMap, type Document, type Node } from "yaml";
 import { atomicWrite } from "../atomic";
 import { assertSafeSpaceId } from "../llm/llm-policy-store";
 
-const MIGRATION_MARKER = "dsh-spaces-settings-v1-sha256:";
 const jsTag = { tag: "tag:yaml.org,2002:js", resolve: (value: string) => value };
 
 /** Mutable profile/data paths must not traverse a junction or symbolic link. */
@@ -60,7 +57,7 @@ function configRows(doc: Document, omitAmbiguous = false): Map<string, YAMLMap> 
   return rows;
 }
 
-/** Detached namespace view over the native profile patch. No legacy reads or writes. */
+/** Detached namespace view over the native profile patch. */
 export function readProfileSettings(home: string, name: string, omitAmbiguous = false): Document {
   const patch = patchDocument(home, name);
   const doc = parse("{}\n", profileSettingsPath(home, name)) as Document;
@@ -100,87 +97,4 @@ export function writeProfileSettings(home: string, name: string, sections: Recor
   const doc = patchDocument(home, name);
   for (const [ns, section] of Object.entries(sections)) setSection(doc, ns, section);
   atomicWrite(path, doc.toString({ lineWidth: 0 }));
-}
-
-function digest(text: string): string { return createHash("sha256").update(text).digest("hex"); }
-
-function knownEntryIds(dump: string): Set<string> {
-  const doc = parse(dump, "composed profile");
-  const ids = new Set<string>();
-  function entries(rows: unknown): void {
-    if (!isSeq(rows)) return;
-    for (const row of rows.items) {
-      if (!isMap(row)) continue;
-      const id = row.get("id");
-      if (typeof id === "string") ids.add(id);
-      if (row.get("group") === true) entries(row.get("config", true));
-    }
-  }
-  entries(doc.contents);
-  return ids;
-}
-
-function legacyEntry(ns: string): string {
-  if (ns === "ui-developer-tools") return "ui-settings";
-  if (ns === "ui-onboarding") return "ui-settings-general";
-  if (ns === "shell") return process.platform === "win32" ? "pwsh-sandbox" : "bash-sandbox";
-  return ns;
-}
-
-function docValue(value: unknown): unknown {
-  if (isMap(value) || isSeq(value) || isScalar(value)) return value.toJSON();
-  return value;
-}
-
-function mergeLegacy(existing: YAMLMap<unknown, Node | null>, incoming: YAMLMap<unknown, Node | null>, label: string): YAMLMap<unknown, Node | null> {
-  const result = existing.clone() as YAMLMap<unknown, Node | null>;
-  for (const pair of incoming.items) {
-    const key = pair.key;
-    if (!isScalar(key) || typeof key.value !== "string") throw new Error(`Invalid legacy settings key: ${label}`);
-    const before = result.get(key.value, true);
-    if (before == null) result.set(key.value, (pair.value?.clone() ?? null) as Node | null);
-    else if (isMap(before) && isMap(pair.value)) result.set(key.value, mergeLegacy(requireStaticMap(before, label), requireStaticMap(pair.value, label), `${label}.${key.value}`));
-    else if (!isDeepStrictEqual(docValue(before), docValue(pair.value))) {
-      throw new Error(`Legacy settings conflict with profile configuration: ${label}.${key.value}`);
-    }
-  }
-  return result;
-}
-
-/** One explicit, guarded migration during normal launch; interrupted commits are never replayed. */
-export function migrateLegacyProfileSettings(home: string, name: string, dump: string): void {
-  if (name === "web") throw new Error("The default web profile is protected.");
-  const source = join(home, "hub", name, "settings.yaml");
-  assertOwnedProfilePath(home, source);
-  if (!existsSync(source)) return;
-  const target = `${source}.migrated`;
-  const path = profileSettingsPath(home, name);
-  assertOwnedProfilePath(home, path);
-  const before = readFileSync(path, "utf8");
-  if (before.includes(MIGRATION_MARKER)) throw new Error("Interrupted settings migration: profile may already be updated; legacy evidence was preserved.");
-  if (existsSync(target) || lstatSync(source).isSymbolicLink()) throw new Error("Legacy settings migration destination or ownership is not available.");
-  const original = readFileSync(source, "utf8");
-  const legacy = parse(original, source);
-  const sections = requireStaticMap(legacy.contents, source);
-  const doc = patchDocument(home, name);
-  const rows = configRows(doc);
-  const ids = knownEntryIds(dump);
-  const mapped = new Set<string>();
-  for (const pair of sections.items) {
-    if (!isScalar(pair.key) || typeof pair.key.value !== "string") throw new Error("Legacy settings namespace is not a string.");
-    const ns = legacyEntry(pair.key.value);
-    if (!ids.has(ns) || mapped.has(ns)) throw new Error(`Unsupported or duplicate legacy settings entry: ${ns}`);
-    mapped.add(ns);
-    const incoming = requireStaticMap(pair.value, ns);
-    const existing = rows.get(ns)?.get("config", true);
-    setSection(doc, ns, existing == null ? incoming : mergeLegacy(requireStaticMap(existing, ns), incoming, ns));
-  }
-  doc.commentBefore = [doc.commentBefore, ` ${MIGRATION_MARKER}${digest(original)}`].filter(Boolean).join("\n");
-  // Recheck under the caller's ownership guard immediately before either mutation.
-  if (existsSync(target) || lstatSync(source).isSymbolicLink()
-    || readFileSync(source, "utf8") !== original || readFileSync(path, "utf8") !== before) {
-    throw new Error("Legacy settings changed during migration; no profile update was committed.");
-  }
-  atomicWrite(path, doc.toString({ lineWidth: 0 }));
-  renameSync(source, target);
 }

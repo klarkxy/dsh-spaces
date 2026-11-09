@@ -334,6 +334,23 @@ test("snapshot create is whole-home, stops owned spaces, and public DTO strips h
   assert.ok(existsSync(join(home, "profiles", "space-coding")));
 });
 
+test("space.runtime.set re-apply at the host version installs it into the store", async () => {
+  const installs: string[] = [];
+  const { maintenance, home, state } = harness({
+    install: async (version) => { installs.push(version); return { bin: "bin.js", version, dir: home }; },
+    installedBin: (version) => (installs.includes(version) ? "bin.js" : undefined),
+    hostRuntime: () => ({ bin: "host-bin.js", version: "0.2.0-rc.3" }),
+  });
+  new ProfileRegistry(home).updateMeta("space-coding", { dshVersion: "0.2.0-rc.3" });
+  state.status["space-coding"] = "stopped";
+  const plan = await maintenance.preview({ kind: "space.runtime.set", spaceId: "space-coding", version: "0.2.0-rc.3" });
+  assert.equal(plan.title, "Re-apply DSH 0.2.0-rc.3 to space-coding");
+  assert.ok(plan.changes.some((row) => row.includes("Download and install DSH 0.2.0-rc.3.")),
+    `expected the download step in: ${JSON.stringify(plan.changes)}`);
+  await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(installs, ["0.2.0-rc.3"], "the host version is installed into the Spaces runtime store");
+});
+
 test("global runtime install requests and saved legacy plans are unsupported without writes", async () => {
   let installs = 0;
   const { maintenance, home, state } = harness({ install: async () => { installs += 1; throw new Error("must not install"); } });
@@ -721,11 +738,10 @@ test("a failed restart after the pin leaves the pin written and the space stoppe
   assert.equal(state.status["space-coding"], "stopped");
 });
 
-test("runtime.remove refuses host, legacy, pinned, and missing versions and removes an unused one", async () => {
+test("runtime.remove refuses host, pinned, and missing versions and removes an unused one", async () => {
   const removed: string[] = [];
   const { maintenance, home } = harness({
     installedBin: (version) => (version === "0.9.9" ? "bin.js" : undefined),
-    legacyCurrent: () => ({ version: "0.8.8", bin: "bin.js", origin: "store" }),
     remove: (version) => removed.push(version),
   });
   new ProfileRegistry(home).updateMeta("space-coding", { dshVersion: "0.7.7" });
@@ -738,7 +754,6 @@ test("runtime.remove refuses host, legacy, pinned, and missing versions and remo
     });
   };
   await reject("0.1.5-rc.1", /is the host runtime\./);
-  await reject("0.8.8", /is the recorded legacy runtime pointer\./);
   await reject("0.7.7", /is pinned by space-coding\./);
   await reject("0.6.6", /is not installed in the Spaces runtime store\./);
   const plan = await maintenance.preview({ kind: "runtime.remove", version: "0.9.9" });
@@ -755,7 +770,6 @@ test("runtime inventory reports host, pinnedBy, and removable flags", async () =
         { version: "0.9.9", bin: "bin.js", dir: home },
         { version: "0.7.7", bin: "bin.js", dir: home },
       ],
-      current: { version: "0.1.5-rc.1", bin: "bin.js", origin: "store" },
     }),
     installedBin: () => "bin.js",
   });
@@ -1068,7 +1082,6 @@ interface HarnessState {
   onStop?: () => void;
   onStart?: () => void;
   stopAllImpl?: () => Promise<void>;
-  pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
 }
 
 interface HarnessOverrides {
@@ -1077,11 +1090,10 @@ interface HarnessOverrides {
   compatible?: (version: string) => boolean;
   pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
   snapshotsCreate?: SnapshotExecutor["create"];
-  pendingRestore?: () => ReturnType<SnapshotExecutor["pendingRestore"]>;
   log?: (message: string, error?: unknown) => void;
-  inventory?: () => { installed: Array<{ version: string; bin: string; dir: string }>; current?: { version: string; bin: string; origin: "store" | "legacy" } };
+  inventory?: () => { installed: Array<{ version: string; bin: string; dir: string }> };
   installedBin?: (version: string) => string | undefined;
-  legacyCurrent?: () => { version: string; bin: string; origin: "store" | "legacy" } | undefined;
+  hostRuntime?: () => { bin: string; version: string } | null;
   install?: (version: string) => Promise<{ version: string; bin: string; dir: string }>;
   remove?: (version: string) => void;
 }
@@ -1106,7 +1118,6 @@ function harness(overrides: HarnessOverrides = {}) {
     maintenance: [],
     order: [],
     backups: [],
-    pendingRestore: overrides.pendingRestore,
   };
   const maintenance = createMaintenance(home, state, overrides);
   return { home, state, maintenance };
@@ -1129,7 +1140,6 @@ function createMaintenance(
       },
       runtimeBin: () => "bin.js",
       runtimeRoot: () => home,
-      pendingRestore: () => state.pendingRestore?.() ?? overrides.pendingRestore?.(),
       create: overrides.snapshotsCreate ?? (async () => {
         throw new Error("snapshot create not stubbed");
       }),
@@ -1138,12 +1148,10 @@ function createMaintenance(
     runtimes: {
       inventory: overrides.inventory ?? (() => ({
         installed: [{ version: "0.1.5-rc.1", bin: "bin.js", dir: home }],
-        current: { version: "0.1.5-rc.1", bin: "bin.js", origin: "store" as const },
       })),
       catalog: async () => ({ versions: [{ version: "0.1.5-rc.2" }], distTags: { next: "0.1.5-rc.2" } }),
       install: overrides.install ?? (async (version: string) => ({ version, bin: "bin.js", dir: home })),
       installedBin: overrides.installedBin ?? ((version: string) => (version === "0.1.5-rc.1" ? "bin.js" : undefined)),
-      current: overrides.legacyCurrent ?? (() => undefined),
       remove: overrides.remove ?? (() => {
         throw new Error("runtime remove not stubbed");
       }),
@@ -1187,7 +1195,7 @@ function createMaintenance(
       state.status[spaceId] = "running";
     },
     currentRuntime: () => runtime,
-    hostRuntime: () => ({ bin: "bin.js", version: runtime.version }),
+    hostRuntime: overrides.hostRuntime ?? (() => ({ bin: "bin.js", version: runtime.version })),
     reinitializeManager: async () => {
       state.order.push("reinitialize");
       state.reinitialized += 1;
@@ -1247,7 +1255,6 @@ function snapshotHarness() {
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async (version: string) => ({ version, bin: join(runtimeDir, "bin.js"), dir: runtimeDir }),
       installedBin: (version: string) => (version === runtime.version ? join(runtimeDir, "bin.js") : undefined),
-      current: () => undefined,
       remove: () => {
         throw new Error("runtime remove not stubbed");
       },
@@ -1302,7 +1309,6 @@ function executorFromStore(store: SnapshotStore): SnapshotExecutor {
     preview: (id: string) => store.preview(id),
     runtimeBin: (id: string) => store.runtimeBin(id),
     runtimeRoot: (id: string) => store.runtimeRoot(id),
-    pendingRestore: () => store.pendingRestore(),
     create: async (runtime: SnapshotRuntime, reason?: string) => store.create(runtime, reason),
     delete: async (id: string) => {
       store.delete(id);
@@ -1453,4 +1459,160 @@ test("unsupported snapshot runtime fails before stopping spaces", async()=>{
  const plan=await maintenance.preview({kind:"snapshot.create"});
  await assert.rejects(()=>maintenance.execute(plan.id,jobCtx()),/unsupported snapshot runtime layout/);
  assert.equal(state.stopAll,0); assert.deepEqual(state.maintenance,[]);
+});
+
+// ---------------------------------------------------------------------------
+// plugin.install.spec — the control channel's exact-source variant (D4).
+// rejectRawSpec is untouched: this kind carries the normalized source itself.
+// ---------------------------------------------------------------------------
+
+/** pnpm persists git resolutions in pnpm-lock.yaml, not the dep specifier. */
+function writeGitLock(home: string, profile: string, name: string, spec: string): void {
+  const body = spec.replace(/^github:/, "https://github.com/").replace(/^git\+/, "");
+  const [repoPart, fragment = ""] = body.split("#");
+  const repo = repoPart!.replace(/\.git$/, "");
+  const segments = fragment.split("&").filter(Boolean);
+  const commit = segments.find((part) => !part.startsWith("path:") && !part.startsWith("semver:")) ?? "";
+  const path = segments.find((part) => part.startsWith("path:"))?.slice(5);
+  const resolution = `{commit: '${commit}', repo: '${repo}', type: git${path ? `, path: ${JSON.stringify(path)}` : ""}}`;
+  const depPath = `git+${repo}#${commit}${path ? `&path:${path}` : ""}`;
+  writeFileSync(
+    join(home, "profiles", profile, "pnpm-lock.yaml"),
+    `lockfileVersion: '9.0'\n\nimporters:\n  .:\n    dependencies:\n      ${name}:\n        specifier: '${spec}'\n        version: '${depPath}'\n\nsnapshots:\n  ${name}@${depPath}:\n    resolution: ${resolution}\n`,
+  );
+}
+
+function addGitFixture(home: string, profile: string, name: string, spec: string): void {
+  const manifest = readManifest(home, profile);
+  manifest.dependencies = { ...manifest.dependencies, [name]: spec };
+  const bundles = new Set(manifest.dsh?.profile?.bundles ?? []);
+  bundles.add(name);
+  writeFileSync(
+    join(home, "profiles", profile, "package.json"),
+    `${JSON.stringify({ dependencies: manifest.dependencies, dsh: { profile: { bundles: [...bundles] } } }, null, 2)}\n`,
+  );
+  const installedDir = join(home, "profiles", profile, "node_modules", ...name.split("/"));
+  mkdirSync(installedDir, { recursive: true });
+  writeFileSync(join(installedDir, "package.json"), JSON.stringify({ name, version: "0.0.0" }));
+  writeGitLock(home, profile, name, spec);
+}
+
+test("plugin.install.spec preview rejects anything that is not a closed exact source", async () => {
+  const { maintenance } = harness();
+  const bad: unknown[] = [
+    { kind: "plugin.install.spec", spaceId: "space-coding" },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: "dsh-plugin@1.0.0" },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "latest" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "^1.0.0" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "@deepseek-ai/dsh-web-app", version: "0.2.0-rc.2" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "@dsh-spaces/plugin", version: "1.0.0" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "main", packageName: "p" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "a".repeat(39), packageName: "p" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "a".repeat(40), path: "../x", packageName: "p" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "a".repeat(40), path: "x\\y", packageName: "p" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "1.0.0", approvedBuilds: ["*"] } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "1.0.0", approvedBuilds: ["github.com/o/r"] } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "1.0.0" } }, extra: 1 },
+  ];
+  for (const request of bad) {
+    await assert.rejects(
+      () => maintenance.preview(request as never),
+      matchCode("workbench/invalid-input"),
+      JSON.stringify(request),
+    );
+  }
+  // Target protection applies before source validation.
+  await assert.rejects(
+    () => maintenance.preview({
+      kind: "plugin.install.spec", spaceId: "spaces-hub",
+      source: { npm: { packageName: "p", version: "1.0.0" } },
+    }),
+    matchCode("workbench/forbidden"),
+  );
+  await assert.rejects(
+    () => maintenance.preview({
+      kind: "plugin.install.spec", spaceId: "space-ghost",
+      source: { npm: { packageName: "p", version: "1.0.0" } },
+    }),
+    matchCode("workbench/not-found"),
+  );
+});
+
+test("plugin.install.spec npm: writes allowBuilds verbatim, installs the pinned spec", async () => {
+  const specs: string[] = [];
+  const { home, maintenance, state } = harness({
+    pluginAdd: async (dshHome, profile, spec) => {
+      specs.push(`${profile} <- ${spec}`);
+      const name = spec.split("@")[0] === "" ? `@${spec.split("@")[1]}` : spec.split("@")[0]!;
+      const version = spec.slice(spec.lastIndexOf("@") + 1);
+      await addNamed(dshHome, profile, name === "" ? spec : name, version);
+    },
+  });
+  state.status["space-coding"] = "running";
+
+  const plan = await maintenance.preview({
+    kind: "plugin.install.spec",
+    spaceId: "space-coding",
+    source: { npm: { packageName: "dsh-plugin-a", version: "1.2.3", approvedBuilds: ["dsh-plugin-a", "dep@1.0.0"] } },
+  });
+  assert.ok(plan.changes.some((line) => line.includes("dsh-plugin-a@1.2.3")));
+  assert.ok(plan.changes.some((line) => /dsh-plugin-a, dep@1\.0\.0/.test(line)));
+  assert.ok(plan.changes.some((line) => /Stop and restart/.test(line)));
+
+  await maintenance.execute(plan.id, jobCtx());
+  assert.deepEqual(specs, ["space-coding <- dsh-plugin-a@1.2.3"]);
+  const policy = readFileSync(join(home, "profiles", "space-coding", "pnpm-workspace.yaml"), "utf8");
+  assert.match(policy, /dangerouslyAllowAllBuilds: false/);
+  assert.match(policy, /dsh-plugin-a: true/);
+  assert.match(policy, /dep@1\.0\.0: true/);
+  const installed = listProfilePlugins(home, "space-coding");
+  assert.ok(installed.some((item) => item.name === "dsh-plugin-a" && item.version === "1.2.3"));
+  assert.deepEqual(state.stopped, ["space-coding"]);
+  assert.deepEqual(state.started, ["space-coding"]);
+});
+
+test("plugin.install.spec github: lockfile read-back proves repo, commit and subdirectory", async () => {
+  const goodSpec = `github:org/repo#${"a".repeat(40)}&path:/plugins/dsh-b`;
+  const badSpec = `github:org/repo#${"b".repeat(40)}&path:/plugins/dsh-b`;
+  for (const spec of [goodSpec, badSpec]) {
+    const { home, maintenance } = harness({
+      pluginAdd: async (dshHome, profile) => addGitFixture(dshHome, profile, "dsh-b", spec),
+    });
+    const plan = await maintenance.preview({
+      kind: "plugin.install.spec",
+      spaceId: "space-coding",
+      source: { github: { owner: "org", repo: "repo", commit: "a".repeat(40), path: "plugins/dsh-b", packageName: "dsh-b" } },
+    });
+    assert.ok(plan.changes.some((line) => /org\/repo\/plugins\/dsh-b#a{40}/.test(line)));
+    if (spec === goodSpec) {
+      await maintenance.execute(plan.id, jobCtx());
+      assert.equal(listProfilePlugins(home, "space-coding").some((item) => item.name === "dsh-b"), true);
+    } else {
+      // A mismatched lockfile resolution is an honest failure, not a fix-up.
+      await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
+    }
+  }
+});
+
+test("plugin.install.spec reports pending build keys without approving them", async () => {
+  const { home, maintenance } = harness({
+    pluginAdd: async () => {
+      throw new Error(
+        `dsh plugin add failed (exit 1): ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED\n` +
+        `allowBuilds:\n  github.com/org/dep: true\n`,
+      );
+    },
+  });
+  const plan = await maintenance.preview({
+    kind: "plugin.install.spec",
+    spaceId: "space-coding",
+    source: { github: { owner: "org", repo: "dep", commit: "a".repeat(40), packageName: "dep" } },
+  });
+  await assert.rejects(
+    () => maintenance.execute(plan.id, jobCtx()),
+    (error: unknown) => /Pending builds awaiting approval: github\.com\/org\/dep/.test((error as Error).message),
+  );
+  // Deny-by-default policy was still written before the attempted install.
+  const policy = readFileSync(join(home, "profiles", "space-coding", "pnpm-workspace.yaml"), "utf8");
+  assert.match(policy, /dangerouslyAllowAllBuilds: false/);
 });

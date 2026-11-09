@@ -19,7 +19,6 @@ import {
   VisibleScale as SharedVisibleScale,
   VisibleSlide as SharedVisibleSlide,
   type MotionPrimitiveProps,
-  type PressButtonProps,
   type VisibleMotionProps,
 } from "../../../../src/shared/ui/motion";
 
@@ -36,12 +35,8 @@ export const VisibleScale = React.forwardRef<HTMLElement, VisibleMotionProps>(fu
   return <SharedVisibleScale ref={ref} transition={featureSpring} {...props} />;
 });
 
-/** Shared `PressButton`; the legacy `as="button"` prop is accepted and dropped. */
-export const PressableButton = React.forwardRef<HTMLButtonElement, PressButtonProps & { as?: "button" }>(
-  function PressableButton({ as: _as, ...props }, ref) {
-    return <PressButton ref={ref} {...props} />;
-  },
-);
+/** Shared `PressButton` (disabled buttons never scale). */
+export const PressableButton = PressButton;
 
 /** Props of `CollapseSection`. */
 interface CollapseSectionProps extends MotionPrimitiveProps {

@@ -14,10 +14,10 @@ const nodeRequire = 'import { createRequire as __spacesCreateRequire } from "nod
 const blueprintBuild = spawnSync(process.execPath, [at('packages/blueprint/scripts/build.mjs')], { cwd: root, stdio: 'inherit', windowsHide: true });
 if (blueprintBuild.status !== 0) throw new Error('Blueprint build failed', { cause: blueprintBuild.error });
 
-async function buildNodeCli(entryPoint, outfile) {
+async function buildNodeCli(entryPoint, outfile, extra = {}) {
   const source = await readFile(at(entryPoint), 'utf8');
   const banner = source.startsWith('#!') ? nodeRequire : `#!/usr/bin/env node\n${nodeRequire}`;
-  await build({ ...common, platform: 'node', banner: { js: banner }, entryPoints: [entryPoint], outfile });
+  await build({ ...common, platform: 'node', banner: { js: banner }, entryPoints: [entryPoint], outfile, ...extra });
   const check = spawnSync(process.execPath, ['--check', at(outfile)], { cwd: root, stdio: 'inherit', windowsHide: true });
   if (check.status !== 0) throw new Error(`Invalid bundled CLI: ${outfile}`);
 }
@@ -37,6 +37,7 @@ const sdkExternal = ['@deepseek-ai/*'];
 await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal, entryPoints: {
   index: 'packages/plugin/src/index.ts',
   'llm-images': 'packages/plugin/src/host/llm-images.ts',
+  'space-control': 'packages/plugin/src/space-control/index.ts',
   'typert.host': 'packages/plugin/src/typert.host.ts',
   'typert.remote-client': 'packages/plugin/src/typert.remote-client.ts',
 }, outdir: 'packages/plugin/lib' });
@@ -70,6 +71,22 @@ for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
   await copyFile(at(`packages/llm-bridge/${file}`), at(`packages/plugin/lib/llm-bridge/${file}`));
 }
 
+// playwright-core is copied verbatim next to the supervisor bundle: it loads
+// its own sub-paths dynamically and cannot be esbuilded. The immutable
+// component payload carries it at a fixed relative position so the packaged
+// install never depends on a profile's node_modules layout. The checkout's
+// own install is the source; its declared version must match the pin.
+await rm(at('packages/supervisor/lib/ui-engine'), { recursive: true, force: true });
+await cp(at('node_modules/playwright-core'), at('packages/supervisor/lib/ui-engine/node_modules/playwright-core'), { recursive: true });
+{
+  const engineManifest = JSON.parse(await readFile(at('packages/supervisor/lib/ui-engine/node_modules/playwright-core/package.json'), 'utf8'));
+  if (engineManifest.name !== 'playwright-core' || engineManifest.version !== '1.62.1') {
+    throw new Error(`ui-engine playwright-core must be 1.62.1, got ${engineManifest.name}@${engineManifest.version}`);
+  }
+}
+
+// The supervisor bundle resolves playwright-core only from ./ui-engine next
+// to itself (see src/adapters/node/supervisor/ui-playwright.ts).
 await buildNodeCli('packages/supervisor/src/index.ts', 'packages/supervisor/lib/index.js');
 await build({ ...common, platform: 'node', banner: { js: nodeRequire },
   entryPoints: ['src/adapters/node/snapshots/snapshot-worker.ts'], outfile: 'packages/supervisor/lib/snapshot-worker.mjs' });

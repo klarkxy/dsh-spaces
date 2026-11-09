@@ -8,7 +8,7 @@ import { isBareNpmPackageName, isGitSpec } from "../../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
 import { BLUEPRINT_ORIGIN_FILE, type BlueprintEligibility, type BlueprintLocalObservation, type BlueprintSourceBundle, type BlueprintSourceNamespace, type BlueprintSourcePackage, type BlueprintSourcePatchInfo } from "../../../../shared/workbench-blueprint";
 import { spaceDataRoot } from "../../llm/llm-policy-store";
-import { spaceSettingsPath } from "../../llm/llm-space-settings";
+import { profileSettingsPath as spaceSettingsPath } from "../../profile/profile-settings";
 import { readProfileSettings } from "../../profile/profile-settings";
 import { parseNpmNameAndVersion } from "../../products/plugin-ops";
 import { isHubPluginArchive, readPluginLibrary } from "../../products/plugin-library";

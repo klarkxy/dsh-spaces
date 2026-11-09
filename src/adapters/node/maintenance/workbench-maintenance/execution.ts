@@ -37,6 +37,12 @@ export class MaintenanceExecution extends MaintenancePlans {
           });
           this.markPlan(stored, "succeeded");
           return;
+        case "plugin.install.spec":
+          await this.runPluginInstallSpec(stored.command, ctx, stored.id, () => {
+            irreversible = true;
+          });
+          this.markPlan(stored, "succeeded");
+          return;
         case "plugin.remove":
           await this.runPluginRemove(stored.command, ctx, stored.id, () => {
             irreversible = true;

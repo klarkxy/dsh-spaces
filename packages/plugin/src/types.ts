@@ -5,7 +5,6 @@ import type { WorkbenchApi, WorkbenchRole } from "../../../src/shared/workbench"
 
 export type { SpaceDetail, SpacesOverview, WorkbenchApi, WorkbenchRole };
 export type { WorkbenchStartupFailure, WorkbenchStartupPhase, WorkbenchStartupStatus } from "../../../src/shared/workbench-startup";
-export type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../src/shared/llm-api";
 
 export interface WorkbenchHostHint {
   role: WorkbenchRole;
@@ -79,8 +78,8 @@ export interface WorkbenchGuideApi {
   previewServiceRestart?(): Promise<WorkbenchServiceRestartPreview>;
   restartService?(confirmationId: string): Promise<WorkbenchBootstrapResult>;
   presentationSnapshot?(): Promise<import("../../../src/shared/space-host").PortalSnapshot>;
-  /** Explicit audience-bound presentation entry; no management operations. Optional for older adapters. */
-  portalTarget?(audience: import("../../../src/shared/space-host").SpaceHostAudience): Promise<WorkbenchReturnTarget>;
+  /** Explicit audience-bound presentation entry; no management operations. */
+  portalTarget(audience: import("../../../src/shared/space-host").SpaceHostAudience): Promise<WorkbenchReturnTarget>;
   role(): Promise<WorkbenchGuideRole>;
   bootstrap(): Promise<WorkbenchBootstrapResult>;
   returnTarget(): Promise<WorkbenchReturnTarget>;

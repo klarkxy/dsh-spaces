@@ -235,7 +235,6 @@ export function observationsMatch(left: PlanObservation, right: PlanObservation)
     left.homeSettingsDigest === right.homeSettingsDigest &&
     left.homePatchDigest === right.homePatchDigest &&
     left.runtimeFingerprint === right.runtimeFingerprint &&
-    left.llmCatalogRevision === right.llmCatalogRevision &&
-    left.llmCatalogDigest === right.llmCatalogDigest
+    true
   );
 }

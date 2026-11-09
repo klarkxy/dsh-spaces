@@ -144,18 +144,13 @@ export class WorkbenchMaintenance extends MaintenanceExecution {
 
   async runtimes(): Promise<WorkbenchRuntime[]> {
     let installed: Array<{ version: string }> = [];
-    let current: string | undefined;
     try {
       const inventory = this.ports.runtimes.inventory();
       installed = inventory.installed.filter((row) => isExactRuntimeVersion(row.version));
-      if (inventory.current && isExactRuntimeVersion(inventory.current.version)) {
-        current = inventory.current.version;
-      }
     } catch (error) {
       throw this.fail(error, "runtimes.inventory");
     }
     const versions = new Set(installed.map((row) => row.version));
-    if (current) versions.add(current);
     try {
       const catalog = await this.ports.runtimes.catalog();
       for (const row of catalog.versions) {
@@ -182,7 +177,7 @@ export class WorkbenchMaintenance extends MaintenanceExecution {
           installed: installedSet.has(version),
           host: host === version,
           pinnedBy,
-          removable: installedSet.has(version) && host !== version && current !== version && pinnedBy.length === 0,
+          removable: installedSet.has(version) && host !== version && pinnedBy.length === 0,
           compatible: this.ports.isCompatibleRuntime(version),
         };
       });

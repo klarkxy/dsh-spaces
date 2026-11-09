@@ -3,7 +3,6 @@ import { SPACES_BROWSER_SEALED } from '../../../shared/browser-sealed';
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { FileLlmSpaceSettings } from "../llm/llm-space-settings";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import { atomicWrite } from "../atomic";
 import { assertNotRealHome } from "../home/home-guard";
@@ -40,14 +39,12 @@ import {
   recipeFromShareParts,
   recipeFromTemplate,
 } from "../../../core/application/space-recipe";
-import { parseLlmShareManifest, type LlmShareManifest } from "../../../shared/llm-share";
 import { isUnresolvedPluginAlias } from "../../../shared/plugin-spec";
 import { t } from "../../../shared/i18n";
-import type { LlmApiRequest, LlmApiResult } from "../../../shared/llm-api";
 import { isBareNpmPackageName, isGitSpec, isSafeSpec, matchesPluginQuery } from "../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../shared/runtime";
 import type { SpaceImportResult, SpaceSharePreview } from "../../../shared/space-share";
-import { assertShareSecretFree } from "../../../shared/llm-share";
+import { assertShareSecretFree } from "../../../shared/share-secret-scan";
 import {
   DEFAULT_HUB_SETTINGS,
   spaceIdFromName,
@@ -104,7 +101,6 @@ export interface WorkbenchProductPorts {
   listSpaces(): WorkbenchSpace[];
   createSpace(input: WorkbenchProductCreateInput, ctx: WorkbenchJobContext): Promise<unknown>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
-  llm(request: LlmApiRequest): Promise<LlmApiResult>;
   diagnostics(spaceId: string): WorkbenchDiagnostics;
   workbenchLog?(): WorkbenchLog;
   withWrite<T>(label: string, action: () => Promise<T>): Promise<T>;
@@ -113,12 +109,8 @@ export interface WorkbenchProductPorts {
   fetchImpl?: WorkbenchProductFetcher;
   packGit?: GitPacker;
   writePatch?(spaceId: string, patch: string): void;
-  writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
   dshVersion?(): string | null;
   spacesVersion?(): string | null;
-  llmBridgeAvailable?(): boolean;
-  llmAdmitted?(request: LlmApiRequest): Promise<LlmApiResult>;
-  llmCatalogObservation?(): { revision: number; digest: string };
   prepareBlueprintPackage?(
     home: string,
     pkg: BlueprintPackage,
@@ -365,13 +357,10 @@ export class WorkbenchProductService {
   }> {
     this.assertMutableSpace(spaceId, { mustExist: true });
     const space = this.ports.listSpaces().find((row) => row.id === spaceId);
-    const shared = await this.ports.llm({ method: "previewShare", spaceId });
-    const llm = parseLlmShareManifest(shared);
     const archive = exportSpaceArchive(this.ports.home, spaceId, {
       displayName: space?.displayName || spaceId,
       icon: space?.icon,
       includeConfig,
-      llm,
     });
     if (archive.length > MAX_WORKBENCH_SHARE_BYTES) {
       throw new Error("The space share archive is too large.");
@@ -475,13 +464,10 @@ export class WorkbenchProductService {
   ): Promise<WorkbenchProductOutcome> {
     this.assertMutableSpace(command.spaceId, { mustExist: true });
     if (!command.name.trim()) throw new Error("A template name is required.");
-    const shared = await this.ports.llm({ method: "previewShare", spaceId: command.spaceId });
-    const llm = parseLlmShareManifest(shared);
     const template = saveSpaceTemplate(this.ports.home, command.spaceId, command.name, {
       displayName: command.name,
       now: this.ports.now?.(),
       includeConfig: command.includeConfig === true,
-      llm,
     });
     const outcome: WorkbenchProductOutcome = { kind: "template.save", templateId: template.id };
     recordProductResult(ctx, outcome);
@@ -515,7 +501,6 @@ export class WorkbenchProductService {
         icon: parsed.manifest.space.icon,
         plugins: parsed.plugins,
         patch: parsed.patch,
-        llm: parsed.llm,
         source: parsed.manifest.source,
       }),
       this.recipePorts(ctx),
@@ -554,6 +539,27 @@ export class WorkbenchProductService {
     return staged;
   }
 
+  /**
+   * Read one staged import without consuming it — the control channel's
+   * plan stage uses it to freeze the preview and to refuse ids that are
+   * expired, consumed, foreign-epoch or unknown. Same checks as takeImport,
+   * minus consumption.
+   */
+  peekImport(importId: string): { expiresAt: string; preview: SpaceSharePreview } {
+    const now = this.nowMs();
+    const staged = this.imports.get(importId);
+    this.pruneImports(now);
+    if (!staged) throw new Error("That import is not available.");
+    if (staged.consumed) throw new Error("That import was already used.");
+    if (staged.expiresAt <= now) {
+      this.imports.delete(importId);
+      throw new Error("That import has expired.");
+    }
+    const epoch = this.ports.observation().serviceEpoch;
+    if (staged.epoch !== epoch) throw new Error("That import belongs to a previous service run.");
+    return { expiresAt: new Date(staged.expiresAt).toISOString(), preview: staged.preview };
+  }
+
   private pruneImports(now: number): void {
     for (const [id, row] of this.imports) {
       if (row.expiresAt <= now) this.imports.delete(id);
@@ -568,9 +574,6 @@ export class WorkbenchProductService {
       installPlugin: (spaceId: string, spec: string) => this.ports.installPlugin(spaceId, spec),
       writePatch: this.ports.writePatch ?? ((spaceId: string, patch: string) => {
         atomicWrite(join(this.ports.home, "profiles", spaceId, "cordis.patch.yml"), patch);
-      }),
-      writeLlmShare: this.ports.writeLlmShare ?? (async (spaceId: string, manifest: LlmShareManifest) => {
-        await new FileLlmSpaceSettings(this.ports.home).writeImport(spaceId, manifest);
       }),
     };
   }

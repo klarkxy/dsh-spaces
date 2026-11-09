@@ -62,6 +62,10 @@ export interface WorkbenchHttpRuntime {
   mintHandoff(): string;
   /** Private LLM delegation registration and per-owned-run transport. */
   handleLlmDelegationRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
+  /** Private Creator scoped channel for the trusted main-space identity. */
+  handleCreatorRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
+  /** Private Control scoped channel for the trusted main-space identity. */
+  handleControlRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
 }
 
 const portalGrants = new WeakMap<WorkbenchHttpRuntime, WorkbenchPortalGrants>();
@@ -185,6 +189,8 @@ async function handleRequest(
       return;
     }
     if (await host.handleLlmDelegationRequest?.(req, res)) return;
+    if (await host.handleCreatorRequest?.(req, res)) return;
+    if (await host.handleControlRequest?.(req, res)) return;
     if (req.method === "OPTIONS") {
       if (!originAllowed(req, host, { allowMissing: false })) {
         deny(res, 403, "workbench/forbidden", "Origin is not allowed.");

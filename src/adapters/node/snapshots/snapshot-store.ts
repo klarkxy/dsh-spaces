@@ -7,18 +7,13 @@ import { atomicWrite, renameDirectory as renameSync } from "../atomic";
 import { assertNotRealHome, samePath } from "../home/home-guard";
 import {
   MANAGED_HOME_ENTRIES,
-  RESTORE_STAGE_DIR,
   SNAPSHOT_ID_RE,
-  type PendingRestore,
-  type RestoreJournal,
   type SnapshotMeta,
   type SnapshotPresence,
   type SnapshotRuntime,
 } from "../../../shared/snapshots";
 
 const MANIFEST = "manifest.json";
-const PENDING_FILE = "pending-restore.json";
-const JOURNAL_FILE = "journal.json";
 const DATA_DIR = "data";
 const RUNTIME_DIR = "runtime";
 
@@ -124,7 +119,6 @@ export class SnapshotStore {
   }
 
   create(runtime: SnapshotRuntime, reason?: string): SnapshotMeta {
-    this.assertWritable();
     const prepared = this.prepareRuntime(runtime);
     return this.writeSnapshot({
       reason,
@@ -161,26 +155,11 @@ export class SnapshotStore {
   }
 
   delete(id: string): void {
-    this.assertWritable();
     const resolved = this.requireId(id);
     if (this.inUse(resolved)) {
       throw new Error(`Snapshot ${resolved} is in use and cannot be deleted`);
     }
     rmContained(this.root, join(this.root, resolved));
-  }
-
-  pendingRestore(): PendingRestore | undefined {
-    const path = join(this.root, PENDING_FILE);
-    if (!lexists(path)) return undefined;
-    this.assertInsideStore(path);
-    return parsePending(readFileSync(path, "utf8"), path);
-  }
-
-  restoreJournal(): RestoreJournal | undefined {
-    const path = join(this.stageDir(), JOURNAL_FILE);
-    if (!lexists(path)) return undefined;
-    this.assertInsideHome(path);
-    return parseJournal(readFileSync(path, "utf8"), path);
   }
 
   private writeSnapshot(input: {
@@ -338,11 +317,6 @@ export class SnapshotStore {
     return dir;
   }
 
-  private assertWritable(): void {
-    if (this.pendingRestore() || this.restoreJournal()) {
-      throw new Error("Unfinished restore evidence was reported. Writes are blocked.");
-    }
-  }
 
   private requireId(id: string): string {
     if (
@@ -378,14 +352,6 @@ export class SnapshotStore {
     assertContained(this.home, target, "DSH home");
   }
 
-  private stageDir(): string {
-    const dir = join(this.home, RESTORE_STAGE_DIR);
-    this.assertInsideHome(dir);
-    if (samePath(dir, this.home)) {
-      throw new Error("Restore stage resolved to DSH home");
-    }
-    return dir;
-  }
 
   private hook(op: string, detail?: string): void {
     this.inject?.(op, detail);
@@ -609,79 +575,6 @@ function parseManifest(raw: string, path: string): SnapshotMeta {
   };
 }
 
-function parsePending(raw: string, path: string): PendingRestore {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    throw new Error(`Pending restore file is not valid JSON: ${path}`);
-  }
-  if (
-    !isRecord(parsed) ||
-    typeof parsed.snapshotId !== "string" ||
-    !SNAPSHOT_ID_RE.test(parsed.snapshotId) ||
-    typeof parsed.beforeRestoreId !== "string" ||
-    !SNAPSHOT_ID_RE.test(parsed.beforeRestoreId) ||
-    typeof parsed.runtimeVersion !== "string" ||
-    typeof parsed.binRelative !== "string" ||
-    typeof parsed.startedAt !== "string"
-  ) {
-    throw new Error(`Pending restore file is invalid: ${path}`);
-  }
-  return {
-    snapshotId: parsed.snapshotId,
-    beforeRestoreId: parsed.beforeRestoreId,
-    runtimeVersion: parsed.runtimeVersion,
-    binRelative: normalizeRel(parsed.binRelative),
-    startedAt: parsed.startedAt,
-    ...optionalPlanIdField(parsed.planId, path),
-  };
-}
-
-function parseJournal(raw: string, path: string): RestoreJournal {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    throw new Error(`Restore journal is not valid JSON: ${path}`);
-  }
-  if (
-    !isRecord(parsed) ||
-    (parsed.phase !== "copying" && parsed.phase !== "swapping" && parsed.phase !== "swapped") ||
-    typeof parsed.snapshotId !== "string" ||
-    !SNAPSHOT_ID_RE.test(parsed.snapshotId) ||
-    typeof parsed.beforeRestoreId !== "string" ||
-    !SNAPSHOT_ID_RE.test(parsed.beforeRestoreId) ||
-    typeof parsed.runtimeVersion !== "string" ||
-    typeof parsed.binRelative !== "string" ||
-    typeof parsed.startedAt !== "string"
-  ) {
-    throw new Error(`Restore journal is invalid: ${path}`);
-  }
-  return {
-    phase: parsed.phase,
-    snapshotId: parsed.snapshotId,
-    beforeRestoreId: parsed.beforeRestoreId,
-    originalPresence: parsePresence(parsed.originalPresence, path),
-    runtimeVersion: parsed.runtimeVersion,
-    binRelative: normalizeRel(parsed.binRelative),
-    startedAt: parsed.startedAt,
-    ...optionalPlanIdField(parsed.planId, path),
-  };
-}
-
-function parseOptionalPlanId(value: unknown, label: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || !SNAPSHOT_ID_RE.test(value)) {
-    throw new Error(`${label} planId is not a UUID`);
-  }
-  return value;
-}
-
-function optionalPlanIdField(value: unknown, path: string): { planId?: string } {
-  const planId = parseOptionalPlanId(value, path);
-  return planId ? { planId } : {};
-}
 
 function parsePresence(value: unknown, path: string): SnapshotPresence {
   if (!isRecord(value)) {

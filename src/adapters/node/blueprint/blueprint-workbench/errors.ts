@@ -1,8 +1,6 @@
 import { lstatSync } from "../../../../shared/node/filesystem";
 import { BlueprintError } from "@klarkxy/dsh-blueprint/v1/types";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../../../shared/types";
-import { LLM_ERROR, LlmConfigError } from "../../../../shared/llm-connections";
-import type { LlmApiResult, LlmDescribeResult, LlmSpacePolicyResult } from "../../../../shared/llm-api";
 import { BlueprintPackageError, blueprintPackageErrorMessage } from "../blueprint-package";
 import { sanitizeLogText } from "../../diagnostics/diagnostics";
 import { GITHUB_APPLY_MESSAGE, INSPECT_RUNTIME_FAILED } from "./constants";
@@ -35,15 +33,6 @@ export function isPublicError(error: unknown): error is Error {
 
 export function isInspectRuntimeFailure(error: unknown): boolean {
   return error instanceof Error && error.message === INSPECT_RUNTIME_FAILED;
-}
-
-export function modelWriteFailureReason(error: unknown): string {
-  if (error instanceof LlmConfigError) {
-    if (error.code === LLM_ERROR.REVISION_CONFLICT) return "The model policy could not be updated.";
-    if (error.code === LLM_ERROR.MODEL_NOT_FOUND) return "The selected model is not available on that connection.";
-  }
-  if (error instanceof Error && isSafeKnownReason(error.message)) return error.message;
-  return "The model binding could not be written.";
 }
 
 export function durableFailureReason(error: unknown, stage: "space-create" | "packages" | "presets"): string {
@@ -102,20 +91,3 @@ export function assertRegularFile(path: string): void {
   if (!st.isFile() || st.isSymbolicLink()) throw publicError("The space manifest is not a regular file.");
 }
 
-export function asDescribe(result: LlmApiResult): LlmDescribeResult {
-  if (!result || typeof result !== "object" || !("connections" in result) || !("revision" in result)) {
-    throw publicError("The model catalog could not be read.");
-  }
-  return result as LlmDescribeResult;
-}
-
-export function asSpacePolicy(result: LlmApiResult): LlmSpacePolicyResult {
-  if (!result || typeof result !== "object" || !("policy" in result)) {
-    throw publicError("The space model policy could not be read.");
-  }
-  const policy = (result as LlmSpacePolicyResult).policy;
-  if (!policy || typeof policy.revision !== "number" || !Number.isInteger(policy.revision) || policy.revision < 0) {
-    throw publicError("The space model policy could not be read.");
-  }
-  return result as LlmSpacePolicyResult;
-}

@@ -78,7 +78,6 @@ test("missing snapshot worker keeps pending restore evidence", async () => {
   const pendingPath = join(root, "pending-restore.json");
   const pendingBytes = readFileSync(pendingPath);
   assert.deepEqual(readFileSync(pendingPath), pendingBytes);
-  assert.ok(store.pendingRestore());
   assert.equal(existsSync(join(home, RESTORE_STAGE_DIR)), true);
 
   const missingWorker = join(dirname(worker), "missing-snapshot-worker.mjs");
@@ -94,7 +93,6 @@ test("runtime leftover staging rm keeps the HTTP heartbeat and still installs", 
   const runtime = new RuntimeStore({
     root,
     source: () => "official",
-    legacy: () => undefined,
     run: mockInstallRun(),
     fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
   });
@@ -125,7 +123,6 @@ test("sync rename of a large published runtime tree stalls HTTP; install publish
   const runtime = new RuntimeStore({
     root,
     source: () => "official",
-    legacy: () => undefined,
     run: async (_command, args) => {
       if (args.includes("install")) {
         try {
@@ -276,6 +273,7 @@ function pendingStageFixture(prefix: string): { home: string; root: string; stor
       runtimeVersion: "1.0.0",
       binRelative: "bin.js",
       startedAt: new Date().toISOString(),
+      planId: "59ca7cee-0c06-4610-bc95-e86849247cef",
     })}\n`,
   );
   fillTree(join(home, RESTORE_STAGE_DIR, "backup"), FILE_COUNT);

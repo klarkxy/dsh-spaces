@@ -138,6 +138,12 @@ export class WorkbenchJobStore {
     return publicJob(this.require(id));
   }
 
+  /** Stored parsed command for internal dispatch use; never serialized back out. */
+  commandOf(id: string): WorkbenchCommand | null {
+    const record = this.records.get(id);
+    return record?.command ?? null;
+  }
+
   get(id: string): WorkbenchJob {
     return this.job(id);
   }

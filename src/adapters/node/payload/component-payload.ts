@@ -1,8 +1,8 @@
 import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 /** Node-only v2 component payload. Do not import this from browser shared contracts. */
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { list as listTarArchive } from "tar";
 import { atomicWrite } from "../atomic";
 import { assertNotRealHome, isInsideRealHome } from "../home/home-guard";
@@ -51,8 +51,25 @@ export const COMPONENT_PAYLOAD_ENTRIES: Record<ComponentPayloadName, string> = {
   "installation-worker": "lib/supervisor/snapshot-worker.mjs",
 };
 
+/**
+ * The pinned UI automation engine: playwright-core copied verbatim next to
+ * the supervisor bundle so the packaged payload never resolves it through a
+ * profile's node_modules. The loader (ui-playwright.ts) imports only
+ * UI_ENGINE_ENTRY_PATH at this fixed position.
+ */
+export const UI_ENGINE_PACKAGE_VERSION = "1.62.1";
+export const UI_ENGINE_DIR_REL = "lib/supervisor/ui-engine";
+export const UI_ENGINE_MANIFEST_REL = `${UI_ENGINE_DIR_REL}/node_modules/playwright-core/package.json`;
+export const UI_ENGINE_ENTRY_PATH = `${UI_ENGINE_DIR_REL}/node_modules/playwright-core/index.mjs`;
+
 export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, readonly string[]> = {
-  supervisor: ["lib/supervisor/package.json", "lib/supervisor/index.js"],
+  supervisor: [
+    "lib/supervisor/package.json",
+    "lib/supervisor/index.js",
+    UI_ENGINE_MANIFEST_REL,
+    UI_ENGINE_ENTRY_PATH,
+    `${UI_ENGINE_DIR_REL}/node_modules/playwright-core/index.js`,
+  ],
   "manager-plugin": [
     "package.json",
     "cordis.patch.yml",
@@ -60,6 +77,7 @@ export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, read
     "lib/typert.host.js",
     "lib/typert.remote-client.js",
     "lib/client.js",
+    "lib/space-control.js",
   ],
   "view-bridge": [
     "lib/view-bridge/package.json",
@@ -290,9 +308,6 @@ export function parseComponentPayloadManifest(value: unknown): ComponentPayloadM
   if (!isPlainObject(value.components)) throw fail("Component payload components must be an object.");
   for (const name of COMPONENT_PAYLOAD_NAMES) {
     if (!Object.prototype.hasOwnProperty.call(value.components, name)) {
-      if (name === "browser" && Object.keys(value.components).length === 5) {
-        throw fail("Component payload is missing component browser. An older five-component installation cannot hot-upgrade to this six-component build; start with a new isolated Home.");
-      }
       throw fail(`Component payload is missing component ${name}.`);
     }
   }
@@ -398,11 +413,93 @@ function assertDeclaredFiles(packageRoot: string, manifest: ComponentPayloadMani
   }
 }
 
+/**
+ * Fixed-size engine scan cap. playwright-core@1.62.1 ships ~140 files; the
+ * cap exists so a corrupt source tree fails the manifest write instead of
+ * growing the payload unboundedly.
+ */
+const UI_ENGINE_SCAN_MAX_FILES = 4_096;
+const UI_ENGINE_SCAN_MAX_BYTES = 64 * 1024 * 1024;
+
+/** Every regular file under the ui-engine directory, hashed into the payload. */
+function collectUiEngineFiles(packageRoot: string): ComponentPayloadFile[] {
+  const root = joinFromRel(packageRoot, UI_ENGINE_DIR_REL);
+  let st;
+  try {
+    st = lstatSync(root);
+  } catch {
+    throw fail(`Component supervisor is missing its ui-engine directory: ${UI_ENGINE_DIR_REL}`);
+  }
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw fail(`Component supervisor ui-engine is not a real directory: ${UI_ENGINE_DIR_REL}`);
+  }
+  const found: string[] = [];
+  let totalBytes = 0;
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name);
+      let stat;
+      try {
+        stat = lstatSync(abs);
+      } catch {
+        throw fail(`Component supervisor ui-engine file could not be read: ${abs}`);
+      }
+      if (stat.isSymbolicLink()) {
+        throw fail(`Component supervisor ui-engine file is a symlink or junction: ${abs}`);
+      }
+      if (stat.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const rel = relative(packageRoot, abs).split(sep).join("/");
+      found.push(rel);
+      totalBytes += stat.size;
+      if (found.length > UI_ENGINE_SCAN_MAX_FILES || totalBytes > UI_ENGINE_SCAN_MAX_BYTES) {
+        throw fail("Component supervisor ui-engine exceeds the payload scan limits.");
+      }
+    }
+  };
+  walk(root);
+  if (!found.length) {
+    throw fail(`Component supervisor ui-engine directory is empty: ${UI_ENGINE_DIR_REL}`);
+  }
+  return found.sort((a, b) => a.localeCompare(b)).map((rel) => {
+    const onDisk = readRegularFile(packageRoot, rel);
+    return { path: rel, sha256: onDisk.sha256, size: onDisk.size };
+  });
+}
+
+/**
+ * The bundled engine manifest must declare the pinned playwright-core: any
+ * other content at that position means the build copied the wrong thing.
+ */
+function assertUiEngineIdentity(packageRoot: string): void {
+  const onDisk = readRegularFile(packageRoot, UI_ENGINE_MANIFEST_REL);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(onDisk.bytes.toString("utf8"));
+  } catch {
+    throw fail(`Component supervisor ui-engine manifest is not valid JSON: ${UI_ENGINE_MANIFEST_REL}`);
+  }
+  const row = parsed as { name?: unknown; version?: unknown };
+  if (row?.name !== "playwright-core" || row?.version !== UI_ENGINE_PACKAGE_VERSION) {
+    throw fail(
+      `Component supervisor ui-engine must be playwright-core@${UI_ENGINE_PACKAGE_VERSION}, got ${String(row?.name)}@${String(row?.version)}.`,
+    );
+  }
+}
+
 function collectComponentFiles(packageRoot: string, name: ComponentPayloadName): ComponentPayloadFile[] {
   const files: ComponentPayloadFile[] = [];
   for (const rel of COMPONENT_PAYLOAD_REQUIRED_FILES[name]) {
     const onDisk = readRegularFile(packageRoot, rel);
     files.push({ path: rel, sha256: onDisk.sha256, size: onDisk.size });
+  }
+  if (name === "supervisor") {
+    assertUiEngineIdentity(packageRoot);
+    const listed = new Set(files.map((file) => file.path));
+    files.push(...collectUiEngineFiles(packageRoot).filter((file) => !listed.has(file.path)));
   }
   for (const rel of COMPONENT_PAYLOAD_OPTIONAL_FILES[name]) {
     const abs = joinFromRel(packageRoot, rel);

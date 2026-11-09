@@ -11,7 +11,7 @@ import { COMPATIBLE_DSH_CLI_VERSION } from "../../src/adapters/node/products/spa
 import { deriveServiceEpoch, digestHomeIdentity } from "../../src/adapters/node/server/workbench-protocol.ts";
 import { SUPERVISOR_ENDPOINT_FILE, writeEndpointFile } from "../../packages/plugin/src/host/supervisor-bootstrap.ts";
 import { WorkbenchHostRuntime, type WorkbenchHostRuntimeOptions } from "../../packages/plugin/src/host/runtime.ts";
-import { STARTUP_READ_FAILED, STARTUP_STATUS_UNSUPPORTED } from "../../packages/plugin/src/host/startup-observation.ts";
+import { STARTUP_READ_FAILED } from "../../packages/plugin/src/host/startup-observation.ts";
 import type { DesktopLaunchState } from "../../packages/plugin/src/types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "desktop-autostart-phase2-"));
@@ -271,13 +271,16 @@ test("a single failed startup read does not claim the launch was stopped or clea
   } finally { lease?.release(); }
 });
 
-test("an old service without startupStatus fails once from state and does not invent a cleanup", async () => {
+test("a failed startupStatus read fails once from state and does not invent a cleanup", async () => {
   const home = freshHome("unsupported-");
   let stateReads = 0;
   let endpoint: { serviceEpoch: string } | undefined;
   let lease: HomeControlHandle | undefined;
   const runtime = new WorkbenchHostRuntime(desktopOptions(home, {
-    connect: () => ({ state: async () => { stateReads++; return managerState(endpoint!.serviceEpoch, "starting"); } }) as never,
+    connect: () => ({
+      state: async () => { stateReads++; return managerState(endpoint!.serviceEpoch, "starting"); },
+      startupStatus: async () => { throw new Error("startup read unavailable"); },
+    }) as never,
     bootstrap: async () => {
       lease = new HomeLease(home, { allowRealHome: false }).acquire("web", "http://127.0.0.1:18466/");
       endpoint = { serviceEpoch: deriveServiceEpoch(lease.owner.nonce) };
@@ -294,7 +297,7 @@ test("an old service without startupStatus fails once from state and does not in
     const failed = await untilPhase(runtime, "failed");
     assert.equal(stateReads, 1);
     assert.equal(failed.failure, null);
-    assert.deepEqual(failed.reasons, [STARTUP_STATUS_UNSUPPORTED]);
+    assert.deepEqual(failed.reasons, [STARTUP_READ_FAILED]);
   } finally { lease?.release(); }
 });
 

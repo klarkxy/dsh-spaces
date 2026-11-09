@@ -19,10 +19,17 @@ DSH Spaces 是安装进兼容 DSH Web 或 Desktop 的多空间插件，没有独
 | 管理空间 `spaces-hub` | 承载管理工作台和受认证的管理转接 | 不是主空间，不复制一套后台 |
 | 普通空间 | 独立 DSH 进程、插件组合、会话和工作数据 | 不暴露管理 Remote，不启动第二个 Supervisor |
 | view bridge | 视图握手和受权的空间间消息能力 | 不承担管理或模型配置职责 |
-| LLM bridge | 主空间继承、旧共享连接和本地模型的接入 | 不创建第二套会话、Agent 或管理器 |
+| LLM bridge | 主空间继承和本地模型的接入 | 不创建第二套会话、Agent 或管理器 |
+| Creator channel | 身份确认主空间经受权工具发起一次空间创建 | 不开放任意管理命令、任意现有空间目标或模型数据面 |
 | Browser bridge | Browser Space 的界面与受权浏览器能力 | 不提供任意网页读取、脚本执行或管理通道 |
 
 主应用、`spaces-hub` 和普通注册空间是不同角色。普通空间成员资格只认 Spaces 注册项；不能仅凭目录存在或名称相似把其他 profile 当作普通空间。
+
+### 2.1 Creator 空间创建
+
+主空间（web/desktop profile）在 Creator（`cordis` preset）下获得四个宿主工具：`spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`。它们只通过 Supervisor 的独立 Creator scope 调用，不走管理 Remote，也不依赖 LLM 服务；scope 只对 `context`/`createPreview`/`createExecute`/`job` 有效，不进会话、日志或端点记录。
+
+创建语义是单个不可取消的组合作业：prepare（含运行时安装）→ create → view-bridge → llm-policy（选 `main` 模型源时）→ 逐项插件安装并读回校验 → 可选 start。预览把输入冻结成一次性计划，绑定服务纪元、状态版本和过期时间；执行在独立 `approveEscalation` 闸门后按 requestId 串行。首个失败即停止：已完成步骤保留为真实结果，未运行步骤保持 `not-run`，不重试、不回滚、不续跑。插件来源只允许 npm 精确版本或 GitHub 完整 commit（可带安全子目录），install script 只在审批明确列出的 `allowBuilds` 键下运行。
 
 ## 3. 控制面与展示面
 
@@ -60,9 +67,6 @@ Supervisor 签发有期限、单次使用并绑定父来源和通道的入口票
 | 普通空间插件组合 | 对应空间 profile | 受控安装与维护操作 |
 | 普通空间会话、工作数据、本地设置和本地凭据 | 对应空间数据根 | 该空间及授权管理操作 |
 | 主应用会话、设置和凭据 | 主应用原有位置 | 主应用；Spaces 不迁移或复制 |
-| 旧共享连接目录与全局默认 | Home 级旧共享连接库 | Home 管理写入与独立 CAS |
-| 旧共享连接凭据 | Home 级独立凭据存储 | 专用秘密写入通道 |
-| 空间模型来源与共享连接策略 | 该空间的策略 | 明确的管理变更；旧空间不自动迁移 |
 | 主空间连接、默认模型和凭据 | 主空间官方服务 | 主空间官方设置与调用准备 |
 | 任务、计划和故障证据 | Spaces 控制数据 | 单写者、原子发布和真实失败记录 |
 | 组件制品与选择 | Home 外的受控工具区域 | 同组制品校验与正常启动/维护 |
@@ -84,7 +88,7 @@ Spaces 不扫描并收养其他 profile。直接创建、普通模板和 `.dshsp
 
 ## 6. LLM 数据面
 
-当前存在三种模型来源，不应混写为一份“全局配置”。
+当前存在两种模型来源，不应混写为一份“全局配置”。
 
 ### 6.1 主空间继承
 
@@ -98,15 +102,9 @@ Spaces 不扫描并收养其他 profile。直接创建、普通模板和 `.dshsp
 
 主空间继承依赖子空间、Supervisor 和主空间同时可用。主空间或 Supervisor 退出后，该路径失败；不自动启动主空间、改读配置、切换供应商或迁移在途请求。
 
-### 6.2 旧共享连接库
+### 6.2 本地与会话选择
 
-旧共享连接在 Home 级保存一份目录和独立凭据，空间启动时取得冻结快照，之后由子空间官方 adapter 直接调用供应商。运行中的实例不会因目录保存而热切换；需要时由用户执行正常重启。
-
-这条路径不经过 Supervisor 中转模型正文，和主空间继承有不同的可用性。旧连接与旧空间继续受支持，但不作为新空间零配置流程的前置条件。
-
-### 6.3 本地与会话选择
-
-空间本地连接、本地默认和会话显式选择保持原有优先与失败语义。显式目标失效时失败，不自动改走主空间或旧共享连接。
+空间本地连接、本地默认和会话显式选择保持原有优先与失败语义。显式目标失效时失败，不自动改走主空间。
 
 模型来源切换是独立决定，不应被其他设置保存暗中改变。当前设置界面和导入映射的剩余收敛工作见 [模型设置重订方案](plans/model-settings-redesign-20261022.md)；该方案未完成的条目不是现行能力声明。
 
@@ -118,12 +116,17 @@ Spaces 不扫描并收养其他 profile。直接创建、普通模板和 `.dshsp
 | 视图门户 | 宿主、manager 与空间视图展示 | 单次入口、精确来源、展示与管理分权 |
 | 空间消息总线 | 普通空间之间的单结果请求/响应 | 私有 IPC、目标白名单、有界内存、无重放 |
 | LLM 委派 | 主空间模型准备、流式调用、取消与附件协作 | 专用受权通道、单次派发、背压与资源限制 |
+| Creator channel | 主空间创建空间的 scope 调用与身份挑战 | loopback-only、无 Cookie/Origin、单注册、一次性计划 |
 
 旧消息总线和 LLM 委派解决不同传输问题，可以共存。通用能力平台、持久消息、广播、跨机器传输和任意 `ctx.*` 远程调用不是现行能力。
 
 ## 8. 制品、版本与升级
 
 Spaces 以同一构建的不可变组件组发行 Supervisor、管理插件、view bridge、Browser、LLM bridge 和安装 worker。制品按版本与摘要校验，不混用不同构建。
+
+当前目标宿主为 `@deepseek-ai/dsh` **0.2.2-rc.1**（Cordis 4.1.0、loader 1.1.0、schemastery 3.19）。宿主自身要求 Node ≥24.9；本项目 engines 为 Node 24.21+ 的 24.x 或 26.x。宿主插件声明的 peer 范围接受 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.2-rc.1；官方升级指南只记录到 v0.2.2-alpha.3，rc.1 差异（Cordis `internal/config` 首参由 config 改为 fiber、`agent/request` 标记 deprecated、`GenerateOptions.purpose` 改为生产方声明合并、fs-observation-policy 默认禁用并新增 `apply_patch`）以版本锁定源码为补充依据。这些语义差异不改变本产品的授权、隔离和失败政策。
+
+`@klarkxy/dsh-dev-index` 作为 canonical 行随宿主插件和 view bridge 的组合 patch 预装：主空间与每个 Web 子空间都获得该工具插件，Browser base 在其 profile patch 中显式禁用同一行 id。
 
 升级 Spaces 的正常路径是：
 

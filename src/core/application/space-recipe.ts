@@ -1,6 +1,6 @@
 import { parseSpaceBaseSelection, type SpaceBaseSelection } from '../../shared/space-base';
 import { applyBrowserIsolationPatch, applyIsolationPatch, patchTextLooksIsolated } from "../domain/isolation";
-import { assertShareSecretFree, parseLlmShareManifest, type LlmShareManifest } from "../../shared/llm-share";
+import { assertShareSecretFree } from "../../shared/share-secret-scan";
 import { FULL_SPACES_PACKAGE, isFullSpacesManagerSpec, isUnresolvedPluginAlias } from "../../shared/plugin-spec";
 import { isGitSpec } from "../../shared/plugin";
 import { isExactRuntimeVersion } from "../../shared/runtime";
@@ -24,7 +24,6 @@ export interface SpaceRecipePorts {
   createSpace(input: { name: string; displayName: string; icon?: string } & SpaceBaseSelection): Promise<void>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
   writePatch?(spaceId: string, patch: string): void;
-  writeLlmShare?(spaceId: string, manifest: LlmShareManifest): Promise<void> | void;
 }
 
 export interface ApplySpaceRecipeOptions {
@@ -94,7 +93,6 @@ export function parseSpaceRecipe(value: unknown): SpaceRecipe {
   if (row.patch !== undefined && typeof row.patch !== "string") {
     throw new Error("The space recipe config is invalid. Original bytes were left unchanged.");
   }
-  const llm = row.llm === undefined ? undefined : parseLlmShareManifest(row.llm);
   if (row.source !== undefined) {
     if (!row.source || typeof row.source !== "object") {
       throw new Error("The space recipe has invalid source metadata. Original bytes were left unchanged.");
@@ -111,7 +109,6 @@ export function parseSpaceRecipe(value: unknown): SpaceRecipe {
     icon: typeof row.icon === "string" ? row.icon : undefined,
     plugins,
     patch: typeof row.patch === "string" ? row.patch : undefined,
-    llm,
     source: source
       ? { ...parseSpaceBaseSelection(source), dshVersion: typeof source.dshVersion === "string" ? source.dshVersion : source.dshVersion === null ? null : undefined }
       : undefined,
@@ -125,7 +122,6 @@ export function recipeFromShareParts(input: {
   icon?: string;
   plugins: SpaceSharePlugin[];
   patch?: string;
-  llm?: LlmShareManifest;
   source?: ({ dshVersion?: string | null } & SpaceBaseSelection);
 }): SpaceRecipe {
   return parseSpaceRecipe({
@@ -134,7 +130,6 @@ export function recipeFromShareParts(input: {
     icon: input.icon,
     plugins: input.plugins,
     patch: input.patch,
-    llm: input.llm,
     source: input.source,
   });
 }
@@ -176,14 +171,6 @@ export function assertRecipeSecretFree(recipe: SpaceRecipe): void {
   if (recipe.patch) assertShareSecretFree([{ name: "profile.patch.yml", data: recipe.patch }]);
 }
 
-export function llmImportResult(manifest: LlmShareManifest | undefined): SpaceImportResult["llm"] {
-  if (!manifest || manifest.requirements.length === 0) return undefined;
-  return {
-    mappingRequired: true,
-    requirements: manifest.requirements,
-    mapped: false,
-  };
-}
 
 export function assertMutableRecipeSpaceId(spaceId: string, protectedIds: Iterable<string> = []): void {
   if (!PROFILE_NAME_RE.test(spaceId)) {
@@ -252,23 +239,6 @@ export async function applySpaceRecipe(
         spaceId,
         errors: [errorMessage(error)],
         pendingManual: [],
-        llm: llmImportResult(parsed.llm),
-      };
-    }
-  }
-
-  if (parsed.llm && ports.writeLlmShare) {
-    try {
-      await ports.writeLlmShare(spaceId, parsed.llm);
-    } catch (error) {
-      return {
-        definition: "imported",
-        plugins: "not-run",
-        start: "not-run",
-        spaceId,
-        errors: [errorMessage(error)],
-        pendingManual: [],
-        llm: llmImportResult(parsed.llm),
       };
     }
   }
@@ -301,7 +271,6 @@ export async function applySpaceRecipe(
     spaceId,
     errors,
     pendingManual,
-    llm: llmImportResult(parsed.llm),
   };
 }
 
@@ -312,7 +281,6 @@ function projectPublicRecipe(recipe: SpaceRecipe): SpaceRecipe {
     icon: recipe.icon,
     plugins: recipe.plugins.map(projectPublicPlugin),
     patch: recipe.patch,
-    llm: recipe.llm,
     source: recipe.source,
   };
 }

@@ -39,7 +39,6 @@ export { WORKBENCH_API_METHODS };
  * The two LLM methods carry their request as the whole request body instead of
  * as a named field. Every other method sends its arguments by name.
  */
-const BARE_BODY_METHODS: ReadonlySet<WorkbenchApiMethod> = new Set<WorkbenchApiMethod>(["llm", "llmCredential"]);
 
 /** Ordinary JSON methods stay at the icon-file bound. */
 export const WORKBENCH_HTTP_BODY_LIMIT = MAX_SPACE_ICON_FILE_BYTES;
@@ -76,7 +75,6 @@ function workbenchBody<K extends WorkbenchApiMethod>(method: K, args: WorkbenchA
   } = WORKBENCH_API_CODECS[method];
   const values = args as unknown as readonly unknown[];
   const parsed = spec.args.map((arg, index) => parseOrInvalid(codecs.params[arg.name].schema, values[index]));
-  if (BARE_BODY_METHODS.has(method)) return parsed[0];
   const body: Record<string, unknown> = {};
   spec.args.forEach((arg, index) => {
     body[arg.name] = parsed[index];
@@ -121,8 +119,6 @@ export function createWorkbenchHttpClient(options: WorkbenchHttpClientOptions): 
     snapshot: async (id) => call("snapshot", [id]),
     runtimes: async () => call("runtimes", []),
     backups: async (spaceId) => call("backups", [spaceId]),
-    llm: async (request) => call("llm", [request]),
-    llmCredential: async (request) => call("llmCredential", [request]),
   };
 }
 

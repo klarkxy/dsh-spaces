@@ -1,10 +1,8 @@
 import { assertBrowserRelease, profileBase } from '../profile/space-base';
 import { SPACES_BROWSER_SEALED } from '../../../shared/browser-sealed';
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { lt as semverLt } from "semver";
-import type { GlobalLlmHost } from "../../../core/application/global-llm-host";
 import { SPACES_MIN_DSH_VERSION } from "../../../shared/runtime";
 import type { ProfileStatus } from "../../../shared/types";
 import type { WorkbenchJob, WorkbenchView } from "../../../shared/workbench";
@@ -13,8 +11,7 @@ import type { HomeOperationLock } from "../home/home-operation-lock";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import { cliLoadError, unmetProfileDshRequirements } from "../payload/component-cli";
 import type { SpacesComponent } from "../payload/dev-checkout";
-import { migrateLegacyProfileSettings } from "../profile/profile-settings";
-import { migrateProfileToAlpha } from "../profile/profile-alpha-migration";
+import { alignProfileComponents } from "../profile/profile-component-alignment";
 import type { ProcessManager } from "../runtime/process-manager";
 import { STOP_KEPT_REASON, STOP_NOT_FORCED, WorkbenchPublicError } from "./errors";
 import type { SupervisorInstanceRecords } from "./instance-records";
@@ -30,7 +27,6 @@ export interface SupervisorSpaceLifecycleHost {
   runs: SpaceRunRegistry;
   instances: () => SupervisorInstanceRecords;
   llmDelegation: () => SupervisorLlmDelegation;
-  llmHost: () => GlobalLlmHost;
   processes: () => ProcessManager | undefined;
   options: WorkbenchSupervisorOptions;
   lock: HomeOperationLock;
@@ -40,6 +36,7 @@ export interface SupervisorSpaceLifecycleHost {
   requireServiceEpoch: () => string;
   ensureViewBridge: (profileId: string) => Promise<void>;
   ensureLlmBridge: (profileId: string) => Promise<void>;
+  ensureBundledDeps: (profileId: string) => Promise<void>;
   installComponent: (profileId: string, component: SpacesComponent) => Promise<void>;
   componentAligned: (profileId: string, component: SpacesComponent) => boolean;
   readDump: (profile: string) => Promise<string | undefined>;
@@ -93,7 +90,6 @@ export class SupervisorSpaceLifecycle {
     current.origin = childOrigin;
     if (id !== this.host.managerId()) this.host.runs.workspaceOrigins.add(childOrigin);
     this.host.instances().writeInstanceRecord(id, port, gen);
-    this.host.runs.llmApplied.set(id, await this.host.llmHost().catalogRevision());
     return {
       spaceId: id,
       view: {
@@ -128,31 +124,29 @@ export class SupervisorSpaceLifecycle {
       if (incompatible.length) throw new WorkbenchPublicError('workbench/incompatible', cliLoadError(spaceRuntime.version, incompatible));
     } else if (this.host.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.host.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
-      await this.host.lock.run("space.alpha-migrate", () => migrateProfileToAlpha({
-        home: this.host.home, profileId: spaceId, payloadRoot: this.host.options.componentPayloadRoot!,
-        bin: spaceRuntime.bin, cliVersion: spaceRuntime.version,
-        install: (bridge) => this.host.installComponent(spaceId, bridge),
-        // A linked checkout matches by link identity; packaged installs keep byte comparison.
-        ...(this.host.options.devCheckoutRoot !== undefined
-          ? { matches: (component: SpacesComponent) => this.host.componentAligned(spaceId, component) }
-          : {}),
-        dump: async () => {
-          const dump = await this.host.readDump(spaceId);
-          if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");
-          return dump;
-        },
-      }));
+      await this.host.lock.run("space.components-align", async () => {
+        // Bundled dependencies become profile-level bundle entries; they must
+        // exist before alignment reads the profile's bundle membership.
+        await this.host.ensureBundledDeps(spaceId);
+        return alignProfileComponents({
+          home: this.host.home, profileId: spaceId, payloadRoot: this.host.options.componentPayloadRoot!,
+          bin: spaceRuntime.bin, cliVersion: spaceRuntime.version,
+          install: (bridge) => this.host.installComponent(spaceId, bridge),
+          // A linked checkout matches by link identity; packaged installs keep byte comparison.
+          ...(this.host.options.devCheckoutRoot !== undefined
+            ? { matches: (component: SpacesComponent) => this.host.componentAligned(spaceId, component) }
+            : {}),
+          dump: async () => {
+            const dump = await this.host.readDump(spaceId);
+            if (!dump) throw new Error("Could not inspect profile configuration.");
+            return dump;
+          },
+        });
+      });
     } else {
       const cliBlock = unmetProfileDshRequirements(join(this.host.home, "profiles", spaceId), spaceRuntime.version);
       if (cliBlock.length) {
         throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(spaceRuntime.version, cliBlock));
-      }
-      if (existsSync(join(this.host.home, "hub", spaceId, "settings.yaml"))) {
-        await this.host.lock.run("space.settings-migrate", async () => {
-          const dump = await this.host.readDump(spaceId);
-          if (!dump) throw new Error("Could not inspect profile configuration before migrating legacy settings.");
-          migrateLegacyProfileSettings(this.host.home, spaceId, dump);
-        });
       }
     }
     await this.host.processes()!.start(spaceId);

@@ -74,6 +74,7 @@ export abstract class StatePart extends WorkbenchCore {
         else this.handledProductJobs.delete(item.id);
       }
       this.watchedCreates.clear();
+      this.dismissedCreations.clear();
     }
     for (const item of state.jobs) {
       if (ACTIVE_JOB.has(item.status) && CREATE_JOB.has(item.kind)) this.watchedCreates.add(item.id);

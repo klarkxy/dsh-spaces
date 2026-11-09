@@ -1,14 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import type { GlobalLlmHost, LlmApplyCommand } from "../../../core/application/global-llm-host";
+import { randomUUID } from "node:crypto";
 import { LLM_ERROR, LlmConfigError } from "../../../shared/llm-connections";
-import type { LlmInstanceRecord } from "../../../core/ports/llm-runtime";
-import { isLlmWriteMethod, type LlmApiResult } from "../../../shared/llm-api";
-import type { WorkbenchJob, WorkbenchSpace } from "../../../shared/workbench";
-import { llmCatalogPath } from "../llm/llm-paths";
-import type { WorkbenchJobContext, WorkbenchJobStore } from "../maintenance/workbench-jobs";
-import { WorkbenchPublicError } from "./errors";
-import type { SupervisorLifecycle } from "./lifecycle";
 import type { SpacesComponent } from "../payload/dev-checkout";
 import { profileHasLlmBridge } from "./profile-probe";
 import type { SpaceRunRegistry } from "./space-runs";
@@ -34,22 +25,14 @@ type ActivitySession = {
 
 export interface SupervisorLlmHost {
   home: string;
-  llmHost: () => GlobalLlmHost;
-  jobs: () => WorkbenchJobStore | undefined;
-  lifecycle: SupervisorLifecycle;
   managerId: () => string | null;
+  publicStatus: (id: string) => "running" | "stopped" | "crashed" | "unknown" | string;
+  currentServiceEpoch: () => string;
   hasComponent: (component: SpacesComponent) => boolean;
   installComponent: (profileId: string, component: SpacesComponent) => Promise<void>;
   componentAligned: (profileId: string, component: SpacesComponent) => boolean;
   devCheckout: () => string | undefined;
   runs: SpaceRunRegistry;
-  observeChildWork: <T>(action: () => T) => T;
-  requireManaged: (spaceId: string) => string;
-  stopOwned: (spaceId: string) => Promise<void>;
-  startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
-  homeProfileNames: () => string[];
-  publicStatus: (id: string) => WorkbenchSpace["status"];
-  currentServiceEpoch: () => string;
 }
 
 export class SupervisorLlm {
@@ -182,144 +165,6 @@ export class SupervisorLlm {
       await release(error);
       throw error;
     }
-  }
-
-  async dispatchLlm(body: unknown): Promise<unknown> {
-    const method = body && typeof body === "object" ? (body as { method?: unknown }).method : undefined;
-    const jobs = this.host.jobs();
-    if (method === "applyPlan") {
-      if (!jobs) throw new WorkbenchPublicError("workbench/read-only");
-      return this.host.llmHost().dispatch(body);
-    }
-    if (typeof method === "string" && isLlmWriteMethod(method)) {
-      if (!jobs) throw new WorkbenchPublicError("workbench/read-only");
-      return jobs.runExclusive(async () => {
-        this.assertLlmMutationAllowed();
-        const result = await this.host.llmHost().dispatch(body);
-        await this.maybeInstallLlmBridge(body);
-        return result;
-      });
-    }
-    const result = await this.host.llmHost().dispatch(body);
-    await this.maybeInstallLlmBridge(body);
-    return result;
-  }
-
-  async dispatchLlmCredential(body: unknown): Promise<unknown> {
-    const jobs = this.host.jobs();
-    if (!jobs) throw new WorkbenchPublicError("workbench/read-only");
-    return jobs.runExclusive(async () => {
-      this.assertLlmMutationAllowed();
-      return this.host.llmHost().dispatchCredential(body);
-    });
-  }
-
-  private assertLlmMutationAllowed(): void {
-    this.host.lifecycle.assertWritable();
-    if (this.host.lifecycle.sealing) {
-      throw new WorkbenchPublicError("workbench/unavailable", "The supervisor is releasing run rights.");
-    }
-    if (!this.host.jobs()) throw new WorkbenchPublicError("workbench/read-only");
-  }
-
-  async dispatchLlmAdmitted(body: unknown): Promise<LlmApiResult> {
-    const jobs = this.host.jobs();
-    if (!jobs) throw new WorkbenchPublicError("workbench/read-only");
-    return jobs.runAdmitted(async () => {
-      const method = body && typeof body === "object" ? (body as { method?: unknown }).method : undefined;
-      if (typeof method === "string" && isLlmWriteMethod(method)) {
-        this.assertLlmMutationAllowed();
-      }
-      const result = await this.host.llmHost().dispatch(body);
-      await this.maybeInstallLlmBridge(body);
-      return result as LlmApiResult;
-    });
-  }
-
-  llmCatalogObservation(): { revision: number; digest: string } {
-    const path = llmCatalogPath(this.host.home);
-    let digest = createHash("sha256").update("").digest("hex");
-    let revision = 0;
-    try {
-      const bytes = readFileSync(path);
-      digest = createHash("sha256").update(bytes).digest("hex");
-      const parsed = JSON.parse(bytes.toString("utf8")) as { revision?: unknown };
-      if (typeof parsed.revision === "number" && Number.isInteger(parsed.revision) && parsed.revision >= 0) {
-        revision = parsed.revision;
-      }
-    } catch {
-      /* missing catalog is an empty observation */
-    }
-    return { revision, digest };
-  }
-
-  private async maybeInstallLlmBridge(body: unknown): Promise<void> {
-    const request = body as { method?: string; spaceId?: string; shared?: { mode?: string } };
-    if (
-      typeof request.spaceId === "string" &&
-      (request.method === "mapImported" ||
-        (request.method === "updateSpacePolicy" && request.shared?.mode && request.shared.mode !== "none"))
-    ) {
-      await this.ensureLlmBridge(request.spaceId);
-    }
-  }
-
-  assertLlmWritable(): void {
-    if (!this.host.lifecycle.handle) {
-      throw new LlmConfigError(LLM_ERROR.WRITE_OWNER_REQUIRED, "Home write owner is required for this change");
-    }
-    this.host.lifecycle.assertWritable();
-  }
-
-  async submitLlmApply(command: LlmApplyCommand, requestId: string): Promise<WorkbenchJob> {
-    this.assertLlmMutationAllowed();
-    const jobs = this.host.jobs();
-    if (!jobs) throw new WorkbenchPublicError("workbench/read-only");
-    return jobs.submit(command, requestId, (ctx) =>
-      this.host.observeChildWork(() => this.runLlmApply(command, ctx)),
-    );
-  }
-
-  async runLlmApply(command: LlmApplyCommand, ctx: WorkbenchJobContext): Promise<void> {
-    this.assertLlmMutationAllowed();
-    for (const id of command.spaceIds) {
-      const failure = this.currentActivity(id)?.cleanupFailure;
-      if (failure) throw failure;
-    }
-    ctx.phase("apply");
-    await this.host.llmHost().executeApply(command, async (spaceId) => {
-      const id = this.host.requireManaged(spaceId);
-      const release = await this.reserveIdle(id);
-      try {
-        this.assertLlmMutationAllowed();
-        ctx.message(`restart ${spaceId}`);
-        await this.host.stopOwned(id);
-      } catch (error) {
-        await release(error);
-        throw error;
-      }
-      await release();
-      await this.host.startSpace(id, ctx);
-    });
-  }
-
-  listLlmInstances(): LlmInstanceRecord[] {
-    return this.host.homeProfileNames().map((id) => {
-      const leftover = this.host.runs.unmanaged.has(id);
-      let status = leftover ? "unknown" : this.host.publicStatus(id);
-      const session = this.currentActivity(id);
-      const activity = session?.cleanupFailure ? "unknown" : session?.status ?? "unknown";
-      if (status === "running" && activity === "unknown") status = "unknown";
-      return {
-        spaceId: id,
-        status,
-        generation: this.host.runs.generations.get(id) ?? 0,
-        catalogRevision: this.host.runs.llmApplied.get(id) ?? null,
-        policyRevision: null,
-        busy: activity === "busy",
-        serviceEpoch: this.host.currentServiceEpoch(),
-      };
-    });
   }
 
   async ensureLlmBridge(profileId: string): Promise<void> {

@@ -61,6 +61,8 @@ npm test
 npm run dev:web
 ```
 
+`npm install` uses `--legacy-peer-deps` via the committed [`.npmrc`](.npmrc). `@klarkxy/dsh-dev-index` declares `@deepseek-ai/*` peers such as `>=0.2.0-rc.2`; npm's default peer gate excludes prerelease versions the range does not explicitly name, so it rejects the pinned `0.2.2-rc.1` toolchain even though the official DSH compatibility check (`includePrerelease`) accepts it. Do not replace the flag with `--force`, which would mask conflicts rather than describe this one prerelease peer contract. The runtime `dsh plugin add` flow installs into managed profiles with pnpm and is unaffected.
+
 Development uses an isolated Home. Never target the real `~/.dsh`, default `sessions/` / `storages/`, or `profiles/web/`. `npm run dev:link` prepares the linked development profile without starting the host. Rebuild and explicitly restart the host after changes; Supervisor changes also require a normal service shutdown and reopen.
 
 The plugin and scoped packages are local prebuilt artifacts unless their individual documentation says otherwise. Publication and marketplace listing are separate release actions.
@@ -129,6 +131,8 @@ npm run build
 npm test
 npm run dev:web
 ```
+
+`npm install` 通过提交内的 [`.npmrc`](.npmrc) 使用 `--legacy-peer-deps`：`@klarkxy/dsh-dev-index` 声明 `>=0.2.0-rc.2` 这类 `@deepseek-ai` peer，npm 默认 peer 规则排除 range 未显式命名的 prerelease 版本，会拒绝已锁定的 `0.2.2-rc.1` 工具链，而官方 DSH 兼容检查（`includePrerelease`）接受它。不要用 `--force` 替代：那会掩盖冲突而非描述这一条预发布 peer 约束。运行时 `dsh plugin add` 在托管 profile 里走 pnpm，不受影响。
 
 开发使用隔离 Home，禁止指向真实 `~/.dsh`、默认 `sessions/` / `storages/` 或 `profiles/web/`。`npm run dev:link` 只准备链接。修改后重新构建并显式重启宿主；Supervisor 变化还需正常停止服务后重新进入。
 

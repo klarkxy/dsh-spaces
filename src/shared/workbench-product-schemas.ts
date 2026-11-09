@@ -1,7 +1,6 @@
 /** Strict product DTO validators. Shape/format/limits only. Durable fields reject local paths and URL credentials; transient blueprint input values may include receiver-local directories. */
 import { z } from "zod";
 import { parseBlueprintDocument as parseBlueprint, type BlueprintDocument as Blueprint } from "@klarkxy/dsh-blueprint/document";
-import { LLM_SHARE_NOTE } from "./llm-share";
 import {
   BLUEPRINT_INPUT_ID_RE,
   BLUEPRINT_JSON_MAX_BYTES,
@@ -211,30 +210,6 @@ const sharePluginSchema = z
   })
   .strict();
 
-const llmShareRequirementSchema = z
-  .object({
-    requirementId: z.string().min(1).max(80),
-    displayName: displayNameSchema,
-    protocol: z.string().min(1).max(80),
-    endpoint: httpUrlSchema,
-    modelIds: z.array(z.string().min(1).max(200)).max(1000),
-    authKind: z.enum(["api-key", "none"]),
-    usedAsDefault: z.boolean(),
-  })
-  .strict();
-
-const llmShareManifestSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    kind: z.literal("dsh-space-llm-requirements"),
-    sourceSharedMode: z.enum(["none", "all", "selected"]),
-    requirements: z.array(llmShareRequirementSchema).max(256),
-    defaultRequirementId: z.string().min(1).max(80).nullable(),
-    adapterRequired: z.literal("llm-pi-ai"),
-    note: z.literal(LLM_SHARE_NOTE),
-  })
-  .strict();
-
 const shareManifestSchema = z
   .object({
     formatVersion: z.literal(1),
@@ -262,8 +237,6 @@ const sharePreviewSchema = z
     plugins: z.array(sharePluginSchema).max(256),
     hasConfig: z.boolean(),
     unknownSources: z.array(z.string().max(214)).max(256),
-    llmMappingRequired: z.boolean(),
-    llmRequirements: z.array(llmShareRequirementSchema).max(256),
   })
   .strict();
 
@@ -278,7 +251,6 @@ const spaceRecipeSchema = z
       .max(256 * 1024)
       .refine((value) => !HEX_COLORLESS_PATH.test(value), "recipe patch")
       .optional(),
-    llm: llmShareManifestSchema.optional(),
     source: z
       .object({
         dshVersion: z.union([exactVersionSchema, z.null()]).optional(),
@@ -309,14 +281,6 @@ const spaceImportResultSchema = z
     spaceId: spaceIdSchema.optional(),
     errors: z.array(z.string().max(500)).max(64),
     pendingManual: z.array(sharePluginSchema).max(256),
-    llm: z
-      .object({
-        mappingRequired: z.boolean(),
-        requirements: z.array(llmShareRequirementSchema).max(256),
-        mapped: z.literal(false),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 
@@ -657,7 +621,7 @@ const blueprintApplyOutcomeSchema = z
       .array(
         z
           .object({
-            kind: z.enum(["patch", "settings", "model", "provenance"]),
+            kind: z.enum(["patch", "settings", "provenance"]),
             status: z.enum(["succeeded", "failed", "not-run"]),
             error: durableTextSchema.optional(),
             namespace: z.string().min(1).max(BLUEPRINT_JSON_MAX_BYTES).optional(),

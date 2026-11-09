@@ -24,7 +24,6 @@ import type {
 } from "../../../../../src/shared/workbench";
 import type { WorkbenchHomeSettings, WorkbenchProductObservation } from "../../../../../src/shared/workbench-product";
 import { localizeError, t, type WorkbenchLocale, type WorkbenchMessageKey } from "../i18n";
-import type { LlmUiClient, LlmUiSpace } from "../llm/client";
 import { isHomeSelection, persistWasEmpty, readPersist } from "../persistence";
 import { ViewSession, type ViewFrameState, type ViewMessageEvent } from "../view-session";
 import { BlueprintSession } from "../blueprint-session";
@@ -62,6 +61,7 @@ export abstract class WorkbenchCore {
   protected requestSurface = 0;
   protected handledProductJobs = new Set<string>();
   protected watchedCreates = new Set<string>();
+  protected dismissedCreations = new Set<string>();
   protected primedProductJobs = false;
   /** Set only by the current poll generation's own rejection. Late failures cannot set it. */
   protected stateReadFailed = false;
@@ -87,7 +87,6 @@ export abstract class WorkbenchCore {
     this.blueprint = new BlueprintSession({
       product: (request) => this.api.product(request),
       submitApply: (planId, observation) => this.submitBlueprintApply(planId, observation),
-      describeLlm: () => this.llmClient().describe(),
       uuid: () => this.env.uuid(),
       now: () => this.env.now(),
       downloadFile: (fileName, archiveBase64) => this.env.downloadFile(fileName, archiveBase64),
@@ -306,9 +305,7 @@ export abstract class WorkbenchCore {
 
   abstract setSettingsTab: (settingsTab: WorkbenchUiState["settingsTab"]) => void;
 
-  abstract llmClient: () => LlmUiClient;
 
-  abstract llmSpaces: () => LlmUiSpace[];
 
   abstract openDetail: (spaceId: string) => void;
 
@@ -330,7 +327,7 @@ export abstract class WorkbenchCore {
     return result;
   };
 
-  abstract createSpace: (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }) => void;
+  abstract createSpace: (input: { name: string; displayName?: string; icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }) => void;
 
   abstract updateSpace: (spaceId: string, patch: { displayName?: string; icon?: string }) => void;
 
@@ -431,6 +428,12 @@ export abstract class WorkbenchCore {
   abstract workspaceSpaces(): WorkbenchSpace[];
 
   abstract hasActiveJobs(): boolean;
+
+  abstract visibleCreations(): import("../../../../../src/shared/space-host").PortalCreation[];
+
+  abstract dismissCreation(jobId: string): void;
+
+  abstract openCreation(creation: import("../../../../../src/shared/space-host").PortalCreation): void;
 
   // Members that more than one part calls.
 

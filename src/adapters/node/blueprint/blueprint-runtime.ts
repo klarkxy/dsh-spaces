@@ -117,7 +117,8 @@ type AppBootModule = {
   loadOverlayPatches: (binName: string, file: string) => unknown[];
   composeEntries: (layers: unknown[][], warn?: (message: string) => void) => unknown[];
   mountRootInclude: unknown;
-  PROFILE_TEMPLATES: { web?: { bundles?: unknown } };
+  /** Older app-boot exports carried the catalogs; 0.2.2 moved them to dsh-official-bundles. */
+  PROFILE_TEMPLATES?: { web?: { bundles?: unknown } };
   OPTIONAL_BUNDLES?: unknown;
   PROFILE_PATCH_FILENAME: string;
   PROFILES_DIR: string;
@@ -130,6 +131,8 @@ type BoundRuntime = {
   appBootPath: string;
   appBootManifestPath: string;
   appBoot: AppBootModule;
+  profileTemplates: Record<string, unknown>;
+  optionalBundles: unknown;
   resolveExports: ResolveExports;
   requireFromBoot: NodeRequire;
 };
@@ -215,13 +218,13 @@ export async function inspectBlueprintRuntime(
   observeRuntimeFiles(observation, bound);
   const profileDir = bound.home;
   const versions = readHostVersions(bound, observation, profileDir);
-  const bundles = webTemplateBundles(bound.appBoot);
+  const bundles = webTemplateBundles(bound);
   const baseLayers: BlueprintRuntimeLayer[] = [];
   for (const [index, packageName] of bundles.entries()) {
     baseLayers.push(readBundleLayer(bound, observation, profileDir, packageName, index));
   }
   const requested = requireBundleNames(options.builtinPackages ?? []);
-  const catalog = optionalBundleNames(bound.appBoot);
+  const catalog = optionalBundleNames(bound.optionalBundles);
   if (requested.some((name) => !catalog.includes(name))) throw runtimeError("builtin-unsupported");
   const builtinLayers: BlueprintRuntimeLayer[] = [];
   // Both resolution anchors belong to the installation. A profile-local copy
@@ -365,6 +368,23 @@ async function bindRuntime(options: BlueprintRuntimeOptions): Promise<BoundRunti
   const appBoot = requireAppBoot(imported);
   const appBootManifestPath = join(dirname(appBootPath), "..", "package.json");
   const requireFromBoot = createRequire(appBootPath);
+  // DSH 0.2.2 moved the bundle catalogs out of dsh-app-boot into
+  // @deepseek-ai/dsh-official-bundles; older app-boot versions still export
+  // them directly. Both layouts are supported runtimes — the missing
+  // capability, not the resolution failure, is what rejects a runtime.
+  let catalogSource: Record<string, unknown> = appBoot as unknown as Record<string, unknown>;
+  try {
+    const resolved = requireFromBoot.resolve("@deepseek-ai/dsh-official-bundles");
+    const namespace = await import(pathToFileURL(resolved).href);
+    if (isPlainObject(namespace) && isPlainObject(namespace.PROFILE_TEMPLATES)) {
+      catalogSource = namespace;
+    }
+  } catch {
+    // No official-bundles package: the app-boot exports above are the source.
+  }
+  const profileTemplates = catalogSource.PROFILE_TEMPLATES;
+  if (!isPlainObject(profileTemplates)) throw runtimeError("runtime-unsupported");
+  const optionalBundles = catalogSource.OPTIONAL_BUNDLES ?? appBoot.OPTIONAL_BUNDLES;
   let resolveExports: ResolveExports;
   try {
     const resolved = requireFromBoot.resolve("resolve.exports");
@@ -385,6 +405,8 @@ async function bindRuntime(options: BlueprintRuntimeOptions): Promise<BoundRunti
     appBootPath,
     appBootManifestPath: existsAsFile(appBootManifestPath) ? resolve(appBootManifestPath) : join(dirname(appBootPath), "package.json"),
     appBoot,
+    profileTemplates,
+    optionalBundles,
     resolveExports,
     requireFromBoot,
   };
@@ -392,7 +414,6 @@ async function bindRuntime(options: BlueprintRuntimeOptions): Promise<BoundRunti
 
 function requireAppBoot(value: unknown): AppBootModule {
   if (!isPlainObject(value)) throw runtimeError("runtime-unsupported");
-  const templates = value.PROFILE_TEMPLATES;
   if (
     typeof value.resolveBundleDir !== "function"
     || typeof value.loadProfileDirectory !== "function"
@@ -402,7 +423,6 @@ function requireAppBoot(value: unknown): AppBootModule {
     || typeof value.mountRootInclude !== "function"
     || typeof value.PROFILE_PATCH_FILENAME !== "string"
     || typeof value.PROFILES_DIR !== "string"
-    || !isPlainObject(templates)
   ) {
     throw runtimeError("runtime-unsupported");
   }
@@ -412,18 +432,19 @@ function requireAppBoot(value: unknown): AppBootModule {
   return value as AppBootModule;
 }
 
-function webTemplateBundles(appBoot: AppBootModule): string[] {
-  const bundles = appBoot.PROFILE_TEMPLATES.web?.bundles;
+function webTemplateBundles(bound: BoundRuntime): string[] {
+  const template = bound.profileTemplates.web;
+  const bundles = isPlainObject(template) ? template.bundles : undefined;
   if (!Array.isArray(bundles) || bundles.some((item) => typeof item !== "string" || !isBareNpmPackageName(item))) {
     throw runtimeError("runtime-unsupported");
   }
   return bundles;
 }
 
-function optionalBundleNames(appBoot: AppBootModule): string[] {
-  if (appBoot.OPTIONAL_BUNDLES === undefined) return [];
+function optionalBundleNames(optionalBundles: unknown): string[] {
+  if (optionalBundles === undefined) return [];
   try {
-    return [...new Set(requireBundleNames(appBoot.OPTIONAL_BUNDLES))];
+    return [...new Set(requireBundleNames(optionalBundles))];
   } catch {
     throw runtimeError("runtime-unsupported");
   }

@@ -123,6 +123,58 @@ export function applyBrowserIsolationPatch(original: string, name: string): stri
   return doc.toString({ lineWidth: 0 });
 }
 
+export const SPACE_CONTROL_ROW_ID = "dsh-space-control";
+
+/**
+ * Force one top-level patch row `disabled: true`, appending it when absent.
+ * Duplicate ids and non-static disabled values fail instead of being
+ * rewritten. Used for bundle rows a managed profile must never mount even
+ * when a component patch inserts them (e.g. the main-space-only control
+ * tools inside the manager and Browser profiles).
+ */
+export function ensureDisabledRow(original: string, id: string, source: string): string {
+  const doc = parsePatchDocument(original, source);
+  const seq = requireSeq(doc, source);
+  const rows = rowsWithId(seq, id);
+  if (rows.length > 1) {
+    throw new PatchVerifyError(duplicateRowMessage(id, source));
+  }
+  const row = rows[0];
+  if (row) {
+    const disabled = row.get("disabled");
+    if (disabled === true) return doc.toString({ lineWidth: 0 });
+    if (disabled === undefined) {
+      row.set("disabled", true);
+      // Managed patches use the same block style as the authored sources
+      // (base-creation.ts), even when the input carried a flow sequence.
+      seq.flow = false;
+      const body = doc.toString({ lineWidth: 0 });
+      return body.endsWith("\n") ? body : `${body}\n`;
+    }
+    throw new PatchVerifyError(`Row ${id} in ${source} has a non-static disabled value; it was not rewritten.`);
+  }
+  const added = new YAMLMap();
+  added.set("id", id);
+  added.set("disabled", true);
+  seq.add(added);
+  seq.flow = false;
+  const body = doc.toString({ lineWidth: 0 });
+  return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+/** Whether the top-level patch already forces `id` disabled (exactly one row). */
+export function patchRowDisabled(original: string, id: string): boolean {
+  let seq: YAMLSeq;
+  try {
+    const doc = parsePatchDocument(original, "profile patch");
+    seq = requireSeq(doc, "profile patch");
+  } catch {
+    return false;
+  }
+  const rows = rowsWithId(seq, id);
+  return rows.length === 1 && rows[0]!.get("disabled") === true;
+}
+
 export function extractRoot(dump: string, id: string): string | null {
   return extractConfigField(dump, id, "root");
 }
@@ -208,7 +260,7 @@ export function assertDumpConfigIsolated(dump: string, name: string): void {
   assertDumpPatched(dump, name);
   const settingsPath = extractConfigField(dump, SETTINGS_ROW_ID, "path");
   const credentialsPath = extractConfigField(dump, CREDENTIALS_ROW_ID, "path");
-  if (settingsPath) throw new PatchVerifyError("Legacy settings.path is not an alpha isolation boundary.");
+  if (settingsPath) throw new PatchVerifyError("settings.path is not a Spaces isolation boundary.");
   if (!credentialsPath) {
     throw new PatchVerifyError(t("errors.missingDumpRow", { id: CREDENTIALS_ROW_ID, name }));
   }

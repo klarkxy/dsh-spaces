@@ -102,7 +102,7 @@ test("same request id concurrent submit runs the handler once", async () => {
 test("Browser create preset survives the actual job command validator", async () => {
   const home = tempHome();
   const store = new WorkbenchJobStore({ home });
-  const command: WorkbenchCommand = { kind: "space.create", input: { name: "browser", browser: true, useSharedLlm: false } };
+  const command: WorkbenchCommand = { kind: "space.create", input: { name: "browser", browser: true } };
   await store.submit(command, "browser-create", noop());
   await store.whenIdle();
   const record = JSON.parse(readFileSync(jobFile(home, "browser-create"), "utf8")) as { command: WorkbenchCommand };
@@ -117,7 +117,7 @@ test('main model create choice survives job parsing and rejects ambiguous legacy
   const command:WorkbenchCommand={kind:'space.create',input:{name:'main-model',modelSource:'main'}};
   await store.submit(command,'main-create',noop());await store.whenIdle();
   assert.deepEqual(JSON.parse(readFileSync(jobFile(home,'main-create'),'utf8')).command,command);
-  for(const input of [{name:'bad',modelSource:'other'},{name:'bad',modelSource:'main',useSharedLlm:true}])await assert.rejects(()=>store.submit({kind:'space.create',input} as never,'bad-create',noop()),{code:'workbench/invalid-input'});
+  for(const input of [{name:'bad',modelSource:'other'},{name:'bad',modelSource:'shared'}])await assert.rejects(()=>store.submit({kind:'space.create',input} as never,'bad-create',noop()),{code:'workbench/invalid-input'});
 });
 
 test("handler failure is a failed job and does not block later work", async () => {

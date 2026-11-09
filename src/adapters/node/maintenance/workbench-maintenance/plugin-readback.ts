@@ -3,12 +3,27 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
 import { isHubPluginArchive } from "../../products/plugin-library";
+import { verifyExactInstall } from "../../products/plugin-exact-source";
 import { listProfilePlugins } from "../../products/plugin-ops";
 import { WorkbenchMaintenanceError } from "./errors";
 import type { PluginMutationExpected } from "./types";
 
 export function verifyPluginReadback(home: string, expected: PluginMutationExpected): void {
   const plugins = listProfilePlugins(home, expected.spaceId);
+  if (expected.action === "install" && expected.plugin) {
+    // Exact-source install: prove the pinned source, not just presence —
+    // npm resolves to the frozen version, git resolves to the frozen
+    // repo/commit/subdirectory through the lockfile.
+    try {
+      verifyExactInstall(plugins, home, expected.spaceId, expected.plugin);
+    } catch (error) {
+      throw new WorkbenchMaintenanceError(
+        "workbench/failed",
+        error instanceof Error ? error.message : "The plugin read-back failed.",
+      );
+    }
+    return;
+  }
   const hit = plugins.find((item) => item.name === expected.packageName);
   const manifestPath = join(home, "profiles", expected.spaceId, "package.json");
   const manifest = existsSync(manifestPath)

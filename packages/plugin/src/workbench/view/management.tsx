@@ -19,7 +19,8 @@ import { InlineErrors } from "../inline-error";
 import { formatDateTime, formatMegabytes, t, type WorkbenchLocale } from "../i18n";
 import { requestOriginMounted, type WorkbenchController } from "../store";
 import { CopyButton, statusKey, type WorkbenchViewProps } from "./shared";
-import { JobsList } from "./jobs";
+import { JobsList, jobKindLabel, jobPhaseLabel } from "./jobs";
+import { ACTIVE_JOB } from "../store/constants";
 import { SpaceDetailPage } from "./space-detail";
 
 export function ManagementContent({ ui, controller }: WorkbenchViewProps): ReactElement {
@@ -82,6 +83,11 @@ export function StatusBanners({ ui }: { ui: WorkbenchViewProps["ui"] }): ReactEl
           {ui.planError}
         </p>
       )}
+      {state?.jobs.filter((job) => ACTIVE_JOB.has(job.status)).map((job) => (
+        <p className="dsh-wb-notice" role="status" data-active-job={job.id} key={job.id}>
+          {jobKindLabel(locale, job.kind)} · {jobPhaseLabel(locale, job.phase)}{job.message ? ` — ${job.message}` : ""}
+        </p>
+      ))}
     </>
   );
 }

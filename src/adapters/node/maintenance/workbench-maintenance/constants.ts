@@ -7,8 +7,6 @@ export const WORKBENCH_PLUGIN_MUTATION_FILE = "plugin-mutation.json";
 export const WORKBENCH_PLUGIN_MUTATION_FILES_DIR = "plugin-mutation-files";
 export const WORKBENCH_PLAN_TTL_MS = 5 * 60 * 1000;
 export const FULL_SPACES_PACKAGE = "@dsh-spaces/plugin";
-export const UPGRADE_STAGE_DIR = ".dsh-spaces-upgrade";
-export const UPGRADE_JOURNAL_FILE = "journal.json";
 
 export const WORKBENCH_MAINTENANCE_ERROR = {
   "workbench/invalid-input": "The request is not a valid workbench maintenance plan.",

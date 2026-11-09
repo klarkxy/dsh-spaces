@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-creator-tools-observer
+      name: '@dsh-spaces/creator-tools-observer'
+      config: {}

@@ -144,7 +144,7 @@ export function HomeSettingsFields({
           </label>
           <p className="dsh-wb-muted">{t(locale, "settings.catalogUrlHint")}</p>
           <div className="dsh-wb-actions">
-            <PressableButton as="button" type="submit" className="dsh-wb-btn primary" disabled={!writable || busy}>
+            <PressableButton type="submit" className="dsh-wb-btn primary" disabled={!writable || busy}>
               {t(locale, "settings.saveHome")}
             </PressableButton>
           </div>
@@ -204,11 +204,11 @@ export function ImportPreviewDialog({
           />
         </label>
         <div className="dsh-wb-actions">
-          <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={onCancel}>
+          <PressableButton type="button" className="dsh-wb-btn" onClick={onCancel}>
             {t(locale, "app.cancel")}
           </PressableButton>
           <PressableButton
-            as="button"
+            
             type="button"
             className="dsh-wb-btn primary"
             disabled={busy}
@@ -251,11 +251,6 @@ function SharePreviewBody({
           {t(locale, "share.unknownSources")}: {preview.unknownSources.join(", ")}
         </p>
       ) : null}
-      {preview.llmMappingRequired ? (
-        <p className="dsh-wb-notice">
-          {t(locale, "share.llmMapping")}. {t(locale, "share.llmMappingHint")}
-        </p>
-      ) : null}
     </>
   );
 }
@@ -296,10 +291,6 @@ export function ImportResultCard({
       <dd>{result.plugins}</dd>
       <dt>{t(locale, "templates.result.start")}</dt>
       <dd>{result.start}</dd>
-      <dt>{t(locale, "templates.result.llm")}</dt>
-      <dd>
-        {result.llm?.mappingRequired ? t(locale, "share.llmMapping") : result.llm ? String(result.llm.mapped) : "—"}
-      </dd>
       {result.errors.length > 0 ? (
         <>
           <dt>{t(locale, "jobs.failed")}</dt>

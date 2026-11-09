@@ -7,7 +7,7 @@ import { BLUEPRINT_LOCAL_FILE, BLUEPRINT_ORIGIN_FILE, BLUEPRINT_ORIGIN_SCHEMA_VE
 import { atomicWrite } from "../../atomic";
 import { realDshHome } from "../../home/home-guard";
 import { spaceDataRoot } from "../../llm/llm-policy-store";
-import { spaceSettingsPath } from "../../llm/llm-space-settings";
+import { profileSettingsPath as spaceSettingsPath } from "../../profile/profile-settings";
 import { writeProfileSettings } from "../../profile/profile-settings";
 import type { OriginRecipe } from "./types";
 import { HOST_PACKAGE_SET, CONTROL_PACKAGE_SET, MANAGED_ENTRY_SET, FORBIDDEN_SETTINGS } from "./constants";

@@ -1,9 +1,8 @@
 import type { SpaceBaseCreation } from './base-creation';
 import { SPACES_BROWSER_SEALED } from '../../../shared/browser-sealed';
-import type { GlobalLlmHost } from "../../../core/application/global-llm-host";
 import type { WorkbenchCommand, WorkbenchJob } from "../../../shared/workbench";
 import type { HomeOperationLock } from "../home/home-operation-lock";
-import { FileLlmPolicyStore } from "../llm/llm-policy-store";
+import { writeSpaceLlmPolicy } from "../llm/llm-policy-store";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import type { ProfileRegistry } from "../profile/profile-registry";
 import type { NodeSpacesService } from "../products/spaces-service";
@@ -20,7 +19,6 @@ export interface SupervisorSpaceCommandsHost {
   options: WorkbenchSupervisorOptions;
   cli: () => BoundCli | null;
   spaces: () => NodeSpacesService | undefined;
-  llmHost: () => GlobalLlmHost;
   requireSpace: (spaceId: string) => string;
   protectSpecial: (id: string, options: { allowManager: boolean }) => void;
   ensureViewBridge: (profileId: string) => Promise<void>;
@@ -36,22 +34,35 @@ export class SupervisorSpaceCommands {
   constructor(private readonly host: SupervisorSpaceCommandsHost) {}
 
   async createSpace(
-    input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string },
+    input: { name: string; displayName?: string; icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string },
     ctx: WorkbenchJobContext,
   ): Promise<WorkbenchJob["result"]> {
-    ctx.phase("create");
+    ctx.phase("prepare");
     ctx.cancellable(false);
     const name = parseSpaceUserName(input.name);
     const base = input.base ?? (input.browser ? 'browser' : 'web');
     if (SPACES_BROWSER_SEALED && base === 'browser') throw new WorkbenchPublicError('workbench/unsupported');
     if (input.base && input.browser !== undefined && input.browser !== (input.base === 'browser')) throw new WorkbenchPublicError('workbench/invalid-input');
-    if (base === 'browser' && (input.modelSource || input.useSharedLlm === true)) throw new WorkbenchPublicError('workbench/invalid-input');
+    if (base === 'browser' && input.modelSource) throw new WorkbenchPublicError('workbench/invalid-input');
+    // Component availability is checked before any space exists so a missing
+    // component source fails during prepare instead of leaving a registered,
+    // partially built profile. In a linked checkout an unusable component
+    // directory is a named failure, not "component absent".
+    const viewBridge = base === 'web' && this.host.hasComponent('view-bridge');
+    if (base === 'web' && input.modelSource === 'main') this.host.hasComponent('llm-bridge');
     if (base === 'browser' && (!this.host.hasComponent('browser') || !this.host.hasComponent('view-bridge'))) {
       throw new WorkbenchPublicError("workbench/unavailable", "The bundled Browser or its view bridge is unavailable.");
     }
     let spaceId = "";
     await this.host.lock.run("space.create", async () => {
-      const recipe = await this.host.bases.prepare(base, input.baseVersion);
+      let installing = false;
+      const recipe = await this.host.bases.prepare(base, input.baseVersion, (version) => {
+        installing = true;
+        ctx.phase("install");
+        ctx.message(`DSH ${version}`);
+      });
+      ctx.phase("create");
+      if (installing) ctx.message("");
       const spaces = this.host.spaces();
       if (spaces) {
         spaceId = (await spaces.create({ name, displayName: input.displayName }, recipe)).id;
@@ -61,25 +72,16 @@ export class SupervisorSpaceCommands {
       if (input.icon !== undefined) {
         this.host.registry.updateMeta(spaceId, { icon: parseIcon(input.icon) });
       }
-      if (base === 'web' && this.host.hasComponent('view-bridge')) {
+      if (base === 'web' && viewBridge) {
+        ctx.phase("view-bridge");
         await this.host.ensureViewBridge(spaceId);
       }
 
     });
-    // Spaces inherit shared connections by default; only an explicit choice is persisted.
-    // Blueprint/template callers omit the flag so their own policy write keeps revision 0.
     if (base === 'web' && input.modelSource==='main') {
-      await new FileLlmPolicyStore(this.host.home).write(spaceId,{schemaVersion:2,revision:1,shared:{mode:'none'},inheritMain:true},0);
-      await this.host.ensureLlmBridge(spaceId);
-    } else if (base === 'web' && (input.useSharedLlm !== undefined || input.modelSource!==undefined)) {
       ctx.phase("llm-policy");
-      await this.host.llmHost().dispatch({
-        method: "updateSpacePolicy",
-        spaceId,
-        shared: input.modelSource==='shared'||input.useSharedLlm ? { mode: "all" } : { mode: "none" },
-        expectedRevision: 0,
-      });
-      if (input.modelSource==='shared'||input.useSharedLlm) await this.host.ensureLlmBridge(spaceId);
+      writeSpaceLlmPolicy(this.host.home, spaceId, true);
+      await this.host.ensureLlmBridge(spaceId);
     }
     return { spaceId };
   }

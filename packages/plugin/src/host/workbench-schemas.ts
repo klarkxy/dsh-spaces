@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { LLM_ADAPTER_VERSION } from "../../../../src/shared/llm-api";
 import { SNAPSHOT_ID_RE } from "../../../../src/shared/snapshots";
 import { SPACE_NAME_RE } from "../../../../src/shared/types";
 import { isExactRuntimeVersion } from "../../../../src/shared/runtime";
@@ -136,6 +135,13 @@ export const workbenchJobSchema = z
     canCancel: z.boolean(),
     result: workbenchJobResultSchema.optional(),
     error: workbenchJobErrorSchema.optional(),
+    subject: z
+      .object({
+        displayName: z.string().min(1).max(200),
+        icon: z.string().max(MAX_SPACE_ICON_DATA_URL_CHARS).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -263,8 +269,7 @@ const createInputSchema = z
     name: spaceNameSchema,
     displayName: displayNameSchema.optional(),
     icon: iconSchema.optional(),
-    useSharedLlm: z.boolean().optional(),
-    modelSource: z.enum(['main','shared','local']).optional(),
+    modelSource: z.enum(['main','local']).optional(),
     browser: z.boolean().optional(),
     base: z.enum(["web", "browser"]).optional(),
     baseVersion: exactVersionSchema.optional(),
@@ -284,27 +289,31 @@ const coreWorkbenchCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("space.reorder"), spaceIds: z.array(spaceIdSchema).min(1).max(256) }).strict(),
   z.object({ kind: z.literal("space.start"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("plan.execute"), planId: planIdSchema }).strict(),
+  z.object({ kind: z.literal("space.restart"), spaceId: spaceIdSchema }).strict(),
+  z.object({ kind: z.literal("space.delete"), spaceId: spaceIdSchema, removeData: z.boolean() }).strict(),
   z
     .object({
-      kind: z.literal("llm.apply"),
-      spaceIds: z.array(spaceIdSchema).min(1).max(256),
-      catalogRevision: z.number().int().nonnegative(),
-      observations: z
-        .array(
-          z
-            .object({
-              spaceId: spaceIdSchema,
-              status: z.enum(["running", "starting", "stopping", "stopped", "crashed", "unknown"]),
-              generation: z.number().int().nonnegative(),
-              catalogRevision: z.number().int().nonnegative().nullable(),
-              busy: z.boolean(),
-              serviceEpoch: hex64Schema,
-            })
-            .strict(),
-        )
-        .max(256),
+      kind: z.literal("plugin.install"),
+      spaceIds: z.array(spaceIdSchema).min(1).max(64),
+      catalogId: catalogIdSchema,
+      version: exactVersionSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("plugin.remove"), spaceId: spaceIdSchema, packageName: z.string().min(1).max(214) }).strict(),
+  z
+    .object({
+      kind: z.literal("plugin.toggle"),
+      spaceId: spaceIdSchema,
+      pluginId: z.string().min(1).max(214),
+      enabled: z.boolean(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("plugin.cleanup-manager"), spaceId: spaceIdSchema }).strict(),
+  z.object({ kind: z.literal("snapshot.create") }).strict(),
+  z.object({ kind: z.literal("snapshot.delete"), snapshotId: snapshotIdSchema }).strict(),
+  z.object({ kind: z.literal("space.runtime.set"), spaceId: spaceIdSchema, version: exactVersionSchema }).strict(),
+  z.object({ kind: z.literal("runtime.remove"), version: exactVersionSchema }).strict(),
+  z.object({ kind: z.literal("service.shutdown") }).strict(),
 ]);
 
 export const workbenchCommandSchema = z.union([coreWorkbenchCommandSchema, workbenchProductCommandSchema]);
@@ -483,318 +492,3 @@ export const overviewSchema = z
   })
   .strict();
 
-const connectionIdSchema = z.string().uuid();
-const llmAuthSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("none") }).strict(),
-  z.object({ kind: z.literal("api-key"), credentialRecordId: z.string().min(1).max(200) }).strict(),
-]);
-const llmDraftSchema = z
-  .object({
-    id: connectionIdSchema.optional(),
-    displayName: z.string().min(1).max(80),
-    enabled: z.boolean().optional(),
-    providerConfig: z.record(z.string(), z.unknown()),
-    auth: llmAuthSchema.optional(),
-  })
-  .strict();
-const llmModelRefSchema = z.object({ connectionId: connectionIdSchema, modelId: z.string().min(1).max(200) }).strict();
-const llmSelectionSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("none") }).strict(),
-  z.object({ mode: z.literal("all") }).strict(),
-  z.object({ mode: z.literal("selected"), connectionIds: z.array(connectionIdSchema).max(256) }).strict(),
-]);
-const llmObservationSchema = z
-  .object({
-    spaceId: spaceIdSchema,
-    status: z.enum(["running", "starting", "stopping", "stopped", "crashed", "unknown"]),
-    generation: z.number().int().nonnegative(),
-    catalogRevision: z.number().int().nonnegative().nullable(),
-    busy: z.boolean(),
-    serviceEpoch: hex64Schema,
-  })
-  .strict();
-
-export const llmApiRequestSchema = z.discriminatedUnion("method", [
-  z.object({ method: z.literal("describe") }).strict(),
-  z.object({ method: z.literal("previewChange"), draft: llmDraftSchema, expectedRevision: z.number().int().nonnegative() }).strict(),
-  z.object({ method: z.literal("saveConnection"), draft: llmDraftSchema, expectedRevision: z.number().int().nonnegative() }).strict(),
-  z.object({ method: z.literal("setDefault"), model: llmModelRefSchema.nullable(), expectedRevision: z.number().int().nonnegative() }).strict(),
-  z.object({ method: z.literal("previewDelete"), connectionId: connectionIdSchema }).strict(),
-  z.object({ method: z.literal("deleteConnection"), connectionId: connectionIdSchema, expectedRevision: z.number().int().nonnegative() }).strict(),
-  z.object({ method: z.literal("discoverModels"), connectionId: connectionIdSchema.optional(), draft: llmDraftSchema.optional() }).strict(),
-  z.object({ method: z.literal("testConnection"), connectionId: connectionIdSchema, modelId: z.string().min(1).max(200), authorize: z.literal(true) }).strict(),
-  z.object({ method: z.literal("spacePolicy"), spaceId: spaceIdSchema }).strict(),
-  z
-    .object({
-      method: z.literal("updateSpacePolicy"),
-      spaceId: spaceIdSchema,
-      shared: llmSelectionSchema,
-      expectedRevision: z.number().int().nonnegative(),
-    })
-    .strict(),
-  z.object({ method: z.literal("spaceDefault"), spaceId: spaceIdSchema }).strict(),
-  z.object({ method: z.literal("updateSpaceDefault"), spaceId: spaceIdSchema, model: llmModelRefSchema.nullable() }).strict(),
-  z.object({ method: z.literal("listLocalCandidates"), spaceId: spaceIdSchema }).strict(),
-  z
-    .object({
-      method: z.literal("adoptLocal"),
-      spaceId: spaceIdSchema,
-      routeId: z.string().min(1).max(200),
-      displayName: z.string().min(1).max(80),
-      expectedRevision: z.number().int().nonnegative(),
-      copyCredential: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      method: z.literal("applyPlan"),
-      spaceIds: z.array(spaceIdSchema).min(1).max(256),
-      catalogRevision: z.number().int().nonnegative(),
-      observations: z.array(llmObservationSchema).max(256),
-      requestId: requestIdSchema,
-    })
-    .strict(),
-  z.object({ method: z.literal("operationStatus"), operationId: requestIdSchema }).strict(),
-  z.object({ method: z.literal("previewShare"), spaceId: spaceIdSchema }).strict(),
-  z.object({ method: z.literal("importedRequirements"), spaceId: spaceIdSchema }).strict(),
-  z
-    .object({
-      method: z.literal("mapImported"),
-      spaceId: spaceIdSchema,
-      mappings: z
-        .array(z.object({ requirementId: z.string().min(1).max(80), connectionId: connectionIdSchema }).strict())
-        .max(256),
-      expectedRevision: z.number().int().nonnegative(),
-    })
-    .strict(),
-]);
-
-const redactedConnectionSchema = z
-  .object({
-    id: connectionIdSchema,
-    revision: z.number().int().positive(),
-    displayName: z.string(),
-    enabled: z.boolean(),
-    backend: z.literal("llm-pi-ai"),
-    providerConfig: z.record(z.string(), z.unknown()),
-    auth: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("none") }).strict(),
-      z.object({ kind: z.literal("api-key"), configured: z.literal(true) }).strict(),
-    ]),
-    createdAt: isoDateSchema,
-    updatedAt: isoDateSchema,
-    routeId: z.string().regex(/^spaces-llm-[0-9a-f]{32}$/),
-    usedBySpaceIds: z.array(spaceIdSchema).optional(),
-  })
-  .strict();
-
-export const llmApiResultSchema = z.union([
-  z
-    .object({
-      revision: z.number().int().nonnegative(),
-      connections: z.array(redactedConnectionSchema).max(256),
-      defaultModel: llmModelRefSchema.nullable(),
-      capabilities: z
-        .object({
-          adapter: z.literal("llm-pi-ai"),
-          adapterVersion: z.literal(LLM_ADAPTER_VERSION),
-          protocols: z.tuple([z.literal("openai-completions"), z.literal("openai-responses"), z.literal("anthropic-messages")]),
-          keyless: z.literal(false),
-        })
-        .strict(),
-      pendingRestartSpaceIds: z.array(spaceIdSchema).max(256),
-    })
-    .strict(),
-  z
-    .object({
-      catalogRevision: z.number().int().nonnegative(),
-      affectedSpaceIds: z.array(spaceIdSchema).max(256),
-      pendingRestartSpaceIds: z.array(spaceIdSchema).max(256),
-      connectionId: connectionIdSchema,
-    })
-    .strict(),
-  z
-    .object({
-      connectionId: connectionIdSchema,
-      references: z
-        .array(
-          z
-            .object({
-              spaceId: spaceIdSchema,
-              connectionIds: z.array(connectionIdSchema).max(256),
-              mode: z.enum(["none", "all", "selected"]),
-            })
-            .strict(),
-        )
-        .max(256),
-    })
-    .strict(),
-  z
-    .object({
-      revision: z.number().int().nonnegative(),
-      connections: z.array(redactedConnectionSchema).max(256),
-      defaultModel: llmModelRefSchema.nullable(),
-      connectionId: connectionIdSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      spaceId: spaceIdSchema,
-      policy: z
-        .object({
-          schemaVersion: z.literal(1),
-          revision: z.number().int().nonnegative(),
-          shared: llmSelectionSchema,
-        })
-        .strict(),
-      targetCatalogRevision: z.number().int().nonnegative(),
-      runningCatalogRevision: z.number().int().nonnegative().nullable(),
-      pendingRestart: z.boolean(),
-    })
-    .strict(),
-  z
-    .object({
-      models: z.array(z.object({ id: z.string(), name: z.string().optional() }).strict()).max(1000),
-      truncated: z.boolean(),
-      connectionId: connectionIdSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      spaceId: spaceIdSchema,
-      source: z.enum(["local", "global", "none"]),
-      inheritGlobal: z.boolean(),
-      local: z.object({ provider: z.string(), model: z.string() }).strict().nullable(),
-      global: llmModelRefSchema.nullable(),
-      effective: z
-        .object({
-          provider: z.string(),
-          model: z.string(),
-          origin: z.enum(["local", "global"]),
-        })
-        .strict()
-        .nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      spaceId: spaceIdSchema,
-      candidates: z
-        .array(
-          z
-            .object({
-              routeId: z.string(),
-              displayName: z.string(),
-              api: z.string().optional(),
-              origin: z.string(),
-              modelIds: z.array(z.string()).max(1000),
-              credentialCopy: z.enum(["available", "reenter", "unsupported"]),
-            })
-            .strict(),
-        )
-        .max(256),
-    })
-    .strict(),
-  z
-    .object({
-      spaceId: spaceIdSchema,
-      schemaVersion: z.literal(1),
-      kind: z.literal("dsh-space-llm-requirements"),
-      sourceSharedMode: z.enum(["none", "all", "selected"]),
-      requirements: z
-        .array(
-          z
-            .object({
-              requirementId: z.string(),
-              displayName: z.string(),
-              protocol: z.string(),
-              endpoint: z.string(),
-              modelIds: z.array(z.string()).max(1000),
-              authKind: z.enum(["api-key", "none"]),
-              usedAsDefault: z.boolean(),
-            })
-            .strict(),
-        )
-        .max(256),
-      defaultRequirementId: z.string().nullable(),
-      adapterRequired: z.literal("llm-pi-ai"),
-      note: z.string(),
-    })
-    .strict(),
-  z
-    .object({
-      spaceId: spaceIdSchema,
-      mappingRequired: z.boolean(),
-      manifest: z
-        .object({
-          schemaVersion: z.literal(1),
-          kind: z.literal("dsh-space-llm-requirements"),
-          sourceSharedMode: z.enum(["none", "all", "selected"]),
-          requirements: z.array(z.object({
-            requirementId: z.string(),
-            displayName: z.string(),
-            protocol: z.string(),
-            endpoint: z.string(),
-            modelIds: z.array(z.string()).max(1000),
-            authKind: z.enum(["api-key", "none"]),
-            usedAsDefault: z.boolean(),
-          }).strict()).max(256),
-          defaultRequirementId: z.string().nullable(),
-          adapterRequired: z.literal("llm-pi-ai"),
-          note: z.string(),
-        })
-        .strict()
-        .nullable(),
-    })
-    .strict(),
-  z.object({ ok: z.literal(true), modelId: z.string(), billed: z.literal(true) }).strict(),
-  z
-    .object({
-      operationId: requestIdSchema,
-      status: z.enum(["committed", "not-found", "unknown"]),
-      catalogRevision: z.number().int().nonnegative().optional(),
-      connectionId: connectionIdSchema.optional(),
-      leftoverRecordId: z.string().optional(),
-    })
-    .strict(),
-  workbenchJobSchema,
-]);
-
-const llmSecretDraftSchema = z
-  .object({
-    id: connectionIdSchema.optional(),
-    displayName: z.string().min(1).max(80),
-    enabled: z.boolean().optional(),
-    providerConfig: z.record(z.string(), z.unknown()),
-  })
-  .strict();
-
-export const llmCredentialRequestSchema = z.discriminatedUnion("method", [
-  z
-    .object({
-      method: z.literal("saveConnectionWithCredential"),
-      draft: llmSecretDraftSchema,
-      secret: z.string().min(1).max(16_384),
-      expectedRevision: z.number().int().nonnegative(),
-      operationId: requestIdSchema,
-    })
-    .strict(),
-  z
-    .object({
-      method: z.literal("discoverModels"),
-      draft: llmSecretDraftSchema,
-      secret: z.string().min(1).max(16_384),
-    })
-    .strict(),
-  z
-    .object({
-      method: z.literal("adoptLocal"),
-      spaceId: spaceIdSchema,
-      routeId: z.string().min(1).max(200),
-      displayName: z.string().min(1).max(80),
-      secret: z.string().min(1).max(16_384),
-      expectedRevision: z.number().int().nonnegative(),
-      operationId: requestIdSchema,
-    })
-    .strict(),
-]);

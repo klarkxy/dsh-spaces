@@ -37,7 +37,7 @@ export class MaintenanceRuntime extends MaintenanceSnapshots {
     this.rejectUnsupportedRuntimePeers(spaceId, version);
     const runningSpaceIds = this.runningOf([spaceId]);
     const command: ResolvedCommand = { kind: "space.runtime.set", spaceId, version };
-    const willDownload = !this.runtimeBinFor(version);
+    const willDownload = !this.ports.runtimes.installedBin(version);
     return this.storeable(id, createdAt, expiresAt, command, {
       kind: "space.runtime.set",
       title: pin === version ? `Re-apply DSH ${version} to ${spaceId}` : `Set ${spaceId} to DSH ${version}`,
@@ -95,11 +95,11 @@ export class MaintenanceRuntime extends MaintenanceSnapshots {
       await this.ports.stopSpace(spaceId);
     }
     ctx.cancellable(false);
-    if (!this.runtimeBinFor(version)) {
+    if (!this.ports.runtimes.installedBin(version)) {
       ctx.phase("runtime");
       ctx.message(`Installing runtime ${version}.`);
       await this.ports.runtimes.install(version);
-      if (!this.runtimeBinFor(version)) {
+      if (!this.ports.runtimes.installedBin(version)) {
         throw new WorkbenchMaintenanceError("workbench/failed", `DSH ${version} is not installed.`);
       }
     }
@@ -157,21 +157,9 @@ export class MaintenanceRuntime extends MaintenanceSnapshots {
       .sort();
   }
 
-  private runtimeBinFor(version: string): string | undefined {
-    const host = this.ports.hostRuntime();
-    if (host && host.version === version) return host.bin;
-    const installed = this.ports.runtimes.installedBin(version);
-    if (installed) return installed;
-    const legacy = this.ports.runtimes.current();
-    if (legacy && legacy.version === version) return legacy.bin;
-    return undefined;
-  }
-
   private runtimeRemoveBlockReason(version: string): string | undefined {
     const host = this.ports.hostRuntime();
     if (host && host.version === version) return `DSH ${version} is the host runtime.`;
-    const legacy = this.ports.runtimes.current();
-    if (legacy && legacy.version === version) return `DSH ${version} is the recorded legacy runtime pointer.`;
     const pinnedBy = this.pinnedSpacesOf(version);
     if (pinnedBy.length) return `DSH ${version} is pinned by ${pinnedBy.join(", ")}.`;
     if (!this.ports.runtimes.installedBin(version)) return `DSH ${version} is not installed in the Spaces runtime store.`;

@@ -1,6 +1,6 @@
 /** Browser-safe workbench contracts. Jobs and durable records never carry file paths, cookies or child launch tokens. Transient blueprint product responses may include receiver-local input values. */
-import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest, LlmSpaceObservation } from './llm-api';
 import type { CreateSpaceInput, SpaceDetail, SpaceSummary, SpacesMode } from './spaces-control';
+import type { PluginSourceSpec } from './plugin-source';
 import type {
   WorkbenchProductCommand,
   WorkbenchProductOutcome,
@@ -119,6 +119,15 @@ export interface WorkbenchViewMessage {
   message?: string;
 }
 
+/** One step of a composed job such as creator.create. */
+export interface WorkbenchJobStep {
+  step: string;
+  status: 'done' | 'failed' | 'not-run';
+  packageName?: string;
+  /** Public provenance for the step, e.g. an exact version or pinned git spec. */
+  detail?: string;
+}
+
 export type WorkbenchJobResult = {
   spaceId?: string;
   snapshotId?: string;
@@ -126,6 +135,7 @@ export type WorkbenchJobResult = {
   dshVersion?: string;
   view?: WorkbenchView;
   product?: WorkbenchProductOutcome;
+  steps?: WorkbenchJobStep[];
 };
 
 export interface WorkbenchJob {
@@ -141,27 +151,91 @@ export interface WorkbenchJob {
   canCancel: boolean;
   result?: WorkbenchJobResult;
   error?: WorkbenchJobErrorInfo;
+  subject?: { displayName: string; icon?: string };
 }
 
 export type WorkbenchCommand =
-  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } }
+  | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } }
   | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string }
   | { kind: 'space.reorder'; spaceIds: string[] }
   | { kind: 'space.start'; spaceId: string }
   | { kind: 'plan.execute'; planId: string }
-  | { kind: 'llm.apply'; spaceIds: string[]; catalogRevision: number; observations: LlmSpaceObservation[] }
+  | {
+      /**
+       * Creator-channel composite command. Submitted only through
+       * `/internal/creator/v1/createExecute`; the general `submit` dispatch
+       * rejects it. `planId` identifies the frozen in-memory plan (prefixed
+       * by its owning creator registration), not a lifecycle plan.
+       */
+      kind: 'creator.create';
+      planId: string;
+      name: string;
+      displayName?: string;
+      icon?: string;
+    }
+  | {
+      /**
+       * Control-channel lifecycle command. Submitted only through
+       * `/internal/control/v1/execute`; the general `submit` dispatch rejects
+       * it. `controlPlanId` identifies the frozen in-memory control plan
+       * (prefixed by the owning main registration); the job's runner resolves
+       * it back to the recorded start command or lifecycle plan.
+       */
+      kind: 'control.execute';
+      controlPlanId: string;
+      spaceId: string;
+    }
   | WorkbenchProductCommand;
 
 export type WorkbenchPlanRequest =
   | { kind: 'space.stop' | 'space.restart'; spaceId: string }
   | { kind: 'space.delete'; spaceId: string; removeData: boolean }
   | { kind: 'plugin.install'; spaceIds: string[]; catalogId: string; version: string }
+  | {
+      /**
+       * Exact-source install variant: the closed npm/github source the
+       * control channel freezes — never a catalog id, tag, range, raw spec
+       * or path. The maintenance plan installs verbatim and verifies the
+       * read-back against the pinned source.
+       */
+      kind: 'plugin.install.spec';
+      spaceId: string;
+      source: PluginSourceSpec;
+    }
   | { kind: 'plugin.remove'; spaceId: string; packageName: string }
   | { kind: 'plugin.toggle'; spaceId: string; pluginId: string; enabled: boolean }
   | { kind: 'plugin.cleanup-manager'; spaceId: string }
+  | {
+      /**
+       * Supervisor-local plans that write through the RUNNING child's own
+       * `pluginManager` @Remote (path B): the child process applies the
+       * change inside its declared reload lifecycle. They require a running
+       * space and never stop it; the supervisor never writes the profile
+       * while these run. The public preview input parser does not admit
+       * these kinds; only the control channel's `plugin.live.*` ops create
+       * them, and they are never read back off disk.
+       */
+      kind: 'plugin.live.install';
+      spaceId: string;
+      source: PluginSourceSpec;
+    }
+  | { kind: 'plugin.live.update'; spaceId: string; packageName: string; version: string }
+  | { kind: 'plugin.live.entry'; spaceId: string; entryId: string; enabled: boolean }
+  | { kind: 'plugin.live.remove'; spaceId: string; packageName: string }
   | { kind: 'snapshot.create' }
   | { kind: 'snapshot.delete'; snapshotId: string }
   | { kind: 'space.runtime.set'; spaceId: string; version: string }
+  | {
+      /**
+       * Supervisor-local plan: atomically rewrite the space's LLM policy.
+       * Only a stopped space may be targeted; the supervisor's local plan
+       * path executes it — the public preview input parser does not admit
+       * this kind and the maintenance service hands it off.
+       */
+      kind: 'space.llm-policy.set';
+      spaceId: string;
+      inheritMain: boolean;
+    }
   | { kind: 'runtime.remove'; version: string }
   | { kind: 'service.shutdown' };
 
@@ -229,11 +303,10 @@ export const WORKBENCH_API = {
     args: [] as const,
     result: undefined as unknown as WorkbenchState,
   },
-  /** Readonly startup observation. Legacy lightweight adapters may omit it. */
+  /** Readonly startup observation. */
   startupStatus: {
     args: [] as const,
     result: undefined as unknown as WorkbenchStartupStatus,
-    optional: true,
   },
   detail: {
     args: [{ name: "spaceId", value: undefined as unknown as string }] as const,
@@ -289,21 +362,6 @@ export const WORKBENCH_API = {
   backups: {
     args: [{ name: "spaceId", value: undefined as unknown as string }] as const,
     result: undefined as unknown as WorkbenchBackup[],
-  },
-  /** Redacted global LLM management. Secrets use the Host-only llmCredential HTTP method. */
-  llm: {
-    args: [{ name: "request", value: undefined as unknown as LlmApiRequest }] as const,
-    result: undefined as unknown as LlmApiResult,
-    optional: true,
-  },
-  /**
-   * Manager-Host-only secret writes. The payload lives for the request only:
-   * it is not a StoredJob, not logged, and not returned to workspace profiles.
-   */
-  llmCredential: {
-    args: [{ name: "request", value: undefined as unknown as LlmCredentialRequest }] as const,
-    result: undefined as unknown as LlmApiResult,
-    optional: true,
   },
 } as const;
 

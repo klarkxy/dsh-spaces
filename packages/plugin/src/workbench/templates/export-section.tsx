@@ -44,7 +44,7 @@ export function TemplatesExportSection({
           testId="templatesExport"
           title={t(locale, "templates.export.empty")}
           action={
-            <PressableButton as="button" type="button" className="dsh-wb-btn primary" disabled={!writable} onClick={controller.openCreate}>
+            <PressableButton type="button" className="dsh-wb-btn primary" disabled={!writable} onClick={controller.openCreate}>
               {t(locale, "app.newSpace")}
             </PressableButton>
           }
@@ -101,7 +101,7 @@ export function TemplatesExportSection({
           {saveError ? <TemplatesError message={saveError} /> : null}
           <div className="dsh-wb-actions">
             <PressableButton
-              as="button"
+              
               type="button"
               className="dsh-wb-btn primary"
               disabled={!writable || busy}
@@ -131,7 +131,7 @@ export function TemplatesExportSection({
           </label>
           <div className="dsh-wb-actions">
             <PressableButton
-              as="button"
+              
               type="button"
               className="dsh-wb-btn primary"
               disabled={!writable || busy || !spaceId}
@@ -149,7 +149,7 @@ export function TemplatesExportSection({
             <h4 className="dsh-wb-title">{t(locale, "templates.export.shareCode")}</h4>
             <div className="dsh-wb-actions">
               <PressableButton
-                as="button"
+                
                 type="button"
                 className="dsh-wb-btn"
                 onClick={() => {

@@ -9,7 +9,6 @@
 import React, { useState, type ReactElement } from "react";
 import { gte as semverGte } from "semver";
 import { SPACES_MIN_DSH_VERSION } from "../../../../../src/shared/runtime";
-import { InlineErrors } from "../inline-error";
 import { t } from "../i18n";
 import type { WorkbenchController, WorkbenchUiState } from "../store";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
@@ -51,7 +50,7 @@ export function DshVersionSection({
       {ui.runtimesStatus === "error" ? (
         <p className="dsh-wb-alert" role="alert">{ui.readError.runtimes ?? t(locale, "app.genericError")}</p>
       ) : null}
-      <InlineErrors ui={ui} origin={`detail:${space.id}:dsh`} />
+
       <label className="dsh-wb-field">
         {t(locale, "detail.dshTarget")}
         <select data-dsh-target="true" value={target} disabled={!ready} onChange={(event) => setSelectedTarget(event.target.value)}>

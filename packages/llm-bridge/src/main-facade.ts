@@ -1,9 +1,9 @@
-import { Context } from '@deepseek-ai/cordis';
+import { Context, type Fiber } from '@deepseek-ai/cordis';
 import LlmRuntime, { callConfigEquals, resolveRetryPolicy, projectFilesToText, type LlmAdapter, type LlmCallConfig, type ConfigureCall, type PreparedLlmCall, type LlmProviderInfo, type LlmModelInfo, type GenerateOptions } from '@deepseek-ai/dsh-llm';
 import type {} from '@deepseek-ai/dsh-fs';
 import { connectOwnedLlmChannel } from './delegation-channel';
 import { MainTransport } from './main-transport';
-import { apply as legacyApply } from './plugin';
+import { apply as applySpaceBridge } from './plugin';
 import { createHash } from 'node:crypto';
 import { deepFreeze } from '@deepseek-ai/dsh-util-values';
 import {assertOwnedProfilePath} from '../../../src/adapters/node/profile/profile-settings';
@@ -53,28 +53,27 @@ export class MainLlmFacade extends LlmRuntime {
         this.ctx.inject(['commands'],ready=>ready.provide('spacesCommandsSource',{realm:ready[Context.isolate].commands} as never));
         if (process.env.DSH_SPACES_LLM_INHERIT_MAIN !== '1')
             return;
-        this.ctx.on('internal/config',function(config,next){const result=next();const project=this.runtime?.callback.name==='BasicCompactionEngine'?(value:unknown)=>{const policy=singleAuxiliaryPolicy(value) as {auto?:boolean};if(policy?.auto!==false)throw new Error('SPACES_AUTOMATIC_COMPACTION_REQUIRES_GUARDED_PRESET');return policy;}:this.runtime?.callback.name==='AgentPreset'?scopeAuxiliaryCommands:undefined;return !project?result:result instanceof Promise?result.then(project):project(result);},{global:true,prepend:true});
+        this.ctx.on('internal/config',function(this:Fiber|undefined,first:Fiber|undefined,next:()=>unknown){const fiber=this??first;const result=next();const name=fiber?.runtime?.callback.name;const project=name==='BasicCompactionEngine'?(value:unknown)=>{const policy=singleAuxiliaryPolicy(value) as {auto?:boolean};if(policy?.auto!==false)throw new Error('SPACES_AUTOMATIC_COMPACTION_REQUIRES_GUARDED_PRESET');return policy;}:name==='AgentPreset'?scopeAuxiliaryCommands:undefined;return !project?result:result instanceof Promise?result.then(project):project(result);},{global:true,prepend:true});
         this.channel = await connectOwnedLlmChannel((request, signal) => this.readImage(request, signal),()=>{
             if(this.transport)void this.refresh().catch(error=>this.ctx.logger.warn(error));
         });
         this.ctx.effect(() => () => this.channel?.dispose());
         this.transport = new MainTransport(this.channel.bootstrap);
         try { await this.refresh(); } catch(error) {this.channel.dispose();this.transport=undefined;throw error;}
-        this.ctx.inject(['agents', 'sessions', 'attachments', 'fs', 'profileContext'], ready => {
-            this.consumers = ready;
-            this.auxiliary=new AuxiliaryContext(session=>{if(ready.sessions.get(session.id)!==session)throw new Error('EXACT_SESSION_ORIGIN_REQUIRED');});
-            // Native summary-error listeners can otherwise mutate selected input and repeat independently of retry counts.
-            ready.on('compaction/summary-error',()=>false,{global:true,prepend:true});
-            ready.on('session/event',(session,event)=>{if(event.type==='request/header')void this.auxiliary!.header(session,event.data.header.config)?.catch(error=>ready.logger.error(error));});
-            ready.on('agent/pre-step',async(payload:any,next:any)=>{
-                if(ready.agents.get(payload.agent.id)!==payload.agent)throw new Error('EXACT_AGENT_ORIGIN_REQUIRED');
-                const session=payload.agent.session;this.automaticFailures.assertClean(session);
-                const scope=await this.auxiliary!.capture(session,session.requestHeader()?.config);scope.automatic=true;
-                return this.auxiliary!.storage.run(scope,async()=>{const result=await next();if(scope.failed)throw scope.failure;return result;});
-            },{prepend:true});
-            ready.on('agent/request', async (payload: any, next: any) => {
+        this.consumers = this.ctx;
+        this.auxiliary=new AuxiliaryContext(session=>{if(this.ctx.sessions?.get(session.id)!==session)throw new Error('EXACT_SESSION_ORIGIN_REQUIRED');});
+        // Native summary-error listeners can otherwise mutate selected input and repeat independently of retry counts.
+        this.ctx.on('compaction/summary-error',()=>false,{global:true,prepend:true});
+        this.ctx.on('session/event',(session,event)=>{if(event.type==='request/header')void this.auxiliary!.header(session,event.data.header.config)?.catch(error=>this.ctx.logger.error(error));});
+        this.ctx.on('agent/pre-step',async(payload:any,next:any)=>{
+            if(this.ctx.agents?.get(payload.agent.id)!==payload.agent)throw new Error('EXACT_AGENT_ORIGIN_REQUIRED');
+            const session=payload.agent.session;this.automaticFailures.assertClean(session);
+            const scope=await this.auxiliary!.capture(session,session.requestHeader()?.config);scope.automatic=true;
+            return this.auxiliary!.storage.run(scope,async()=>{const result=await next();if(scope.failed)throw scope.failure;return result;});
+        },{prepend:true});
+        this.ctx.on('agent/request', async (payload: any, next: any) => {
                 const seed = await next(), agent = payload.agent;
-                if (!agent || ready.agents.get(agent.session.id) !== agent)
+                if (!agent || this.ctx.agents?.get(agent.session.id) !== agent)
                     throw new Error('EXACT_AGENT_ORIGIN_REQUIRED');
                 // Official Agent selection and downstream middleware have already assembled this proposal.
                 const selection = seed, selectedProvider = selection.provider;
@@ -90,7 +89,6 @@ export class MainLlmFacade extends LlmRuntime {
                 this.exact.set(config, { sessionId: agent.session.id, defaultReasoning, target,main:true });
                 return config;
             });
-        });
     }
     private async refresh() {
         const next:Description=await (await this.transport!.post('describe', {})).json();
@@ -221,29 +219,34 @@ export class MainLlmFacade extends LlmRuntime {
     private granted(sessionId: string, ref: any, type: string) { const facts = (r: any) => JSON.stringify(Object.entries(r).filter(([k]) => k !== 'name').sort(([a], [b]) => a.localeCompare(b))); if (!this.refs(sessionId).some((b: any) => b.type === type && facts(b.attachment) === facts(ref)))
         throw new Error('ATTACHMENT_NOT_GRANTED'); }
     private async ownedPath(path: string | undefined, signal?: AbortSignal) { if (!path)
-        throw new Error('SOURCE_PATH_MISSING'); const ctx = this.consumers!;assertOwnedProfilePath(ctx.profileContext.home,path);const target = await ctx.fs.resolve(path, { signal }), root = await ctx.fs.resolve(ctx.profileContext.home + '/hub/' + ctx.profileContext.name, { signal }); if (!ctx.fs.contains(root, target))
+        throw new Error('SOURCE_PATH_MISSING'); const ctx = this.consumers!;if (!ctx.profileContext || !ctx.fs)
+        throw new Error('EXACT_CONSUMER_SERVICES_REQUIRED'); assertOwnedProfilePath(ctx.profileContext.home,path);const target = await ctx.fs.resolve(path, { signal }), root = await ctx.fs.resolve(ctx.profileContext.home + '/hub/' + ctx.profileContext.name, { signal }); if (!ctx.fs.contains(root, target))
         throw new Error('SOURCE_PATH_OUTSIDE_SPACE'); return ctx.fs.processPath(target); }
-    private async readImage({ sessionId, ref, target }: any, signal: AbortSignal) { this.granted(sessionId, ref, 'image'); const ctx = this.consumers!, path = await this.ownedPath(ctx.attachments.imageHostPath(ref), signal); if (target === null)
+    private async readImage({ sessionId, ref, target }: any, signal: AbortSignal) { this.granted(sessionId, ref, 'image'); const ctx = this.consumers!;if (!ctx.attachments)
+        throw new Error('EXACT_CONSUMER_SERVICES_REQUIRED'); const path = await this.ownedPath(ctx.attachments.imageHostPath(ref), signal); if (target === null)
         return { toolPath: path }; const result = await ctx.attachments.readImageRequest(ref, target, signal); signal.throwIfAborted(); return { ...result, data: Buffer.from(result.data).toString('base64'), toolPath: path }; }
     private async project(options: GenerateOptions, sessionId: string) {
+        const attachments = this.consumers!.attachments, fs = this.consumers!.fs;
+        if (!attachments || !fs)
+            throw new Error('EXACT_CONSUMER_SERVICES_REQUIRED');
         for (const message of options.messages)
             for (const block of message.content) {
                 if (block.type === 'image')
                     this.granted(sessionId, block.attachment, 'image');
                 if (block.type === 'file') {
                     this.granted(sessionId, block.attachment, 'file');
-                    await this.ownedPath(this.consumers!.attachments.fileHostPath(block.attachment), options.signal);
+                    await this.ownedPath(attachments.fileHostPath(block.attachment), options.signal);
                     const hash = createHash('sha256');
-                    for await (const chunk of this.consumers!.attachments.readFileStream(block.attachment, options.signal))
+                    for await (const chunk of attachments.readFileStream(block.attachment, options.signal))
                         hash.update(chunk);
                     if ('sha256:' + hash.digest('hex') !== block.attachment.attachmentId)
                         throw new Error('FILE_INTEGRITY_MISMATCH');
                 }
             }
-        return { ...options, messages: [...projectFilesToText(options.messages, ref => this.consumers!.fs.processPathFromHostPath(this.consumers!.attachments.fileHostPath(ref)!))] };
+        return { ...options, messages: [...projectFilesToText(options.messages, ref => fs.processPathFromHostPath(attachments.fileHostPath(ref)!))] };
     }
 }
 export const name = 'dsh-spaces-llm-facade';
 export const inject = ['loader'];
-export async function apply(ctx: Context) { const facade = new MainLlmFacade(ctx); await facade.initialize(); ctx.inject(['configEditor', 'settings', 'credentials', 'llm'], ready => legacyApply(ready)); }
+export async function apply(ctx: Context) { const facade = new MainLlmFacade(ctx); await facade.initialize(); ctx.inject(['configEditor'], ready => applySpaceBridge(ready)); }
 export default { name, inject, apply };

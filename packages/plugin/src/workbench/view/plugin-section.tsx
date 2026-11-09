@@ -14,13 +14,12 @@
  * readable from the first frame.
  */
 
-import React, { useRef, type ReactElement } from "react";
+import React, { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 import { gt as semverGt, valid as semverValid } from "semver";
 import { StaggerItem, springSoft } from "../../../../../src/shared/ui/motion";
 import type { PluginCatalogEntry } from "../../../../../src/shared/types";
 import type { WorkbenchPlugin, WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { EmptyState } from "../empty-state";
-import { InlineErrors } from "../inline-error";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { WorkbenchController, WorkbenchUiState, WorkbenchPluginVersions } from "../store";
 
@@ -56,17 +55,17 @@ export function PluginsSection({
   ui: WorkbenchUiState;
 }): ReactElement {
   const installed = ui.plugins.filter((plugin) => plugin.installedIn.includes(space.id));
-  // The empty state points at the search field, so the next step is one click away.
+  // The empty state expands the install area and points at the search field.
   const searchRef = useRef<HTMLInputElement>(null);
+  const [installOpen, setInstallOpen] = useState(false);
   return (
     <section className="dsh-wb-space-detail-card" data-space-section="plugins">
       <h3 className="dsh-wb-title">{t(locale, "detail.plugins")}</h3>
       <p className="dsh-wb-muted">{t(locale, "plugins.toggleHint")}</p>
-      <h4 className="dsh-wb-title">{t(locale, "detail.pluginsInstalled")}</h4>
       {ui.pluginsStatus === "error" ? (
         <p className="dsh-wb-alert" role="alert">{ui.readError.plugins ?? t(locale, "app.genericError")}</p>
       ) : null}
-      <InlineErrors ui={ui} origin={`detail:${space.id}:plugins`} />
+
       {installed.length === 0 && ui.pluginsStatus === "ready" ? (
         <EmptyState
           testId="plugins"
@@ -77,7 +76,7 @@ export function PluginsSection({
               type="button"
               className="dsh-wb-btn primary"
               data-space-plugin-search-focus="true"
-              onClick={() => searchRef.current?.focus()}
+              onClick={() => { setInstallOpen(true); requestAnimationFrame(() => searchRef.current?.focus()); }}
             >
               {t(locale, "plugins.search")}
             </button>
@@ -96,17 +95,21 @@ export function PluginsSection({
           />
         </StaggerItem>
       ))}
-      <PluginInstallArea locale={locale} space={space} controller={controller} writable={writable} busy={busy} ui={ui} searchRef={searchRef} />
-      <p className="dsh-wb-muted">{t(locale, "plugins.cleanupHint")}</p>
-      <div className="dsh-wb-actions">
-        <button
-          type="button"
-          className="dsh-wb-btn"
-          disabled={!writable || busy}
-          onClick={() => controller.preview({ kind: "plugin.cleanup-manager", spaceId: space.id })}
-        >
-          {t(locale, "plugins.cleanup")}
-        </button>
+      {installed.length > 0 || ui.pluginsStatus === "ready" ? (
+        <div className="dsh-wb-actions">
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            aria-expanded={installOpen}
+            data-space-plugin-install-open="true"
+            onClick={() => setInstallOpen((open) => !open)}
+          >
+            {t(locale, "plugins.installArea")}
+          </button>
+        </div>
+      ) : null}
+      <div data-space-plugin-install-area="true" hidden={!installOpen}>
+        <PluginInstallArea locale={locale} space={space} controller={controller} writable={writable} busy={busy} ui={ui} searchRef={searchRef} />
       </div>
     </section>
   );
@@ -129,10 +132,24 @@ function PluginRow({
 }): ReactElement {
   const latest = versions?.status === "ready" ? versions.latest : null;
   const newer = latest && isNewerVersion(latest, plugin.version) ? latest : null;
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const first = menuRef.current?.querySelector<HTMLButtonElement>("button[role='menuitem']:not(:disabled)");
+    (first ?? menuRef.current)?.focus();
+    return () => { triggerRef.current?.focus(); };
+  }, [menu]);
+  const openMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ x: rect.left, y: rect.bottom + 4 });
+  };
   return (
     <div className="dsh-wb-space-row" data-space-plugin={plugin.id}>
       <span>
-        <strong>{plugin.title}</strong> · <code>{plugin.id}</code>
+        <strong>{plugin.title}</strong>
+        {plugin.id !== plugin.title ? <small className="dsh-wb-muted"> · {plugin.id}</small> : null}
         {plugin.version ? ` @ ${plugin.version}` : ""}
         {plugin.protected ? ` · ${t(locale, "plugins.protected")}` : ""}
       </span>
@@ -148,26 +165,63 @@ function PluginRow({
         </button>
       ) : null}
       {versions?.status === "error" ? (
-        <small className="dsh-wb-muted" data-space-plugin-versions-note={plugin.id}>
-          {versions.error}
+        <small className="dsh-wb-muted" data-space-plugin-versions-note={plugin.id} title={versions.error ?? undefined}>
+          {t(locale, "plugins.versionsUnavailable")}
         </small>
       ) : null}
       <button
         type="button"
+        ref={triggerRef}
         className="dsh-wb-btn"
-        disabled={!writable || plugin.protected}
-        onClick={() => controller.preview({ kind: "plugin.toggle", spaceId, pluginId: plugin.id, enabled: false })}
+        aria-haspopup="menu"
+        aria-expanded={menu ? true : undefined}
+        aria-label={t(locale, "plugins.moreActions")}
+        data-space-plugin-actions={plugin.id}
+        onClick={openMenu}
       >
-        {t(locale, "plugins.removeFromSpace")}
+        ⋯
       </button>
-      <button
-        type="button"
-        className="dsh-wb-btn danger"
-        disabled={!writable || plugin.protected}
-        onClick={() => controller.preview({ kind: "plugin.remove", spaceId, packageName: plugin.packageName })}
+      {menu ? (<>
+      <div
+        ref={menuRef}
+        className="dsh-wb-menu"
+        role="menu"
+        style={{ position: "fixed", left: menu.x, top: menu.y, zIndex: 30 }}
+        data-space-plugin-menu={plugin.id}
+        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+          if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); setMenu(null); return; }
+          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const items = [...menuRef.current!.querySelectorAll<HTMLButtonElement>("button[role='menuitem']")];
+          if (items.length === 0) return;
+          const index = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+          items[next]?.focus();
+        }}
       >
-        {t(locale, "app.delete")}
-      </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!writable || plugin.protected}
+          onClick={() => { setMenu(null); controller.preview({ kind: "plugin.toggle", spaceId, pluginId: plugin.id, enabled: false }); }}
+        >
+          {t(locale, "plugins.removeFromSpace")}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!writable || plugin.protected}
+          onClick={() => { setMenu(null); controller.preview({ kind: "plugin.remove", spaceId, packageName: plugin.packageName }); }}
+        >
+          {t(locale, "app.delete")}
+        </button>
+      </div>
+      <div
+        className="dsh-wb-menu-backdrop"
+        style={{ position: "fixed", inset: 0, zIndex: 29 }}
+        onClick={() => setMenu(null)}
+      />
+      </>) : null}
     </div>
   );
 }
@@ -316,7 +370,6 @@ function PluginInstallArea({
         </p>
       ) : null}
       {!selected ? <p className="dsh-wb-muted">{t(locale, "plugins.selectEntry")}</p> : null}
-      <p className="dsh-wb-muted">{t(locale, "detail.pluginsVersionHint")}</p>
       <details className="dsh-wb-field">
         <summary>{t(locale, "plugins.versionManual")}</summary>
         <label className="dsh-wb-field">

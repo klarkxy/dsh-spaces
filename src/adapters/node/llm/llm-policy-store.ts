@@ -1,20 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { atomicWrite } from "../atomic";
-import {
-  LLM_ERROR,
-  LlmConfigError,
-  defaultPolicyFor,
-  emptyPolicy,
-  parsePolicy,
-  type SpaceLlmPolicy,
-} from "../../../shared/llm-connections";
-import type { LlmPolicyStore } from "../../../core/ports/llm-store";
+import { LLM_ERROR, LlmConfigError } from "../../../shared/llm-connections";
 import { PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from "../../../shared/types";
-import { withExclusiveDir } from "./llm-file-lock";
-import { LLM_POLICY_FILENAME } from "./llm-paths";
 
-export { LLM_POLICY_FILENAME } from "./llm-paths";
+export const LLM_POLICY_FILENAME = "llm-policy.json";
+
+export interface SpaceLlmPolicy {
+  inheritMain: boolean;
+}
 
 export function spaceDataRoot(home: string, spaceId: string): string {
   assertSafeSpaceId(spaceId);
@@ -36,41 +30,37 @@ export function assertSafeSpaceId(spaceId: string): void {
   }
 }
 
-export class FileLlmPolicyStore implements LlmPolicyStore {
-  constructor(private readonly home: string) {}
-
-  async read(spaceId: string): Promise<SpaceLlmPolicy> {
-    if (!existsSync(llmPolicyPath(this.home, spaceId))) return defaultPolicyFor(spaceId);
-    return readPolicyFile(llmPolicyPath(this.home, spaceId));
+export function parseSpaceLlmPolicy(value: unknown): SpaceLlmPolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llm policy must be an object");
   }
-
-  async write(spaceId: string, next: SpaceLlmPolicy, expectedRevision: number): Promise<SpaceLlmPolicy> {
-    const path = llmPolicyPath(this.home, spaceId);
-    return withExclusiveDir(`${path}.lock`, () => {
-      const current = readPolicyFile(path);
-      if (current.revision !== expectedRevision) {
-        throw new LlmConfigError(LLM_ERROR.REVISION_CONFLICT, "policy revision moved", {
-          expected: expectedRevision,
-          actual: current.revision,
-        });
-      }
-      if (next.revision !== expectedRevision + 1) {
-        throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "policy write must increment revision by one");
-      }
-      const parsed = parsePolicy(next);
-      atomicWrite(path, `${JSON.stringify(parsed, null, 2)}\n`);
-      return parsed;
-    });
+  const row = value as Record<string, unknown>;
+  if (Object.keys(row).sort().join(",") !== "inheritMain,schemaVersion") {
+    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llm policy has unexpected keys");
   }
+  if (row.schemaVersion !== 1 || typeof row.inheritMain !== "boolean") {
+    throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "llm policy is invalid");
+  }
+  return { inheritMain: row.inheritMain };
 }
 
-function readPolicyFile(path: string): SpaceLlmPolicy {
-  if (!existsSync(path)) return emptyPolicy();
+/** No file means no inheritance. A present file must parse strictly. */
+export function readSpaceLlmPolicy(home: string, spaceId: string): SpaceLlmPolicy {
+  const path = llmPolicyPath(home, spaceId);
+  if (!existsSync(path)) return { inheritMain: false };
   let value: unknown;
   try {
     value = JSON.parse(readFileSync(path, "utf8"));
   } catch {
     throw new LlmConfigError(LLM_ERROR.CONFIG_INVALID, "policy file is not valid JSON");
   }
-  return parsePolicy(value);
+  return parseSpaceLlmPolicy(value);
+}
+
+/** Creation-time write; nothing updates the policy afterwards. */
+export function writeSpaceLlmPolicy(home: string, spaceId: string, inheritMain: boolean): void {
+  atomicWrite(
+    llmPolicyPath(home, spaceId),
+    `${JSON.stringify({ schemaVersion: 1, inheritMain }, null, 2)}\n`,
+  );
 }

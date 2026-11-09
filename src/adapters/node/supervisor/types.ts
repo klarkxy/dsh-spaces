@@ -39,7 +39,7 @@ export interface WorkbenchSupervisorOptions {
   llmBridgeArtifact?: string;
   snapshotWorkerFile?: string;
   snapshotRoot?: string;
-  /** Selected v2 payload `lib` root (`--component-payload`). Absent keeps library callers compatible. */
+  /** Selected v2 payload `lib` root (`--component-payload`). */
   componentPayloadRoot?: string;
   /** Source checkout root (`--dev-checkout`): components link in place instead of installing tarballs. */
   devCheckoutRoot?: string;

@@ -216,7 +216,7 @@ test("257 selected npm packages parse, diagnose, and pass inspect through genera
     writes: [
       { kind: "patch", status: "not-run" },
       { kind: "settings", status: "not-run" },
-      { kind: "model", status: "not-run" },
+      
       { kind: "provenance", status: "not-run" },
     ],
     host: { dsh: "1.0.0", spaces: "1.0.0", base: "1.0.0", webApp: "1.0.0" },
@@ -339,7 +339,7 @@ test("65 settings namespaces, inputs, and bindings round-trip preview, generate,
     packageResults: [],
     writes: [
       { kind: "patch", status: "succeeded" },
-      { kind: "model", status: "not-run" },
+      
       { kind: "provenance", status: "succeeded" },
       ...Object.keys(raw.profile.settings).map((namespace) => ({
         kind: "settings" as const,
@@ -351,7 +351,7 @@ test("65 settings namespaces, inputs, and bindings round-trip preview, generate,
   });
   assert.equal(outcome.kind, "blueprint.apply");
   if (outcome.kind !== "blueprint.apply") throw new Error("expected apply");
-  assert.equal(outcome.writes.length, 68);
+  assert.equal(outcome.writes.length, 67);
 });
 
 test("legal 4097-character string default binds and round-trips preview value and generate overrides", () => {

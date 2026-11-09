@@ -1,6 +1,5 @@
 import type { WorkbenchJobContext, WorkbenchJobResult } from "../workbench-jobs";
 import { MaintenancePluginBatch } from "./plugin-batch";
-import { WorkbenchMaintenanceError } from "./errors";
 import type { ResolvedCommand, StoredPlan } from "./types";
 
 /**
@@ -31,9 +30,6 @@ export class MaintenanceSnapshots extends MaintenancePluginBatch {
 
   protected planSnapshotDelete(id: string, createdAt: string, expiresAt: string, snapshotId: string): StoredPlan {
     const meta = this.requireSnapshot(snapshotId);
-    const pending = this.inspectPendingRestore();
-    if (pending.status === "unreadable") throw new WorkbenchMaintenanceError("workbench/failed");
-    if (pending.status === "pending") throw new WorkbenchMaintenanceError("workbench/stale");
     const command: ResolvedCommand = { kind: "snapshot.delete", snapshotId: meta.id };
     return this.storeable(id, createdAt, expiresAt, command, {
       kind: "snapshot.delete",

@@ -1,3 +1,114 @@
+# 2026-11-09 管理空间残留旧 space-control bundle
+
+- [x] 真实 `--dump-config` 确认 spaces-hub 仍引用已撤销的 `@dsh-spaces/space-control`；当前源码/产物已使用 `@dsh-spaces/plugin/space-control`，未新增迁移或自动修复代码。
+- [x] 隔离验证官方 remove 的两种形态后，用户明确授权检查并移除真实旧声明。实际 dependency 为 `link:H:/Code/dsh-spaces/packages/plugin/lib/space-control`；官方卸载退出 0，读回旧 dependency/bundle 均不存在，普通权限下配置导出退出 0。沙箱下导出会因写生成的 cordis.yml 而 EPERM，不能把它视为完全无写入命令。详见 [本轮记录](space-control-stale-bundle-20261109.md)。
+- [ ] 实际服务重新启动待用户按错误页现有预览/确认流程操作；本轮没有重启服务或子空间。
+
+# 2026-11-09 主空间空间总控插件设计
+
+- [x] 仅设计文档，未实现：新建 [docs/space-control-design.md](../docs/space-control-design.md)。覆盖四类能力（生命周期、子空间会话、子空间插件与模型、日志诊断），只做 Agent 工具不做 UI。
+- [x] 设计要点：新建 `packages/space-control`（`@dsh-spaces/space-control`，独立 bundle），沿用 dev-index 先例由宿主插件 patch 预装；`ensureBundledDependencies` 改为封闭已知包名列表。通道复用主身份单注册签发 control scope，新增 `/internal/control/v1/*` 原生请求路由；宿主插件提供 `spacesMainChannel` Cordis Service 供新包 inject。
+- [x] 关键查证：Supervisor 可从 Node 侧以已认证客户端调子空间 `/api` —— launch token 保留于 `instance.url`（仅主进程可见，process-manager.ts:293-296），`dshSessionCookie` 已交换 `dsh-auth-*`（dsh-endpoint.ts:42-56），`viewEntry` 证明 token 可重复交换（workbench-supervisor.ts:695-738）；cookie 不落盘、不下发主空间。
+- [x] 已定：D1 双 scope、D2 变更工具需 cordis preset、D7 不合并。用户否决会话代理（原 P4/P5），改为界面操控（playwright-core + 系统 Chrome/Edge；open 审批一次；snapshot 支持 aria/text/html/screenshot；`spaces_ui_eval` 每次单独审批），见 [ui-automation](../docs/space-control-ui-automation.md)。安装/插件顺序/调试扩展见 [extensions](../docs/space-control-extensions.md)；官方无插件 reorder，不做。
+- [x] P1 只读实现：契约 `src/shared/control.ts`；Supervisor `control.ts`/`native-request.ts`，同一注册签发 creator+control 两份 scope；宿主 `MainSpaceControlService` 作为 `spacesMainChannel`（仅可信主空间）；工具注册于 `packages/plugin/src/space-control`（见下条修订）；宿主插件 patch 预装，manager/Browser 禁用，`ensureBundledDependencies` 闭合列表。子空间只链 view-bridge/llm-bridge，不安装 space-control（toolchain.ts:258-295）。
+- [x] 发行修复（2026-11-09）：space-control 从独立 `file:` 包改为宿主插件内子入口 `@dsh-spaces/plugin/space-control`（源码并入 `packages/plugin/src/space-control`，产物 `lib/space-control.js`），修掉 tarball 安装时 `file:lib/space-control` 按 profile 根解析的 ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND；pack 预检拒绝 file:/link: 依赖。playwright-core@1.62.1 打进 supervisor payload 的 `lib/supervisor/ui-engine/node_modules/`，loader 只按 bundle 相对路径导入，不再靠 profile node_modules 解析（真实安装下必然 engine-unavailable 的缺陷）。
+- [x] P1 验收（普通进程 `check:all`）：首轮 [checks-KpoOEs](../.sandbox/checks-KpoOEs/result.json) 11/14，含 5 个本轮回归，以及因 npm 全局 DSH 在 00:54 被升级而失败的 2 个 blueprint 测试（0.2.2-rc.1 把 PROFILE_TEMPLATES/OPTIONAL_BUNDLES 移到 `@deepseek-ai/dsh-official-bundles`，blueprint-runtime 已按两种官方布局各自绑定）。修复后 [checks-T5Ak8v](../.sandbox/checks-T5Ak8v/result.json) 12/14：test:workbench 823 通过、1 失败（既有 `--dsw-*` token）、2 跳过；test:workbench:browser 18/7，其中 6 个是既有选择器失败，新增的 “terminal portal” 单测在完整并行负载下超时，单独复跑 1/1、整份 portable-host 8/8 通过。保留原失败，不记全绿。
+- [x] P1 真实加载冒烟已由后续 `.sandbox/space-control-smoke/run.mjs` 覆盖（见下文 PASS 记录）。`tests/helpers/tsx-lite.mjs` 是沙箱内在进程内跑 node:test 的开发辅助，不在测试清单中。
+- [x] P2 生命周期：spaces_plan / spaces_execute / spaces_control_job，start/stop/restart/delete 两段式，执行前重新观察 activity，按 requestId 保证幂等，cordis preset 门控，审批走 danger-full-access。普通进程中：类型三组、构建、`npm test` 245/245、test:spaces 114（1 跳过）、test:workbench 833/1 失败（既有 token）。
+- [x] P3 插件/运行时/模型策略：新增 `plugin.install.spec`（D4），以及 Supervisor 本地的 `space.llm-policy.set`（D5，仅限已停止空间）；plugin.remove/toggle、runtime.set 沿用现有 maintenance 语义，运行中的空间按计划停止后再恢复，计划 changes 写进审批文案。普通进程 [checks-oXiqKA](../.sandbox/checks-oXiqKA/result.json) 12/14：只剩既有的 `--dsw-*` token（workbench 851/1/2 跳过）和 6 个既有浏览器选择器失败（19/6）。
+- [x] P4 界面操控：契约 `ui.open/snapshot/act/eval/close`；Supervisor `ui-automation.ts`/`ui-playwright.ts`/`ui-shared.ts`，按 msedge→chrome 的固定顺序选浏览器，只启动一次；playwright-core@1.62.1 随 supervisor 组件 payload 分发（`lib/supervisor/ui-engine`，111 个文件，约 12.8MB），只从该固定相对位置导入。宿主侧新增五个工具：open 时审批一次，eval 每次审批并展示完整脚本，截图经 `attachments.saveImage` 以 image 块返回。验收中修掉的真实缺陷：①页面函数引用了模块作用域名字，或被转译器注入 `__name`，进入页面后失效，现改为逐字源码，经 `pageFunction` 还原后传入；②Playwright 的字符串 evaluate 不会调用函数（已用 msedge 探针 `.sandbox/ui-probe.mts` 实测）；③注入的会话 cookie 原先没有 HttpOnly，页面脚本可读，现与 DSH 一致，设为 `httpOnly + SameSite=Strict`；④cookie 原先用 `split("=",2)` 拆分会截断值。
+- [x] 发行修复（真实冒烟发现）：`file:lib/space-control` 依赖在 tarball 安装时按 profile 根解析（ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND），改为插件子入口 `@dsh-spaces/plugin/space-control`（Loader 支持子路径，先例是 `llm-images`），`packages/space-control` 已删除，pack 预检会拒绝 file:/link:/workspace: 依赖。Supervisor 从 tools/components 运行，解析不到 profile 里的依赖，因此 playwright-core 改为打进 payload。
+- [x] 真实冒烟 `.sandbox/space-control-smoke/run.mjs`（隔离 Home、tarball 安装、SDK 组合 harness、CLI 0.2.2-rc.1）PASS：[results](../../dsh-spaces-checktmp/space-control-smoke-2026-11-08T21-41-33-163Z/results.json)。overview 有一处宿主 attachReady 晚于 manager running 的就绪竞态，这是脚本层的就绪门，只等待裸的 `workbench/unavailable`。此前失败的三次运行现场保留。
+- [x] 普通进程 [checks-M8MTPb](../.sandbox/checks-M8MTPb/result.json) 11/14：`npm test` 244/1，失败的是计时敏感的 launch token 用例，单独复跑 1/1；workbench 884/1（既有 token）；browser 21/6（6 个既有选择器失败，界面操控真实浏览器测试通过）。不记全绿。
+- [x] P5 运行中插件操作 + P7 条目启停（施工子代理完成）：wire 形态按 0.2.2-rc.1 源码核对——`POST /api/<namespace>/<method>`，`client-request` 信封 `{args:{…}}`，`server-response` 信封 `{ok,value|error}`；`pluginManager` 参数键以 `typert.remote-client.js` 为准。新增 `src/adapters/node/supervisor/child-remote.ts`（ChildRemoteClient：每次调用换一次 cookie、仅内存、绑定 (spaceId, generation, epoch)、封闭方法与参数字段白名单、有界 I/O、凭据脱敏；`readLivePluginView` 只读 `pluginManager/listPlugins`+`listBundles` 顺序视图，无回落；`runLivePlan` install→waitForInstall→listBundles 读回）。control 新 op：`plugin.live.install/update/entry/remove` 与 inspect `plugins.live` 区段；停止空间 plan 阶段 `control/conflict` 并提示改用停机 op；live 计划走 P2 两段式 + supervisor-local plan（fingerprint 再验），执行在串行 job tail 内经子空间 pluginManager 写入，与停机写互斥。受保护包（Spaces 组件、view-bridge/llm-bridge/dev-index、官方受保护包）本地拒绝。`plugin.live.install` 带 approvedBuilds 在 plan 解析阶段即 `control/unsupported`（官方 `InstallBundleOptions.approvedBuilds` 只批准 pnpm-workspace.yaml 中已 pending 的键，lib/index.js:1264-1269，不能预批准新键；停机 `plugin.install` 才是预写入口）。宿主 spaces_plan schema 与审批文案（运行中空间、精确来源、entryId）同步。
+- [x] P5 运行中安装 + P7 条目启停：`child-remote.ts`（ChildRemoteClient）每次调用都重新交换 cookie，只存内存，绑定 (spaceId, generation, epoch)。方法和参数有白名单，wire 为 `POST /api/pluginManager/<m>` client-request 信封（证据：dsh-client-connection:888-931、dsh-api-gateway:907-914,1491-1504）。新增 `plugin.live.install/update/entry/remove`，只对运行中空间生效，执行与停止态写入共用同一条串行 job tail，执行后读回校验，不回滚。inspect `plugins.live` 只读 listPlugins + listBundles，不做回落。官方 `approvedBuilds` 只能批准已 pending 的键（dsh-plugin-manager types.d.ts:187、lib/index.js:1264-1269），因此 live install 带 approvedBuilds 时在 plan 阶段返回 `control/unsupported`，提示改走停止态 plugin.install。普通进程 [checks-Kh3Nui](../.sandbox/checks-Kh3Nui/result.json) 12/14：只剩既有 token（workbench 909/1/2 跳过）和 6 个既有浏览器选择器失败。
+- [x] 扩展真实冒烟 PASS（[results](../../dsh-spaces-checktmp/space-control-smoke-2026-11-08T22-33-17-295Z/results.json)）：经 spacesMainChannel 的 plan/execute 真实启动子空间（modelSource main），inspect `plugins.live` 读到真实子空间 listPlugins/listBundles，其中有 view-bridge 和 llm-bridge；在系统浏览器里对真实子空间页面执行 ui open、aria（含 ref）、PNG 截图、wait、eval（`document.cookie` 不含 dsh-auth）、close；经 plan/execute 停止；正常关机，无残留进程。限制：服务层调用不经过 danger-full-access 审批；运行中安装和条目启停的真实写入未执行。
+- [x] P6 导入：新增 read view `templates`；`import.preview` 以内容（archiveBase64 ≤8MiB）暂存为一次性 importId，现有 `space.import` 本来就不接受路径（workbench-products.ts:377-400,491-509），因此不存在路径逃逸；plan op 增加 `space.from-template` / `space.import`，模板不存在、重名、非法名、importId 失效都在 plan 阶段拒绝；sourceDigest 计入 fingerprint；不自动启动；审批文案列出插件精确来源并声明不批准构建脚本。普通进程 [checks-39mwef](../.sandbox/checks-39mwef/result.json) 12/14（workbench 918/1 既有 token；browser 21/6 既有选择器），合入后真实冒烟再次 PASS（[results](../../dsh-spaces-checktmp/space-control-smoke-2026-11-08T23-03-44-852Z/results.json)）。
+- [ ] 遗留：attachReady 监听器一旦失败，本纪元内控制工具会一直不可用（不重投，符合 let it crash，但 `workbench/unavailable` 无法区分“未接入”与“不可用”，排障有歧义）；P6 导入未开始；真实 Desktop EXE 与 cordis 会话内的 plan/execute/ui 审批端到端尚未实测；`plugin.live.*` 对真实子 DSH 进程（真 cookie 交换 + 真 pluginManager）的端到端冒烟未做——需要真实子进程的集成测试留给父代理在普通进程里跑（沙箱禁止 stdin 管道子进程）。
+
+# 2026-11-09 新空间无模型与自定义图标同屏报插件路径错误
+
+- [x] 用户限定只读授权后确认：旧 space-ds-bot 创建失败于 view-bridge，未到模型策略步骤；源码恢复后单独启动不会补写失败创建的策略。00:09:51 删除计划成功时，两个 bridge 源目录及仓库 dev-index 依赖同时被清空；随后 space-dsbot 创建/启动均以 pluginSpecInvalid[path] 失败。图标本身已保存，错误来自组件安装。
+- [x] 再次恢复 bridge 源码并保留独立源码副本；从隔离安装缓存找回已声明的 dev-index@0.2.8，29 个文件逐一 SHA256 对照一致，没有执行安装脚本或改真实 profile。
+- [x] 删除 profile/hub 改为 native-identity-aware 的不跟随链接遍历；Windows 目录别名只用非递归入口删除。Node 24.21 跨盘/沙箱哨兵测试通过；普通 Node 原始 rm 未复现实际 Desktop 误删，保留此限制。
+- [x] 普通创建与 Creator 在注册空间前检查开发组件目录/manifest/build入口/patch；缺失明确拒绝，不隐式重装、不恢复已有失败空间。修正 dangling link 先判断未对齐而漏报源缺失的顺序问题。
+- [x] 最终构建、空间/测试类型检查、包预检通过，定向回归54/54，单独端口诊断1/1。首轮完整检查11/14（另有一次端口分配失败、已知主题/DOM失败及随后已修的缺失依赖和预检遗漏），保留原失败记录，不记全绿。详见 [本轮记录](model-icon-20261109.md)。
+- [ ] 实际 Desktop 加载后的删除/新建验收尚待；当前失败空间与作业保留，不自动补配置或重放。
+
+# 2026-11-08 新建空间 portal 报 invalid state
+
+- [x] 定位：`projectSpaceCreations` 被 `.toString()` 嵌入页面，却引用页面中未定义的模块常量 `PORTAL_SPACE_RE`。首条创建作业出现后 ReferenceError 被映射为 `state-invalid`；已在旧构建机制的实际 Chromium 中复现。
+- [x] 最小修复：校验正则改为函数内局部变量，保持校验与失败终态边界；永久 VM 回归覆盖 native 初始/后续创建作业和 Web 投影。隔离 Chromium 修后 16/16 通过。
+- [x] 用户确认并授权找回误删 bridge：恢复 Git 基线并按保留的构建产物、现行任务与测试补回未提交迁移；三组类型、构建通过。完整检查 **12/14**，仅剩此前记录的主题 token 与浏览器选择器两组失败（workbench 797 通过/1 失败/2 跳过，DOM 19 通过/6 失败）；未记全量通过。详见 [本轮记录](portal-creation-state-20261108.md)。
+- [x] 最终重建与产物对照完成：6 个 bridge bundle 中5个逐字节一致，LLM主bundle仅3处换行差异；Supervisor内嵌函数已含局部正则。最终类型两组、构建、LLM 50/50、包预检通过，组合回归101通过/1个既有主题token失败。
+- [ ] 实际用户窗口加载与创建验收待完整构建后进行；没有重启真实服务、重放创建请求或清除失败记录。
+
+# 2026-11-08 重开后 spaces-hub 报 "cannot resolve profile bundle @klarkxy/dsh-dev-index"
+
+- [x] 根因定位（只读）：`pnpm link:` 不安装链接包的 dependencies；`packages/plugin`/`view-bridge` 的 `cordis.patch.yml` 都插入了 `name:'@klarkxy/dsh-dev-index'` 行，`link:` 安装的 spaces-hub/普通 Web 空间 `node_modules` 缺该包。`alignProfileComponents` 的 `admission()`（`src/adapters/node/profile/profile-component-alignment.ts` L259-261）对每个启用行调官方 `resolveBundleDir`（仅 dsh 安装与 profile 目录祖先两锚点），逐字抛出用户所见错误；`startOwned` → `initWritable` `startup.fail("start")` → `spaces_context` `workbench/unavailable`。`dsh.profile.bundles` 里并没有 dev-index。`.sandbox` 同构 Home 因仓库根 `node_modules` 可解而假阴性；`file:`/tarball 安装传递安装 dev-index 不受影响。证据 [REPORT](../.sandbox/registration-after-reopen-20261108/REPORT.md)。
+- [x] 修复（开发链接路径）：`SupervisorToolchain.ensureBundledDependencies` 只处理已知 `@klarkxy/dsh-dev-index`：读取已链接组件 `package.json` 声明的精确版本，把 checkout 自有 `node_modules` 副本经既有 `pluginLink` 以 `link:` 装进 profile 根，依赖来源为本地已安装包；已声明 profile 不动，声明缺实体清楚失败，不重装已对齐组件，browser base 跳过。仅 `alignManagerPlugin` 与 `space.components-align` 在正常对齐写锁内调用，`ensureViewBridge` 不新增依赖写入，无重试恢复。见 [实现](../src/adapters/node/supervisor/toolchain.ts)、[回归](../tests/payload/dev-checkout-bundled-deps.test.ts)。
+- [x] `typecheck:spaces`、`typecheck:tests`、`check:test-lists` 通过。定向测试首轮 24/28 的清单夹具与测试作用域问题已修，普通进程复验 **28/28**。子空间依赖只在 `space.components-align` 锁内写入，`ensureViewBridge` 保持原职责。
+- [x] 真 CLI 隔离验收使用仓库外 SDK 和 Home，逐字复现原 cannot-resolve，并通过官方 root-link→正常 manager 对齐→dev-index 直接依赖/bundle→解析→`alignProfileComponents` 准入全链。修正 compose 中间行计数夹具后，在新 Home 真 boot 验证 Loader 中仅一条 dev-index、5 个工具实际注册、正常 dispose exit 0。成功现场 `H:/Code/dsh-spaces-checktmp/dev-index-link-2026-11-08T13-13-14-637Z`，首轮夹具失败现场保留。
+- [x] 最终构建和三组类型检查通过。完整检查原始 **11/14**：[结果](../.sandbox/checks-dbnQgE/result.json)；Spaces 组接口夹具补齐后单独复验 **114 通过、1 跳过**，剩余为既有主题 token 和浏览器选择器两组失败。详见 [修复与验收记录](dev-index-link-fix-20261108.md)。
+- [ ] 用户实际管理空间待下一次明确重开加载本轮构建后验收；本轮未直接修改真实 Home、未替用户重启或清理记录。上轮 `MAIN_REGISTRATION_REFUSED:400` 历史根因仍独立未判，不能据本轮定位合并。
+
+# 2026-11-08 Desktop 主空间注册 400 诊断（实际原因未定）
+
+- [x] 修复 `MainLlmService` 丢弃 Supervisor 错误码的问题：保留 `MAIN_REGISTRATION_REFUSED:<status>` 前缀，仅追加封闭白名单中的公开码；响应体读取上限 8 KiB，超限、断流、非法 JSON 和未知值只保留状态码，不透传原文、不重试。见 [实现](../packages/plugin/src/host/llm-main.ts)、[回归](../tests/llm/llm-registration-refusal.test.ts)。
+- [x] 旧实现反事实 4 过 / 6 失败，新实现 10/10 通过；[对照证据](../.sandbox/registration-refusal-counterfactual/REPORT.md)。完整 `check:all` 12/14 通过：类型三组、构建、基础、Spaces、recovery、LLM（50/50）、Blueprint、Browser 和包预检通过；workbench 787 过 / 1 失败 / 2 跳过（既有 `--dsw-radius-sm`），workbench browser 19 过 / 6 失败（既有选择器），未宣称全绿。见 [完整结果](../.sandbox/checks-MrRqvQ/result.json)。
+- [x] 只读现场调查：选中的 Supervisor 构建早于 Creator，缺少 Creator 路由，解释 `spaces_context` 的 404；注册字段与当前源码兼容，不能据此解释 400。现有日志没有本次拒绝码；当前控制记录和主空间文件状态未见对应异常，不能排除故障发生时的瞬时状态。用户授权真实 Home 的有限只读检查；调查代理额外读取了 hub 注册表及模型策略格式字段，超出限定范围，已停止并向用户说明，无真实文件修改。
+- [ ] 用户实例原始 `MAIN_REGISTRATION_REFUSED:400` 根因未确定。补丁已在工作区构建，尚未确认运行中的插件加载此修复。用户授权官方管理器安装后，`list_bundles` 确认当前 source 为 `link:H:\Code\dsh-spaces`；`install_bundle` 返回 `changed:false / application:failed / already-installed`，没有卸载重装。未重启真实服务、未清理故障记录。后续需确认加载后的实际拒绝码，服务操作仍遵守既有预览与确认；不能把诊断修复当作实例已恢复。
+
+# 2026-11-07 Creator 空间创建（主空间四工具 + DSH 0.2.2-rc.1 适配）
+
+- [x] 主空间 Creator 四工具、独立 scope 签发、完整冻结计划与单个组合作业实现；dev-index 预装（Web 全量、Browser 显式禁用）与 DSH 0.2.2-rc.1 适配完成。契约见 [src/shared/creator.ts](../src/shared/creator.ts)、[src/adapters/node/supervisor/creator.ts](../src/adapters/node/supervisor/creator.ts)、[packages/plugin/src/host/main-space-tools.ts](../packages/plugin/src/host/main-space-tools.ts)。
+- [x] 类型检查三组（`typecheck` / `typecheck:spaces` / `typecheck:tests`）exit 0；llm-bridge `internal/config` 与 fixture 已按 Cordis 4.1.0 新契约适配。施工与已知结果见 [creator-spaces-20261107.md](creator-spaces-20261107.md)。
+- [x] SDK 验收：dev link 与真实 tarball 两条安装路径在 SDK composition harness 均 PASS（`.sandbox/creator-sdk-7bfb045bb3d347c2a991a213bb9aae27`、`creator-sdk-release-203398ed0d1149e4835acd5ab738649e`）；local 与 main-inherit 两个创建 job 全部 steps done、`llm-policy` 持久化 `inheritMain:true`、observer 见证 `spaces_*` 四工具、子空间 5 工具、shutdown durable/owner dead/endpoint 失效。Git 受控传输读回与 `allowBuilds` 哨兵在 `check:all` 第二轮通过。
+- [x] `check:all` 第二轮 12/14：剩余 `test:workbench` 唯一既有 `--dsw-radius-sm` 与 `test:workbench:browser` 6 个旧选择器失败，非本轮回归；新增功能用例全过。
+- [x] 官方 Desktop EXE 0.2.2-rc.1 隔离冒烟通过：主空间四工具注册、main-inherit 创建并启动、正常退出后无测试进程残留、端点/租约释放、官方 EXE/asar 摘要不变。证据见 [native 结果](../.sandbox/creator-native-acceptance/2026-11-07T18-18-10-326Z/results.json)。创建经受权 wire 驱动，未调用付费模型。
+- [x] 2026-11-08 独立 Web + Magpie SWE2 真实会话已验证搜索/preview 与 UI 拒绝、允许一次；拒绝无创建副作用，允许真实提交 job，最终只读查询如实报告失败。测试服务正常停机，见 [SWE2 Web 实测](creator-swe2-web-20261108.md)。
+- [ ] 本轮完整安装启动未通过：dev-index@0.2.9 的传递依赖 model-route@0.2.7 在工具链 china 镜像缺失，job failed@plugins，start/result not-run；失败现场保留。子空间运行时工具隔离与进入后交互本轮未验；上游 served-model 未独立关联；旧浏览器选择器问题继续开放。
+
+# 2026-11-05 未发布遗留兼容层移除（Phase 1+2）
+
+- [x] Phase 1：profile 组件对齐仅保留当前语义（`migrateProfileToAlpha`→`alignProfileComponents`，标记文件更名），删除 `settings.path` 清理与 `hub/<id>/settings.yaml` 迁移；运行时旧 `current.json` 指针与 `legacy` 分支全部移除；删除 Electron `desktop` 租约种类与无主的 `coldstart.lock` 检查；`startupStatus`/`portalTarget` 改为必填，旧门户/旧 adapter 容忍分支删除；`findLegacyDshBin`→`discoverDshBin`；`snapshots.ts` `planId` 改为必填（确认无生产写入者）。
+- [x] Phase 2：旧共享 LLM 连接库整体退役。删除 Home 级目录/凭据/快照/绑定/导入映射与“应用到所选空间”：`global-llm-host`/`global-llm-service`、全部 `adapters/node/llm/*` 存储（仅存留最小 `llm-policy-store`）、`llm-api.ts`/`llm-share.ts`、`llm`/`llmCredential` 管理 API、`llm.apply` 任务、模板/分享/recipe 的 `llm.json`、设置“模型与连接”页与空间详情“模型”页。`llm-connections.ts` 收缩为仅错误码模块。`packages/llm-bridge` 仅保留主空间继承投影与活动安装（`legacyApply`→`applySpaceBridge`），`plugin.ts` 只读 `DSH_SPACES_LLM_INHERIT_MAIN`。
+- [x] 新策略格式：`hub/<id>/llm-policy.json` = `{ "schemaVersion": 1, "inheritMain": true }`，创建 `modelSource:"main"` 时一次性原子写入，严格解析；spawn 仅在该策略为真时置 `DSH_SPACES_LLM_INHERIT_MAIN=1`。保留：主空间继承/委派/`MainLlmFacade`/宿主 `MainLlmService`、LLM 活动跟踪与忙碌检测、`ensureLlmBridge`。
+- [x] 确认 `pending-restore.json`、恢复 `journal.json`、升级 journal 均无生产写入者，删除读取器、残留检查与 doctor 检查项（snapshot-store/executor、`inspectPendingRestore`/`readUpgradeJournal`、control-residue、constants、doctor inspect）。
+- [x] 文档：`architecture.md` §6.2 改为本地选择、删除共享行与提及（LLM bridge→“主空间继承和本地模型的接入”）；`workbench.md` 同步；`docs/compat/global-llm-*.md` 删除（目录清空）；两份计划文首加退役状态行。删除 `validate-llm-secrets` 工具及仅覆盖已删行为的测试；`test:llm`/`test:llm:integration`/`test:llm:browser` 列表同步（browser 组已删）。
+
+# 2026-11-04 Desktop 重开误报 ready 但 manager 未运行
+
+- [x] 确认启动观察存在跨请求竞态：`waitForManager` 先读取 `state`，再读取 `startupStatus`；manager 在两次读取之间完成启动时，旧逻辑把较早的 starting 与较晚的 ready 比较，直接报 `Startup status reported ready, but the manager is not running.`。确定性回归在旧实现上复现同句错误；尚未据此断定用户实例中的实际时序。
+- [x] 修复：收到 ready 后，在原启动期限内确认一次新的 state；running 即成功，仍未运行即终态失败。读取失败、纪元变化、崩溃、维护不可用继续拒绝；没有新启动、重放或失败重试。新增 4 项回归覆盖转换、持续不一致、失败边界及挂起读取；旧实现 4 项失败，修复后启动观察与 Desktop 相关测试 56/56 通过。
+- [x] 完整 `check:all` 已运行，12/14 组通过：test-lists、三组类型、构建、基础/Spaces/recovery/LLM/Blueprint/Browser 测试和包预检通过。`test:workbench` 749 过、1 失败、2 跳过，失败为此前已记录的 `native-styles.ts` 使用不存在的 `--dsw-radius-sm`；`test:workbench:browser` 19 过、6 失败（含父子测试计数），失败集中在管理页等待隐藏的 plugins/diagnostics/版本选择器，以及查找“预览切换”按钮超时。本次未修改这些 UI 或测试，未将完整检查记为通过。证据 `.sandbox/desktop-reopen-checks-20261104/result.json` 与同目录日志。
+- [x] 修后 dev-checkout 的隔离官方 Desktop A/B 两轮：同一 Home 正常退出后重开，服务纪元变化、manager running，退出后约 0.5s 释放端点和租约，无匹配残留进程。后续正确点击“新建空间”的截图显示完整创建表单。真实用户 Home 未读写。
+- [x] 主线程严格检查 E：先确认旧端点/租约均释放，同 Home 重开 7.62s manager running；精确点击一次“新建空间”，9.52s 子帧文本及截图确认创建表单展开，正常退出后 436ms Supervisor 退出并释放端点/租约。每次读取失败即停止，本轮无读取失败；未提交创建。证据 `.sandbox/desktop-reopen-20261104/e-result.json`、`e-create-form.png`。
+- [ ] 真实用户实例尚未验证，旧构建未做官方 Desktop 对照，实机样本未命中精确竞态。早期脚本误点/取消、死亡租约和读取失败记录保留，不算正常退出验收通过；后续严格 E 成功不抵消它们。详细边界见 `.sandbox/desktop-reopen-20261104/REPORT.md`；早期隔离证据目录 `H:/Code/dsh-spaces-checktmp/desktop-reopen-20261104/dev-2026-11-04T15-58-06-504Z/`。
+
+# 2026-11-04 管理空间启动反复报 "The operation was aborted due to timeout"
+
+- [x] 定位（用户授权只读查看真实 `.dsh-spaces-control`；隔离 Home 按真实启动方式复现 8/10，证据见 `.sandbox/manager-auth-timeout-20261104/REPORT.md`）：Supervisor 启动 DSH 子进程未带 `--expose-internals`，`dsh-hmr` 在应用就绪时改走 `node-addon-require-builtin`（每次调用 0.3–0.7 s，不缓存），子进程在打印 `dsh web:` 后阻塞 2.3–4.2 s；登录 Cookie 交换是固定 3 s 的单次请求，因此随负载时好时坏。Supervisor 事件循环未阻塞。加参数后隔离实测交换耗时 0.56–1.0 s。
+- [x] 修复：子进程启动参数加 `--expose-internals`（与官方 Desktop 宿主一致）；Cookie 交换仍为单次请求、不重试，等待上限改为本次就绪时间的剩余值。`slow-auth` 夹具扩展（`DSH_TEST_AUTH_DELAY_MS` 延迟 + `token-request` 日志）新增 3 项 ProcessManager 回归；慢交换用例在旧实现上以 `[TimeoutError: The operation was aborted due to timeout]` 失败，证实该测试有效。修复 `tests/supervisor/workbench-supervisor.test.ts` 一处按位置取 bin 的断言（改用 `endsWith("bin.js")` 查找）。验证：process-manager + cooperative-children 单测全过、typecheck、typecheck:tests、test-lists 121/121、build、`npm test` 265/265；`test:workbench` 744 过 2 失败——其一即该位置断言（修复后单独重跑通过），另一为既有未提交工作中 `native-styles.ts` 的 `--dsw-radius-sm` 主题 token 检查，与本次改动无关。未提交。
+- [ ] 真实 Desktop 未实测：日常 Desktop 从开发链接运行，需重新构建并经错误页手动启动/重启 Spaces 服务后才加载新代码。`dsh-app-boot` 启动早期仍无条件调用原生插件（1.3–2.8 s），计入 60 s 就绪时间。
+
+# 2026-11-04 Windows 标题栏折叠按钮改为空间栏开关
+
+- [x] 用户确认：标题栏左上角按钮改为收起/展开 72px 空间栏，状态存 localStorage `dsh-spaces.native.rail`；主空间展开时官方侧栏折叠按钮改为放在品牌行右端（和子空间一样，在侧栏内部），主侧栏收起时它和新会话仍在标题栏，排在空间栏按钮之后。子空间和 portable 宿主不变。
+- [x] 实现：`attachHostLayout` 不再用内联 left 平移固定控件（旧实现中菜单停在第一次观察到的位置，不随主侧栏收起移动）；框架左边距改用 `--dsh-spaces-rail-width`。标题栏位置全部由 `NATIVE_HOST_CSS` 决定：偏移 72px，空间栏收起时为 36px；`--dsh-windows-menu-start` 也覆盖为同样的偏移。选择器依赖官方结构（框架首个 div 为侧栏列、`[data-window-drag] > button:last-of-type` 为折叠按钮、其后的 button 为新会话），官方结构变化时会失效。
+- [x] 测试：替换 portable-host-dom 中原标题栏平移用例，新增 native-background-startup-dom 的开关/记忆用例。test-lists 121/121、typecheck、typecheck:tests、build 通过；两份 DOM 测试 14/14、`test:browser` 18/18。
+- [ ] 未在真实 Desktop 上实测（深/浅色、拖拽区域、菜单位置）。
+
+# 2026-11-03 新建空间“没反应”、再次创建被禁用
+
+- [x] 定位（用户授权只读读取真实 `.dsh-spaces-control` 作业记录）：宿主 CLI 为 0.2.1-rc.2，用户选了未安装的 0.2.1-rc.5；`space.create` 在 `SpaceBaseCreation.prepare` 内安装运行时约 110 s 后成功（`~/.dsh-spaces-tools/versions/0.2.1-rc.5` 的创建/写入时间与作业窗口一致）。期间阶段始终是未翻译的 `create`，管理首页之外没有任何进行中提示，重新打开的创建弹窗按钮禁用且不说明原因。隔离复现中 submit 114 ms 返回，弹窗随即关闭，Supervisor 事件循环未阻塞。
+- [x] 修复：安装运行时期间作业阶段为 `install`、消息 `DSH <版本>`，安装后恢复 `create`；全局状态栏列出进行中的作业；创建弹窗在有作业运行时说明原因。不改准入/忙碌规则，不加重试或超时。新增 2 项 Supervisor、4 项 UI 回归（Supervisor 项在旧实现上失败）。test-lists、三组类型、构建、`npm test`、`test:workbench` 通过（个别既有计时用例单独重跑通过）。未提交。
+- [ ] 隔离复现中安装作业因测试进程链缺少 `SystemRoot` 失败，未在真实宿主上看到完整 110 s 的新提示；用户实际环境安装成功。
+- [x] 侧栏创建占位（用户确认：步骤分段圆环、不排队、失败保留标红、创建中拒绝启停其他空间、Desktop + 网页两条侧栏）：作业阶段 prepare/install/create/view-bridge/llm-bridge；公开作业新增 `subject`（名称，进行中带图标）；`space.create` 受理即带 `affectedSpaceIds`；`PortalSnapshot.creating`（非空才发送）；`runDesktopSpaceAction` 与工作台 `beginSpace` 在创建进行中拒绝启停。区分性测试确认：安装期间按旧 revision 提交的 `space.start` 在创建完成后以 `workbench/conflict` 失败。隔离官方 Desktop 实测占位、3/4 步提示、失败红环与弹窗、移除；首轮圆环被 `.dsh-host-rail-btn > *` 覆盖而不可见，已修正。未提交。
+- [x] Desktop 标题栏左端：侧栏正上方露出的 body 底色（#151517 / #fff）用仅覆盖 72px×标题栏高度的 body 背景图补成侧栏色；`attachHostLayout` 把仍落在侧栏列内的固定定位标题栏控件（折叠按钮、`[data-windows-menu]`）右移 72px，dispose 时还原。隔离官方 Desktop 深/浅色实测像素一致、按钮与菜单可点；新增 Chromium DOM 回归。管理页偏蓝配色按用户意见未改。
+- [x] 空间设置页整理（用户确认：页签 + 精简）：头部合并概览与启停操作、ID 可复制；页签 常规/插件/模型/高级（Browser 底座无模型）；图标改用已有图标弹窗；插件行名称只显示一次、版本读取失败改为“无法检查更新”标签（原因在 title）、两个移除操作收进 ⋯ 菜单、安装区按需展开；清理与删除移到高级。非当前页签的错误显示在头部。真实 CSS 的 Chromium 夹具截图核对（浅/深色）；隔离 Desktop 中管理页 webview 未挂载，未在真实宿主截图。
+- [ ] 隔离环境中安装 rc.5 的 worker 报 “Windows system directory is unavailable for ZIP extraction”（`toolchain.ts:249`），疑为测试启动链环境变量缺失，未定位；用户真实环境未受影响。
+
 # 2026-11-02 首次导航诊断与入口加载竞态
 
 - [x] 补齐外壳、portal、child bootstrap 的有界脱敏阶段记录。实际发行包首开捕获到初始空白页完成事件提前结束下一次 `loadURL` 的竞态，同版本 Electron 独立对照确认。修复初始完整加载等待，回归在旧实现上失败、修复后通过。见 [诊断与修复记录](manager-navigation-diagnostics-20261102.md)。

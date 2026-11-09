@@ -66,7 +66,6 @@ function fixture() {
       write(join(home, "profiles", id, "node_modules", prepared.name, "package.json"), { ...prepared, dsh: { bundle: { patch: "patch.yml" } } });
     },
     composeRuntime: async (_options, input) => ({ versions, layers: input.bundles.map(name => ({ name, version: name === BUILTIN ? version : HOST.includes(name) ? "0.2.0-rc.2" : "1.0.0" })), entries: [], warnings: [], fingerprint }),
-    llm: async () => { throw new Error("unexpected model request"); },
   };
   return { home, spaces, calls, ports, profile, wb: new BlueprintWorkbench(ports),
     change(next: { fingerprint?: string; version?: string; available?: boolean; failPackage?: string }) {

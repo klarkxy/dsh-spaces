@@ -1,5 +1,6 @@
 import type { PackageSource } from "../../../../shared/types";
 import type { WorkbenchPlan } from "../../../../shared/workbench";
+import type { ExactPluginSource } from "../../../../shared/plugin-source";
 import type { setSpacePlugin as defaultSetSpacePlugin } from "../../products/plugin-ops";
 
 export type MaintenanceFetcher = (
@@ -32,6 +33,7 @@ export type ResolvedCommand =
       packageName: string;
       version: string;
     }
+  | { kind: "plugin.install.spec"; spaceId: string; plugin: ExactPluginSource }
   | { kind: "plugin.remove"; spaceId: string; packageName: string }
   | { kind: "plugin.toggle"; spaceId: string; pluginId: string; packageName: string; enabled: boolean }
   | { kind: "plugin.cleanup-manager"; spaceId: string; packageName: string }
@@ -60,6 +62,8 @@ export interface PluginMutationExpected {
   action: "install" | "remove";
   packageName: string;
   version?: string;
+  /** Exact-source installs are verified against the frozen source (pin provenance). */
+  plugin?: ExactPluginSource;
 }
 
 export interface PluginMutationJournal {

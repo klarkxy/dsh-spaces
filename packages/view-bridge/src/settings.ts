@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { SettingsForms, type SettingsDescribeOptions } from "@deepseek-ai/dsh-settings";
@@ -31,9 +30,6 @@ export default class SpaceSettingsForms extends SettingsForms {
       throw new Error("Space settings require an independently owned profile directory.");
     }
     const home = join(profile.home, "hub", profile.name);
-    if (existsSync(join(home, "settings.yaml"))) {
-      throw new Error("Legacy space settings have not completed migration to the profile configuration.");
-    }
     // Only SettingsForms gets this context. ConfigEditor still owns the original
     // profile patch; other plugins keep the actual DSH Home.
     super(ctx.extend({ profileContext: { ...profile, home } }));

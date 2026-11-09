@@ -46,8 +46,8 @@ const failed: WorkbenchStartupStatus = {
   },
 };
 
-test("startupStatus is a readonly optional canonical method", () => {
-  assert.equal(WORKBENCH_API.startupStatus.optional, true);
+test("startupStatus is a readonly canonical method", () => {
+  assert.equal("optional" in WORKBENCH_API.startupStatus, false);
   assert.equal(WORKBENCH_API.startupStatus.args.length, 0);
   const methods = WORKBENCH_API_METHODS as readonly string[];
   assert.equal(methods[methods.indexOf("state") + 1], "startupStatus");
@@ -97,9 +97,7 @@ test("host client calls startupStatus with no arguments", async () => {
       });
     },
   });
-  const startupStatus = api.startupStatus;
-  if (!startupStatus) throw new Error("startupStatus is missing");
-  assert.deepEqual(await startupStatus(), preparing);
+  assert.deepEqual(await api.startupStatus(), preparing);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.url, `${ORIGIN}/api/workbench/startupStatus`);
   assert.equal(calls[0]?.init.method, "POST");
@@ -116,10 +114,8 @@ test("host client rejects a startup status that carries a raw field", async () =
       headers: { "content-type": "application/json" },
     }),
   });
-  const startupStatus = api.startupStatus;
-  if (!startupStatus) throw new Error("startupStatus is missing");
   await assert.rejects(
-    () => startupStatus(),
+    () => api.startupStatus(),
     (error: unknown) => error instanceof RemoteError && error.code === "workbench/unavailable",
   );
 });
@@ -134,31 +130,8 @@ test("browser remote calls startupStatus with an empty payload", async () => {
       },
     },
   } as never);
-  const startupStatus = remote.startupStatus;
-  if (!startupStatus) throw new Error("startupStatus is missing");
-  assert.deepEqual(await startupStatus(), failed);
+  assert.deepEqual(await remote.startupStatus(), failed);
   assert.deepEqual(calls, [{ channel: "/api", endpoint: "workbench/startupStatus", args: {} }]);
-});
-
-test("manager startupStatus stays unsupported when the connected api omits it", async () => {
-  const calls: string[] = [];
-  const runtime = {
-    async managerApi() {
-      calls.push("managerApi");
-      return {
-        async state() {
-          calls.push("state");
-          throw new Error("must not read state");
-        },
-      };
-    },
-  } as unknown as WorkbenchHostRuntime;
-  const host = new WorkbenchManagerHost(new Context(), runtime);
-  await assert.rejects(
-    () => host.startupStatus(),
-    (error: unknown) => error instanceof RemoteError && error.code === "workbench/unsupported",
-  );
-  assert.deepEqual(calls, ["managerApi"]);
 });
 
 test("manager startupStatus returns the connected observation", async () => {

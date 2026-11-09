@@ -9,6 +9,8 @@ import type {
   WorkbenchPlan,
   WorkbenchPlanRequest,
 } from "../../../shared/workbench";
+import { pinDetailFor } from "../products/plugin-exact-source";
+import { parsePluginSource } from "../../../shared/plugin-source";
 import type { HomeOperationLock } from "../home/home-operation-lock";
 import type { SpaceMessageRouter } from "../message-bus/router";
 import type { ProfileRegistry } from "../profile/profile-registry";
@@ -44,6 +46,19 @@ export interface SupervisorPlansHost {
   stopOwned: (spaceId: string) => Promise<void>;
   stopOwnedAll: () => Promise<void>;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
+  /** Strict read of the space's current LLM policy (absent file = inheritMain:false). */
+  readLlmPolicy: (spaceId: string) => { inheritMain: boolean };
+  /** Atomic write of the space's LLM policy; a failure after commit keeps the scene. */
+  writeLlmPolicy: (spaceId: string, inheritMain: boolean) => void;
+  /**
+   * Run one `plugin.live.*` request through the child's own pluginManager
+   * inside the current serialized job; absent when the child remote
+   * surface cannot be composed (the op fails closed).
+   */
+  pluginLive?: (
+    request: Extract<WorkbenchPlanRequest, { kind: 'plugin.live.install' | 'plugin.live.update' | 'plugin.live.entry' | 'plugin.live.remove' }>,
+    ctx: WorkbenchJobContext,
+  ) => Promise<WorkbenchJob["result"] | void>;
   currentServiceEpoch: () => string;
   stateRevision: () => string;
   productObservation: () => { serviceEpoch: string; expectedRevision: string };
@@ -63,6 +78,37 @@ export class SupervisorPlans {
       this.host.protectSpecial(id, { allowManager: request.kind !== "space.delete" });
       if (request.kind === "space.delete") this.host.protectSpecial(id, { allowManager: false });
     }
+    let policyChanges: string[] | undefined;
+    if (request.kind === "space.llm-policy.set") {
+      this.host.requireManaged(id);
+      this.host.protectSpecial(id, { allowManager: false });
+      const status = this.host.statusOf(id);
+      if (status !== "stopped" && status !== "crashed") {
+        throw new WorkbenchPublicError(
+          "workbench/conflict",
+          `The space ${id} must be stopped before its model policy can change. Plan a stop first.`,
+        );
+      }
+      const current = this.host.readLlmPolicy(id).inheritMain;
+      policyChanges = [
+        `Set ${id} model policy inheritMain from ${current} to ${request.inheritMain}.`,
+        "The space stays stopped; the new policy applies on its next start.",
+      ];
+    }
+    if (request.kind === "plugin.live.install" || request.kind === "plugin.live.update" ||
+        request.kind === "plugin.live.entry" || request.kind === "plugin.live.remove") {
+      this.host.requireManaged(id);
+      this.host.protectSpecial(id, { allowManager: false });
+      const status = this.host.statusOf(id);
+      if (status !== "running") {
+        throw new WorkbenchPublicError(
+          "workbench/conflict",
+          `The space ${id} is ${status}; ${request.kind} requires a running space. ` +
+          `Use the stopped-space plugin ops (plugin.install, plugin.remove, plugin.toggle) instead.`,
+        );
+      }
+      policyChanges = livePlanChanges(request);
+    }
     const running = id && this.host.statusOf(id) === "running" ? [id] : [];
     const taskActivity = request.kind === "space.stop" || request.kind === "space.restart"
       ? observedActivity ?? "unknown" : undefined;
@@ -77,10 +123,10 @@ export class SupervisorPlans {
       runningSpaceIds: request.kind === "service.shutdown"
         ? this.host.ownedSpaceIds().filter((name) => this.host.statusOf(name) === "running")
         : running,
-      changes: request.kind === "space.delete" ? [
+      changes: policyChanges ?? (request.kind === "space.delete" ? [
         "Remove this space's profile and installed plugins.",
         request.removeData ? "Delete this space's isolated sessions and storage." : "Keep this space's isolated sessions and storage on disk.",
-      ] : [request.kind],
+      ] : [request.kind]),
       destructive: request.kind === "space.delete" || request.kind === "service.shutdown",
       expiresAt: new Date(this.host.now().getTime() + PLAN_TTL_MS).toISOString(),
       serviceEpoch: observed.serviceEpoch,
@@ -124,7 +170,7 @@ export class SupervisorPlans {
     return maintenance.execute(planId, ctx);
   }
 
-  private async executeLocal(stored: StoredPlan, ctx: WorkbenchJobContext): Promise<void> {
+  private async executeLocal(stored: StoredPlan, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
     const request = stored.request;
     switch (request.kind) {
       case "space.stop": {
@@ -164,6 +210,46 @@ export class SupervisorPlans {
           this.host.registry.removeMeta(id);
         });
         return;
+      }
+      case "space.llm-policy.set": {
+        ctx.phase("llm-policy");
+        const id = this.host.requireManaged(request.spaceId);
+        this.host.protectSpecial(id, { allowManager: false });
+        const status = this.host.statusOf(id);
+        if (status !== "stopped" && status !== "crashed") {
+          throw new WorkbenchPublicError(
+            "workbench/conflict",
+            `The space ${id} must be stopped before its model policy can change.`,
+          );
+        }
+        // The serialized job tail plus the write lock serialize this write;
+        // a failure after the atomic commit keeps the scene as evidence.
+        await this.host.lock.run("space.llm-policy.set", async () => {
+          this.host.writeLlmPolicy(id, request.inheritMain);
+        });
+        return;
+      }
+      case "plugin.live.install":
+      case "plugin.live.update":
+      case "plugin.live.entry":
+      case "plugin.live.remove": {
+        ctx.phase("live-plugin");
+        const id = this.host.requireManaged(request.spaceId);
+        this.host.protectSpecial(id, { allowManager: false });
+        // The execute-time fingerprint already binds status + generation;
+        // the runner re-checks the same identity before every child call.
+        if (this.host.statusOf(id) !== "running") {
+          throw new WorkbenchPublicError(
+            "workbench/conflict",
+            `The space ${id} stopped since the plan was frozen; the live operation was not submitted.`,
+          );
+        }
+        if (!this.host.pluginLive) {
+          throw new WorkbenchPublicError("workbench/unavailable", "The child remote surface is unavailable.");
+        }
+        // Same job lane as every other profile writer: no supervisor-side
+        // write can overlap the child's own pluginManager application.
+        return await this.host.pluginLive(request, ctx);
       }
       case "service.shutdown": {
         ctx.phase("stopping-children");
@@ -239,5 +325,42 @@ export class SupervisorPlans {
     } catch {
       return false;
     }
+  }
+}
+
+/** Approval-time change text for the running-space ops (path B). */
+function livePlanChanges(request: WorkbenchPlanRequest): string[] {
+  const appliedBy = "The change is applied inside the running space by the child's own plugin manager; no supervisor-side profile write happens.";
+  switch (request.kind) {
+    case "plugin.live.install": {
+      let detail = "an exact source";
+      try {
+        detail = pinDetailFor(parsePluginSource(request.source));
+      } catch {
+        // The shared parser already validated this; the plan text keeps the
+        // frozen request rather than reformatting it.
+      }
+      return [
+        `Install plugin ${detail} into the running space ${request.spaceId} through its own plugin manager (installBundle).`,
+        appliedBy,
+      ];
+    }
+    case "plugin.live.update":
+      return [
+        `Update plugin ${request.packageName} to ${request.version} inside the running space ${request.spaceId} through its own plugin manager (updateBundle).`,
+        appliedBy,
+      ];
+    case "plugin.live.entry":
+      return [
+        `${request.enabled ? "Enable" : "Disable"} loader entry ${request.entryId} inside the running space ${request.spaceId} through its own plugin manager (setPluginEnabled).`,
+        appliedBy,
+      ];
+    case "plugin.live.remove":
+      return [
+        `Remove plugin ${request.packageName} from the running space ${request.spaceId} through its own plugin manager (removeBundle).`,
+        appliedBy,
+      ];
+    default:
+      return [request.kind];
   }
 }

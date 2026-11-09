@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -417,19 +418,6 @@ test("HTTP state during owned manager bootstrap stays limited without latching b
   assert.equal(again.spaces.find((space) => space.id === again.managerId)?.status, "running");
 });
 
-test("leftover upgrade journal stays limited after repeated state", async () => {
-  const home = tempHome();
-  mkdirSync(join(home, ".dsh-spaces-upgrade"), { recursive: true });
-  writeFileSync(join(home, ".dsh-spaces-upgrade", "journal.json"), `${JSON.stringify({ version: 1 })}\n`);
-  const handle = await startSupervisor(home);
-  const first = await handle.runtime.state();
-  assert.equal(first.availability, "limited");
-  assert.match(first.reasons.join(" "), /journal|maintenance/i);
-  const second = await handle.runtime.state();
-  assert.equal(second.availability, "limited");
-  assert.match(second.reasons.join(" "), /journal|maintenance/i);
-  assert.notEqual(second.spaces.find((space) => space.id === second.managerId)?.status, "running");
-});
 
 afterEach(async () => {
   for (const handle of handles.splice(0)) {
@@ -1087,7 +1075,7 @@ test("stable entry still responds after the manager process is gone", async () =
 
 test("busy home keeps a read-only entry and does not write the job store", async () => {
   const home = tempHome();
-  const holder = new HomeLease(home).acquire("desktop");
+  const holder = new HomeLease(home).acquire("web");
   const handle = await startSupervisor(home);
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const page = await fetch(`${handle.origin}/`, { headers: { cookie } });
@@ -1864,6 +1852,10 @@ function writePayload(pluginRoot: string, marker = "payload"): ValidatedComponen
     ["lib/llm-bridge/cordis.patch.yml", `- insert:\n    - id: dsh-spaces-llm-bridge\n      name: '${COMPONENT_PAYLOAD_PACKAGES["llm-bridge"]}'\n      config: {}\n`],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
+    ["lib/space-control.js", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
   ];
   for (const [rel, content] of files) {
     const abs = join(pluginRoot, rel);
@@ -2177,7 +2169,11 @@ test("registered spaces keep their pin; unregistered profiles and stale meta sta
 
 test("a new space pins the host DSH version", async () => {
   const home = tempHome();
-  const handle = await startSupervisor(home);
+  const runtimeRoot = join(home, "runtimes");
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    snapshotWorkerFile: writeFakeRuntimeWorker(home),
+  });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const created = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.create", input: { name: "created" } },
@@ -2213,13 +2209,21 @@ test("spaces pinned to different installed runtimes spawn with their own binarie
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: `@deepseek-ai/${name}`, version: "0.9.9" })}\n`);
   }
+  // A host-version pin that also has a store copy must prefer the store bin.
+  const gammaDir = join(runtimeRoot, "versions", "0.2.0-rc.2", "node_modules", "@deepseek-ai", "dsh");
+  mkdirSync(join(gammaDir, "lib"), { recursive: true });
+  const gammaBin = join(gammaDir, "lib", "bin.js");
+  writeFileSync(gammaBin, "console.log('gamma');\n");
+  writeFileSync(join(gammaDir, "package.json"), `${JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2" })}\n`);
+  writeSpace(home, "gamma", {}, { dshVersion: "0.2.0-rc.2" });
+  writeSpace(home, "delta", {}, { dshVersion: "0.9.8" });
   const spawned: Array<{ profile: string; bin: string }> = [];
   const handle = await startSupervisor(home, {
     runtimeRoot,
     processRuntime: {
       ...alignProcessRuntime([]),
       spawn: (args, options = {}) => {
-        spawned.push({ profile: args[args.indexOf("--profile") + 1] ?? "", bin: String(args[0]) });
+        spawned.push({ profile: args[args.indexOf("--profile") + 1] ?? "", bin: String(args.find((item) => item.endsWith("bin.js")) ?? args[0]) });
         return spawnFixture("ok")(args, options);
       },
     },
@@ -2238,8 +2242,21 @@ test("spaces pinned to different installed runtimes spawn with their own binarie
     requestId: "start-b",
   });
   await waitJob(handle.origin, cookie, "start-b");
-  assert.equal(spawned.find((row) => row.profile === "space-alpha")?.bin, hostBin);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-gamma" },
+    requestId: "start-g",
+  });
+  await waitJob(handle.origin, cookie, "start-g");
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-delta" },
+    requestId: "start-d",
+  });
+  await assert.rejects(waitJob(handle.origin, cookie, "start-d"), /not installed/);
+  assert.equal(spawned.find((row) => row.profile === "space-alpha")?.bin, gammaBin,
+    "a host-version pin prefers the store bin over the host CLI");
   assert.equal(spawned.find((row) => row.profile === "space-beta")?.bin, betaBin);
+  assert.equal(spawned.find((row) => row.profile === "space-gamma")?.bin, gammaBin);
+  assert.equal(spawned.some((row) => row.profile === "space-delta"), false);
 });
 
 test("startup without a selected payload checks each component's target engine requirement", async () => {
@@ -2533,3 +2550,135 @@ test("bridge packages declare peer ranges covering the supported DSH minimum", (
   }
 });
 
+
+function writeFakeRuntimeWorker(home: string, gate?: boolean): string {
+  const workerFile = join(home, gate ? "fake-runtime-worker-gated.mjs" : "fake-runtime-worker.mjs");
+  writeFileSync(workerFile, [
+    'import { parentPort, workerData } from "node:worker_threads";',
+    'import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'const jobsDir = join(workerData.home, ".dsh-spaces-control", "jobs");',
+    'const jobs = readdirSync(jobsDir)',
+    '  .map((f) => JSON.parse(readFileSync(join(jobsDir, f), "utf8")))',
+    '  .filter((j) => j.kind === "space.create" && j.status === "running")',
+    '  .map((j) => ({ phase: j.phase, message: j.message }));',
+    'mkdirSync(workerData.runtimeRoot, { recursive: true });',
+    'writeFileSync(join(workerData.runtimeRoot, "seen.json"), JSON.stringify(jobs));',
+    'const dir = join(workerData.runtimeRoot, "versions", workerData.version, "node_modules", "@deepseek-ai", "dsh");',
+    'mkdirSync(join(dir, "lib"), { recursive: true });',
+    'const bin = join(dir, "lib", "bin.js");',
+    'writeFileSync(bin, "console.log(1);\\n");',
+    'writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: workerData.version }));',
+    ...(gate ? [
+      'const gate = join(workerData.runtimeRoot, "install-gate");',
+      'const deadline = Date.now() + 30000;',
+      'while (!existsSync(gate) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));',
+      'if (!existsSync(gate)) throw Error("install gate never released");',
+    ] : []),
+    'parentPort.postMessage({ ok: true, result: { bin, version: workerData.version, origin: "store" } });',
+  ].join("\n"));
+  return workerFile;
+}
+
+test("a create that installs a missing runtime reports the install phase and restores create", async () => {
+  const home = tempHome();
+  const runtimeRoot = join(home, "runtimes");
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    snapshotWorkerFile: writeFakeRuntimeWorker(home),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  const submittedResponse = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.create", input: { name: "fresh-space", displayName: "Fresh", icon: "whale", modelSource: "main", baseVersion: "0.9.9" } },
+    requestId: "create-install",
+  });
+  const submittedBody = submittedResponse.body as { ok?: boolean; value?: { subject?: { displayName: string; icon?: string }; status: string }; error?: { code: string; message: string } };
+  assert.ok(submittedBody.ok, JSON.stringify(submittedBody.error));
+  const submitted = submittedBody.value!;
+  assert.deepEqual(submitted.subject, { displayName: "Fresh", icon: "whale" }, "an active create carries its subject and icon");
+  assert.deepEqual((submitted as { affectedSpaceIds?: string[] }).affectedSpaceIds, ["space-fresh-space"],
+    "an active create exposes its eventual space id for presentation projections");
+  const done = await waitJob(handle.origin, cookie, "create-install");
+  assert.equal(done.status, "succeeded");
+  const record = (await api(handle.origin, cookie, "job", { id: "create-install" })).body.value as {
+    phase: string;
+    message: string;
+    subject?: { displayName: string; icon?: string };
+  };
+  assert.equal(record.phase, "llm-policy", "the final record keeps the last create phase");
+  assert.equal(record.message, "", "the final record does not keep the install message");
+  assert.deepEqual(record.subject, { displayName: "Fresh" }, "a settled create keeps the name but drops the icon");
+  const seen = JSON.parse(readFileSync(join(runtimeRoot, "seen.json"), "utf8")) as Array<{
+    phase: string;
+    message: string;
+  }>;
+  assert.deepEqual(seen, [{ phase: "install", message: "DSH 0.9.9" }]);
+  const { spaceCreateStep } = await import("../../src/shared/space-host.ts");
+  // The canonical phase order is monotonic by construction of the step table.
+  const ordered = ["prepare", "install", "create", "view-bridge", "llm-bridge", "llm-policy"];
+  const steps = ordered.map((phase) => spaceCreateStep(phase).index);
+  assert.ok(steps.every((step, i) => i === 0 || step >= steps[i - 1]), `steps: ${steps.join(",")}`);
+  // The live run ended on the last phase; earlier phases were captured above.
+  assert.equal(record.phase, "llm-policy");
+});
+
+test("a space.start submitted mid-install with a pre-create revision", async () => {
+  const home = tempHome();
+  const runtimeRoot = join(home, "runtimes");
+  writeSpace(home, "running-one", {}, { dshVersion: "0.2.0-rc.2" });
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    snapshotWorkerFile: writeFakeRuntimeWorker(home, true),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.create", input: { name: "gate-space", baseVersion: "0.9.9" } },
+    requestId: "create-gate",
+  });
+  // Wait until the create is inside the install; the new space does not exist yet.
+  let createJob = {} as { phase?: string };
+  for (let i = 0; i < 200 && createJob.phase !== "install"; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    createJob = (await api(handle.origin, cookie, "job", { id: "create-gate" })).body.value as { phase?: string };
+  }
+  assert.equal(createJob.phase, "install", "the create must be inside the install for the context to be pre-create");
+  const snapshot = (await api(handle.origin, cookie, "state", {})).body.value as {
+    spaces: Array<{ id: string }>;
+  };
+  assert.equal(snapshot.spaces.some((space) => space.id === "space-gate-space" || space.id === "gate-space"), false,
+    "the space being created is not listed yet");
+  const start = (await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-running-one" },
+    requestId: "start-behind-create",
+  })).body.value as { status: string };
+  assert.equal(start.status, "queued");
+  writeFileSync(join(runtimeRoot, "install-gate"), "go");
+  const finishedCreate = await waitJob(handle.origin, cookie, "create-gate");
+  assert.equal(finishedCreate.status, "succeeded");
+  // Premise confirmed: with the revision captured before the space existed,
+  // the queued start fails the live-context check when it runs.
+  const finishedStart = await waitJob(handle.origin, cookie, "start-behind-create", "failed");
+  assert.equal((finishedStart.error as { code?: string } | undefined)?.code, "workbench/conflict");
+});
+
+test("a create on the host runtime installs that version into the store and pins it", async () => {
+  const home = tempHome();
+  const runtimeRoot = join(home, "runtimes");
+  const handle = await startSupervisor(home, {
+    runtimeRoot,
+    snapshotWorkerFile: writeFakeRuntimeWorker(home),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.create", input: { name: "host-space" } },
+    requestId: "create-host",
+  });
+  const done = await waitJob(handle.origin, cookie, "create-host");
+  assert.equal(done.status, "succeeded");
+  assert.equal(existsSync(join(runtimeRoot, "seen.json")), true, "the install worker ran for the host version");
+  const registry = JSON.parse(readFileSync(join(home, "hub", "spaces.json"), "utf8")) as {
+    meta: Record<string, { dshVersion?: string }>;
+  };
+  assert.equal(registry.meta["space-host-space"]?.dshVersion, "0.2.0-rc.2",
+    "the space is pinned to the host version it was created at");
+});

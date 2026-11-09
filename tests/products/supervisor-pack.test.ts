@@ -69,6 +69,10 @@ function writeV2Plugin(pluginRoot: string): string {
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
+    ["lib/space-control.js", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   writeComponentPayloadManifest(join(pluginRoot, "lib"));

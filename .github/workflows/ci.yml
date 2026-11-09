@@ -34,7 +34,6 @@ jobs:
       - run: npm run test:spaces
       - run: npm run test:llm
       - run: npm run test:llm:integration
-      - run: npm run validate:llm:secrets
       - run: npm run validate:llm:distribution
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
@@ -80,7 +79,6 @@ jobs:
       - run: npx playwright install chromium
       - name: Fit icon browser
         run: node --import tsx --test tests/ui/fit-icon-browser.test.ts
-      - run: npm run test:llm:browser
       - name: Install official DSH 0.2 CLI and package manager for acceptance
         run: npm install --prefix "${{ runner.temp }}/plugin-tools" @deepseek-ai/dsh@0.2.2-rc.1 pnpm@10.29.2 --no-audit --no-fund
       - name: Blueprint and official model bridge regressions

@@ -300,56 +300,6 @@ test("generated CLI fallback links are omitted from snapshot data while local pl
   assert.equal(readFileSync(join(root, snapshot.id, "data", "cordis.patch.yml"), "utf8"), "# original global patch\n");
 });
 
-test("unfinished pending/journal/receipt evidence is read-only and blocks writes", () => {
-  const { home, root, store, runtime } = harness();
-  seedHome(home, { profiles: ["web"], settings: "live\n" });
-  const snap = store.create(runtime);
-  const pendingPath = join(root, "pending-restore.json");
-  const pending = Buffer.from(`${JSON.stringify({
-    snapshotId: snap.id,
-    beforeRestoreId: snap.id,
-    runtimeVersion: "1.0.0",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-    planId: PLAN_A,
-  }, null, 2)}\n`);
-  writeFileSync(pendingPath, pending);
-  const journalPath = join(home, RESTORE_STAGE_DIR, "journal.json");
-  mkdirSync(dirname(journalPath), { recursive: true });
-  const journal = Buffer.from(`${JSON.stringify({
-    phase: "swapping",
-    snapshotId: snap.id,
-    beforeRestoreId: snap.id,
-    originalPresence: {
-      profiles: true,
-      sessions: false,
-      storages: false,
-      hub: false,
-      "settings.yaml": true,
-      "cordis.patch.yml": false,
-    },
-    runtimeVersion: "1.0.0",
-    binRelative: "bin.js",
-    startedAt: "2026-09-12T00:00:00.000Z",
-    planId: PLAN_A,
-  }, null, 2)}\n`);
-  writeFileSync(journalPath, journal);
-  const settings = readFileSync(join(home, "settings.yaml"));
-
-  assert.equal(store.pendingRestore()?.planId, PLAN_A);
-  assert.equal(store.restoreJournal()?.phase, "swapping");
-  assert.throws(() => store.create(runtime), /Unfinished restore evidence/);
-  assert.throws(() => store.delete(snap.id), /Unfinished restore evidence/);
-  assert.deepEqual(readFileSync(pendingPath), pending);
-  assert.deepEqual(readFileSync(journalPath), journal);
-  assert.deepEqual(readFileSync(join(home, "settings.yaml")), settings);
-  assert.equal(store.list().length, 1);
-  rmSync(pendingPath);
-  assert.throws(() => store.create(runtime), /Unfinished restore evidence/);
-  assert.throws(() => store.delete(snap.id), /Unfinished restore evidence/);
-  assert.deepEqual(readFileSync(journalPath), journal);
-  assert.equal(store.list().length, 1);
-});
 
 test("old snapshots without runtimeMissing remain readable; missing runtime refuses runtimeRoot", () => {
   const { home, root, store, runtime } = harness();
@@ -373,14 +323,6 @@ test("old snapshots without runtimeMissing remain readable; missing runtime refu
   assert.equal(readFileSync(manifestPath, "utf8"), dataOnly);
 });
 
-test("a bad restore journal throws and keeps the original bytes", () => {
-  const { home, store } = harness();
-  const journalPath = join(home, RESTORE_STAGE_DIR, "journal.json");
-  mkdirSync(dirname(journalPath), { recursive: true });
-  writeFileSync(journalPath, "{not-json");
-  assert.throws(() => store.restoreJournal(), /not valid JSON/);
-  assert.equal(readFileSync(journalPath, "utf8"), "{not-json");
-});
 
 function harness(): { home: string; root: string; runtime: SnapshotRuntime; store: SnapshotStore } {
   const home = fakeDir("dsh-home-");

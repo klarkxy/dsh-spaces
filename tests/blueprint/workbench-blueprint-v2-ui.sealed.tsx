@@ -60,7 +60,6 @@ function harness(product?: (request: WorkbenchProductRequest) => Promise<Workben
       throw new Error(request.method);
     },
     submitApply: async (planId) => { applies.push(planId); },
-    describeLlm: async () => { throw new Error("v2 has no model inputs"); },
     uuid: () => "test", now: () => 0, downloadFile: (name) => { downloads.push(name); },
     writeClipboard: async (value) => { copies.push(value); }, locale: () => "zh", canMutate: () => true,
     serviceEpoch: () => observation.serviceEpoch, emit: () => undefined,

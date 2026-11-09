@@ -11,8 +11,6 @@
 
 import React, { useEffect, useRef, type ReactElement } from "react";
 import { LayoutIndicator, VisibleScale, VisibleSlide } from "../../../../../src/shared/ui/motion";
-import { LlmModelCenter } from "../llm/center";
-import { LegacyConnectionSettings } from "../llm/legacy-settings";
 import { HomeSettingsFields, ThemeSwitch } from "../product-ui";
 import { InlineErrors } from "../inline-error";
 import { t } from "../i18n";
@@ -26,7 +24,6 @@ type SettingsTab = WorkbenchViewProps["ui"]["settingsTab"];
 const MAIN_TABS: Array<[SettingsTab, Parameters<typeof t>[1]]> = [
   ["spaces", "settings.nav.spaces"],
   ["templates", "settings.nav.templates"],
-  ["llm", "settings.nav.models"],
   ["general", "settings.nav.general"],
 ];
 
@@ -164,13 +161,6 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
               <InlineErrors ui={ui} origin="service" />
               <div><button type="button" className="dsh-wb-btn danger" disabled={!writable || busy} onClick={requestServiceStop ?? (() => controller.preview({ kind: "service.shutdown" }))}>{t(locale, "settings.service.stop")}</button></div>
             </section>
-          </>}
-          {ui.settingsTab === "llm" && <>
-            <h3 className="dsh-wb-title">{t(locale, "settings.models")}</h3>
-            <p className="dsh-wb-muted">{t(locale, "llm.modelSettingsHint")}</p>
-            <LegacyConnectionSettings locale={locale}>
-              <LlmModelCenter locale={locale} writable={writable} client={controller.llmClient()} spaces={controller.llmSpaces()} uuid={crypto.randomUUID.bind(crypto)} />
-            </LegacyConnectionSettings>
           </>}
           <ManagementContent ui={ui} controller={controller} />
         </VisibleSlide>

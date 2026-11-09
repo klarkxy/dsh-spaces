@@ -122,6 +122,7 @@ function defaultProduct(request: WorkbenchProductRequest): WorkbenchProductResul
 function fakeApi(product: (request: WorkbenchProductRequest) => WorkbenchProductResult): WorkbenchApi {
   return {
     state: async () => state(),
+    startupStatus: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", phase: "ready" as const, reasons: [], failure: null }),
     detail: async (spaceId) => ({
       space: { id: spaceId, displayName: spaceId, isHost: false, hasWebApp: true, status: "running" },
       plugins: [],

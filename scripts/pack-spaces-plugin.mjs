@@ -39,6 +39,10 @@ const LLM_DIR = join(REPO, "packages", "llm-bridge");
 const SUPERVISOR_DIR = join(REPO, "packages", "supervisor");
 const PACK_MS = 60_000;
 
+/** The pinned UI automation engine bundled inside the supervisor payload. */
+const UI_ENGINE_VERSION = "1.62.1";
+const UI_ENGINE_REL = "lib/supervisor/ui-engine/node_modules/playwright-core";
+
 /** v2 component payload. The plugin tarball is the distribution unit; this script does not publish. */
 const COMPONENT_PAYLOAD_MANIFEST = "lib/supervisor/manifest.json";
 
@@ -78,6 +82,10 @@ const PLUGIN_REQUIRED = [
   "lib/llm-bridge/cordis.patch.yml",
   "lib/llm-bridge/lib/index.js",
   "lib/llm-bridge/lib/auxiliary.js",
+  "lib/space-control.js",
+  `${UI_ENGINE_REL}/package.json`,
+  `${UI_ENGINE_REL}/index.mjs`,
+  `${UI_ENGINE_REL}/index.js`,
 ];
 
 const VIEW_REQUIRED = [
@@ -110,7 +118,9 @@ const FORBIDDEN_PACKED = [
   /(^|\/)\.sandbox(\/|$)/,
   /(^|\/)\.env(\.|$)/,
   /(^|\/)src\//,
-  /(^|\/)node_modules\//,
+  // node_modules stays forbidden except the one deliberately bundled
+  // playwright-core payload inside the supervisor component.
+  /(^|\/)node_modules\/(?!.*playwright-core\/)/,
 ];
 
 function info(m) {
@@ -375,6 +385,34 @@ function preflightOnDisk() {
     directory: "packages/llm-bridge",
     keywords: ["dsh-plugin", "deepseek-harness"],
   });
+  // space-control ships as a subpath entry inside the plugin package, never
+  // as a dependency: a file:/link:/workspace: spec inside the tarball would
+  // resolve against the installing profile and fail the whole install (the
+  // ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND defect this guard exists to catch).
+  for (const [dep, spec] of Object.entries(pluginPkg.dependencies ?? {})) {
+    if (typeof spec !== "string" || /^(?:file|link|workspace|portal):/.test(spec) || dep.startsWith("@dsh-spaces/")) {
+      throw new Error(`packages/plugin dependency ${dep}@${String(spec)} is not installable from the tarball`);
+    }
+  }
+  if (pluginPkg.exports?.["./space-control"] !== "./lib/space-control.js") {
+    throw new Error(`packages/plugin must export ./space-control as ./lib/space-control.js, got ${String(pluginPkg.exports?.["./space-control"])}`);
+  }
+  const patchText = readFileSync(join(PLUGIN_DIR, "cordis.patch.yml"), "utf8");
+  const controlRow = /id:\s*dsh-space-control\b[\s\S]*?name:\s*['"]([^'"]+)['"]/.exec(patchText);
+  if (controlRow?.[1] !== "@dsh-spaces/plugin/space-control") {
+    throw new Error(`packages/plugin cordis.patch.yml must name dsh-space-control @dsh-spaces/plugin/space-control, got ${controlRow?.[1] ?? "(row missing)"}`);
+  }
+  const engineManifest = readPkg(join(PLUGIN_DIR, "lib", "supervisor", "ui-engine", "node_modules", "playwright-core"));
+  if (engineManifest.name !== "playwright-core" || engineManifest.version !== UI_ENGINE_VERSION) {
+    throw new Error(`supervisor ui-engine must be playwright-core@${UI_ENGINE_VERSION}, got ${engineManifest.name}@${engineManifest.version}`);
+  }
+  const rootManifest = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8"));
+  if (rootManifest.devDependencies?.["playwright-core"] !== UI_ENGINE_VERSION) {
+    throw new Error(`root devDependencies playwright-core must stay pinned at ${UI_ENGINE_VERSION}, got ${String(rootManifest.devDependencies?.["playwright-core"])}`);
+  }
+  if ("playwright-core" in (pluginPkg.dependencies ?? {}) || "playwright-core" in (supervisorPkg.dependencies ?? {})) {
+    throw new Error("playwright-core must ship inside the component payload, not as a package dependency");
+  }
   if (supervisorPkg.private !== true) {
     throw new Error("@dsh-spaces/supervisor must stay private; the plugin tarball is the distribution unit");
   }

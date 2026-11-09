@@ -235,7 +235,7 @@ test("product result requires an observation and a closed method payload", () =>
 
 test("share and template results accept stored avatar size and keep its limit", () => {
   const icon="data:image/png;base64,"+"A".repeat(20000);
-  const preview={manifest:{formatVersion:1,kind:"dsh-space",exportedAt:"2026-10-13T00:00:00.000Z",source:{},space:{displayName:"Avatar",icon}},plugins:[],hasConfig:false,unknownSources:[],llmMappingRequired:false,llmRequirements:[]};
+  const preview={manifest:{formatVersion:1,kind:"dsh-space",exportedAt:"2026-10-13T00:00:00.000Z",source:{},space:{displayName:"Avatar",icon}},plugins:[],hasConfig:false,unknownSources:[]};
   const observation={serviceEpoch:digest,expectedRevision:otherDigest};
   const result={method:"share.export",fileName:"avatar.dsh-space",archiveBase64:"AAAA",preview,observation};
   parseWorkbenchProductResult(result);

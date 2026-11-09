@@ -38,7 +38,7 @@ export function TemplateDropZone({
       <p className="dsh-wb-dropzone-title">{t(locale, "templates.drop.title")}</p>
       <p className="dsh-wb-muted">{t(locale, "templates.drop.hint")}</p>
       <PressableButton
-        as="button"
+        
         type="button"
         className="dsh-wb-btn"
         onClick={() => inputRef.current?.click()}

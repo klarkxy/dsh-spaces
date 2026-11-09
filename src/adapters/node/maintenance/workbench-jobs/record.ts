@@ -3,6 +3,7 @@ import type {
   WorkbenchCommand,
   WorkbenchJob,
   WorkbenchJobErrorInfo,
+  WorkbenchJobStep,
   WorkbenchView,
 } from "../../../../shared/workbench";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
@@ -29,6 +30,7 @@ const PUBLIC_JOB_KEYS = [
   "canCancel",
   "result",
   "error",
+  "subject",
 ] as const;
 
 
@@ -65,6 +67,20 @@ export function publicJob(record: StoredJob): WorkbenchJob {
     canCancel: record.canCancel,
   };
   if (record.result) job.result = publicResult(record.result);
+  if (record.command?.kind === "space.create" || record.command?.kind === "creator.create") {
+    const input = record.command.kind === "space.create" ? record.command.input : record.command;
+    const displayName = sanitizeJobText(
+      (typeof input.displayName === "string" && input.displayName.trim()) ||
+      (typeof input.name === "string" ? input.name : ""),
+    );
+    if (displayName) {
+      job.subject = { displayName };
+      if ((record.status === "queued" || record.status === "running") &&
+          typeof input.icon === "string" && input.icon) {
+        job.subject.icon = input.icon;
+      }
+    }
+  }
   if (record.error) {
     job.error = publicErrorFromStored(record.error as unknown as Record<string, unknown>);
     if (record.error.spaceId) job.error.spaceId = record.error.spaceId;
@@ -101,12 +117,14 @@ export function publicResult(value: unknown): WorkbenchJobResult | undefined {
       /* drop unsafe product payloads instead of persisting them */
     }
   }
+  const steps = publicSteps(value.steps);
+  if (steps) result.steps = steps;
   return result;
 }
 
 function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   if (!isPlainObject(value)) return undefined;
-  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "dshVersion", "view", "product"]);
+  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "dshVersion", "view", "product", "steps"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
   if (value.spaceId !== undefined && (typeof value.spaceId !== "string" || !ENTITY_ID_RE.test(value.spaceId))) {
     return undefined;
@@ -121,6 +139,7 @@ function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
     if (typeof value.dshVersion !== "string" || !isExactRuntimeVersion(value.dshVersion)) return undefined;
   }
   if (value.view !== undefined && !publicView(value.view)) return undefined;
+  if (value.steps !== undefined && !publicSteps(value.steps)) return undefined;
   if (value.product !== undefined) {
     try {
       parseWorkbenchProductOutcome(value.product);
@@ -130,6 +149,31 @@ function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   }
   return publicResult(value) ?? {};
 }
+
+const JOB_STEP_STATUSES = new Set(["done", "failed", "not-run"]);
+
+function publicSteps(value: unknown): WorkbenchJobStep[] | undefined {
+  if (!Array.isArray(value) || value.length > 64) return undefined;
+  const steps: WorkbenchJobStep[] = [];
+  for (const row of value) {
+    if (!isPlainObject(row)) return undefined;
+    if (typeof row.step !== "string" || !row.step.trim() || row.step.length > 40) return undefined;
+    if (typeof row.status !== "string" || !JOB_STEP_STATUSES.has(row.status)) return undefined;
+    if (row.packageName !== undefined && (typeof row.packageName !== "string" || row.packageName.length > 214)) {
+      return undefined;
+    }
+    if (row.detail !== undefined && (typeof row.detail !== "string" || row.detail.length > 300)) return undefined;
+    steps.push({
+      step: row.step,
+      status: row.status as JobStepStatus,
+      ...(typeof row.packageName === "string" ? { packageName: row.packageName } : {}),
+      ...(typeof row.detail === "string" ? { detail: row.detail } : {}),
+    });
+  }
+  return steps;
+}
+
+type JobStepStatus = WorkbenchJobStep["status"];
 
 function publicView(value: unknown): WorkbenchView | undefined {
   if (!isPlainObject(value)) return undefined;

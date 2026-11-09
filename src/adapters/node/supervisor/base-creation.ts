@@ -49,7 +49,7 @@ export class SpaceBaseCreation {
     return { base, versions, preferred };
   }
 
-  async prepare(base: SpaceBase, requested?: string) {
+  async prepare(base: SpaceBase, requested?: string, onInstall?: (version: string) => void) {
     const cli = this.host.cli();
     if (!cli) throw new WorkbenchPublicError('workbench/incompatible');
     const release = base === 'browser' ? this.browserRelease() : null;
@@ -59,10 +59,11 @@ export class SpaceBaseCreation {
     }
     const runtimeVersion = release?.runtimeVersion ?? baseVersion;
     if (!gte(runtimeVersion, SPACES_MIN_DSH_VERSION)) throw new WorkbenchPublicError('workbench/incompatible');
-    let bin = cli.version === runtimeVersion ? cli.bin : this.host.runtimes()?.installedBin(runtimeVersion);
+    let bin = this.host.runtimes()?.installedBin(runtimeVersion);
     if (!bin) {
       const store = this.host.runtimes();
       if (!store) throw new WorkbenchPublicError('workbench/unavailable');
+      onInstall?.(runtimeVersion);
       bin = (await store.install(runtimeVersion)).bin;
     }
     const runCli: BoundCliRunner = this.host.options.runCli ?? (args => spawnBoundCli(
@@ -83,7 +84,9 @@ export class SpaceBaseCreation {
           const added = await runCli(['plugin', '--profile', name, 'add', artifact]);
           if (added.code !== 0) throw new Error(`Browser base installation failed (exit ${added.code}): ${added.stderr.slice(-2000)}`);
         }
-        atomicWrite(join(dir, 'cordis.patch.yml'), `- id: credentials\n  config:\n    path: !!js dshHomePath('hub/${name}/.credentials.yaml')\n`);
+        // The Browser base never uses the dev-index preinstall; a final
+        // disabled row overrides whatever the installed bundle patches inserted.
+        atomicWrite(join(dir, 'cordis.patch.yml'), `- id: credentials\n  config:\n    path: !!js dshHomePath('hub/${name}/.credentials.yaml')\n- id: dsh-dev-index\n  disabled: true\n- id: dsh-space-control\n  disabled: true\n`);
       } : undefined,
     };
   }

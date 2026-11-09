@@ -64,10 +64,10 @@ export function TemplatesCreateSection({
             hint={t(locale, "templates.emptyListHint")}
             action={
               <div className="dsh-wb-actions">
-                <PressableButton as="button" type="button" className="dsh-wb-btn primary" onClick={onGoToImport}>
+                <PressableButton type="button" className="dsh-wb-btn primary" onClick={onGoToImport}>
                   {t(locale, "templates.section.import")}
                 </PressableButton>
-                <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={onGoToExport}>
+                <PressableButton type="button" className="dsh-wb-btn" onClick={onGoToExport}>
                   {t(locale, "templates.section.export")}
                 </PressableButton>
               </div>
@@ -142,7 +142,7 @@ function TemplateCard({
         {description ? <p className="dsh-wb-muted">{description}</p> : null}
         <p className="dsh-wb-muted">{t(locale, "templates.pluginCount", { count: String(pluginCount) })}</p>
       </div>
-      <PressableButton as="button" type="button" className="dsh-wb-btn primary" onClick={onPick}>
+      <PressableButton type="button" className="dsh-wb-btn primary" onClick={onPick}>
         {t(locale, "templates.createSpace")}
       </PressableButton>
     </div>
@@ -189,7 +189,7 @@ function TemplateCreateForm({
       {error ? <TemplatesError message={error} /> : null}
       <div className="dsh-wb-actions">
         <PressableButton
-          as="button"
+          
           type="button"
           className="dsh-wb-btn primary"
           disabled={!writable || busy}

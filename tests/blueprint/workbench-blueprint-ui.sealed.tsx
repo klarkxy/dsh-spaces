@@ -126,6 +126,7 @@ function job(partial: Partial<WorkbenchJob> & Pick<WorkbenchJob, "kind">): Workb
 function fakeApi(product: (request: WorkbenchProductRequest) => WorkbenchProductResult): WorkbenchApi {
   return {
     state: async () => state(),
+    startupStatus: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", phase: "ready" as const, reasons: [], failure: null }),
     detail: async (spaceId) => ({
       space: {
         id: spaceId,

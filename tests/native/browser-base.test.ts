@@ -44,7 +44,7 @@ test('base catalogs and creation keep Browser product version separate from its 
     assert.equal(calls.some(args => args.includes('--from-default-profile')), false);
     const web = await bases.prepare('web', '0.3.0');
     assert.equal(web.baseVersion, '0.3.0'); assert.equal(web.runtimeVersion, '0.3.0');
-    assert.deepEqual(installs, ['0.3.0']);
+    assert.deepEqual(installs, ['0.2.1-rc.2', '0.3.0']);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

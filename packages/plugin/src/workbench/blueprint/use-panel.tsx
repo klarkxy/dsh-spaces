@@ -56,7 +56,7 @@ export function UseBlueprintPanel({
       ) : null}
       <div className="dsh-wb-actions">
         <PressableButton
-          as="button"
+          
           type="button"
           className="dsh-wb-btn primary"
           disabled={ui.inspectStatus === "loading"}

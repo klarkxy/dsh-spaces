@@ -16,7 +16,7 @@ import { workbenchRequestOrigin } from "../origin";
 import { OverlayPart } from "./overlays";
 
 export abstract class CommandPart extends OverlayPart {
-  createSpace = (input: { name: string; displayName?: string; icon?: string; useSharedLlm?: boolean; modelSource?: 'main'|'shared'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }): void => {
+  createSpace = (input: { name: string; displayName?: string; icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }): void => {
     const name = input.name.trim().toLowerCase();
     // The create dialog owns the failure of its own form.
     const origin = this.ui.overlay?.type === "create" ? "create" : null;
@@ -42,7 +42,6 @@ export abstract class CommandPart extends OverlayPart {
           ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
           displayName: input.displayName?.trim() || undefined,
           icon: icon.icon || undefined,
-          ...(input.useSharedLlm === undefined ? {} : { useSharedLlm: input.useSharedLlm }),
           ...(input.modelSource === undefined ? {} : { modelSource: input.modelSource }),
           ...(input.browser ? { browser: true } : {}),
         },

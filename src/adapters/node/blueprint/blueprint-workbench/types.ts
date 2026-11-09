@@ -1,6 +1,5 @@
 import type { BlueprintRecipe as Blueprint } from "@klarkxy/dsh-blueprint/document";
 import type { BlueprintInputValues, BlueprintPackage } from "@klarkxy/dsh-blueprint/v1/types";
-import type { LlmApiRequest, LlmApiResult } from "../../../../shared/llm-api";
 import type { WorkbenchSpace } from "../../../../shared/workbench";
 import type { WorkbenchProductObservation } from "../../../../shared/workbench-product";
 import type { BlueprintOriginRecord } from "../../../../shared/workbench-blueprint";
@@ -49,15 +48,11 @@ export interface BlueprintWorkbenchPorts {
   listSpaces(): WorkbenchSpace[];
   createSpace(input: BlueprintCreateInput, ctx: WorkbenchJobContext): Promise<unknown>;
   installPlugin(spaceId: string, spec: string): Promise<void>;
-  llm(request: LlmApiRequest): Promise<LlmApiResult>;
   now?(): Date;
   fetchImpl?: PluginFetcher;
   writePatch?(spaceId: string, patch: string): void;
   dshVersion?(): string | null;
   spacesVersion?(): string | null;
-  llmBridgeAvailable?(): boolean;
-  llmAdmitted?(request: LlmApiRequest): Promise<LlmApiResult>;
-  llmCatalogObservation?(): { revision: number; digest: string };
   runtimeBin?(spaceId?: string): string | undefined;
   inspectRuntime?(options: BlueprintRuntimeOptions): Promise<BlueprintRuntimeInspect>;
   composeRuntime?(
@@ -84,8 +79,6 @@ export type PlanObservation = {
   homeSettingsDigest: string;
   homePatchDigest: string;
   runtimeFingerprint: string;
-  llmCatalogRevision: number;
-  llmCatalogDigest: string;
 };
 
 export type StagedPlan = {

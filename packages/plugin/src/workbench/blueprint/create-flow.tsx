@@ -74,7 +74,7 @@ export function BlueprintCreateFlow({
             </label>
             <div className="dsh-wb-actions">
               <PressableButton
-                as="button"
+                
                 type="button"
                 className="dsh-wb-btn"
                 disabled={!writable || ui.previewStatus === "loading"}
@@ -82,7 +82,7 @@ export function BlueprintCreateFlow({
               >
                 {t(locale, "blueprints.preview")}
               </PressableButton>
-              <PressableButton as="button" type="button" className="dsh-wb-btn" onClick={() => session.cancelStaged()}>
+              <PressableButton type="button" className="dsh-wb-btn" onClick={() => session.cancelStaged()}>
                 {t(locale, "blueprints.cancelStaged")}
               </PressableButton>
             </div>
@@ -108,7 +108,7 @@ export function BlueprintCreateFlow({
           <p className="dsh-wb-notice">{t(locale, "blueprints.installHint")}</p>
           <div className="dsh-wb-actions">
             <PressableButton
-              as="button"
+              
               type="button"
               className="dsh-wb-btn primary"
               data-blueprint-apply-action="true"

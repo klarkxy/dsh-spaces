@@ -32,21 +32,7 @@ import type { WorkbenchJobContext } from "../../src/adapters/node/maintenance/wo
 import { stringifyBlueprint } from "@klarkxy/dsh-blueprint/v1/codec";
 import { parseBlueprint } from "@klarkxy/dsh-blueprint/v1";
 import type { Blueprint } from "@klarkxy/dsh-blueprint/v1/types";
-import { GlobalLlmHost } from "../../src/core/application/global-llm-host.ts";
 import { BlueprintPackageError } from "../../src/adapters/node/blueprint/blueprint-package.ts";
-import { GlobalLlmService } from "../../src/core/application/global-llm-service.ts";
-import {
-  LLM_ERROR,
-  LlmConfigError,
-  compileManagedRouteId,
-  parseCatalog,
-  type GlobalLlmCatalog,
-  type SpaceLlmPolicy,
-} from "../../src/shared/llm-connections.ts";
-import type { LlmInstanceRecord, LlmOperationRecord, LlmOperationStore, LlmSpaceSettingsPort, SpaceDefaultModel } from "../../src/core/ports/llm-runtime.ts";
-import type { LlmCatalogStore, LlmCredentialStore, LlmPolicyStore } from "../../src/core/ports/llm-store.ts";
-import type { LlmApiRequest, LlmApiResult, LlmLocalCandidate } from "../../src/shared/llm-api.ts";
-import type { LlmShareManifest } from "../../src/shared/llm-share.ts";
 import { BLUEPRINT_ORIGIN_FILE, type WorkbenchBlueprintApplyOutcome } from "../../src/shared/workbench-blueprint.ts";
 import type { WorkbenchSpace } from "../../src/shared/workbench.ts";
 import { spaceIdFromName } from "../../src/shared/types.ts";
@@ -181,83 +167,6 @@ function composeOk(
   });
 }
 
-function describePayload(enabled = true, modelId = "m1", revision = 1): LlmApiResult {
-  return {
-    revision,
-    connections: [
-      {
-        id: CONN,
-        revision: 1,
-        displayName: "demo",
-        enabled,
-        backend: "llm-pi-ai",
-        providerConfig: { models: [{ id: modelId }] },
-        auth: { kind: "none" },
-        createdAt: "2026-09-21T00:00:00.000Z",
-        updatedAt: "2026-09-21T00:00:00.000Z",
-        routeId: "spaces-llm-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        usedBySpaceIds: [],
-      },
-    ],
-    defaultModel: null,
-    capabilities: {
-      adapter: "llm-pi-ai",
-      adapterVersion: "0.2.1-rc.2",
-      protocols: ["openai-completions", "openai-responses", "anthropic-messages"],
-      keyless: false,
-    },
-    pendingRestartSpaceIds: [],
-  };
-}
-
-function llmDescribe(enabled = true, modelId = "m1"): (request: LlmApiRequest) => Promise<LlmApiResult> {
-  const catalogRevision = 1;
-  let policyRevision = 0;
-  let shared: SpaceLlmPolicy["shared"] = { mode: "none" };
-  return async (request) => {
-    if (!request || typeof request !== "object" || !("method" in request)) {
-      throw new Error("llm fixture requires a method");
-    }
-    if (request.method === "describe") return describePayload(enabled, modelId, catalogRevision);
-    if (request.method === "spacePolicy") {
-      return {
-        spaceId: request.spaceId,
-        policy: { schemaVersion: 1, revision: policyRevision, shared },
-        targetCatalogRevision: catalogRevision,
-        runningCatalogRevision: null,
-        pendingRestart: false,
-      };
-    }
-    if (request.method === "updateSpacePolicy") {
-      if (request.expectedRevision !== policyRevision) {
-        throw new LlmConfigError(LLM_ERROR.REVISION_CONFLICT, "policy revision moved");
-      }
-      policyRevision += 1;
-      shared = request.shared;
-      return {
-        spaceId: request.spaceId,
-        policy: { schemaVersion: 1, revision: policyRevision, shared },
-        targetCatalogRevision: catalogRevision,
-        runningCatalogRevision: null,
-        pendingRestart: false,
-      };
-    }
-    if (request.method === "updateSpaceDefault") {
-      return {
-        spaceId: request.spaceId,
-        source: request.model ? "local" : "none",
-        inheritGlobal: !request.model,
-        local: request.model ? { provider: compileManagedRouteId(request.model.connectionId), model: request.model.modelId } : null,
-        global: null,
-        effective: request.model
-          ? { provider: compileManagedRouteId(request.model.connectionId), model: request.model.modelId, origin: "local" as const }
-          : null,
-      };
-    }
-    throw new Error(`llm fixture does not implement ${request.method}`);
-  };
-}
-
 function portsOf(
   dshHome: string,
   spaces: WorkbenchSpace[],
@@ -273,9 +182,6 @@ function portsOf(
       spaces.push(space(spaceIdFromName(input.name)));
     },
     installPlugin: async () => {},
-    llm: extra.llm ?? llmDescribe(),
-    llmAdmitted: extra.llmAdmitted ?? extra.llm ?? llmDescribe(),
-    llmBridgeAvailable: extra.llmBridgeAvailable ?? (() => true),
     dshVersion: () => "0.1.5-rc.2",
     spacesVersion: () => "0.3.1",
     runtimeBin: () => join(dshHome, "bin.js"),
@@ -342,7 +248,6 @@ test("product schemas accept blueprint apply detail and reject path-bearing dura
     writes: [
       { kind: "patch", status: "not-run" },
       { kind: "settings", status: "not-run" },
-      { kind: "model", status: "not-run" },
       { kind: "provenance", status: "not-run" },
     ],
     host: { dsh: null, spaces: null, base: null, webApp: null },
@@ -696,314 +601,11 @@ test("existing settings product still reads on a disposable Home", async () => {
     listSpaces: () => [space("coding")],
     createSpace: async () => {},
     installPlugin: async () => {},
-    llm: async () => ({ revision: 0, connections: [], defaultModel: null }) as LlmApiResult,
     diagnostics: (spaceId) => ({ spaceId, status: "stopped", logs: [], backups: [] }),
     withWrite: (_label, action) => lock.run(_label, action),
   } satisfies WorkbenchProductPorts);
   const result = await service.read({ method: "settings" });
   assert.equal(result.method, "settings");
-});
-
-class MemoryCatalogStore implements LlmCatalogStore {
-  constructor(private catalog: GlobalLlmCatalog) {}
-  async read(): Promise<GlobalLlmCatalog> {
-    return this.catalog;
-  }
-  async write(next: GlobalLlmCatalog, expectedRevision: number): Promise<GlobalLlmCatalog> {
-    if (this.catalog.revision !== expectedRevision) {
-      throw new LlmConfigError(LLM_ERROR.REVISION_CONFLICT, "catalog revision moved");
-    }
-    this.catalog = parseCatalog(next);
-    return this.catalog;
-  }
-}
-
-class MemoryPolicyStore implements LlmPolicyStore {
-  private readonly files = new Map<string, SpaceLlmPolicy>();
-  async read(spaceId: string): Promise<SpaceLlmPolicy> {
-    return this.files.get(spaceId) ?? { schemaVersion: 1, revision: 0, shared: { mode: "none" } };
-  }
-  async write(spaceId: string, next: SpaceLlmPolicy, expectedRevision: number): Promise<SpaceLlmPolicy> {
-    const current = await this.read(spaceId);
-    if (current.revision !== expectedRevision) {
-      throw new LlmConfigError(LLM_ERROR.REVISION_CONFLICT, "policy revision moved");
-    }
-    this.files.set(spaceId, next);
-    return next;
-  }
-}
-
-class MemoryCredentialStore implements LlmCredentialStore {
-  async writeRecord() {
-    return { recordId: "unused", configured: true, writable: false, source: "spaces-global" as const };
-  }
-  async readSecret() {
-    return undefined;
-  }
-  async describe(recordId: string) {
-    return { recordId, configured: false, writable: true, source: "spaces-global" as const };
-  }
-}
-
-class MemoryOperationStore implements LlmOperationStore {
-  async get() {
-    return undefined;
-  }
-  async begin(operationId: string): Promise<LlmOperationRecord> {
-    return { operationId, status: "unknown", createdAt: "2026-09-21T00:00:00.000Z" };
-  }
-  async commit(operationId: string, input: { catalogRevision: number; connectionId: string }): Promise<LlmOperationRecord> {
-    return {
-      operationId,
-      status: "committed",
-      catalogRevision: input.catalogRevision,
-      connectionId: input.connectionId,
-      createdAt: "2026-09-21T00:00:00.000Z",
-    };
-  }
-  async markUnknown(operationId: string): Promise<LlmOperationRecord> {
-    return { operationId, status: "unknown", createdAt: "2026-09-21T00:00:00.000Z" };
-  }
-}
-
-class MemoryInstances {
-  async list(): Promise<LlmInstanceRecord[]> {
-    return [];
-  }
-  async get(): Promise<LlmInstanceRecord | undefined> {
-    return undefined;
-  }
-  async markApplied() {}
-}
-
-class MemorySpaceSettings implements LlmSpaceSettingsPort {
-  defaults = new Map<string, SpaceDefaultModel>();
-  async readDefault(spaceId: string) {
-    return this.defaults.get(spaceId) ?? null;
-  }
-  async writeDefault(spaceId: string, value: SpaceDefaultModel | null) {
-    if (value === null) this.defaults.delete(spaceId);
-    else this.defaults.set(spaceId, value);
-  }
-  async listLocal(): Promise<LlmLocalCandidate[]> {
-    return [];
-  }
-  async readLocalProvider(): Promise<Record<string, unknown>> {
-    throw new LlmConfigError(LLM_ERROR.MODEL_NOT_FOUND, "local connection was not found");
-  }
-  async readCopyableSecret() {
-    return undefined;
-  }
-  async readImport(): Promise<LlmShareManifest | null> {
-    return null;
-  }
-}
-
-function seededCatalog(): GlobalLlmCatalog {
-  return parseCatalog({
-    schemaVersion: 1,
-    revision: 1,
-    connections: {
-      [CONN]: {
-        id: CONN,
-        revision: 1,
-        displayName: "demo",
-        enabled: true,
-        backend: "llm-pi-ai",
-        providerConfig: {
-          api: "openai-completions",
-          baseURL: "http://127.0.0.1:9/v1",
-          models: [{ id: "m1" }],
-        },
-        auth: { kind: "none" },
-        createdAt: "2026-09-21T00:00:00.000Z",
-        updatedAt: "2026-09-21T00:00:00.000Z",
-      },
-    },
-    defaultModel: null,
-    retiredConnectionIds: [],
-  });
-}
-
-function modelBlueprint(): Blueprint {
-  return parseBlueprint(
-    baseBlueprint({
-      inputs: [{ id: "model", type: "model", label: "Model", required: true }],
-      bindings: [{ input: "model", target: { kind: "default-model" } }],
-    }),
-  );
-}
-
-test("bindModel uses space policy revision through admitted LLM and does not re-queue", async () => {
-  const dshHome = home();
-  const spaces: WorkbenchSpace[] = [];
-  const catalog = new MemoryCatalogStore(seededCatalog());
-  const policies = new MemoryPolicyStore();
-  const settings = new MemorySpaceSettings();
-  const service = new GlobalLlmService(catalog, policies, new MemoryCredentialStore(), async () => spaces.map((row) => row.id));
-  const host = new GlobalLlmHost({
-    service,
-    operations: new MemoryOperationStore(),
-    instances: new MemoryInstances(),
-    probe: {
-      discover: async () => ({ models: [{ id: "m1" }], truncated: false }),
-      test: async ({ modelId }) => ({ ok: true as const, modelId }),
-    },
-    spaceSettings: settings,
-    assertWritable: () => {},
-    submitApply: async () => {
-      throw new Error("applyPlan must not run during blueprint model bind");
-    },
-    readSecret: async () => undefined,
-  });
-  const methods: string[] = [];
-  const wb = new BlueprintWorkbench(
-    portsOf(dshHome, spaces, {
-      createSpace: async (input) => {
-        writeSpace(dshHome, spaceIdFromName(input.name), {
-          deps: {
-            "@deepseek-ai/dsh-base": "0.1.5-rc.2",
-            "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
-            "@dsh-spaces/view-bridge": "0.3.1",
-            "@dsh-spaces/llm-bridge": "0.3.1",
-          },
-          bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"],
-        });
-        spaces.push(space(spaceIdFromName(input.name)));
-      },
-      llm: async () => {
-        throw new Error("llm port re-queued the exclusive tail");
-      },
-      llmAdmitted: async (request) => {
-        methods.push(request.method);
-        return (await host.dispatch(request)) as LlmApiResult;
-      },
-    }),
-  );
-  const preview = await wb.preview({
-    content: stringifyBlueprint(modelBlueprint()),
-    name: "model-space",
-    values: { model: { connectionId: CONN, modelId: "m1" } },
-  });
-  assert.ok(preview.planId);
-  const outcome = await wb.apply(preview.planId!, jobCtx().ctx);
-  assert.equal(outcome.stages.presets.status, "succeeded");
-  assert.equal(outcome.writes.find((row) => row.kind === "model")?.status, "succeeded");
-  assert.equal(methods.filter((method) => method === "updateSpacePolicy").length, 1);
-  assert.equal(methods.filter((method) => method === "updateSpaceDefault").length, 1);
-  assert.ok(methods.includes("spacePolicy"));
-  assert.equal(methods.includes("describe"), true);
-  const policy = await policies.read("space-model-space");
-  assert.equal(policy.revision, 1);
-  assert.equal(policy.shared.mode, "selected");
-  if (policy.shared.mode === "selected") assert.deepEqual(policy.shared.connectionIds, [CONN]);
-  assert.deepEqual(settings.defaults.get("space-model-space"), {
-    provider: compileManagedRouteId(CONN),
-    model: "m1",
-  });
-  const manifest = JSON.parse(readFileSync(join(dshHome, "profiles", "space-model-space", "package.json"), "utf8")) as {
-    dsh?: { profile?: { bundles?: string[] } };
-  };
-  assert.equal(manifest.dsh?.profile?.bundles?.includes("@dsh-spaces/llm-bridge"), true);
-  assert.equal((await catalog.read()).revision, 1);
-});
-
-test("late model llm-bridge composition is validated before provenance", async () => {
-  const dshHome = home();
-  const spaces: WorkbenchSpace[] = [];
-  const composedBundles: string[][] = [];
-  const wb = new BlueprintWorkbench(
-    portsOf(dshHome, spaces, {
-      createSpace: async (input) => {
-        writeSpace(dshHome, spaceIdFromName(input.name), {
-          deps: {
-            "@deepseek-ai/dsh-base": "0.1.5-rc.2",
-            "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
-            "@dsh-spaces/llm-bridge": "0.3.1",
-          },
-          bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
-        });
-        spaces.push(space(spaceIdFromName(input.name)));
-      },
-      composeRuntime: async (options, input) => {
-        composedBundles.push([...input.bundles]);
-        if (input.bundles.includes("@dsh-spaces/llm-bridge")) {
-          throw new Error("The llm-bridge bundle could not be composed.");
-        }
-        return composeOk()(options, input);
-      },
-      llmAdmitted: llmDescribe(),
-    }),
-  );
-  const preview = await wb.preview({
-    content: stringifyBlueprint(modelBlueprint()),
-    name: "late-bridge-invalid",
-    values: { model: { connectionId: CONN, modelId: "m1" } },
-  });
-  assert.ok(preview.planId);
-  const { ctx, recorded } = jobCtx();
-  await assert.rejects(() => wb.apply(preview.planId!, ctx), /could not be composed|composition could not be verified/);
-  assert.equal(composedBundles.length, 1);
-  assert.equal(composedBundles[0]?.includes("@dsh-spaces/llm-bridge"), true);
-  const last = recorded.at(-1) as {
-    product?: {
-      stages?: { packages?: { status?: string }; presets?: { status?: string } };
-      writes?: Array<{ kind: string; status: string }>;
-    };
-  };
-  assert.equal(last.product?.stages?.packages?.status, "succeeded");
-  assert.equal(last.product?.stages?.presets?.status, "failed");
-  assert.equal(last.product?.writes?.find((row) => row.kind === "patch")?.status, "succeeded");
-  assert.equal(last.product?.writes?.find((row) => row.kind === "settings")?.status, "succeeded");
-  assert.equal(last.product?.writes?.find((row) => row.kind === "model")?.status, "succeeded");
-  assert.equal(last.product?.writes?.find((row) => row.kind === "provenance")?.status, "not-run");
-  assert.equal(existsSync(join(dshHome, "profiles", "space-late-bridge-invalid")), true);
-
-  const okHome = home();
-  const okSpaces: WorkbenchSpace[] = [];
-  const okBundles: string[][] = [];
-  const ok = new BlueprintWorkbench(
-    portsOf(okHome, okSpaces, {
-      createSpace: async (input) => {
-        writeSpace(okHome, spaceIdFromName(input.name), {
-          deps: {
-            "@deepseek-ai/dsh-base": "0.1.5-rc.2",
-            "@deepseek-ai/dsh-web-app": "0.1.5-rc.2",
-            "@dsh-spaces/llm-bridge": "0.3.1",
-          },
-          bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
-        });
-        okSpaces.push(space(spaceIdFromName(input.name)));
-      },
-      composeRuntime: async (options, input) => {
-        okBundles.push([...input.bundles]);
-        return composeOk({
-          layers: input.bundles.map((name) => ({
-            name,
-            version: name.startsWith("@deepseek-ai/") ? "0.1.5-rc.2" : "0.3.1",
-          })),
-        })(options, input);
-      },
-      llmAdmitted: llmDescribe(),
-    }),
-  );
-  const okPreview = await ok.preview({
-    content: stringifyBlueprint(modelBlueprint()),
-    name: "late-bridge-ok",
-    values: { model: { connectionId: CONN, modelId: "m1" } },
-  });
-  assert.ok(okPreview.planId);
-  const okOutcome = await ok.apply(okPreview.planId!, jobCtx().ctx);
-  assert.equal(okOutcome.stages.packages.status, "succeeded");
-  assert.equal(okOutcome.stages.presets.status, "succeeded");
-  assert.equal(okOutcome.writes.find((row) => row.kind === "model")?.status, "succeeded");
-  assert.equal(okOutcome.writes.find((row) => row.kind === "provenance")?.status, "succeeded");
-  assert.equal(okBundles.length, 1);
-  assert.equal(okBundles[0]?.includes("@dsh-spaces/llm-bridge"), true);
-  const okManifest = JSON.parse(readFileSync(join(okHome, "profiles", "space-late-bridge-ok", "package.json"), "utf8")) as {
-    dsh?: { profile?: { bundles?: string[] } };
-  };
-  assert.equal(okManifest.dsh?.profile?.bundles?.includes("@dsh-spaces/llm-bridge"), true);
 });
 
 test("named insert of a selected package can preview on a home with no target profile", async () => {
@@ -1354,7 +956,6 @@ test("provenance failure keeps skipped model not-run and retains partial setting
   const writes = last.product?.writes ?? [];
   assert.equal(writes.find((row) => row.kind === "patch")?.status, "succeeded");
   assert.equal(writes.find((row) => row.kind === "settings")?.status, "succeeded");
-  assert.equal(writes.find((row) => row.kind === "model")?.status, "not-run");
   assert.equal(writes.find((row) => row.kind === "provenance")?.status, "failed");
   assert.equal(writes.find((row) => row.kind === "provenance")?.error, "Blueprint provenance could not be saved.");
   assert.equal(last.product?.stages?.presets?.status, "failed");

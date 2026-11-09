@@ -14,7 +14,6 @@ import { extractArchiveAsync } from "../../src/adapters/node/runtime/toolchain.t
 
 const repo = join(import.meta.dirname, "..", "..");
 const patchPath = join(repo, "packages/llm-bridge/cordis.patch.yml");
-const fixtures = join(repo, "tests/fixtures/llm-bridge-runtime");
 const BRIDGE_ID = "dsh-spaces-llm-bridge";
 const BRIDGE_NAME = "@dsh-spaces/llm-bridge";
 const LEGACY_BUNDLE_OBJECT_YAML = "bundle:\n  - id: dsh-spaces-llm-bridge\n    name: '@dsh-spaces/llm-bridge'\n";
@@ -70,22 +69,6 @@ function parseResultJson(stdout: string): Record<string, unknown> {
   }
 }
 
-function runBridgeFixture(script: string): Record<string, unknown> {
-  const tempRoot = mkdtempSync(join(tmpdir(), "dsh-spaces-llm-bridge-"));
-  temps.push(tempRoot);
-  const child = spawnSync(process.execPath, ["--import", "tsx", join(fixtures, script)], {
-    cwd: repo,
-    env: { ...process.env, DSH_BRIDGE_TEST_ROOT: tempRoot },
-    encoding: "utf8",
-    timeout: 120_000,
-    windowsHide: true,
-  });
-  assert.equal(child.status, 0, child.stderr || child.stdout || child.error?.message || "Bridge fixture failed.");
-  const result = parseResultJson(child.stdout);
-  assert.equal(result.failure, undefined);
-  assert.equal(result.sourceStable, true);
-  return result;
-}
 
 test("llm-bridge is a packable DSH plugin and is embedded in the plugin payload list", () => {
   const pkg = JSON.parse(readFileSync(join(repo, "packages/llm-bridge/package.json"), "utf8")) as {
@@ -149,6 +132,65 @@ test("packed auxiliary export survives startup staging and imports from the stag
 });
 
 test(
+  "bridge rows activate without a spacesLlmSnapshot provider (marker-proof)",
+  async () => {
+    // The real Cordis loader only mounts an entry after every inject target
+    // exists. Mounting composed rows against marker implementations proves the
+    // patch no longer blocks on a provider that does not exist.
+    const appBoot = await loadOfficialAppBoot();
+    const patches = asPatchList(appBoot.loadOverlayPatches("dsh", patchPath));
+    const composed = appBoot.composeEntries(
+      [[
+        {
+          insert: [
+            { id: "seed", name: "seed-mod" },
+            { id: "llm", name: "@deepseek-ai/dsh-llm" },
+            { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai" },
+            { id: "agent-default-model", name: "@deepseek-ai/dsh-agent-default-model" },
+            { id: "session-title-llm", name: "@deepseek-ai/dsh-session-title-first-prompt-llm" },
+            { id: "compaction-basic", name: "@deepseek-ai/dsh-compaction-basic" },
+            { id: "command-compact", name: "@deepseek-ai/dsh-command-compact" },
+          ],
+        },
+      ], patches],
+    );
+    const required = new Set<string>();
+    for (const row of composed) {
+      for (const name of Object.keys(row.inject ?? {})) required.add(name);
+    }
+    // Nothing may require the removed snapshot provider.
+    assert.equal(required.has("spacesLlmSnapshot"), false);
+
+    const { Context } = await import("@deepseek-ai/cordis");
+    const ctx = new Context();
+    for (const name of required) ctx.provide(name, {});
+    ctx.provide("loader", { import: async () => ({}) });
+    ctx.provide("spacesAuxiliarySources", { llm: {} });
+    ctx.provide("spacesTitleSource", { realm: Symbol("title") });
+    ctx.provide("spacesCommandsSource", { realm: Symbol("commands") });
+    ctx.provide("configEditor", { configuration: () => [] });
+    // Marker stand-ins for the composed plugins: activation succeeds when the
+    // inject graph is satisfiable without spacesLlmSnapshot.
+    const applied: string[] = [];
+    for (const row of composed) {
+      if (row.disabled) continue;
+      const plugin = {
+        name: String(row.id),
+        inject: Object.keys(row.inject ?? {}),
+        apply: () => { applied.push(String(row.id)); },
+      };
+      ctx.plugin(plugin);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(applied.includes("seed"));
+    assert.ok(applied.includes("llm-pi-ai"));
+    assert.ok(applied.includes("agent-default-model"));
+    assert.ok(applied.includes(BRIDGE_ID));
+    await ctx.fiber.dispose();
+  },
+);
+
+test(
   "llm-bridge bundle patch is a loader insert list that official compose mounts",
   async () => {
     const appBoot = await loadOfficialAppBoot();
@@ -189,52 +231,10 @@ test(
     const mounted = composed.find((row) => row.id === BRIDGE_ID);
     assert.equal(mounted?.name, BRIDGE_NAME);
     assert.deepEqual(mounted?.config, {});
-    assert.deepEqual(composed.find((row) => row.id === "llm-pi-ai")?.inject, { spacesLlmSnapshot: true });
-    assert.deepEqual(composed.find((row) => row.id === "agent-default-model")?.inject, { spacesLlmSnapshot: true });
+    // The retired snapshot provider is gone; nothing may gate activation on it.
+    for (const row of composed) {
+      const inject = (row.inject ?? {}) as Record<string, unknown>;
+      assert.equal("spacesLlmSnapshot" in inject, false, `${String(row.id)} must not inject the removed spacesLlmSnapshot`);
+    }
   },
 );
-
-test("official SettingsForms projects snapshot for PiAi and AgentDefaultModel", { timeout: 120_000 }, () => {
-  const result = runBridgeFixture("main.mjs");
-  assert.equal(result.modelFound, true);
-  assert.equal(result.defaultProjected, true);
-  assert.equal(result.localDelegation, true);
-  assert.equal(result.sharedCredentialReadOnly, true);
-  assert.equal(result.noProviderPersist, true);
-  assert.equal(result.disposedCleanly, true);
-  assert.equal(result.lateConsumerProjection, true);
-  assert.equal(result.consumerOwnsRegistration, true);
-});
-
-test("official SettingsForms rejects mutate bypasses and runtime conflict next", { timeout: 120_000 }, () => {
-  const result = runBridgeFixture("boundaries.mjs");
-  const sectionRoot = result.sectionRoot as { rejected?: boolean; noFileChange?: boolean };
-  const providersRoot = result.providersRoot as { rejected?: boolean; noFileChange?: boolean };
-  const runtimeRawConflict = result.runtimeRawConflict as { rejected?: boolean; nextCalls?: number };
-  const localDelegation = result.localDelegation as { referenceReadWrite?: boolean; recordReadWrite?: boolean };
-  assert.equal(sectionRoot.rejected, true);
-  assert.equal(sectionRoot.noFileChange, true);
-  assert.equal(providersRoot.rejected, true);
-  assert.equal(providersRoot.noFileChange, true);
-  assert.equal(runtimeRawConflict.rejected, true);
-  assert.equal(runtimeRawConflict.nextCalls, 0);
-  assert.equal(localDelegation.referenceReadWrite, true);
-  assert.equal(localDelegation.recordReadWrite, true);
-});
-
-test("bridge dispose withdraws shared projection and forged managed routes are rejected", { timeout: 120_000 }, () => {
-  const result = runBridgeFixture("lifecycle.mjs");
-  const late = result.lateConsumerBridgeDispose as {
-    beforeDispose?: boolean;
-    providerStillPresent?: boolean;
-    defaultAfterDispose?: { provider?: string; model?: string };
-    namespaceStillRegistered?: boolean;
-    error?: string;
-  };
-  const forged = result.forgedManagedRoute as { error?: string };
-  assert.equal(late.beforeDispose, true);
-  assert.equal(late.providerStillPresent, false);
-  assert.equal(late.namespaceStillRegistered, false);
-  assert.ok(late.defaultAfterDispose == null || late.defaultAfterDispose.provider === "composition");
-  assert.match(String(forged.error ?? ""), /occupy a managed shared LLM route|MANAGED_ROUTE_CONFLICT|conflict|reserved/i);
-});

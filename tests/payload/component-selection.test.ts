@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { COMPONENT_PAYLOAD_PACKAGES, writeComponentPayloadManifest } from "../../src/adapters/node/payload/component-payload.ts";
 import {
-  COLD_START_LOCK_NAME,
   coldStartLockLabel,
   ComponentSelectionError,
   readSelectedComponentPayload,
@@ -72,6 +71,10 @@ function dummyPayload(): { root: string; lib: string } {
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
     ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
+    ["lib/space-control.js", "export const control = 1;\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
   ];
   for (const [rel, content] of files) writeRel(root, rel, content);
   return { root, lib: join(root, "lib") };
@@ -124,6 +127,10 @@ test("stage reads a validated payload from profiles/web inside the target Home",
     ["lib/llm-bridge/LICENSE", "llm-license\n"],
     ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
+    ["lib/space-control.js", "export const control = 1;\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   const lib = join(pluginRoot, "lib");
@@ -176,8 +183,6 @@ test("select requires this process's cold-start reservation when no owner is hel
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
   assert.throws(() => selectComponentPayload(home, tools, staged.digest), /reservation|occupancy/);
   assert.equal(readSelectedComponentPayload(home, tools), undefined);
-  mkdirSync(join(tools, COLD_START_LOCK_NAME));
-  assert.throws(() => selectComponentPayload(home, tools, staged.digest), /reservation/);
   const selected = await new HomeOperationLock(tools).run(coldStartLockLabel(home), async () => selectComponentPayload(home, tools, staged.digest));
   assert.equal(selected.digest, staged.digest);
   const again = readSelectedComponentPayload(home, tools);
@@ -190,7 +195,6 @@ test("select refuses a live non-launcher owner and does not write a pointer", ()
   const tools = tempDir("dsh-sel-tools-");
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
-  mkdirSync(join(tools, COLD_START_LOCK_NAME));
   const lease = new HomeLease(home);
   const handle = lease.acquire("web");
   assert.throws(() => selectComponentPayload(home, tools, staged.digest), ComponentSelectionError);
@@ -204,7 +208,7 @@ test("select is allowed for the current launcher occupancy", () => {
   const { lib } = dummyPayload();
   const staged = stageComponentPayload(home, tools, writeComponentPayloadManifest(lib).payloadRootLib);
   const lease = new HomeLease(home);
-  const handle = lease.acquire("desktop");
+  const handle = lease.acquire("web");
   writeFileSync(join(lease.runDir, HOME_CONTROL_OWNER_FILE), `${JSON.stringify({
     version: 2,
     phase: "launcher",
@@ -216,7 +220,7 @@ test("select is allowed for the current launcher occupancy", () => {
     serviceEpoch: "cd".repeat(32),
     artifactDigest: "ef".repeat(32),
     secretHash: "12".repeat(32),
-    original: { pid: handle.owner.pid, nonce: handle.owner.nonce, startedAt: handle.owner.startedAt, kind: "desktop" },
+    original: { pid: handle.owner.pid, nonce: handle.owner.nonce, startedAt: handle.owner.startedAt, kind: "web" },
   })}\n`);
   assert.throws(() => new HomeLease(home).acquire("web"), HomeControlBusyError);
   const selected = selectComponentPayload(home, tools, staged.digest);

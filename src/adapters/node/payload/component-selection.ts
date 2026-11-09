@@ -17,7 +17,6 @@ import { digestHomeIdentity } from "../server/workbench-protocol";
 export const COMPONENT_SELECTION_SCHEMA_VERSION = 2 as const;
 export const COMPONENT_SELECTION_CODE = "component-selection/invalid" as const;
 export const COMPONENT_STAGED_DIR_NAME = "components";
-export const COLD_START_LOCK_NAME = "coldstart.lock";
 
 export function coldStartLockLabel(home: string, access?: ComponentHomeAccess): string {
   return `supervisor-start:${digestHomeIdentity(boundHome(home, access))}`;

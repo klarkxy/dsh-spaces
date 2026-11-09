@@ -15,7 +15,6 @@ export class SpaceRunRegistry {
   readonly workspaceOrigins = new Set<string>();
   readonly spawned = new Map<string, { pid: number; startedAt: string }>();
   readonly unmanaged = new Set<string>();
-  readonly llmApplied = new Map<string, number>();
 
   generation(id: string): number {
     return this.generations.get(id) ?? 0;

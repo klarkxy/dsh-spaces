@@ -172,8 +172,6 @@ function sharePreview(): SpaceSharePreview {
     plugins: [{ packageName: "demo", resolvedVersion: "1.2.3", source: "npm" }],
     hasConfig: false,
     unknownSources: [],
-    llmMappingRequired: true,
-    llmRequirements: [],
   };
 }
 
@@ -475,6 +473,10 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
     state: async () => {
       calls.push({ method: "state", arg: undefined });
       return state();
+    },
+    startupStatus: async () => {
+      calls.push({ method: "startupStatus", arg: undefined });
+      return { serviceEpoch: "a".repeat(64), managerId: "hub", phase: "ready", reasons: [], failure: null };
     },
     detail: async (spaceId) => {
       calls.push({ method: "detail", arg: spaceId });
@@ -959,12 +961,12 @@ test("the settings navigation groups the everyday tabs and keeps plugins and blu
     return /hidden/.test(tag) ? main : [...main, ...ids(rest)];
   };
   const collapsed = ready(ctrl);
-  assert.deepEqual(visibleTabIds(collapsed), ["spaces", "templates", "llm", "general"]);
+  assert.deepEqual(visibleTabIds(collapsed), ["spaces", "templates", "general"]);
   assert.ok(!collapsed.includes('id="settings-tab-plugins"'));
   assert.ok(!collapsed.includes('id="settings-tab-blueprints"'));
   ctrl.toggleMaintenance();
   const expanded = ready(ctrl);
-  assert.deepEqual(visibleTabIds(expanded), ["spaces", "templates", "llm", "general", "overview", "snapshots", "runtime", "advanced"]);
+  assert.deepEqual(visibleTabIds(expanded), ["spaces", "templates", "general", "overview", "snapshots", "runtime", "advanced"]);
 });
 
 test("the maintenance group stays visible, remembers its state and expands around its active tab", async () => {
@@ -1436,31 +1438,33 @@ test("the space detail page offers the per-status actions and hides them for the
     const html = ready(ctrl);
     const detail = html.indexOf(`data-space-detail="true" data-space-id="${spaceId}"`);
     assert.notEqual(detail, -1, `detail page for ${spaceId}`);
-    const from = html.indexOf(`data-space-section="${section}"`, detail);
-    assert.notEqual(from, -1, `section ${section} of ${spaceId}`);
-    const to = html.indexOf('data-space-section="', from + 10);
-    const segment = html.slice(from, to === -1 ? html.length : to);
+    const to = section === "header" ? html.indexOf('data-space-tablist', detail) : html.indexOf('data-space-section="', html.indexOf(`data-space-section="${section}"`, detail) + 10);
+    const region = section === "header" ? html.slice(detail, to === -1 ? html.length : to)
+      : html.slice(html.indexOf(`data-space-section="${section}"`, detail), to === -1 ? html.length : to);
+    const from = section === "header" ? region.indexOf('dsh-wb-actions') : 0;
+    if (section === "header" && from === -1) return [];
+    const segment = region.slice(from);
     return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
   };
   ctrl.openDetail("alpha");
   await flush();
   await flush();
-  assert.deepEqual(detailButtons("alpha", "overview"), [enter, stop, restart]);
+  assert.deepEqual(detailButtons("alpha", "header"), [enter, stop, restart]);
   assert.deepEqual(detailButtons("alpha", "danger"), [del]);
   ctrl.openDetail("beta");
   await flush();
   await flush();
-  assert.deepEqual(detailButtons("beta", "overview"), [enter, start]);
+  assert.deepEqual(detailButtons("beta", "header"), [enter, start]);
   assert.deepEqual(detailButtons("beta", "danger"), [del]);
   ctrl.openDetail("rogue");
   await flush();
   await flush();
-  assert.deepEqual(detailButtons("rogue", "overview"), []);
+  assert.deepEqual(detailButtons("rogue", "header"), []);
   assert.deepEqual(detailButtons("rogue", "danger"), []);
   ctrl.openDetail("hub");
   await flush();
   await flush();
-  assert.deepEqual(detailButtons("hub", "overview"), []);
+  assert.deepEqual(detailButtons("hub", "header"), []);
   assert.deepEqual(detailButtons("hub", "danger"), []);
 });
 
@@ -1468,10 +1472,11 @@ test("detail page actions are disabled without mutation rights or while busy", a
   const overviewButtons = (html: string, spaceId: string): Array<{ tag: string; label: string }> => {
     const detail = html.indexOf(`data-space-detail="true" data-space-id="${spaceId}"`);
     assert.notEqual(detail, -1, `detail page for ${spaceId}`);
-    const from = html.indexOf(`data-space-section="overview"`, detail);
-    assert.notEqual(from, -1, `overview section of ${spaceId}`);
-    const to = html.indexOf('data-space-section="', from + 10);
-    const segment = html.slice(from, to === -1 ? html.length : to);
+    const to = html.indexOf('data-space-tablist', detail);
+    const region = html.slice(detail, to === -1 ? html.length : to);
+    const from = region.indexOf('dsh-wb-actions');
+    if (from === -1) return [];
+    const segment = region.slice(from);
     return [...segment.matchAll(/<button[^>]*>([^<]*)<\/button>/g)]
       .map((match) => ({ tag: match[0], label: match[1] }));
   };
@@ -2083,7 +2088,6 @@ test("import preview then confirm submits once and does not resend after epoch c
   assert.equal(ctrl.getSnapshot().importPreview?.importId, "imp-1");
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "share.confirmImport")));
-  assert.ok(html.includes(t("zh", "share.llmMapping")));
   ctrl.setImportName("notes");
   ctrl.confirmImport();
   await flush();
@@ -2134,7 +2138,6 @@ test("failed import jobs keep partial product results", () => {
                 spaceId: "notes",
                 errors: ["plugin demo failed"],
                 pendingManual: [],
-                llm: { mappingRequired: true, requirements: [], mapped: false },
               },
             },
           },
@@ -2654,4 +2657,272 @@ test("known server preview-rejection reasons are localized", () => {
   assert.ok(epoch.includes(t("zh", "error.epochChanged")));
   const english = localizeError("en", { code: "workbench/conflict", message: "The target changed. Request a new preview." });
   assert.ok(english.includes(t("en", "error.targetChanged")));
+});
+
+test("active jobs are announced in the global status with kind, phase and message", async () => {
+  const api = fakeApi({
+    state: async () => state({
+      jobs: [job({ kind: "space.create", status: "running", phase: "install", message: "DSH 0.2.1-rc.5" })],
+    }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-active-job="job-1"'));
+  assert.ok(html.includes("创建空间 · 安装中 — DSH 0.2.1-rc.5"));
+  ctrl.setLocale("en");
+  const en = ready(ctrl);
+  assert.ok(en.includes("Create space · Installing — DSH 0.2.1-rc.5"));
+});
+
+test("finished jobs leave the global status quiet", async () => {
+  const api = fakeApi({
+    state: async () => state({ jobs: [job({ status: "failed", phase: "done", canCancel: false })] }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  assert.ok(!ready(ctrl).includes("data-active-job"));
+});
+
+test("the create dialog explains the disabled create button during another operation", async () => {
+  const api = fakeApi({
+    state: async () => state({
+      jobs: [job({ kind: "space.create", status: "running", phase: "install", message: "DSH 0.2.1-rc.5" })],
+    }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openCreate();
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-create-busy="true"'));
+  assert.ok(html.includes(t("zh", "create.busy")));
+  assert.match(html, /<button[^>]*type="submit"[^>]*disabled/);
+});
+
+test("the create dialog has no busy reason when nothing is running", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openCreate();
+  assert.ok(!ready(ctrl).includes("data-create-busy"));
+});
+
+test("a space create job renders a rail placeholder and blocks starting other spaces", async () => {
+  const createdJob = job({ id: "create-1", kind: "space.create", status: "running", phase: "install", message: "DSH 0.9.9",
+    affectedSpaceIds: ["made-space"], subject: { displayName: "Made Space", icon: "whale" } });
+  let current = state({ writable: true, jobs: [createdJob] });
+  const api = fakeApi({ state: async () => current });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  const markup = ready(ctrl);
+  assert.match(markup, /data-creation-step="1"/);
+  assert.match(markup, /data-creation-total="4"/);
+  assert.match(markup, /Made Space · 正在创建/);
+  // The same space id never shows as a normal space while its create is visible.
+  assert.doesNotMatch(markup, /data-space-id="made-space"[^>]*aria-current/);
+  // Selecting a running space still works.
+  ctrl.selectSpace("alpha");
+  await flush();
+  // Starting a stopped space is refused locally: error set, nothing submitted.
+  const submits = () => api.calls.filter((item) => item.method === "submit").length;
+  const before = submits();
+  ctrl.selectSpace("beta");
+  await flush();
+  assert.equal(submits(), before);
+  assert.match(ctrl.getSnapshot().commandError ?? "", /正在创建空间「Made Space」/);
+});
+
+test("a failed create placeholder stays until dismissed and opens a failure dialog", async () => {
+  const failedJob = job({ id: "create-dead", kind: "space.create", status: "failed", phase: "create",
+    affectedSpaceIds: ["lost-space"], error: { code: "workbench/failed", message: "install broke" },
+    subject: { displayName: "Lost Space" } });
+  // Never seen active: not rendered.
+  let hiddenCurrent = state({ writable: true, jobs: [failedJob] });
+  const hidden = controller(fakeApi({ state: async () => hiddenCurrent }));
+  await hidden.poll();
+  assert.doesNotMatch(ready(hidden), /data-creation-step=/);
+  // Seen active first: stays visible as failed and opens a reason dialog.
+  const runningJob = job({ id: "create-dead", kind: "space.create", status: "running", phase: "create",
+    affectedSpaceIds: ["lost-space"], subject: { displayName: "Lost Space" } });
+  let current = state({ writable: true, jobs: [runningJob] });
+  const ctrl = controller(fakeApi({ state: async () => current }));
+  await ctrl.poll();
+  current = state({ writable: true, jobs: [failedJob] });
+  await ctrl.poll();
+  assert.match(ready(ctrl), /data-creation-status="failed"/);
+  ctrl.openCreation(ctrl.visibleCreations()[0]);
+  await flush();
+  const dialog = ready(ctrl);
+  assert.match(dialog, /data-creation-error="true">install broke/);
+  assert.match(dialog, /查看任务|移除/);
+  ctrl.dismissCreation("create-dead");
+  await flush();
+  assert.doesNotMatch(ready(ctrl), /data-creation-step=/);
+});
+
+test("space detail page is a three-tab layout with the header carrying lifecycle actions", async () => {
+  const ctrl = controller(fakeApi());
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush(); await flush();
+  const html = ready(ctrl);
+  // Header carries identity + actions.
+  assert.ok(html.includes('dsh-wb-space-detail-header'), "header present");
+  assert.ok(html.includes('data-space-detail-back="true"'), "back button");
+  assert.ok(html.includes(`<code class="dsh-wb-muted">alpha</code>`), "space id as muted code");
+  assert.ok(html.includes(t("zh", "detail.enter")), "enter action in header");
+  // Tablist: three tabs with ARIA wiring.
+  const tablistSeg = html.slice(html.indexOf("data-space-tablist"), html.indexOf('data-space-tab="general"'));
+  const tabs = [...tablistSeg.matchAll(/role="tab"[^>]*aria-selected="(true|false)"[^>]*>/g)];
+  assert.equal(tabs.length, 3, "3 tabs for a web space");
+  assert.equal(tabs.filter(m => m[1] === "true").length, 1);
+  assert.ok(html.includes('aria-orientation="horizontal"'));
+  assert.ok(html.includes('data-space-tab="general"'));
+  assert.ok(html.includes('data-space-tab="plugins"'));
+  assert.ok(html.includes('data-space-tab="advanced"'));
+  assert.ok(html.includes('role="tabpanel"'));
+  // Panels stay mounted for effects; the three inactive ones are hidden.
+  const generalPanel = html.match(/data-space-tab="general"([^>]*)>/)?.[1] ?? "missing";
+  assert.ok(!generalPanel.includes("hidden"), "active general panel visible");
+  const pluginsPanel = html.match(/data-space-tab="plugins"([^>]*)>/)?.[1] ?? "missing";
+  assert.ok(pluginsPanel.includes("hidden"), "plugins panel hidden by default");
+});
+
+test("space detail browser base keeps three tabs and still shows 更换图标", async () => {
+  const browserSpace: WorkbenchSpace = { ...alpha, id: "browser-one", base: "browser", managed: true };
+  const ctrl = controller(fakeApi({ state: async () => state({ spaces: [manager, browserSpace] }) }));
+  await ctrl.poll();
+  ctrl.openDetail("browser-one");
+  await flush(); await flush();
+  const html = ready(ctrl);
+  const tablistSeg = html.slice(html.indexOf("data-space-tablist"), html.indexOf('data-space-tab="general"'));
+  const tabs = [...tablistSeg.matchAll(/role="tab"[^>]*aria-selected="(true|false)"[^>]*>/g)];
+  assert.equal(tabs.length, 3, "3 tabs for a browser space");
+  assert.ok(html.includes(t("zh", "detail.changeIcon")), "the icon entry point stays");
+});
+
+test("plugin row keeps its row actions inside the ⋯ menu and the install area collapsed", async () => {
+  const ctrl = controller(fakeApi({
+    plugins: async () => [
+      { id: "demo", title: "Demo", packageName: "catalog.demo", description: "A plugin", version: "1.0.0", installedIn: ["alpha"], protected: false },
+    ],
+    product: async (request) => {
+      if (request.method === "plugin.versions") {
+        throw Object.assign(new Error("registry offline: 503"), { code: "workbench/failed" });
+      }
+      return productResult(request);
+    },
+  }));
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush(); await flush(); await flush(); await flush();
+  const html = ready(ctrl);
+  // Title renders once (no duplicated id when it equals the title).
+  const row = html.match(/data-space-plugin="demo"[\s\S]*?<\/span>/)?.[0] ?? "";
+  assert.ok(row.includes("<strong>Demo</strong>"), "title once");
+  assert.ok(!row.includes(" · <code>demo</code>"), "id not duplicated when it equals the title");
+  // Version lookup failure is a compact tag carrying the full reason.
+  const note = html.match(/<small[^>]*data-space-plugin-versions-note="demo"[^>]*>/)?.[0] ?? "";
+  assert.notEqual(note, "", "compact versions note");
+  const noteTitle = note.match(/title="([^"]+)"/)?.[1] ?? "";
+  assert.ok(noteTitle.length > 0, "the tag title carries the full reason");
+  assert.ok(html.includes(t("zh", "plugins.versionsUnavailable")));
+  // Removal actions live inside the per-row ⋯ menu only; no menu exists while closed.
+  assert.ok(html.includes(`data-space-plugin-actions="demo"`), "the ⋯ trigger exists");
+  assert.ok(!html.includes('[role="menu"]'), "no menu is rendered while all are closed");
+  assert.ok(!html.includes('data-space-plugin-menu='), "closed menus do not exist in the DOM");
+  const rowText = html.match(/data-space-plugin="demo"[\s\S]*?(?=data-space-plugin=|dsh-wb-actions|data-space-plugin-install)/)?.[0] ?? "";
+  assert.ok(!rowText.includes(t("zh", "plugins.removeFromSpace")), "row shows no removal action outside the menu");
+  // Install area collapsed by default; the empty-state expander stays reachable.
+  assert.ok(html.includes('data-space-plugin-install-area="true" hidden'), "install area collapsed");
+});
+
+test("a plugins-origin error is also visible in the header while another tab is active", async () => {
+  const api = fakeApi({
+    preview: async () => {
+      throw Object.assign(new Error("nope"), { code: "workbench/invalid-input" });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.openDetail("alpha");
+  await flush();
+  ctrl.setPluginCatalog("demo", "1.0.0");
+  await flush();
+  ctrl.previewInstallSelected("alpha");
+  await flush();
+  const html = ready(ctrl);
+  // The plugins tab is inactive: the reason must still surface under the header.
+  const headerArea = html.slice(html.indexOf("dsh-wb-space-detail-header"), html.indexOf("data-space-tablist"));
+  assert.ok(headerArea.includes('data-inline-error="detail:alpha:plugins"'),
+    "the plugins failure surfaces in the header while the plugins tab is inactive");
+});
+
+// ---------------------------------------------------------------------------
+// Creator channel (creator.create) parity with ordinary space.create jobs.
+// ---------------------------------------------------------------------------
+
+test("a running creator.create job renders the rail placeholder and blocks starting other spaces", async () => {
+  const createdJob = job({ id: "creator-1", requestId: "creator-req-1", kind: "creator.create", status: "running",
+    phase: "plugins", message: "@acme/tool",
+    affectedSpaceIds: ["space-demo"], subject: { displayName: "Demo Space", icon: "whale" } });
+  let current = state({ writable: true, jobs: [createdJob] });
+  const api = fakeApi({ state: async () => current });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  const markup = ready(ctrl);
+  // Later pipeline stages share the last ring step instead of rewinding.
+  assert.match(markup, /data-creation-step="4"/);
+  assert.match(markup, /data-creation-total="4"/);
+  assert.match(markup, /Demo Space · 正在创建/);
+  assert.doesNotMatch(markup, /data-space-id="space-demo"[^>]*aria-current/);
+  // Starting a stopped space is refused locally while creation runs.
+  const submits = () => api.calls.filter((item) => item.method === "submit").length;
+  const before = submits();
+  ctrl.selectSpace("beta");
+  await flush();
+  assert.equal(submits(), before);
+  assert.match(ctrl.getSnapshot().commandError ?? "", /正在创建空间「Demo Space」/);
+});
+
+test("a creator.create failure keeps the seen placeholder and never enters automatically", async () => {
+  const runningJob = job({ id: "creator-dead", requestId: "creator-req-2", kind: "creator.create", status: "running",
+    phase: "plugins", affectedSpaceIds: ["space-lost"], subject: { displayName: "Lost Space" } });
+  const failedJob = job({ ...runningJob, status: "failed",
+    error: { code: "creator/failed", message: "plugin install broke" } });
+  let current = state({ writable: true, jobs: [runningJob] });
+  const ctrl = controller(fakeApi({ state: async () => current }));
+  await ctrl.poll();
+  current = state({ writable: true, jobs: [failedJob] });
+  await ctrl.poll();
+  assert.match(ready(ctrl), /data-creation-status="failed"/);
+  ctrl.openCreation(ctrl.visibleCreations()[0]);
+  await flush();
+  assert.match(ready(ctrl), /data-creation-error="true">plugin install broke/);
+  // A failed Agent job is a terminal record: no notice, no pending navigation.
+  assert.equal(ctrl.getSnapshot().createdNotice, null);
+});
+
+test("a succeeded creator.create shows the notice but never auto-enters", async () => {
+  const requestId = "creator-req-3";
+  const runningJob = job({ id: "creator-ok", requestId, kind: "creator.create", status: "running",
+    phase: "plugins", affectedSpaceIds: ["space-made"], subject: { displayName: "Made Space" } });
+  const doneJob = job({ id: "creator-ok", requestId, kind: "creator.create", status: "succeeded",
+    phase: "result", affectedSpaceIds: ["space-made"], subject: { displayName: "Made Space" },
+    result: { spaceId: "space-made" } });
+  let current = state({ writable: true, jobs: [runningJob] });
+  const ctrl = controller(fakeApi({ state: async () => current }));
+  await ctrl.poll();
+  assert.match(ready(ctrl), /Made Space · 正在创建/);
+  current = state({ writable: true, jobs: [doneJob], spaces: [manager, alpha, beta, space({ id: "space-made", displayName: "Made Space" })] });
+  await ctrl.poll();
+  await flush();
+  // The notice is shown; auto-enter is reserved for this client's own creates.
+  assert.deepEqual(ctrl.getSnapshot().createdNotice, { spaceId: "space-made" });
+  assert.equal(ctrl.getSnapshot().selected, "home");
+  assert.equal(ctrl.getSnapshot().pendingId, null);
+  ctrl.enterCreated();
+  await flush();
+  assert.equal(ctrl.getSnapshot().createdNotice, null);
+  assert.equal(ctrl.getSnapshot().pendingId, "space-made");
 });

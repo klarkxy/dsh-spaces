@@ -7,6 +7,7 @@
  */
 
 import type { WorkbenchJob, WorkbenchState } from "../../../../../../src/shared/workbench";
+import { projectSpaceCreations, type PortalCreation } from "../../../../../../src/shared/space-host";
 import { ACTIVE_JOB, CREATE_JOB } from "../constants";
 import { importSpaceId } from "../errors";
 import { RequestPart } from "./requests";
@@ -117,5 +118,25 @@ export abstract class JobPart extends RequestPart {
 
   hasActiveJobs(): boolean {
     return (this.ui.state?.jobs ?? []).some((job) => ACTIVE_JOB.has(job.status));
+  }
+
+  /** Creation placeholders for the rail: all active, plus failed ones seen while active and not dismissed. */
+  visibleCreations(): PortalCreation[] {
+    return projectSpaceCreations(this.ui.state?.jobs ?? []).filter((creation) =>
+      creation.status !== "failed" || (this.watchedCreates.has(creation.jobId) && !this.dismissedCreations.has(creation.jobId)));
+  }
+
+  dismissCreation(jobId: string): void {
+    this.dismissedCreations.add(jobId);
+    this.patch(this.ui.overlay?.type === "creation-failed" && this.ui.overlay.jobId === jobId ? { overlay: null } : {});
+  }
+
+  openCreation(creation: PortalCreation): void {
+    if (creation.status === "failed") {
+      this.patch({ overlay: { type: "creation-failed", jobId: creation.jobId } });
+      return;
+    }
+    this.selectHome();
+    this.setHomeTab("overview");
   }
 }

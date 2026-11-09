@@ -39,7 +39,7 @@ export abstract class OverlayPart extends NavigationPart {
   };
 
   setSettingsTab = (settingsTab: WorkbenchUiState["settingsTab"]): void => {
-    if (settingsTab !== "general" && settingsTab !== "llm" && settingsTab !== "advanced") {
+    if (settingsTab !== "general" && settingsTab !== "advanced") {
       this.setHomeTab(settingsTab);
       return;
     }

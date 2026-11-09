@@ -187,7 +187,6 @@ export class BlueprintWorkbench extends BlueprintWorkbenchPreviewOps {
     const writes: BlueprintWriteResult[] = [
       { kind: "patch", status: "not-run" },
       { kind: "settings", status: "not-run" },
-      { kind: "model", status: "not-run" },
       { kind: "provenance", status: "not-run" },
     ];
     outcome.writes = writes;
@@ -207,25 +206,13 @@ export class BlueprintWorkbench extends BlueprintWorkbenchPreviewOps {
       currentWrite = undefined;
       outcome.writes = [...writes];
       publish(outcome);
-      if (bound.model) {
-        currentWrite = "model";
-        await this.bindModel(spaceId, bound.model);
-        writes[2] = { kind: "model", status: "succeeded" };
-        currentWrite = undefined;
-      }
-      outcome.writes = [...writes];
-      publish(outcome);
       composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles, {
-        includeLlmBridge: Boolean(bound.model),
+        includeLlmBridge: false,
       });
-      if (bound.model) {
-        const lateError = await this.compositionError(spaceId, staged.blueprint, bound.patch, { force: true });
-        if (lateError) throw publicError(lateError);
-      }
       currentWrite = "provenance";
       await this.assertBuiltinRuntimeUnchanged(staged);
       writeProvenance(this.ports.home, spaceId, staged.blueprint, staged.values);
-      writes[3] = { kind: "provenance", status: "succeeded" };
+      writes[2] = { kind: "provenance", status: "succeeded" };
       currentWrite = undefined;
       outcome.writes = [...writes];
       outcome.host = hostOutcome(await this.hostVersions(spaceId));
@@ -289,7 +276,6 @@ function emptyOutcome(host: BlueprintHostVersions, packages: BlueprintPackageRes
     writes: [
       { kind: "patch", status: "not-run" },
       { kind: "settings", status: "not-run" },
-      { kind: "model", status: "not-run" },
       { kind: "provenance", status: "not-run" },
     ],
     host: hostOutcome(host),

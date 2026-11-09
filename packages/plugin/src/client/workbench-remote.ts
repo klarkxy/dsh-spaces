@@ -112,8 +112,6 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
     snapshot: (id) => callWorkbench(connection, "snapshot", [id]),
     runtimes: () => callWorkbench(connection, "runtimes", []),
     backups: (spaceId) => callWorkbench(connection, "backups", [spaceId]),
-    llm: (request) => callWorkbench(connection, "llm", [request]),
-    llmCredential: (request) => callWorkbench(connection, "llmCredential", [request]),
   };
 }
 

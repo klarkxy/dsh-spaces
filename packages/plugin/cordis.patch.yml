@@ -12,6 +12,22 @@
       isolate:
         attachments: spaces-main-images
         fs: spaces-main-images
+# Bundled dev-index: same canonical id as the package's own cordis.patch.yml row,
+# so an explicit `dsh plugin add @klarkxy/dsh-dev-index` and this row can never
+# register twice — the last composed row wins at mount. Browser-space profiles
+# must override this row with `disabled: true` in their profile patch.
+- insert:
+    - id: dsh-dev-index
+      name: '@klarkxy/dsh-dev-index'
+# Bundled main-space control tools: a subpath entry inside this same package
+# (same shape as dsh-spaces-main-images above), so no separate dependency is
+# installed and the row resolves wherever @dsh-spaces/plugin does. The module
+# injects spacesMainChannel, provided only by the trusted main host; manager
+# (spaces-hub) and Browser-space profile patches must override this row with
+# `disabled: true`.
+- insert:
+    - id: dsh-space-control
+      name: '@dsh-spaces/plugin/space-control'
 - id: llm-pi-ai
   isolate:
     attachments: spaces-main-images

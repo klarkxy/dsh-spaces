@@ -92,7 +92,6 @@ test("a dead owner with unfinished maintenance retains its lease, endpoint and e
   const endpointFile = join(lease.controlDir, "endpoint.json");
   const ownerBytes = readFileSync(ownerFile), endpointBytes = readFileSync(endpointFile);
   for (const relative of [
-    ".dsh-spaces-restore/journal.json", ".dsh-spaces-upgrade/journal.json",
     ".dsh-spaces-mutation.json", ".dsh-spaces-control/plugin-mutation.json",
     ".dsh-spaces-control/workbench-upgrade.json", ".dsh-spaces-control/manager-bootstrap.json",
     ".dsh-spaces-lock/owner.json",
@@ -129,72 +128,7 @@ test("a toolchain record superseded by a host update does not block retiring a d
   }
 });
 
-test("pending restore evidence in a stale record's snapshot root still prevents lease retirement", async () => {
-  const home = tempHome();
-  const owner = await exitedHolder(home);
-  const lease = new HomeLease(home);
-  const snapshots = tempHome();
-  writeFileSync(join(snapshots, "pending-restore.json"), "{unfinished");
-  writeFileSync(join(lease.controlDir, "toolchain.json"), JSON.stringify({
-    version: 1, bin: join(home, "gone", "lib", "bin.js"), nodeExe: process.execPath, dshVersion: "0.2.0-rc.2", snapshotRoot: snapshots,
-  }));
-  assert.throws(() => retirePreviousSupervisor(home, owner, false), /Unfinished Home maintenance/);
-  assert.equal(existsSync(join(lease.controlDir, "previous-controller-exit.json")), false);
-});
 
-test("pending restore evidence in bound, explicit and default snapshot roots prevents lease retirement", async () => {
-  const home = tempHome();
-  const owner = await exitedHolder(home);
-  const lease = new HomeLease(home);
-  const ownerFile = join(lease.runDir, "owner.json");
-  const endpointFile = join(lease.controlDir, "endpoint.json");
-  const ownerBytes = readFileSync(ownerFile), endpointBytes = readFileSync(endpointFile);
-  const toolchain = join(lease.controlDir, "toolchain.json");
-  const cliRoot = join(home, "cli");
-  mkdirSync(join(cliRoot, "lib"), { recursive: true });
-  writeFileSync(join(cliRoot, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.2.0-rc.2" }));
-  const bin = join(cliRoot, "lib", "bin.js");
-  writeFileSync(bin, "export {};");
-  for (const mode of ["bound", "explicit", "default"]) {
-    const root = mode === "default" ? home + "-snapshots" : tempHome();
-    if (mode === "default") { mkdirSync(root); homes.push(root); }
-    const pending = join(root, "pending-restore.json");
-    writeFileSync(pending, "{unfinished");
-    if (mode === "bound") writeFileSync(toolchain, JSON.stringify({
-      version: 1, bin, nodeExe: process.execPath, dshVersion: "0.2.0-rc.2", snapshotRoot: root,
-    }));
-    assert.throws(() => retirePreviousSupervisor(home, owner, false, mode === "explicit" ? root : undefined), /Unfinished Home maintenance/);
-    assert.deepEqual(readFileSync(ownerFile), ownerBytes);
-    assert.deepEqual(readFileSync(endpointFile), endpointBytes);
-    assert.equal(readFileSync(pending, "utf8"), "{unfinished");
-    assert.equal(existsSync(join(lease.controlDir, "previous-controller-exit.json")), false);
-    rmSync(pending);
-    if (mode === "bound") rmSync(toolchain);
-  }
-  writeFileSync(toolchain, "{unknown snapshot binding");
-  assert.throws(() => retirePreviousSupervisor(home, owner, false), /Unfinished Home maintenance/);
-  assert.deepEqual(readFileSync(ownerFile), ownerBytes);
-  assert.deepEqual(readFileSync(endpointFile), endpointBytes);
-});
-
-test("legacy desktop owner without an endpoint permits a new user launch only after its process exits", async () => {
-  const home = tempHome();
-  const lease = new HomeLease(home);
-  const live = lease.acquire("desktop");
-  assert.ok("blocked" in await attachExistingSupervisor({ home, allowRealHome: false }));
-  live.release();
-  const owner = await exitedHolder(home, "desktop", false, false);
-  const before = readFileSync(join(lease.runDir, "owner.json"));
-  const attached = await attachExistingSupervisor({ home, allowRealHome: false });
-  assert.ok("missing" in attached && attached.previousOwner?.kind === "desktop");
-  assert.deepEqual(readFileSync(join(lease.runDir, "owner.json")), before);
-  retirePreviousSupervisor(home, owner, false);
-  const next = lease.acquire("web", "http://127.0.0.1:9");
-  assert.notEqual(next.owner.nonce, owner.nonce);
-  next.release();
-  const evidence = JSON.parse(readFileSync(join(lease.controlDir, "previous-controller-exit.json"), "utf8"));
-  assert.equal(evidence.kind, "desktop");
-});
 
 test("a launch cannot retire an owner different from the one it observed", async () => {
   const home = tempHome();
@@ -222,9 +156,9 @@ test("dead ownership cannot authorize removal of a mismatched endpoint", async (
   assert.equal(lease.inspect().held, true);
 });
 
-test("dead foreign and incomplete ownership are not classified as absence", async () => {
+test("dead unbound and incomplete ownership are not classified as absence", async () => {
   const foreign = tempHome();
-  await exitedHolder(foreign, "desktop");
+  await exitedHolder(foreign, "web", true, false);
   assert.ok("blocked" in await attachExistingSupervisor({ home: foreign, allowRealHome: false }));
   const incomplete = tempHome();
   const lease = new HomeLease(incomplete);
@@ -308,6 +242,8 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
       protectSpecial: () => {}, statusOf: () => "stopped", ownedSpaceIds: () => [],
       stopOwned: async () => {}, stopOwnedAll: async () => {},
       startSpace: async () => undefined,
+      readLlmPolicy: () => ({ inheritMain: false }),
+      writeLlmPolicy: () => {},
       currentServiceEpoch: () => "", stateRevision: () => "",
       productObservation: () => ({ serviceEpoch: "", expectedRevision: "" }),
       assertLiveContext: () => {},
@@ -367,7 +303,10 @@ test("shutdown persistence diagnostics distinguish failure before stopping from 
       requireSpace: id => id, requireManaged: id => id, protectSpecial: () => {},
       statusOf: () => "running", ownedSpaceIds: () => ["spaces-hub"],
       stopOwned: async () => {}, stopOwnedAll: async () => { stopCalls++; },
-      startSpace: async () => undefined, currentServiceEpoch: () => epoch,
+      startSpace: async () => undefined,
+      readLlmPolicy: () => ({ inheritMain: false }),
+      writeLlmPolicy: () => {},
+      currentServiceEpoch: () => epoch,
       stateRevision: () => "revision",
       productObservation: () => ({ serviceEpoch: epoch, expectedRevision: "revision" }),
       assertLiveContext: () => {},

@@ -199,7 +199,7 @@ export type BlueprintPackageResult = {
   error?: string;
 };
 
-export type BlueprintWriteKind = "patch" | "settings" | "model" | "provenance";
+export type BlueprintWriteKind = "patch" | "settings" | "provenance";
 
 export type BlueprintWriteResult = {
   kind: BlueprintWriteKind;

@@ -172,6 +172,10 @@ function writePayload(pluginRoot: string, marker = "payload"): string {
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
+    ["lib/space-control.js", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   writeComponentPayloadManifest(join(pluginRoot, "lib"));
@@ -1636,7 +1640,7 @@ test("initialize rejects a CLI that cannot be bound before manager allocation or
   assert.equal(existsSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE)), false);
 });
 
-test("initialize refuses a desktop lease without an endpoint and preserves owner bytes", async () => {
+test("initialize refuses an owner record with an unknown kind and preserves owner bytes", async () => {
   const home = tempDir("dsh-init-desktop-");
   writeProfile(home, "web");
   const ownerFile = join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME, HOME_CONTROL_OWNER_FILE);

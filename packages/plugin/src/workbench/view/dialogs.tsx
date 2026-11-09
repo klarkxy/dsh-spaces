@@ -77,11 +77,39 @@ export function Overlays({ ui, controller, systemPage, requestServiceStop }: Wor
       {ui.overlay?.type === "menu" && (
         <SpaceMenu ui={ui} controller={controller} spaceId={ui.overlay.spaceId} x={ui.overlay.x} y={ui.overlay.y} />
       )}
+      {ui.overlay?.type === "creation-failed" && (
+        <CreationFailedDialog locale={ui.locale} controller={controller} jobId={ui.overlay.jobId} />
+      )}
       {ui.pendingPlan && (
         <PlanDialog locale={ui.locale} plan={ui.pendingPlan.plan} request={ui.pendingPlan.request} spaces={ui.state?.spaces ?? []} onCancel={controller.closePlan} onConfirm={controller.confirmPlan} />
       )}
 
     </>
+  );
+}
+
+function CreationFailedDialog({ locale, controller, jobId }: { locale: WorkbenchLocale; controller: WorkbenchController; jobId: string }): ReactElement | null {
+  const panel = useRef<HTMLElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const modal = useModalDialog(panel, { onCancel: controller.closeOverlay, initialFocus: cancelRef });
+  const creation = controller.visibleCreations().find((row) => row.jobId === jobId);
+  if (!creation) return null;
+  const title = t(locale, "create.failedTitle").replace("{name}", creation.displayName);
+  return (
+    <div className="dsh-wb-overlay">
+      <VisibleScale ref={panel} className="dsh-wb-dialog" role="dialog" aria-modal="true" aria-label={title} onKeyDown={modal.onKeyDown}>
+        <h2 className="dsh-wb-title">{title}</h2>
+        <p className="dsh-wb-muted" data-creation-error="true">{creation.error}</p>
+        <div className="dsh-wb-actions">
+          <button ref={cancelRef} type="button" className="dsh-wb-btn" onClick={() => { controller.closeOverlay(); controller.selectHome(); controller.setHomeTab("overview"); }}>
+            {t(locale, "create.viewTask")}
+          </button>
+          <button type="button" className="dsh-wb-btn" onClick={() => controller.dismissCreation(jobId)}>
+            {t(locale, "create.dismiss")}
+          </button>
+        </div>
+      </VisibleScale>
+    </div>
   );
 }
 
@@ -335,6 +363,9 @@ function CreateDialog({
         <IconPicker locale={locale} value={iconRef.current} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
         {error ? <p className="dsh-wb-alert" role="alert" data-create-error="true">{error}</p> : null}
         </div>
+        {controller.hasActiveJobs() ? (
+          <p className="dsh-wb-muted" role="status" data-create-busy="true">{t(locale, "create.busy")}</p>
+        ) : null}
         <div className="dsh-wb-actions">
           <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
             {t(locale, "app.cancel")}

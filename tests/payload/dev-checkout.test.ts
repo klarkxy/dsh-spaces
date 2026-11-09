@@ -8,6 +8,7 @@ import {
   detectDevCheckout,
   devComponentDir,
   devComponentLinked,
+  devComponentProblem,
   type SpacesComponent,
 } from "../../src/adapters/node/payload/dev-checkout.ts";
 import {
@@ -41,13 +42,17 @@ function writeRel(root: string, rel: string, content: string): void {
   writeFileSync(abs, content);
 }
 
-/** Minimal source checkout: private root manifest plus packages/<c> dirs. */
+/** Minimal source checkout: private root manifest plus installable packages/<c> dirs. */
 function writeCheckout(root: string): string {
   writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
   for (const dir of ["plugin", "view-bridge", "llm-bridge", "browser"]) {
-    mkdirSync(join(root, "packages", dir), { recursive: true });
+    writeRel(join(root, "packages", dir), "package.json", `${JSON.stringify({
+      name: `@dsh-spaces/${dir}`, version: "0.5.0", main: "./lib/index.js",
+      dsh: { bundle: { patch: "./cordis.patch.yml" } },
+    })}\n`);
+    writeRel(join(root, "packages", dir), "cordis.patch.yml", "[]\n");
+    writeRel(join(root, "packages", dir), "lib/index.js", "export {};\n");
   }
-  mkdirSync(join(root, "packages", "plugin", "lib"), { recursive: true });
   return root;
 }
 
@@ -80,6 +85,10 @@ function writeCheckoutPayload(root: string): string {
     ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
     ["lib/llm-bridge/lib/index.js", "export {};\n"],
     ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
+    ["lib/space-control.js", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
+    ["lib/supervisor/ui-engine/node_modules/playwright-core/index.js", "module.exports = {};\n"],
   ];
   for (const [rel, content] of files) writeRel(pluginRoot, rel, content);
   return writeComponentPayloadManifest(join(pluginRoot, "lib")).payloadRootLib;
@@ -250,4 +259,66 @@ test("dev alignManagerPlugin links plugin and view-bridge for an unlinked manage
   specs.length = 0;
   await toolchain.alignManagerPlugin("spaces-hub");
   assert.deepEqual(specs, [], "aligned components are not reinstalled");
+});
+
+test("devComponentProblem names each unusable source state", () => {
+  const checkout = writeCheckout(tempDir("dsh-dev-prob-co-"));
+  assert.equal(devComponentProblem(checkout, "view-bridge"), undefined);
+
+  rmSync(join(checkout, "packages", "llm-bridge"), { recursive: true, force: true });
+  assert.match(devComponentProblem(checkout, "llm-bridge")!, /llm-bridge.*missing/i);
+
+  const wrongName = writeCheckout(tempDir("dsh-dev-prob-wn-"));
+  writeFileSync(join(wrongName, "packages", "view-bridge", "package.json"),
+    `${JSON.stringify({ name: "@dsh-spaces/other", main: "./lib/index.js" })}\n`);
+  assert.match(devComponentProblem(wrongName, "view-bridge")!, /view-bridge.*declares/i);
+
+  const noMain = writeCheckout(tempDir("dsh-dev-prob-nm-"));
+  writeFileSync(join(noMain, "packages", "view-bridge", "package.json"),
+    `${JSON.stringify({ name: "@dsh-spaces/view-bridge", dsh: { bundle: { patch: "./cordis.patch.yml" } } })}\n`);
+  assert.match(devComponentProblem(noMain, "view-bridge")!, /view-bridge.*main/i);
+
+  const noEntry = writeCheckout(tempDir("dsh-dev-prob-ne-"));
+  rmSync(join(noEntry, "packages", "view-bridge", "lib", "index.js"));
+  assert.match(devComponentProblem(noEntry, "view-bridge")!, /view-bridge.*main/i);
+
+  const noPatch = writeCheckout(tempDir("dsh-dev-prob-np-"));
+  rmSync(join(noPatch, "packages", "view-bridge", "cordis.patch.yml"));
+  assert.match(devComponentProblem(noPatch, "view-bridge")!, /view-bridge.*patch/i);
+});
+
+test("hasComponent rejects an unusable checkout component instead of reporting it absent", () => {
+  const home = tempDir("dsh-dev-hasc-home-");
+  const checkout = writeCheckout(tempDir("dsh-dev-hasc-co-"));
+  const toolchain = new SupervisorToolchain(toolchainHost(home, { devCheckoutRoot: checkout }));
+  assert.equal(toolchain.hasComponent("view-bridge"), true);
+
+  rmSync(join(checkout, "packages", "view-bridge"), { recursive: true, force: true });
+  const error = (() => { try { toolchain.hasComponent("view-bridge"); } catch (thrown) { return thrown as { code?: string; message?: string }; } })();
+  assert.equal(error?.code, "workbench/unavailable");
+  assert.match(String(error?.message), /view-bridge/);
+});
+
+test("componentAligned fails a live link whose source became unusable instead of reinstalling", async () => {
+  const home = tempDir("dsh-dev-dead-home-");
+  const checkout = writeCheckout(tempDir("dsh-dev-dead-co-"));
+  writeProfile(home, "child", {});
+  const specs: string[] = [];
+  const toolchain = new SupervisorToolchain(toolchainHost(home, {
+    devCheckoutRoot: checkout,
+    pluginLink: async (addedHome, profile, dir) => {
+      specs.push(dir);
+      linkComponent(addedHome, profile, dir);
+    },
+  }));
+  await toolchain.installComponent("child", "view-bridge");
+  assert.equal(toolchain.componentAligned("child", "view-bridge"), true);
+
+  // The linked source is wiped after the link exists: alignment reports the
+  // fault by name rather than silently reinstalling over the empty target.
+  rmSync(join(checkout, "packages", "view-bridge"), { recursive: true, force: true });
+  const error = (() => { try { toolchain.componentAligned("child", "view-bridge"); } catch (thrown) { return thrown as { code?: string; message?: string }; } })();
+  assert.equal(error?.code, "workbench/unavailable");
+  assert.match(String(error?.message), /view-bridge/);
+  assert.deepEqual(specs, [devComponentDir(checkout, "view-bridge")], "no implicit reinstall was attempted");
 });

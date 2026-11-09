@@ -1,6 +1,8 @@
+import { join } from "node:path";
 import { runBatch } from "../../../../shared/batch";
 import { formatWorkbenchFailure } from "../../../../shared/workbench";
 import { applyXpEmbedCompatibility, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from "../../diagnostics/xp-compatibility";
+import { installSpecFor, pendingBuildKeys, writeBuildPolicy } from "../../products/plugin-exact-source";
 import { WorkbenchJobAbortError, WorkbenchJobError, type WorkbenchJobContext } from "../workbench-jobs";
 import { FULL_SPACES_PACKAGE } from "./constants";
 import { MaintenanceCore } from "./core";
@@ -51,6 +53,54 @@ export class MaintenancePluginBatch extends MaintenanceCore {
             command.packageName,
             "install",
           );
+        }
+      },
+    );
+  }
+
+  /**
+   * Exact-source install: write the caller's allowBuilds verbatim (with the
+   * deny-by-default stance), install the verbatim spec, then verify the
+   * read-back against the pinned source. No catalog resolution or download
+   * step happens for this kind.
+   */
+  protected async runPluginInstallSpec(
+    command: Extract<ResolvedCommand, { kind: "plugin.install.spec" }>,
+    ctx: WorkbenchJobContext,
+    planId: string,
+    markIrreversible: () => void,
+  ) {
+    const plugin = command.plugin;
+    await this.mutatePlugins(
+      [command.spaceId],
+      ctx,
+      planId,
+      [{
+        spaceId: command.spaceId,
+        action: "install",
+        packageName: plugin.packageName,
+        ...(plugin.kind === "npm" ? { version: plugin.version } : {}),
+        plugin,
+      }],
+      async () => {
+        markIrreversible();
+        ctx.cancellable(false);
+        ctx.phase("install");
+        ctx.message(`Installing ${plugin.packageName}.`);
+        writeBuildPolicy(join(this.ports.home, "profiles", command.spaceId), plugin.approvedBuilds);
+        try {
+          await this.pluginAddImpl(this.ports.home, command.spaceId, installSpecFor(plugin));
+        } catch (error) {
+          const pending = pendingBuildKeys(error instanceof Error ? error.message : String(error));
+          if (pending.length) {
+            throw new Error(
+              `${error instanceof Error ? error.message : String(error)} Pending builds awaiting approval: ${pending.join(", ")}`,
+            );
+          }
+          throw error;
+        }
+        if (plugin.kind === "npm" && plugin.packageName === XP_PACKAGE_NAME && plugin.version === XP_SUPPORTED_VERSION) {
+          applyXpEmbedCompatibility(this.ports.home, command.spaceId);
         }
       },
     );

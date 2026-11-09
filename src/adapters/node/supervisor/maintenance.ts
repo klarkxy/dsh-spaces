@@ -73,10 +73,6 @@ export class SupervisorMaintenanceGate {
       root: this.host.runtimeRoot(),
       snapshotRoot,
       source: () => this.host.readHomeSettings().packageSource,
-      legacy: () => {
-        const cli = this.host.cli();
-        return cli ? { bin: cli.bin, version: cli.version } : undefined;
-      },
     });
     this.host.setRuntimeStore(runtimes);
     const diagnostics = this.ensureDiagnostics();

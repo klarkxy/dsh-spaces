@@ -9,6 +9,10 @@ import { publicReason } from "../../../../src/adapters/node/runtime/start-failur
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "../../../../src/shared/loopback";
 import { assertSupportedNode } from "../../../../src/shared/node-version";
 import { MainLlmService } from "./llm-main";
+import { MainSpaceCreatorService } from "./main-space-creator";
+import { MainSpaceControlService } from "./main-space-control";
+import { installMainSpaceGuidance } from "./main-space-guidance";
+import { installMainSpaceTools } from "./main-space-tools";
 import type { SupervisorEndpoint } from "./supervisor-bootstrap";
 import { shareWelcomeNotice } from "./welcome-notice";
 
@@ -34,6 +38,8 @@ export class SpacesPlugin {
   readonly guide: WorkbenchGuideHost;
   readonly manager: WorkbenchManagerHost | null;
   readonly spaces: SpacesRemote | null;
+  readonly creator: MainSpaceCreatorService | null;
+  readonly control: MainSpaceControlService | null;
 
   constructor(ctx: Context, config: SpacesRemoteConfig = {}, runtime?: WorkbenchHostRuntime) {
     assertSupportedNode();
@@ -47,6 +53,34 @@ export class SpacesPlugin {
     } else {
       this.manager = null;
       this.spaces = null;
+    }
+    // Creator tools and guidance only ever live on the confirmed main host
+    // (web/desktop), never on the manager profile and never on a child space.
+    // The guidance names the tools, so both install together.
+    this.creator = this.runtime.isTrustedMainHost ? new MainSpaceCreatorService(ctx) : null;
+    // spacesMainChannel is provided only on the same confirmed main host:
+    // the control tools' provider simply does not exist elsewhere.
+    this.control = this.runtime.isTrustedMainHost && this.creator ? new MainSpaceControlService(ctx, this.creator) : null;
+    if (this.creator) {
+      installMainSpaceGuidance(ctx);
+      installMainSpaceTools(ctx, this.runtime, this.creator);
+      const creator = this.creator;
+      const control = this.control;
+      const dispose = this.runtime.onSupervisorAttached(
+        async (endpoint) => {
+          await creator.attach(endpoint);
+          control?.attach(endpoint);
+        },
+        async (epoch) => {
+          await creator.afterSupervisorStopped(epoch);
+          control?.afterSupervisorStopped(epoch);
+        },
+      );
+      ctx.effect(() => async () => {
+        dispose();
+        await control?.close();
+        await creator.close();
+      });
     }
     installHostHint(ctx, this.runtime);
     installHandoffRoute(ctx, this.runtime);

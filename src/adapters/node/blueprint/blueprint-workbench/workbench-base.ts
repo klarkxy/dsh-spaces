@@ -8,7 +8,7 @@ import { settingsPath } from "../../home/hub-settings";
 import type { BlueprintRuntimeOptions, BlueprintRuntimeInspect, BlueprintRuntimeCompose, BlueprintRuntimeModule, BlueprintWorkbenchPorts, PlanObservation, StagedPlan } from "./types";
 import { INSPECT_RUNTIME_FAILED } from "./constants";
 import { sha256Hex, exactOrNull } from "./utils";
-import { publicError, compositionFailureReason, assertMutableName, asDescribe } from "./errors";
+import { publicError, compositionFailureReason, assertMutableName } from "./errors";
 import { readProfileManifest, fileDigest } from "./source-inspection";
 import { officialSkippedBlueprintOverlay, selectedBundleIdentityError, patchModuleSpecifiers, moduleResolutionEvidence, resolvedIdentityAllowed, homePatchesOverrideManaged, composedManagedIsolationError } from "./runtime-composition";
 
@@ -84,25 +84,7 @@ export class BlueprintWorkbenchBase {
 
   protected async modelAvailabilityError(model: { connectionId: string; modelId: string } | undefined): Promise<string | undefined> {
     if (!model) return undefined;
-    if (this.ports.llmBridgeAvailable?.() !== true) {
-      return "This Home cannot apply a model binding.";
-    }
-    try {
-      const catalog = asDescribe(await (this.ports.llmAdmitted ?? this.ports.llm)({ method: "describe" }));
-      const connection = catalog.connections.find((row) => row.id === model.connectionId);
-      if (!connection || connection.enabled !== true) return "The selected model connection is not available.";
-      const models = Array.isArray(connection.providerConfig.models)
-        ? connection.providerConfig.models.flatMap((item) =>
-            item && typeof item === "object" && "id" in item && typeof (item as { id?: unknown }).id === "string"
-              ? [(item as { id: string }).id]
-              : [],
-          )
-        : [];
-      if (!models.includes(model.modelId)) return "The selected model is not available on that connection.";
-      return undefined;
-    } catch {
-      return "The model catalog could not be read.";
-    }
+    return "This Home cannot apply a model binding.";
   }
 
   protected async homePatchOverrideError(): Promise<string | undefined> {
@@ -188,7 +170,6 @@ export class BlueprintWorkbenchBase {
   protected async captureObservation(blueprint?: Blueprint): Promise<PlanObservation> {
     const observation = this.ports.observation();
     const host = await this.hostVersions();
-    const catalog = this.ports.llmCatalogObservation?.() ?? { revision: 0, digest: sha256Hex("") };
     const inspected = await this.inspectRuntimeSnapshot(blueprint);
     return {
       serviceEpoch: observation.serviceEpoch,
@@ -199,8 +180,6 @@ export class BlueprintWorkbenchBase {
       homeSettingsDigest: fileDigest(settingsPath(this.ports.home)),
       homePatchDigest: fileDigest(join(this.ports.home, "cordis.patch.yml")),
       runtimeFingerprint: inspected?.fingerprint ?? sha256Hex(`${host.dsh ?? ""}|${host.base ?? ""}|${host.webApp ?? ""}|${fileDigest(join(this.ports.home, "cordis.patch.yml"))}`),
-      llmCatalogRevision: catalog.revision,
-      llmCatalogDigest: catalog.digest,
     };
   }
 

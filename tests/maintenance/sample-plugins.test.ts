@@ -213,7 +213,7 @@ function harness(packed: Record<string, { tarball: Buffer; version: string }>) {
       delete: async () => undefined,
     } as unknown as SnapshotExecutor,
     runtimes: {
-      inventory: () => ({ installed: [], current: { version: runtime.version, bin: "bin.js", origin: "store" as const } }),
+      inventory: () => ({ installed: [] }),
       catalog: async () => ({ versions: [], distTags: {} }),
       install: async () => ({ version: runtime.version, bin: "bin.js", dir: home }),
     } as unknown as WorkbenchMaintenancePorts["runtimes"],

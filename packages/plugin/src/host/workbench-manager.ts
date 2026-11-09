@@ -19,14 +19,11 @@ import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../../.
 import type { SpaceDetail } from "../../../../src/shared/spaces-control";
 import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import {
-  LLM_PUBLIC_ERROR,
   SPACES_PUBLIC_ERROR,
   WORKBENCH_PUBLIC_ERROR,
-  type LlmRemoteCode,
   type SpacesRemoteCode,
   type WorkbenchRemoteCode,
 } from "./remote-errors";
-import type { LlmApiRequest, LlmApiResult, LlmCredentialRequest } from "../../../../src/shared/llm-api";
 import type { WorkbenchHostRuntime } from "./runtime";
 
 /**
@@ -47,10 +44,7 @@ export class WorkbenchManagerHost extends TypertRemoteService implements Workben
   }
 
   async startupStatus(): Promise<WorkbenchStartupStatus> {
-    return this.guard((api) => {
-      if (!api.startupStatus) throw new Error("workbench/unsupported");
-      return api.startupStatus();
-    });
+    return this.guard((api) => api.startupStatus());
   }
 
   async detail(spaceId: string): Promise<SpaceDetail> {
@@ -102,20 +96,6 @@ export class WorkbenchManagerHost extends TypertRemoteService implements Workben
   }
 
 
-  async llm(request: LlmApiRequest): Promise<LlmApiResult> {
-    return this.guard((api) => {
-      if (!api.llm) throw new Error("workbench/unsupported");
-      return api.llm(request);
-    });
-  }
-
-  async llmCredential(request: LlmCredentialRequest): Promise<LlmApiResult> {
-    return this.guard((api) => {
-      if (!api.llmCredential) throw new Error("workbench/unsupported");
-      return api.llmCredential(request);
-    });
-  }
-
   private async guard<T>(action: (api: Awaited<ReturnType<WorkbenchHostRuntime["managerApi"]>>) => Promise<T>): Promise<T> {
     try {
       const api = await this.runtime.managerApi();
@@ -129,10 +109,6 @@ export class WorkbenchManagerHost extends TypertRemoteService implements Workben
       if (code in WORKBENCH_PUBLIC_ERROR) {
         const known = code as WorkbenchRemoteCode;
         throw new RemoteError(known, reportedOrFallback(reported, WORKBENCH_PUBLIC_ERROR[known]), {});
-      }
-      if (code in LLM_PUBLIC_ERROR) {
-        const known = code as LlmRemoteCode;
-        throw new RemoteError(known, reportedOrFallback(reported, LLM_PUBLIC_ERROR[known]), {});
       }
       if (code in SPACES_PUBLIC_ERROR) {
         const known = code as SpacesRemoteCode;

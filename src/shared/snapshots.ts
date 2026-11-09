@@ -36,26 +36,3 @@ export interface SnapshotMeta {
   runtimeMissing?: boolean;
 }
 
-export interface PendingRestore {
-  snapshotId: string;
-  beforeRestoreId: string;
-  runtimeVersion: string;
-  binRelative: string;
-  startedAt: string;
-  /** Workbench plan identity. Absent on legacy desktop restores. */
-  planId?: string;
-}
-
-export type RestorePhase = "copying" | "swapping" | "swapped";
-
-export interface RestoreJournal {
-  phase: RestorePhase;
-  snapshotId: string;
-  beforeRestoreId: string;
-  originalPresence: SnapshotPresence;
-  runtimeVersion: string;
-  binRelative: string;
-  startedAt: string;
-  /** Workbench plan identity. Absent on legacy desktop restores. */
-  planId?: string;
-}

@@ -38,7 +38,7 @@ test('linked repository resolves the same plugin, client, remotes and patch as t
       return;
     }
     const require = createRequire(join(profile, 'package.json'));
-    for (const entry of ['.', './client', './typert', './remote', './cordis.patch.yml']) {
+    for (const entry of ['.', './client', './typert', './remote', './space-control', './cordis.patch.yml']) {
       const specifier = entry === '.' ? repo.name : `${repo.name}/${entry.slice(2)}`;
       assert.equal(realpathSync(require.resolve(specifier)), realpathSync(resolve(root, 'packages/plugin', published.exports[entry])));
     }

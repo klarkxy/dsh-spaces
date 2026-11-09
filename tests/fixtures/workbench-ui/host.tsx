@@ -57,8 +57,6 @@ function sharePreview(): SpaceSharePreview {
     plugins: [{ packageName: "demo", resolvedVersion: "1.2.3", source: "npm" }],
     hasConfig: false,
     unknownSources: [],
-    llmMappingRequired: true,
-    llmRequirements: [],
   };
 }
 
@@ -325,6 +323,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
   const calls = (window.__WB_CALLS ??= []);
   return {
     state: async () => state,
+    startupStatus: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", phase: "ready" as const, reasons: [], failure: null }),
     detail: async (spaceId) => ({
       space: {
         id: spaceId,

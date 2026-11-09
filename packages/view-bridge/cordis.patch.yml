@@ -7,3 +7,11 @@
 - insert:
     - id: dsh-spaces-settings
       name: '@dsh-spaces/view-bridge/settings'
+# Bundled dev-index for managed web subspaces (see packages/plugin
+# cordis.patch.yml for the canonical-id contract). Browser-space profiles must
+# override this row with `disabled: true` in their profile patch — the Browser
+# bundle itself is applied BEFORE this bundle, so the disable cannot live in
+# the Browser package's own cordis.patch.yml.
+- insert:
+    - id: dsh-dev-index
+      name: '@klarkxy/dsh-dev-index'

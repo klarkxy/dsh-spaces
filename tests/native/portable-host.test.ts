@@ -212,7 +212,7 @@ test("cached stopped rows reach manager authority, latest click wins, and failed
   f.controller.showCurrent();
   f.controller.handleMessage(f.event({ type: "selected", requestId: current, spaceId: null }));
   assert.equal(f.controller.getSnapshot().visible, "current");
-  f.controller.handleMessage(f.event({ type: "failed" }));
+  f.controller.handleMessage(f.event({ type: "failed", failure: { reason: "manager-disconnected" } }));
   assert.equal(f.controller.getSnapshot().phase, "failed"); assert.equal(f.controller.getSnapshot().portal, null);
   f.controller.handleMessage(f.event({ type: "state", snapshot: inventory }));
   await tick(); assert.deepEqual(f.calls, ["role", "portalTarget"]); f.controller.stop();
@@ -408,9 +408,10 @@ test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () =>
 
 test("failed portal reads its failure once without reconnect or launch", async () => {
   const f = fixture();
+  f.guide.portalTarget = async () => { f.calls.push("portalTarget"); return { available: false, unavailable: true, origin: null, path: null, reasons: [] }; };
   f.guide.presentationSnapshot = async () => { f.calls.push("presentationSnapshot"); throw new Error("Snapshot failed EACCES lstat C:\\private\\file"); };
   f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
-  f.controller.handleMessage(f.event({type:"failed"})); await tick();
+  await tick();
   assert.match(f.controller.getSnapshot().detail!, /EACCES lstat \[path\]/);
   assert.deepEqual(f.calls, ["role", "portalTarget", "presentationSnapshot"]);
   assert.equal(f.controller.getSnapshot().portal, null); f.controller.stop();
@@ -489,9 +490,9 @@ test("late initialization and portal errors cannot cross controller lifetimes", 
 
 test("late failure observation cannot replace a newer cause or keep old detail on a new launch", async () => {
   const f = fixture(); const observed = Promise.withResolvers<never>();
+  f.guide.portalTarget = async () => { f.calls.push("portalTarget"); return { available: false, unavailable: true, origin: null, path: null, reasons: [] }; };
   f.guide.presentationSnapshot = () => { f.calls.push("presentationSnapshot"); return observed.promise; };
   f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
-  f.controller.handleMessage(f.event({ type: "failed" }));
   f.controller.stop();
   f.guide.portalTarget = async () => {
     f.calls.push("portalTarget");
@@ -501,7 +502,9 @@ test("late failure observation cannot replace a newer cause or keep old detail o
   observed.reject(new Error("Obsolete snapshot failure")); await tick();
   assert.equal(f.controller.getSnapshot().detail, "New lifetime cause");
   assert.equal(f.calls.filter(name => name === "presentationSnapshot").length, 1);
-  f.controller.stop(); f.controller.start();
+  f.controller.stop();
+  f.guide.portalTarget = async () => { f.calls.push("portalTarget"); return { available: true, unavailable: false, origin: "http://127.0.0.1:3088", path: "/portal-bootstrap/" + "a".repeat(32), reasons: [] }; };
+  f.controller.start();
   assert.equal(f.controller.getSnapshot().detail, null); await tick(); f.controller.stop();
 });
 
@@ -720,4 +723,115 @@ test("portal uses exact manager origin/source/identity and both readiness signal
   connectionState = "connected"; subscriber(); p.select(); await p.refresh();
   assert.equal(p.requests.length, count); assert.equal(p.sent.filter(message => message.type === "failed").length, 1);
   bridge();
+});
+
+test("portal creation entries validate strictly and project from jobs", async () => {
+  const { projectSpaceCreations, spaceCreateStep } = await import("../../src/shared/space-host.ts");
+  const base = { serviceEpoch: "a".repeat(64), managerId: null, spaces: [] };
+  assert.deepEqual(parsePortalSnapshot(base), { serviceEpoch: base.serviceEpoch, managerId: null, spaces: [] });
+  const creation = { jobId: "j1", spaceId: "new-space", displayName: "New", status: "running", phase: "install", message: "DSH 0.9.9", icon: "whale" };
+  const withCreating = parsePortalSnapshot({ ...base, creating: [creation] });
+  assert.deepEqual(withCreating?.creating, [creation]);
+  const failed = { ...creation, status: "failed", error: "boom", message: "" };
+  assert.deepEqual(parsePortalSnapshot({ ...base, creating: [failed] })?.creating, [failed]);
+  for (const bad of [
+    { ...creation, error: "x" },                       // error on a non-failed entry
+    { ...creation, spaceId: "BAD" },
+    { ...creation, status: "succeeded" },
+    { ...creation, extra: 1 },
+    { ...creation, icon: "javascript:alert(1)" },
+    { ...creation, jobId: "x".repeat(81) },
+    { ...creation, message: "x".repeat(2001) },
+  ]) assert.equal(parsePortalSnapshot({ ...base, creating: [bad] }), null, JSON.stringify(bad));
+  assert.equal(parsePortalSnapshot({ ...base, creating: Array(17).fill(creation) }), null);
+  assert.deepEqual(spaceCreateStep("install").index, 0);
+  assert.deepEqual(spaceCreateStep("create").index, 1);
+  assert.deepEqual(spaceCreateStep("view-bridge").index, 2);
+  assert.deepEqual(spaceCreateStep("llm-bridge").index, 3);
+  assert.deepEqual(spaceCreateStep("llm-policy").index, 3);
+  // The creator pipeline's later stages share the last step instead of
+  // rewinding to 0: plugin installs, the optional start and the result phase.
+  for (const phase of ["plugins", "plugin", "start", "result"]) {
+    assert.deepEqual(spaceCreateStep(phase).index, 3, `phase ${phase}`);
+  }
+  const creatorPath = ["prepare", "install", "create", "view-bridge", "llm-policy", "plugins", "start", "result"];
+  const creatorSteps = creatorPath.map((phase) => spaceCreateStep(phase).index);
+  assert.ok(creatorSteps.every((step, i) => i === 0 || step >= creatorSteps[i - 1]), `creator steps: ${creatorSteps.join(",")}`);
+  assert.deepEqual(spaceCreateStep("mystery").index, 0);
+  const job = (over: Record<string, unknown>) => ({ id: "j", kind: "space.create", status: "running", phase: "create",
+    message: "", affectedSpaceIds: [], createdAt: "t", updatedAt: "t", canCancel: false, ...over });
+  const rows = projectSpaceCreations([
+    job({ id: "a", result: { spaceId: "made-one" }, subject: { displayName: "Made", icon: "code" } }),
+    job({ id: "b", status: "succeeded", result: { spaceId: "skip-me" } }),
+    job({ id: "c", kind: "space.start" }),
+    job({ id: "d", status: "failed", affectedSpaceIds: ["lost-one"], error: { code: "workbench/failed", message: "nope" }, updatedAt: "2026-01-01" }),
+  ]);
+  assert.deepEqual(rows.map(r => [r.jobId, r.spaceId, r.status]), [["a", "made-one", "running"], ["d", "lost-one", "failed"]]);
+  assert.equal(rows[1].error, "nope");
+  const many = Array.from({ length: 10 }, (_, i) =>
+    job({ id: `f${i}`, status: "failed", affectedSpaceIds: [`lost-${i}`], error: { message: "x" }, updatedAt: `2026-01-${String(i + 1).padStart(2, "0")}` }));
+  assert.equal(projectSpaceCreations(many).filter(r => r.status === "failed").length, 8);
+  // creator.create jobs project through the same placeholder contract.
+  const creatorJob = (over: Record<string, unknown>) => ({ id: "j", kind: "creator.create", status: "running", phase: "plugins",
+    message: "@acme/tool", affectedSpaceIds: ["space-demo"], createdAt: "t", updatedAt: "t", canCancel: false, ...over });
+  const creatorRows = projectSpaceCreations([
+    creatorJob({ id: "run", subject: { displayName: "Demo Space", icon: "whale" } }),
+    creatorJob({ id: "dead", status: "failed", error: { code: "creator/failed", message: "install broke" }, updatedAt: "2026-01-02" }),
+    creatorJob({ id: "done", status: "succeeded", result: { spaceId: "space-demo" } }),
+  ]);
+  assert.deepEqual(creatorRows.map(r => [r.jobId, r.spaceId, r.displayName, r.status, r.phase]),
+    [["run", "space-demo", "Demo Space", "running", "plugins"], ["dead", "space-demo", "space-demo", "failed", "plugins"]]);
+  assert.equal(creatorRows[1].error, "install broke");
+  assert.equal(creatorRows[0].icon, "whale");
+});
+
+test("host rail shows active creations and keeps seen failed ones until dismissed", async () => {
+  const f = fixture(); f.controller.start(); await tick(); f.controller.registerFrame(f.frame);
+  const running = { jobId: "create-1", spaceId: "made-one", displayName: "Made", status: "running" as const, phase: "install", message: "DSH 0.9.9" };
+  const unseen = { jobId: "create-2", spaceId: "lost-one", displayName: "Lost", status: "failed" as const, phase: "create", message: "", error: "boom" };
+  f.controller.handleMessage(f.event({ type: "state", snapshot: { ...inventory, creating: [running, unseen] } }));
+  assert.deepEqual(f.controller.visibleCreations().map(row => row.jobId), ["create-1"]);
+  f.controller.handleMessage(f.event({ type: "state", snapshot: { ...inventory,
+    creating: [{ ...running, status: "failed", message: "", error: "install broke" }, unseen] } }));
+  assert.deepEqual(f.controller.visibleCreations().map(row => row.jobId), ["create-1"]);
+  f.controller.openCreation(f.controller.visibleCreations()[0]);
+  assert.equal(f.controller.getSnapshot().creationFailed?.jobId, "create-1");
+  f.controller.closeCreationFailed();
+  assert.equal(f.controller.getSnapshot().creationFailed, null);
+  f.controller.openCreation(f.controller.visibleCreations()[0]);
+  f.controller.dismissCreation("create-1");
+  assert.deepEqual(f.controller.visibleCreations(), []);
+  assert.equal(f.controller.getSnapshot().creationFailed, null);
+  f.controller.handleMessage(f.event({ type: "state", snapshot: { ...inventory, creating: [running] } }));
+  f.controller.openCreation(f.controller.visibleCreations()[0]);
+  assert.equal((f.messages.at(-1) as { type?: string; spaceId?: string | null }).type, "select");
+  assert.equal((f.messages.at(-1) as { spaceId?: string | null }).spaceId, null);
+  f.controller.stop();
+});
+
+test("creation rail entries and failure dialog render labels, steps and actions", async () => {
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const React = await import("react");
+  const { CreationRailEntry, CreationFailureDialog } = await import("../../packages/plugin/src/client/ui/creation-rail.tsx");
+  const el = React.createElement;
+  const running = el(CreationRailEntry, { creation: { jobId: "c1", spaceId: "made-one", displayName: "Made", status: "running", phase: "create", message: "" }, layoutId: "x", onSelect: () => {} });
+  const runningMarkup = renderToStaticMarkup(running);
+  assert.match(runningMarkup, /data-creation-step="2"/);
+  assert.match(runningMarkup, /data-creation-total="4"/);
+  assert.match(runningMarkup, /Made · 正在创建/);
+  assert.match(runningMarkup, /title="Made · 正在创建 · 第 2\/4 步：创建空间配置"/);
+  assert.doesNotMatch(runningMarkup, /dsh-wb-creation-failed/);
+  const queued = renderToStaticMarkup(el(CreationRailEntry, { creation: { jobId: "c2", spaceId: "wait-one", displayName: "Wait", status: "queued", phase: "", message: "" }, layoutId: "x", onSelect: () => {} }));
+  assert.match(queued, /Wait · 等待开始/);
+  assert.match(queued, /data-creation-status="queued"/);
+  const failed = renderToStaticMarkup(el(CreationRailEntry, { creation: { jobId: "c3", spaceId: "lost-one", displayName: "Lost", status: "failed", phase: "create", message: "", error: "install broke", icon: "whale" }, layoutId: "x", onSelect: () => {} }));
+  assert.match(failed, /data-creation-status="failed"/);
+  assert.match(failed, /Lost · 创建失败：install broke/);
+  assert.match(failed, /dsh-wb-creation-failed/);
+  const dialog = renderToStaticMarkup(el(CreationFailureDialog, { creation: { jobId: "c3", spaceId: "lost-one", displayName: "Lost", status: "failed", phase: "create", message: "", error: "install broke" }, onView: () => {}, onDismiss: () => {}, onClose: () => {} }));
+  assert.match(dialog, /空间「Lost」创建失败/);
+  assert.match(dialog, /install broke/);
+  assert.match(dialog, /查看任务/);
+  assert.match(dialog, /移除/);
+  assert.doesNotMatch(dialog, /class="dsh-host-action danger"/);
 });

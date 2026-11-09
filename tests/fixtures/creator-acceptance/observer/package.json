@@ -1,0 +1,17 @@
+{
+  "name": "@dsh-spaces/creator-tools-observer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["index.js", "cordis.patch.yml"],
+  "keywords": ["dsh-plugin"],
+  "description": "Read-only tools-registry observer for creator space acceptance evidence.",
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "license": "MIT"
+}

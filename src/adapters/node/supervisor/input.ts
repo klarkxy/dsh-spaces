@@ -1,5 +1,6 @@
 import { sanitizeSpaceIcon } from "../../../shared/space-icon";
 import { SPACE_NAME_RE } from "../../../shared/types";
+import { PluginSourceError, parsePluginSource, pluginSourceSpecOf, type PluginSourceSpec } from "../../../shared/plugin-source";
 import type { WorkbenchPlanRequest } from "../../../shared/workbench";
 import { parseSpaceId, SpacesPublicError } from "../products/spaces-service";
 import { WorkbenchPublicError } from "./errors";
@@ -41,6 +42,17 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
         catalogId: parsePluginKey(body.catalogId),
         version: parseId(body.version),
       };
+    case "plugin.install.spec": {
+      expectKeys(body, ["kind", "spaceId", "source"]);
+      let source: PluginSourceSpec;
+      try {
+        source = pluginSourceSpecOf(parsePluginSource(body.source));
+      } catch (error) {
+        if (error instanceof PluginSourceError) throw new WorkbenchPublicError("workbench/invalid-input");
+        throw error;
+      }
+      return { kind, spaceId: parseSpaceName(body.spaceId), source };
+    }
     case "plugin.remove":
       expectKeys(body, ["kind", "spaceId", "packageName"]);
       return { kind, spaceId: parseSpaceName(body.spaceId), packageName: parsePluginKey(body.packageName) };
