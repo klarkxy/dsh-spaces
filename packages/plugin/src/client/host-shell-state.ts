@@ -1,6 +1,6 @@
 import { publicGuideDetail } from "./guide-detail";
 import type { WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
-import { parsePortalFailure, portalFailureDetail, parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalFailure, type PortalSnapshot } from "../../../../src/shared/space-host";
+import { parsePortalFailure, portalFailureDetail, parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalCreation, type PortalFailure, type PortalSnapshot } from "../../../../src/shared/space-host";
 
 export interface HostShellSnapshot {
   phase: "loading" | "initialize" | "start" | "connecting" | "ready" | "failed";
@@ -13,6 +13,7 @@ export interface HostShellSnapshot {
   detail: string | null;
   portalFailure: PortalFailure | null;
   error: "unavailable" | "unsupported" | "stopped" | "entry" | null;
+  creationFailed: PortalCreation | null;
 }
 export interface HostShellWindow { postMessage(value: unknown, origin: string): void }
 export interface HostShellEnvironment {
@@ -31,7 +32,9 @@ const browserEnv: HostShellEnvironment = {
 /** Presentation client only. It cannot submit a management command, stop a Host or change its profile. */
 export class HostShellController {
   private ui: HostShellSnapshot = { phase: "loading", role: null, inventory: null, portal: null,
-    visible: "current", selected: null, pending: null, error: null, detail: null, portalFailure: null };
+    visible: "current", selected: null, pending: null, error: null, detail: null, portalFailure: null, creationFailed: null };
+  private seenCreations = new Set<string>();
+  private dismissedCreations = new Set<string>();
   private listeners = new Set<() => void>();
   private frame: HostShellWindow | null = null;
   private epoch = 0;
@@ -67,7 +70,7 @@ export class HostShellController {
   stop = (): void => { this.running = false; this.epoch++; this.clearTimers(); this.frame = null; };
   registerFrame = (frame: HostShellWindow | null): void => { this.frame = frame; };
   private supportsTransport(): boolean {
-    return !!this.guide.portalTarget && !!parseSpaceHostAudience({ parentOrigin: this.env.origin(), channel: "0".repeat(32) });
+    return !!parseSpaceHostAudience({ parentOrigin: this.env.origin(), channel: "0".repeat(32) });
   }
   private fail(error: HostShellSnapshot["error"], cause?: unknown): void {
     const epoch = this.epoch;
@@ -98,7 +101,7 @@ export class HostShellController {
     const channel = this.env.channel();
     const audience = parseSpaceHostAudience({ parentOrigin: this.env.origin(), channel });
     if (!audience) throw new Error("unsupported-host-transport");
-    const target = await this.guide.portalTarget!(audience);
+    const target = await this.guide.portalTarget(audience);
     if (!this.running || epoch !== this.epoch) return;
     if (!target.available && !target.unavailable && this.ui.role?.managerId) {
       this.patch({ phase: "start", error: null }); return;
@@ -124,7 +127,6 @@ export class HostShellController {
       const result = await this.guide.initialize();
       if (!this.running || epoch !== this.epoch) return;
       if (!result.ok || result.unavailable) { this.fail("unavailable", result.reasons); return; }
-      // The legacy top-level handoff URL is never navigated to or sent to another frame.
       await this.connect(epoch);
     } catch (cause) { if (this.running && epoch === this.epoch) this.fail("unavailable", cause); }
   };
@@ -134,6 +136,21 @@ export class HostShellController {
     this.patch({ visible: "current", selected: null, pending: null, error: this.ui.phase === "failed" ? this.ui.error : null });
   };
   showGuide = (): void => { this.patch({ visible: "guide" }); };
+  /** Creation placeholders visible in this session: all active, plus failed ones seen while active and not dismissed. */
+  visibleCreations = (): PortalCreation[] => {
+    const creating = this.ui.inventory?.creating ?? [];
+    return creating.filter(creation =>
+      creation.status !== "failed" || (this.seenCreations.has(creation.jobId) && !this.dismissedCreations.has(creation.jobId)));
+  };
+  dismissCreation = (jobId: string): void => {
+    this.dismissedCreations.add(jobId);
+    this.patch(this.ui.creationFailed?.jobId === jobId ? { creationFailed: null } : {});
+  };
+  openCreation = (creation: PortalCreation): void => {
+    if (creation.status === "failed") { this.patch({ creationFailed: creation }); return; }
+    this.select(null);
+  };
+  closeCreationFailed = (): void => { this.patch({ creationFailed: null }); };
   select = (spaceId: string | null): void => {
     const { portal, inventory } = this.ui;
     if (this.ui.phase !== "ready" || !portal || !inventory || !this.frame) { this.showGuide(); return; }
@@ -162,14 +179,18 @@ export class HostShellController {
       if (this.ui.inventory && inventory.serviceEpoch !== this.ui.inventory.serviceEpoch) { this.failPortal({ reason: "service-changed" }); return; }
       if (this.entryTimer !== null) this.env.clearTimeout(this.entryTimer);
       this.entryTimer = null;
+      if (inventory.serviceEpoch !== this.ui.inventory?.serviceEpoch) {
+        this.seenCreations.clear(); this.dismissedCreations.clear();
+      }
+      for (const creation of inventory.creating ?? []) {
+        if (creation.status !== "failed") this.seenCreations.add(creation.jobId);
+      }
       this.patch({ inventory, phase: "ready" });
       if (this.openAfterConnect) { this.openAfterConnect = false; this.select(null); }
     } else if (message.type === "failed" && keys === "channel,failure,source,type") {
       const failure = parsePortalFailure(message.failure);
       if (failure) this.failPortal(failure);
     }
-    // Older portal packages do not report a cause; do not infer authentication.
-    else if (message.type === "failed" && keys === "channel,source,type") this.fail("unavailable");
     else if (message.requestId === this.ui.pending && this.ui.pending !== null) {
       if (message.type === "selected" && keys === "channel,requestId,source,spaceId,type" && message.spaceId === this.target) {
         if (this.selectionTimer !== null) this.env.clearTimeout(this.selectionTimer);

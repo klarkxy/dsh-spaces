@@ -4,14 +4,10 @@ import type { WorkbenchStartupFailure, WorkbenchStartupStatus } from "../../../.
 /** One startup read, including its response body, never waits longer than this. */
 export const STARTUP_READ_CAP_MS = 5_000;
 
-export const STARTUP_STATUS_UNSUPPORTED =
-  "This supervisor does not support startup status. An unready service from this version is not compatible with startup observation.";
 export const STARTUP_EPOCH_MISMATCH = "The supervisor service epoch changed during startup observation.";
 export const STARTUP_READY_INCONSISTENT = "Startup status reported ready, but the manager is not running.";
 export const STARTUP_READ_FAILED = "The startup observation could not be read.";
 export const STARTUP_READ_TIMEOUT = "The startup observation did not finish before its deadline.";
-
-const UNSUPPORTED_STARTUP_CODES = new Set(["workbench/not-found", "workbench/unsupported"]);
 
 /**
  * Node-side reader for startup observation.
@@ -20,7 +16,7 @@ const UNSUPPORTED_STARTUP_CODES = new Set(["workbench/not-found", "workbench/uns
  */
 export type StartupObservationReader = {
   state: (signal?: AbortSignal) => Promise<WorkbenchState>;
-  startupStatus?: (signal?: AbortSignal) => Promise<WorkbenchStartupStatus>;
+  startupStatus: (signal?: AbortSignal) => Promise<WorkbenchStartupStatus>;
 };
 
 export class StartupReadTimeoutError extends Error {
@@ -67,11 +63,6 @@ export async function observeStartupRead<T>(
     settled = true;
     if (timer !== undefined) clearTimeout(timer);
   }
-}
-
-export function isStartupStatusUnsupported(error: unknown): boolean {
-  const remote = remoteFailure(error);
-  return remote !== null && UNSUPPORTED_STARTUP_CODES.has(remote.code);
 }
 
 /** Known public text only. Raw transport errors and secrets stay out. */

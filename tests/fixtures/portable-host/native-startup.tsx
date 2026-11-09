@@ -35,6 +35,7 @@ const controller = new NativeHostController({
     return response.json();
   },
   bootstrap: async () => { throw Error("Unexpected bootstrap"); },
+  portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
   returnTarget: async () => { throw Error("Unexpected navigation"); },
 }, { acquire: async () => { throw Error("Unexpected guest"); }, release: async () => {} });
 const style = document.createElement("style");

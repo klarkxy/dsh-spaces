@@ -8,6 +8,7 @@
  * The material is layered: the rail and the stage carry their own depth, the
  * overlays are glass, and the dialogs sit on an elevated panel.
  */
+import { CREATION_RING_CSS } from "../../../../../src/shared/ui/creation-ring";
 
 export const WORKBENCH_SHELL_CSS = `
 .dsh-wb-settings-page{position:absolute;inset:0;z-index:4;background:var(--wb-panel);display:flex;min-width:0;min-height:0}
@@ -310,7 +311,17 @@ export const WORKBENCH_SHELL_CSS = `
   padding: 16px;
 }
 .dsh-wb-space-detail { display: flex; flex-direction: column; gap: 16px; }
-.dsh-wb-space-detail-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.dsh-wb-space-detail-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dsh-wb-space-detail-header > .dsh-wb-actions { margin-left: auto; }
+.dsh-wb-detail-icon { width: 40px; height: 40px; flex: none; display: grid; place-items: center; }
+.dsh-wb-detail-icon > * { width: 40px; height: 40px; }
+.dsh-wb-detail-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dsh-wb-detail-id .dsh-wb-title { margin: 0; }
+.dsh-wb-detail-id > span { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dsh-wb-detail-tabs { display: flex; flex-direction: row; gap: 16px; border-bottom: 1px solid var(--wb-hairline); }
+.dsh-wb-detail-tabs[hidden] { display: none; }
+.dsh-wb-space-detail [data-space-tab] { display: flex; flex-direction: column; gap: 16px; }
+.dsh-wb-space-detail [data-space-tab][hidden] { display: none; }
 .dsh-wb-space-detail-card {
   display: flex;
   flex-direction: column;
@@ -469,4 +480,5 @@ export const WORKBENCH_SHELL_CSS = `
 @media (prefers-reduced-motion: reduce) {
   .dsh-workbench * { transition: none !important; animation: none !important; }
 }
+${CREATION_RING_CSS}
 `;

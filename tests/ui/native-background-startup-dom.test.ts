@@ -56,6 +56,7 @@ async function checkMain(page: Page, locale: "zh-CN" | "en-US", outcome: "ready"
   const rail = await page.locator(".dsh-host-rail").boundingBox();
   const bounds = await status.boundingBox();
   assert.ok(rail && bounds);
+  assert.equal(await page.locator(".dsh-native-rail-toggle").isVisible(), false, "the caption rail toggle stays hidden without a Windows title bar");
   assert.ok(Math.abs(rail.width - 72) < 1, "rail stays 72px");
   assert.ok(bounds.x + bounds.width <= rail.x + rail.width + 1, "startup status stays inside the rail");
   await page.evaluate(next => next === "failed" ? window.__fixture.fail() : window.__fixture.phase("ready"), outcome);
@@ -109,6 +110,58 @@ for (const [label, actions, creates, navigates] of [
   assert.equal(counts.child, 0);
   assert.equal(counts.oldInitialize, 0);
   assert.equal(counts.focus, navigates ? 1 : 0);
+});
+
+test("DOM: Windows caption toggle hides and remembers the spaces rail", { timeout: 60000 }, async t => {
+  const bundle = await build({ entryPoints: [resolve("tests/fixtures/portable-host/native-background-startup.tsx")], bundle: true, write: false, format: "iife", platform: "browser", jsx: "automatic" });
+  const server = await serve(bundle.outputFiles[0].text);
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const context = await browser.newContext({ locale: "zh-CN", viewport: { width: 1000, height: 650 } });
+  t.after(() => context.close());
+  // Init scripts run before the parser creates the root element, so the
+  // attribute is applied as soon as it appears.
+  await context.addInitScript({
+    content: `
+      (function () {
+        function apply() {
+          document.documentElement.setAttribute("data-windows-titlebar", "");
+          document.documentElement.style.setProperty("--dsh-windows-titlebar-height", "40px");
+        }
+        if (document.documentElement) apply();
+        else new MutationObserver(function (_, observer) { if (document.documentElement) { apply(); observer.disconnect(); } }).observe(document, { childList: true });
+      })();
+    `,
+  });
+  const page = await context.newPage();
+  await page.goto(server.origin);
+  await page.locator("[data-spaces-native]").waitFor();
+  const collapse = page.getByRole("button", { name: "收起空间栏", exact: true });
+  await collapse.waitFor();
+  assert.equal(await collapse.getAttribute("aria-expanded"), "true");
+  const captionBox = await collapse.boundingBox();
+  assert.ok(captionBox && Math.abs(captionBox.x - 12) < 1, `rail toggle sits in the caption, got ${captionBox?.x}`);
+  assert.equal(await page.locator("#root").evaluate(el => el.getBoundingClientRect().x), 72);
+  await collapse.click();
+  const expand = page.getByRole("button", { name: "展开空间栏", exact: true });
+  await expand.waitFor();
+  assert.equal(await expand.getAttribute("aria-expanded"), "false");
+  assert.equal(await page.locator(".dsh-host-rail").isHidden(), true);
+  assert.equal(await page.locator("#root").evaluate(el => el.getBoundingClientRect().x), 0);
+  assert.equal(await page.locator(".dsh-native-container").evaluate(el => getComputedStyle(el).left), "0px");
+  assert.equal(await page.evaluate(() => localStorage.getItem("dsh-spaces.native.rail")), "collapsed");
+  await page.reload();
+  await page.locator("[data-spaces-native]").waitFor();
+  const remembered = page.getByRole("button", { name: "展开空间栏", exact: true });
+  await remembered.waitFor();
+  assert.equal(await page.locator(".dsh-host-rail").isHidden(), true, "a reload keeps the remembered collapsed rail");
+  assert.equal(await page.locator("#root").evaluate(el => el.getBoundingClientRect().x), 0);
+  await remembered.click();
+  await page.getByRole("button", { name: "收起空间栏", exact: true }).waitFor();
+  assert.equal(await page.locator(".dsh-host-rail").isVisible(), true);
+  assert.equal(await page.locator("#root").evaluate(el => el.getBoundingClientRect().x), 72);
+  assert.equal(await page.evaluate(() => localStorage.getItem("dsh-spaces.native.rail")), "expanded");
 });
 
 test("DOM: remounting a stopped record rejoins it without opening a guest", { timeout: 60000 }, async t => {

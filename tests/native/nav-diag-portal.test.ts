@@ -14,10 +14,10 @@ const CHANNEL = "manager-channel";
 const LEAK = "leak-sentinel-private-message";
 const SPACE_NAME = "LeakSpaceName";
 
-const portalSource = () => renderPortalPage(
+const portalSource = (native = true) => renderPortalPage(
   { parentOrigin: ORIGIN, channel: "b".repeat(32) },
   MANAGER,
-  true,
+  native,
 ).split("<script>")[1]!.split("</script>")[0]!;
 
 type TimerRow = { fn: () => void; ms: number };
@@ -31,10 +31,11 @@ function records(logs: string[]): NavDiagRecord[] {
   });
 }
 
-async function boot(options: { failState?: { status: number; code: string; message: string }; throwConsole?: boolean } = {}) {
+async function boot(options: { failState?: { status: number; code: string; message: string }; throwConsole?: boolean; jobs?: unknown[]; web?: boolean } = {}) {
   const logs: string[] = [];
   const fetches: string[] = [];
   const posts: Posted[] = [];
+  const parentPosts: Posted[] = [];
   const appended: unknown[] = [];
   const timers = new Map<number, TimerRow>();
   const listeners = new Map<string, (event?: { source?: unknown; origin?: string; data?: unknown }) => void>();
@@ -47,9 +48,10 @@ async function boot(options: { failState?: { status: number; code: string; messa
     remove: () => { iframe.removed = true; },
   };
   const location = { origin: ORIGIN, hash: "#select/1/@settings", replace(value: string) { this.hash = value; } };
-  const state = {
+  const state: Record<string, unknown> = {
     protocolVersion: 2, availability: "ready", serviceEpoch: EPOCH, managerId: "hub",
     spaces: [{ id: "hub", displayName: SPACE_NAME, status: "running", generation: 1, hasWebApp: true }],
+    ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
   };
   const view = {
     spaceId: "hub", generation: 1, serviceEpoch: EPOCH, entryOrigin: ORIGIN, origin: MANAGER,
@@ -60,8 +62,9 @@ async function boot(options: { failState?: { status: number; code: string; messa
     timers.set(id, { fn, ms: ms ?? 0 });
     return id;
   };
-  new Script(portalSource()).runInNewContext({
+  new Script(portalSource(!options.web)).runInNewContext({
     location, URL, TextDecoder, AbortController, AbortSignal,
+    parent: { postMessage: (data: Record<string, unknown>, origin: string) => { parentPosts.push({ data, origin }); } },
     console: { log: (line: unknown) => { if (options.throwConsole) throw new Error("console failed"); logs.push(String(line)); } },
     document: {
       getElementById: () => ({ remove() {} }),
@@ -83,7 +86,8 @@ async function boot(options: { failState?: { status: number; code: string; messa
     setInterval: schedule, clearInterval: (id?: number) => { if (id != null) timers.delete(id); },
   });
   await tick();
-  return { logs, fetches, posts, appended, timers, listeners, iframe, managerWindow, location };
+  const setJobs = (jobs: unknown) => { state.jobs = jobs; };
+  return { logs, fetches, posts, parentPosts, appended, timers, listeners, iframe, managerWindow, location, setJobs };
 }
 
 function deliver(world: Awaited<ReturnType<typeof boot>>, data: Record<string, unknown>, origin = MANAGER, source: unknown = world.managerWindow) {
@@ -291,4 +295,51 @@ test("child bootstrap script keeps the destination and logs markers without the 
   } finally {
     await http.close();
   }
+});
+
+test("rendered portals publish real creation jobs instead of failing the state read", async () => {
+  // projectSpaceCreations is embedded by toString() and must not reference
+  // module-scope constants such as PORTAL_SPACE_RE; a leaked reference throws
+  // ReferenceError inside refresh(), reported as state-invalid.
+  const jobs = [
+    { id: "create-1", kind: "creator.create", status: "running", phase: "plugins", message: "@acme/tool",
+      subject: { displayName: "Demo", icon: "whale" }, affectedSpaceIds: ["demo-space"],
+      createdAt: "t", updatedAt: "t", canCancel: false },
+    { id: "create-2", kind: "space.create", status: "failed", phase: "create", message: "boom",
+      error: { code: "workbench/failed", message: "install broke" }, affectedSpaceIds: ["lost-one"],
+      createdAt: "t", updatedAt: "t", canCancel: false },
+  ];
+  const expected = [
+    { jobId: "create-1", spaceId: "demo-space", displayName: "Demo", status: "running", phase: "plugins",
+      message: "@acme/tool", icon: "whale" },
+    { jobId: "create-2", spaceId: "lost-one", displayName: "lost-one", status: "failed", phase: "create",
+      message: "boom", error: "install broke" },
+  ];
+  // Jobs present before the first state read must not fail the native portal.
+  const native = await boot({ jobs });
+  assert.equal(native.location.hash, "#select/1/@settings");
+  assert.equal(native.fetches.length, 2);
+  assert.equal(native.appended.length, 1);
+  assert.equal(native.posts.filter(post => post.data.type === "select").length, 0);
+  assert.equal(parseNativePortalFailureHash(native.location.hash), null);
+  assert.equal(native.logs.some(line => parseNavDiag(line)?.ev === "fail"), false);
+  // A job that appears later must not fail the next refresh either.
+  const late = await boot();
+  assert.equal(late.fetches.length, 2);
+  late.setJobs(jobs);
+  timerOf(late, 1500).fn();
+  await tick();
+  assert.equal(late.location.hash, "#select/1/@settings");
+  assert.equal(late.fetches.length, 3);
+  // The web portal publishes both projections to the host.
+  const web = await boot({ web: true });
+  assert.equal(web.parentPosts.filter(post => post.data.type === "state").length, 1);
+  web.setJobs(jobs);
+  timerOf(web, 1500).fn();
+  await tick();
+  const states = web.parentPosts.filter(post => post.data.type === "state");
+  assert.equal(states.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify((states[1]!.data.snapshot as { creating: unknown }).creating)), expected);
+  assert.equal(web.parentPosts.some(post => post.data.type === "failed"), false);
+  assert.equal(web.fetches.filter(url => url.endsWith("/state")).length, 2);
 });

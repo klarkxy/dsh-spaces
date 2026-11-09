@@ -9,6 +9,8 @@ import { HOST_LIGHT_MATERIAL_CSS, HOST_UI_TOKEN_CSS } from "./ui/material";
 import { HostLoadingPill, HostShellPanel } from "./ui/host-guide";
 import { HostRail, HostRailButton, HostRailDivider, HostRailList } from "./ui/host-rail";
 import { hostTexts } from "./ui/host-texts";
+import { CreationRailEntry, CreationFailureDialog } from "./ui/creation-rail";
+import { CREATION_RING_CSS } from "../../../../src/shared/ui/creation-ring";
 
 /**
  * The additive space dock of a compatible host.
@@ -32,14 +34,14 @@ export const HOST_SHELL_CSS = `${UI_TOKENS_CSS}${HOST_UI_TOKEN_CSS}${HOST_LIGHT_
 .dsh-host-rail button:has(.dsh-wb-glyph-img) { padding:0; }
 .dsh-host-rail .dsh-wb-glyph-img { display:block; width:100% !important; height:100% !important; max-width:100%; max-height:100%; object-fit:cover; }
 .dsh-host-rail .dsh-wb-glyph { width:32px; height:32px; fill:currentColor; }
-.dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:72px; right:0; pointer-events:auto; background:var(--dsw-alias-bg-base,var(--host-bg,#fff)); color:var(--dsw-alias-label-primary,var(--host-text,#202127)); }
-iframe.dsh-host-surface { width:calc(100% - 72px); height:calc(100% - var(--dsh-frame-top-clearance,0px)); border:0; }
+.dsh-host-surface { position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:var(--dsh-spaces-rail-width,72px); right:0; pointer-events:auto; background:var(--dsw-alias-bg-base,var(--host-bg,#fff)); color:var(--dsw-alias-label-primary,var(--host-text,#202127)); }
+iframe.dsh-host-surface { width:calc(100% - var(--dsh-spaces-rail-width,72px)); height:calc(100% - var(--dsh-frame-top-clearance,0px)); border:0; }
 .dsh-host-surface[hidden] { display:none !important; }
 .dsh-host-guide { padding:24px; box-sizing:border-box; overflow:auto; color:var(--dsw-alias-label-primary,var(--host-text,#202127)); }
 .dsh-host-guide button { padding:8px 14px; margin:8px 8px 8px 0; border:1px solid currentColor; border-radius:8px; background:transparent; color:inherit; cursor:pointer; transition:background-color var(--host-dur-fast) linear, border-color var(--host-dur-fast) linear, box-shadow var(--host-dur-base) var(--host-ease-standard); }
 .dsh-host-guide button:hover:not(:disabled) { background:color-mix(in srgb,currentColor 10%,transparent); }
 .dsh-host-guide button:focus-visible { outline:2px solid currentColor; outline-offset:1px; }
-.dsh-host-loading { position:absolute; bottom:12px; left:84px; display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--dsw-alias-bg-base,var(--host-bg,#fff)); color:var(--dsw-alias-label-primary,var(--host-text,#202127)); pointer-events:none; border-radius:var(--host-radius-pill,999px); box-shadow:var(--host-elev-md,0 10px 26px -14px rgba(0,0,0,0.45)); }
+.dsh-host-loading { position:absolute; bottom:12px; left:calc(var(--dsh-spaces-rail-width,72px) + 12px); display:flex; align-items:center; gap:8px; padding:6px 12px; background:var(--dsw-alias-bg-base,var(--host-bg,#fff)); color:var(--dsw-alias-label-primary,var(--host-text,#202127)); pointer-events:none; border-radius:var(--host-radius-pill,999px); box-shadow:var(--host-elev-md,0 10px 26px -14px rgba(0,0,0,0.45)); }
 
 /* Rail material: a hover morph and a sliding selection pill. */
 .dsh-host-rail-btn {
@@ -70,6 +72,7 @@ iframe.dsh-host-surface { width:calc(100% - 72px); height:calc(100% - var(--dsh-
   animation:dsh-ui-shimmer 1.6s linear infinite;
 }
 .dsh-host-loading-label { white-space:nowrap; }
+${CREATION_RING_CSS}
 `;
 
 /** Shared layout id of the portable selection pill. */
@@ -95,7 +98,9 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
     window.addEventListener("message", listen);
     return () => { window.removeEventListener("message", listen); controller.stop(); };
   }, [controller, layoutError]);
-  const spaces = ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== ui.role?.profileId) ?? [];
+  const creations = controller.visibleCreations();
+  const creatingIds = new Set(creations.map(c => c.spaceId));
+  const spaces = ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== ui.role?.profileId && !creatingIds.has(s.id)) ?? [];
   // A guide that reports a failure is never faded: an animation must not delay
   // or soften a real error.
   const failed = ui.error !== null || layoutError;
@@ -112,6 +117,9 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
           onSelect={() => controller.select(space.id)}>
           <SpaceGlyph spaceId={space.id} icon={space.icon} />
         </HostRailButton>)}
+        {creations.map(creation => (
+          <CreationRailEntry key={creation.jobId} creation={creation} layoutId={RAIL_LAYOUT_ID} onSelect={() => controller.openCreation(creation)} />
+        ))}
       </HostRailList>
       <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.manage} onSelect={controller.showGuide}>⋯</HostRailButton>
     </HostRail>
@@ -128,6 +136,10 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
         transition={fade}
       >{layoutError ? <FadeIn as="section" appear={false} className="dsh-host-guide" role="alert">{t.unsupported}</FadeIn> : <HostShellPanel controller={controller} />}</motion.div>
     </Presence>}
+    {ui.creationFailed && <CreationFailureDialog creation={ui.creationFailed}
+      onView={() => { controller.closeCreationFailed(); controller.select(null); }}
+      onDismiss={() => controller.dismissCreation(ui.creationFailed!.jobId)}
+      onClose={controller.closeCreationFailed} />}
     {ui.pending !== null && <HostLoadingPill label={t.loading} />}
   </div>;
 }

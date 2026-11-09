@@ -13,7 +13,6 @@ import {
   STARTUP_EPOCH_MISMATCH,
   STARTUP_READ_FAILED,
   STARTUP_READY_INCONSISTENT,
-  STARTUP_STATUS_UNSUPPORTED,
   type StartupObservationReader,
 } from "../../packages/plugin/src/host/startup-observation.ts";
 import { WorkbenchHostRuntime } from "../../packages/plugin/src/host/runtime.ts";
@@ -70,17 +69,15 @@ function managerState(status: "running" | "starting"): StartupObservationReader[
   }) as unknown as Awaited<ReturnType<StartupObservationReader["state"]>>;
 }
 
-test("old healthy manager is ready without startupStatus", async () => {
+test("a healthy manager is ready without startupStatus", async () => {
   let stateCalls = 0;
   let startupCalls = 0;
   const api: StartupObservationReader = {
     state: async () => { stateCalls += 1; return managerState("running")(); },
     startupStatus: async () => { startupCalls += 1; throw new Error("startupStatus must not be called"); },
   };
-  const omitted: StartupObservationReader = { state: async () => { stateCalls += 1; return managerState("running")(); } };
   assert.equal(await watch(runtime(600), api), null);
-  assert.equal(await watch(runtime(600), omitted), null);
-  assert.equal(stateCalls, 2);
+  assert.equal(stateCalls, 1);
   assert.equal(startupCalls, 0);
 });
 
@@ -144,9 +141,7 @@ test("changed epoch and a single failed read both stop", async () => {
   assert.equal(JSON.stringify(failed).includes("fixture-secret"), false);
 });
 
-test("legacy unready service and inconsistent ready both fail once", async () => {
-  const legacy = await watch(runtime(600), { state: managerState("starting") });
-  assert.deepEqual(legacy?.reasons, [STARTUP_STATUS_UNSUPPORTED]);
+test("an inconsistent ready status fails once", async () => {
   let startupCalls = 0;
   const inconsistent = await watch(runtime(600), {
     state: managerState("starting"),
@@ -157,6 +152,84 @@ test("legacy unready service and inconsistent ready both fail once", async () =>
   });
   assert.equal(startupCalls, 1);
   assert.deepEqual(inconsistent?.reasons, [STARTUP_READY_INCONSISTENT]);
+});
+
+test("manager becoming running between state and startupStatus is observed after ready", async () => {
+  const calls: string[] = [];
+  let running = false;
+  const result = await watch(runtime(600), {
+    state: async () => {
+      calls.push("state");
+      return managerState(running ? "running" : "starting")();
+    },
+    startupStatus: async () => {
+      calls.push("startupStatus");
+      running = true;
+      return { serviceEpoch: epoch, managerId: "hub", phase: "ready", reasons: [], failure: null };
+    },
+  });
+  assert.equal(result, null);
+  assert.deepEqual(calls, ["state", "startupStatus", "state"]);
+});
+
+test("ready is confirmed once and an inconsistent manager stays failed", async () => {
+  const calls: string[] = [];
+  const result = await watch(runtime(600), {
+    state: async () => { calls.push("state"); return managerState("starting")(); },
+    startupStatus: async () => {
+      calls.push("startupStatus");
+      return { serviceEpoch: epoch, managerId: "hub", phase: "ready", reasons: [], failure: null };
+    },
+  });
+  assert.deepEqual(result?.reasons, [STARTUP_READY_INCONSISTENT]);
+  assert.deepEqual(calls, ["state", "startupStatus", "state"]);
+});
+
+test("post-ready observation keeps transport, epoch, crash and maintenance failures terminal", async () => {
+  for (const fault of ["transport", "epoch", "crash", "maintenance"] as const) {
+    const calls: string[] = [];
+    const result = await watch(runtime(600), {
+      state: async () => {
+        calls.push("state");
+        if (calls.length === 1) return managerState("starting")();
+        if (fault === "transport") throw new Error("fixture-secret");
+        const state = await managerState("running")();
+        if (fault === "epoch") state.serviceEpoch = "b".repeat(64);
+        if (fault === "crash") state.spaces[0]!.status = "crashed";
+        if (fault === "maintenance") state.availability = "unavailable";
+        return state;
+      },
+      startupStatus: async () => {
+        calls.push("startupStatus");
+        return { serviceEpoch: epoch, managerId: "hub", phase: "ready", reasons: [], failure: null };
+      },
+    });
+    assert.ok(result && !result.ok, fault);
+    assert.equal(JSON.stringify(result).includes("fixture-secret"), false);
+    assert.deepEqual(calls, ["state", "startupStatus", "state"], fault);
+  }
+});
+
+test("post-ready state read shares the startup deadline and is not retried", { timeout: 2_000 }, async () => {
+  const calls: string[] = [];
+  let signal: AbortSignal | undefined;
+  const started = Date.now();
+  const result = await watch(runtime(120), {
+    state: async (readSignal) => {
+      calls.push("state");
+      if (calls.length === 1) return managerState("starting")();
+      signal = readSignal;
+      return new Promise(() => {});
+    },
+    startupStatus: async () => {
+      calls.push("startupStatus");
+      return { serviceEpoch: epoch, managerId: "hub", phase: "ready", reasons: [], failure: null };
+    },
+  });
+  assert.ok(result && !result.ok);
+  assert.ok(Date.now() - started < 500);
+  assert.equal(signal?.aborted, true);
+  assert.deepEqual(calls, ["state", "startupStatus", "state"]);
 });
 
 test("a successful pending observation stays inside the phase budget", { timeout: 2_000 }, async () => {
@@ -241,7 +314,7 @@ test("http startup reads abort a hung fetch and a hung body whose cancel never s
   }
 });
 
-test("legacy startupStatus 404 is an explicit compatibility failure", async () => {
+test("a failed startupStatus read reports its remote reason", async () => {
   const calls: string[] = [];
   const result = await watch(runtime(600), createWorkbenchHttpClient({
     endpoint: httpEndpoint,
@@ -253,7 +326,7 @@ test("legacy startupStatus 404 is an explicit compatibility failure", async () =
     },
   }));
   assert.deepEqual(calls, ["state", "startupStatus"]);
-  assert.deepEqual(result?.reasons, [STARTUP_STATUS_UNSUPPORTED]);
+  assert.deepEqual(result?.reasons, ["That item was not found."]);
 });
 
 test("an already running http manager does not call startupStatus", async () => {

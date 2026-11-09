@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { WorkbenchApi, WorkbenchCommand, WorkbenchState } from "../../../../src/shared/workbench";
+import { projectSpaceCreations } from "../../../../src/shared/space-host";
 import { validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
 
 /** One explicit operation; polling only observes its result, never resubmits it. */
@@ -35,6 +36,8 @@ export async function runDesktopSpaceAction(api: WorkbenchApi, request: DesktopS
   if (space.status === "unknown" || space.status === "stopping" || (action === "restart" && space.status === "starting")) {
     throw Error("The space state does not allow this operation.");
   }
+  const creating = projectSpaceCreations(state.jobs).find((row) => row.status === "queued" || row.status === "running");
+  if (creating) throw Error(`正在创建空间「${creating.displayName}」，完成后才能启动或停止其他空间。`);
   const context = { serviceEpoch, expectedRevision: state.revision };
   let command: WorkbenchCommand;
   if (action === "open" || action === "start") command = { kind: "space.start", spaceId };

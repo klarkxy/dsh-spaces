@@ -10,16 +10,33 @@
 import React, { type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { LayoutIndicator } from "../../../../../src/shared/ui/motion";
+import { spaceCreateStep, type PortalCreation } from "../../../../../src/shared/space-host";
+import { CreationRing } from "../../../../../src/shared/ui/creation-ring";
 import { SpaceGlyph } from "../space-glyph";
-import { t } from "../i18n";
+import { t, type WorkbenchLocale } from "../i18n";
 import { statusKey, type WorkbenchViewProps } from "./shared";
 
 /** Custom properties need a cast; React types only know the standard ones. */
 type SlotStyle = CSSProperties & { "--dsh-wb-rail-delay"?: string };
 
+function creationRailLabel(locale: WorkbenchLocale, creation: PortalCreation): string {
+  const fill = (template: string) => template.replace("{name}", creation.displayName);
+  if (creation.status === "failed") return fill(t(locale, "create.railFailed")).replace("{error}", creation.error ?? "");
+  if (creation.status === "queued") return fill(t(locale, "create.railQueued"));
+  const step = spaceCreateStep(creation.phase);
+  const stepName = creation.phase === "install" ? t(locale, "create.stepInstall")
+    : [t(locale, "create.stepPrepare"), t(locale, "create.stepConfig"), t(locale, "create.stepView"), t(locale, "create.stepModels")][step.index] ?? "";
+  return fill(t(locale, "create.railRunning"))
+    .replace("{n}", String(step.index + 1))
+    .replace("{total}", String(step.total))
+    .replace("{step}", stepName) + (creation.message ? ` — ${creation.message}` : "");
+}
+
 export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
   const locale = ui.locale;
-  const spaces = controller.workspaceSpaces();
+  const creations = controller.visibleCreations();
+  const creatingIds = new Set(creations.map((creation) => creation.spaceId));
+  const spaces = controller.workspaceSpaces().filter((space) => !creatingIds.has(space.id));
   const writable = controller.canMutate();
   return (
     <aside className="dsh-wb-rail" inert={ui.overlay?.type === "settings" || undefined} aria-label={t(locale, "app.title")}>
@@ -47,6 +64,18 @@ export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
               onMoveDown={writable ? () => controller.moveSpace(space.id, 1) : undefined}
               canMoveUp={index > 0}
               canMoveDown={index < spaces.length - 1}
+            />
+          </RailSlot>
+        ))}
+        {creations.map((creation) => (
+          <RailSlot key={creation.jobId} active={false} delay={`${60 + spaces.length * 45}ms`}>
+            <RailButton
+              label={creationRailLabel(locale, creation)}
+              icon={creation.icon}
+              spaceId={creation.spaceId}
+              onClick={() => controller.openCreation(creation)}
+              ring={spaceCreateStep(creation.phase)}
+              ringStatus={creation.status}
             />
           </RailSlot>
         ))}
@@ -98,6 +127,8 @@ function RailButton({
   glyph,
   disabled,
   tool,
+  ring,
+  ringStatus,
 }: {
   label: string;
   current?: boolean;
@@ -114,6 +145,8 @@ function RailButton({
   glyph?: "home" | "plus" | "gear";
   disabled?: boolean;
   tool?: boolean;
+  ring?: { index: number; total: number };
+  ringStatus?: "queued" | "running" | "failed";
 }): ReactElement {
   return (
     <button
@@ -148,6 +181,8 @@ function RailButton({
       }}
     >
       {glyph === "home" ? <HomeGlyph /> : glyph === "plus" ? <PlusGlyph /> : glyph === "gear" ? <GearGlyph /> : <SpaceGlyph icon={icon} spaceId={spaceId} />}
+      {ring ? <CreationRing index={ring.index} total={ring.total} status={ringStatus ?? "queued"} /> : null}
+      {ringStatus === "failed" ? <span className="dsh-wb-creation-failed" aria-hidden="true">!</span> : null}
       {status ? <span className="dsh-wb-status" data-status={status} aria-hidden="true" /> : null}
       <span className="dsh-wb-sr">{label}</span>
     </button>

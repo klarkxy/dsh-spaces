@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { browserProtocolScript } from "../../../shared/browser-guest";
 import { navDiagPortalPrelude } from "../../../shared/nav-diag";
 import { parseSpaceHostAudience, parsePortalSnapshot, parsePortalFailure, nativePortalFailureHash,
-  parseNativeCreateIntent, parseNativeSpaceHash, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
+  parseNativeCreateIntent, parseNativeSpaceHash, projectSpaceCreations, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
   type SpaceHostAudience } from "../../../shared/space-host";
 
 /** Bounded, process-local, audience-bound entry grants. No disk state or cross-restart replay. */
@@ -75,6 +75,7 @@ const NATIVE_PORTAL_FAILURE_HASH_LIMIT = ${NATIVE_PORTAL_FAILURE_HASH_LIMIT};
 const parsePortalFailure = ${parsePortalFailure.toString()};
 const nativePortalFailureHash = ${nativePortalFailureHash.toString()};
 const parseSnapshot = ${parsePortalSnapshot.toString()};
+const projectSpaceCreations = ${projectSpaceCreations.toString()};
 const parseNativeCreateIntent = ${parseNativeCreateIntent.toString()};
 const parseNativeSpaceHash = ${parseNativeSpaceHash.toString()};
 ${browserProtocolScript()}
@@ -165,7 +166,9 @@ async function refresh() {
       fail("state-invalid"); return;
     }
     // Validate every projected row before publishing presentation data to the host.
+    const creating = projectSpaceCreations(state.jobs);
     const all = parseSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
+      ...(creating.length ? { creating } : {}),
       spaces: state.spaces.map(row => ({ id: row.id, displayName: row.displayName, status: row.status,
         generation: row.generation, ...(row.icon === undefined ? {} : { icon: row.icon }) })) });
     if (!all) { fail("state-invalid"); return; }

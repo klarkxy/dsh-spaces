@@ -180,6 +180,12 @@ export abstract class NavigationPart extends PersistencePart {
         this.rejectReadonly();
         return;
       }
+      const creating = this.ui.state?.jobs.find((job) => (job.kind === "space.create" || job.kind === "creator.create") && (job.status === "queued" || job.status === "running"));
+      if (creating) {
+        const name = creating.subject?.displayName || creating.affectedSpaceIds[0] || "";
+        this.patch({ commandError: this.msg("create.blockedStart").replace("{name}", name), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.start", spaceId: space.id }) });
+        return;
+      }
       this.clearRequestError();
       const decision = this.views.requestSpace(space);
       this.syncSelection();

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore, 
 import { motion } from "motion/react";
 import { FadeIn, Presence, fade } from "../../../../../src/shared/ui/motion";
 import { SpaceGlyph } from "../../workbench/space-glyph";
+import { defaultStorage } from "../../workbench/persistence";
 import { attachHostLayout } from "../host-layout";
 import type { NativeHostController } from "./native-controller";
 import { HostLoadingPill } from "./host-guide";
@@ -11,6 +12,7 @@ import { useServiceRestart } from "./service-restart";
 import { NativeSpaceMenu } from "./native-space-menu";
 import { nativeStartupLabel, nativeStatusText, nativeTexts } from "./native-texts";
 import { NativeDialog } from "./native-dialog";
+import { CreationRailEntry, CreationFailureDialog } from "./creation-rail";
 
 /**
  * The desktop (Electron) host shell.
@@ -23,6 +25,9 @@ import { NativeDialog } from "./native-dialog";
 
 /** Shared layout id of the desktop selection pill. */
 const RAIL_LAYOUT_ID = "dsh-native-rail-pill";
+
+/** localStorage key of the remembered rail visibility. */
+const RAIL_STORAGE_KEY = "dsh-spaces.native.rail";
 
 export function NativeHostShell({ controller }: { controller: NativeHostController }): ReactElement {
   const [active, setActive] = useState(controller);
@@ -45,6 +50,9 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
     return () => { controller.stop(); layout.current?.dispose(); };
   }, [controller]);
   useEffect(() => { layout.current?.cover(ui.selected !== "current" || ui.guide); }, [ui.selected, ui.guide]);
+  const [railCollapsed, setRailCollapsed] = useState(() => defaultStorage().getItem(RAIL_STORAGE_KEY) === "collapsed");
+  useEffect(() => { defaultStorage().setItem(RAIL_STORAGE_KEY, railCollapsed ? "collapsed" : "expanded"); }, [railCollapsed]);
+  const railToggleLabel = railCollapsed ? texts.railExpand : texts.railCollapse;
   const railLocked = ui.phase === "stopping" || !!ui.operation;
   const startupLabel = nativeStartupLabel(ui.phase, texts);
   const button = (target: string, label: string, glyph: React.ReactNode): ReactElement => (
@@ -61,7 +69,13 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
     >
       {glyph}
     </HostRailButton>
-  );  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-native="true">
+  );  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-native="true" data-rail-collapsed={railCollapsed || undefined}>
+    <button type="button" className="dsh-native-rail-toggle" aria-label={railToggleLabel} title={railToggleLabel} aria-expanded={!railCollapsed} onClick={() => setRailCollapsed(current => !current)}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+        <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+        <path d="M6 2.5v11" />
+      </svg>
+    </button>
     <HostRail label={texts.rail} layoutId={RAIL_LAYOUT_ID}>
       <HostRailButton
         layoutId={RAIL_LAYOUT_ID}
@@ -77,7 +91,9 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
       </HostRailButton>
       <HostRailDivider />
       <HostRailList>
-        {ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== "desktop").map(s => (
+        {(() => { const creations = controller.visibleCreations(); const creatingIds = new Set(creations.map(c => c.spaceId));
+          return <>
+        {ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== "desktop" && !creatingIds.has(s.id)).map(s => (
           <HostRailButton
             key={s.id}
             layoutId={RAIL_LAYOUT_ID}
@@ -101,6 +117,10 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
             <span className="dsh-native-space-status" data-status={controller.spaceStatus(s.id)} aria-hidden="true" />
           </HostRailButton>
         ))}
+        {creations.map(creation => (
+          <CreationRailEntry key={creation.jobId} creation={creation} layoutId={RAIL_LAYOUT_ID} onSelect={() => controller.openCreation(creation)} />
+        ))}
+        </>; })()}
         <HostRailButton
           layoutId={RAIL_LAYOUT_ID}
           label={texts.newSpace}
@@ -162,6 +182,10 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
       <div className="dsh-native-confirm-actions"><PressButton className="dsh-host-action" type="button" onClick={() => setScopeHelp(false)}>{texts.scopeHelpOk}</PressButton>
         <PressButton className="dsh-host-action" type="button" disabled={railLocked} onClick={() => { setScopeHelp(false); controller.select("@settings"); }}>{texts.scopeHelpGoSettings}</PressButton></div>
     </NativeDialog>}
+    {ui.creationFailed && <CreationFailureDialog creation={ui.creationFailed}
+      onView={() => { controller.closeCreationFailed(); controller.select("@settings"); }}
+      onDismiss={() => controller.dismissCreation(ui.creationFailed!.jobId)}
+      onClose={controller.closeCreationFailed} />}
     {ui.notice && <div className="dsh-native-operation-notice" role="status">{ui.notice}</div>}
     {ui.pending && <HostLoadingPill label={texts.openingSpace} />}
     {ui.operation && <HostLoadingPill label={`${ui.operation.action === "stop" ? texts.stoppingSpace : ui.operation.action === "restart" ? texts.restartingSpace : texts.opening} ${ui.inventory?.spaces.find(s => s.id === ui.operation?.spaceId)?.displayName ?? ui.operation.spaceId}`} />}

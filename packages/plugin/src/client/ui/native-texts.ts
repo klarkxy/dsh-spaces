@@ -12,6 +12,8 @@ import { inferSpacesLocale, type SpacesLocale } from "../i18n";
 /** Every string the desktop shell can show. */
 export interface NativeShellTexts {
   rail: string;
+  railCollapse: string;
+  railExpand: string;
   desktopMain: string;
   desktopMainPinned: string;
   newSpace: string;
@@ -118,16 +120,29 @@ export interface NativeShellTexts {
   startupStarting: string;
   startupConnecting: string;
   startupIdle: string;
+  creationQueued: string;
+  creationRunning: string;
+  creationFailed: string;
+  creationStepInstall: string;
+  creationStepPrepare: string;
+  creationStepConfig: string;
+  creationStepView: string;
+  creationStepModels: string;
+  creationFailedTitle: string;
+  creationViewTask: string;
+  creationDismiss: string;
 }
 
 const texts: Record<SpacesLocale, NativeShellTexts> = {
   zh: {
     rail: "空间",
+    railCollapse: "收起空间栏",
+    railExpand: "展开空间栏",
     desktopMain: "Desktop · 主空间",
     desktopMainPinned: "Desktop · 主空间（始终置顶）",
     newSpace: "新建空间",
     scopeHelpLabel: "运行与退出说明",
-    scopeHelpHint: "退出 Desktop 后，Spaces 仍在后台运行；点击查看停止范围",
+    scopeHelpHint: "退出 Desktop 会停止由它启动的 Spaces 服务；点击查看停止范围",
     operating: "操作中",
     settings: "设置",
     settingsStopped: "设置 · Spaces 服务已停止",
@@ -153,7 +168,7 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     restartSpace: "重启空间",
     scopeHelpTitle: "关闭、退出和停止的区别",
     scopeHelpClose: "关闭窗口（×）：收起到托盘，Desktop 和空间继续运行。",
-    scopeHelpQuit: "退出 Desktop：退出主空间；Spaces 和子空间仍在后台运行。使用主空间模型的子空间需要 Desktop 保持打开。",
+    scopeHelpQuit: "退出 Desktop：退出主空间，并正常停止由本次 Desktop 启动的 Spaces 服务及其子空间。若连接的是已有服务，该服务不会随本次 Desktop 退出而停止。",
     scopeHelpStopSpace: "停止空间：仅停止所选空间；正在执行的任务会中断。",
     scopeHelpStopService: "停止整个服务：停止管理服务及其管理的所有空间，Desktop 主空间保持打开。",
     scopeHelpNote: "会话记录会保留。退出 Desktop 后，子空间里未发送的输入和附件会丢失。中断的任务不会自动继续。",
@@ -229,14 +244,27 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     startupStarting: "启动中",
     startupConnecting: "接入中",
     startupIdle: "未启动",
+    creationQueued: "{name} · 等待开始",
+    creationRunning: "{name} · 正在创建 · 第 {n}/{total} 步：{step}",
+    creationFailed: "{name} · 创建失败：{error}",
+    creationStepInstall: "安装 DSH",
+    creationStepPrepare: "准备",
+    creationStepConfig: "创建空间配置",
+    creationStepView: "安装视图组件",
+    creationStepModels: "连接模型",
+    creationFailedTitle: "空间「{name}」创建失败",
+    creationViewTask: "查看任务",
+    creationDismiss: "移除",
   },
   en: {
     rail: "Spaces",
+    railCollapse: "Hide spaces bar",
+    railExpand: "Show spaces bar",
     desktopMain: "Desktop · main space",
     desktopMainPinned: "Desktop · main space (always on top)",
     newSpace: "New space",
     scopeHelpLabel: "Run and quit behaviour",
-    scopeHelpHint: "Spaces keeps running after Desktop quits; click to see what stops",
+    scopeHelpHint: "Quitting Desktop stops the Spaces service it started; click to see what stops",
     operating: "busy",
     settings: "Settings",
     settingsStopped: "Settings · Spaces service stopped",
@@ -262,7 +290,7 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     restartSpace: "Restart space",
     scopeHelpTitle: "Close, quit and stop",
     scopeHelpClose: "Closing the window (×) hides Desktop to the tray; Desktop and spaces keep running.",
-    scopeHelpQuit: "Quitting Desktop exits the main space; Spaces and child spaces keep running in the background. Spaces using the main space model need Desktop to stay open.",
+    scopeHelpQuit: "Quitting Desktop exits the main space and normally shuts down the Spaces service and child spaces started by this Desktop instance. If Desktop connected to an existing service, quitting this instance does not stop that service.",
     scopeHelpStopSpace: "Stopping a space stops only that space; a running task is interrupted.",
     scopeHelpStopService: "Stopping the whole service stops the manager and every space it manages; the Desktop main space stays open.",
     scopeHelpNote: "Conversation history is kept. After quitting Desktop, unsent input and attachments in child spaces are lost. Interrupted tasks do not resume automatically.",
@@ -338,6 +366,17 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     startupStarting: "Starting",
     startupConnecting: "Attaching",
     startupIdle: "Idle",
+    creationQueued: "{name} · Waiting to start",
+    creationRunning: "{name} · Creating · step {n}/{total}: {step}",
+    creationFailed: "{name} · Creation failed: {error}",
+    creationStepInstall: "Installing DSH",
+    creationStepPrepare: "Preparing",
+    creationStepConfig: "Creating the space configuration",
+    creationStepView: "Installing the view bridge",
+    creationStepModels: "Connecting models",
+    creationFailedTitle: "Creating “{name}” failed",
+    creationViewTask: "View task",
+    creationDismiss: "Remove",
   },
 };
 

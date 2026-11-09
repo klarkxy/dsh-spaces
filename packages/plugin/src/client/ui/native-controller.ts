@@ -1,6 +1,6 @@
 import { isNativeSpaceTarget, parseNativeSpaceHash, parseNativePortalFailureHash, portalFailureDetail,
   parsePortalSnapshot, nativeCreateIntentHash, parseNativeCreateIntent,
-  type NativeSpaceTarget, type PortalSnapshot, type PortalFailure } from "../../../../../src/shared/space-host";
+  type NativeSpaceTarget, type PortalSnapshot, type PortalFailure, type PortalCreation } from "../../../../../src/shared/space-host";
 import { BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, type BrowserRelay } from "../../../../../src/shared/browser-guest";
 import type { DesktopSpaceAction, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
 import { publicGuideDetail } from "../guide-detail";
@@ -49,11 +49,15 @@ type NativeState = { phase: "loading" | NativeLaunchPhase | "ready" | "stopping"
   navigationIntent: NativeNavigationIntent | null; createHandoff: boolean;
   operation: { spaceId: string; action: DesktopSpaceAction["action"] } | null; operationError: string | null;
   notice: string | null; serviceStopRequest: number;
-  spaceConfirmation: { request: DesktopSpaceAction; activity: "busy" | "unknown" } | null };
+  spaceConfirmation: { request: DesktopSpaceAction; activity: "busy" | "unknown" } | null;
+  creationFailed: PortalCreation | null };
 
 /** One native guest, one lifetime. It has no Node API or product script execution channel. */
 export class NativeHostController {
-  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null };
+  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null };
+  /** Creation job ids seen queued/running this session; failed entries need it to stay visible. */
+  private seenCreations = new Set<string>();
+  private dismissedCreations = new Set<string>();
   private listeners = new Set<() => void>();
   private stopped = false;
   private started = false;
@@ -154,9 +158,30 @@ export class NativeHostController {
               change.inventory.serviceEpoch !== this.state.inventory?.serviceEpoch) table.delete(id);
         }
       }
+      if (change.inventory && change.inventory.serviceEpoch !== this.state.inventory?.serviceEpoch) {
+        this.seenCreations.clear(); this.dismissedCreations.clear();
+      }
+      for (const creation of change.inventory?.creating ?? []) {
+        if (creation.status !== "failed") this.seenCreations.add(creation.jobId);
+      }
     }
     this.state = { ...this.state, ...change }; for (const fn of this.listeners) fn();
   }
+  /** Creation placeholders visible in this session: all active, plus failed ones seen while active and not dismissed. */
+  visibleCreations = (): PortalCreation[] => {
+    const creating = this.state.inventory?.creating ?? [];
+    return creating.filter(creation =>
+      creation.status !== "failed" || (this.seenCreations.has(creation.jobId) && !this.dismissedCreations.has(creation.jobId)));
+  };
+  dismissCreation = (jobId: string): void => {
+    this.dismissedCreations.add(jobId);
+    this.patch(this.state.creationFailed?.jobId === jobId ? { creationFailed: null } : {});
+  };
+  openCreation = (creation: PortalCreation): void => {
+    if (creation.status === "failed") { this.patch({ creationFailed: creation }); return; }
+    this.select("@settings");
+  };
+  closeCreationFailed = (): void => { this.patch({ creationFailed: null }); };
   private detailOf(error: unknown): string | null {
     const detail = publicGuideDetail(error instanceof Error ? error.message : String(error ?? ""));
     return detail || null;
@@ -606,9 +631,7 @@ export class NativeHostController {
   }
   /**
    * The manager guest lives in another origin than this shell. The portal
-   * page in between carries the closed create intent to it. An older portal
-   * page does not know the fragment: the user stays on the settings page
-   * without a dialog, without a failure and without a timeout.
+   * page in between carries the closed create intent to it.
    */
   private handOverCreateIntent() {
     const intent = this.nativeUrl + nativeCreateIntentHash(++this.intentSequence);

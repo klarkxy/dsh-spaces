@@ -435,3 +435,126 @@ test("DOM: terminal portal causes retain exact iframe authentication and never r
     assert.equal(stateReads, reads); assert.equal(portalMints, 1); assert.equal(viewReads, 1);
   }
 });
+
+test("DOM: Windows caption controls follow the spaces rail and main sidebar state", { timeout: 30000 }, async t => {
+  const bundle = await build({
+    stdin: {
+      contents: `
+        import { attachHostLayout } from "./packages/plugin/src/client/host-layout";
+        import { HOST_SHELL_CSS } from "./packages/plugin/src/client/host-shell";
+        import { NATIVE_HOST_CSS } from "./packages/plugin/src/client/ui/native-styles";
+        const style = document.createElement("style");
+        style.textContent = HOST_SHELL_CSS + NATIVE_HOST_CSS;
+        document.head.append(style);
+        window.__attachHostLayout = () => {
+          const anchor = document.createElement("div");
+          anchor.className = "dsh-host-dock";
+          anchor.setAttribute("data-spaces-native", "");
+          anchor.innerHTML = '<button class="dsh-native-rail-toggle" type="button"></button><nav class="dsh-host-rail"></nav><main class="dsh-host-surface"></main>';
+          document.querySelector("[data-shell-overlay]").append(anchor);
+          window.__layout = attachHostLayout(anchor);
+          return true;
+        };
+        window.__disposeHostLayout = () => { window.__layout.dispose(); document.querySelector(".dsh-host-dock")?.remove(); };
+      `,
+      resolveDir: resolve("."),
+      loader: "ts",
+    },
+    bundle: true, write: false, format: "iife", platform: "browser",
+  });
+  const server = await serve((req, res) => {
+    if (req.url === "/client.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(bundle.outputFiles[0].text); return; }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(`<!doctype html><html data-windows-titlebar style="--dsh-windows-titlebar-height:40px"><style>
+      html,body{margin:0;width:100%;height:100%}#frame{height:100%;position:relative}[data-shell-overlay]{position:absolute;inset:0;pointer-events:none}
+      #sidebar{position:absolute;top:0;bottom:0;left:0;width:280px;box-sizing:border-box;background:#eee}
+      #sidebar [data-window-drag]{display:flex;justify-content:flex-end;align-items:center;height:40px;box-sizing:border-box}
+      #brand{flex:1}
+      [data-windows-titlebar] #toggle{position:fixed;left:12px;top:6px;width:28px;height:28px}
+      [data-windows-titlebar] [data-sidebar-collapsed] #newsession{position:fixed;left:48px;top:6px}
+      html[data-windows-titlebar]:has([data-sidebar-collapsed=true]){--dsh-windows-menu-start:84px}
+    </style><div id="frame"><div id="sidebar"><div id="sidebar-root">
+      <div data-window-drag><button id="brand">brand</button><button id="toggle">t</button></div>
+      <button id="newsession">new session</button>
+    </div></div><div data-shell-overlay></div></div>
+    <div data-windows-menu style="position:fixed;top:0;left:var(--dsh-windows-menu-start,48px);width:98px;height:40px"></div>
+    <script src="/client.js"></script></html>`);
+  });
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true, ...process.env.DSH_TEST_CHROMIUM ? { executablePath: process.env.DSH_TEST_CHROMIUM } : {} });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.goto(server.origin);
+  await page.evaluate(() => (window as any).__attachHostLayout());
+  await page.locator(".dsh-host-rail").waitFor();
+  const positions = () => page.evaluate(() => {
+    const toggle = document.getElementById("toggle")!;
+    const rail = document.querySelector<HTMLElement>(".dsh-host-rail");
+    return {
+      frame: document.getElementById("frame")!.getBoundingClientRect().x,
+      toggle: toggle.getBoundingClientRect().x,
+      togglePosition: getComputedStyle(toggle).position,
+      newsession: document.getElementById("newsession")!.getBoundingClientRect().x,
+      menu: document.querySelector("[data-windows-menu]")!.getBoundingClientRect().x,
+      railDisplay: rail ? getComputedStyle(rail).display : "removed",
+    };
+  });
+
+  // Rail shown, main sidebar expanded: the sidebar toggle joins the brand row,
+  // the Windows menu opens right of the rail.
+  let now = await positions();
+  assert.equal(now.frame, 72);
+  assert.equal(now.togglePosition, "static");
+  assert.ok(now.toggle > 72 + 200, `sidebar toggle lands inside the sidebar column, got ${now.toggle}`);
+  assert.equal(now.menu, 120);
+
+  // Rail shown, main sidebar collapsed: the official caption controls keep
+  // working, offset by the rail width.
+  await page.evaluate(() => document.getElementById("frame")!.setAttribute("data-sidebar-collapsed", "true"));
+  now = await positions();
+  assert.equal(now.togglePosition, "fixed");
+  assert.equal(now.toggle, 84);
+  assert.equal(now.newsession, 120);
+  assert.equal(now.menu, 156);
+
+  // Rail hidden, main sidebar collapsed: only the rail toggle occupies the
+  // caption, so the official controls shrink to a 36px offset.
+  await page.evaluate(() => document.querySelector(".dsh-host-dock")!.setAttribute("data-rail-collapsed", ""));
+  now = await positions();
+  assert.equal(now.frame, 0);
+  assert.equal(now.railDisplay, "none");
+  assert.equal(now.toggle, 48);
+  assert.equal(now.newsession, 84);
+  assert.equal(now.menu, 120);
+  await page.evaluate(() => document.getElementById("frame")!.removeAttribute("data-sidebar-collapsed"));
+  now = await positions();
+  assert.equal(now.menu, 84);
+
+  // A collapsed main sidebar that is covered by a space does not move the menu.
+  await page.evaluate(() => document.getElementById("frame")!.setAttribute("data-sidebar-collapsed", "true"));
+  await page.evaluate(() => (window as any).__layout.cover(true));
+  now = await positions();
+  assert.equal(now.menu, 84);
+  await page.evaluate(() => (window as any).__layout.cover(false));
+
+  // Dispose restores the frame margin.
+  await page.evaluate(() => (window as any).__disposeHostLayout());
+  const restored = await page.locator("#frame").evaluate(el => ({
+    x: el.getBoundingClientRect().x, marginLeft: (el as HTMLElement).style.marginLeft,
+  }));
+  assert.equal(restored.x, 0);
+  assert.equal(restored.marginLeft, "");
+
+  // Without the Windows title bar the rail keeps the legacy 72px margin and
+  // caption controls keep the page's own placement.
+  await page.evaluate(() => {
+    document.documentElement.removeAttribute("data-windows-titlebar");
+    document.getElementById("frame")!.removeAttribute("data-sidebar-collapsed");
+    (window as any).__attachHostLayout();
+  });
+  now = await positions();
+  assert.equal(now.frame, 72);
+  assert.equal(now.togglePosition, "static");
+  assert.equal(now.menu, 48);
+  await page.evaluate(() => (window as any).__disposeHostLayout());
+});

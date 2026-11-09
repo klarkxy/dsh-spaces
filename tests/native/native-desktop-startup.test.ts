@@ -69,6 +69,7 @@ function harness(t: TestContext, options: { phase?: DesktopLaunchPhase; empty?: 
     presentationSnapshot: async () => { calls.directory++; return structuredClone(directory); },
     initialize: async () => { calls.initialize++; throw Error("must not initialize"); },
     bootstrap: async () => { calls.bootstrap++; throw Error("must not bootstrap"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => { calls.portal++; return options.holdPortal && calls.portal === 1 ? portalHeld.promise : { ...PORTAL, reasons: [] }; },
     spaceAction: async () => { calls.child++; throw Error("child must not autostart"); },
   } satisfies WorkbenchGuideApi;
@@ -280,6 +281,7 @@ test("a missing launch observation interface fails without claiming the service 
     presentationSnapshot: async () => { throw Error("must not read"); },
     initialize: async () => { throw Error("must not initialize"); },
     bootstrap: async () => { throw Error("must not bootstrap"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => { throw Error("must not open"); },
   } as never, { acquire: async () => { throw Error("must not acquire"); }, release: async () => {} });
   t.after(() => missing.stop());
@@ -330,6 +332,7 @@ test("a confirmed manual restart returns a new controller for the supplied recor
     presentationSnapshot: async () => ({ serviceEpoch: nextEpoch, managerId: "hub", spaces: [] }),
     initialize: async () => { throw Error("must not initialize"); },
     bootstrap: async () => { throw Error("must not bootstrap"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => ({ ...PORTAL }),
     previewServiceRestart: async () => ({ confirmationId: "confirm-1", expiresAt: "2099-01-01T00:00:00.000Z", action: "restart" as const, spaces: [] }),
     restartService: async (confirmationId: string) => {

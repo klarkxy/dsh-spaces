@@ -32,12 +32,10 @@ import {
   type DesktopLaunchRecord,
 } from "./desktop-launch";
 import {
-  isStartupStatusUnsupported,
   observeStartupRead,
   publicObservationReason,
   STARTUP_EPOCH_MISMATCH,
   STARTUP_READY_INCONSISTENT,
-  STARTUP_STATUS_UNSUPPORTED,
   startupFailureReasons,
   type StartupObservationReader,
   type StartupWatch,
@@ -52,7 +50,7 @@ import {
   type SupervisorEndpoint,
 } from "./supervisor-bootstrap";
 
-import { parseSpaceHostAudience, parsePortalSnapshot, type PortalSnapshot, type SpaceHostAudience } from "../../../../src/shared/space-host";
+import { parseSpaceHostAudience, parsePortalSnapshot, projectSpaceCreations, type PortalSnapshot, type SpaceHostAudience } from "../../../../src/shared/space-host";
 
 const inflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
 const initializeInflight = new Map<string, Promise<WorkbenchBootstrapResult>>();
@@ -115,6 +113,19 @@ export class WorkbenchHostRuntime {
     return this.identity.role === "manager" && !this.identity.recoveryRequired && this.identity.confirmed;
   }
 
+  /**
+   * Confirmed main host that may expose Creator tools: the operator's own
+   * web/desktop profile, never a child space and never the manager profile.
+   * Child spaces are also role "workspace", so the profile id itself must be
+   * the trusted host identity, not the role.
+   */
+  get isTrustedMainHost(): boolean {
+    const identity = this.identity;
+    if (!identity.confirmed || identity.recoveryRequired || !identity.home) return false;
+    if (identity.role === "manager") return false;
+    return identity.profileId === "web" || identity.profileId === "desktop";
+  }
+
   get canColdStart(): boolean {
     if (this.identity.recoveryRequired || !this.identity.confirmed) return false;
     return this.identity.role === "manager";
@@ -165,7 +176,9 @@ export class WorkbenchHostRuntime {
     if (state.maintenance && failure?.status === "failed") {
       throw new Error([failure?.error?.message, ...state.reasons].filter(Boolean).join(" ") || "Maintenance has stopped the manager. The owning service remains blocked.");
     }
+    const creating = projectSpaceCreations(state.jobs);
     const snapshot = parsePortalSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
+      ...(creating.length ? { creating } : {}),
       spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) });
     if (!snapshot) throw new Error(ENTRY_UNAVAILABLE);
     return snapshot;
@@ -356,15 +369,16 @@ export class WorkbenchHostRuntime {
         watch?.({ kind: "state", state });
         return null;
       }
-      if (typeof api.startupStatus !== "function") {
-        return fail([STARTUP_STATUS_UNSUPPORTED], null, state, null);
+      // A ready status was read after the previous state snapshot. This state
+      // is the single confirmation of that transition, within the same deadline.
+      if (seen?.phase === "ready") {
+        return fail([STARTUP_READY_INCONSISTENT], null, state, seen);
       }
       let status: import("../../../../src/shared/workbench-startup").WorkbenchStartupStatus;
       try {
-        status = await read((signal) => api.startupStatus!(signal));
+        status = await read((signal) => api.startupStatus(signal));
       } catch (error) {
-        const reason = isStartupStatusUnsupported(error) ? STARTUP_STATUS_UNSUPPORTED : publicObservationReason(error);
-        return fail([reason], null, state, null);
+        return fail([publicObservationReason(error)], null, state, null);
       }
       seen = status;
       if (status.serviceEpoch !== endpoint?.serviceEpoch) {
@@ -373,9 +387,9 @@ export class WorkbenchHostRuntime {
       if (status.phase === "failed") {
         return fail(startupFailureReasons(status), status.failure, state, status);
       }
-      if (status.phase === "ready") {
-        return fail([STARTUP_READY_INCONSISTENT], null, state, status);
-      }
+      // The manager may have started between the two reads. Confirm against a
+      // state captured after ready, rather than treating the older one as a fault.
+      if (status.phase === "ready") continue;
       watch?.({ kind: "status", status });
       if (status.reasons.length) reasons = [...status.reasons];
       const remaining = deadline - Date.now();

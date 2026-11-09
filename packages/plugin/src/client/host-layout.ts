@@ -8,8 +8,9 @@ export function attachHostLayout(anchor: HTMLElement): { cover(active: boolean):
   const width = frame.style.getPropertyValue("width"), widthPriority = frame.style.getPropertyPriority("width");
   const usedMargin = getComputedStyle(frame).marginLeft;
   // AppFrame measures its border box and positions resize handles against its
-  // own columns. Reserve the rail outside that box so both stay in one coordinate system.
-  frame.style.setProperty("margin-left", `calc(${usedMargin} + 72px)`);
+  // own columns. Reserve the rail outside that box so both stay in one coordinate
+  // system. The rail width is a CSS variable so the native shell can collapse it.
+  frame.style.setProperty("margin-left", `calc(${usedMargin} + var(--dsh-spaces-rail-width, 72px))`);
   const assignedMargin = frame.style.getPropertyValue("margin-left");
   frame.style.setProperty("width", "auto");
   const owned = new Map<HTMLElement, { inert: boolean; hidden: string | null }>();

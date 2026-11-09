@@ -11,9 +11,6 @@ export type NativeSpaceTarget = "@settings" | string;
  * guest, which opens its own create dialog on top of that page. It carries
  * presentation only: no right, no credential and no management request
  * travels with it.
- *
- * An older portal page does not know this fragment. It ignores it and the
- * user stays on the settings page without a dialog: no failure, no timeout.
  */
 export function nativeCreateIntentHash(requestId: number): string {
   return "#intent/create/" + String(requestId);
@@ -40,7 +37,18 @@ export function parseNativeSpaceHash(hash: string): NativeSpaceNavigation | null
 }
 export interface SpaceHostAudience { parentOrigin: string; channel: string }
 export interface PortalSpace { id: string; displayName: string; status: string; generation: number; icon?: string }
-export interface PortalSnapshot { serviceEpoch: string; managerId: string | null; spaces: PortalSpace[] }
+/** A space being created, projected for presentation surfaces only. */
+export interface PortalCreation {
+  jobId: string;
+  spaceId: string;
+  displayName: string;
+  icon?: string;
+  status: "queued" | "running" | "failed";
+  phase: string;
+  message: string;
+  error?: string;
+}
+export interface PortalSnapshot { serviceEpoch: string; managerId: string | null; spaces: PortalSpace[]; creating?: PortalCreation[] }
 
 export const PORTAL_FAILURE_REASONS = [
   "state-request", "state-invalid", "service-changed", "manager-generation-changed",
@@ -127,9 +135,10 @@ export function parseSpaceHostAudience(value: unknown): SpaceHostAudience | null
 export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
   // Self-contained: the portal embeds this validator in its browser script.
   const spacePattern = /^[a-z0-9][a-z0-9-]{0,38}$/;
+  const iconPattern = /^(?:|whale|hash|code|chat|lab|book|data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2})$/;
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).sort().join(",") !== "managerId,serviceEpoch,spaces" ||
+  if (!["creating,managerId,serviceEpoch,spaces", "managerId,serviceEpoch,spaces"].includes(Object.keys(row).sort().join(",")) ||
       typeof row.serviceEpoch !== "string" || !/^[a-f0-9]{64}$/.test(row.serviceEpoch) ||
       !(row.managerId === null || typeof row.managerId === "string" && spacePattern.test(row.managerId)) ||
       !Array.isArray(row.spaces) || row.spaces.length > 1000) return null;
@@ -139,8 +148,7 @@ export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const space = item as Record<string, unknown>;
     if (!["displayName,generation,id,status", "displayName,generation,icon,id,status"].includes(Object.keys(space).sort().join(",")) ||
-        (space.icon !== undefined && (typeof space.icon !== "string" || space.icon.length > 240_000 ||
-          !/^(?:|whale|hash|code|chat|lab|book|data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2})$/.test(space.icon))) ||
+        (space.icon !== undefined && (typeof space.icon !== "string" || !iconPattern.test(space.icon) || space.icon.length > 240_000)) ||
         typeof space.id !== "string" || !spacePattern.test(space.id) || ids.has(space.id) ||
         typeof space.displayName !== "string" || space.displayName.length > 200 ||
         typeof space.status !== "string" || !["running", "starting", "stopping", "stopped", "crashed", "unknown"].includes(space.status) ||
@@ -149,7 +157,79 @@ export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
     spaces.push({ id: space.id, displayName: space.displayName, status: space.status, generation: space.generation as number,
       ...(space.icon === undefined ? {} : { icon: space.icon as string }) });
   }
-  return { serviceEpoch: row.serviceEpoch, managerId: row.managerId as string | null, spaces };
+  const creating: PortalCreation[] = [];
+  if (row.creating !== undefined) {
+    if (!Array.isArray(row.creating) || row.creating.length > 16) return null;
+    for (const item of row.creating) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const creation = item as Record<string, unknown>;
+      if (!["displayName,jobId,message,phase,spaceId,status", "displayName,error,jobId,message,phase,spaceId,status", "displayName,icon,jobId,message,phase,spaceId,status", "displayName,error,icon,jobId,message,phase,spaceId,status"].includes(Object.keys(creation).sort().join(",")) ||
+          typeof creation.jobId !== "string" || creation.jobId.length > 80 ||
+          typeof creation.spaceId !== "string" || !spacePattern.test(creation.spaceId) ||
+          typeof creation.displayName !== "string" || creation.displayName.length > 200 ||
+          typeof creation.phase !== "string" || creation.phase.length > 64 ||
+          typeof creation.message !== "string" || creation.message.length > 2000 ||
+          typeof creation.status !== "string" || !["queued", "running", "failed"].includes(creation.status) ||
+          (creation.icon !== undefined && (typeof creation.icon !== "string" || creation.icon.length > 240_000 || !iconPattern.test(creation.icon))) ||
+          (creation.status === "failed"
+            ? (typeof creation.error !== "string" || creation.error.length > 2000)
+            : creation.error !== undefined)) return null;
+      creating.push({ jobId: creation.jobId, spaceId: creation.spaceId, displayName: creation.displayName,
+        status: creation.status as PortalCreation["status"], phase: creation.phase, message: creation.message,
+        ...(creation.icon === undefined ? {} : { icon: creation.icon as string }),
+        ...(creation.error === undefined ? {} : { error: creation.error as string }) });
+    }
+  }
+  return { serviceEpoch: row.serviceEpoch, managerId: row.managerId as string | null, spaces,
+    ...(row.creating === undefined ? {} : { creating }) };
+}
+
+/** Projects space.create and creator.create jobs for presentation surfaces; self-contained for portal embedding. */
+export function projectSpaceCreations(jobs: unknown): PortalCreation[] {
+  // Self-contained: this function is embedded in the portal by toString(), so it
+  // must not reference module-scope constants such as PORTAL_SPACE_RE.
+  const spacePattern = /^[a-z0-9][a-z0-9-]{0,38}$/;
+  const creations: PortalCreation[] = [];
+  const failed: Array<{ creation: PortalCreation; updatedAt: string }> = [];
+  if (!Array.isArray(jobs)) return creations;
+  for (const job of jobs) {
+    if (!job || typeof job !== "object" || Array.isArray(job)) continue;
+    const row = job as Record<string, unknown>;
+    if (row.kind !== "space.create" && row.kind !== "creator.create" || typeof row.status !== "string") continue;
+    if (row.status !== "queued" && row.status !== "running" && row.status !== "failed") continue;
+    const result = typeof row.result === "object" && row.result !== null ? row.result as Record<string, unknown> : undefined;
+    const affected = Array.isArray(row.affectedSpaceIds) ? row.affectedSpaceIds : [];
+    const spaceId = typeof result?.spaceId === "string" ? result.spaceId : typeof affected[0] === "string" ? affected[0] : undefined;
+    if (!spaceId || !spacePattern.test(spaceId)) continue;
+    const subject = typeof row.subject === "object" && row.subject !== null ? row.subject as Record<string, unknown> : undefined;
+    const displayName = typeof subject?.displayName === "string" && subject.displayName ? subject.displayName : spaceId;
+    const error = typeof row.error === "object" && row.error !== null ? row.error as Record<string, unknown> : undefined;
+    const creation: PortalCreation = {
+      jobId: typeof row.id === "string" ? row.id : "",
+      spaceId, displayName,
+      ...(typeof subject?.icon === "string" && subject.icon ? { icon: subject.icon } : {}),
+      status: row.status as PortalCreation["status"], phase: typeof row.phase === "string" ? row.phase : "",
+      message: typeof row.message === "string" ? row.message : "",
+      ...(row.status === "failed" ? { error: (typeof error?.message === "string" && error.message) || (typeof row.message === "string" ? row.message : "") } : {}),
+    };
+    if (row.status === "failed") failed.push({ creation, updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "" });
+    else creations.push(creation);
+  }
+  return creations.concat(failed.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 8).map((row) => row.creation));
+}
+
+/**
+ * Step index for the creation ring; monotonic over the job's phase path.
+ * Ordinary space.create phases land on 0-2; the creator pipeline's later
+ * stages (llm-policy, plugin installs, optional start, final result) share the
+ * last step so progress never rewinds mid-job.
+ */
+export function spaceCreateStep(phase: string): { index: number; total: 4 } {
+  const index = phase === "create" ? 1
+    : phase === "view-bridge" ? 2
+    : phase === "llm-bridge" || phase === "llm-policy" || phase === "plugins" || phase === "plugin" || phase === "start" || phase === "result" ? 3
+    : 0;
+  return { index, total: 4 };
 }
 
 /** Validate source, origin and one presentation lifetime before inspecting a message payload. */

@@ -170,6 +170,7 @@ test("late native lease is released on plugin disposal; discovery never initiali
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
     ...readyLaunchApi("a".repeat(64), "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [] }),
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }),
     bootstrap: async () => { throw Error("must not bootstrap"); }, initialize: async () => { calls.push("initialize"); throw Error(); },
   }, { acquire: () => new Promise(resolve => { acquire = resolve; }), release: async id => { released.push(id); } });
@@ -362,6 +363,7 @@ test("Desktop clicking a stopped child starts once, ignores stale status and res
     spaceAction: async request => { requests++; assert.equal(request.action, "open"); return new Promise(resolve => { complete = resolve; }); },
     bootstrap: async () => { throw Error("unused"); },
     initialize: async () => { throw Error("unused"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => { throw Error("unused"); },
   } as import("../../packages/plugin/src/types.ts").WorkbenchGuideApi, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
   t.after(() => controller.stop());
@@ -582,6 +584,7 @@ test("native guide shows sanitized launch reasons after a failed automatic begin
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: null, unavailable: false, reasons: [] }),
     presentationSnapshot: async () => { throw Error("unused"); },
     bootstrap: async () => { throw Error("unused"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => { throw Error("unused"); },
     initialize: async () => { throw Error("must not initialize"); },
     beginDesktopLaunch: async () => {
@@ -764,6 +767,7 @@ test("native first open prepares the portal alongside launch and only shows gree
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
     ...readyLaunchApi(inventory.serviceEpoch, inventory.managerId),
     presentationSnapshot: async () => structuredClone(inventory),
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => { handoffs++; return { available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }; },
     spaceAction: () => new Promise(resolve => { complete = resolve; }),
   } as never, { acquire: async () => ({ lease: "test", partition: "isolated" }), release: async () => {} });
@@ -834,6 +838,7 @@ async function openSettingsGuest(t: import("node:test").TestContext, options?: {
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
     ...readyLaunchApi(epoch, "hub", options?.calls),
     presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + navToken, reasons: [] }),
     initialize: async () => { options?.calls?.push("initialize"); throw new Error("must not relaunch"); },
   } as never, {
@@ -989,6 +994,7 @@ test("initial about:blank must finish and stop before the first bootstrap loadUR
     role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
     ...readyLaunchApi(epoch, "hub"),
     presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + navToken, reasons: [] }),
     initialize: async () => { throw new Error("must not relaunch"); },
   } as never, { acquire: async () => ({ lease: "blank-lease", partition: "isolated" }), release: async () => {} });
@@ -1022,4 +1028,44 @@ test("initial about:blank must finish and stop before the first bootstrap loadUR
   assert.ok(bootstrap > loadStopped);
   assert.equal(records.filter(row => row.ev === "bootstrap-load-start").length, 1);
   assert.equal(records.filter(row => row.ev === "select-load-start").length, 1);
+});
+
+test("native rail shows active creations and keeps seen failed ones until dismissed", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const epoch = "a".repeat(64);
+  const running = { jobId: "create-1", spaceId: "made-one", displayName: "Made", status: "running" as const, phase: "install", message: "DSH 0.9.9" };
+  const unseen = { jobId: "create-2", spaceId: "lost-one", displayName: "Lost", status: "failed" as const, phase: "create", message: "", error: "boom" };
+  let current: unknown = { serviceEpoch: epoch, managerId: "hub", spaces: [], creating: [running, unseen] };
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    presentationSnapshot: async () => current,
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
+    returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }),
+    initialize: async () => { throw Error("must not initialize"); },
+  } as never, { acquire: async () => { throw Error("no guest needed"); }, release: async () => {} });
+  await controller.start({} as HTMLElement);
+  // A failed job never seen active stays hidden; the running one shows.
+  assert.deepEqual(controller.visibleCreations().map(row => row.jobId), ["create-1"]);
+  // The same job failing after it was seen stays visible as a failed placeholder.
+  current = { serviceEpoch: epoch, managerId: "hub", spaces: [],
+    creating: [{ ...running, status: "failed", message: "", error: "install broke" }, unseen] };
+  t.mock.timers.tick(1500); await tick();
+  assert.deepEqual(controller.visibleCreations().map(row => row.jobId), ["create-1"]);
+  // Clicking the failed placeholder opens its dialog; dismissing removes it and closes the dialog.
+  controller.openCreation(controller.visibleCreations()[0]);
+  assert.equal(controller.getSnapshot().creationFailed?.jobId, "create-1");
+  controller.closeCreationFailed();
+  assert.equal(controller.getSnapshot().creationFailed, null);
+  controller.openCreation(controller.visibleCreations()[0]);
+  controller.dismissCreation("create-1");
+  assert.deepEqual(controller.visibleCreations(), []);
+  assert.equal(controller.getSnapshot().creationFailed, null);
+  // A running placeholder navigates to the settings surface, like the active job surface.
+  current = { serviceEpoch: epoch, managerId: "hub", spaces: [], creating: [running] };
+  t.mock.timers.tick(1500); await tick();
+  assert.deepEqual(controller.visibleCreations().map(row => row.jobId), ["create-1"]);
+  controller.openCreation(controller.visibleCreations()[0]);
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  controller.stop();
 });

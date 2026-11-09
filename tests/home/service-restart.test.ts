@@ -252,3 +252,28 @@ test("busy and unknown child tasks need generation-bound consent before a stop",
     assert.equal(submitted, count + 1);
   }
 });
+
+test("Desktop child actions are refused while a space.create is active", async (t) => {
+  const f = fixture(t);
+  const activeCreate = { id: "create-job", requestId: "create-job", kind: "space.create", status: "running", phase: "install",
+    message: "DSH 0.9.9", affectedSpaceIds: ["new-space"], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    canCancel: false, subject: { displayName: "New Space", icon: "whale" } };
+  f.state.jobs = [activeCreate] as never;
+  const calls: string[] = [];
+  const api = { ...f.api,
+    preview: async () => { calls.push("preview"); throw Error("unreachable"); },
+    submit: async () => { calls.push("submit"); throw Error("unreachable"); },
+  } as unknown as WorkbenchApi;
+  for (const action of ["open", "start"] as const) {
+    f.state.spaces[1].status = "stopped";
+    await assert.rejects(runDesktopSpaceAction(api, { spaceId: "coding", action, serviceEpoch: f.state.serviceEpoch }), /正在创建空间「New Space」/);
+  }
+  for (const action of ["stop", "restart"] as const) {
+    f.state.spaces[1].status = "running";
+    await assert.rejects(runDesktopSpaceAction(api, { spaceId: "coding", action, serviceEpoch: f.state.serviceEpoch }), /正在创建空间「New Space」/);
+  }
+  f.state.spaces[1].status = "running";
+  const state = await runDesktopSpaceAction(api, { spaceId: "coding", action: "open", serviceEpoch: f.state.serviceEpoch });
+  assert.equal(state.spaces[1].status, "running");
+  assert.deepEqual(calls, []);
+});

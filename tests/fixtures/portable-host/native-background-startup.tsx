@@ -57,6 +57,7 @@ const api = {
   initialize: async () => { counts.oldInitialize += 1; throw Error("must not initialize"); },
   bootstrap: async () => { throw Error("must not bootstrap"); },
   spaceAction: async () => { counts.child += 1; throw Error("must not autostart a child"); },
+  portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
   returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] as string[] }),
 };
 const bridge = { acquire: async () => { counts.acquire += 1; return { lease: "owned", partition: "isolated" }; }, release: async () => {} };
