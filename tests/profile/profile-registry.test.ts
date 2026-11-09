@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createDirectoryLink } from "../../src/shared/node/filesystem.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -102,6 +103,34 @@ test("validateNewName rejects reserved and existing", () => {
     message: t("errors.profileExists", { name: "space-coding" }),
   });
   registry.validateNewName("space-notes");
+});
+
+test("deleting a space removes linked entries but preserves external component sources and hub targets", () => {
+  const home = fakeHome();
+  const checkout = fakeHome();
+  const name = "space-linked";
+  writeRegisteredSpace(home, name);
+  const modules = join(home, "profiles", name, "node_modules", "@dsh-spaces");
+  const hub = join(home, "hub", name);
+  mkdirSync(modules, { recursive: true });
+  mkdirSync(hub, { recursive: true });
+  for (const component of ["view-bridge", "llm-bridge"]) {
+    const source = join(checkout, component);
+    mkdirSync(join(source, "src"), { recursive: true });
+    writeFileSync(join(source, "package.json"), JSON.stringify({ name: `@dsh-spaces/${component}` }));
+    writeFileSync(join(source, "src", "sentinel.ts"), `keep ${component}`);
+    createDirectoryLink(source, join(modules, component));
+  }
+  createDirectoryLink(checkout, join(hub, "linked-workspace"));
+  const registry = new ProfileRegistry(home);
+  registry.removeOfficialProfile(name);
+  registry.removeHubData(name);
+  assert.equal(existsSync(join(home, "profiles", name)), false);
+  assert.equal(existsSync(hub), false);
+  for (const component of ["view-bridge", "llm-bridge"]) {
+    assert.equal(readFileSync(join(checkout, component, "src", "sentinel.ts"), "utf8"), `keep ${component}`);
+    assert.deepEqual(JSON.parse(readFileSync(join(checkout, component, "package.json"), "utf8")), { name: `@dsh-spaces/${component}` });
+  }
 });
 
 test("official desktop profile is reserved and cannot be deleted", () => {

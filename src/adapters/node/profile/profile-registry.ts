@@ -1,5 +1,5 @@
-import { lstatSync } from "../../../shared/node/filesystem";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, removeTreeNoFollow } from "../../../shared/node/filesystem";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { t } from "../../../shared/i18n";
 import { SPACE_ID_RE, type ProfileRecord, type SpaceMeta, type SpacesFile } from "../../../shared/types";
@@ -98,7 +98,7 @@ export class ProfileRegistry {
     }
     const dir = this.hubDataDir(name);
     if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true });
+      removeTreeNoFollow(dir);
     }
   }
 
@@ -109,7 +109,7 @@ export class ProfileRegistry {
     }
     const dir = join(this.profilesDir(), name);
     if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true });
+      removeTreeNoFollow(dir);
     }
   }
 

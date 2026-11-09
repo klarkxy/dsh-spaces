@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 /** Dev-checkout linking: components installed as link: specs straight into a source checkout. */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { samePath } from "../home/home-guard";
 
@@ -88,4 +88,42 @@ export function devComponentLinked(
   } catch {
     return false;
   }
+}
+
+/**
+ * Why a checkout component directory cannot be linked into a profile, or
+ * undefined when it is installable: a real directory whose manifest names the component,
+ * declares a `main` entry, and whose declared bundle patch file exists.
+ * Returning a reason instead of guessing keeps a missing or damaged source
+ * from degrading into "no component" (silently skipped steps) or into an
+ * opaque plugin-add failure.
+ */
+export function devComponentProblem(checkout: string, component: SpacesComponent): string | undefined {
+  const expected = `@dsh-spaces/${component}`;
+  const dir = devComponentDir(checkout, component);
+  let stat;
+  try {
+    stat = lstatSync(dir);
+  } catch {
+    return `the linked ${expected} source directory is missing`;
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return `the linked ${expected} source is not a real directory`;
+  const manifestPath = join(dir, "package.json");
+  let manifest: { name?: unknown; main?: unknown; dsh?: { bundle?: { patch?: unknown } } };
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as typeof manifest;
+  } catch {
+    return `the linked ${expected} manifest could not be read`;
+  }
+  if (manifest.name !== expected) return `the linked ${expected} manifest declares ${String(manifest.name)}`;
+  const main = manifest.main;
+  if (typeof main !== "string" || !main.trim() || !existsSync(join(dir, ...main.split("/")))) {
+    return `the linked ${expected} main build entry is missing`;
+  }
+  const patch = manifest.dsh?.bundle?.patch;
+  const patches = typeof patch === "string" ? [patch] : Array.isArray(patch) ? patch : [];
+  if (!patches.length || patches.some((file) => typeof file !== "string" || !file.trim() || !existsSync(join(dir, ...file.split("/"))))) {
+    return `the linked ${expected} bundle patch is missing`;
+  }
+  return undefined;
 }

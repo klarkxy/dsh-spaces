@@ -1,5 +1,5 @@
 import {
-  constants, lstatSync as nodeLstatSync, readdirSync, readlinkSync as nodeReadlinkSync,
+  constants, lstatSync as nodeLstatSync, readdirSync, readlinkSync as nodeReadlinkSync, rmdirSync, unlinkSync,
   realpathSync as nodeRealpathSync, symlinkSync, type BigIntStats, type Stats,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -68,6 +68,27 @@ export function readlinkSync(path: string): string {
     if (target) return target;
   }
   return nodeReadlinkSync(path);
+}
+
+/** Remove directory entries without traversing directory aliases or linked package sources. */
+export function removeTreeNoFollow(path: string): void {
+  let stat: Stats;
+  try { stat = lstatSync(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    // A Windows directory alias that native lstat reports as a directory needs
+    // the non-recursive directory-entry removal API, never a recursive walk.
+    if (process.platform === "win32" && nodeLstatSync(path).isDirectory()) rmdirSync(path);
+    else unlinkSync(path);
+    return;
+  }
+  // Use our native-identity-aware lstat at every level. A generic recursive rm
+  // may use the runtime's uncorrected directory classification for junctions.
+  for (const name of readdirSync(path)) removeTreeNoFollow(join(path, name));
+  rmdirSync(path);
 }
 
 /** Create an internal directory link, including a not-yet-published target. */
