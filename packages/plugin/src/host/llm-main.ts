@@ -20,6 +20,22 @@ type Request = {
     used?: boolean;
     timer?: NodeJS.Timeout;
 };
+/**
+ * Public error codes a supervisor may put in the JSON `error` field of a
+ * refused register/catalog-updated/unregister response. A closed set: anything
+ * else — arbitrary messages, tokens, or unrelated codes — is dropped so the
+ * thrown error only ever carries status plus a recognized code.
+ */
+const SUPERVISOR_REFUSAL_CODES: ReadonlySet<string> = new Set([
+    'INVALID_CONTENT_TYPE', 'BODY_TOO_LARGE', 'NATIVE_AUTH_REQUIRED',
+    'UNAUTHENTICATED', 'METHOD_NOT_ALLOWED', 'REQUEST_LIMIT', 'HOST_REQUIRED',
+    'HOST_AUTH_REQUIRED', 'MAIN_ALREADY_REGISTERED', 'MAIN_DRAINING',
+    'FOREIGN_HOME', 'INVALID_MAIN_ORIGIN', 'MAIN_IDENTITY_MISMATCH',
+    'MAIN_NOT_REGISTERED', 'STALE_MAIN', 'UNAVAILABLE', 'CLEANUP_UNCONFIRMED',
+    'UNKNOWN_OPERATION', 'REQUEST_FAILED', 'INVALID_INPUT',
+    'workbench/read-only', 'workbench/unavailable', 'workbench/protected',
+]);
+const SUPERVISOR_REFUSAL_BODY_LIMIT = 8 * 1024;
 /** A plugin-owned listener; official LLM services retain credentials and adapter generations. */
 export class MainLlmService {
     private endpoint?: SupervisorEndpoint;
@@ -84,10 +100,46 @@ export class MainLlmService {
     private async supervisor(operation: string, input: unknown) {
         const response = await fetch(this.endpoint!.origin + LLM_DELEGATION_PREFIX + operation, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000), headers: { authorization: `Bearer ${this.endpoint!.bearer}`, 'content-type': 'application/json' }, body: JSON.stringify(input) });
         if (!response.ok) {
-            await response.body?.cancel();
-            throw new Error('MAIN_REGISTRATION_REFUSED:' + response.status);
+            const code = await this.refusalCode(response);
+            throw new Error('MAIN_REGISTRATION_REFUSED:' + response.status + (code ? ':' + code : ''));
         }
         return response;
+    }
+    /** Bounded read of a refusal body; read failures never mask the HTTP status. */
+    private async refusalCode(response: Response): Promise<string | undefined> {
+        try {
+            if (!response.body || Number(response.headers.get('content-length')) > SUPERVISOR_REFUSAL_BODY_LIMIT) {
+                await response.body?.cancel();
+                return undefined;
+            }
+            const chunks: Buffer[] = [];
+            let bytes = 0;
+            const reader = response.body.getReader();
+            try {
+                for (;;) {
+                    const { value, done } = await reader.read();
+                    if (done)
+                        break;
+                    bytes += value.length;
+                    if (bytes > SUPERVISOR_REFUSAL_BODY_LIMIT) {
+                        await reader.cancel();
+                        return undefined;
+                    }
+                    chunks.push(Buffer.from(value));
+                }
+            }
+            finally {
+                reader.releaseLock();
+            }
+            const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                const error = (parsed as { error?: unknown }).error;
+                if (typeof error === 'string' && SUPERVISOR_REFUSAL_CODES.has(error))
+                    return error;
+            }
+        }
+        catch { }
+        return undefined;
     }
     private json(res: ServerResponse, value: unknown, status = 200) { if (res.destroyed || res.writableEnded)
         return; res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)); }
