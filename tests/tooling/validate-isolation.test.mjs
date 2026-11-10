@@ -57,7 +57,8 @@ test("isolation gate exchanges one launch token and reuses its session cookie", 
   const log = join(dir, "web.log");
   writeFileSync(log, `dsh web: http://127.0.0.1:${address.port}/?token=${secret}\n`);
   try {
-    const authenticated = await waitForApi(address.port, log, 2_000);
+    // Fixture poll budget only. The product gate uses 60s. 2s misses polls when npm test saturates the event loop.
+    const authenticated = await waitForApi(address.port, log, 15_000);
     assert.equal(authenticated, cookie);
     assert.deepEqual(await rpc(address.port, "session.list", {}, authenticated), { items: [] });
     assert.equal(exchanges, 1);
@@ -112,7 +113,7 @@ test("isolation gate falls back from session.list to session/list after HTTP 404
   const log = join(dir, "web.log");
   writeFileSync(log, `dsh web: http://127.0.0.1:${address.port}/?token=${secret}\n`);
   try {
-    const authenticated = await waitForApi(address.port, log, 2_000);
+    const authenticated = await waitForApi(address.port, log, 15_000);
     assert.equal(authenticated, cookie);
     assert.deepEqual(await rpc(address.port, "session.list", {}, authenticated), { items: [] });
   } finally {

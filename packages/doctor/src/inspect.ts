@@ -114,7 +114,7 @@ export function readPluginMutation(home: string): Json {
       phase,
       spaces: parsed.spaceIds.length,
       evidence: files === "ok" || files === "missing" ? files : "unreadable",
-      rollbackRequired: true,
+      writeBlocked: true,
     };
   } catch {
     return { present: true, unreadable: true };

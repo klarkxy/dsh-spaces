@@ -474,7 +474,7 @@ test("downloadPlugin deadline starts after a prior plugin-queue hold, not when e
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const prior = enqueuePlugin("hold-queue", async () => {
+  const prior = enqueuePlugin(async () => {
     await held;
   });
   let started = 0;

@@ -6,9 +6,9 @@
 
 源码与本轮开始时的 Supervisor 构建产物具有相同缺陷。修复把相同正则放到函数内部，与既有 `parsePortalSnapshot` 的自包含模式一致；未放宽校验、添加重试或恢复。
 
-- [修复](../src/shared/space-host.ts#L188)
-- [脚本嵌入与异常边界](../src/adapters/node/server/workbench-portal.ts#L78)
-- [永久回归](../tests/native/nav-diag-portal.test.ts)：实际渲染脚本在独立 VM 中执行，覆盖 native 初始状态含创建作业、native 轮询出现作业，以及 Web 发布创建投影。
+- [修复](../../src/shared/space-host.ts#L188)
+- [脚本嵌入与异常边界](../../src/adapters/node/server/workbench-portal.ts#L78)
+- [永久回归](../../tests/native/nav-diag-portal.test.ts)：实际渲染脚本在独立 VM 中执行，覆盖 native 初始状态含创建作业、native 轮询出现作业，以及 Web 发布创建投影。
 
 ## 隔离验证
 

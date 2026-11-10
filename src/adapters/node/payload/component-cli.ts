@@ -1,4 +1,4 @@
-import { lstatSync } from "../../../shared/node/filesystem";
+import { lstatSync, samePath } from "../../../shared/node/filesystem";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { gte, satisfies, valid } from "semver";
@@ -299,9 +299,5 @@ function declaredFileCoordinate(spec: string, profileDir: string): string | unde
   if (isAbsolute(body)) return resolve(body);
   if (!prefixed) return undefined;
   return resolve(profileDir, body);
-}
-
-function samePath(left: string, right: string): boolean {
-  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 

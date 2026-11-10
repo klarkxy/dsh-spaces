@@ -15,7 +15,6 @@ const en = {
   "app.home": "Home",
   "app.settings": "Settings",
   "app.newSpace": "New space",
-  "app.retry": "Retry",
   "app.close": "Close",
   "app.cancel": "Cancel",
   "app.confirm": "Confirm",
@@ -52,7 +51,6 @@ const en = {
   "create.done": "Created",
   "create.enter": "Enter space",
   "app.openIndependent": "Open independently",
-  "app.diagnose": "Diagnostics",
   "app.start": "Start",
   "app.stop": "Stop",
   "app.restart": "Restart",
@@ -128,7 +126,6 @@ const en = {
   "icon.book": "Book",
   "icon.default": "Use default icon",
   "detail.id": "ID",
-  "detail.status": "Status",
   "detail.tabGeneral": "General",
   "detail.tabPlugins": "Plugins",
   "detail.tabAdvanced": "Advanced",
@@ -215,7 +212,6 @@ const en = {
   "snapshots.create": "Create Home backup",
   "snapshots.createHint": "Stops running spaces, then backs up the whole Home. Spaces stay stopped.",
   "snapshots.empty": "No backups yet.",
-  "snapshots.restore": "Restore is not supported",
   "snapshots.delete": "Preview delete",
   "snapshots.notRestorable": "Not restorable",
   "snapshots.spaces": "Spaces",
@@ -360,7 +356,7 @@ const en = {
   "create.modelSource": "Models",
   "create.mainModel": "Use the main space model",
   "create.localModel": "Configure in this space",
-  "create.modelSourceHint": "Follow the main space by default, or configure models in this space.",
+  "create.modelSourceHint": "By default, models are copied once from the main space at creation. Sync again from the space details whenever you like, or configure models in this space.",
   "create.base": "Base",
   "create.baseVersion": "Base version",
   "create.versionPending": "Loading versions…",
@@ -368,11 +364,7 @@ const en = {
   "create.browserBaseHint": "Our Browser versions. No chat or models are loaded by default; browser plugins can be installed from the space details.",
   "create.webVersion": "DSH version",
   "create.browser": "Browser space",
-  "create.browserHint": "Install the bundled Browser and open its own tabbed page. Cross-space access starts disabled.",
-  "create.dshVersion": "DSH version: {version} (upgrade later from the space details)",
-  "recovery.title": "Workbench entry",
   "iframe.title": "Space",
-  // --- settings-ia (owner: settings/IA worker) ---
   "settings.nav.spaces": "Spaces",
   "settings.nav.templates": "Space templates",
   "settings.nav.general": "General",
@@ -387,7 +379,6 @@ const en = {
     "Stopping the service stops every space and ends the manager. To keep working, open Spaces again.",
   "settings.service.stop": "Stop the whole service",
   "detail.back": "Back to spaces",
-  "detail.overview": "Overview",
   "detail.appearance": "Appearance",
   "detail.export": "Export",
   "detail.danger": "Danger zone",
@@ -400,7 +391,6 @@ const en = {
   "detail.exportShare": "Export a share file",
   "detail.deleteHint": "Deleting a space removes its configuration and installed plugins; session and storage files stay on disk. It cannot be undone here.",
   "detail.unsaved": "Unsaved changes",
-  "detail.pluginsInstalled": "Installed plugins",
   "detail.pluginsInstall": "Install from the catalog",
   "jobs.details": "Details",
   "jobs.kind.space.create": "Create space",
@@ -457,8 +447,6 @@ const en = {
   "plugins.selectEntry": "Pick a plugin from the catalog to see its published versions.",
   "plugins.upgradeTo": "Upgrade to {version}",
   "plugins.notInstallable": "This entry is not one-click installable.",
-  // --- end settings-ia ---
-  // --- templates (owner: templates worker) ---
   "templates.section.create": "Create from a template",
   "templates.section.import": "Import",
   "templates.section.export": "Export",
@@ -481,7 +469,6 @@ const en = {
   "templates.export.advanced": "Advanced options",
   "templates.export.templateName": "Template name",
   "templates.export.empty": "There is no space to export yet.",
-  // --- end templates ---
 } as const;
 
 export type WorkbenchMessageKey = keyof typeof en;
@@ -494,7 +481,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "app.home": "首页",
   "app.settings": "设置",
   "app.newSpace": "新建空间",
-  "app.retry": "重试",
   "app.close": "关闭",
   "app.cancel": "取消",
   "app.confirm": "确认",
@@ -531,7 +517,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "create.done": "已创建",
   "create.enter": "进入空间",
   "app.openIndependent": "独立打开",
-  "app.diagnose": "诊断",
   "app.start": "启动",
   "app.stop": "停止",
   "app.restart": "重启",
@@ -607,7 +592,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "icon.book": "书本",
   "icon.default": "使用默认图标",
   "detail.id": "ID",
-  "detail.status": "状态",
   "detail.tabGeneral": "常规",
   "detail.tabPlugins": "插件",
   "detail.tabAdvanced": "高级",
@@ -694,7 +678,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "snapshots.create": "创建整 Home 备份",
   "snapshots.createHint": "会先停止运行中的空间，再备份整个 Home。完成后空间保持停止。",
   "snapshots.empty": "还没有备份。",
-  "snapshots.restore": "不支持恢复",
   "snapshots.delete": "预览删除",
   "snapshots.notRestorable": "不可恢复",
   "snapshots.spaces": "空间",
@@ -837,7 +820,7 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "create.modelSource": "模型来源",
   "create.mainModel": "使用主空间模型",
   "create.localModel": "在此空间配置",
-  "create.modelSourceHint": "默认跟随主空间，也可在此空间单独配置模型。",
+  "create.modelSourceHint": "默认在创建时从主空间复制一次模型配置，之后可随时在空间详情里再次同步；也可以在此空间单独配置。",
   "create.base": "底座（base）",
   "create.baseVersion": "底座版本",
   "create.versionPending": "正在读取版本…",
@@ -845,11 +828,7 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "create.browserBaseHint": "使用我们自己的 Browser 版本。默认不加载聊天和模型，可在空间详情中安装浏览器插件。",
   "create.webVersion": "DSH 版本",
   "create.browser": "浏览器空间",
-  "create.browserHint": "安装内置浏览器，打开独立多标签页面。跨空间访问默认关闭。",
-  "create.dshVersion": "DSH 版本：{version}（创建后可在空间详情中升级）",
-  "recovery.title": "工作台入口",
   "iframe.title": "空间",
-  // --- settings-ia (owner: settings/IA worker) ---
   "settings.nav.spaces": "空间",
   "settings.nav.templates": "空间模板",
   "settings.nav.general": "常规",
@@ -863,7 +842,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "settings.service.stopHint": "停止服务会停掉所有空间并结束管理器。之后要继续使用，需要重新打开 Spaces。",
   "settings.service.stop": "停止整个服务",
   "detail.back": "返回空间列表",
-  "detail.overview": "概览",
   "detail.appearance": "外观",
   "detail.export": "导出",
   "detail.danger": "危险操作",
@@ -876,7 +854,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "detail.exportShare": "导出分享文件",
   "detail.deleteHint": "删除空间会移除它的配置和已安装插件；会话和存储文件保留在磁盘上。这里无法撤销。",
   "detail.unsaved": "有未保存的更改",
-  "detail.pluginsInstalled": "已安装插件",
   "detail.pluginsInstall": "从目录安装",
   "jobs.details": "详细信息",
   "jobs.kind.space.create": "创建空间",
@@ -933,8 +910,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "plugins.selectEntry": "先从目录中选一个插件，再选择它发布的版本。",
   "plugins.upgradeTo": "升级到 {version}",
   "plugins.notInstallable": "该条目不能一键安装。",
-  // --- end settings-ia ---
-  // --- templates (owner: templates worker) ---
   "templates.section.create": "从模板创建",
   "templates.section.import": "导入",
   "templates.section.export": "导出",
@@ -957,7 +932,6 @@ const zh: Record<WorkbenchMessageKey, string> = {
   "templates.export.advanced": "高级选项",
   "templates.export.templateName": "模板名称",
   "templates.export.empty": "还没有可以导出的空间。",
-  // --- end templates ---
 };
 
 export const WORKBENCH_MESSAGES: Record<WorkbenchLocale, Record<WorkbenchMessageKey, string>> = {
@@ -970,11 +944,9 @@ const VAGUE_REASONS = new Set([
   "The workbench cannot accept this request.",
   "The workbench service could not complete this request.",
   "The workbench request failed.",
-  "The workbench request failed. Try again later.",
   "The job failed.",
   "The maintenance operation failed.",
   "工作台无法完成该请求。",
-  "工作台请求失败，请稍后重试。",
 ]);
 
 /** Date and time in the reader's locale. */

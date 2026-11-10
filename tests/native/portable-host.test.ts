@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setImmediate as tick } from "node:timers/promises";
 import { WorkbenchPortalGrants, portalCsp, renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 import { Script } from "node:vm";
@@ -371,24 +373,11 @@ test("host surfaces take background and text color from DSH 0.2 theme tokens", a
   for (const text of [HOST_SHELL_CSS, clientIndex]) assert.ok(!text.includes("--dsw-alias-app-bg"));
 });
 
-test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () => {
-  // Verified against @deepseek-ai/dsh 0.2.0-rc.2 (local SDK fixture).
-  const sdkTokens = new Set([
-    "--dsw-alias-bg-base",
-    "--dsw-alias-bg-layer-1",
-    "--dsw-alias-border-l3",
-    "--dsw-alias-button-elevated-fill",
-    "--dsw-alias-button-primary-fill",
-    "--dsw-alias-interactive-bg-active",
-    "--dsw-alias-interactive-bg-hover",
-    "--dsw-alias-label-error",
-    "--dsw-alias-label-primary",
-    "--dsw-alias-label-primary-inverted",
-    "--dsw-alias-label-secondary",
-    "--dsw-alias-state-success-primary",
-    "--dsw-alias-state-warn-primary",
-    "--dsw-specific-sidebar-fill",
-  ]);
+test("every --dsw-* token used in source exists in the installed DSH client UI", () => {
+  // Taken from the installed @deepseek-ai client packages (this checkout: 0.2.2-rc.1),
+  // not a frozen allowlist. A token counts when official CSS or JS uses it.
+  const sdkTokens = installedClientThemeTokens();
+  assert.ok(sdkTokens.has("--dsw-radius-sm"), "installed client UI did not expose --dsw-radius-sm");
   const roots = [new URL("../../src", import.meta.url), new URL("../../packages", import.meta.url)];
   const pending = roots.map(url => url.pathname.slice(1));
   const used = new Map<string, string[]>();
@@ -403,8 +392,30 @@ test("every --dsw-* token used in source exists in the DSH 0.2 SDK theme", () =>
     }
   }
   for (const [token, files] of used)
-    assert.ok(sdkTokens.has(token), `${token} is not a DSH 0.2 theme token (used in ${[...new Set(files)].join(", ")})`);
+    assert.ok(sdkTokens.has(token), `${token} is not used by the installed DSH client UI (used in ${[...new Set(files)].join(", ")})`);
 });
+
+function installedClientThemeTokens(): Set<string> {
+  const root = fileURLToPath(new URL("../../node_modules/@deepseek-ai", import.meta.url));
+  const tokens = new Set<string>();
+  const pending = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^(dsh-client-ui-|dsh-experimental-client-ui-|dsh-brand)/.test(entry.name))
+    .map((entry) => join(root, entry.name));
+  while (pending.length) {
+    const dir = pending.pop()!;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules") pending.push(path);
+        continue;
+      }
+      if (!/\.(css|js)$/.test(entry.name)) continue;
+      for (const token of readFileSync(path, "utf8").match(/--dsw-[a-z0-9-]+/g) ?? []) tokens.add(token);
+    }
+  }
+  assert.ok(tokens.size > 10, "installed DSH client UI did not expose theme tokens");
+  return tokens;
+}
 
 test("failed portal reads its failure once without reconnect or launch", async () => {
   const f = fixture();

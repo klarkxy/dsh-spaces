@@ -571,13 +571,12 @@ test("jobs run serially and survive returning the HTTP-facing promise", async ()
   assert.deepEqual(order, ["a-start", "a-end", "b-start", "b-end"]);
 });
 
-test("unreadable history cannot be settled into a fabricated terminal job", async () => {
+test("unreadable history stays failed with original bytes preserved", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   writeFileSync(jobFile(home, "unknown"), "{broken", "utf8");
   const store = new WorkbenchJobStore({ home });
-  await assert.rejects(() => store.settleRecovery("unknown", { status: "failed" }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported");
+  assert.equal(store.job("unknown").status, "failed");
   assert.equal(readFileSync(jobFile(home, "unknown"), "utf8"), "{broken");
   assert.equal(new WorkbenchJobStore({ home }).job("unknown").status, "failed");
 });
@@ -715,11 +714,6 @@ test("persist failure on a running job fails that job and does not freeze later 
     }),
     (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
   );
-  await assert.rejects(
-    () => store.settleRecovery("job-first", { status: "failed" }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
-  );
-
   const next = await store.submit(startCmd("three"), "job-third", async () => ({ spaceId: "three" }));
   await store.whenIdle();
   assert.equal(next.kind, "space.start");
@@ -846,7 +840,7 @@ test("result and view projection drop path, token, and non-loopback origins", as
   assert.equal(JSON.stringify(store.job("proj-6")).includes("private-entry-token"), false);
 });
 
-test("settleRecovery is unsupported and leftover jobs stay failed", async () => {
+test("leftover queued jobs stay failed and are not replayed", async () => {
   const home = tempHome();
   mkdirSync(jobsDir(home), { recursive: true });
   writeFileSync(
@@ -857,15 +851,6 @@ test("settleRecovery is unsupported and leftover jobs stay failed", async () => 
   const store = new WorkbenchJobStore({ home });
   assert.equal(store.job("need-settle").status, "failed");
   assert.equal(store.job("need-settle").phase, "copy");
-  await assert.rejects(
-    () =>
-      store.settleRecovery("need-settle", {
-        status: "succeeded",
-        result: { runtimeVersion: "0.1.5-rc.1", spaceId: "alpha" },
-      }),
-    (error: unknown) => error instanceof WorkbenchJobError && error.code === "workbench/unsupported",
-  );
-  assert.equal(store.job("need-settle").status, "failed");
 });
 
 test("formatWorkbenchFailure names space, stage, plugin-or-unknown, and exit", () => {

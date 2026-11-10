@@ -39,7 +39,7 @@ PR #10–#17 已合入 `main@990cc80`。本轮使用当前源码构建、全新�
 
 # 2026-09-25 宿主内空间栏与展示/管理权限分离
 
-用户授权按新的插件定位更新并提交 PR，未授权合并或发布。本批依赖 PR #16，保留看板和发布授权工作。合同：[宿主嵌入](../../docs/host/embedding.md)；实际执行及未验边界：[实施记录](../../docs/host/implementation.md)。
+用户授权按新的插件定位更新并提交 PR，未授权合并或发布。本批依赖 PR #16，保留看板和发布授权工作。合同：[宿主嵌入](../../docs/host/embedding.md)；实际执行及未验边界：[实施记录](../../docs/archive/host-implementation.md)。
 
 - [x] 普通顶层宿主 additive 空间栏，保留原应用；展示角色独立于 manager 权限。
 - [x] audience-bound 单次入口与受限导航桥，保留 manager/child 来源链，抑制重复空间栏；蓝图 v1 不变。
@@ -212,7 +212,7 @@ PR #10–#17 已合入 `main@990cc80`。本轮使用当前源码构建、全新�
 
 # 2026-09-20 分支合并与架构收敛
 
-本文件继续作为唯一活动账本。[本次计划](../../docs/plans/spaces-merge-convergence.md)，[执行与验收记录](../merge-execution.md)。用户已授权 Grok 施工，主 Agent 编排、集成和验收；本次前端也交 Grok，Kimi 不参与。仅本地实施，不推送或发布。
+本文件继续作为唯一活动账本。[本次计划](../../docs/archive/spaces-merge-convergence.md)，[执行与验收记录](merge-execution.md)。用户已授权 Grok 施工，主 Agent 编排、集成和验收；本次前端也交 Grok，Kimi 不参与。仅本地实施，不推送或发布。
 
 - [x] A0：固定最新基线与本地备份引用，完成独立测试基线；官方 CLI 补充检查已通过，真实双端与安装包仍单独验收。
 - [x] A1：279 个差异路径逐项审计，加核 3 个导入点独有差异；4 处文档/验收脚本遗漏已补齐，2 处 Windows 测试问题已独立复测。
@@ -222,7 +222,7 @@ PR #10–#17 已合入 `main@990cc80`。本轮使用当前源码构建、全新�
 - [x] B3：模板、分享、批量、设置、插件缓存和诊断能力完整接入统一接口。
 - [x] B4：桌面使用共享工作台与后台，退出旧业务装配；最终打包程序与 Chromium 验证同一活动任务在桌面退出后继续完成。
 - [x] B5：统一制品、受控升级和遗留代码清理；标准插件、组件更新及正常运行时/快照流程已实测。
-- [x] B6：当前本地集成范围的跨端、故障、打包目录及重要审查通过，已快进合入本地 main，旧分支祖先关系保留。签名、NSIS 安装登记/卸载和其它平台等实际未验项见[验收记录](../merge-execution.md)。
+- [x] B6：当前本地集成范围的跨端、故障、打包目录及重要审查通过，已快进合入本地 main，旧分支祖先关系保留。签名、NSIS 安装登记/卸载和其它平台等实际未验项见[验收记录](merge-execution.md)。
 
 以下是之前的活动记录与验收限制，本次不重新认定其通过状态。
 
@@ -230,9 +230,9 @@ PR #10–#17 已合入 `main@990cc80`。本轮使用当前源码构建、全新�
 
 本文件是**唯一活动任务账本**。根 [TODO.md](../../TODO.md) 只作导航和历史摘要。故障政策：[docs/let-it-crash.md](../../docs/let-it-crash.md)。开发入口：[AGENTS.md](../../AGENTS.md)。
 
-产品路径已按 [docs/let-it-crash.md](../../docs/let-it-crash.md) 实施。未在本机跑完的 CLI/浏览器项见 [q-coverage.md](../q-coverage.md)。不推送、不发版本，除非用户另说。
+产品路径已按 [docs/let-it-crash.md](../../docs/let-it-crash.md) 实施。未在本机跑完的 CLI/浏览器项见 [q-coverage.md](q-coverage.md)。不推送、不发版本，除非用户另说。
 
-插件功能计划：[plugin-management/plan.md](../plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](../plugin-management/task-01-write-scope.md)，不作为恢复模块建设前置，也不默认以后继续做恢复。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
+插件功能计划：[plugin-management/plan.md](plugin-management/plan.md)。任务 01 证据见 [task-01-write-scope.md](plugin-management/task-01-write-scope.md)，不作为恢复模块建设前置，也不默认以后继续做恢复。旧批次的执行者、发布许可和完成记录不自动适用于本计划。
 
 ## D：文档与任务修订（本轮直接范围）
 
@@ -241,7 +241,7 @@ PR #10–#17 已合入 `main@990cc80`。本轮使用当前源码构建、全新�
 - [x] D2. 工作台/安装/包 README、实施计划、本账本、插件管理计划。
 - [x] D2b. `tasks/workbench-*.md`、`tasks/pluginization-*.md`、演示/社区/发布文案：重写有效合同，历史盖章，不删 `history-recovery.md`。
 - [x] D3. 逐文件交付记录（变更清单、撤销清单、仍有效任务、未迁移代码入口、验证结果、本地/提交/推送状态）。见 [let-it-crash-d-delivery.md](let-it-crash-d-delivery.md)。
-- [x] D4. 按已完成实现读回文档。产品路径允许声明运行时已符合 let it crash；未接线历史模块和 CLI/浏览器未跑项见 [q-coverage.md](../q-coverage.md)。
+- [x] D4. 按已完成实现读回文档。产品路径允许声明运行时已符合 let it crash；未接线历史模块和 CLI/浏览器未跑项见 [q-coverage.md](q-coverage.md)。
 
 ## 插件管理与 Space 导入导出（仍有效）
 
@@ -284,11 +284,11 @@ PR #10–#17 已合入 `main@990cc80`。本轮使用当前源码构建、全新�
 - [x] **R4** 删除恢复业务链，保留正常安装和必要安全操作。入口：`workbench-maintenance.ts`、`coordinated-upgrade.ts`、`snapshot-store.ts`、`snapshot-executor.ts`、`snapshot-worker.ts`、`restore-session.ts`、`plugin-restore-point.ts`、`runtime-store.ts` 及关联服务。取消配置恢复、安装恢复点、整 Home 恢复、失败回滚、依赖环境拷回、journal 对账恢复、升级后自动回退。提交前失败未切换新结果不是回滚，可保留。不要整份删除 `snapshot-worker`：先保留运行时安装等非恢复执行，并同步打包和启动参数。公开 `recovery.resume`、`snapshot.restore`、`config.restore` 产品入口明确失败。
 - [x] **R5** Doctor 收缩为诊断，不再治病。入口：`packages/doctor/src/**`（`unlock` / `recover` / `rollback`）、对应 README 与 `tests/spaces-doctor.test.ts`、`tests/workbench-doctor.test.ts`。只保留能证明不改写环境的诊断与检查。旧恢复命令明确返回「不支持」和非零退出码，不能静默忽略，也不能转发到改名后的旧实现。诊断时不会清锁、改 job、写回运行时指针、重建配置或启动服务。
 - [x] **R6** 同步删除 UI、API、CLI 和构建里的残留。入口：`packages/plugin/src/workbench/**`、client/host、`src/renderer/**`、`src/preload/**`、i18n、`scripts/build-spaces.mjs`、`package.json`、打包资源。错误页只留错误详情、查看日志、复制脱敏日志。常规启停卸载留在正常管理位置。
-- [x] **Q** 真实故障验收 E01–E18（见 `dsh-spaces-let-it-crash-plan.md` §8）。故障注入保留，改验「失败被如实报告，并且没有发生抢救」。不整组删除 `test:workbench:recovery`；逐项拆分，保留与恢复无关的有效覆盖。不靠假测试、放宽条件或跳过获得通过。未在本机跑到的 CLI/浏览器项见 [q-coverage.md](../q-coverage.md)。
+- [x] **Q** 真实故障验收 E01–E18（见 `dsh-spaces-let-it-crash-plan.md` §8）。故障注入保留，改验「失败被如实报告，并且没有发生抢救」。不整组删除 `test:workbench:recovery`；逐项拆分，保留与恢复无关的有效覆盖。不靠假测试、放宽条件或跳过获得通过。未在本机跑到的 CLI/浏览器项见 [q-coverage.md](q-coverage.md)。
 
 ## 全局 LLM 连接库
 
-独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../../docs/plans/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1 已实现 catalog / policy / 凭据记录与 CAS；P2 已把共享连接接到官方适配器流式调用；P3 已露出脱敏管理 API、独立凭据通道和无秘密 apply 计划。P4 已露出全局模型中心与 Space 绑定 UI（Web / 桌面）。P5 已实现显式接管、无秘密分享映射和 llm-bridge 打包。P6 已加上发布门禁、秘密扫描和 A 矩阵证据；未跑平台与 A25 见 [global-llm-acceptance.md](../../docs/compat/global-llm-acceptance.md)。
+独立于 `web` 的共享连接资源。施工计划：[global-llm.md](global-llm.md)，完整契约：[docs/plans/global-llm-connections.md](../../docs/archive/global-llm-connections.md)。P0 已固定 `0.1.5-rc.2` 接入面和配置来源；P1 已实现 catalog / policy / 凭据记录与 CAS；P2 已把共享连接接到官方适配器流式调用；P3 已露出脱敏管理 API、独立凭据通道和无秘密 apply 计划。P4 已露出全局模型中心与 Space 绑定 UI（Web / 桌面）。P5 已实现显式接管、无秘密分享映射和 llm-bridge 打包。P6 已加上发布门禁、秘密扫描和 A 矩阵证据；未跑平台与 A25 见 [global-llm-acceptance.md](../../docs/compat/global-llm-acceptance.md)。
 
 ## 其它仍有效、与恢复无关的未完成项
 

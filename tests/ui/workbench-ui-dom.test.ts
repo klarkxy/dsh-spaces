@@ -32,6 +32,11 @@ function routeView(
   return true;
 }
 
+/** Detail panels other than 常规 stay hidden until that tab is selected. */
+async function openDetailTab(page: Page, name: "插件" | "高级"): Promise<void> {
+  await page.getByRole("tab", { name, exact: true }).click();
+}
+
 async function launchChromium(chromium: {
   launch: (opts?: { headless?: boolean; channel?: string; executablePath?: string }) => Promise<{
     close: () => Promise<void>;
@@ -321,7 +326,10 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   // plugin section of the space detail page now.
   await page.getByRole("tab", { name: "空间", exact: true }).click();
   await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await openDetailTab(page, "插件");
   await page.locator("[data-space-section=\"plugins\"]").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByRole("button", { name: "安装插件", exact: true }).click();
+  await page.locator("[data-space-plugin-install-area=\"true\"]").waitFor({ state: "visible", timeout: 15_000 });
   await page.locator("[data-space-plugin-entry=\"catalog.demo\"]").click();
   await page.waitForFunction(() => {
     const select = document.querySelector<HTMLSelectElement>("[data-space-plugin-versions=\"true\"]");
@@ -427,6 +435,7 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
   await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await openDetailTab(page, "高级");
   const select = page.locator("[data-dsh-target=\"true\"]");
   await select.waitFor({ state: "visible", timeout: 15_000 });
   await select.selectOption("0.2.0");
@@ -469,6 +478,7 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   await page.getByRole("tab", { name: "空间", exact: true }).click();
   await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
   await page.waitForFunction(() => document.querySelectorAll("[data-space-detail=\"true\"]").length === 1);
+  await openDetailTab(page, "高级");
   await page.locator("[data-space-section=\"danger\"]").getByRole("button", { name: "删除", exact: true }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
   assert.deepEqual(await previewCalls(), [
@@ -557,6 +567,7 @@ test("DOM: dialogs trap and restore focus, names validate live, the menu answers
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
   await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await openDetailTab(page, "高级");
   await page.locator('[data-space-section="diagnostics"]').waitFor();
   const copy = page.getByRole("button", { name: "复制脱敏日志", exact: true });
   await copy.click();
@@ -611,6 +622,7 @@ test("DOM: delayed runtime candidates derive a usable target and keep selections
         await page.getByRole("button", { name: "设置", exact: true }).click();
         await page.getByRole("tab", { name: "空间", exact: true }).click();
         await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…", exact: true }).click();
+        await openDetailTab(page, "高级");
         await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
         const select = page.locator("[data-dsh-target=\"true\"]");
         const preview = page.getByRole("button", { name: "预览切换", exact: true });
@@ -629,6 +641,7 @@ test("DOM: delayed runtime candidates derive a usable target and keep selections
 
         if (pin === null) return;
         await page.evaluate(() => window.__WB_CONTROLLER!.openDetail("alpha"));
+        await openDetailTab(page, "高级");
         const refresh = async (versions: string[]) => {
           await page.evaluate(() => { void window.__WB_CONTROLLER!.loadRuntimes(); });
           await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
@@ -643,6 +656,7 @@ test("DOM: delayed runtime candidates derive a usable target and keep selections
         assert.equal(await select.inputValue(), "0.2.0-rc.2", "a removed choice derives a current valid target");
         await select.selectOption("0.4.0");
         await page.evaluate(() => window.__WB_CONTROLLER!.openDetail("beta"));
+        await openDetailTab(page, "高级");
         assert.equal(await select.inputValue(), "0.2.0-rc.2", "the previous space's choice does not carry into another detail");
         await select.selectOption("0.4.0");
         await page.evaluate(async () => {

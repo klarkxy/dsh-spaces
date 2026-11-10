@@ -17,7 +17,6 @@ export interface BoundCli {
   bin: string;
   version: string;
   allowedVerify: boolean;
-  allowedWrite: boolean;
 }
 
 export interface ResolvedResources {
@@ -47,7 +46,6 @@ export function bindCli(cli: string, required: boolean): BoundCli {
       bin: realpathSync(bin),
       version: pkg.version,
       allowedVerify: isCompatibleDshCliVersion(pkg.version),
-      allowedWrite: isCompatibleDshCliVersion(pkg.version),
     };
   } catch (error) {
     if (error instanceof Fail) throw error;
@@ -141,7 +139,6 @@ export function resolveResources(home: string, flags: Record<string, string>): R
     ...file.status,
     hasSnapshotRoot: Boolean(snapshotRoot),
     hasRuntimeRoot: Boolean(runtimeRoot),
-    writeAllowed: cli?.allowedWrite === true,
     ...(cli ? { dshVersion: cli.version } : {}),
     ...(missing.length ? { missing } : {}),
   };

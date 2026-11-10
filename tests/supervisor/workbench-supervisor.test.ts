@@ -2167,6 +2167,20 @@ test("registered spaces keep their pin; unregistered profiles and stale meta sta
   assert.equal(readMeta()["space-ghost"].dshVersion, undefined);
 });
 
+test("a create following the main space fails in prepare when no main space is connected", async () => {
+  const home = tempHome();
+  const handle = await startSupervisor(home, { runtimeRoot: join(home, "runtimes"), snapshotWorkerFile: writeFakeRuntimeWorker(home) });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.create", input: { name: "follows-main" } },
+    requestId: "create-follows-main",
+  });
+  const failed = await waitJob(handle.origin, cookie, "create-follows-main", "failed");
+  assert.equal((failed as { phase?: string }).phase, "prepare");
+  assert.match(String((failed.error as { message?: string } | undefined)?.message), /main space is not connected/);
+  assert.equal(existsSync(join(home, "profiles", "space-follows-main")), false, "no space was created");
+});
+
 test("a new space pins the host DSH version", async () => {
   const home = tempHome();
   const runtimeRoot = join(home, "runtimes");
@@ -2176,7 +2190,7 @@ test("a new space pins the host DSH version", async () => {
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const created = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.create", input: { name: "created" } },
+    command: { kind: "space.create", input: { name: "created", modelSource: "local" } },
     requestId: "create-created",
   });
   assert.equal(created.body.ok, true, JSON.stringify(created.body));
@@ -2589,7 +2603,7 @@ test("a create that installs a missing runtime reports the install phase and res
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   const submittedResponse = await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.create", input: { name: "fresh-space", displayName: "Fresh", icon: "whale", modelSource: "main", baseVersion: "0.9.9" } },
+    command: { kind: "space.create", input: { name: "fresh-space", displayName: "Fresh", icon: "whale", modelSource: "local", baseVersion: "0.9.9" } },
     requestId: "create-install",
   });
   const submittedBody = submittedResponse.body as { ok?: boolean; value?: { subject?: { displayName: string; icon?: string }; status: string }; error?: { code: string; message: string } };
@@ -2632,7 +2646,7 @@ test("a space.start submitted mid-install with a pre-create revision", async () 
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.create", input: { name: "gate-space", baseVersion: "0.9.9" } },
+    command: { kind: "space.create", input: { name: "gate-space", modelSource: "local", baseVersion: "0.9.9" } },
     requestId: "create-gate",
   });
   // Wait until the create is inside the install; the new space does not exist yet.
@@ -2670,7 +2684,7 @@ test("a create on the host runtime installs that version into the store and pins
   });
   const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
   await mutate(handle.origin, cookie, "submit", {
-    command: { kind: "space.create", input: { name: "host-space" } },
+    command: { kind: "space.create", input: { name: "host-space", modelSource: "local" } },
     requestId: "create-host",
   });
   const done = await waitJob(handle.origin, cookie, "create-host");

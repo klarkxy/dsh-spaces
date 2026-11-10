@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync } from "../../../../shared/node/filesystem";
+import { inside, lexists, realpathSync, samePath } from "../../../../shared/node/filesystem";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isExpectedIsolationRoot } from "../../profile/patch-writer";
 import { isExactRuntimeVersion } from "../../../../shared/runtime";
@@ -31,33 +31,10 @@ export function sameContainedPath(expected: string, actual: string, home: string
   }
 }
 
+export { inside, lexists, samePath };
+
 export function assertLexicalInside(root: string, target: string): void {
   if (!inside(root, resolve(target))) throw new SpacesPublicError("spaces/invalid-input");
-}
-
-export function inside(root: string, target: string): boolean {
-  const r = comparablePath(root);
-  const t = comparablePath(target);
-  if (samePath(r, t)) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return t.startsWith(prefix);
-}
-
-function comparablePath(path: string): string {
-  const normalized = resolve(path);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
-}
-
-export function samePath(a: string, b: string): boolean { return comparablePath(a) === comparablePath(b); }
-
-export function lexists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 export function canonicalExisting(root: string, target: string): string | null {

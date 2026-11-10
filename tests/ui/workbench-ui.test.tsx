@@ -1184,7 +1184,6 @@ test("SSR ready home shows management actions and plugin install wording", async
   await flush();
   const snap = ready(ctrl);
   assert.ok(snap.includes(t("zh", "snapshots.create")));
-  assert.ok(!snap.includes(t("zh", "snapshots.restore")));
   assert.ok(!snap.includes("snapshot.restore"));
   ctrl.setHomeTab("runtime");
   await flush();
@@ -1567,8 +1566,8 @@ test("overview keeps failed jobs and reasons without a recovery page", async () 
   const readyHtml = ready(ctrl);
   assert.ok(readyHtml.includes("desktop holds write access"));
   assert.ok(readyHtml.includes("needs resume"));
-  assert.ok(!readyHtml.includes(t("zh", "recovery.title")));
-  assert.ok(!readyHtml.includes(t("zh", "app.retry")));
+  assert.ok(!readyHtml.includes("工作台入口"));
+  assert.ok(!readyHtml.includes("重试"));
 });
 
 test("create validates name and does not submit reserved ids", async () => {
@@ -2188,7 +2187,6 @@ test("service shutdown is a preview, not acquire", async () => {
   ctrl.setSettingsTab("advanced");
   await flush();
   const html = ready(ctrl);
-  assert.ok(html.includes(t("zh", "settings.shutdown")));
   assert.ok(html.includes(t("zh", "settings.service.stop")));
   assert.ok(html.includes(t("zh", "settings.service.danger")));
   assert.ok(!html.includes("controller.acquire"));
@@ -2583,7 +2581,7 @@ test("the space detail does not show the internal generation and managed rows", 
   const html = ready(ctrl);
   assert.ok(html.includes('data-space-detail="true"'));
   assert.equal(html.includes(t("zh", "detail.id")), true);
-  assert.equal(html.includes(t("zh", "detail.status")), true);
+  assert.equal(html.includes(t("zh", "app.status.running")), true);
 });
 
 test("the delete plan dialog is worded in the locale with the display name and a danger confirm", async () => {

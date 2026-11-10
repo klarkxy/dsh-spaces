@@ -148,8 +148,3 @@ export const TYPERT = {
     objects: [],
   },
 };
-
-export const GUIDE_METHODS = ["role", "presentationSnapshot", "spaceAction", "bootstrap", "returnTarget", "portalTarget", "initialize", "previewServiceRestart", "restartService"] as const;
-/** The manager Remote's method names, in registration order. */
-export const MANAGER_METHODS = WORKBENCH_API_METHODS;
-export const SPACES_READ_METHODS = ["overview", "detail"] as const;

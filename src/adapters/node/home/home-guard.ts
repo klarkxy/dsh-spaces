@@ -28,14 +28,12 @@ export function isInsideRealHome(home: string): boolean {
 }
 
 /**
- * Refuse the user's production ~/.dsh unless this is a packaged app
- * (or the operator explicitly opted in). Node tests and unpackaged Electron
- * never write the real home.
+ * Refuse the user's production ~/.dsh unless the operator explicitly opted in
+ * for this process. Tests and development never write the real home.
  */
 export function assertNotRealHome(home: string): void {
   if (isAuthorizedProductHome(home)) return;
   if (!isInsideRealHome(home)) return;
-  if (process.env.DSH_SPACES_PACKAGED === "1") return;
   if (process.env.DSH_SPACES_ALLOW_REAL_HOME) return;
   throw new Error(
     `refusing to use the real DSH home: ${realDshHome()}. Set DSH_SPACES_HOME to a sandbox.`,

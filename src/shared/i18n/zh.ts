@@ -53,8 +53,4 @@ export const zh: Messages = {
   "errors.nodeMissing": "尚未安装 Node",
   "errors.npmMissing": "托管 Node 旁未找到自带的 npm",
   "errors.installExited": "安装退出码 {code}",
-
-  "queue.pluginAddSpec": "安装 {spec} → {name}",
-  "queue.pluginRemove": "卸载 {spec} → {name}",
-  "queue.pluginDownload": "下载 {spec}",
 };

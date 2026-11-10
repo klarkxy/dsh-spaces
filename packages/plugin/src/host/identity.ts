@@ -1,7 +1,7 @@
-import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
+import { inside, lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   HOME_CONTROL_DIR_NAME,
@@ -161,19 +161,6 @@ function sameContainedPath(expected: string, actual: string, home: string): bool
   } catch {
     return false;
   }
-}
-
-function inside(root: string, target: string): boolean {
-  const r = comparable(root);
-  const t = comparable(target);
-  if (samePath(r, t)) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return t.startsWith(prefix);
-}
-
-function comparable(path: string): string {
-  const normalized = resolve(path);
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function realDirectory(path: string): string | null {

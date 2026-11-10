@@ -1,6 +1,6 @@
 # 工作台管理 API 公共语义
 
-> 状态：现行说明。完整协议见 [merge-contract-v2.md](../tasks/merge-contract-v2.md)，架构见 [architecture.md](architecture.md)，故障政策见 [let-it-crash.md](let-it-crash.md)。本文不复制方法清单、类型定义或实现派生关系；那些以共享 API 定义和实际代码为准。
+> 状态：现行说明。完整协议见 [merge-contract-v2.md](../tasks/merge-contract-v2.md)，架构见 [architecture.md](architecture.md)，故障政策见 [let-it-crash.md](let-it-crash.md)。本文不复制方法清单、类型定义或实现派生关系；现行方法集合以 `src/shared/workbench.ts` 的 `WORKBENCH_API` 为准。
 
 ## 单一事实源与变更纪律
 
@@ -34,4 +34,4 @@
 
 Host 与 Supervisor 可以在各自边界执行不同严格度的校验，但差异必须是有意的兼容决定，不能靠两份定义偶然漂移。公开错误码和拒绝行为发生变化时，应按协议变更处理。
 
-历史验证只证明对应批次的方法集合和 wire 行为未漂移，不构成当前全量验收。批次记录见 [tasks/todo.md](../tasks/todo.md) 的 Workbench API 单源化条目。
+历史验证只证明对应批次的方法集合和 wire 行为未漂移，不构成当前全量验收。历史批次记录见 [tasks/archive/todo-2026-10.md](../tasks/archive/todo-2026-10.md) 的 Workbench API 单源化条目。

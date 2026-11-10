@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-Maintained in [dsh-spaces/packages/blueprint](https://github.com/klarkxy/dsh-spaces/tree/main/packages/blueprint). This remains an independently installable plugin for DSH **0.2.0-rc.2 or later**, currently built against **0.2.1-rc.2**. Spaces depends on its protocol exports; Blueprint has no Spaces runtime dependency.
+Maintained in [dsh-spaces/packages/blueprint](https://github.com/klarkxy/dsh-spaces/tree/main/packages/blueprint). This remains an independently installable plugin for DSH **0.2.0-rc.2 or later**, currently built against **0.2.2-rc.1**. Spaces depends on its protocol exports; Blueprint has no Spaces runtime dependency.
 
 Share a plugin set as exact versions plus a preferred order. Paste a blueprint code into **Creator mode** together with your import intent, and the Agent merges it into the current profile's bundle collection. The Core part does not need Web — the Plugins page is an optional export and read-only parsing view. Blueprint does not provide Spaces, a separate application or a background Agent orchestrator.
 
@@ -85,7 +85,7 @@ npm pack
 dsh plugin --profile <target-profile> add <absolute-archive-path>
 ```
 
-Official packages are provided by the runtime: this plugin declares them as optional peers with open lower bounds and never bundles its own copy. The current source targets the installed official CLI `0.2.1-rc.2`; historical tests on `0.1.7-rc.2` are recorded separately in [ACCEPTANCE.md](ACCEPTANCE.md). Tests run in isolated temporary directories, never against a production profile. Syntax or offline contract checks are not real-host certification.
+Official packages are provided by the runtime: this plugin declares them as optional peers with open lower bounds and never bundles its own copy. The current source targets the installed official CLI `0.2.2-rc.1`; historical tests on `0.1.7-rc.2` are recorded separately in [ACCEPTANCE.md](ACCEPTANCE.md). Tests run in isolated temporary directories, never against a production profile. Syntax or offline contract checks are not real-host certification.
 
 ## Protocol consumers
 

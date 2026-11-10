@@ -1,8 +1,8 @@
-import { createDirectoryLink, lstatSync, readlinkSync, realpathSync } from "../../../shared/node/filesystem";
+import { createDirectoryLink, inside, lexists, lstatSync, readlinkSync, realpathSync } from "../../../shared/node/filesystem";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync, symlinkSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { parseDocument } from "yaml";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { atomicWrite, renameDirectory as renameSync } from "../atomic";
 import { assertNotRealHome, samePath } from "../home/home-guard";
 import {
@@ -86,7 +86,7 @@ function retargetPnpmMetadata(file: string, oldRoot: string, newRoot: string): v
   // A recovery backup must retain even damaged metadata; pnpm will diagnose it.
   if (document.errors.length) return;
   const pointer = document.get("virtualStoreDir");
-  if (typeof pointer !== "string" || !isAbsolute(pointer) || !isInside(oldRoot, pointer)) return;
+  if (typeof pointer !== "string" || !isAbsolute(pointer) || !inside(oldRoot, pointer)) return;
   document.set("virtualStoreDir", resolve(newRoot, relative(resolve(oldRoot), resolve(pointer))));
   atomicWrite(file, text.trimStart().startsWith("{")
     ? `${JSON.stringify(document.toJSON(), null, 2)}\n` : document.toString());
@@ -392,7 +392,7 @@ function copyManagedEntry(src: string, dest: string, fallbackRuntimeRoot?: strin
 
 function copyNode(from: string, to: string, srcRoot: string, destRoot: string, fallbackRuntimeRoot?: string): void {
   // Checked roots, enumerated names and link-only copying keep recursion in this tree.
-  if (!isInside(destRoot, to)) throw new Error("Copy destination escaped its root");
+  if (!inside(destRoot, to)) throw new Error("Copy destination escaped its root");
   const st = lstatSync(from);
   if (st.isSymbolicLink()) {
     copyLink(from, to, srcRoot, destRoot, fallbackRuntimeRoot);
@@ -417,7 +417,7 @@ function copyNode(from: string, to: string, srcRoot: string, destRoot: string, f
 function copyLink(from: string, to: string, srcRoot: string, destRoot: string, fallbackRuntimeRoot?: string): void {
   const raw = normalizeReadlink(String(readlinkSync(from)));
   const resolved = isAbsolute(raw) ? resolve(raw) : resolve(dirname(from), raw);
-  if (!isInside(srcRoot, resolved)) {
+  if (!inside(srcRoot, resolved)) {
     // DSH heals profiles/node_modules from its CLI on every boot, without a download.
     // Only omit generated fallback links into the runtime captured alongside this profile tree.
     // Locally installed plugins and links to any other outside directory are not omitted.
@@ -431,9 +431,9 @@ function copyLink(from: string, to: string, srcRoot: string, destRoot: string, f
 }
 
 function isRuntimeFallback(from: string, profiles: string, runtimeRoot: string, target: string): boolean {
-  if (!isInside(join(profiles, "node_modules"), from) || !isInside(runtimeRoot, target)) return false;
+  if (!inside(join(profiles, "node_modules"), from) || !inside(runtimeRoot, target)) return false;
   try {
-    return isInside(realpathSync(runtimeRoot), realpathSync(from));
+    return inside(realpathSync(runtimeRoot), realpathSync(from));
   } catch {
     return true;
   }
@@ -470,11 +470,11 @@ function retargetLink(linkPath: string, oldRoot: string, newRoot: string): void 
   const raw = normalizeReadlink(String(readlinkSync(linkPath)));
   if (!isAbsolute(raw)) return;
   const resolved = resolve(raw);
-  if (isInside(newRoot, resolved) && !isInside(oldRoot, resolved)) return;
-  if (!isInside(oldRoot, resolved) && !isInside(newRoot, resolved)) {
+  if (inside(newRoot, resolved) && !inside(oldRoot, resolved)) return;
+  if (!inside(oldRoot, resolved) && !inside(newRoot, resolved)) {
     throw new Error(`Link escaped the snapshot tree: ${linkPath} -> ${raw}`);
   }
-  const fromRoot = isInside(oldRoot, resolved) ? oldRoot : newRoot;
+  const fromRoot = inside(oldRoot, resolved) ? oldRoot : newRoot;
   const destTarget = resolve(newRoot, relative(resolve(fromRoot), resolved));
   assertContained(newRoot, destTarget, "retargeted link");
   const dir = followsDirectory(linkPath) || isDirectoryEntry(destTarget);
@@ -607,22 +607,13 @@ function normalizeReadlink(raw: string): string {
   return raw;
 }
 
-function lexists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertDisjoint(a: string, b: string, label: string): void {
-  if (isInside(a, b) || isInside(b, a)) {
+  if (inside(a, b) || inside(b, a)) {
     throw new Error(`Refusing nested paths for ${label}`);
   }
 }
@@ -671,11 +662,11 @@ function nearestExisting(path: string): string {
 
 function assertContained(root: string, target: string, label: string): void {
   const resolved = resolve(target);
-  if (!isInside(root, resolved)) {
+  if (!inside(root, resolved)) {
     throw new Error(`Refusing to touch path outside ${label}: ${resolved}`);
   }
   const existing = lexists(resolved) ? resolved : nearestExisting(resolved);
-  if (!isInside(root, existing) && !samePath(root, existing)) {
+  if (!inside(root, existing) && !samePath(root, existing)) {
     if (!lexists(root)) return;
     throw new Error(`Refusing to touch path outside ${label}: ${existing}`);
   }
@@ -686,23 +677,12 @@ function assertContained(root: string, target: string, label: string): void {
   }
   const real = realpathSync(existing);
   const realRoot = lexists(root) ? realpathSync(root) : resolve(root);
-  if (!isInside(realRoot, real) && !samePath(realRoot, real)) {
+  if (!inside(realRoot, real) && !samePath(realRoot, real)) {
     throw new Error(`Refusing to touch path outside ${label}: ${real}`);
   }
 }
 
-function isInside(root: string, target: string): boolean {
-  const r = canon(root);
-  const t = canon(target);
-  if (t === r) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return t.startsWith(prefix);
-}
 
-function canon(path: string): string {
-  const resolved = resolve(path);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}
 
 function rmContained(root: string, target: string): void {
   if (!lexists(target)) return;

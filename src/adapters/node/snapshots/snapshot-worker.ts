@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
+import { inside, lexists, lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { readdirSync, rmdirSync, unlinkSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { runRuntimeInstallation } from "../runtime/runtime-installation";
 import { renameDirectory } from "../atomic";
@@ -120,19 +120,10 @@ function rmLinkAware(path: string): void {
   }
 }
 
-function lexists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
 
 function assertContained(root: string, target: string, label: string): void {
   const resolved = resolve(target);
-  if (!isInside(root, resolved) && !samePath(root, resolved)) {
+  if (!inside(root, resolved) && !samePath(root, resolved)) {
     throw new Error(`Refusing to touch path outside ${label}: ${resolved}`);
   }
   if (!lexists(resolved)) return;
@@ -140,20 +131,8 @@ function assertContained(root: string, target: string, label: string): void {
   if (st.isSymbolicLink()) return;
   const real = realpathSync(resolved);
   const realRoot = lexists(root) ? (lstatSync(root).isSymbolicLink() ? resolve(root) : realpathSync(root)) : resolve(root);
-  if (!isInside(realRoot, real) && !samePath(realRoot, real)) {
+  if (!inside(realRoot, real) && !samePath(realRoot, real)) {
     throw new Error(`Refusing to touch path outside ${label}: ${real}`);
   }
 }
 
-function isInside(root: string, target: string): boolean {
-  const r = canon(root);
-  const t = canon(target);
-  if (t === r) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return t.startsWith(prefix);
-}
-
-function canon(path: string): string {
-  const resolved = resolve(path);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}

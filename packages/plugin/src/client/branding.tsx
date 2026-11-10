@@ -3,7 +3,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client";
 import { BRAND_IMAGE_URL } from "../../../../src/shared/brand-artwork";
 
-// Optional conversation surface: mirrored from the rc.2 owner contract so
+// Optional conversation surface: mirrored from the 0.2 owner contract so
 // Spaces does not require the conversation plugin in every profile.
 declare module "@deepseek-ai/dsh-client-ui-slots" {
   interface SlotMap {

@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "../../../src/shared/node/filesystem";
+import { lexists, lstatSync, realpathSync } from "../../../src/shared/node/filesystem";
 
 import { join, resolve, sep } from "node:path";
 
@@ -17,7 +17,6 @@ export const EXIT = {
   profile: 5,
   runtime: 6,
   unsupported: 7,
-  recovery: 10,
 } as const;
 
 export type Json = Record<string, unknown>;
@@ -41,16 +40,14 @@ export function print(body: Json, exit: number = EXIT.ok): number {
   return exit;
 }
 
-export function lexists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
+export { lexists };
 
+/**
+ * Doctor's own comparison intentionally folds case on every platform: a Home
+ * moved between filesystems keeps matching. Keep this copy separate from
+ * shared/node/filesystem's case-sensitive canonical samePath/inside — the
+ * stricter shared versions would change Linux behavior for this diagnostic.
+ */
 export function same(a: string, b: string): boolean {
   return resolve(a).toLowerCase() === resolve(b).toLowerCase();
 }

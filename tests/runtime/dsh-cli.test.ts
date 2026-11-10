@@ -5,12 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
-  DSH_CLI_SPEC,
   dshBinCandidates,
+  ensureDshCli,
   findDshBin,
   resetDshBinCache,
   setManagedCliPrefix,
   setManagedNodeExecutable,
+  setSelectedDshResolver,
   spawnNode,
 } from "../../src/adapters/node/runtime/dsh-cli.ts";
 import { setToolchainRoot } from "../../src/adapters/node/runtime/toolchain.ts";
@@ -52,6 +53,9 @@ afterEach(() => {
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) child.kill();
   }
+  // A resolver left set intercepts findDshBin before discovery — restore the
+  // file's default unset-resolver state so later tests exercise discovery.
+  setSelectedDshResolver(undefined);
   resetDshBinCache();
   setManagedNodeExecutable(undefined);
   restoreElectronEnv();
@@ -61,9 +65,19 @@ afterEach(() => {
   }
 });
 
-test("managed CLI install pins the default official release", () => {
-  assert.equal(DSH_DEFAULT_VERSION, "0.2.1-rc.2");
-  assert.equal(DSH_CLI_SPEC, `@deepseek-ai/dsh@${DSH_DEFAULT_VERSION}`);
+test("reference DSH version is the current distributed target", () => {
+  assert.equal(DSH_DEFAULT_VERSION, "0.2.2-rc.1");
+});
+
+test("ensureDshCli rejects instead of installing when no bin resolves", async () => {
+  setSelectedDshResolver(() => undefined);
+  resetDshBinCache();
+  try {
+    await assert.rejects(ensureDshCli("space-x"), /No bound DSH CLI/);
+  } finally {
+    setSelectedDshResolver(undefined);
+    resetDshBinCache();
+  }
 });
 
 test("candidates prefer the managed prefix over a global npm root", () => {

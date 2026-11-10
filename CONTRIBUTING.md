@@ -1,6 +1,6 @@
 # Contributing to DSH Spaces
 
-Read [docs/let-it-crash.md](docs/let-it-crash.md) first. That file is the only current fault policy.
+Read [docs/let-it-crash.md](docs/let-it-crash.md) first. That file is the only current fault policy. For the current product boundary read [docs/architecture.md](docs/architecture.md); current open items are in [tasks/todo.md](tasks/todo.md).
 
 ## Safety
 
@@ -20,7 +20,7 @@ Plugin combinations may fail. Report the actual failure. Do not recover it.
 - A plugin error does not require killing the whole host.
 - Keep authentication, isolation, Origin/path checks, single-writer constraints, atomic writes, and bounded resource release.
 
-Historical recovery plans, tests, and screenshots are evidence of what was built then. They are not current construction or release gates. Documentation done is not runtime migration done. See [tasks/todo.md](tasks/todo.md) for D vs R.
+Historical recovery plans, tests, and screenshots are evidence of what was built then. They are not current construction or release gates. Documentation done is not runtime migration done.
 
 ## Workflow
 
@@ -34,7 +34,7 @@ To link manually, set `DSH_HOME` to a separate development Home, create a custom
 
 ## Full local checks
 
-Run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain still defaults to Node 26.10.0. This runs the required list/type/build checks and seven test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
+Run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain defaults to Node 26.10.0. This runs the required list/type/build checks and seven test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
 
 The runner gives child processes a fresh temporary directory and non-real DSH Home. On Windows that directory must be outside the checkout. A workspace reader can briefly open a staging child and make the single atomic directory rename fail with `EPERM`, even when the reader permits delete sharing. `.gitignore` alone does not stop every external reader. The runner rejects an inherited repository-local TMP, including a directory alias into it, before starting checks. If needed, choose an existing external directory explicitly:
 
@@ -44,6 +44,9 @@ npm run check:all -- --temp-root "$env:LOCALAPPDATA\Temp"
 
 Use an authorized ordinary shell if the restricted shell cannot write there. Do not redirect these Windows checks to `.sandbox/tmp`, disable other applications, or add rename retries to make a run pass. Temporary fixtures and evidence are retained by the runner; individual tests still release their own resources. See [the investigation](tasks/archive/runtime-eperm-20261020.md) for the observed conflict and verification limits.
 
-## Phase gates
+## Maintenance documentation
 
-The activity ledger is [tasks/todo.md](tasks/todo.md). Isolation (phase 0) must stay green. Do not ship a GUI that starts a workbench without `dump-config` verification. Do not treat restore-success tests as a current pass condition.
+- Current product docs are in `docs/`; historical plans and records are in `docs/archive/` and `tasks/archive/`. Do not promote archived text to current requirements.
+- Keep [tasks/todo.md](tasks/todo.md) to a short list of open items. Long dated logs go to `tasks/archive/`.
+- Update [CHANGELOG.md](CHANGELOG.md) and `docs/releases/` for user-visible changes. Do not mark an unreleased candidate as released.
+- Do not put links to untracked `.sandbox/` or `dsh-spaces-checktmp` evidence in current docs.

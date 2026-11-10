@@ -20,7 +20,6 @@ import {
   type WorkbenchJobErrorCode,
   type WorkbenchJobHandler,
   type WorkbenchJobResult,
-  type WorkbenchJobSettle,
   type WorkbenchJobsInject,
   type WorkbenchJobsOptions,
 } from "./workbench-jobs/contract";
@@ -51,8 +50,6 @@ export type {
   WorkbenchJobErrorCode,
   WorkbenchJobResult,
   WorkbenchJobsInject,
-  WorkbenchJobSettleStatus,
-  WorkbenchJobSettle,
   WorkbenchJobContext,
   WorkbenchJobHandler,
   WorkbenchJobsOptions,
@@ -172,13 +169,6 @@ export class WorkbenchJobStore {
     } catch (error) {
       return Promise.reject(error);
     }
-  }
-
-  /**
-   * Recovery settlement is not supported. Interrupted jobs stay failed.
-   */
-  settleRecovery(_id: string, _settlement: WorkbenchJobSettle): Promise<WorkbenchJob> {
-    return Promise.reject(new WorkbenchJobError("workbench/unsupported"));
   }
 
   whenIdle(): Promise<void> {

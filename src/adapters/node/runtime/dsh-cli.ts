@@ -1,34 +1,23 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { spawnObserved } from "./owned-process-record";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { t } from "../../../shared/i18n";
-import { DSH_DEFAULT_VERSION, DSH_RUNTIME_PACKAGE } from "../../../shared/runtime";
-import { npmRegistry } from "../products/package-source";
 import { terminateProcessTree } from "./terminate-process";
 import {
-  currentPackageSource,
   nodeExecutable,
-  npmCliJs,
-  pnpmCjs,
-  runProcess,
   toolchainEnv,
 } from "./toolchain";
-
-export const DSH_CLI_SPEC = `${DSH_RUNTIME_PACKAGE}@${DSH_DEFAULT_VERSION}`;
-const INSTALL_TIMEOUT_MS = 10 * 60_000;
 
 let cachedBin: string | undefined;
 let selectedBin: ((profile?: string) => string | undefined) | undefined;
 
-/** A persisted selection is authoritative; resolver errors must not trigger a fallback install. */
-export function setSelectedDshResolver(resolver: (profile?: string) => string | undefined): void {
+/** A persisted selection is authoritative; resolver errors must not trigger a fallback install. Pass undefined to restore discovery. */
+export function setSelectedDshResolver(resolver: ((profile?: string) => string | undefined) | undefined): void {
   selectedBin = resolver;
 }
 let managedPrefixOverride: string | undefined;
 let managedNodeOverride: string | undefined;
-let ensuring: Promise<string> | undefined;
 
 function binUnder(nodeModulesRoot: string): string {
   return join(nodeModulesRoot, "@deepseek-ai", "dsh", "lib", "bin.js");
@@ -102,78 +91,27 @@ export function discoverDshBin(): string | undefined {
 
 export function resetDshBinCache(): void {
   cachedBin = undefined;
-  ensuring = undefined;
 }
 
-async function runManagedInstall(
-  argsForPnpm: string[],
-  argsForNpm: string[],
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  const node = nodeExecutable();
-  if (!node) throw new Error(t("errors.managedNodeMissing"));
-  const pnpmJs = pnpmCjs();
-  if (pnpmJs) {
-    return runProcess(node, [pnpmJs, ...argsForPnpm], { timeoutMs: INSTALL_TIMEOUT_MS });
-  }
-  const npmJs = npmCliJs();
-  if (npmJs) {
-    return runProcess(node, [npmJs, ...argsForNpm], { timeoutMs: INSTALL_TIMEOUT_MS });
-  }
-  throw new Error(t("errors.noPackageManager"));
-}
-
-async function installManagedCli(): Promise<string> {
-  const prefix = managedCliPrefix();
-  const bin = binUnder(join(prefix, "node_modules"));
-  mkdirSync(prefix, { recursive: true });
-  writeFileSync(join(prefix, ".npmrc"), `registry=${npmRegistry(currentPackageSource())}\n`, "utf8");
-  writeFileSync(
-    join(prefix, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "dsh-spaces-cli",
-        private: true,
-        description: "Managed DSH CLI install for DSH Spaces",
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
-
-  console.log(`dsh-cli: installing ${DSH_CLI_SPEC} into ${prefix}`);
-  try {
-    const result = await runManagedInstall(
-      ["add", "--dir", prefix, DSH_CLI_SPEC],
-      ["install", "--prefix", prefix, "--no-fund", "--no-audit", "--loglevel", "notice", DSH_CLI_SPEC],
+export class DshCliNotFoundError extends Error {
+  readonly name = "DshCliNotFoundError";
+  constructor(profile?: string) {
+    super(
+      profile
+        ? `No bound DSH CLI resolved for profile "${profile}". Bind one with --bin or pin a runtime; nothing was installed.`
+        : "No bound or discovered DSH CLI. Nothing was installed.",
     );
-    if (existsSync(bin)) return bin;
-    throw new Error(
-      (result.stderr || result.stdout).slice(0, 800) || t("errors.installExited", { code: result.code }),
-    );
-  } catch (err) {
-    if (existsSync(bin)) return bin;
-    throw err;
   }
 }
 
-async function doEnsure(): Promise<string> {
-  const existing = findDshBin();
-  if (existing) return existing;
-  const bin = await installManagedCli();
-  cachedBin = bin;
-  return bin;
-}
-
+/**
+ * Resolve the CLI binary for a profile. A missing or undiscoverable binary is a
+ * hard failure: Spaces never downloads or installs a DSH runtime on demand.
+ */
 export function ensureDshCli(profile?: string): Promise<string> {
   const existing = findDshBin(profile);
-  if (existing) return Promise.resolve(existing);
-  if (!ensuring) {
-    ensuring = doEnsure().finally(() => {
-      ensuring = undefined;
-    });
-  }
-  return ensuring;
+  if (!existing) return Promise.reject(new DshCliNotFoundError(profile));
+  return Promise.resolve(existing);
 }
 
 /** An explicitly bound Host runtime wins, including Electron's ASAR-capable Node. */
@@ -240,7 +178,7 @@ export async function runDsh(
 
 let pluginTail: Promise<void> = Promise.resolve();
 
-export function enqueuePlugin<T>(_label: string, work: () => Promise<T>): Promise<T> {
+export function enqueuePlugin<T>(work: () => Promise<T>): Promise<T> {
   const run = pluginTail.then(work, work);
   pluginTail = run.then(
     () => undefined,

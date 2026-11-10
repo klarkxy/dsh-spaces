@@ -1,8 +1,8 @@
 # 合并执行与验收记录
 
-> 历史导航：本文件是 2026-09-20 的历史施工/验收执行记录，只证明当时范围。现行架构见 [architecture.md](../docs/architecture.md)；故障政策见 [let it crash](../docs/let-it-crash.md)。文中与现行架构冲突的桌面壳、应用内升级、恢复、交接或旧 LLM 方案内容，仅作历史参考，不是当前合同或验收门槛。
+> 历史导航：本文件是 2026-09-20 的历史施工/验收执行记录，只证明当时范围。现行架构见 [architecture.md](../../docs/architecture.md)；故障政策见 [let it crash](../../docs/let-it-crash.md)。文中与现行架构冲突的桌面壳、应用内升级、恢复、交接或旧 LLM 方案内容，仅作历史参考，不是当前合同或验收门槛。
 
-2026-09-20 开始。计划：[spaces-merge-convergence.md](../docs/plans/spaces-merge-convergence.md)。活动状态只在 [todo.md](todo.md) 维护。
+2026-09-20 开始。计划：[spaces-merge-convergence.md](../../docs/archive/spaces-merge-convergence.md)。活动状态只在 [todo.md](../todo.md) 维护。
 
 ## 基线
 
@@ -31,7 +31,7 @@
 
 三个分区合计 279 行，逐行字段/引用/路径集合通过主 Agent 校验；另有 3 条 old→imported 差异不在 old→main 集合，托盘与进程测试已与旧分支字节相同，ControllerStatus 在旧分支和当前主线均不存在。合计 282 个并集路径无待归类项。
 
-初判 242 已覆盖、33 被后续政策替代、4 遗漏。4 项均为文档/验收脚本：正常备份说明及演示源台词、失效的接管徽章等待、rc2 脚本的个人机器路径；Grok 修正后主 Agent 读回并做 JSON/语法检查。未把静态脚本检查声称为真实 UI 通过。总表：[acceptance.json](archive/merge-audit/acceptance.json)。
+初判 242 已覆盖、33 被后续政策替代、4 遗漏。4 项均为文档/验收脚本：正常备份说明及演示源台词、失效的接管徽章等待、rc2 脚本的个人机器路径；Grok 修正后主 Agent 读回并做 JSON/语法检查。未把静态脚本检查声称为真实 UI 通过。总表：[acceptance.json](merge-audit/acceptance.json)。
 
 完整基线 641 tests：638 pass、2 fail、1 skip。两处失败均为 Windows 测试移植问题；修正后主 Agent 独立复跑两文件，8/8 pass、0 skip（含先前失败的两项）。未无理由重跑其余 633 项。三组类型检查和两种构建均通过。可选官方 CLI 实测、真实浏览器与安装包启动仍未跑。
 
@@ -83,9 +83,9 @@
 | 标准插件安装 | 普通 web 安装成功，首次初始化失败；不得认定通过 | `.sandbox/final-standard-install/results.json`、`.sandbox/standard-install-diagnostic/results.json` |
 | 构建和本地 Windows 包 | 本轮曾构建成功；早于最终两项 P1 修复，须重新生成和验证 | `.sandbox/final-build.log`、`.sandbox/final-desktop-package.log` |
 
-[重要集成审查](archive/merge-final-integrated-review.md) 在捕获基线上发现两个 P1：管理器未就绪仍确认交接成功，以及下载正文停滞导致取消无效、占住写队列。前者修复后上述 16 项通过；后者的修复正在完成独立验收。标准插件安装的当前真实失败是 manager 首次插件安装退出 `4294963248`，监督进程仍可响应；另一次手动重试成功不是首次初始化通过证据。
+[重要集成审查](merge-final-integrated-review.md) 在捕获基线上发现两个 P1：管理器未就绪仍确认交接成功，以及下载正文停滞导致取消无效、占住写队列。前者修复后上述 16 项通过；后者的修复正在完成独立验收。标准插件安装的当前真实失败是 manager 首次插件安装退出 `4294963248`，监督进程仍可响应；另一次手动重试成功不是首次初始化通过证据。
 
-组件更新和桌面运行前检查已通过，但完整组件更新、Electron 与浏览器双端、正常维护产品流程及最终打包位置启动尚未完成。四个旧恢复/接管验收脚本已明确退役，主 Agent 验证调用均非零退出且不执行旧流程；现行替代入口见 [退役记录](archive/merge-b5-docs-legacy-cleanup.md)。
+组件更新和桌面运行前检查已通过，但完整组件更新、Electron 与浏览器双端、正常维护产品流程及最终打包位置启动尚未完成。四个旧恢复/接管验收脚本已明确退役，主 Agent 验证调用均非零退出且不执行旧流程；现行替代入口见 [退役记录](merge-b5-docs-legacy-cleanup.md)。
 
 ## 最终流程复验（更新于 2026-09-20）
 

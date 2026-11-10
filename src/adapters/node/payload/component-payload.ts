@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
+import { inside, lstatSync, realpathSync, samePath } from "../../../shared/node/filesystem";
 /** Node-only v2 component payload. Do not import this from browser shared contracts. */
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
@@ -677,16 +677,7 @@ function isComponentName(value: string): value is ComponentPayloadName {
 }
 
 function contained(root: string, target: string): boolean {
-  const r = resolve(root);
-  const t = resolve(target);
-  if (samePath(r, t)) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  if (process.platform === "win32") return t.toLowerCase().startsWith(prefix.toLowerCase());
-  return t.startsWith(prefix);
-}
-
-function samePath(a: string, b: string): boolean {
-  return process.platform === "win32" ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b);
+  return inside(root, target);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

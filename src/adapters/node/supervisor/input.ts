@@ -8,6 +8,12 @@ import { WorkbenchPublicError } from "./errors";
 const ENTITY_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const GLYPH_RE = /^[a-z0-9-]{1,32}$/;
 
+/**
+ * Public-entry plan parser. Stricter about what callers may send; the
+ * maintenance service re-validates the parsed request a second time under
+ * its own rules in workbench-maintenance/validation.ts parsePlanRequest —
+ * keep the accepted kinds and the rejected (unsupported) kinds aligned.
+ */
 export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
   const body = expectObject(input);
   const kind = body.kind;

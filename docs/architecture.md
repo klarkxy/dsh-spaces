@@ -124,7 +124,7 @@ Spaces 不扫描并收养其他 profile。直接创建、普通模板和 `.dshsp
 
 Spaces 以同一构建的不可变组件组发行 Supervisor、管理插件、view bridge、Browser、LLM bridge 和安装 worker。制品按版本与摘要校验，不混用不同构建。
 
-当前目标宿主为 `@deepseek-ai/dsh` **0.2.2-rc.1**（Cordis 4.1.0、loader 1.1.0、schemastery 3.19）。宿主自身要求 Node ≥24.9；本项目 engines 为 Node 24.21+ 的 24.x 或 26.x。宿主插件声明的 peer 范围接受 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.2-rc.1；官方升级指南只记录到 v0.2.2-alpha.3，rc.1 差异（Cordis `internal/config` 首参由 config 改为 fiber、`agent/request` 标记 deprecated、`GenerateOptions.purpose` 改为生产方声明合并、fs-observation-policy 默认禁用并新增 `apply_patch`）以版本锁定源码为补充依据。这些语义差异不改变本产品的授权、隔离和失败政策。
+当前目标宿主和默认新空间运行时为 `@deepseek-ai/dsh` **0.2.2-rc.1**（Cordis 4.1.0、loader 1.1.0、schemastery 3.19）；普通空间最低运行时为 0.2.0-rc.2。宿主自身要求 Node ≥24.9；本项目 engines 为 Node 24.21+ 的 24.x 或 26.x。宿主插件声明的 peer 范围接受 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.2-rc.1；官方升级指南只记录到 v0.2.2-alpha.3，rc.1 差异（Cordis `internal/config` 首参由 config 改为 fiber、`agent/request` 标记 deprecated、`GenerateOptions.purpose` 改为生产方声明合并、fs-observation-policy 默认禁用并新增 `apply_patch`）以版本锁定源码为补充依据。这些语义差异不改变本产品的授权、隔离和失败政策。
 
 `@klarkxy/dsh-dev-index` 作为 canonical 行随宿主插件和 view bridge 的组合 patch 预装：主空间与每个 Web 子空间都获得该工具插件，Browser base 在其 profile patch 中显式禁用同一行 id。
 

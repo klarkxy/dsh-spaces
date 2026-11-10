@@ -2,7 +2,7 @@
 
 本文件是 Spaces 管理面（Supervisor ↔ 管理 Host ↔ 工作台客户端）的现行公共合同，随实现更新后保留本文件名。修改本合同或共享类型须由主 Agent 协调；执行者不得各自发明协议。故障政策唯一权威为 [let it crash](../docs/let-it-crash.md)；现行产品边界见 [docs/architecture.md](../docs/architecture.md)。
 
-> 历史提示：本文件最初是 2026-09-20 单 Supervisor 合并的实施合同，含桌面壳移交、应用内自我更新与一次性启动器交接等条款。桌面壳与应用内升级已分别移除（见 [todo.md](todo.md) 的 2026-10-12 记录），下文不再描述它们。
+> 历史提示：本文件最初是 2026-09-20 单 Supervisor 合并的实施合同，含桌面壳移交、应用内自我更新与一次性启动器交接等条款。桌面壳与应用内升级已分别移除（见 [tasks/archive/todo-2026-10.md](archive/todo-2026-10.md) 的 2026-10-12 记录），下文不再描述它们。
 
 ## 入口与职责
 
@@ -24,7 +24,7 @@
 
 读取接口返回读取瞬时的投影：状态版本不表示任务列表、日志和所有磁盘读都来自同一一致性快照。管理读取不取 Home 写锁。
 
-服务端预览保存 epoch、目标状态和资源指纹，执行时重新校验。公开 `WorkbenchPlan` 携带 `serviceEpoch` 与 `stateRevision`。旧服务的计划即使未过有效期也不能执行。`llm.apply` 的 observation 带 serviceEpoch，执行队列轮到它时再次核对实例，不仅在提交时检查。
+服务端预览保存 epoch、目标状态和资源指纹，执行时重新校验。公开 `WorkbenchPlan` 携带 `serviceEpoch` 与 `stateRevision`。旧服务的计划即使未过有效期也不能执行。计划执行在队列轮到它时再次核对服务纪元、实例和计划指纹，不仅在提交时检查。
 
 公开合同不包含 `controller.acquire`、`controller.release`、`recovery.*`、`snapshot.restore`、`config.restore`、`workbench.prepare`、`workbenchPackage`、`workbench.upgrade` 和 `recoveryRequired`。正常服务停止使用 `service.shutdown` 预览。旧调用只在明确的兼容拒绝边界返回 unsupported，不继续出现在命令联合类型或新 UI 中。旧持久记录可作为历史证据读取，未知或损坏记录保留原字节，不重放、重置或修补环境。
 
@@ -32,7 +32,7 @@ endpoint 记录包含协议版本、公开服务 epoch、canonical Home 身份�
 
 ## 产品 API 与执行归属
 
-沿用 `WorkbenchApi` 的 `submit` / `preview` / `job` / `state` / `detail` / `view` / `cancel` 等面，不另造任务总线。`product(request)` 是类型化读/预览入口，与 `llm(request)` 风格一致；请求与结果为封闭 union，禁止任意方法名、路径、shell 命令和透传对象。读方法不得悄悄落盘刷新或同步缓存。
+沿用 `WorkbenchApi` 的 `submit` / `preview` / `job` / `state` / `detail` / `view` / `cancel` 等面，不另造任务总线。`product(request)` 是类型化读/预览入口；请求与结果为封闭 union，禁止任意方法名、路径、shell 命令和透传对象。读方法不得悄悄落盘刷新或同步缓存。
 
 产品读取与预览覆盖 Home 设置、插件目录与制品、诊断、普通模板、分享和版本查询等封闭用例；具体成员、参数与结果由共享产品契约单源定义，本文不复制一份容易过期的清单。读取不得悄悄落盘刷新，公开结果不得泄露绝对路径、来源凭据、聊天正文或其他秘密。Spaces 蓝图工作流封存期间，`blueprint.source` / `generate` / `inspect` / `preview` / `apply` 均返回 `workbench/unsupported`，旧 DTO 与历史任务记录仍可识别。
 
@@ -42,7 +42,7 @@ endpoint 记录包含协议版本、公开服务 epoch、canonical Home 身份�
 
 产品用例统一由 Supervisor 装配与分发，不在宿主入口复制第二套业务实现。模板和分享复用版本化配方创建流程，兼容现有磁盘与分享格式，分别记录定义、安装、启动和模型映射结果。正常快照创建、查看、删除及安装能力保留。
 
-凭据请求仍使用 `llmCredential` 专用通道，值只在请求内存中，持久化无秘密回执。它与其他管理写入共享授权及同一串行互斥；不得因没有通用 job 而绕过正在进行的维护或停止操作。
+凭据和秘密值只在请求内存中处理，不进入通用 job、日志或持久化回执。凭据相关操作与其他管理写入共享授权及同一串行互斥；不得因没有通用 job 而绕过正在进行的维护或停止操作。
 
 ## 任务与计划
 

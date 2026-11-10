@@ -28,6 +28,7 @@ Thumbs.db
 !.env.example
 
 # Local tooling
+.codegraph/
 .playwright-mcp/
 .pnpm-store/
 .learnings/

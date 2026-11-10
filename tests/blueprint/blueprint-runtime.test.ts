@@ -24,7 +24,7 @@ const realHome = join(homedir(), ".dsh");
 const here = fileURLToPath(import.meta.url);
 const sourcePath = join(dirname(here), "../../src/adapters/node/blueprint/blueprint-runtime.ts");
 const jsYamlPath = createRequire(here).resolve("js-yaml");
-const officialBin = officialRc2Bin();
+const official = officialBoundBin();
 
 afterEach(() => {
   for (const dir of temps.splice(0)) {
@@ -345,17 +345,18 @@ test("fixture: root group insert then later overlay of the inserted child matche
 });
 
 test(
-  "integration: official 0.2.1-rc.2 base version is available without profiles/web or local base node_modules",
-  { skip: officialBin ? false : "official 0.2.1-rc.2 bin not available" },
+  "integration: bound official CLI base is available without profiles/web or local base node_modules",
+  { skip: official ? false : "official bound DSH installation unavailable" },
   async () => {
     const home = tempHome();
-    const inspected = await inspectBlueprintRuntime({ home, bin: officialBin! });
-    assert.equal(inspected.versions.dsh, "0.2.1-rc.2");
-    assert.equal(inspected.versions.base, "0.2.1-rc.2");
-    assert.equal(inspected.versions.webApp, "0.2.1-rc.2");
+    const inspected = await inspectBlueprintRuntime({ home, bin: official!.bin });
+    assert.equal(inspected.versions.dsh, official!.version);
     assert.equal(inspected.baseLayers[0]?.name, "@deepseek-ai/dsh-base");
-    assert.equal(inspected.baseLayers[0]?.version, "0.2.1-rc.2");
+    assert.equal(inspected.versions.base, inspected.baseLayers[0]?.version);
+    assert.ok(inspected.versions.base);
     assert.equal(inspected.baseLayers[1]?.name, "@deepseek-ai/dsh-web-app");
+    assert.equal(inspected.versions.webApp, inspected.baseLayers[1]?.version);
+    assert.ok(inspected.versions.webApp);
     assert.ok(asEntries(inspected.baseEntries).some((row) => row.id === "timer"));
     assert.deepEqual(inspected.homePatches, []);
     assert.equal(existsSync(join(home, "profiles")), false);
@@ -365,13 +366,14 @@ test(
 );
 
 test(
-  "integration: official 0.2.1-rc.2 skipped warnings and whole-config replacement",
-  { skip: officialBin ? false : "official 0.2.1-rc.2 bin not available" },
+  "integration: bound official CLI skipped warnings and whole-config replacement",
+  { skip: official ? false : "official bound DSH installation unavailable" },
   async () => {
     const home = tempHome();
     writeSpace(home, "coding");
+    const inspected = await inspectBlueprintRuntime({ home, bin: official!.bin });
     const composed = await composeBlueprintRuntime(
-      { home, bin: officialBin! },
+      { home, bin: official!.bin },
       {
         spaceId: "coding",
         bundles: ["@deepseek-ai/dsh-base"],
@@ -390,22 +392,23 @@ test(
     ]);
     const hmr = asEntries(composed.entries).find((row) => row.id === "hmr");
     assert.deepEqual(hmr?.config, { root: ["hub"] });
-    assert.equal(composed.layers[0]?.version, "0.2.1-rc.2");
+    assert.equal(composed.layers[0]?.version, inspected.versions.base);
     assert.equal(existsSync(join(home, "profiles", "web")), false);
     const builtins = await resolveBlueprintModule(
-      { home, bin: officialBin! },
+      { home, bin: official!.bin },
       { spaceId: "coding", specifier: "cordis:group" },
     );
     assert.equal(builtins.builtin, true);
     assert.equal(builtins.packageName, "@deepseek-ai/cordis-plugin-group");
     assert.equal(builtins.resolvedPath, null);
-    assert.equal(builtins.packageVersion, "1.0.5");
+    assert.ok(builtins.packageVersion);
+    assert.match(builtins.packageVersion, /^\d+\.\d+\.\d+/);
   },
 );
 
 test(
-  "integration: official 0.2.1-rc.2 ESM-only export uses resolve.exports, not plugin execution",
-  { skip: officialBin ? false : "official 0.2.1-rc.2 bin not available" },
+  "integration: bound official CLI resolves an ESM-only export with resolve.exports, not plugin execution",
+  { skip: official ? false : "official bound DSH installation unavailable" },
   async () => {
     const home = tempHome();
     writeSpace(home, "coding");
@@ -422,13 +425,13 @@ test(
     );
     writeFileSync(join(pkg, "esm.js"), "throw new Error('plugin executed');\n");
     const resolved = await resolveBlueprintModule(
-      { home, bin: officialBin! },
+      { home, bin: official!.bin },
       { spaceId: "coding", specifier: "esm-only-plugin" },
     );
     assert.equal(resolved.packageVersion, "3.0.0");
     assert.ok(resolved.resolvedPath && /esm-only-plugin[\\/]esm\.js$/i.test(resolved.resolvedPath));
     await assertRejects(
-      resolveBlueprintModule({ home, bin: officialBin! }, { spaceId: "coding", specifier: "esm-only-plugin/missing" }),
+      resolveBlueprintModule({ home, bin: official!.bin }, { spaceId: "coding", specifier: "esm-only-plugin/missing" }),
       "module-unresolved",
     );
   },
@@ -742,17 +745,20 @@ function writeSpace(home: string, spaceId: string): void {
   );
 }
 
-function officialRc2Bin(): string | null {
+function officialBoundBin(): { bin: string; version: string } | null {
   const appData = process.env.APPDATA;
-  const bin = process.env.DSH_TEST_CLI_BIN ?? (appData && join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
-  if (!bin) return null;
-  if (!existsSync(bin)) return null;
+  const bin = process.env.DSH_TEST_CLI_BIN
+    ?? process.env.DSH_BLUEPRINT_TEST_BIN
+    ?? (appData && join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
+  if (!bin || !existsSync(bin)) return null;
   try {
     const pkg = JSON.parse(readFileSync(join(bin, "..", "..", "package.json"), "utf8")) as {
       name?: unknown;
       version?: unknown;
     };
-    if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.2.1-rc.2") return bin;
+    if (pkg.name === "@deepseek-ai/dsh" && typeof pkg.version === "string" && pkg.version.length > 0) {
+      return { bin, version: pkg.version };
+    }
   } catch {
     return null;
   }

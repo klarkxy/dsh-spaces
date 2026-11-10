@@ -1,6 +1,6 @@
 # Global LLM connection library
 
-Plan: [docs/plans/global-llm-connections.md](../../docs/plans/global-llm-connections.md).
+Plan: [docs/plans/global-llm-connections.md](../../docs/archive/global-llm-connections.md).
 Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
 
 `web` is not the owner of global model settings. Shared connections live in a Home-level catalog. Each Space keeps its own settings, plugins, sessions, and runtime.

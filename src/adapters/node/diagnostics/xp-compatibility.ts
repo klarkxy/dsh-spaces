@@ -1,7 +1,7 @@
-import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
+import { inside, lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { atomicWrite } from "../atomic";
 import { PROFILE_NAME_RE } from "../../../shared/types";
 
@@ -263,19 +263,6 @@ function assertLexicalInside(root: string, target: string): void {
   if (!inside(root, resolved)) {
     throw new XpCompatibilityError("out-of-profile", `XP path is outside the profile: ${resolved}`);
   }
-}
-
-function inside(root: string, target: string): boolean {
-  const r = comparable(root);
-  const t = comparable(target);
-  if (r === t) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  return t.startsWith(prefix);
-}
-
-function comparable(path: string): string {
-  const resolved = resolve(path);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
 function countOccurrences(source: string, snippet: string): number {

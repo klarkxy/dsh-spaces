@@ -34,18 +34,14 @@ const guideEn = {
     "This creates a dedicated manager and supervisor for this Home, then opens the authenticated workbench. It does not turn this space into the manager.",
   initAction: "Initialize Spaces",
   initBusy: "Initializing Spaces…",
-  initProgress: "Creating the dedicated manager and supervisor…",
   enterTitle: "Enter workbench",
   enterBody:
     "This space is not the manager. Open the authenticated workbench, or start it if it is stopped. Management stays on the dedicated manager profile.",
   enterAction: "Enter workbench",
   enterBusy: "Connecting…",
-  enterProgress: "Connecting to the workbench…",
   startAction: "Start workbench",
-  retry: "Retry",
   copyDetails: "Copy details",
   unavailable: "The workbench entry is not available yet.",
-  untrusted: "The workbench entry is not an authorized local address.",
   roleFailed: "This Home could not be checked.",
 } as const;
 
@@ -57,17 +53,13 @@ const guideZh: Record<keyof typeof guideEn, string> = {
   initBody: "这将为本 Home 创建专用管理空间和监督进程，然后打开已认证的工作台。不会把当前空间变成管理空间。",
   initAction: "初始化 Spaces",
   initBusy: "正在初始化 Spaces…",
-  initProgress: "正在创建专用管理空间和监督进程…",
   enterTitle: "进入工作台",
   enterBody: "当前空间不是管理工作台。这里只会打开已认证的工作台入口；若工作台已停止，请启动它。管理能力仍在专用管理空间。",
   enterAction: "进入工作台",
   enterBusy: "正在连接…",
-  enterProgress: "正在连接工作台…",
   startAction: "启动工作台",
-  retry: "重试",
   copyDetails: "复制详情",
   unavailable: "工作台入口暂不可用。",
-  untrusted: "工作台入口不是已授权的本机地址。",
   roleFailed: "无法检查此 Home。",
 };
 

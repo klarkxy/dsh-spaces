@@ -1,6 +1,6 @@
 # B5 current docs + legacy verifier cleanup
 
-> 本文件是该施工叶交付时的历史检查点。下文的 FAIL / not yet PASS 不代表当前状态；后续复验以 [合并执行与验收记录](../merge-execution.md) 为准。
+> 本文件是该施工叶交付时的历史检查点。下文的 FAIL / not yet PASS 不代表当前状态；后续复验以 [合并执行与验收记录](merge-execution.md) 为准。
 
 Narrow leaf. No Git, config, credentials, real Home, package.json/CI, live acceptance scripts, or B-complete checkboxes. Primary still owns `tasks/merge-execution.md`, `tasks/todo.md`, root README, and plan updates.
 

@@ -2,7 +2,7 @@ import {
   constants, lstatSync as nodeLstatSync, readdirSync, readlinkSync as nodeReadlinkSync, rmdirSync, unlinkSync,
   realpathSync as nodeRealpathSync, symlinkSync, type BigIntStats, type Stats,
 } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 // Windows' native resolver follows reparse points (including Global DOS-device
 // junctions) which lstat and the JS realpath walker can treat as directories.
@@ -95,4 +95,37 @@ export function removeTreeNoFollow(path: string): void {
 export function createDirectoryLink(target: string, path: string): void {
   symlinkSync(process.platform === "win32" ? resolve(target) : relative(dirname(path), target) || ".",
     path, process.platform === "win32" ? "junction" : "dir");
+}
+
+// Lexical path identity shared by adapters and bundled CLIs. Windows folds
+// case; other platforms compare byte-exactly (an unconditional lowercase here
+// would weaken isolation checks on case-sensitive filesystems).
+function comparablePath(path: string): string {
+  const resolved = resolve(path);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/** Lexical path equality; resolve only, no filesystem reads. */
+export function samePath(a: string, b: string): boolean {
+  return comparablePath(a) === comparablePath(b);
+}
+
+/** Lexical containment: target is inside root or equal to it. */
+export function inside(root: string, target: string): boolean {
+  const r = comparablePath(root);
+  const t = comparablePath(target);
+  if (r === t) return true;
+  const prefix = r.endsWith(sep) ? r : r + sep;
+  return t.startsWith(prefix);
+}
+
+/** lstat-based existence check. Only ENOENT reports missing; other errors throw. */
+export function lexists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }

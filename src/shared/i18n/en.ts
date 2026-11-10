@@ -51,10 +51,6 @@ export const en = {
   "errors.nodeMissing": "Node is not installed",
   "errors.npmMissing": "Bundled npm not found next to managed Node",
   "errors.installExited": "Install exited {code}",
-
-  "queue.pluginAddSpec": "Installing {spec} on {name}",
-  "queue.pluginRemove": "Removing {spec} from {name}",
-  "queue.pluginDownload": "Downloading {spec}",
 } as const;
 
 export type MessageKey = keyof typeof en;

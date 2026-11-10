@@ -31,13 +31,6 @@ export type WorkbenchJobErrorCode = keyof typeof WORKBENCH_JOB_ERROR;
 
 export type WorkbenchJobResult = NonNullable<WorkbenchJob["result"]>;
 export type WorkbenchJobsInject = (op: string, detail?: string) => void;
-export type WorkbenchJobSettleStatus = "succeeded" | "failed" | "cancelled";
-
-export interface WorkbenchJobSettle {
-  status: WorkbenchJobSettleStatus;
-  result?: WorkbenchJobResult;
-  message?: string;
-}
 
 export class WorkbenchJobError extends Error {
   readonly name = "WorkbenchJobError";

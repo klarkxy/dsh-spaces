@@ -1,6 +1,6 @@
 # Cross-Space request/response: phase one
 
-> Historical phase-one design and acceptance record. For the current architecture see [architecture.md](../architecture.md); the branch also includes [static capabilities](./static-capabilities.md) and Browser Space. The protocol boundaries below remain useful, but dated test results and stop/publishing notes describe only that checkpoint.
+> Historical phase-one design and acceptance record. For the current architecture see [architecture.md](../architecture.md); the branch also includes [static capabilities](../message-bus/static-capabilities.md) and Browser Space. The protocol boundaries below remain useful, but dated test results and stop/publishing notes describe only that checkpoint.
 
 ## Scope
 

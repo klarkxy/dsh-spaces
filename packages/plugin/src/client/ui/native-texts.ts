@@ -26,11 +26,8 @@ export interface NativeShellTexts {
   dismissOperationError: string;
   guideLabel: string;
   guideLoading: string;
-  guidePreparing: string;
   guideStopping: string;
   guideStopped: string;
-  guideLaunching: string;
-  guideInitialize: string;
   initialize: string;
   backToMain: string;
   confirmInterruptLabel: string;
@@ -54,7 +51,6 @@ export interface NativeShellTexts {
   stoppingSpace: string;
   restartingSpace: string;
   opening: string;
-  launchingService: string;
   serviceOperation: string;
   serviceManual: string;
   serviceActionFailed: string;
@@ -150,11 +146,8 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     dismissOperationError: "关闭操作提示",
     guideLabel: "空间状态",
     guideLoading: "正在连接空间服务…",
-    guidePreparing: "正在准备 Spaces 管理服务及所需组件，首次初始化可能需要几分钟…",
     guideStopping: "正在停止 Spaces 服务，并确认停机结果…",
     guideStopped: "Spaces 服务已停止。会话记录保留，Desktop 主空间仍可使用。",
-    guideLaunching: "Spaces 管理服务没有在运行，正在随本次打开启动它…",
-    guideInitialize: "初始化独立的 Spaces 管理服务后，即可在这里切换空间。",
     initialize: "初始化 Spaces",
     backToMain: "返回主空间",
     confirmInterruptLabel: "确认任务中断影响",
@@ -178,7 +171,6 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     stoppingSpace: "正在停止",
     restartingSpace: "正在重启",
     opening: "正在打开",
-    launchingService: "正在启动 Spaces 服务",
     serviceOperation: "Spaces 服务操作",
     serviceManual: "手动启动 / 重启 Spaces 服务…",
     serviceActionFailed: "服务操作失败，未自动重试。",
@@ -272,11 +264,8 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     dismissOperationError: "Dismiss the operation notice",
     guideLabel: "Space status",
     guideLoading: "Connecting to the space service…",
-    guidePreparing: "Preparing the Spaces manager service and its components. First-time setup can take a few minutes…",
     guideStopping: "Stopping the Spaces service and confirming the shutdown…",
     guideStopped: "The Spaces service is stopped. Conversation history is kept; the Desktop main space stays usable.",
-    guideLaunching: "The Spaces manager service is not running; it is starting with this launch…",
-    guideInitialize: "Initialize the independent Spaces manager service to switch spaces here.",
     initialize: "Initialize Spaces",
     backToMain: "Back to main space",
     confirmInterruptLabel: "Confirm task interruption",
@@ -300,7 +289,6 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     stoppingSpace: "Stopping",
     restartingSpace: "Restarting",
     opening: "Opening",
-    launchingService: "Starting the Spaces service",
     serviceOperation: "Spaces service operation",
     serviceManual: "Start / restart the Spaces service manually…",
     serviceActionFailed: "The service operation failed; it was not retried.",

@@ -207,7 +207,7 @@ export async function pluginAdd(dshHome: string, name: string, spec: string, opt
   assertProfile(dshHome, name);
   const target = addableSpec(dshHome, spec);
   const cliTarget = archiveAddArgument(dshHome, name, target);
-  await enqueuePlugin(t("queue.pluginAddSpec", { name, spec: target }), async () => {
+  await enqueuePlugin(async () => {
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "add", cliTarget, ...(options.force ? ["--force"] : [])],
@@ -243,7 +243,7 @@ export async function pluginLinkDirectory(
     }
   }
   if (!valid) throw invalid();
-  await enqueuePlugin(t("queue.pluginAddSpec", { name, spec: dir }), async () => {
+  await enqueuePlugin(async () => {
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "add", dir],
@@ -261,7 +261,7 @@ export async function pluginRemove(dshHome: string, name: string, packageName: s
   if (isProtectedPlugin(packageName)) {
     throw new Error(t("errors.pluginProtected", { name: packageName }));
   }
-  await enqueuePlugin(t("queue.pluginRemove", { name, spec: packageName }), async () => {
+  await enqueuePlugin(async () => {
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "remove", packageName],
@@ -768,7 +768,7 @@ export async function downloadPlugin(
     archiveMaxBytes: options.archiveMaxBytes,
   });
   const draft = resolveDownloadDraft(dshHome, request);
-  return enqueuePlugin(t("queue.pluginDownload", { spec: draft.spec }), async () => {
+  return enqueuePlugin(async () => {
     const control = createDownloadControl(options);
     const limits = {
       signal: control.signal,

@@ -63,7 +63,7 @@ test("interpolate substitutes named placeholders", () => {
 test("t uses the requested locale and interpolates placeholders", () => {
   assert.equal(t("errors.unknownProfile", { name: "coding" }, "en"), "Unknown space coding");
   assert.equal(t("errors.unknownProfile", { name: "coding" }, "zh"), "未知空间 coding");
-  assert.equal(t("queue.pluginAddSpec", { spec: "pkg@1", name: "notes" }, "zh"), "安装 pkg@1 → notes");
+  assert.equal(t("errors.pluginSpecInvalid", { spec: "pkg@1" }, "zh"), "插件 spec 不合法：pkg@1");
 });
 
 test("catalogs do not offer recovery actions", () => {
@@ -86,7 +86,7 @@ test("name errors shown to users are human copy, not a regex", () => {
 });
 
 test("runtime errors stay free of shell jargon and recovery offers", () => {
-  assert.equal(t("queue.pluginAddSpec", { name: "notes", spec: "pkg@1.0.0" }, "en"), "Installing pkg@1.0.0 on notes");
+  assert.equal(t("errors.pluginSpecInvalid", { spec: "pkg@1.0.0" }, "en"), "Plugin spec is not allowed: pkg@1.0.0");
   assert.ok(!t("errors.stopFailed", { detail: "x" }, "en").toLowerCase().includes("profile"));
   assert.ok(!t("errors.portNotReady", undefined, "en").toLowerCase().includes("port"));
   assert.ok(!t("errors.portNotReady", undefined, "zh").includes("端口"));

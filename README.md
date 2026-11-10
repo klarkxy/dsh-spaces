@@ -12,7 +12,11 @@ It adds a space rail to the existing application, runs each ordinary space in it
 - [Workbench guide](docs/workbench.md) — lifecycle, models, backups, upgrades and diagnostics.
 - [Standard installation](docs/plugin-standard-install.md) — installation, linked development and removal.
 - [Management contract](tasks/merge-contract-v2.md) — protocol 2, tasks, plans and concurrency.
+- [Workbench API surface](docs/workbench-api-surface.md) — public management wire semantics.
+- [Host embedding contract](docs/host/embedding.md) — presentation, origin and Desktop limits.
+- [Space control design](docs/space-control-design.md) — implemented main-space control tools.
 - [Fault policy](docs/let-it-crash.md) — the sole authority for failure and recovery behavior.
+- [Changelog](CHANGELOG.md) — release history.
 - [Blueprint](docs/blueprint.md) — DSHBP1/DSHBP2 protocols. Spaces blueprint workflows are currently sealed; the independent package remains available.
 
 ## Data and identity
@@ -21,13 +25,15 @@ It adds a space rail to the existing application, runs each ordinary space in it
 - An ordinary space exists only after creation in Spaces. Its profile is `profiles/space-<name>`, its data is under `hub/space-<name>`, and membership comes from `hub/spaces.json`.
 - Spaces does not scan, adopt or modify unrelated profiles.
 - `spaces-hub` is the dedicated manager profile, not the main space and not an ordinary deletable space.
-- Main-space settings and credentials stay in the main host. Legacy shared connections use a separate Home catalog and credential store; neither is a copy of the main settings document.
+- Main-space settings and credentials stay in the main host; Spaces does not copy or migrate that settings document.
 
 ## Runtime behavior
 
 Protocol 2 mutations carry a service epoch and expected revision. Requests and plans are rechecked at execution; refreshing reads existing jobs instead of replaying them. Closing a tab or host window does not stop spaces or the Supervisor. Stopping all spaces and stopping the service are separate actions.
 
-New ordinary spaces can follow the main host's model without copying its credentials. This path depends on the child space, Supervisor and main host all remaining available. Legacy shared connections keep their launch-snapshot and direct-provider behavior; local and session-specific selections remain distinct. See [LLM data flows](docs/architecture.md#6-llm-数据面).
+Each ordinary space calls its models with its own configuration. Choosing the main space's models copies the main space's routes, default model and their keys into the new space once at creation; the workbench space detail can copy them again on request while the space is stopped. Login-grant and expression routes are reported and skipped. Session selections and local defaults keep their own precedence. See [Model configuration](docs/architecture.md#6-模型配置).
+
+The main space's `cordis` preset also exposes the Creator four-tool set and the space-control tools (`spaces_overview`, `spaces_inspect`, `spaces_logs`, `spaces_templates`, `spaces_import_preview`, `spaces_plan`, `spaces_execute`, `spaces_control_job`, and the `spaces_ui_*` session tools). They use separate authenticated scopes; mutation plans require explicit approval and are never a management bypass for ordinary spaces.
 
 Failures are recorded with their actual stage and known cause, or explicitly marked unknown. Spaces does not automatically retry, restart, reconnect, roll back, restore, repair or replay interrupted work. The bounded Desktop service-start/restart exception is defined only in the [fault policy](docs/let-it-crash.md).
 
@@ -49,7 +55,7 @@ In ordinary Web, open **Workbench / 工作台** and choose **Initialize Spaces /
 
 To upgrade, install the newer host plugin, stop the Spaces service from the manager, and reopen Spaces. There is no in-app self-update or launcher handoff. Each ordinary space pins an exact DSH runtime; the manager follows the host runtime.
 
-Node.js 24.21+ (24.x) and 26.x are supported. New managed toolchains default to Node 26.10.0. The default DSH CLI for new installations is **`0.2.1-rc.2`**; `0.2.0-rc.2` is also the minimum supported space runtime. See the [installation guide](docs/plugin-standard-install.md) for exact package and platform limits.
+Node.js 24.21+ (24.x) and 26.x are supported. New managed toolchains default to Node 26.10.0. The default DSH CLI for new installations is **`0.2.2-rc.1`**; `0.2.0-rc.2` is the minimum supported space runtime. See the [installation guide](docs/plugin-standard-install.md) for exact package and platform limits.
 
 ## Develop
 
@@ -85,7 +91,11 @@ MIT. See [LICENSE](LICENSE).
 - [工作台说明](docs/workbench.md)：生命周期、模型、备份、升级与诊断。
 - [标准安装](docs/plugin-standard-install.md)：安装、链接开发与卸载。
 - [管理合同](tasks/merge-contract-v2.md)：协议 2、任务、计划与并发。
+- [工作台 API 语义](docs/workbench-api-surface.md)：公开管理 wire 语义。
+- [宿主嵌入合同](docs/host/embedding.md)：展示、来源与 Desktop 边界。
+- [空间总控设计](docs/space-control-design.md)：已实现的主空间控制工具。
 - [故障政策](docs/let-it-crash.md)：唯一的失败与恢复边界。
+- [变更记录](CHANGELOG.md)：发布历史。
 - [蓝图](docs/blueprint.md)：DSHBP1/DSHBP2 协议。Spaces 内蓝图工作流当前已封存，独立蓝图包保留。
 
 ## 数据与身份
@@ -94,7 +104,7 @@ MIT. See [LICENSE](LICENSE).
 - 普通空间只能在 Spaces 中创建；profile 为 `profiles/space-<name>`，数据位于 `hub/space-<name>`，成员资格以 `hub/spaces.json` 为准。
 - 不扫描、收养或修改无关 profile。
 - `spaces-hub` 是专用管理空间，不是主空间，也不是可删除的普通空间。
-- 主空间设置和凭据留在主宿主；旧共享连接使用独立的 Home 目录和凭据库，不复制整份主空间设置。
+- 主空间设置和凭据留在主宿主；Spaces 不复制、不迁移该设置文档。
 
 ## 运行语义
 
@@ -120,7 +130,7 @@ dsh web
 
 升级时更新宿主插件，在管理界面停止 Spaces 服务，再重新打开。没有应用内自我更新或启动器交接。普通空间固定精确 DSH 运行时，管理空间跟随宿主。
 
-支持 Node.js 24.21+（24.x）和 26.x；新托管工具链默认 Node 26.10.0。新安装默认 DSH CLI 为 **`0.2.1-rc.2`**，它也是普通空间最低运行时。具体包与平台限制见[安装说明](docs/plugin-standard-install.md)。
+支持 Node.js 24.21+（24.x）和 26.x；新托管工具链默认 Node 26.10.0。新安装默认 DSH CLI 为 **`0.2.2-rc.1`**；普通空间最低运行时为 `0.2.0-rc.2`。具体包与平台限制见[安装说明](docs/plugin-standard-install.md)。
 
 ## 开发
 

@@ -94,6 +94,7 @@ export const WORKBENCH_SHELL_CSS = `
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  z-index: 2;
   border: 2px solid var(--wb-rail);
   background: var(--wb-faint);
   transition: background-color var(--wb-dur-base) var(--wb-ease-standard);

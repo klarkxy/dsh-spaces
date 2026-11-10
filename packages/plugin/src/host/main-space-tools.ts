@@ -29,56 +29,20 @@ export interface CreatorCreatePreviewInput {
   plugins?: CreatorPluginSpec[];
 }
 
-// ---------------------------------------------------------------------------
-// Cordis / SDK structural surfaces (version-matched 0.2.1-rc.2).
-// ---------------------------------------------------------------------------
+// Cordis / SDK structural surfaces live in ./tool-surfaces (shared with
+// space-control). Creator-specific names are aliases of the shared shapes.
 
-interface CreatorToolExecAgent {
-  ctx: Context;
-  session: { id?: unknown; [key: string]: unknown };
-  [key: string]: unknown;
-}
+import {
+  AgentPresetsService,
+  ApprovalService,
+  EscalationApprove,
+  SandboxPolicyService,
+  ToolDefinition,
+  ToolExec,
+  ToolsService,
+} from "./tool-surfaces";
 
-interface CreatorToolExec {
-  signal: AbortSignal;
-  agent?: CreatorToolExecAgent;
-  callId?: string;
-  [key: string]: unknown;
-}
-
-interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  output: {
-    schema: Record<string, unknown>;
-    render(args: unknown, value: unknown): Array<{ type: "text"; text: string }>;
-  };
-  execute(args: Record<string, unknown>, exec: CreatorToolExec): Promise<unknown>;
-}
-
-interface ToolsService {
-  register(definition: unknown): () => void;
-}
-
-interface AgentPresetsService {
-  composedPreset(ctx: Context): string | undefined;
-}
-
-interface SandboxPolicyService {
-  resolve(input: { session: unknown }): { mode: string };
-}
-
-interface ApprovalService {
-  request(req: {
-    agent: object;
-    toolName: string;
-    callId?: string;
-    reason: string;
-    displayReason?: { en: string };
-    signal?: AbortSignal;
-  }): Promise<string>;
-}
+type CreatorToolExec = ToolExec;
 
 // ---------------------------------------------------------------------------
 // Gates
@@ -129,18 +93,7 @@ function requiredString(value: unknown, label: string): string {
 // Escalation (native approveEscalation shape, dynamically imported).
 // ---------------------------------------------------------------------------
 
-export interface EscalationApprove {
-  <A, C>(
-    request: { requestedMode: string; effectiveMode: string; subject: string; justification: string },
-    approval: {
-      approver: ApprovalService | undefined;
-      agent: A | undefined;
-      callId: C;
-      toolName: string;
-      signal?: AbortSignal;
-    },
-  ): Promise<string>;
-}
+export type { EscalationApprove } from "./tool-surfaces";
 
 export interface MainSpaceToolsOptions {
   /** Escalation gate override for tests; defaults to the official dsh-sandbox approveEscalation. */

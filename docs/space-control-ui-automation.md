@@ -1,6 +1,6 @@
 # 子空间界面自动化调研与方案（space-control UI automation）
 
-> 状态：调研结论与设计草案 2026-11-09，未实现。方向变更：原 P4/P5（经 Supervisor 代理子空间 `sessionController`）不覆盖无会话功能的空间；用户要求“像 Playwright 一样看图、点点点”的通用界面操控。本文替代 [space-control-design.md](space-control-design.md) 的 P4/P5；P1–P3（只读、生命周期、插件与模型）不变。运行时 DSH 版本：0.2.2-rc.1（node_modules/@deepseek-ai/dsh/package.json）。故障政策以 [let-it-crash.md](let-it-crash.md) 为准。
+> 状态：设计记录，2026-11-09。方向变更：原 P4/P5（经 Supervisor 代理子空间 `sessionController`）不覆盖无会话功能的空间；用户要求“像 Playwright 一样看图、点点点”的通用界面操控。本文替代 [space-control-design.md](space-control-design.md) 的 P4/P5；P1–P3（只读、生命周期、插件与模型）不变。界面操控的 P4 子集已实现为 `spaces_ui_open` / `snapshot` / `act` / `eval` / `close`；本文保留选型与设计依据，未实现项以代码和工具 schema 为准。运行时 DSH 版本：0.2.2-rc.1（node_modules/@deepseek-ai/dsh/package.json）。故障政策以 [let-it-crash.md](let-it-crash.md) 为准。
 
 ## 1. 引擎选项对比
 

@@ -23,82 +23,23 @@
  * plugin and is never returned to the model.
  */
 import type { Context } from "@deepseek-ai/cordis";
+import type {
+  AgentPresetsService,
+  ApprovalService,
+  ContentBlock,
+  EscalationApprove,
+  ImageAttachmentRef,
+  SandboxPolicyService,
+  ToolDefinition,
+  ToolExec,
+  ToolsService,
+} from "../host/tool-surfaces";
 
 export const name = "dsh-space-control";
 export const inject = ["spacesMainChannel", "tools", "agentPresets", "sandboxPolicy", "attachments"];
 
-// ---------------------------------------------------------------------------
-// Structural surfaces (kept local so this package pins no dsh SDK version).
-// ---------------------------------------------------------------------------
-
-interface ToolExecAgent {
-  ctx: Context;
-  session: { id?: unknown; [key: string]: unknown };
-  [key: string]: unknown;
-}
-
-interface ToolExec {
-  signal: AbortSignal;
-  agent?: ToolExecAgent;
-  callId?: string;
-  [key: string]: unknown;
-}
-
-interface TextBlock {
-  type: "text";
-  text: string;
-}
-
-interface ImageAttachmentRef {
-  attachmentId: string;
-  mediaType: string;
-  bytes: number;
-  width: number;
-  height: number;
-  name?: string;
-  originalDimensions?: { width: number; height: number };
-}
-
-interface ImageBlock {
-  type: "image";
-  attachment: ImageAttachmentRef;
-}
-
-type ContentBlock = TextBlock | ImageBlock;
-
-interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  output: {
-    schema: Record<string, unknown>;
-    render(args: unknown, value: unknown): ContentBlock[];
-  };
-  execute(args: Record<string, unknown>, exec: ToolExec): Promise<unknown>;
-}
-
-interface ToolsService {
-  register(definition: unknown): () => void;
-}
-
-interface AgentPresetsService {
-  composedPreset(ctx: Context): string | undefined;
-}
-
-interface SandboxPolicyService {
-  resolve(input: { session: unknown }): { mode: string };
-}
-
-interface ApprovalService {
-  request(req: {
-    agent: object;
-    toolName: string;
-    callId?: string;
-    reason: string;
-    displayReason?: { en: string };
-    signal?: AbortSignal;
-  }): Promise<string>;
-}
+// Structural surfaces shared with the Creator tools live in
+// ../host/tool-surfaces; only control-specific shapes stay local.
 
 interface AttachmentsService {
   saveImage(input: { data: Uint8Array; mediaType: string; name?: string }): Promise<ImageAttachmentRef>;
@@ -269,19 +210,6 @@ function requireControlPreset(ctx: { agentPresets?: AgentPresetsService }, exec:
   if (!exec.agent || !presets || presets.composedPreset(exec.agent.ctx) !== CONTROL_PRESET) {
     throw controlError("Controlling a space requires Creator mode.");
   }
-}
-
-interface EscalationApprove {
-  <A, C>(
-    request: { requestedMode: string; effectiveMode: string; subject: string; justification: string },
-    approval: {
-      approver: ApprovalService | undefined;
-      agent: A | undefined;
-      callId: C;
-      toolName: string;
-      signal?: AbortSignal;
-    },
-  ): Promise<string>;
 }
 
 /** One-line summary of the exact thing the approval is authorizing. */

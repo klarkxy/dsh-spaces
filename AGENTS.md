@@ -1,6 +1,16 @@
 # Project rules
 
-Read [docs/let-it-crash.md](docs/let-it-crash.md) and [tasks/todo.md](tasks/todo.md) before planning or editing.
+Read [docs/let-it-crash.md](docs/let-it-crash.md), [docs/architecture.md](docs/architecture.md) and [tasks/todo.md](tasks/todo.md) before planning or editing.
+
+## Maintenance state
+
+This repository is in maintenance state. Keep current documentation current, and keep history historical.
+
+- Current product and maintainer documentation lives in `docs/`; historical plans, designs and acceptance records live in `docs/archive/` and `tasks/archive/`. Archived files are evidence, not current requirements or release gates.
+- A current document must not describe a retired feature as current. Check [docs/architecture.md](docs/architecture.md) for the product boundary before writing.
+- New work is recorded briefly in [tasks/todo.md](tasks/todo.md). Long dated logs go to `tasks/archive/`; do not grow `tasks/todo.md` into a journal.
+- Release notes live in `docs/releases/`; user-visible changes also update [CHANGELOG.md](CHANGELOG.md). Do not mark an unreleased candidate as released or invent dates.
+- Documentation completion is not runtime migration completion.
 
 DSH Spaces follows let it crash: report the actual failure, do not recover it.
 Do not add automatic retries, restarts, rollback, restore, repair, fallback,
@@ -16,7 +26,6 @@ ownership guard, preserving failure evidence. Read-only discovery never clears
 records; an in-session failure never automatically triggers another launch. Live, ambiguous,
 foreign and handoff ownership, and interrupted maintenance, remain protected.
 Historical recovery plans and tests are not current requirements.
-Documentation completion is not runtime migration completion.
 
 Never read or write the real `~/.dsh` except read-only `dsh --help` / `dsh --dump-config`.
 Development and tests use `.sandbox/dsh-home` or another non-real `DSH_SPACES_HOME`.

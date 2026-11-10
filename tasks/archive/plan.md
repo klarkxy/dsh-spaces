@@ -1,12 +1,12 @@
 # 2026-09-20 现行计划
 
-当前实施：[分支合并与架构收敛](../../docs/plans/spaces-merge-convergence.md)。状态只在 [todo.md](../todo.md) 登记，证据见 [merge-execution.md](../merge-execution.md)。本次前后端 Grok 施工、主 Agent 编排和验收，使用 CLI 默认配置。下面保留历史计划；历史授权和已撤销恢复要求不适用于本次。
+当前实施：[分支合并与架构收敛](../../docs/archive/spaces-merge-convergence.md)。状态只在 [todo.md](../todo.md) 登记，证据见 [merge-execution.md](merge-execution.md)。本次前后端 Grok 施工、主 Agent 编排和验收，使用 CLI 默认配置。下面保留历史计划；历史授权和已撤销恢复要求不适用于本次。
 
 # 2026-09-15 现行计划
 
 故障政策：[docs/let-it-crash.md](../../docs/let-it-crash.md)。唯一活动账本：[todo.md](../todo.md)。
 
-当前功能计划：[插件管理与 Space 导入导出实施计划](../plugin-management/plan.md)。空间/插件可自行崩溃；只反馈错误；不提供自动或手动恢复。整 Home 快照恢复不是例外。原 03/04/05/06 恢复线 **已撤销**。任务 08 分开定义/安装/启动；任务 10 首失败终止。任务 01 测量见 [写入范围](../plugin-management/task-01-write-scope.md)，不是恢复模块前置。下一功能项为任务 02。
+当前功能计划：[插件管理与 Space 导入导出实施计划](plugin-management/plan.md)。空间/插件可自行崩溃；只反馈错误；不提供自动或手动恢复。整 Home 快照恢复不是例外。原 03/04/05/06 恢复线 **已撤销**。任务 08 分开定义/安装/启动；任务 10 首失败终止。任务 01 测量见 [写入范围](plugin-management/task-01-write-scope.md)，不是恢复模块前置。下一功能项为任务 02。
 
 运行时迁移 R1–R6 已登记为待实施，本文件不宣称代码已符合 let it crash。
 
@@ -14,7 +14,7 @@
 
 # 2026-09-15 新计划：插件管理与 Space 导入导出（起草时口径，已被上文取代）
 
-按用户当时确认的方向制定。当时仍保留整 Home 快照恢复例外，以及批量失败重试/继续。那些条款已撤销。完整现行正文见 [plugin-management/plan.md](../plugin-management/plan.md)。
+按用户当时确认的方向制定。当时仍保留整 Home 快照恢复例外，以及批量失败重试/继续。那些条款已撤销。完整现行正文见 [plugin-management/plan.md](plugin-management/plan.md)。
 
 # 2026-09-13 当前计划：标准插件安装与最新 CLI
 

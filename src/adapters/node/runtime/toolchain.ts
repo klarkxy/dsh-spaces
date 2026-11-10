@@ -225,7 +225,7 @@ async function downloadFile(url: string, dest: string, onLine?: (line: string) =
   mkdirSync(dirname(dest), { recursive: true });
   const result = await runProcess(
     "curl",
-    ["-L", "--fail", "--retry", "3", "--retry-delay", "2", "-o", dest, url],
+    ["-L", "--fail", "-o", dest, url],
     { onLine, timeoutMs: DOWNLOAD_TIMEOUT_MS, env: process.env },
   );
   if (result.code !== 0) {

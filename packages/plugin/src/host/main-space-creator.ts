@@ -121,8 +121,11 @@ export class MainSpaceCreatorService {
       throw error("CREATOR_REGISTRATION_CHANGED");
     }
     if (!this.endpoint) this.endpoint = endpoint;
-    // Registration is lazy: the callback listener and the scope are minted on
-    // first use, so a main host that never calls a Creator tool opens nothing.
+    // Register once when the endpoint arrives: the supervisor learns the main
+    // profile from this registration (model sync, creation with main models),
+    // and a Desktop launch stays connecting until it settles. A rejection is
+    // terminal for this endpoint and is reported as the attach failure.
+    await this.scope();
   }
 
   /** Called when the supervisor endpoint is released. */

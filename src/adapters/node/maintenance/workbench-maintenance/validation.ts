@@ -9,6 +9,12 @@ import { WorkbenchMaintenanceError } from "./errors";
 import type { PlanStatus, ResolvedCommand } from "./types";
 import { isPlainObject, unique } from "./util";
 
+/**
+ * Maintenance-side re-validation of a plan request. The public surface first
+ * goes through supervisor/input.ts parsePlanRequest (different id/version
+ * strictness); this parser rejects the same removed kinds and additionally
+ * enforces maintenance catalog/package rules. Keep kind coverage aligned.
+ */
 export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
   if (!isPlainObject(input)) throw new WorkbenchMaintenanceError("workbench/invalid-input");
   const kind = input.kind;

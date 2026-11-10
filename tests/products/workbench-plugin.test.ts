@@ -40,7 +40,7 @@ import {
   coldStartLockLabel,
 } from "../../src/adapters/node/payload/component-selection.ts";
 import { catalogIdSchema, workbenchCommandSchema, workbenchInitializeResultSchema, workbenchViewSchema, workbenchPlanRequestSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
-import { GUIDE_METHODS, TYPERT } from "../../packages/plugin/src/typert.host.ts";
+import { TYPERT } from "../../packages/plugin/src/typert.host.ts";
 import {
   createWorkbenchGuideRemote,
   createWorkbenchRemote,
@@ -1149,7 +1149,7 @@ test("guide error cards are details-only; initialize is only first healthy start
       }),
     );
   const noRecoveryActions = (html: string) => {
-    assert.equal(html.includes(en.retry), false);
+    assert.equal(html.includes("Retry"), false);
     assert.equal(html.includes(en.startAction), false);
     assert.equal(html.includes('data-dsh-spaces-action="initialize"'), false);
     assert.equal(html.includes('data-dsh-spaces-action="enter"'), false);
@@ -1177,7 +1177,7 @@ test("guide error cards are details-only; initialize is only first healthy start
   assert.equal(enterFailed.includes(en.enterBody), true);
   assert.equal(enterFailed.includes(en.startAction), true);
   assert.equal(enterFailed.includes('data-dsh-spaces-action="initialize"'), true);
-  assert.equal(enterFailed.includes(en.retry), false);
+  assert.equal(enterFailed.includes("Retry"), false);
   assert.equal(enterFailed.includes('data-dsh-spaces-action="enter"'), false);
   assert.equal(enterFailed.includes('data-dsh-spaces-copy="details"'), true);
 
@@ -1185,7 +1185,7 @@ test("guide error cards are details-only; initialize is only first healthy start
   assert.match(firstInit, /data-dsh-spaces-guide="init"/);
   assert.equal(firstInit.includes('data-dsh-spaces-action="initialize"'), true);
   assert.equal(firstInit.includes(en.initAction), true);
-  assert.equal(firstInit.includes(en.retry), false);
+  assert.equal(firstInit.includes("Retry"), false);
   assert.equal(firstInit.includes(en.startAction), false);
   assert.equal(firstInit.includes('data-dsh-spaces-copy="details"'), false);
 
@@ -1194,7 +1194,7 @@ test("guide error cards are details-only; initialize is only first healthy start
   assert.equal(enter.includes('data-dsh-spaces-action="enter"'), true);
   assert.equal(enter.includes('data-dsh-spaces-action="initialize"'), false);
   assert.equal(enter.includes(en.startAction), false);
-  assert.equal(enter.includes(en.retry), false);
+  assert.equal(enter.includes("Retry"), false);
 });
 
 test("view-bridge ignores invalid env, has no management API, and can ready again after disconnect", () => {

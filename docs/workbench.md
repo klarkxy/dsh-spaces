@@ -36,7 +36,7 @@ Spaces 安装在现有 DSH Web 或 Desktop 宿主中。初始化后，原应用�
 
 主应用、`spaces-hub` 和普通空间是不同角色。主应用不属于可删除、可停止的普通空间。
 
-新建空间当前使用 **Web**，选择官方 DSH 的精确版本，再选择跟随主空间模型或在此空间配置。版本目录读取失败会显示错误并阻止提交。
+新建空间当前使用 **Web**，选择官方 DSH 的精确版本，再选择跟随主空间模型或在此空间配置。两种选择都会在创建时记录新的模型来源策略，同名重建不会沿用保留数据中的旧策略；其他保留数据不变。版本目录读取失败会显示错误并阻止提交。
 
 主空间（web/desktop）在 Creator（`cordis` preset）下可用四个宿主工具：`spaces_context`（服务纪元/版本/可写性/忙闲/可用模型源）、`spaces_create_preview`（冻结一次性计划）、`spaces_create_execute`（单次审批后按 requestId 执行单个组合作业）、`spaces_job`（按作业 id 读结果）。执行是一个串行作业：prepare/运行时安装 → create → view-bridge → llm-policy → 逐项插件安装并读回 → 可选 start；首处失败即停止，partial 结果如实记录，不重试、不回滚。插件只接受 npm 精确版本或 GitHub 完整 commit，install script 仅在审批明确列出的 allowBuilds 键下运行。工具经独立 Creator scope 调用，不授予其他管理命令，也不依赖 LLM 服务。
 
@@ -91,7 +91,7 @@ queued → running → succeeded / failed / cancelled
 
 ## 8. DSH 版本与 Spaces 升级
 
-每个普通空间固定一个精确 DSH 版本，禁止降级。官方基础插件随所选运行时变化，不由 Spaces 作为第三方插件安装进 profile。管理空间跟随宿主运行时。当前基线 SDK 为 `@deepseek-ai/dsh` **0.2.2-rc.1**（Cordis 4.1.0；宿主 Node ≥24.9，本项目 engines 为 Node 24.21+ 的 24.x 或 26.x）；官方升级指南目前只覆盖到 v0.2.2-alpha.3，rc.1 接缝以版本锁定源码为准。
+每个普通空间固定一个精确 DSH 版本，禁止降级。官方基础插件随所选运行时变化，不由 Spaces 作为第三方插件安装进 profile。管理空间跟随宿主运行时。当前基线 SDK 和新空间默认运行时为 `@deepseek-ai/dsh` **0.2.2-rc.1**，最低空间运行时为 `0.2.0-rc.2`（Cordis 4.1.0；宿主 Node ≥24.9，本项目 engines 为 Node 24.21+ 的 24.x 或 26.x）；官方升级指南目前只覆盖到 v0.2.2-alpha.3，rc.1 接缝以版本锁定源码为准。
 
 `@klarkxy/dsh-dev-index` 随宿主插件和 view bridge 的组合 patch 以同一行 id 预装：主空间和每个 Web 子空间可用；Browser 的 profile patch 显式禁用它，普通模板与 `.dshspace` 分享不改变这个边界。
 
@@ -139,6 +139,6 @@ DSH Spaces uses one Supervisor per Home, a dedicated manager profile and indepen
 
 Use [the installation guide](plugin-standard-install.md) to install and initialize. Closing a tab does not stop the service. Mutations use protocol 2 epochs and revisions, dangerous operations use preview then execute, and interrupted jobs are never replayed.
 
-Main-model inheritance depends on the child, Supervisor and main host. Legacy shared connections retain frozen launch snapshots and direct provider calls. Local and session selections do not silently fall back to another source.
+Main-model inheritance depends on the child, Supervisor and main host. Local defaults and explicit session selections are separate and do not silently fall back to another source.
 
 Upgrade Spaces by updating the host plugin, stopping the service and reopening it. Backups are create/list/delete only. Unregistered external DSH writers are outside the consistency guarantee. See [the current architecture](architecture.md) and [the fault policy](let-it-crash.md) for the authoritative boundaries.

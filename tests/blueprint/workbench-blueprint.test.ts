@@ -1075,17 +1075,20 @@ test("preview still stages when runtime inspection is not configured", async () 
   assert.equal(existsSync(join(dshHome, "profiles", "no-inspector")), false);
 });
 
-function officialRc2Bin(): string | null {
+function officialBoundBin(): { bin: string; version: string } | null {
   const appData = process.env.APPDATA;
-  const bin = process.env.DSH_TEST_CLI_BIN ?? (appData && join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
-  if (!bin) return null;
-  if (!existsSync(bin)) return null;
+  const bin = process.env.DSH_TEST_CLI_BIN
+    ?? process.env.DSH_BLUEPRINT_TEST_BIN
+    ?? (appData && join(appData, "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"));
+  if (!bin || !existsSync(bin)) return null;
   try {
     const pkg = JSON.parse(readFileSync(join(bin, "..", "..", "package.json"), "utf8")) as {
       name?: unknown;
       version?: unknown;
     };
-    if (pkg.name === "@deepseek-ai/dsh" && pkg.version === "0.2.1-rc.2") return bin;
+    if (pkg.name === "@deepseek-ai/dsh" && typeof pkg.version === "string" && pkg.version.length > 0) {
+      return { bin, version: pkg.version };
+    }
   } catch {
     return null;
   }
@@ -1601,11 +1604,12 @@ test("profile-relative hub plugin file spec is npm when library and identity mat
 });
 
 test("official runtime rejects managed Home settings overlay, config-only not-found, and accepts host agent overlay", async (t) => {
-  const bin = officialRc2Bin();
-  if (!bin) {
-    t.skip("official DSH 0.2.1-rc.2 bin is not installed");
+  const bound = officialBoundBin();
+  if (!bound) {
+    t.skip("official bound DSH installation unavailable");
     return;
   }
+  const bin = bound.bin;
   const hostBundles = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"];
   const runtimePorts = (dshHome: string, spaces: WorkbenchSpace[], extra: Partial<BlueprintWorkbenchPorts> = {}) =>
     portsOf(dshHome, spaces, {
@@ -1718,6 +1722,6 @@ test("official runtime rejects managed Home settings overlay, config-only not-fo
   assert.equal(pinLast.product?.stages?.presets?.status, "not-run");
   assert.equal(pinLast.product?.installed?.[0]?.version, selectedVersion);
   const resolved = await resolveBlueprintModule({ home: pinHome, bin }, { spaceId: "space-target", specifier: packageName });
-  assert.equal(resolved.packageVersion, "0.2.1-rc.2");
+  assert.equal(resolved.packageVersion, bound.version);
   assert.notEqual(resolved.packageVersion, selectedVersion);
 });

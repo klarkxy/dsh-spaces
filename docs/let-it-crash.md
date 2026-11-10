@@ -30,7 +30,7 @@
 
 正常快照创建、删除和安装 IO 不是恢复产品，不得据此重新引入恢复链。
 
-维护成功后可以在同一服务纪元内重新初始化管理器；失败路径保持维护状态，不自动重启管理 profile。Spaces 不在应用内自我更新：宿主插件通过 `dsh plugin --profile web add <新包>` 升级，管理界面停止服务后重新打开。管理插件对齐失败会阻止启动并报告原因。中断的旧式更新留下的证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。标准安装、正常维护及桌面真实流程的具体版本、结果和限制见 [合并执行记录](../tasks/merge-execution.md)；实现完成与实际验收分别记录。
+维护成功后可以在同一服务纪元内重新初始化管理器；失败路径保持维护状态，不自动重启管理 profile。Spaces 不在应用内自我更新：宿主插件通过 `dsh plugin --profile web add <新包>` 升级，管理界面停止服务后重新打开。管理插件对齐失败会阻止启动并报告原因。中断的旧式更新留下的证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。标准安装、正常维护及桌面真实流程的具体版本、结果和限制见 [合并执行记录](../tasks/archive/merge-execution.md)；实现完成与实际验收分别记录。
 
 ## 两个必须明确的解释
 

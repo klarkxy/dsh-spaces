@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { main as doctorMain } from "../../packages/doctor/src/index.ts";
 import { WorkbenchJobStore } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
-import { runBatch } from "../../src/shared/batch.ts";
 import { formatWorkbenchFailure } from "../../src/shared/workbench.ts";
 import { parseSpaceShare } from "../../src/adapters/node/products/space-share.ts";
 import { packZip } from "../../src/adapters/node/products/space-share-zip.ts";
@@ -71,18 +70,6 @@ test("E06 leftover running jobs fail in place and are not replayed", async () =>
   await store.whenIdle();
   assert.equal(ran, 1);
   assert.equal(store.job("job-left").status, "failed");
-});
-
-test("E08 batch A kept, B failed, C not run", async () => {
-  const ran: string[] = [];
-  const result = await runBatch(["A", "B", "C"], async (item) => {
-    ran.push(item);
-    if (item === "B") throw new Error("boom");
-  });
-  assert.deepEqual(ran, ["A", "B"]);
-  assert.deepEqual(result.succeeded, ["A"]);
-  assert.equal(result.failed?.item, "B");
-  assert.deepEqual(result.skipped, ["C"]);
 });
 
 test("E11 unreadable job bytes stay and do not look succeeded", () => {

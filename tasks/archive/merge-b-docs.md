@@ -9,7 +9,7 @@
 - `tasks/workbench-contract.md`
 - `tasks/archive/merge-b-docs.md`
 
-依据：[merge-contract-v2.md](../merge-contract-v2.md)、[spaces-merge-convergence.md](../../docs/plans/spaces-merge-convergence.md)。历史文件未改写，只在文首指向 [history-recovery.md](../history-recovery.md)。
+依据：[merge-contract-v2.md](../merge-contract-v2.md)、[spaces-merge-convergence.md](../../docs/archive/spaces-merge-convergence.md)。历史文件未改写，只在文首指向 [history-recovery.md](history-recovery.md)。
 
 ## 现行合同（写入上述三份）
 

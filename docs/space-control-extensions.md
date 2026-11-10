@@ -1,8 +1,8 @@
 # 空间总控扩展：安装、插件顺序、调试
 
-> 状态：设计补充 2026-11-09，未实现。父设计见 [space-control-design.md](space-control-design.md)。故障政策只以 [let-it-crash.md](let-it-crash.md) 为准。官方行为以运行时 **DSH 0.2.2-rc.1**（Desktop `dsh-desktop-runtime` 与 tag `dsh-v0.2.2-rc.1` / `66491b05`）为准。当前官网文档未钉版本，只作索引，不覆盖 checkout。
+> 状态：设计记录，2026-11-09。相关控制面 P1–P7 已实现，以下设计中的安装、插件、运行时、导入和只读扩展子集已落地；`reorder`、config 读写、HMR/dev link 和任意代理明确不作为能力。父设计见 [space-control-design.md](space-control-design.md)。故障政策只以 [let-it-crash.md](let-it-crash.md) 为准。官方行为以运行时 **DSH 0.2.2-rc.1**（Desktop `dsh-desktop-runtime` 与 tag `dsh-v0.2.2-rc.1` / `66491b05`）为准。当前官网文档未钉版本，只作索引，不覆盖 checkout。
 >
-> 本文件不改 `src/shared/control.ts`、`src/shared/creator.ts`、`src/adapters/node/supervisor/{creator,control}.ts`。下文 Creator 行号是本次只读所见，施工中的文件以合并后的源码为准。
+> 本文件不改 `src/shared/control.ts`、`src/shared/creator.ts`、`src/adapters/node/supervisor/{creator,control}.ts`。下文 Creator 行号是设计时只读所见，施工中的文件以合并后的源码为准。
 
 ## 1. 两条写者，不能同时写同一 profile
 
@@ -191,7 +191,7 @@ P4/P5 不动。P6 依赖 P2 的计划/作业语义和现有 product 导入，不
 
 ## 9. 依据
 
-- 运行时：`C:\Users\27837\AppData\Local\Programs\DeepSeek Harness\resources\app.asar\dsh\package.json` 版本 `0.2.2-rc.1`。Host 服务目录：`4b92d3a02cf7-cordis_inspect_query.txt` 上列行号。
+- 运行时：本机官方 DSH 安装版本 `0.2.2-rc.1`。Host 服务目录：`4b92d3a02cf7-cordis_inspect_query.txt` 上列行号。
 - 官方包 README（同一 checkout）：`@deepseek-ai/dsh-plugin-manager`、`dsh-config-editor`、`dsh-hmr`、`dsh-app-boot`、`dsh-host-plugin-inventory`、`dsh-tool-cordis`、`cordis-plugin-loader`、`dsh-experimental-inspector`。
 - tag：`dsh-v0.2.2-rc.1` = `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`。
 - 本仓库：`validation.ts:25-73,183-201`；`plugin-batch.ts:16-193`；`plugin-ops.ts:206-287,845-884`；`runtime.ts:18-116`；`space-recipe.ts:44-71,197-274`；`workbench-products.ts:434-558`；`creator.ts:240-267,433-571,792-812`；`space-commands.ts:104-109`；`registry.ts:102-108`；`packages/doctor/src/index.ts:25-50,106-118`；`let-it-crash.md:9-33,76-88`；父设计 §5、§7、§9。

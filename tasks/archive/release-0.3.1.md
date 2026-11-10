@@ -31,4 +31,4 @@ macOS ZIP 的 blockmap 构建时名为 `DSH.Spaces-0.3.1-arm64-mac.zip.blockmap`
 
 本机证据保留在 `.sandbox/release-031-published/verification.json`、`.sandbox/release-031-published-desktop/results.json`、对应截图及 `.sandbox/release-031-published-desktop.log`；正式 Windows 组件摘要为 `226355b468973a7f7397f39c6f6b4f4ad2cf008a20d618e3f9751265cc5aa8dc`。
 
-验收未访问真实 `~/.dsh`。本次没有执行 NSIS 安装登记或卸载；macOS ARM64 和 Linux 仅有构建及附件校验，未做本机运行交互。桌面包未签名。此前完整功能验收范围见[合并执行记录](../merge-execution.md)。
+验收未访问真实 `~/.dsh`。本次没有执行 NSIS 安装登记或卸载；macOS ARM64 和 Linux 仅有构建及附件校验，未做本机运行交互。桌面包未签名。此前完整功能验收范围见[合并执行记录](merge-execution.md)。

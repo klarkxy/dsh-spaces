@@ -1,7 +1,7 @@
-import { lstatSync, realpathSync } from "../../../../src/shared/node/filesystem";
+import { inside, lstatSync, realpathSync, samePath } from "../../../../src/shared/node/filesystem";
 import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { MANAGED_HOME_ENTRIES, RESTORE_STAGE_DIR } from "../../../../src/shared/snapshots";
 import { ensureNode, npmCliJs, setToolchainRoot } from "../../../../src/adapters/node/runtime/toolchain";
 
@@ -306,16 +306,3 @@ function realDirectory(path: string): string | null {
   }
 }
 
-function inside(root: string, target: string): boolean {
-  const r = resolve(root);
-  const t = resolve(target);
-  if (samePath(r, t)) return true;
-  const prefix = r.endsWith(sep) ? r : r + sep;
-  const left = process.platform === "win32" ? prefix.toLowerCase() : prefix;
-  const right = process.platform === "win32" ? t.toLowerCase() : t;
-  return right.startsWith(left);
-}
-
-function samePath(a: string, b: string): boolean {
-  return process.platform === "win32" ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b);
-}

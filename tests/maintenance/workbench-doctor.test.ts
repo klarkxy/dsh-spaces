@@ -441,9 +441,9 @@ test("doctor reports plugin mutation and missing roots without guessing app data
   const result = await runDoctor(["doctor", "--home", home]);
   assert.equal(result.code, 0, result.stdout + result.stderr);
   const body = jsonOf(result.stdout);
-  const plugin = (body.journals as { pluginMutation: { present: boolean; rollbackRequired?: boolean } }).pluginMutation;
+  const plugin = (body.journals as { pluginMutation: { present: boolean; writeBlocked?: boolean } }).pluginMutation;
   assert.equal(plugin.present, true);
-  assert.equal(plugin.rollbackRequired, true);
+  assert.equal(plugin.writeBlocked, true);
   const findings = body.findings as string[];
   assert.ok(findings.some((row) => /plugin mutation evidence is present/i.test(row)));
   assert.equal(findings.some((row) => /rollback|restore/i.test(row)), false);
