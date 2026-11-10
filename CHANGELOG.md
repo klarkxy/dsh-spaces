@@ -4,6 +4,10 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ## [Unreleased]
 
+### Added
+
+- The three space rails draw a breathing attention halo around a space whose sessions have a pending tool approval or `ask_user_question` card; the halo is presentation only and reports `unknown` when no fresh view-bridge report exists.
+
 ## [0.5.0] — release candidate, not published
 
 ### Added

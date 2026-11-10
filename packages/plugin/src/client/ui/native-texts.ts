@@ -20,6 +20,8 @@ export interface NativeShellTexts {
   scopeHelpLabel: string;
   scopeHelpHint: string;
   operating: string;
+  /** Label suffix while a space waits on an approval or a question. */
+  attention: string;
   settings: string;
   settingsStopped: string;
   settingsUnavailable: string;
@@ -140,6 +142,7 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     scopeHelpLabel: "运行与退出说明",
     scopeHelpHint: "退出 Desktop 会停止由它启动的 Spaces 服务；点击查看停止范围",
     operating: "操作中",
+    attention: "等待处理",
     settings: "设置",
     settingsStopped: "设置 · Spaces 服务已停止",
     settingsUnavailable: "设置 · 空间服务不可用（查看详情）",
@@ -258,6 +261,7 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     scopeHelpLabel: "Run and quit behaviour",
     scopeHelpHint: "Quitting Desktop stops the Spaces service it started; click to see what stops",
     operating: "busy",
+    attention: "Needs attention",
     settings: "Settings",
     settingsStopped: "Settings · Spaces service stopped",
     settingsUnavailable: "Settings · space service unavailable (details)",

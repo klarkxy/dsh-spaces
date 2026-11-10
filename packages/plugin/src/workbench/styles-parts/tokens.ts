@@ -46,6 +46,8 @@ export const WORKBENCH_UI_TOKEN_CSS = uiTokenMixin(".dsh-workbench", {
   "--wb-ease-standard": "var(--dsh-ui-ease-standard, cubic-bezier(0.2, 0, 0, 1))",
   "--wb-ease-emphasized": "var(--dsh-ui-ease-emphasized, cubic-bezier(0.32, 0.72, 0, 1))",
   "--wb-ease-spring": "var(--dsh-ui-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1))",
+  /** Attention halo colour: the shared accent-2 hue, distinct from the warn status pulse. */
+  "--dsh-spaces-attention": "var(--dsh-ui-accent-2, var(--wb-accent-2, #8b5cf6))",
 });
 
 export const WORKBENCH_THEME_CSS = `

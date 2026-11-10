@@ -73,6 +73,7 @@ export const workbenchSpaceSchema = z
     dshVersion: exactVersionSchema.nullable(),
     base: z.enum(["web", "browser"]).optional(),
     baseVersion: exactVersionSchema.optional(),
+    attention: z.enum(["required", "none", "unknown"]).optional(),
   })
   .strict();
 

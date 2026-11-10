@@ -52,10 +52,11 @@ export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
         {spaces.map((space, index) => (
           <RailSlot key={space.id} active={ui.selected === space.id} delay={`${60 + index * 45}ms`}>
             <RailButton
-              label={`${space.displayName} · ${t(locale, statusKey(space.status))}`}
+              label={`${space.displayName} · ${t(locale, statusKey(space.status))}${space.attention === "required" ? ` · ${t(locale, "app.attention")}` : ""}`}
               current={ui.selected === space.id}
               pending={ui.pendingId === space.id}
               status={space.status}
+              attention={space.attention}
               icon={space.icon}
               spaceId={space.id}
               onClick={() => controller.selectSpace(space.id)}
@@ -116,6 +117,7 @@ function RailButton({
   current,
   pending,
   status,
+  attention,
   icon,
   spaceId,
   onClick,
@@ -134,6 +136,7 @@ function RailButton({
   current?: boolean;
   pending?: boolean;
   status?: WorkbenchSpace["status"];
+  attention?: WorkbenchSpace["attention"];
   icon?: string;
   spaceId?: string;
   onClick: () => void;
@@ -157,6 +160,8 @@ function RailButton({
       aria-current={current ? "true" : undefined}
       aria-busy={pending || undefined}
       data-pending={pending ? "true" : undefined}
+      data-space-id={spaceId}
+      data-attention={attention === "required" ? "required" : undefined}
       disabled={disabled}
       onClick={onClick}
       onContextMenu={(event) => {

@@ -65,6 +65,44 @@ test("portal inventory rejects unknown data, duplicate identities and invalid ge
   }
 });
 
+test("portal inventory accepts the closed attention field and rejects other values", () => {
+  const withAttention = {
+    ...inventory,
+    spaces: [
+      { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running", attention: "none" },
+      { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required" },
+      { id: "beta", displayName: "Beta", generation: 2, status: "stopped", attention: "unknown" },
+    ],
+  };
+  assert.deepEqual(parsePortalSnapshot(withAttention), withAttention);
+  for (const bad of ["busy", "error", "idle", "yes", "REQUIRED", 1, null, true]) {
+    assert.equal(parsePortalSnapshot({ ...withAttention, spaces: [{ ...withAttention.spaces[0], attention: bad }] }), null, JSON.stringify(bad));
+  }
+});
+
+test("the portable rail halo marks a space needing attention", async () => {
+  const { PortableHostShell } = await import("../../packages/plugin/src/client/host-shell.tsx");
+  const React = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const f = fixture();
+  Object.assign(f.controller, {
+    ui: { phase: "ready", role: { role: "workspace", profileId: "entry", managerId: "spaces-hub", unavailable: false, reasons: [] },
+      inventory: { serviceEpoch: epoch, managerId: "spaces-hub", spaces: [
+        { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running" },
+        { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required" },
+        { id: "beta", displayName: "Beta", generation: 2, status: "running", attention: "none" },
+      ] },
+      portal: { src: "http://127.0.0.1:3091/portal-bootstrap/x", origin: "http://127.0.0.1:3091", channel }, visible: "portal",
+      selected: null, pending: null, detail: null, portalFailure: null, error: null, creationFailed: null },
+  });
+  const html = renderToStaticMarkup(React.createElement(PortableHostShell, { controller: f.controller }));
+  assert.ok(html.includes('data-attention="required"'), "the portable rail shows the attention halo");
+  const alphaButton = html.match(/<button[^>]*data-space-id="alpha"[^>]*>/)?.[0] ?? "";
+  assert.match(alphaButton, /Alpha · (等待处理|Needs attention)/, "the attention label suffix is announced");
+  const betaButton = html.match(/<button[^>]*data-space-id="beta"[^>]*>/)?.[0] ?? "";
+  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no halo");
+});
+
 test("portal grants are one-use, audience-bound, bounded and not durable", () => {
   let now = 0;
   const grants = new WorkbenchPortalGrants(() => now);

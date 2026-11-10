@@ -8,6 +8,7 @@
  * siblings of the container.
  */
 import { CREATION_RING_CSS } from "../../../../../src/shared/ui/creation-ring";
+import { ATTENTION_RING_CSS } from "../../../../../src/shared/ui/attention-ring";
 
 export const NATIVE_HOST_CSS = `
 .dsh-native-confirm-backdrop{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;background:#0006;padding:24px;pointer-events:auto}
@@ -105,6 +106,7 @@ html[data-windows-titlebar] [data-spaces-host-rail][data-sidebar-collapsed] > di
 .dsh-host-dock[data-spaces-native] .dsh-host-rail-btn[aria-current="page"] { border-color: transparent; background: transparent; }
 .dsh-host-dock[data-spaces-native] .dsh-native-service-error { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--host-danger, #d1242f); color: #fff; font: bold 12px/16px system-ui; text-align: center; }
 ${CREATION_RING_CSS}
+${ATTENTION_RING_CSS}
 `;
 
 /** Styles of the official Browser tab inside a native space. */

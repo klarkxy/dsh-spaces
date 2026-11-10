@@ -96,6 +96,7 @@ import { silentJobContext } from "./supervisor/job-context";
 import { SupervisorLifecycle } from "./supervisor/lifecycle";
 import { SupervisorStartup } from "./supervisor/startup";
 import { publicReason, startupFailureFrom } from "./runtime/start-failure";
+import { SupervisorAttention } from "./supervisor/attention";
 import { SupervisorLlm } from "./supervisor/llm";
 import { SupervisorControl } from "./supervisor/control";
 import { SupervisorCreator } from "./supervisor/creator";
@@ -207,6 +208,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly instances: SupervisorInstanceRecords;
   private readonly llmOps: SupervisorLlm;
   private readonly llmDelegation: SupervisorLlmDelegation;
+  private readonly spaceAttention: SupervisorAttention;
   private readonly creator: SupervisorCreator;
   private readonly control: SupervisorControl;
   private readonly uiAutomation: UiAutomationManager;
@@ -239,6 +241,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       // Reuse the launch validation when provided; it must belong to this root.
       this.selectedPayload = selectedPayload ?? validateComponentPayload(options.componentPayloadRoot);
     }
+    this.spaceAttention = new SupervisorAttention({
+      runs: this.runs,
+      currentServiceEpoch: () => this.stateModel.currentServiceEpoch(),
+    });
     this.spaceInventory = new SupervisorSpaces({
       home: this.home,
       registry: this.registry,
@@ -246,6 +252,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       runs: this.runs,
       processes: () => this.processes,
       managerId: () => this.managerId,
+      attentionOf: (id) => this.spaceAttention.attentionOf(id),
     });
     this.spaceLifecycle = new SupervisorSpaceLifecycle({
       home: this.home,
@@ -1233,6 +1240,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         catch (error) { this.instances.removeInstanceRecord(profile); throw error; }
         if (child.pid) {
           this.llmOps.attachChild(profile, child, this.runs.generation(profile), this.stateModel.currentServiceEpoch());
+          this.spaceAttention.attachChild(profile, child, this.runs.generation(profile), this.stateModel.currentServiceEpoch());
           if (profile !== this.managerId) this.messageBus.attach(profile, child);
           this.runs.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
           if (profile !== this.managerId) this.llmDelegation.attachChild(profile, child, this.runs.generation(profile));

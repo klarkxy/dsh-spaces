@@ -170,7 +170,8 @@ async function refresh() {
     const all = parseSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
       ...(creating.length ? { creating } : {}),
       spaces: state.spaces.map(row => ({ id: row.id, displayName: row.displayName, status: row.status,
-        generation: row.generation, ...(row.icon === undefined ? {} : { icon: row.icon }) })) });
+        generation: row.generation, ...(row.icon === undefined ? {} : { icon: row.icon }),
+        ...(row.attention === undefined ? {} : { attention: row.attention }) })) });
     if (!all) { fail("state-invalid"); return; }
     if (snapshot && snapshot.serviceEpoch !== state.serviceEpoch) { fail("service-changed"); return; }
     const previousManager = managerView || snapshot?.spaces.find(row => row.id === snapshot.managerId);

@@ -179,7 +179,7 @@ export class WorkbenchHostRuntime {
     const creating = projectSpaceCreations(state.jobs);
     const snapshot = parsePortalSnapshot({ serviceEpoch: state.serviceEpoch, managerId: state.managerId,
       ...(creating.length ? { creating } : {}),
-      spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}) })) });
+      spaces: state.spaces.filter(row => row.hasWebApp).map(row => ({ id: row.id, displayName: row.displayName, status: row.status, generation: row.generation, ...(row.icon ? { icon: row.icon } : {}), ...(row.attention === undefined ? {} : { attention: row.attention }) })) });
     if (!snapshot) throw new Error(ENTRY_UNAVAILABLE);
     return snapshot;
   }

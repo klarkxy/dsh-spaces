@@ -73,6 +73,8 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   status: 'running' | 'starting' | 'stopping' | 'stopped' | 'crashed' | 'unknown';
   generation: number;
   managed: boolean;
+  /** Presentation hint only: a pending approval or question in this space. Never a status, never authority. */
+  attention?: import('./space-attention').SpaceAttention;
   /** Exact pinned DSH runtime version; null for the manager, which follows the host CLI. */
   dshVersion: string | null;
 }

@@ -9,6 +9,7 @@
  * overlays are glass, and the dialogs sit on an elevated panel.
  */
 import { CREATION_RING_CSS } from "../../../../../src/shared/ui/creation-ring";
+import { ATTENTION_RING_CSS } from "../../../../../src/shared/ui/attention-ring";
 
 export const WORKBENCH_SHELL_CSS = `
 .dsh-wb-settings-page{position:absolute;inset:0;z-index:4;background:var(--wb-panel);display:flex;min-width:0;min-height:0}
@@ -482,4 +483,5 @@ export const WORKBENCH_SHELL_CSS = `
   .dsh-workbench * { transition: none !important; animation: none !important; }
 }
 ${CREATION_RING_CSS}
+${ATTENTION_RING_CSS}
 `;

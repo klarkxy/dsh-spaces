@@ -61,6 +61,8 @@ export interface HostRailButtonProps {
   transitional?: boolean;
   /** Status of the space behind the entry, if any. */
   status?: string;
+  /** Presentation attention flag; "required" draws the attention halo. */
+  attention?: "required" | "none" | "unknown";
   /** Pinned entries stay at the top of the rail. */
   pinned?: boolean;
   /** True while the entry is waiting for a response. */
@@ -83,6 +85,7 @@ export function HostRailButton({
   currentValue = "true",
   transitional = false,
   status,
+  attention,
   pinned = false,
   busy = false,
   disabled = false,
@@ -102,6 +105,7 @@ export function HostRailButton({
       data-pinned={pinned ? "true" : undefined}
       data-space-id={spaceId}
       data-space-status={status}
+      data-attention={attention === "required" ? "required" : undefined}
       data-transitional={transitional ? "true" : undefined}
       disabled={disabled}
       onClick={onSelect}

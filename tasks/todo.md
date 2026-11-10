@@ -2,6 +2,8 @@
 
 > 只列当前仍需跟踪的事项。完整日期日志和已关闭条目在 [tasks/archive](archive/README.md)，不要在这里追加长日志。
 
+- [ ] 空间注意光晕：三种空间栏按 `dsh-spaces:space-attention` 通道投影待审批/待提问状态；已有空间的 view-bridge 需按新组件组重新对齐才会上报（此前为 unknown、无光晕），真实 Desktop 尚未实测。
+
 ## 发布验收
 
 - [ ] 最终 0.5.0 制品验收：按错误页现有预览/确认流程完成一次真实服务重启（旧 space-control bundle 清理后的实际服务重启仍未执行）。见 [归档记录](archive/todo-2026-11.md) 2026-11-09 管理空间残留旧 space-control bundle。

@@ -52,6 +52,8 @@ export const HOST_UI_TOKEN_CSS = uiTokenMixin(".dsh-host-dock", {
   "--host-ease-spring": "var(--dsh-ui-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1))",
   "--host-accent-gradient": "var(--dsh-ui-accent-gradient, linear-gradient(135deg, #5865f2 0%, #8b5cf6 100%))",
   "--host-shimmer": "linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--host-text) 14%, transparent) 42%, transparent 64%)",
+  /** Attention halo colour: the shared accent-2 hue, distinct from the warn status pulse. */
+  "--dsh-spaces-attention": "var(--dsh-ui-accent-2, #8b5cf6)",
 });
 
 /**

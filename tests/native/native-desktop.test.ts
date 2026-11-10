@@ -1069,3 +1069,25 @@ test("native rail shows active creations and keeps seen failed ones until dismis
   assert.equal(controller.getSnapshot().pending, "@settings");
   controller.stop();
 });
+
+test("the native rail halo marks a space needing attention without replacing its status dot", async () => {
+  const React = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { NativeHostShell } = await import("../../packages/plugin/src/client/ui/native-shell.tsx");
+  const controller = new NativeHostController({} as never, {} as never);
+  Object.assign(controller, { state: { phase: "ready", selected: "current", pending: null, error: null, guide: false,
+    navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null,
+    serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null, detail: null, cleanupDetail: null,
+    instanceRetained: null, portalFailure: null,
+    inventory: { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [
+      { id: "alpha", displayName: "Alpha", status: "running", generation: 1, attention: "required" },
+      { id: "beta", displayName: "Beta", status: "running", generation: 1, attention: "none" },
+    ] } } });
+  const html = renderToStaticMarkup(React.createElement(NativeHostShell, { controller }));
+  const alphaButton = html.match(/<button[^>]*data-space-id="alpha"[^>]*>/)?.[0] ?? "";
+  assert.ok(alphaButton.includes('data-attention="required"'), "the native rail shows the attention halo");
+  assert.ok(alphaButton.includes('data-space-status="unopened"'), "the status dot stays alongside the halo");
+  assert.match(html, /Alpha · (尚未打开|Not opened yet) · (等待处理|Needs attention)/, "the label carries status and the attention hint");
+  const betaButton = html.match(/<button[^>]*data-space-id="beta"[^>]*>/)?.[0] ?? "";
+  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no halo");
+});

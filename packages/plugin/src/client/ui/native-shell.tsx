@@ -97,13 +97,14 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
           <HostRailButton
             key={s.id}
             layoutId={RAIL_LAYOUT_ID}
-            label={`${s.displayName} · ${nativeStatusText(controller.spaceStatus(s.id), texts)}${ui.operation?.spaceId === s.id ? ` · ${texts.operating}` : ""}`}
+            label={`${s.displayName} · ${nativeStatusText(controller.spaceStatus(s.id), texts)}${ui.operation?.spaceId === s.id ? ` · ${texts.operating}` : ""}${s.attention === "required" ? ` · ${texts.attention}` : ""}`}
             current={ui.selected === s.id}
             currentValue="page"
             transitional={ui.pending === s.id}
             busy={ui.pending === s.id || ui.operation?.spaceId === s.id}
             disabled={!!ui.operation && ui.operation.spaceId !== s.id}
             status={controller.spaceStatus(s.id)}
+            attention={s.attention}
             spaceId={s.id}
             onSelect={() => controller.select(s.id)}
             onContextMenu={event => { if (!controller.supportsSpaceActions) return; event.preventDefault(); setMenu({ spaceId: s.id, x: event.clientX, y: event.clientY }); }}

@@ -2647,6 +2647,26 @@ test("rail buttons name each space together with its status", async () => {
   assert.ok(html.includes('class="dsh-wb-status" data-status="crashed" aria-hidden="true"'));
 });
 
+test("a space needing attention gets the rail halo and a labelled hint", async () => {
+  const ctrl = controller(fakeApi({
+    state: async () => state({ spaces: [
+      manager,
+      space({ id: "alpha", attention: "required" }),
+      space({ id: "gamma", displayName: "Gamma", status: "stopped", attention: "none" }),
+      space({ id: "delta", displayName: "Delta", status: "crashed" }),
+    ] }),
+  }));
+  await ctrl.poll();
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-attention="required"'), "the attention halo is rendered");
+  assert.ok(html.includes(`aria-label="alpha · ${t("zh", "app.status.running")} · ${t("zh", "app.attention")}"`));
+  const gamma = html.indexOf('data-space-id="gamma"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="gamma"') - 400), html.indexOf('data-space-id="gamma"')) : html;
+  assert.ok(!gamma.includes('data-attention="required"'), "a 'none' space has no halo");
+  assert.ok(!html.includes(`Gamma · ${t("zh", "app.status.stopped")} · ${t("zh", "app.attention")}`));
+  const crashed = html.indexOf('data-space-id="delta"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="delta"') - 400), html.indexOf('data-space-id="delta"')) : html;
+  assert.ok(!crashed.includes('data-attention="required"'), "a crashed space with no report has no halo");
+});
+
 test("known server preview-rejection reasons are localized", () => {
   const localized = localizeError("zh", { code: "workbench/conflict", message: "The preview expired. Request a new preview." });
   assert.ok(localized.includes(t("zh", "error.previewExpired")));

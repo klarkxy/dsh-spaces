@@ -11,6 +11,7 @@ import { HostRail, HostRailButton, HostRailDivider, HostRailList } from "./ui/ho
 import { hostTexts } from "./ui/host-texts";
 import { CreationRailEntry, CreationFailureDialog } from "./ui/creation-rail";
 import { CREATION_RING_CSS } from "../../../../src/shared/ui/creation-ring";
+import { ATTENTION_RING_CSS } from "../../../../src/shared/ui/attention-ring";
 
 /**
  * The additive space dock of a compatible host.
@@ -73,6 +74,7 @@ iframe.dsh-host-surface { width:calc(100% - var(--dsh-spaces-rail-width,72px)); 
 }
 .dsh-host-loading-label { white-space:nowrap; }
 ${CREATION_RING_CSS}
+${ATTENTION_RING_CSS}
 `;
 
 /** Shared layout id of the portable selection pill. */
@@ -112,9 +114,10 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
       <HostRailDivider />
       <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.home} current={ui.visible === "portal" && ui.selected === null} onSelect={() => controller.select(null)}>⌂</HostRailButton>
       <HostRailList>
-        {spaces.map(space => <HostRailButton key={space.id} layoutId={RAIL_LAYOUT_ID} label={space.displayName}
-          current={ui.visible === "portal" && ui.selected === space.id} status={space.status}
-          onSelect={() => controller.select(space.id)}>
+        {spaces.map(space => <HostRailButton key={space.id} layoutId={RAIL_LAYOUT_ID}
+          label={space.attention === "required" ? `${space.displayName} · ${t.attention}` : space.displayName}
+          current={ui.visible === "portal" && ui.selected === space.id} status={space.status} attention={space.attention}
+          spaceId={space.id} onSelect={() => controller.select(space.id)}>
           <SpaceGlyph spaceId={space.id} icon={space.icon} />
         </HostRailButton>)}
         {creations.map(creation => (
