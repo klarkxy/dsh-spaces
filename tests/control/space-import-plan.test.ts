@@ -155,7 +155,7 @@ function makeFixture(home: string): Fixture {
     maintenance: () => false,
     hasComponent: () => false,
     ensureViewBridge: async () => undefined,
-    ensureLlmBridge: async () => undefined,
+    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
     installedRuntimeBin: () => join(home, "cli", "lib", "bin.js"),
     pluginAdd: async () => undefined,
     observeChildWork: (action) => action(),
@@ -179,7 +179,6 @@ function makeFixture(home: string): Fixture {
     unmanaged: (id) => runs.unmanaged.has(id),
     detail: async () => ({ plugins: [] }),
     diagnostics: (spaceId): WorkbenchDiagnostics => ({ spaceId, status: "stopped", logs: [], backups: [] }),
-    llmPolicy: () => ({ inheritMain: false }),
     observeTaskActivity: async () => "idle",
     admitSubmission: () => {
       if (!ownerAlive) throw new WorkbenchPublicError("workbench/read-only");

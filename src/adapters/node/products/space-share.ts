@@ -29,10 +29,13 @@ import { listProfilePlugins, parseNpmNameAndVersion } from "./plugin-ops";
 import { isHubPluginArchive, readPluginLibrary } from "./plugin-library";
 import { packZip, unpackZip } from "./space-share-zip";
 import { COMPONENT_PAYLOAD_PACKAGES } from "../payload/component-payload";
+import { RETIRED_LLM_BRIDGE } from "../profile/profile-component-alignment";
 
 const HOST_PACKAGES = new Set<string>([
   ...PROTECTED_PLUGIN_PACKAGES,
   FULL_SPACES_PACKAGE,
+  // An older space keeps the retired bridge until its next start removes it.
+  RETIRED_LLM_BRIDGE,
   ...Object.entries(COMPONENT_PAYLOAD_PACKAGES).filter(([component]) => component !== "browser").map(([, name]) => name),
 ]);
 const SHARE_SOURCES = new Set<SpaceSharePluginSource>(["npm", "git", "manual", "unknown"]);

@@ -119,6 +119,19 @@ export const workbenchJobResultSchema = z
     dshVersion: exactVersionSchema.optional(),
     view: workbenchViewSchema.optional(),
     product: workbenchProductOutcomeSchema.optional(),
+    steps: z
+      .array(
+        z
+          .object({
+            step: z.string().trim().min(1).max(40),
+            status: z.enum(["done", "failed", "not-run"]),
+            packageName: z.string().max(214).optional(),
+            detail: z.string().max(300).optional(),
+          })
+          .strict(),
+      )
+      .max(64)
+      .optional(),
   })
   .strict();
 
@@ -323,6 +336,7 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("space.stop"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("space.restart"), spaceId: spaceIdSchema }).strict(),
   z.object({ kind: z.literal("space.delete"), spaceId: spaceIdSchema, removeData: z.boolean() }).strict(),
+  z.object({ kind: z.literal("space.models.sync"), spaceId: spaceIdSchema }).strict(),
   z
     .object({
       kind: z.literal("plugin.install"),
@@ -356,6 +370,7 @@ export const workbenchPlanSchema = z
       "space.stop",
       "space.restart",
       "space.delete",
+      "space.models.sync",
       "plugin.install",
       "plugin.remove",
       "plugin.toggle",

@@ -3,6 +3,7 @@ import { SpaceMessages } from "./message-service";
 import type { Context } from "@deepseek-ai/cordis";
 import { injectViewHintScript, parseViewEnv, VIEW_HINT_GLOBAL, type ViewHandshakeConfig } from "./env";
 import { installSpaceAttention } from "./attention";
+import { installLlmActivity } from "./activity";
 
 export const name = "dsh-spaces-view-bridge";
 export const inject = ["webServer"];
@@ -21,6 +22,7 @@ export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = 
     ctx.effect(() => bus.close);
     new SpaceMessages(ctx, bus);
     installSpaceAttention(ctx);
+    installLlmActivity(ctx, env);
   }
   const on = (ctx as { on?(event: string, listener: (...args: unknown[]) => void): () => void }).on;
   if (typeof on === "function") {
@@ -65,3 +67,4 @@ export default { name, inject, apply };
 export { SpaceMessages } from "./message-service";
 export { SpaceMessageBus, SpaceMessageError, type SpaceOperation, type JsonValue, type SpaceCapability, type SpaceCapabilityDeclaration } from "./message-bus";
 export { SpaceAttentionProbe, installSpaceAttention, type SpaceAttentionSources } from "./attention";
+export { LlmActivity, installLlmActivity } from "./activity";

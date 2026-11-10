@@ -6,7 +6,7 @@ import type { BlueprintBinding, BlueprintInput, BlueprintInputValues, BlueprintJ
 import { BLUEPRINT_LOCAL_FILE, BLUEPRINT_ORIGIN_FILE, BLUEPRINT_ORIGIN_SCHEMA_VERSION, type BlueprintOriginRecord } from "../../../../shared/workbench-blueprint";
 import { atomicWrite } from "../../atomic";
 import { realDshHome } from "../../home/home-guard";
-import { spaceDataRoot } from "../../llm/llm-policy-store";
+import { spaceDataRoot } from "../../profile/space-data-root";
 import { profileSettingsPath as spaceSettingsPath } from "../../profile/profile-settings";
 import { writeProfileSettings } from "../../profile/profile-settings";
 import type { OriginRecipe } from "./types";
@@ -78,7 +78,6 @@ export function composeBundles(
   home: string,
   spaceId: string,
   blueprintBundles: string[],
-  options: { includeLlmBridge: boolean },
 ): void {
   const manifest = readProfileManifest(home, spaceId);
   const known = [...manifest.bundles, ...Object.keys(manifest.dependencies)];
@@ -87,7 +86,9 @@ export function composeBundles(
   const llm = known.find((name) => name === "@dsh-spaces/llm-bridge" || name === "dsh-spaces-llm-bridge");
   const final: string[] = [...hostLayers];
   if (view && !final.includes(view)) final.push(view);
-  if (llm && (options.includeLlmBridge || manifest.bundles.includes(llm)) && !final.includes(llm)) final.push(llm);
+  // An older space keeps its retired LLM bridge layer here; the next start
+  // removes it once through component alignment.
+  if (llm && manifest.bundles.includes(llm) && !final.includes(llm)) final.push(llm);
   for (const name of blueprintBundles) {
     if (!final.includes(name)) final.push(name);
   }

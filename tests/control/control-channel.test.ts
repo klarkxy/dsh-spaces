@@ -165,7 +165,7 @@ function makePorts(home: string, options: {
     maintenance: () => false,
     hasComponent: () => false,
     ensureViewBridge: async () => undefined,
-    ensureLlmBridge: async () => undefined,
+    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
     installedRuntimeBin: () => join(home, "cli", "lib", "bin.js"),
     pluginAdd: async () => undefined,
     observeChildWork: (action) => action(),
@@ -199,7 +199,6 @@ function makePorts(home: string, options: {
     unmanaged: (id) => runs.unmanaged.has(id),
     detail: options.detail ?? (async () => ({ plugins: [{ name: "dsh-plugin-one", version: "1.0.0" }] })),
     diagnostics: options.diagnostics ?? diagnosticsDefault,
-    llmPolicy: () => ({ inheritMain: true }),
     observeTaskActivity: async (spaceId) => activityOf(spaceId),
     admitSubmission: () => {
       if (options.writable === false || !ownerAlive) throw new WorkbenchPublicError("workbench/read-only");
@@ -604,7 +603,6 @@ test("inspect returns per-section results and isolates section failures", async 
   assert.deepEqual(inspect.plugins, { ok: false, code: "control/unavailable", message: "registry read exploded" });
   assert.equal(inspect.model?.ok, true);
   if (inspect.model?.ok) {
-    assert.equal(inspect.model.value.inheritMain, true);
     assert.equal(inspect.model.value.catalog, null);
     assert.ok(inspect.model.value.catalogReason.length > 0, "catalog absence is explained, not silent");
   }

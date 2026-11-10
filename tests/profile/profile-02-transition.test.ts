@@ -7,10 +7,10 @@ import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { gte } from "semver";
-import { assertSettingsIsolation, alignProfileComponents } from "../../src/adapters/node/profile/profile-component-alignment.ts";
+import { assertSettingsIsolation, alignProfileComponents, RETIRED_LLM_BRIDGE } from "../../src/adapters/node/profile/profile-component-alignment.ts";
 import { SupervisorSpaceLifecycle } from "../../src/adapters/node/supervisor/space-lifecycle.ts";
 
-type Bridge = "view-bridge" | "llm-bridge" | "browser";
+type Bridge = "view-bridge" | "browser";
 type Row = { id?: string; name?: string; disabled?: unknown };
 type OfficialBoot = {
   getDshRuntimeVersion: () => string;
@@ -26,7 +26,7 @@ const officialPath = process.env.DSH_COMPAT_APP_BOOT ?? require.resolve("@deepse
 const boot = await import(pathToFileURL(officialPath).href) as OfficialBoot;
 const officialVersion = boot.getDshRuntimeVersion();
 
-function fixture() {
+function fixture(retired = false) {
   const home = mkdtempSync(join(tmpdir(), "dsh-profile-02-")); roots.push(home);
   const profile = join(home, "profiles", "writing");
   const payloadRoot = join(home, "selected");
@@ -42,7 +42,7 @@ function fixture() {
   writeFileSync(join(bootFacade, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh-app-boot", type: "module", main: "index.js" }));
   writeFileSync(join(bootFacade, "index.js"), `export * from ${JSON.stringify(pathToFileURL(officialPath).href)};\n`);
   const installed = (name: string) => join(profile, "node_modules", name);
-  const bundles = ["fixture-base", "@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"];
+  const bundles = ["fixture-base", "@dsh-spaces/view-bridge", ...(retired ? [RETIRED_LLM_BRIDGE] : [])];
   mkdirSync(profile, { recursive: true });
   const manifestPath = join(profile, "package.json");
   writeFileSync(manifestPath, JSON.stringify({ name: "writing", dsh: { profile: { bundles } } }));
@@ -57,21 +57,32 @@ function fixture() {
     return dir;
   };
   writeBundle("fixture-base", ">=0.2.0-rc.2", "- insert:\n    - id: settings\n      name: fixture-base\n    - id: fixture-local\n      name: fixture-base\n");
-  for (const bridge of ["view-bridge", "llm-bridge"] as Bridge[]) {
+  {
+    const bridge: Bridge = "view-bridge";
     const name = `@dsh-spaces/${bridge}`;
-    const dir = writeBundle(name, ">=0.2.0-rc.2", `- insert:\n    - id: dsh-spaces-${bridge}\n      name: '${name}'\n` + (bridge === "view-bridge" ? "- id: settings\n  disabled: true\n- insert:\n    - id: dsh-spaces-settings\n      name: '@dsh-spaces/view-bridge/settings'\n" : ""));
+    const dir = writeBundle(name, ">=0.2.0-rc.2", `- insert:\n    - id: dsh-spaces-${bridge}\n      name: '${name}'\n- id: settings\n  disabled: true\n- insert:\n    - id: dsh-spaces-settings\n      name: '@dsh-spaces/view-bridge/settings'\n`);
     const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
-    if (bridge === "view-bridge") pkg.peerDependencies["@deepseek-ai/dsh-client-connection"] = ">=0.2.0-rc.2";
+    pkg.peerDependencies["@deepseek-ai/dsh-client-connection"] = ">=0.2.0-rc.2";
     writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
     cpSync(dir, join(payloadRoot, bridge), { recursive: true });
     for (const key of Object.keys(pkg.peerDependencies)) pkg.peerDependencies[key] = "^0.1.7-alpha.1";
     writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
   }
+  // An older space still carries the retired LLM bridge with pre-0.2 peers.
+  if (retired) writeBundle(RETIRED_LLM_BRIDGE, "^0.1.7-alpha.1", "- insert:\n    - id: dsh-spaces-llm-bridge\n      name: '@dsh-spaces/llm-bridge'\n");
   const calls: string[] = [];
+  const removes: string[] = [];
   const dumps: { skipped: string[]; rows: Row[] }[] = [];
   const input = {
     home, profileId: "writing", payloadRoot, bin, cliVersion: officialVersion,
     install: async (bridge: Bridge) => { calls.push(bridge); cpSync(join(payloadRoot, bridge), installed(`@dsh-spaces/${bridge}`), { recursive: true }); },
+    remove: async (name: string) => {
+      removes.push(name);
+      const pkg = JSON.parse(readFileSync(manifestPath, "utf8"));
+      pkg.dsh.profile.bundles = pkg.dsh.profile.bundles.filter((row: string) => row !== name);
+      writeFileSync(manifestPath, JSON.stringify(pkg));
+      rmSync(installed(name), { recursive: true, force: true });
+    },
     dump: async () => {
       const loaded = boot.loadProfileDirectory("dsh", profile, anchor);
       const rows = boot.composeEntries([...loaded.layers.map(layer => layer.patches), loaded.patches]);
@@ -87,7 +98,7 @@ function fixture() {
       writeFileSync(manifestPath, JSON.stringify(pkg));
     }
   };
-  return { input, home, profile, patch, manifestPath, installed, calls, dumps, add, marker: join(profile, ".dsh-spaces-component-alignment.json") };
+  return { input, home, profile, patch, manifestPath, installed, calls, removes, dumps, add, marker: join(profile, ".dsh-spaces-component-alignment.json") };
 }
 
 for (const engineAccepts of [true, false]) {
@@ -132,35 +143,34 @@ test("unknown native settings inactivity remains rejected when no literal true s
   assert.throws(() => assertSettingsIsolation("- id: parent\n  group: true\n  disabled: !!js process.env.UNKNOWN\n  config:\n    - id: settings\n      disabled: false\n- id: dsh-spaces-settings\n  name: '@dsh-spaces/view-bridge/settings'\n"), /scoped settings/);
 });
 
-test("0.2 omitted bundle layers do not turn an enabled LLM bridge into disabled intent", async () => {
+test("0.2 omitted bundle layers do not hide the enabled view bridge", async () => {
   const f = fixture(); const before = readFileSync(f.patch);
   await alignProfileComponents(f.input);
-  assert.deepEqual(f.dumps[0]!.skipped, ["@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"]);
-  assert.equal(f.dumps[0]!.rows.some(row => row.id === "dsh-spaces-llm-bridge"), false);
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.dumps[0]!.skipped, ["@dsh-spaces/view-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
   assert.ok(readFileSync(f.patch).equals(before));
   assert.equal(f.dumps.at(-1)!.rows.find(row => row.id === "settings")?.disabled, true);
-  assert.equal(f.dumps.at(-1)!.rows.find(row => row.id === "dsh-spaces-llm-bridge")?.disabled, undefined);
+  assert.equal(f.dumps.at(-1)!.rows.find(row => row.id === "dsh-spaces-view-bridge")?.disabled, undefined);
   assert.equal(existsSync(f.marker), false);
   await alignProfileComponents(f.input);
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 1);
 });
 
-for (const value of [true, false]) test(`explicit LLM disabled=${value} survives absent old layers`, async () => {
-  const f = fixture();
-  writeFileSync(f.patch, readFileSync(f.patch, "utf8") + `- id: dsh-spaces-llm-bridge\n  disabled: ${value}\n`);
-  const before = readFileSync(f.patch);
-  const old = readFileSync(join(f.installed("@dsh-spaces/llm-bridge"), "package.json"));
+test("an older space drops the retired LLM bridge before admission checks its stale peers", async () => {
+  const f = fixture(true); const before = readFileSync(f.patch);
   await alignProfileComponents(f.input);
-  assert.deepEqual(f.calls, value ? ["view-bridge"] : ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.removes, [RETIRED_LLM_BRIDGE]);
+  assert.deepEqual(JSON.parse(readFileSync(f.manifestPath, "utf8")).dsh.profile.bundles, ["fixture-base", "@dsh-spaces/view-bridge"]);
+  assert.equal(existsSync(f.installed(RETIRED_LLM_BRIDGE)), false);
+  assert.deepEqual(f.calls, ["view-bridge"]);
+  assert.equal(f.dumps.at(-1)!.rows.some(row => row.id === "dsh-spaces-llm-bridge"), false);
   assert.ok(readFileSync(f.patch).equals(before));
-  if (value) assert.ok(readFileSync(join(f.installed("@dsh-spaces/llm-bridge"), "package.json")).equals(old));
-  else assert.equal(f.dumps.at(-1)!.rows.find(row => row.id === "dsh-spaces-llm-bridge")?.disabled, false);
+  assert.equal(existsSync(f.marker), false);
 });
 
 test("dynamic bridge intent rejects before installation even when dump would omit it", async () => {
   const f = fixture();
-  writeFileSync(f.patch, readFileSync(f.patch, "utf8") + "- id: dsh-spaces-llm-bridge\n  disabled: !!js process.env.UNKNOWN\n");
+  writeFileSync(f.patch, readFileSync(f.patch, "utf8") + "- id: dsh-spaces-view-bridge\n  disabled: !!js process.env.UNKNOWN\n");
   await assert.rejects(alignProfileComponents(f.input), /Dynamic/);
   assert.deepEqual(f.calls, []); assert.equal(existsSync(f.marker), false);
 });
@@ -170,7 +180,7 @@ test("dynamic ordinary plugin enablement is inspected without evaluating its exp
   writeFileSync(f.patch, readFileSync(f.patch, "utf8") + "- id: third-party-dynamic\n  disabled: !!js (() => { throw new Error('expression must not execute') })()\n");
   const before = readFileSync(f.patch);
   await alignProfileComponents(f.input);
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
   assert.ok(readFileSync(f.patch).equals(before));
 });
 
@@ -185,16 +195,8 @@ function groupBridge(f: ReturnType<typeof fixture>, bridge: Bridge, state: strin
   writeFileSync(join(f.installed(`@dsh-spaces/${bridge}`), "cordis.patch.yml"), `- insert:\n    - id: bridge-parent\n      name: cordis:group\n      group: true\n      disabled: ${state}\n      config:\n        - id: dsh-spaces-${bridge}\n          name: '@dsh-spaces/${bridge}'\n`);
 }
 
-test("a literal disabled parent preserves the inactive LLM bridge", async () => {
-  const f = fixture(); groupBridge(f, "llm-bridge", "true");
-  const before = readFileSync(join(f.installed("@dsh-spaces/llm-bridge"), "package.json"));
-  await alignProfileComponents(f.input);
-  assert.deepEqual(f.calls, ["view-bridge"]);
-  assert.ok(readFileSync(join(f.installed("@dsh-spaces/llm-bridge"), "package.json")).equals(before));
-});
-
-test("dynamic parent intent for a managed LLM bridge rejects before writes", async () => {
-  const f = fixture(); groupBridge(f, "llm-bridge", "!!js process.env.UNKNOWN");
+test("dynamic parent intent for the managed view bridge rejects before writes", async () => {
+  const f = fixture(); groupBridge(f, "view-bridge", "!!js process.env.UNKNOWN");
   await assert.rejects(alignProfileComponents(f.input), /Dynamic managed bridge ancestry/);
   assert.deepEqual(f.calls, []); assert.equal(existsSync(f.marker), false);
 });
@@ -209,7 +211,7 @@ test("a disabled ordinary group does not admit its inactive incompatible child",
   const f = fixture(); f.add("third-party-grouped", "^0.1.7-alpha.1");
   writeFileSync(join(f.installed("third-party-grouped"), "cordis.patch.yml"), "- insert:\n    - id: custom-parent\n      name: cordis:group\n      group: true\n      disabled: true\n      config:\n        - id: custom-child\n          name: third-party-grouped\n");
   await alignProfileComponents(f.input);
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
 });
 
 const officialBin = process.env.DSH_PROFILE_TRANSITION_OFFICIAL_BIN ?? join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
@@ -218,9 +220,9 @@ test("actual official 0.2 web profile dynamic defaults admit current managed bri
   const boundBoot = await import(pathToFileURL(createRequire(officialBin).resolve("@deepseek-ai/dsh-app-boot")).href) as OfficialBoot;
   assert.equal(JSON.parse(readFileSync(anchor, "utf8")).version, boundBoot.getDshRuntimeVersion());
   const pkg = JSON.parse(readFileSync(f.manifestPath, "utf8"));
-  pkg.dsh.profile.bundles = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-spaces/view-bridge", "@dsh-spaces/llm-bridge"];
+  pkg.dsh.profile.bundles = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@dsh-spaces/view-bridge"];
   writeFileSync(f.manifestPath, JSON.stringify(pkg));
-  for (const bridge of ["view-bridge", "llm-bridge"] as Bridge[]) cpSync(join(f.input.payloadRoot, bridge), f.installed(`@dsh-spaces/${bridge}`), { recursive: true });
+  cpSync(join(f.input.payloadRoot, "view-bridge"), f.installed("@dsh-spaces/view-bridge"), { recursive: true });
   f.input.bin = officialBin;
   f.input.cliVersion = boundBoot.getDshRuntimeVersion();
   let dynamicRows = 0;
@@ -272,7 +274,7 @@ for (const token of ["workspace:^", "workspace:~", "workspace:*"]) test(`officia
   const pkg = JSON.parse(readFileSync(path, "utf8")); pkg.peerDependencies["@deepseek-ai/dsh"] = token;
   writeFileSync(path, JSON.stringify(pkg)); const before = readFileSync(path);
   await alignProfileComponents(f.input);
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
   assert.ok(readFileSync(path).equals(before));
   assert.ok(f.dumps.at(-1)!.rows.some(row => row.id === "third-party-workspace"));
   assert.equal(f.dumps.at(-1)!.skipped.includes("third-party-workspace"), false);
@@ -304,7 +306,7 @@ test("disabled and dependency-only third-party packages stay installed and untou
   const old = readFileSync(join(f.installed("third-party-old"), "package.json"));
   await alignProfileComponents(f.input);
   assert.ok(readFileSync(join(f.installed("third-party-old"), "package.json")).equals(old));
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
 });
 
 test("the old management plugin has no transition exemption", async () => {
@@ -315,7 +317,7 @@ test("the old management plugin has no transition exemption", async () => {
 
 test("current selected bytes with changed code are reinstalled from the selected payload", async () => {
   const f = fixture();
-  for (const bridge of ["view-bridge", "llm-bridge"] as Bridge[]) cpSync(join(f.input.payloadRoot, bridge), f.installed(`@dsh-spaces/${bridge}`), { recursive: true });
+  cpSync(join(f.input.payloadRoot, "view-bridge"), f.installed("@dsh-spaces/view-bridge"), { recursive: true });
   writeFileSync(join(f.installed("@dsh-spaces/view-bridge"), "lib/index.js"), "changed current code");
   await alignProfileComponents(f.input);
   assert.deepEqual(f.calls, ["view-bridge"]);
@@ -332,26 +334,26 @@ test("a CLI that cannot load the selected target rejects before alignment writes
   assert.deepEqual(f.calls, []); assert.equal(existsSync(f.marker), false);
 });
 
-test("a target host denying the aligned LLM row leaves failure evidence and prevents replay", async () => {
+test("a target host denying the aligned scoped settings row leaves failure evidence and prevents replay", async () => {
   const f = fixture(); const dump = f.input.dump;
-  f.input.dump = async () => JSON.stringify(JSON.parse(await dump()).map((row: Row) => row.id === "dsh-spaces-llm-bridge" ? { ...row, disabled: true } : row));
-  await assert.rejects(alignProfileComponents(f.input), /denied by the target host/);
+  f.input.dump = async () => JSON.stringify(JSON.parse(await dump()).map((row: Row) => row.id === "dsh-spaces-settings" && f.calls.length ? { ...row, disabled: true } : row));
+  await assert.rejects(alignProfileComponents(f.input), /scoped settings/);
   assert.equal(JSON.parse(readFileSync(f.marker, "utf8")).target, officialVersion);
   await assert.rejects(alignProfileComponents(f.input), /Interrupted component alignment/);
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
 });
 
-test("a target dump disabled parent does not make its aligned LLM child look active", async () => {
+test("a target dump disabled parent does not make its aligned scoped settings look active", async () => {
   const f = fixture(); const dump = f.input.dump;
   f.input.dump = async () => {
     const rows: Row[] = JSON.parse(await dump());
-    const llm = rows.find(row => row.id === "dsh-spaces-llm-bridge");
-    if (!llm) return JSON.stringify(rows);
-    return JSON.stringify([...rows.filter(row => row !== llm), { id: "denied-parent", name: "cordis:group", group: true, disabled: true, config: [llm] }]);
+    const scoped = rows.find(row => row.id === "dsh-spaces-settings");
+    if (!scoped || !f.calls.length) return JSON.stringify(rows);
+    return JSON.stringify([...rows.filter(row => row !== scoped), { id: "denied-parent", name: "cordis:group", group: true, disabled: true, config: [scoped] }]);
   };
-  await assert.rejects(alignProfileComponents(f.input), /denied by the target host/);
+  await assert.rejects(alignProfileComponents(f.input), /scoped settings/);
   assert.equal(existsSync(f.marker), true);
-  assert.deepEqual(f.calls, ["view-bridge", "llm-bridge"]);
+  assert.deepEqual(f.calls, ["view-bridge"]);
 });
 
 test("a patch changed during component installation keeps the mutation and marker instead of restoring it", async () => {
@@ -367,7 +369,7 @@ test("Supervisor start admits the known transition under its writer lock before 
   const startOwned = (SupervisorSpaceLifecycle.prototype as unknown as { startOwned(id: string): Promise<void> }).startOwned;
   const host = {
     home: f.home, runs: { unmanaged: new Set<string>() },
-    options: { componentPayloadRoot: f.input.payloadRoot, viewBridgeArtifact: join(f.home, "view.tgz"), llmBridgeArtifact: join(f.home, "llm.tgz") },
+    options: { componentPayloadRoot: f.input.payloadRoot, viewBridgeArtifact: join(f.home, "view.tgz") },
     lifecycle: { assertWritable: () => { steps.push("guard"); } }, statusOf: () => "stopped",
     managerId: () => null,
     pinnedDshVersion: () => undefined,
@@ -376,20 +378,21 @@ test("Supervisor start admits the known transition under its writer lock before 
     lock: { run: async (_name: string, action: () => Promise<void>) => { steps.push("lock"); await action(); steps.push("unlock"); } },
     installComponent: async (_id: string, component: Bridge) => {
       steps.push("install");
-      const artifact = component === "view-bridge" ? host.options.viewBridgeArtifact : host.options.llmBridgeArtifact;
+      const artifact = host.options.viewBridgeArtifact;
       const digest = createHash("sha256").update(readFileSync(artifact)).digest("hex").slice(0, 20);
       archiveIds.push(`dsh-spaces-${component}-${digest}`);
       await f.input.install(component);
     },
+    removePlugin: async (_id: string, name: string) => { steps.push("remove"); await f.input.remove(name); },
     ensureBundledDeps: async () => { steps.push("deps"); },
     readDump: f.input.dump,
   };
   const supervisor = { host };
-  writeFileSync(host.options.viewBridgeArtifact, "view archive"); writeFileSync(host.options.llmBridgeArtifact, "llm archive");
+  writeFileSync(host.options.viewBridgeArtifact, "view archive");
   await startOwned.call(supervisor, "writing");
-  assert.deepEqual(steps, ["guard", "lock", "deps", "install", "install", "unlock", "spawn"]);
+  assert.deepEqual(steps, ["guard", "lock", "deps", "install", "unlock", "spawn"]);
   assert.match(archiveIds[0]!, /^dsh-spaces-view-bridge-[0-9a-f]{20}$/);
-  assert.match(archiveIds[1]!, /^dsh-spaces-llm-bridge-[0-9a-f]{20}$/);
+  assert.equal(archiveIds.length, 1);
   f.add("third-party-old", "^0.1.7-alpha.1"); steps.length = 0;
   await assert.rejects(startOwned.call(supervisor, "writing"), /cannot load/);
   assert.deepEqual(steps, ["guard", "lock", "deps"]);

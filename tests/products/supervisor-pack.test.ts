@@ -11,7 +11,7 @@ import {
 import {
   bootstrapSupervisor,
   COMPONENT_PAYLOAD_ARGV_FLAG,
-  LLM_BRIDGE_PAYLOAD_DIRNAME,
+  VIEW_BRIDGE_PAYLOAD_DIRNAME,
   SUPERVISOR_CLI_FLAGS,
 } from "../../packages/plugin/src/host/supervisor-bootstrap.ts";
 import { packLocalArtifacts } from "../../packages/plugin/src/host/supervisor-pack.ts";
@@ -65,10 +65,6 @@ function writeV2Plugin(pluginRoot: string): string {
     ["lib/browser/lib/index.js", "export {};\n"],
     ["lib/browser/lib/client.js", "export {};\n"],
     ["lib/browser/lib/typert.host.js", "export {};\n"],
-    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
-    ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
-    ["lib/llm-bridge/lib/index.js", "export {};\n"],
-    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
     ["lib/space-control.js", "export {};\n"],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
@@ -91,28 +87,18 @@ function writeCli(root: string): string {
 async function stubPack(request: { packageRoot: string; destination: string }): Promise<string> {
   mkdirSync(request.destination, { recursive: true });
   const pkg = JSON.parse(readFileSync(join(request.packageRoot, "package.json"), "utf8")) as { name?: string };
-  const name = pkg.name === "@dsh-spaces/llm-bridge"
-    ? "llm-bridge-0.2.0.tgz"
-    : pkg.name === "@dsh-spaces/view-bridge"
-      ? "view-bridge-0.2.0.tgz"
-      : "plugin-0.2.0.tgz";
+  const name = pkg.name === "@dsh-spaces/view-bridge" ? "view-bridge-0.2.0.tgz" : "plugin-0.2.0.tgz";
   const path = join(request.destination, name);
   writeFileSync(path, "tarball");
   return path;
 }
 
-test("packLocalArtifacts packs llm-bridge when llmBridgeRoot is provided", async () => {
-  const home = tempDir("dsh-pack-home-");
-  const plugin = writeNamedPackage(tempDir("dsh-pack-plugin-"), "@dsh-spaces/plugin");
-  const view = writeNamedPackage(tempDir("dsh-pack-view-"), "@dsh-spaces/view-bridge");
-  const llm = writeNamedPackage(tempDir("dsh-pack-llm-"), "@dsh-spaces/llm-bridge");
-  const dest = tempDir("dsh-pack-dest-");
+test("packLocalArtifacts packs the plugin and view-bridge", async () => {
   const packed = await packLocalArtifacts({
-    home,
-    pluginPackageRoot: plugin,
-    viewBridgeRoot: view,
-    llmBridgeRoot: llm,
-    artifactDir: dest,
+    home: tempDir("dsh-pack-home-"),
+    pluginPackageRoot: writeNamedPackage(tempDir("dsh-pack-plugin-"), "@dsh-spaces/plugin"),
+    viewBridgeRoot: writeNamedPackage(tempDir("dsh-pack-view-"), "@dsh-spaces/view-bridge"),
+    artifactDir: tempDir("dsh-pack-dest-"),
     execPath: process.execPath,
     pack: stubPack,
   });
@@ -120,40 +106,10 @@ test("packLocalArtifacts packs llm-bridge when llmBridgeRoot is provided", async
   if ("reasons" in packed) return;
   assert.match(packed.pluginArtifact.replaceAll("\\", "/"), /plugin-0\.2\.0\.tgz$/);
   assert.match(packed.viewBridgeArtifact.replaceAll("\\", "/"), /view-bridge-0\.2\.0\.tgz$/);
-  assert.ok(packed.llmBridgeArtifact);
-  assert.match(packed.llmBridgeArtifact.replaceAll("\\", "/"), /llm-bridge-0\.2\.0\.tgz$/);
+  assert.equal(Object.keys(packed).some((key) => /llm/i.test(key)), false);
 });
 
-test("packLocalArtifacts omits llm-bridge when llmBridgeRoot is not provided", async () => {
-  const packed = await packLocalArtifacts({
-    home: tempDir("dsh-pack-home2-"),
-    pluginPackageRoot: writeNamedPackage(tempDir("dsh-pack-plugin2-"), "@dsh-spaces/plugin"),
-    viewBridgeRoot: writeNamedPackage(tempDir("dsh-pack-view2-"), "@dsh-spaces/view-bridge"),
-    artifactDir: tempDir("dsh-pack-dest2-"),
-    execPath: process.execPath,
-    pack: stubPack,
-  });
-  assert.equal("reasons" in packed, false);
-  if ("reasons" in packed) return;
-  assert.equal(packed.llmBridgeArtifact, undefined);
-});
-
-test("packLocalArtifacts refuses a misnamed llm-bridge package", async () => {
-  const packed = await packLocalArtifacts({
-    home: tempDir("dsh-pack-home3-"),
-    pluginPackageRoot: writeNamedPackage(tempDir("dsh-pack-plugin3-"), "@dsh-spaces/plugin"),
-    viewBridgeRoot: writeNamedPackage(tempDir("dsh-pack-view3-"), "@dsh-spaces/view-bridge"),
-    llmBridgeRoot: writeNamedPackage(tempDir("dsh-pack-llm3-"), "not-llm-bridge"),
-    artifactDir: tempDir("dsh-pack-dest3-"),
-    execPath: process.execPath,
-    pack: stubPack,
-  });
-  assert.equal("reasons" in packed, true);
-  if (!("reasons" in packed)) return;
-  assert.ok(packed.reasons.some((row) => /llm-bridge/i.test(row)));
-});
-
-test("bootstrap packs selected llm-bridge and passes --llm-bridge-artifact", async () => {
+test("bootstrap packs view-bridge and passes --view-bridge-artifact", async () => {
   const home = tempDir("dsh-boot-home-");
   const payloadRoot = writeV2Plugin(tempDir("dsh-boot-plugin-"));
   const toolsRoot = tempDir("dsh-boot-tools-");
@@ -180,9 +136,9 @@ test("bootstrap packs selected llm-bridge and passes --llm-bridge-artifact", asy
   });
   assert.equal(result.connected, false);
   assert.equal(spawned.length, 1);
-  assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.llmBridgeArtifact));
-  assert.ok(spawned[0]?.some((row) => /llm-bridge-0\.2\.0\.tgz$/.test(row.replaceAll("\\", "/"))));
-  assert.ok(packedRoots.some((root) => root.replaceAll("\\", "/").includes(`/${LLM_BRIDGE_PAYLOAD_DIRNAME}`)));
+  assert.ok(spawned[0]?.includes(SUPERVISOR_CLI_FLAGS.viewBridgeArtifact));
+  assert.equal(spawned[0]?.some((row) => /llm-bridge/.test(row)), false);
+  assert.ok(packedRoots.some((root) => root.replaceAll("\\", "/").includes(`/${VIEW_BRIDGE_PAYLOAD_DIRNAME}`)));
 });
 
 test("bootstrap links a source checkout without staging, pointer writes, or packing", async () => {
@@ -223,7 +179,6 @@ test("bootstrap links a source checkout without staging, pointer writes, or pack
     SUPERVISOR_CLI_FLAGS.pluginArtifact,
     SUPERVISOR_CLI_FLAGS.viewBridgeArtifact,
     SUPERVISOR_CLI_FLAGS.browserArtifact,
-    SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
   ]) {
     assert.equal(argv.includes(flag), false, flag);
   }

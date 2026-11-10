@@ -22,8 +22,7 @@
 - 成功返回 `{ ok: true, value }`；失败返回 `{ ok: false, error: { code, message } }`。
 - 错误不携带建议修复、恢复计划或自动重试字段。
 - `submit` / `preview` 携带 `{ serviceEpoch, expectedRevision }`，比较发生在 Supervisor 的串行执行边界。
-- `llm` 与 `llmCredential` 使用整个请求对象作为请求体；其他方法使用命名字段封装。
-- `llmCredential` 只供管理 Host 使用，秘密值不进入持久化任务。
+- 模型配置只通过封闭 command `space.models.sync`（从主空间复制一次，目标空间须已停止）或创建时的 `modelSource` 变更；凭据只随这次复制进入目标空间，接口返回名称和数量。
 - 产品读取与预览使用封闭的 `product(request)`，不接受任意方法名、路径或透传对象。
 - 新建空间使用配对的 `base` 与精确 `baseVersion`；版本查询按 base 返回，Browser 产品版本不能作为 DSH 框架版本。两者都省略的既有调用保留原默认语义；只传其中一个、未知 base 或冲突的旧 Browser 标记会被拒绝。本次为协议 2 的可选字段及封闭产品查询增量，不改变既有字段含义。
 - Spaces 蓝图工作流封存期间，`blueprint.source` / `generate` / `inspect` / `preview` / `apply` 返回 `workbench/unsupported`；保留旧 DTO 仅用于兼容识别和历史记录。

@@ -17,7 +17,7 @@ import {
 } from "../../src/adapters/node/home/home-lease.ts";
 import { COMPATIBLE_DSH_CLI_VERSION } from "../../src/adapters/node/products/spaces-service.ts";
 import { deriveServiceEpoch, digestHomeIdentity } from "../../src/adapters/node/server/workbench-protocol.ts";
-import { LLM_DELEGATION_PREFIX } from "../../src/shared/llm-delegation.ts";
+import { CREATOR_CHANNEL_PREFIX } from "../../src/shared/creator.ts";
 import { createWorkbenchGuideRemote } from "../../packages/plugin/src/client/workbench-remote.ts";
 import { SpacesPlugin } from "../../packages/plugin/src/host/plugin.ts";
 import { WorkbenchHostRuntime, type WorkbenchHostRuntimeOptions } from "../../packages/plugin/src/host/runtime.ts";
@@ -126,11 +126,7 @@ class CountingRuntime extends WorkbenchHostRuntime {
 }
 
 function provideMain(ctx: Context, home: string): void {
-  ctx.provide("attachments", {} as never);
-  ctx.provide("fs", {} as never);
   ctx.provide("profileContext", { home, name: "desktop" } as never);
-  ctx.provide("llm", {} as never);
-  ctx.provide("agentDefaultModel", {} as never);
 }
 
 async function listen(server: Server): Promise<number> {
@@ -214,13 +210,18 @@ test("confirmed Desktop schedules one background launch and stays connecting unt
   const fetches: string[] = [];
   let release = (): void => undefined;
   const gate = new Promise<void>((resolve) => { release = resolve; });
+  let releaseIssue = (): void => undefined;
+  const issueGate = new Promise<void>((resolve) => { releaseIssue = resolve; });
   let lease: HomeControlHandle | undefined;
   let endpoint: { origin: string; bearer: string; protocolVersion: 2; homeId: string; serviceEpoch: string } | undefined;
   const server = createServer(async (req, res) => {
     for await (const chunk of req) void chunk;
-    if (req.url?.endsWith("/register")) registrations.push(req.url);
+    if (req.url?.endsWith("/issue")) {
+      registrations.push(req.url);
+      await issueGate;
+    }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ registrationId: "desktop-main" }));
+    res.end(JSON.stringify({ ok: true, value: { registrationId: "desktop-main", scopes: { creator: "s".repeat(64) }, serviceEpoch: endpoint!.serviceEpoch } }));
   });
   const port = await listen(server);
   let bootstraps = 0;
@@ -249,6 +250,7 @@ test("confirmed Desktop schedules one background launch and stays connecting unt
   });
   const runtime = new CountingRuntime(options);
   const ctx = new Context();
+  provideMain(ctx, home);
   try {
     assert.equal(runtime.qualifiesForAutomaticDesktopLaunch(), true);
     const plugin = new SpacesPlugin(ctx, {}, runtime);
@@ -261,15 +263,16 @@ test("confirmed Desktop schedules one background launch and stays connecting unt
     release();
     const connecting = await untilPhase(runtime, "connecting");
     assert.equal(connecting.operationId, preparing.operationId);
-    assert.equal(registrations.length, 0);
     await delay(40);
+    // The Creator registration is in flight: the launch waits for it.
     assert.equal((await plugin.guide.desktopLaunchState!()).phase, "connecting");
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0]?.includes(CREATOR_CHANNEL_PREFIX), true);
     assert.equal(runtime.begins, 1);
-    provideMain(ctx, home);
+    releaseIssue();
     const ready = await untilPhase(runtime, "ready");
     assert.equal(ready.operationId, preparing.operationId);
     assert.equal(registrations.length, 1);
-    assert.equal(registrations[0]?.includes(LLM_DELEGATION_PREFIX), true);
     assert.equal(bootstraps, 1);
     assert.equal((await plugin.guide.beginDesktopLaunch!()).operationId, ready.operationId);
     assert.equal(runtime.begins, 2);
@@ -298,6 +301,7 @@ test("confirmed Desktop schedules one background launch and stays connecting unt
     }
   } finally {
     release();
+    releaseIssue();
     await ctx.fiber.dispose();
     const current = lease as HomeControlHandle | undefined;
     current?.release();
@@ -314,9 +318,9 @@ test("rejected Main registration is a terminal Desktop launch and is not replaye
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    if (req.url?.endsWith("/register")) registrations.push(Buffer.concat(chunks).toString());
+    if (req.url?.endsWith("/issue")) registrations.push(Buffer.concat(chunks).toString());
     res.writeHead(403, { "content-type": "application/json" });
-    res.end("{}");
+    res.end(JSON.stringify({ ok: false, error: { code: "creator/forbidden", message: "Main registration refused." } }));
   });
   const port = await listen(server);
   let bootstraps = 0;
@@ -337,13 +341,11 @@ test("rejected Main registration is a terminal Desktop launch and is not replaye
     },
   }));
   const ctx = new Context();
+  provideMain(ctx, home);
   try {
     new SpacesPlugin(ctx, {}, runtime);
-    const connecting = await untilPhase(runtime, "connecting");
-    provideMain(ctx, home);
     const failed = await untilPhase(runtime, "failed");
-    assert.equal(failed.operationId, connecting.operationId);
-    assert.match(failed.reasons.join(" "), /MAIN_REGISTRATION_REFUSED:403/);
+    assert.match(failed.reasons.join(" "), /Main registration refused/);
     assert.equal(registrations.length, 1);
     assert.equal(bootstraps, 1);
     await delay(50);
@@ -399,7 +401,7 @@ test("disposal keeps the launch record and does not schedule another begin", asy
     release();
     const failed = await untilPhase(runtime, "failed");
     assert.equal(failed.operationId, preparing.operationId);
-    assert.match(failed.reasons.join(" "), /Main registration dependencies are not available/);
+    assert.match(failed.reasons.join(" "), /MAIN_CLOSED/);
     assert.equal(runtime.begins, 1);
     assert.equal(bootstraps, 1);
     assert.equal((await runtime.desktopLaunchState()).operationId, preparing.operationId);

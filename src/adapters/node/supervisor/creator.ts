@@ -34,7 +34,7 @@ import type { SpaceBaseCreation } from "./base-creation";
 import type { NodeSpacesService } from "../products/spaces-service";
 import type { SpaceRunRegistry } from "./space-runs";
 import { assertOwnedProfilePath } from "../profile/profile-settings";
-import { writeSpaceLlmPolicy } from "../llm/llm-policy-store";
+import { describeModelSync, type ModelSyncSummary } from "../llm/main-model-sync";
 import { listProfilePlugins } from "../products/plugin-ops";
 import { parseIcon } from "./input";
 import type { BoundCli } from "./types";
@@ -99,7 +99,8 @@ export interface SupervisorCreatorPorts {
   maintenance(): boolean;
   hasComponent(component: SpacesComponent): boolean;
   ensureViewBridge(profileId: string): Promise<void>;
-  ensureLlmBridge(profileId: string): Promise<void>;
+  /** One copy of the main space's models into the new, not yet started space. */
+  syncMainModels(spaceId: string): Promise<ModelSyncSummary>;
   installedRuntimeBin(version: string): string | undefined;
   /** Optional space start for `startAfterCreate`; wired to the real lifecycle in production. */
   startSpace?(spaceId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"]>;
@@ -298,7 +299,8 @@ export class SupervisorCreator {
     if (!this.ports.installedRuntimeBin(input.baseVersion!)) steps.push({ step: "install-runtime" });
     steps.push({ step: "create" });
     if (this.ports.hasComponent("view-bridge")) steps.push({ step: "view-bridge" });
-    if (input.modelSource === "main" && this.ports.hasComponent("llm-bridge")) steps.push({ step: "llm-policy" });
+    // "main" copies the main space's models once; "local" leaves the new space's models to the user.
+    if (input.modelSource === "main") steps.push({ step: "models-sync" });
     for (const plugin of input.plugins) steps.push({ step: "plugin", packageName: plugin.packageName });
     if (input.startAfterCreate) steps.push({ step: "start" });
     steps.push({ step: "result" });
@@ -510,12 +512,9 @@ export class SupervisorCreator {
         // Component availability is decided while the job is still in
         // prepare: an unusable linked component source fails here with the
         // component named rather than after the profile exists.
-        let components: { viewBridge: boolean; llmBridge: boolean };
+        let components: { viewBridge: boolean };
         try {
-          components = {
-            viewBridge: this.ports.hasComponent("view-bridge"),
-            llmBridge: input.modelSource === "main" && this.ports.hasComponent("llm-bridge"),
-          };
+          components = { viewBridge: this.ports.hasComponent("view-bridge") };
         } catch (error) {
           fail("prepare", undefined, error);
         }
@@ -541,15 +540,17 @@ export class SupervisorCreator {
           }
           done("view-bridge");
         }
-        if (components!.llmBridge) {
-          ctx.phase("llm-policy");
+        if (input.modelSource === "main") {
+          ctx.phase("models-sync");
+          let summary: ModelSyncSummary;
           try {
-            writeSpaceLlmPolicy(this.ports.home, spaceId, true);
-            await this.ports.ensureLlmBridge(spaceId);
+            summary = await this.ports.syncMainModels(spaceId);
           } catch (error) {
-            fail("llm-policy", undefined, error);
+            fail("models-sync", undefined, error);
           }
-          done("llm-policy");
+          const index = stepIndex("models-sync");
+          if (index >= 0) steps[index].detail = describeModelSync(summary!);
+          done("models-sync");
         }
         if (input.plugins.length) {
           ctx.phase("plugins");

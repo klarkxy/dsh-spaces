@@ -1,8 +1,8 @@
 /**
  * Control channel plan ops beyond lifecycle: plugin.install (exact source),
- * plugin.remove, plugin.toggle, runtime.set and llm-policy.set.
+ * plugin.remove, plugin.toggle, runtime.set and models.sync.
  * Covers closed params validation, op → workbench plan mapping, normalized
- * params on the frozen plan, and the llm-policy stopped-only rule (D5).
+ * params on the frozen plan, and the models.sync stopped-only rule.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -138,7 +138,7 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
     maintenance: () => false,
     hasComponent: () => false,
     ensureViewBridge: async () => undefined,
-    ensureLlmBridge: async () => undefined,
+    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
     installedRuntimeBin: () => join(home, "cli", "lib", "bin.js"),
     pluginAdd: async () => undefined,
     observeChildWork: (action) => action(),
@@ -179,7 +179,6 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
     unmanaged: (id) => runs.unmanaged.has(id),
     detail: async () => ({ plugins: [] }),
     diagnostics: (spaceId): WorkbenchDiagnostics => ({ spaceId, status: "stopped", logs: [], backups: [] }),
-    llmPolicy: () => ({ inheritMain: false }),
     observeTaskActivity: async () => "idle",
     admitSubmission: () => {
       if (!ownerAlive) throw new WorkbenchPublicError("workbench/read-only");
@@ -390,8 +389,8 @@ test("plan params are a closed shape per op and required exactly where expected"
     { op: "plugin.toggle", spaceId: "space-alpha", params: { packageName: "@deepseek-ai/dsh-base", enabled: true } },
     { op: "runtime.set", spaceId: "space-alpha", params: { version: "latest" } },
     { op: "runtime.set", spaceId: "space-alpha", params: {} },
-    { op: "llm-policy.set", spaceId: "space-alpha", params: { inheritMain: "true" } },
-    { op: "llm-policy.set", spaceId: "space-alpha", params: { inheritMain: true, extra: 1 } },
+    { op: "models.sync", spaceId: "space-alpha", params: {} },
+    { op: "models.sync", spaceId: "space-alpha", params: { inheritMain: true } },
     { op: "start", spaceId: "space-alpha", params: {} },
     { op: "nuke", spaceId: "space-alpha", params: {} },
   ];
@@ -427,7 +426,7 @@ test("remove, toggle and runtime.set map to their maintenance plans", async () =
   assert.equal(runtimePlan.taskActivity, "idle", "mutation ops carry the frozen activity snapshot");
 });
 
-test("llm-policy.set requires a stopped space at plan time", async () => {
+test("models.sync requires a stopped space at plan time", async () => {
   const home = tempHome();
   writeProfile(home, "web");
   writeSpace(home, "alpha");
@@ -437,16 +436,16 @@ test("llm-policy.set requires a stopped space at plan time", async () => {
   const listener = await startIdentityServer({ home, profile: "web" });
   const scope = await issueScope(fx, listener);
 
-  const running = await call(fx, "plan", scope, { op: "llm-policy.set", spaceId: "space-beta", params: { inheritMain: true } });
+  const running = await call(fx, "plan", scope, { op: "models.sync", spaceId: "space-beta" });
   assert.equal(running.body.error?.code, "control/conflict");
   assert.match(running.body.error?.message ?? "", /plan a stop first/i);
   assert.equal(fx.localPreviewCalls.length, 0, "no plan was frozen for a running space");
 
-  const stopped = await call(fx, "plan", scope, { op: "llm-policy.set", spaceId: "space-alpha", params: { inheritMain: true } });
+  const stopped = await call(fx, "plan", scope, { op: "models.sync", spaceId: "space-alpha" });
   assert.equal(stopped.body.ok, true, JSON.stringify(stopped.body));
   const plan = stopped.body.value as ControlPlanResult;
-  assert.deepEqual(fx.localPreviewCalls, [{ kind: "space.llm-policy.set", spaceId: "space-alpha", inheritMain: true }]);
-  assert.deepEqual(plan.params, { inheritMain: true });
+  assert.deepEqual(fx.localPreviewCalls, [{ kind: "space.models.sync", spaceId: "space-alpha" }]);
+  assert.equal(plan.params, undefined);
 });
 
 test("execute runs a plugin plan job through the frozen workbench plan id", async () => {

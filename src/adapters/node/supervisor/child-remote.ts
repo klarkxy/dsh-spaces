@@ -103,7 +103,6 @@ const LIVE_PROTECTED_PACKAGES = new Set<string>([
   ...PROTECTED_PLUGIN_PACKAGES,
   FULL_SPACES_PACKAGE,
   "@dsh-spaces/view-bridge",
-  "@dsh-spaces/llm-bridge",
   "@klarkxy/dsh-dev-index",
 ]);
 

@@ -21,7 +21,7 @@ test('the distributed plugin declares its icon and localized display text', () =
   assert.equal(published.icon, './icon.svg');
   assert.equal(published.exports['./icon'], './icon.svg');
   assert.equal(published.exports['./locale/*.json'], './locale/*.json');
-  for (const file of ['icon.svg', 'llm-images.svg', 'locale/*.json', 'llm-images/locale/*.json']) {
+  for (const file of ['icon.svg', 'locale/*.json']) {
     assert.ok(published.files.includes(file), `files must publish ${file}`);
   }
 });
@@ -86,15 +86,11 @@ test('a linked install resolves the icon and locale resources the DSH metadata r
       english: require.resolve('@dsh-spaces/plugin/locale/en.json'),
       chinese: require.resolve('@dsh-spaces/plugin/locale/zh.json'),
       icon: require.resolve('@dsh-spaces/plugin/icon'),
-      imagesIcon: require.resolve('@dsh-spaces/plugin/llm-images/icon'),
-      imagesEnglish: require.resolve('@dsh-spaces/plugin/llm-images/locale/en.json'),
     };
     assert.equal(realpathSync(resolved.manifest), realpathSync(join(root, 'packages/plugin', 'package.json')));
     assert.equal(realpathSync(resolved.english), realpathSync(join(root, 'packages/plugin', 'locale', 'en.json')));
     assert.equal(realpathSync(resolved.chinese), realpathSync(join(root, 'packages/plugin', 'locale', 'zh.json')));
     assert.equal(realpathSync(resolved.icon), realpathSync(join(root, 'packages/plugin', 'icon.svg')));
-    assert.equal(realpathSync(resolved.imagesIcon), realpathSync(join(root, 'packages/plugin', 'llm-images.svg')));
-    assert.equal(realpathSync(resolved.imagesEnglish), realpathSync(join(root, 'packages/plugin', 'llm-images', 'locale', 'en.json')));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

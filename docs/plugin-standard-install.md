@@ -60,7 +60,7 @@ dsh --profile spaces-dev
 
 依赖应记录为 `link:`，并指向本仓库根目录。不要链接到仓库父目录。开发流程不写真实 `~/.dsh` 或 `profiles/web`。
 
-当宿主插件解析到本源码检出（私有根包 `@dsh-spaces/plugin` 下的 `packages/plugin/lib`）时，开发检出模式自动生效，无需环境变量：Supervisor 不再暂存组件副本、不写选中指针、不打包 tarball，直接以检出内验证过的组件组启动，并向 Supervisor 传入 `--dev-checkout <root>`。此后管理器 profile 在下次 Supervisor 启动时、各子空间在下次空间启动时，分别获得 `packages/plugin`、`packages/view-bridge`、`packages/llm-bridge` 的 `link:` 安装（浏览器组件被封存，不参与）。链接生效后：客户端改动经 `npm run build`（或持续运行的 `npm run dev:watch`）由官方 dsh-client-hmr 实时呈现；空间侧服务端桥接代码需重启该空间。Supervisor 代码变更后，普通 Web 遵循显式初始化或进入工作台；官方 Desktop 需重新打开应用，或使用既有的确认式手动启动。首次从既有 tarball 安装切换到链接模式时同样如此，并需每个子空间各一次重启。已知限制：`link:` 包从检出的 `node_modules` 解析 `@deepseek-ai/*` 对等依赖，因此固定到与检出开发依赖不同 DSH 版本的子空间在开发模式下可能无法正确加载。软链接不等于热替换，运行中的服务不会自动重启。普通 Web 首次进入仍需点击 **初始化 Spaces**。官方 Desktop 开发宿主在打开应用时后台启动管理服务；同一进程里服务已停止则保持停止，重新进入面板不会再请求启动。再次打开应用，或使用已有的确认式手动服务操作，才是新的启动。
+当宿主插件解析到本源码检出（私有根包 `@dsh-spaces/plugin` 下的 `packages/plugin/lib`）时，开发检出模式自动生效，无需环境变量：Supervisor 不再暂存组件副本、不写选中指针、不打包 tarball，直接以检出内验证过的组件组启动，并向 Supervisor 传入 `--dev-checkout <root>`。此后管理器 profile 在下次 Supervisor 启动时、各子空间在下次空间启动时，分别获得 `packages/plugin`、`packages/view-bridge` 的 `link:` 安装（浏览器组件被封存，不参与）。链接生效后：客户端改动经 `npm run build`（或持续运行的 `npm run dev:watch`）由官方 dsh-client-hmr 实时呈现；空间侧服务端桥接代码需重启该空间。Supervisor 代码变更后，普通 Web 遵循显式初始化或进入工作台；官方 Desktop 需重新打开应用，或使用既有的确认式手动启动。首次从既有 tarball 安装切换到链接模式时同样如此，并需每个子空间各一次重启。已知限制：`link:` 包从检出的 `node_modules` 解析 `@deepseek-ai/*` 对等依赖，因此固定到与检出开发依赖不同 DSH 版本的子空间在开发模式下可能无法正确加载。软链接不等于热替换，运行中的服务不会自动重启。普通 Web 首次进入仍需点击 **初始化 Spaces**。官方 Desktop 开发宿主在打开应用时后台启动管理服务；同一进程里服务已停止则保持停止，重新进入面板不会再请求启动。再次打开应用，或使用已有的确认式手动服务操作，才是新的启动。
 
 发行仍使用 `npm run pack:plugin` 生成的独立包，根目录保持 `private`。
 

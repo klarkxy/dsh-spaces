@@ -69,7 +69,6 @@ interface FrozenControlPlan {
     enabled?: boolean;
     entryId?: string;
     version?: string;
-    inheritMain?: boolean;
     templateId?: string;
     importId?: string;
     name?: string;
@@ -172,7 +171,7 @@ const PLAN_OPS = [
   "plugin.remove",
   "plugin.toggle",
   "runtime.set",
-  "llm-policy.set",
+  "models.sync",
   "plugin.live.install",
   "plugin.live.update",
   "plugin.live.entry",
@@ -181,7 +180,7 @@ const PLAN_OPS = [
   "space.import",
 ] as const;
 const OPS_WITH_PARAMS = new Set([
-  "plugin.install", "plugin.remove", "plugin.toggle", "runtime.set", "llm-policy.set",
+  "plugin.install", "plugin.remove", "plugin.toggle", "runtime.set",
   "plugin.live.install", "plugin.live.update", "plugin.live.entry", "plugin.live.remove",
   "space.from-template", "space.import",
 ]);
@@ -196,7 +195,7 @@ const OP_LABELS: Record<string, string> = {
   "plugin.remove": "Remove plugin from",
   "plugin.toggle": "Toggle plugin on",
   "runtime.set": "Switch runtime of",
-  "llm-policy.set": "Set model policy of",
+  "models.sync": "Sync main space models into",
   "plugin.live.install": "Install plugin into the running",
   "plugin.live.update": "Update plugin inside the running",
   "plugin.live.entry": "Toggle plugin entry inside the running",
@@ -253,8 +252,8 @@ function describePlanOp(plan: FrozenControlPlan): string {
       return `${p?.enabled ? "Install/enable" : "Remove/disable"} plugin ${p?.packageName ?? "?"} on "${plan.displayName}" (${plan.spaceId})`;
     case "runtime.set":
       return `Switch "${plan.displayName}" (${plan.spaceId}) to DSH runtime ${p?.version ?? "?"}`;
-    case "llm-policy.set":
-      return `Set model policy of "${plan.displayName}" (${plan.spaceId}) to inheritMain=${p?.inheritMain ?? "?"}`;
+    case "models.sync":
+      return `Copy the main space model settings and their keys into "${plan.displayName}" (${plan.spaceId})`;
     default:
       return `${OP_LABELS[plan.op] ?? plan.op} space "${plan.displayName}" (${plan.spaceId})`;
   }
@@ -611,7 +610,7 @@ export function apply(ctx: Context, options: { approve?: EscalationApprove } = {
   register({
     name: "spaces_plan",
     description:
-      "Freeze a change plan under this main host's control registration — lifecycle ops (start, stop, restart, delete), stopped-space ops (plugin.install exact npm/GitHub source, plugin.remove, plugin.toggle install/remove semantics, runtime.set, llm-policy.set), running-space ops (plugin.live.install, plugin.live.update, plugin.live.entry enable/disable one loader entry by entryId, plugin.live.remove) which are applied inside the running space by its own plugin manager and refuse a stopped space, and creation ops (space.from-template, space.import) which create a NEW space from a template id or a staged importId and never start it. Planning mutates nothing: it freezes the operation, the target and its observed state into a single-use plan that expires after five minutes. Execute the returned controlPlanId with spaces_execute, which asks for one danger-full-access approval naming the operation, the exact source/version and the affected spaces. A stop or restart plan carries the space's last observed task activity; execute re-checks it and refuses when it changed. Requires Creator mode.",
+      "Freeze a change plan under this main host's control registration — lifecycle ops (start, stop, restart, delete), stopped-space ops (plugin.install exact npm/GitHub source, plugin.remove, plugin.toggle install/remove semantics, runtime.set, models.sync copying the main space model routes, default model and their keys into the stopped space once), running-space ops (plugin.live.install, plugin.live.update, plugin.live.entry enable/disable one loader entry by entryId, plugin.live.remove) which are applied inside the running space by its own plugin manager and refuse a stopped space, and creation ops (space.from-template, space.import) which create a NEW space from a template id or a staged importId and never start it. Planning mutates nothing: it freezes the operation, the target and its observed state into a single-use plan that expires after five minutes. Execute the returned controlPlanId with spaces_execute, which asks for one danger-full-access approval naming the operation, the exact source/version and the affected spaces. A stop or restart plan carries the space's last observed task activity; execute re-checks it and refuses when it changed. Requires Creator mode.",
     parameters: {
       type: "object",
       properties: {
@@ -627,14 +626,14 @@ export function apply(ctx: Context, options: { approve?: EscalationApprove } = {
             "plugin.live.update params: {packageName,version} — exact newer version, running space only. " +
             "plugin.live.entry params: {entryId,enabled} — a loader entry id from spaces_inspect plugins.live, running space only. " +
             "runtime.set params: {version} — exact DSH version, no downgrades. " +
-            "llm-policy.set params: {inheritMain} — space must be stopped. " +
+            "models.sync takes no params — space must be stopped. " +
             "space.from-template params: {templateId,name,displayName?} — templateId from spaces_templates. " +
             "space.import params: {importId,name,displayName?} — importId from spaces_import_preview. Creation ops take no spaceId.",
         },
         spaceId: { type: "string", description: "Registered space id (the profile name, e.g. space-notes). Required except for space.from-template and space.import." },
         params: {
           type: "object",
-          description: "Per-op parameters; required for plugin.*, runtime.set, llm-policy.set and the creation ops.",
+          description: "Per-op parameters; required for plugin.*, runtime.set and the creation ops.",
           additionalProperties: true,
         },
       },

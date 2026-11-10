@@ -156,7 +156,7 @@ export class BlueprintWorkbench extends BlueprintWorkbenchPreviewOps {
         publish(outcome);
       }
       await this.assertBuiltinRuntimeUnchanged(staged);
-      composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles, { includeLlmBridge: false });
+      composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles);
       const compositionError = await this.compositionError(spaceId, staged.blueprint, bound.patch);
       if (compositionError) throw publicError(compositionError);
       outcome.host = hostOutcome(await this.hostVersions(spaceId));
@@ -206,9 +206,7 @@ export class BlueprintWorkbench extends BlueprintWorkbenchPreviewOps {
       currentWrite = undefined;
       outcome.writes = [...writes];
       publish(outcome);
-      composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles, {
-        includeLlmBridge: false,
-      });
+      composeBundles(this.ports.home, spaceId, staged.blueprint.profile.bundles);
       currentWrite = "provenance";
       await this.assertBuiltinRuntimeUnchanged(staged);
       writeProvenance(this.ports.home, spaceId, staged.blueprint, staged.values);

@@ -96,7 +96,7 @@ export const CONTROL_PLAN_OPS = [
   'plugin.remove',
   'plugin.toggle',
   'runtime.set',
-  'llm-policy.set',
+  'models.sync',
   'plugin.live.install',
   'plugin.live.update',
   'plugin.live.entry',
@@ -107,6 +107,8 @@ export const CONTROL_PLAN_OPS = [
 export type ControlPlanOp = (typeof CONTROL_PLAN_OPS)[number];
 /** Ops that mutate a space but take no params beyond the target. */
 const LIFECYCLE_OPS = new Set<ControlPlanOp>(['start', 'stop', 'restart', 'delete']);
+/** Ops that take only the target space, like lifecycle ops, but freeze a supervisor plan. */
+const TARGET_ONLY_OPS = new Set<ControlPlanOp>(['models.sync']);
 /**
  * Ops that create a space rather than mutate an existing one. They take no
  * `spaceId` — the space id is derived from `params.name` — and the frozen
@@ -239,7 +241,6 @@ export type ControlSectionResult<T> =
   | { ok: false; code: ControlErrorCode; message: string };
 
 export interface ControlInspectModel {
-  inheritMain: boolean;
   /** Child model catalog is not readable by the supervisor yet; null stays. */
   catalog: null;
   /** Why catalog is null: the child model catalog is only readable through a
@@ -381,7 +382,6 @@ export type ControlPlanParamsResult =
   | { packageName: string; version: string }
   | { entryId: string; enabled: boolean }
   | { version: string }
-  | { inheritMain: boolean }
   | { templateId: string; name: string; displayName?: string }
   | { importId: string; name: string; displayName?: string };
 
@@ -393,7 +393,6 @@ export type ControlPlanParams =
   | { packageName: string; version: string }
   | { entryId: string; enabled: boolean }
   | { version: string }
-  | { inheritMain: boolean }
   | { templateId: string; name: string; displayName?: string }
   | { importId: string; name: string; displayName?: string };
 
@@ -403,7 +402,7 @@ export type ControlPlanInput =
   | { op: 'plugin.remove'; spaceId: string; params: { packageName: string } }
   | { op: 'plugin.toggle'; spaceId: string; params: { packageName: string; enabled: boolean } }
   | { op: 'runtime.set'; spaceId: string; params: { version: string } }
-  | { op: 'llm-policy.set'; spaceId: string; params: { inheritMain: boolean } }
+  | { op: 'models.sync'; spaceId: string }
   | { op: 'plugin.live.install'; spaceId: string; params: { source: PluginSourceSpec } }
   | { op: 'plugin.live.update'; spaceId: string; params: { packageName: string; version: string } }
   | { op: 'plugin.live.entry'; spaceId: string; params: { entryId: string; enabled: boolean } }
@@ -698,6 +697,10 @@ export function parseControlPlanInput(value: unknown): ControlPlanInput {
     expectKeys(body, ['op', 'spaceId']);
     return { op: op as 'start' | 'stop' | 'restart' | 'delete', spaceId };
   }
+  if (TARGET_ONLY_OPS.has(op)) {
+    expectKeys(body, ['op', 'spaceId']);
+    return { op: 'models.sync', spaceId };
+  }
   expectKeys(body, ['op', 'spaceId', 'params']);
   const params = expectObject(body.params);
   switch (op) {
@@ -736,11 +739,6 @@ export function parseControlPlanInput(value: unknown): ControlPlanInput {
       const version = expectString(params.version, 64);
       if (!isExactRuntimeVersion(version)) invalid('The runtime version must be an exact version.');
       return { op, spaceId, params: { version } };
-    }
-    case 'llm-policy.set': {
-      expectKeys(params, ['inheritMain']);
-      const inheritMain = expectBoolean(params.inheritMain);
-      return { op, spaceId, params: { inheritMain } };
     }
     case 'plugin.live.install': {
       expectKeys(params, ['source']);

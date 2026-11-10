@@ -799,7 +799,7 @@ async function main() {
 
     // -- two real creator.create jobs on the same registration -----------------
     // Job 1: local model source + explicit dev-index install + start.
-    // Job 2: main-inherit model source (default LLM policy), start, no plugins.
+    // Job 2: main model source (one model sync at creation), start, no plugins.
     const runCreation = async (spec, expect) => {
       const plan = await creator.createPreview(spec);
       if (plan.kind !== "creator.create" || plan.serviceEpoch !== endpoint.serviceEpoch) {
@@ -815,8 +815,8 @@ async function main() {
           !plan.steps.some((s) => s.step === "plugin" && s.packageName === spec.plugins[0].npm?.packageName)) {
         throw new Error(`${spec.name}: plan missing plugin step: ${JSON.stringify(plan.steps)}`);
       }
-      if (expect.llmPolicy && !stepKinds.includes("llm-policy")) {
-        throw new Error(`${spec.name}: plan missing llm-policy step: ${JSON.stringify(plan.steps)}`);
+      if (expect.modelsSync !== stepKinds.includes("models-sync")) {
+        throw new Error(`${spec.name}: plan models-sync step mismatch: ${JSON.stringify(plan.steps)}`);
       }
       if (!creator.previewedPlan(plan.id)) throw new Error(`${spec.name}: service did not retain its own preview`);
 
@@ -850,15 +850,17 @@ async function main() {
           .dependencies?.[pkg.packageName];
         if (!dep && !onDisk) throw new Error(`${pkg.packageName} not installed into ${spaceId}`);
       }
-      if (expect.llmPolicy) {
-        const policyStep = steps.find((s) => s.step === "llm-policy");
-        if (policyStep?.status !== "done") {
-          throw new Error(`${spec.name}: llm-policy step is ${policyStep?.status ?? "missing"}`);
+      if (expect.modelsSync) {
+        const syncStep = steps.find((s) => s.step === "models-sync");
+        if (syncStep?.status !== "done") {
+          throw new Error(`${spec.name}: models-sync step is ${syncStep?.status ?? "missing"}`);
         }
-        const policy = JSON.parse(readFileSync(join(home, "hub", spaceId, "llm-policy.json"), "utf8"));
-        if (policy.schemaVersion !== 1 || policy.inheritMain !== true) {
-          throw new Error(`${spec.name}: llm-policy.json invalid: ${JSON.stringify(policy)}`);
+        if (typeof syncStep.detail !== "string" || !syncStep.detail.startsWith(`main: ${MAIN_PROFILE}`)) {
+          throw new Error(`${spec.name}: models-sync step does not name the main space: ${redact(String(syncStep.detail))}`);
         }
+      }
+      if (existsSync(join(home, "hub", spaceId, "llm-policy.json"))) {
+        throw new Error(`${spec.name}: a retired llm-policy.json was written`);
       }
       // Observer witness inside the child: all dev-index tools, zero spaces_*.
       const childTools = await until(() => {
@@ -879,7 +881,7 @@ async function main() {
       modelSource: "local",
       startAfterCreate: true,
       plugins: [{ npm: { packageName: DEV_INDEX.packageName, version: DEV_INDEX.version } }],
-    }, { llmPolicy: false });
+    }, { modelsSync: false });
     report.createJobs = [first];
     pass(`job 1: ${first.spaceId} created+started (local model, dev-index installed, child tools witnessed)`);
 
@@ -888,9 +890,9 @@ async function main() {
       modelSource: "main",
       startAfterCreate: true,
       plugins: [],
-    }, { llmPolicy: true });
+    }, { modelsSync: true });
     report.createJobs.push(second);
-    pass(`job 2: ${second.spaceId} created+started (main-inherit model, llm-policy done + persisted inheritMain:true, child tools witnessed)`);
+    pass(`job 2: ${second.spaceId} created+started (main models synced once at creation, child tools witnessed)`);
 
     const createdIds = [first.spaceId, second.spaceId];
     for (const claimed of createdIds) {

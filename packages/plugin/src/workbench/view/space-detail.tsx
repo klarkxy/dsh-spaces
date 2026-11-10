@@ -4,8 +4,8 @@
  * It replaces the old detail dialog: every action that belongs to one space
  * has exactly one authoritative place. The page is rendered inside the spaces
  * tab of the settings surface. A compact header carries identity and the
- * lifecycle actions; everything else lives under four tabs — 常规 / 插件 /
- * 模型 / 高级 — so a short space never scrolls past unrelated sections.
+ * lifecycle actions; everything else lives under three tabs — 常规 / 插件 /
+ * 高级 — so a short space never scrolls past unrelated sections.
  *
  * Failures are never part of an entrance animation: a read error or a failed
  * write is readable from the first frame, and an error that arrives after the
@@ -150,6 +150,24 @@ export function SpaceDetailPage({
             <p className="dsh-wb-muted">{t(locale, "detail.dshNotPinned")}</p>
           )}
         </section>
+        {manageable && space.managed && space.base !== 'browser' && !controller.isManagerId(space.id) ? (
+          <section className="dsh-wb-space-detail-card" data-space-section="models">
+            <h3 className="dsh-wb-title">{t(locale, "detail.models.title")}</h3>
+            <p className="dsh-wb-muted">{t(locale, "detail.models.hint")}</p>
+            {!startable ? <p className="dsh-wb-muted">{t(locale, "detail.models.stoppedHint")}</p> : null}
+            <div className="dsh-wb-actions">
+              <button
+                type="button"
+                className="dsh-wb-btn"
+                data-space-models-sync="true"
+                disabled={!writable || busy || !startable}
+                onClick={() => controller.preview({ kind: "space.models.sync", spaceId: space.id })}
+              >
+                {t(locale, "detail.models.sync")}
+              </button>
+            </div>
+          </section>
+        ) : null}
         <section className="dsh-wb-space-detail-card" data-space-section="diagnostics">
           <DiagnosticsSection ui={ui} locale={locale} text={() => controller.copyDiagnostics()} />
         </section>

@@ -52,7 +52,6 @@ interface BundledRequirement {
 const COMPONENT_ARCHIVE_PREFIX: Record<SpacesComponent, string> = {
   plugin: "dsh-spaces-plugin",
   "view-bridge": VIEW_BRIDGE_ID,
-  "llm-bridge": "dsh-spaces-llm-bridge",
   browser: "dsh-spaces-browser",
 };
 
@@ -395,7 +394,6 @@ export class SupervisorToolchain {
     switch (component) {
       case "plugin": return this.host.options.pluginArtifact;
       case "view-bridge": return this.host.options.viewBridgeArtifact;
-      case "llm-bridge": return this.host.options.llmBridgeArtifact;
       case "browser": return this.host.options.browserArtifact;
     }
   }

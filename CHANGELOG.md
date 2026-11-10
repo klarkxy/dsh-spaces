@@ -7,6 +7,16 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 ### Added
 
 - The three space rails draw a breathing attention halo around a space whose sessions have a pending tool approval or `ask_user_question` card; the halo is presentation only and reports `unknown` when no fresh view-bridge report exists.
+- "Sync models from the main space" in the workbench space detail (Advanced) and the `models.sync` operation of `spaces_plan` copy the main space's `llm-pi-ai` routes, `llm-deepseek` settings, default model and the keys those routes reference into a stopped space once. Login-grant and expression routes are skipped and listed in the job result.
+
+### Changed
+
+- Choosing the main space's models when creating a space now copies the main model configuration into the new space once (`models-sync` step). Each space then calls its providers directly with its own configuration, so spaces keep working while the main host is closed.
+- An older space drops the retired `@dsh-spaces/llm-bridge` bundle once through the official `dsh plugin remove` at its next start; an interrupted removal keeps its alignment marker as evidence.
+
+### Removed
+
+- Live main-model delegation: the `@dsh-spaces/llm-bridge` component, the main host's LLM services and image helper entry, the `--llm-bridge-artifact` Supervisor flag, the `llm-policy.set` control operation and `hub/<id>/llm-policy.json` writes.
 
 ## [0.5.0] — release candidate, not published
 

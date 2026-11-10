@@ -1848,10 +1848,6 @@ function writePayload(pluginRoot: string, marker = "payload"): ValidatedComponen
     ["lib/browser/lib/index.js", "export {};\n"],
     ["lib/browser/lib/client.js", "export {};\n"],
     ["lib/browser/lib/typert.host.js", "export {};\n"],
-    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], true)],
-    ["lib/llm-bridge/cordis.patch.yml", `- insert:\n    - id: dsh-spaces-llm-bridge\n      name: '${COMPONENT_PAYLOAD_PACKAGES["llm-bridge"]}'\n      config: {}\n`],
-    ["lib/llm-bridge/lib/index.js", "export {};\n"],
-    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
     ["lib/space-control.js", "export {};\n"],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
@@ -1881,13 +1877,12 @@ function packNpmTar(sourceDir: string, destTgz: string): string {
 function packPayloadArtifacts(
   payload: ValidatedComponentPayload,
   destDir: string,
-): { pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string; llmBridgeArtifact: string } {
+): { pluginArtifact: string; viewBridgeArtifact: string; browserArtifact: string } {
   mkdirSync(destDir, { recursive: true });
   return {
     pluginArtifact: packNpmTar(payload.packageRoot, join(destDir, "plugin.tgz")),
     viewBridgeArtifact: packNpmTar(join(payload.packageRoot, "lib", "view-bridge"), join(destDir, "view.tgz")),
     browserArtifact: packNpmTar(join(payload.packageRoot, "lib", "browser"), join(destDir, "browser.tgz")),
-    llmBridgeArtifact: packNpmTar(join(payload.packageRoot, "lib", "llm-bridge"), join(destDir, "llm.tgz")),
   };
 }
 
@@ -2553,7 +2548,7 @@ test("startup performs no official plugin installs on the manager", async () => 
 
 test("bridge packages declare peer ranges covering the supported DSH minimum", () => {
   const root = dirname(fileURLToPath(import.meta.url));
-  for (const name of ["view-bridge", "llm-bridge", "browser"]) {
+  for (const name of ["view-bridge", "browser"]) {
     const pkg = JSON.parse(
       readFileSync(join(root, "..", "..", "packages", name, "package.json"), "utf8"),
     ) as { peerDependencies?: Record<string, string> };
@@ -2619,7 +2614,7 @@ test("a create that installs a missing runtime reports the install phase and res
     message: string;
     subject?: { displayName: string; icon?: string };
   };
-  assert.equal(record.phase, "llm-policy", "the final record keeps the last create phase");
+  assert.equal(record.phase, "create", "the final record keeps the last create phase (local models: no models-sync)");
   assert.equal(record.message, "", "the final record does not keep the install message");
   assert.deepEqual(record.subject, { displayName: "Fresh" }, "a settled create keeps the name but drops the icon");
   const seen = JSON.parse(readFileSync(join(runtimeRoot, "seen.json"), "utf8")) as Array<{
@@ -2629,11 +2624,11 @@ test("a create that installs a missing runtime reports the install phase and res
   assert.deepEqual(seen, [{ phase: "install", message: "DSH 0.9.9" }]);
   const { spaceCreateStep } = await import("../../src/shared/space-host.ts");
   // The canonical phase order is monotonic by construction of the step table.
-  const ordered = ["prepare", "install", "create", "view-bridge", "llm-bridge", "llm-policy"];
+  const ordered = ["prepare", "install", "create", "view-bridge", "models-sync"];
   const steps = ordered.map((phase) => spaceCreateStep(phase).index);
   assert.ok(steps.every((step, i) => i === 0 || step >= steps[i - 1]), `steps: ${steps.join(",")}`);
   // The live run ended on the last phase; earlier phases were captured above.
-  assert.equal(record.phase, "llm-policy");
+  assert.equal(record.phase, "create");
 });
 
 test("a space.start submitted mid-install with a pre-create revision", async () => {

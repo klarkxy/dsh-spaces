@@ -8,7 +8,9 @@ import { isBareNpmPackageName } from "../../../shared/plugin";
 import { cliLoadError, payloadBridgeFiles } from "../payload/component-cli";
 import { assertOwnedProfilePath, profileSettingsPath } from "./profile-settings";
 
-type Bridge = "view-bridge" | "llm-bridge";
+type Bridge = "view-bridge";
+/** Retired bundle removed once from older spaces during alignment. */
+export const RETIRED_LLM_BRIDGE = "@dsh-spaces/llm-bridge";
 type SpacesComponent = Bridge | "browser";
 type Entry = { id?: unknown; name?: unknown; disabled?: unknown; group?: unknown; config?: unknown };
 type ObservedEntry = Entry & { inheritedDisabled: boolean; dynamicAncestry: boolean };
@@ -121,15 +123,6 @@ function bridgeEntry(rows: ObservedEntry[], bridge: Bridge): ObservedEntry {
   return found[0]!;
 }
 
-function bridgeDisabled(dump: string): boolean {
-  const rows = dumpEntries(dump).filter(row => row.get("id") === "dsh-spaces-llm-bridge");
-  if (rows.length !== 1) throw new Error("The installed LLM bridge entry is missing or ambiguous.");
-  const value = rows[0]!.get("disabled", true);
-  if (value === undefined) return false;
-  if (!isScalar(value) || value.tag || typeof value.value !== "boolean") throw new Error("Dynamic LLM bridge enablement cannot be aligned safely.");
-  return value.value;
-}
-
 function ownedComponentRoot(home: string, profile: string, component: SpacesComponent): string {
   const modules = join(profile, "node_modules");
   const path = join(modules, "@dsh-spaces", component);
@@ -176,6 +169,8 @@ export async function alignProfileComponents(input: {
   home: string; profileId: string; payloadRoot: string;
   bin?: string; cliVersion?: string;
   install: (component: SpacesComponent) => Promise<void>;
+  /** Official `dsh plugin remove` for the retired LLM bridge bundle. */
+  remove?: (packageName: string) => Promise<void>;
   /**
    * Optional alignment check replacing the packaged byte comparison, e.g. a
    * linked checkout matching by link identity. Must be consulted before
@@ -195,18 +190,31 @@ export async function alignProfileComponents(input: {
   if (existsSync(marker)) throw new Error("Interrupted component alignment; evidence was preserved and will not be replayed.");
   const manifestBefore = readFileSync(join(profile, "package.json"), "utf8");
   const manifest = JSON.parse(manifestBefore);
-  const bundles: string[] = manifest.dsh?.profile?.bundles ?? [];
-  if (!Array.isArray(bundles) || bundles.some(name => typeof name !== "string" || !isBareNpmPackageName(name)) || new Set(bundles).size !== bundles.length) throw new Error("Invalid managed profile bundle membership.");
+  const initialBundles: string[] = manifest.dsh?.profile?.bundles ?? [];
+  if (!Array.isArray(initialBundles) || initialBundles.some(name => typeof name !== "string" || !isBareNpmPackageName(name)) || new Set(initialBundles).size !== initialBundles.length) throw new Error("Invalid managed profile bundle membership.");
+  // Older spaces carry the retired LLM bridge bundle. It is dropped once with
+  // the official remove under the alignment marker; the bundles checked below
+  // are the membership expected after that removal.
+  const retired = initialBundles.includes(RETIRED_LLM_BRIDGE);
+  const bundles = initialBundles.filter(name => name !== RETIRED_LLM_BRIDGE);
+  if (retired) {
+    if (!input.remove) throw new Error("The managed profile carries the retired LLM bridge and no removal was provided.");
+    writeFileSync(marker, JSON.stringify({ version: 1, profileId, remove: [RETIRED_LLM_BRIDGE] }), { flag: "wx" });
+    // Leave the marker on failure: an interrupted removal is evidence, not replayed.
+    await input.remove(RETIRED_LLM_BRIDGE);
+    const removed = JSON.parse(readFileSync(join(profile, "package.json"), "utf8"));
+    if (JSON.stringify(removed.dsh?.profile?.bundles ?? []) !== JSON.stringify(bundles)) throw new Error("The retired LLM bridge removal left an unexpected bundle membership.");
+    unlinkSync(marker);
+  }
+  const manifestAligned = readFileSync(join(profile, "package.json"), "utf8");
   const before = readFileSync(patch, "utf8");
   const homePatch = join(home, "cordis.patch.yml");
   const homeBefore = existsSync(homePatch) ? readFileSync(homePatch, "utf8") : undefined;
   const declared = await declaredProfile(home, profile, bundles, input.bin);
-  const active = (["view-bridge", "llm-bridge"] as Bridge[])
+  const active = (["view-bridge"] as Bridge[])
     .filter(bridge => bundles.includes(`@dsh-spaces/${bridge}`));
   if (!active.includes("view-bridge")) throw new Error("The managed profile has no active canonical view bridge.");
   if (disabled(bridgeEntry(declared.rows, "view-bridge"))) throw new Error("The managed profile has no active canonical view bridge.");
-  const llmDisabled = active.includes("llm-bridge") && disabled(bridgeEntry(declared.rows, "llm-bridge"));
-  if (llmDisabled) active.splice(active.indexOf("llm-bridge"), 1);
   const initialDump = await input.dump();
   if (declared.rows.some(row => (row.id === "settings" && row.disabled === false)
     || (row.id === "dsh-spaces-settings" && disabled(row)))) {
@@ -277,11 +285,10 @@ export async function alignProfileComponents(input: {
     const afterManifest = JSON.parse(readFileSync(join(profile, "package.json"), "utf8"));
     if (JSON.stringify(afterManifest.dsh?.profile?.bundles ?? []) !== JSON.stringify(bundles)) throw new Error("Profile bundle membership changed during component alignment.");
   };
-  if (readFileSync(join(profile, "package.json"), "utf8") !== manifestBefore) throw new Error("Profile manifest changed before component alignment.");
+  if (readFileSync(join(profile, "package.json"), "utf8") !== (retired ? manifestAligned : manifestBefore)) throw new Error("Profile manifest changed before component alignment.");
   assertUnchanged();
   const verifyHost = (dump: string) => {
     assertSettingsIsolation(dump);
-    if (active.includes("llm-bridge") && bridgeDisabled(dump)) throw new Error("The aligned LLM bridge was denied by the target host.");
   };
   if (!pending.length) { verifyHost(initialDump); return; }
   writeFileSync(marker, JSON.stringify({ version: 1, profileId, target: cliVersion, bridges: pending }), { flag: "wx" });
@@ -295,7 +302,6 @@ export async function alignProfileComponents(input: {
   assertUnchanged();
   const afterDeclared = await declaredProfile(home, profile, bundles, input.bin);
   admission(afterDeclared, []);
-  if (bundles.includes("@dsh-spaces/llm-bridge") && disabled(bridgeEntry(afterDeclared.rows, "llm-bridge")) !== llmDisabled) throw new Error("LLM bridge enablement changed during component alignment.");
   const composed = await input.dump();
   verifyHost(composed);
   unlinkSync(marker);

@@ -1,6 +1,6 @@
 # 主空间空间总控插件设计（space-control）
 
-> 状态：2026-11-09 已按修订分期实现 P1–P7（原会话代理 P4/P5 已撤销，改为界面操控；space-control 实际以宿主插件子入口 `@dsh-spaces/plugin/space-control` 分发，不是 §3 写的独立包）。实现与验收记录见 [tasks/todo.md](../tasks/todo.md) 顶部条目；本文正文保留设计原稿，未逐节改写。故障政策以 [let it crash](let-it-crash.md) 为唯一权威；角色与通道基线见 [architecture.md](architecture.md)；主空间注册与 Creator 通道实现见 §依据。官方 API 以运行时 DSH 0.2.2-rc.1 版本锁定源码为准。
+> 状态：2026-11-09 已按修订分期实现 P1–P7（原会话代理 P4/P5 已撤销，改为界面操控；space-control 实际以宿主插件子入口 `@dsh-spaces/plugin/space-control` 分发，不是 §3 写的独立包）。实现与验收记录见 [tasks/archive/todo-2026-11.md](../tasks/archive/todo-2026-11.md)；本文正文保留设计原稿，未逐节改写。故障政策以 [let it crash](let-it-crash.md) 为唯一权威；角色与通道基线见 [architecture.md](architecture.md)；主空间注册与 Creator 通道实现见 §依据。官方 API 以运行时 DSH 0.2.2-rc.1 版本锁定源码为准。2026-11-10 修订：`llm-policy.set` 与 `hub/<id>/llm-policy.json` 已随 LLM 委派退役，现行操作是不带参数的 `models.sync`（从主空间复制一次模型配置，目标空间须已停止），`spaces_inspect` 的 model 段只返回目录占位；正文中涉及 llm-policy 与 llm-bridge 的段落是设计原稿。
 
 ## 1. 目标与非目标
 
@@ -53,7 +53,7 @@ Supervisor（每 Home 一个，唯一管理写者）
 
 ## 3. 包与预装
 
-**实现修订（2026-11-09，取代原“独立 bundle”方案）**：space-control 不再是独立 npm 包。原方案把 `@dsh-spaces/space-control` 作为 `file:lib/space-control` 嵌进宿主插件 dependencies，真实 tarball 安装时 pnpm 将该 file: 路径按**安装方 profile 根**解析而非 tarball 内部，整条安装失败（ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND）。改为宿主插件包内子入口：源码在 `packages/plugin/src/space-control/`，构建产物 `packages/plugin/lib/space-control.js`，经 package.json `exports["./space-control"]` 暴露为 `@dsh-spaces/plugin/space-control`（与 `dsh-spaces-main-images` 的 `@dsh-spaces/plugin/llm-images` 同一形态）。Cordis Loader 的 `name` 即 Node 模块 specifier，patch 行照常解析子路径（entry.ts/tree.ts 经 `import.meta.resolve` / 内部 loader）。
+**实现修订（2026-11-09，取代原“独立 bundle”方案）**：space-control 不再是独立 npm 包。原方案把 `@dsh-spaces/space-control` 作为 `file:lib/space-control` 嵌进宿主插件 dependencies，真实 tarball 安装时 pnpm 将该 file: 路径按**安装方 profile 根**解析而非 tarball 内部，整条安装失败（ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND）。改为宿主插件包内子入口：源码在 `packages/plugin/src/space-control/`，构建产物 `packages/plugin/lib/space-control.js`，经 package.json `exports["./space-control"]` 暴露为 `@dsh-spaces/plugin/space-control`。Cordis Loader 的 `name` 即 Node 模块 specifier，patch 行照常解析子路径（entry.ts/tree.ts 经 `import.meta.resolve` / 内部 loader）。
 
 落地：
 
@@ -153,7 +153,7 @@ Creator 通道每 service epoch 只允许一个注册（creator.ts:209-211）；
 
 1. `/internal/control/v1/` 路由 + `SupervisorControl` 类（issue 共享注册、scope 校验、op 分发、controlPlan 存取）——主体可复用 `SupervisorCreator` 的注册/计划骨架。
 2. `ChildSessionClient`：launch-token→cookie 交换、`/api` Remote 代理（方法白名单：sessionController.list/search/events/state/create/prompt/cancel、pluginManager.listPlugins/listBundles/modelCatalog），输入输出 bounded、非 JSON/越权如实失败。
-3. 新 plan kind `space.llm-policy.set`：`{spaceId, inheritMain: boolean}`。写 `hub/<id>/llm-policy.json` 走 `writeSpaceLlmPolicy` 原子写（llm-policy-store.ts:60-65）；语义：仅停止空间可写策略（运行中空间的 `DSH_SPACES_LLM_INHERIT_MAIN` 在 spawn env 时生效，tasks/todo.md:48）；计划含“需要停止/重启”的 changes 文案；执行在写锁内，先停（若计划含 restart）→ 原子写 → 可选重启；失败保留现场不回滚。是否并入 maintenance plans 或 Supervisor 本地 plans 视写权边界定。
+3. 新 plan kind `space.llm-policy.set`：`{spaceId, inheritMain: boolean}`。写 `hub/<id>/llm-policy.json` 走 `writeSpaceLlmPolicy` 原子写（llm-policy-store.ts:60-65）；语义：仅停止空间可写策略（运行中空间的 `DSH_SPACES_LLM_INHERIT_MAIN` 在 spawn env 时生效）；计划含“需要停止/重启”的 changes 文案；执行在写锁内，先停（若计划含 restart）→ 原子写 → 可选重启；失败保留现场不回滚。是否并入 maintenance plans 或 Supervisor 本地 plans 视写权边界定。
 4. `plugin.install` 的 GitHub 精确来源变体（若采纳）：installSpec 生成与读回校验复用 Creator 的 `installSpecFor`/`gitResolutionFor`（creator.ts:441-449,859-921）；allowBuilds 写 `pnpm-workspace.yaml` 复用 `writeBuildPolicy`（creator.ts:792-812）。
 5. `spaces_context`/`spaces_job` 工具的读面扩展（context 增 `controlBusy`；job 识别 control 作业归属）。
 

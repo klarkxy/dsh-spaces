@@ -8,16 +8,11 @@ import { runtimeFromContext, WorkbenchHostRuntime } from "./runtime";
 import { publicReason } from "../../../../src/adapters/node/runtime/start-failure";
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "../../../../src/shared/loopback";
 import { assertSupportedNode } from "../../../../src/shared/node-version";
-import { MainLlmService } from "./llm-main";
 import { MainSpaceCreatorService } from "./main-space-creator";
 import { MainSpaceControlService } from "./main-space-control";
 import { installMainSpaceGuidance } from "./main-space-guidance";
 import { installMainSpaceTools } from "./main-space-tools";
-import type { SupervisorEndpoint } from "./supervisor-bootstrap";
 import { shareWelcomeNotice } from "./welcome-notice";
-
-/** Bound for Main dependencies. The registration HTTP call keeps its own 10s limit. */
-const MAIN_DEPENDENCY_WAIT_MS = 10_000;
 
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 const HANDOFF_PATH = "/dsh-spaces/handoff";
@@ -28,7 +23,7 @@ const HANDOFF_PATH = "/dsh-spaces/handoff";
  * compatibility spaces reads register only when HomeLease.roleOf(current
  * profile) is manager. Web and ordinary managed profiles never auto-bootstrap a
  * supervisor. A confirmed Desktop host schedules one background launch after its
- * required Main registration listener is installed.
+ * Creator registration listener is installed.
  */
 export class SpacesPlugin {
   static inject = ["loader"];
@@ -66,10 +61,28 @@ export class SpacesPlugin {
       installMainSpaceTools(ctx, this.runtime, this.creator);
       const creator = this.creator;
       const control = this.control;
-      const dispose = this.runtime.onSupervisorAttached(
+      const runtime = this.runtime;
+      // The listener outlives a disposal that happens before the endpoint is
+      // delivered: the late attach then fails with MAIN_CLOSED, so a launch
+      // never reports ready without its main registration.
+      let delivered = false;
+      let disposed = false;
+      let listening = true;
+      let stopListening = (): void => undefined;
+      const stop = (): void => {
+        if (!listening) return;
+        listening = false;
+        stopListening();
+      };
+      stopListening = runtime.onSupervisorAttached(
         async (endpoint) => {
-          await creator.attach(endpoint);
-          control?.attach(endpoint);
+          delivered = true;
+          try {
+            await creator.attach(endpoint);
+            control?.attach(endpoint);
+          } finally {
+            if (disposed) stop();
+          }
         },
         async (epoch) => {
           await creator.afterSupervisorStopped(epoch);
@@ -77,104 +90,33 @@ export class SpacesPlugin {
         },
       );
       ctx.effect(() => async () => {
-        dispose();
+        disposed = true;
+        if (delivered) stop();
+        else {
+          void runtime.desktopLaunchState().then((state) => {
+            if (state.phase === "failed" || state.phase === "stopped" || state.phase === "ready" || state.phase === "idle") stop();
+          }, () => stop());
+        }
         await control?.close();
         await creator.close();
       });
     }
     installHostHint(ctx, this.runtime);
     installHandoffRoute(ctx, this.runtime);
-    if (!this.runtime.shouldRegisterManager) {
-      if (this.runtime.qualifiesForAutomaticDesktopLaunch()) scheduleConfirmedDesktopLaunch(ctx, this.runtime);
-      else if (process.env.DSH_SPACES_LLM_INHERIT_MAIN !== "1" && typeof ctx.inject === "function") {
-        ctx.inject(["llm", "agentDefaultModel", "attachments", "fs"], (ready) => {
-          const service = new MainLlmService(ready);
-          const dispose = this.runtime.onSupervisorAttached((endpoint) => service.attach(endpoint), (epoch) => service.afterSupervisorStopped(epoch));
-          ready.effect(() => async () => { dispose(); await service.close(); });
-        });
-      }
+    if (!this.runtime.shouldRegisterManager && this.runtime.qualifiesForAutomaticDesktopLaunch()) {
+      scheduleConfirmedDesktopLaunch(ctx, this.runtime);
     }
   }
 }
 
 /**
- * Install the required Main listener before scheduling the launch. The listener
- * waits until dependency injection supplies MainLlmService; dropping it first
- * would let attachReady report ready with no registration. Disposal clears the
- * timer and this listener once it has run or the launch is already terminal.
- * It does not erase the process launch record or schedule another begin.
+ * A confirmed Desktop host is also the trusted main host, so the Creator
+ * attachment listener is installed above before this launch begins; the
+ * launch waits for that registration. One launch per process start.
  */
 function scheduleConfirmedDesktopLaunch(ctx: Context, runtime: WorkbenchHostRuntime): void {
-  let service: MainLlmService | undefined;
-  let settled = false;
-  let disposed = false;
-  let delivered = false;
-  let listenerStopped = false;
-  let resolveReady: (value: MainLlmService) => void = () => undefined;
-  let rejectReady: (error: Error) => void = () => undefined;
-  const ready = new Promise<MainLlmService>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  void ready.catch(() => undefined);
-  const unavailable = () => new Error("Main registration dependencies are not available.");
-  const failWait = () => {
-    if (settled) return;
-    settled = true;
-    rejectReady(unavailable());
-  };
-  const timer = setTimeout(failWait, MAIN_DEPENDENCY_WAIT_MS);
-  if (typeof timer === "object") timer.unref();
-  let stopListening = (): void => undefined;
-  const stopListener = () => {
-    if (listenerStopped) return;
-    listenerStopped = true;
-    stopListening();
-  };
-  stopListening = runtime.onSupervisorAttached(async (endpoint: SupervisorEndpoint) => {
-    delivered = true;
-    try {
-      const main = await ready;
-      await main.attach(endpoint);
-    } finally {
-      if (disposed) stopListener();
-    }
-  }, async (epoch) => {
-    if (service) await service.afterSupervisorStopped(epoch);
-  });
-  const release = () => {
-    disposed = true;
-    clearTimeout(timer);
-    failWait();
-    if (delivered) {
-      stopListener();
-      return;
-    }
-    void runtime.desktopLaunchState().then((state) => {
-      if (state.phase === "failed" || state.phase === "stopped" || state.phase === "ready" || state.phase === "idle") stopListener();
-    }, () => stopListener());
-  };
-  ctx.effect(() => release);
   void runtime.beginDesktopLaunch().catch((error: unknown) => {
     ctx.logger.error(publicReason(error));
-  });
-  if (process.env.DSH_SPACES_LLM_INHERIT_MAIN === "1" || typeof ctx.inject !== "function") return;
-  ctx.inject(["llm", "agentDefaultModel", "attachments", "fs"], (injected) => {
-    const created = new MainLlmService(injected);
-    service = created;
-    if (disposed) {
-      void created.close();
-      return;
-    }
-    if (!settled) {
-      settled = true;
-      clearTimeout(timer);
-      resolveReady(created);
-    }
-    injected.effect(() => async () => {
-      release();
-      await created.close();
-    });
   });
 }
 

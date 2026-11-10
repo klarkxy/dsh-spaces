@@ -161,7 +161,7 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
     maintenance: () => false,
     hasComponent: () => false,
     ensureViewBridge: async () => undefined,
-    ensureLlmBridge: async () => undefined,
+    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
     installedRuntimeBin: () => join(home, "cli", "lib", "bin.js"),
     pluginAdd: async () => undefined,
     observeChildWork: (action) => action(),
@@ -190,8 +190,8 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
     stopOwned: async () => undefined,
     stopOwnedAll: async () => undefined,
     startSpace: async (id) => ({ spaceId: id }),
-    readLlmPolicy: () => ({ inheritMain: false }),
-    writeLlmPolicy: () => undefined,
+    mainProfile: () => "web",
+    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
     pluginLive: async (request) => {
       fixture.liveCalls.push({ request });
       if (fixture.liveAnswer) await fixture.liveAnswer(request);
@@ -223,7 +223,6 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
     unmanaged: (id) => runs.unmanaged.has(id),
     detail: async () => ({ plugins: [] }),
     diagnostics: (spaceId): WorkbenchDiagnostics => ({ spaceId, status: "stopped", logs: [], backups: [] }),
-    llmPolicy: () => ({ inheritMain: false }),
     observeTaskActivity: async () => "idle",
     admitSubmission: () => {
       if (!ownerAlive) throw new WorkbenchPublicError("workbench/read-only");

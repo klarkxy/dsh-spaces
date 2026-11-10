@@ -39,9 +39,6 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   if (flags["view-bridge-artifact"]) {
     options.viewBridgeArtifact = requirePath(flags["view-bridge-artifact"], "--view-bridge-artifact");
   }
-  if (flags["llm-bridge-artifact"]) {
-    options.llmBridgeArtifact = requirePath(flags["llm-bridge-artifact"], "--llm-bridge-artifact");
-  }
   if (flags["browser-artifact"]) {
     options.browserArtifact = requirePath(flags["browser-artifact"], "--browser-artifact");
   }
@@ -64,7 +61,6 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.supervisorAssetRoot) args.push("--supervisor-asset-root", options.supervisorAssetRoot);
   if (options.pluginArtifact) args.push("--plugin-artifact", options.pluginArtifact);
   if (options.viewBridgeArtifact) args.push("--view-bridge-artifact", options.viewBridgeArtifact);
-  if (options.llmBridgeArtifact) args.push("--llm-bridge-artifact", options.llmBridgeArtifact);
   if (options.browserArtifact) args.push("--browser-artifact", options.browserArtifact);
   if (options.snapshotWorkerFile) args.push("--snapshot-worker", options.snapshotWorkerFile);
   if (options.snapshotRoot) args.push("--snapshot-root", options.snapshotRoot);
@@ -84,7 +80,6 @@ function flagName(token: string): string | undefined {
     "--supervisor-asset-root": "supervisor-asset-root",
     "--plugin-artifact": "plugin-artifact",
     "--view-bridge-artifact": "view-bridge-artifact",
-    "--llm-bridge-artifact": "llm-bridge-artifact",
     "--browser-artifact": "browser-artifact",
     "--snapshot-worker": "snapshot-worker",
     "--snapshot-root": "snapshot-root",

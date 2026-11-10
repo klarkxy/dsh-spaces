@@ -36,7 +36,6 @@ export interface WorkbenchSupervisorOptions {
   pluginArtifact?: string;
   viewBridgeArtifact?: string;
   browserArtifact?: string;
-  llmBridgeArtifact?: string;
   snapshotWorkerFile?: string;
   snapshotRoot?: string;
   /** Selected v2 payload `lib` root (`--component-payload`). */
@@ -59,6 +58,8 @@ export interface WorkbenchSupervisorOptions {
   runCli?: BoundCliRunner;
   pluginAdd?: (home: string, profile: string, spec: string, options?: { force?: boolean }) => Promise<void>;
   pluginLink?: (home: string, profile: string, dir: string, expectedName: string) => Promise<void>;
+  /** Official plugin remove; used once per older space to drop the retired LLM bridge. */
+  pluginRemove?: (home: string, profile: string, packageName: string) => Promise<void>;
   dumpConfig?: (profile: string) => Promise<string>;
   patchWriter?: PatchWriter;
 }

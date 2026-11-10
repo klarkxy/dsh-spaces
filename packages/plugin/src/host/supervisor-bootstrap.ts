@@ -38,7 +38,6 @@ export { readLastSupervisorDiagnostics } from "../../../../src/adapters/node/hom
 export const SUPERVISOR_PAYLOAD_DIRNAME = "supervisor";
 export const VIEW_BRIDGE_PAYLOAD_DIRNAME = "view-bridge";
 export const BROWSER_PAYLOAD_DIRNAME = "browser";
-export const LLM_BRIDGE_PAYLOAD_DIRNAME = "llm-bridge";
 
 /** Matches parseSupervisorArgs in src/adapters/node/workbench-supervisor.ts. */
 export const SUPERVISOR_CLI_FLAGS = {
@@ -51,7 +50,6 @@ export const SUPERVISOR_CLI_FLAGS = {
   controlToolRoot: "--control-tool-root",
   snapshotWorker: "--snapshot-worker",
   snapshotRoot: "--snapshot-root",
-  llmBridgeArtifact: "--llm-bridge-artifact",
   exitWithHost: "--exit-with-host",
 } as const;
 
@@ -118,7 +116,7 @@ export interface SupervisorBootstrapOptions {
  * Attach a live supervisor if the private endpoint authenticates and the
  * HomeLease matches. Otherwise, for allowed roles, validate and
  * stage the full v2 component group outside Home, pack plugin/view-bridge/
- * llm-bridge tarballs from the selected package, and cold-start the supervisor CLI.
+ * browser tarballs from the selected package, and cold-start the supervisor CLI.
  */
 export async function bootstrapSupervisor(
   options: SupervisorBootstrapOptions,
@@ -291,15 +289,13 @@ export async function bootstrapSupervisor(
       } else {
         const viewRoot = realDirectory(join(selected.payloadRootLib, VIEW_BRIDGE_PAYLOAD_DIRNAME));
         const browserRoot = realDirectory(join(selected.payloadRootLib, BROWSER_PAYLOAD_DIRNAME));
-        const llmRoot = realDirectory(join(selected.payloadRootLib, LLM_BRIDGE_PAYLOAD_DIRNAME));
-        if (!viewRoot || !browserRoot || !llmRoot) {
-          return fail(["Installed plugin package, view-bridge, browser, or llm-bridge payload is missing."]);
+        if (!viewRoot || !browserRoot) {
+          return fail(["Installed plugin package, view-bridge, or browser payload is missing."]);
         }
         const packedArtifacts = await packLocalArtifacts({
           pluginPackageRoot: selected.packageRoot,
           viewBridgeRoot: viewRoot,
           browserRoot,
-          llmBridgeRoot: llmRoot,
           artifactDir: join(toolsRoot, "artifacts"),
           home,
           execPath,
@@ -308,9 +304,6 @@ export async function bootstrapSupervisor(
           pack: options.pack,
         });
         if ("reasons" in packedArtifacts) return fail(packedArtifacts.reasons);
-        if (!packedArtifacts.llmBridgeArtifact) {
-          return fail(["llm-bridge artifact was not packed from the selected payload."]);
-        }
         if (!packedArtifacts.browserArtifact) {
           return fail(["browser artifact was not packed from the selected payload."]);
         }
@@ -321,8 +314,6 @@ export async function bootstrapSupervisor(
           packedArtifacts.viewBridgeArtifact,
           SUPERVISOR_CLI_FLAGS.browserArtifact,
           packedArtifacts.browserArtifact,
-          SUPERVISOR_CLI_FLAGS.llmBridgeArtifact,
-          packedArtifacts.llmBridgeArtifact,
         );
       }
 

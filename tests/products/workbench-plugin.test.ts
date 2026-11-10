@@ -168,10 +168,6 @@ function writePayload(pluginRoot: string, marker = "payload"): string {
     ["lib/browser/lib/index.js", "export {};\n"],
     ["lib/browser/lib/client.js", "export {};\n"],
     ["lib/browser/lib/typert.host.js", "export {};\n"],
-    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
-    ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
-    ["lib/llm-bridge/lib/index.js", "export {};\n"],
-    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
     ["lib/space-control.js", "export {};\n"],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
@@ -492,7 +488,7 @@ test("two bootstrap callers serialize preparation and connect to the same single
     const results = await Promise.all([bootstrapSupervisor(options), bootstrapSupervisor(options)]);
     for (const result of results) assert.equal(result.connected, true, JSON.stringify(result));
     assert.equal(spawns, 1);
-    assert.equal(packs, 4);
+    assert.equal(packs, 3);
     assert.equal(new HomeOperationLock(toolsRoot).inspect().held, false);
   } finally {
     await fixture.close();

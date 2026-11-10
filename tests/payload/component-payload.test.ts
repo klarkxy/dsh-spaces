@@ -83,11 +83,6 @@ function dummyTree(options: { skip?: string[] } = {}): { root: string; lib: stri
     ["lib/browser/lib/index.js", "export const browser = 1;\n"],
     ["lib/browser/lib/client.js", "export const browserClient = 1;\n"],
     ["lib/browser/lib/typert.host.js", "export const browserHost = 1;\n"],
-    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], "4.0.0")],
-    ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
-    ["lib/llm-bridge/LICENSE", "llm-license\n"],
-    ["lib/llm-bridge/lib/index.js", "export const llm = 1;\n"],
-    ["lib/llm-bridge/lib/auxiliary.js", "export const auxiliary = 1;\n"],
     ["lib/space-control.js", "export const control = 1;\n"],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", pkg("playwright-core", UI_ENGINE_PACKAGE_VERSION)],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export const chromium = {};\n"],
@@ -111,7 +106,7 @@ function writeManifest(root: string, manifest: unknown): void {
   writeRel(root, COMPONENT_PAYLOAD_MANIFEST_REL, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-test("write and validate a complete six-component dummy payload", () => {
+test("write and validate a complete five-component dummy payload", () => {
   const { root, lib } = dummyTree();
   const written = writeComponentPayloadManifest(lib);
   assert.equal(written.manifest.schemaVersion, COMPONENT_PAYLOAD_SCHEMA_VERSION);
@@ -122,7 +117,7 @@ test("write and validate a complete six-component dummy payload", () => {
   assert.equal(written.packageRoot, root);
   assert.deepEqual(
     COMPONENT_PAYLOAD_NAMES.map((name) => written.manifest.components[name].version),
-    ["2.0.0", "1.0.0", "3.0.0", "3.0.0", "4.0.0", "2.0.0"],
+    ["2.0.0", "1.0.0", "3.0.0", "3.0.0", "2.0.0"],
   );
   for (const name of COMPONENT_PAYLOAD_NAMES) {
     const row = written.manifest.components[name];
@@ -151,45 +146,10 @@ test("manifest identity must agree with the package bytes", () => {
   assert.throws(() => validateComponentPayload(lib), /identity differs/);
 });
 
-test("write fails closed when llm-bridge assets are missing", () => {
-  const { lib } = dummyTree({
-    skip: ["lib/llm-bridge/package.json", "lib/llm-bridge/cordis.patch.yml", "lib/llm-bridge/lib/index.js", "lib/llm-bridge/LICENSE"],
-  });
-  assert.throws(() => writeComponentPayloadManifest(lib), ComponentPayloadError);
-  assert.throws(() => writeComponentPayloadManifest(lib), /llm-bridge|missing/i);
-});
-
 test("write fails closed when the installation worker is missing", () => {
   const { lib } = dummyTree({ skip: ["lib/supervisor/snapshot-worker.mjs"] });
   assert.throws(() => writeComponentPayloadManifest(lib), ComponentPayloadError);
   assert.throws(() => writeComponentPayloadManifest(lib), /installation-worker|snapshot-worker/i);
-});
-
-test("auxiliary entry is required before manifest creation and after staging", () => {
-  const rel = "lib/llm-bridge/lib/auxiliary.js";
-  const missing = dummyTree({ skip: [rel] });
-  assert.throws(() => writeComponentPayloadManifest(missing.lib), /auxiliary\.js/);
-
-  const source = dummyTree();
-  const written = writeComponentPayloadManifest(source.lib);
-  const declared = written.files.find(file => file.path === rel);
-  assert.ok(declared, "auxiliary export must be covered by the runtime manifest");
-  const copied = copyComponentPayload(source.lib, join(tempDir("dsh-auxiliary-copy-"), "payload"));
-  assert.deepEqual(copied.files.find(file => file.path === rel), declared);
-  assert.deepEqual(readFileSync(join(copied.packageRoot, rel)), readFileSync(join(source.root, rel)));
-  writeRel(copied.packageRoot, rel, "export const auxiliary = 2;\n");
-  assert.throws(() => validateComponentPayload(copied.payloadRootLib), /sha256 does not match/);
-});
-
-test("a manifest omitting auxiliary is rejected before a destination is created", () => {
-  const source = dummyTree();
-  const manifest = writeComponentPayloadManifest(source.lib).manifest;
-  manifest.components["llm-bridge"].files = manifest.components["llm-bridge"].files
-    .filter(file => file.path !== "lib/llm-bridge/lib/auxiliary.js");
-  writeManifest(source.root, manifest);
-  const destination = join(tempDir("dsh-auxiliary-rejected-"), "payload");
-  assert.throws(() => copyComponentPayload(source.lib, destination), /auxiliary\.js/);
-  assert.equal(existsSync(destination), false);
 });
 
 test("validate rejects a v1 supervisor manifest", () => {
@@ -208,19 +168,19 @@ test("validate rejects unknown schema and protocol versions", () => {
   assert.throws(() => validateComponentPayload(lib), /protocolVersion/);
 });
 
-test("validate rejects a missing llm-bridge component and a tampered file", () => {
+test("validate rejects a missing view-bridge component and a tampered file", () => {
   const { root, lib } = dummyTree();
   const valid = writeComponentPayloadManifest(lib).manifest;
-  const { "llm-bridge": _omitted, ...rest } = valid.components;
+  const { "view-bridge": _omitted, ...rest } = valid.components;
   writeManifest(root, { ...valid, components: rest });
-  assert.throws(() => validateComponentPayload(lib), /missing component llm-bridge/);
+  assert.throws(() => validateComponentPayload(lib), /missing component view-bridge/);
 
   writeManifest(root, valid);
   writeRel(root, "lib/index.js", "export const plugin = 2;\n");
   assert.throws(() => validateComponentPayload(lib), /sha256 does not match/);
 });
 
-test("an older five-component manifest is rejected without touching Home data", () => {
+test("a manifest without the browser component is rejected without touching Home data", () => {
   const { root, lib } = dummyTree();
   const home = tempDir("dsh-existing-home-");
   const sentinel = join(home, "profiles", "notes", "cordis.patch.yml");
@@ -317,7 +277,7 @@ test("copy copies only declared files and refuses to import src or node_modules"
   assert.equal(existsSync(join(dest, "node_modules")), false);
   assert.equal(existsSync(join(dest, COMPONENT_PAYLOAD_MANIFEST_REL)), true);
   assert.equal(existsSync(join(dest, "lib", "supervisor", "index.js")), true);
-  assert.equal(existsSync(join(dest, "lib", "llm-bridge", "lib", "index.js")), true);
+  assert.equal(existsSync(join(dest, "lib", "view-bridge", "lib", "index.js")), true);
   const again = copyComponentPayload(source.lib, dest);
   assert.equal(again.digest, written.digest);
 });
@@ -355,12 +315,12 @@ test("external directory junction assets are rejected", (t) => {
   const source = dummyTree();
   writeComponentPayloadManifest(source.lib);
   const outsideDir = tempDir("dsh-component-outside-dir-");
-  writeRel(outsideDir, "package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], "4.0.0"));
-  writeRel(outsideDir, "cordis.patch.yml", "llm: dummy\n");
-  writeRel(outsideDir, "lib/index.js", "export const llm = 1;\n");
-  rmSync(join(source.root, "lib", "llm-bridge"), { recursive: true, force: true });
+  writeRel(outsideDir, "package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["view-bridge"], "4.0.0"));
+  writeRel(outsideDir, "cordis.patch.yml", "view: dummy\n");
+  writeRel(outsideDir, "lib/index.js", "export const view = 1;\n");
+  rmSync(join(source.root, "lib", "view-bridge"), { recursive: true, force: true });
   try {
-    symlinkSync(outsideDir, join(source.root, "lib", "llm-bridge"), process.platform === "win32" ? "junction" : "dir");
+    symlinkSync(outsideDir, join(source.root, "lib", "view-bridge"), process.platform === "win32" ? "junction" : "dir");
   } catch (error) {
     t.skip(`external directory junction is not testable on this Windows account: ${String(error)}`);
     return;
@@ -368,14 +328,11 @@ test("external directory junction assets are rejected", (t) => {
   assert.throws(() => validateComponentPayload(source.lib), /symlink or junction/);
 });
 
-test("pack-spaces-plugin required list includes the v2 manifest and llm assets", () => {
+test("pack-spaces-plugin required list includes the v2 manifest and bridge assets", () => {
   for (const rel of [
     "lib/supervisor/manifest.json",
     "lib/supervisor/index.js",
     "lib/supervisor/snapshot-worker.mjs",
-    "lib/llm-bridge/package.json",
-    "lib/llm-bridge/cordis.patch.yml",
-    "lib/llm-bridge/lib/index.js",
     "lib/view-bridge/package.json",
     "lib/view-bridge/cordis.patch.yml",
     "lib/view-bridge/lib/index.js",

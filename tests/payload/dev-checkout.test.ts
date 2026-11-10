@@ -45,7 +45,7 @@ function writeRel(root: string, rel: string, content: string): void {
 /** Minimal source checkout: private root manifest plus installable packages/<c> dirs. */
 function writeCheckout(root: string): string {
   writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
-  for (const dir of ["plugin", "view-bridge", "llm-bridge", "browser"]) {
+  for (const dir of ["plugin", "view-bridge", "browser"]) {
     writeRel(join(root, "packages", dir), "package.json", `${JSON.stringify({
       name: `@dsh-spaces/${dir}`, version: "0.5.0", main: "./lib/index.js",
       dsh: { bundle: { patch: "./cordis.patch.yml" } },
@@ -81,10 +81,6 @@ function writeCheckoutPayload(root: string): string {
     ["lib/browser/lib/index.js", "export {};\n"],
     ["lib/browser/lib/client.js", "export {};\n"],
     ["lib/browser/lib/typert.host.js", "export {};\n"],
-    ["lib/llm-bridge/package.json", pkg(COMPONENT_PAYLOAD_PACKAGES["llm-bridge"])],
-    ["lib/llm-bridge/cordis.patch.yml", "llm: dummy\n"],
-    ["lib/llm-bridge/lib/index.js", "export {};\n"],
-    ["lib/llm-bridge/lib/auxiliary.js", "export {};\n"],
     ["lib/space-control.js", "export {};\n"],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/package.json", `${JSON.stringify({ name: "playwright-core", version: "1.62.1" })}\n`],
     ["lib/supervisor/ui-engine/node_modules/playwright-core/index.mjs", "export {};\n"],
@@ -264,9 +260,6 @@ test("dev alignManagerPlugin links plugin and view-bridge for an unlinked manage
 test("devComponentProblem names each unusable source state", () => {
   const checkout = writeCheckout(tempDir("dsh-dev-prob-co-"));
   assert.equal(devComponentProblem(checkout, "view-bridge"), undefined);
-
-  rmSync(join(checkout, "packages", "llm-bridge"), { recursive: true, force: true });
-  assert.match(devComponentProblem(checkout, "llm-bridge")!, /llm-bridge.*missing/i);
 
   const wrongName = writeCheckout(tempDir("dsh-dev-prob-wn-"));
   writeFileSync(join(wrongName, "packages", "view-bridge", "package.json"),

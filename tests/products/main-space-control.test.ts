@@ -247,7 +247,7 @@ async function startFakeSupervisor(home: string): Promise<FakeSupervisor> {
           return reply({ ok: true, value: { view: "overview", protocolVersion: 1, serviceEpoch: fake.serviceEpoch, revision: "r1", writable: true, maintenance: false, busy: false, dshVersion: null, spaces: [{ id: "space-alpha", displayName: "Alpha", status: "running", generation: 1, dshVersion: null, activity: "busy" }], creating: [], failedJobs: [], truncated: false } });
         }
         if (op === "read" && body.view === "inspect") {
-          return reply({ ok: true, value: { view: "inspect", spaceId: body.spaceId, plugins: { ok: true, value: [{ name: "dsh-plugin-one", version: "1.0.0" }] }, model: { ok: true, value: { inheritMain: true, catalog: null } } } });
+          return reply({ ok: true, value: { view: "inspect", spaceId: body.spaceId, plugins: { ok: true, value: [{ name: "dsh-plugin-one", version: "1.0.0" }] }, model: { ok: true, value: { catalog: null, catalogReason: "not readable" } } } });
         }
         if (op === "read" && body.view === "logs") {
           return reply({ ok: true, value: { view: "logs", spaceId: body.spaceId, status: "stopped", entries: [{ at: "2026-01-01T00:00:00Z", channel: "stdout", text: `tail-${body.tail}` }], truncated: false } });
@@ -460,7 +460,7 @@ test("the plugin patch row and package metadata carry the canonical ids", () => 
   assert.equal(rootPkg.dependencies?.["@dsh-spaces/space-control"], undefined);
   assert.equal(existsSync(join(repo, "packages/space-control/package.json")), false, "no standalone space-control package remains");
 
-  for (const rel of ["packages/view-bridge/cordis.patch.yml", "packages/llm-bridge/cordis.patch.yml"]) {
+  for (const rel of ["packages/view-bridge/cordis.patch.yml"]) {
     const text = readFileSync(join(repo, rel), "utf8");
     assert.equal(text.includes("dsh-space-control"), false, `${rel} must not carry the main-space-only row`);
   }
@@ -807,7 +807,7 @@ test("plugin.install approval names the exact source and every approved build sc
   });
 });
 
-test("runtime.set and llm-policy.set approvals name the from/to change", async () => {
+test("runtime.set and models.sync approvals name the change", async () => {
   const home = tempDir("dsh-control-pol-");
   writeProfile(home, "web");
   const supervisor = await startFakeSupervisor(home);
@@ -836,11 +836,11 @@ test("runtime.set and llm-policy.set approvals name the from/to change", async (
   assert.match(approvalSeen.at(-1)?.reason ?? "", /Switch "Alpha" \(space-alpha\) to DSH runtime 0\.2\.1-rc\.2/);
 
   const pol = await plan.execute(
-    { op: "llm-policy.set", spaceId: "space-alpha", params: { inheritMain: false } },
+    { op: "models.sync", spaceId: "space-alpha" },
     execArgs({ agent }),
   ) as { controlPlanId: string };
   await execute.execute({ planId: pol.controlPlanId, requestId: "req-pol" }, execArgs({ agent }));
-  assert.match(approvalSeen.at(-1)?.reason ?? "", /Set model policy of "Alpha" \(space-alpha\) to inheritMain=false/);
+  assert.match(approvalSeen.at(-1)?.reason ?? "", /Copy the main space model settings and their keys into "Alpha" \(space-alpha\)/);
 });
 
 test("plugin.live.* approvals name the running-space application and the exact target", async () => {

@@ -33,8 +33,6 @@ jobs:
       - run: npm test
       - run: npm run test:spaces
       - run: npm run test:llm
-      - run: npm run test:llm:integration
-      - run: npm run validate:llm:distribution
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
       - name: Install official DSH CLI (0.2.2-rc.1)

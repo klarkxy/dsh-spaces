@@ -45,7 +45,7 @@ function writeRel(root: string, rel: string, content: string): void {
 
 function writeCheckout(root: string): string {
   writeRel(root, "package.json", `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
-  for (const dir of ["plugin", "view-bridge", "llm-bridge", "browser"]) {
+  for (const dir of ["plugin", "view-bridge", "browser"]) {
     const dependencies: Record<string, string> = {};
     if (dir === "plugin" || dir === "view-bridge") dependencies[DEV_INDEX] = DEV_INDEX_VERSION;
     writeRel(root, `packages/${dir}/package.json`, `${JSON.stringify({

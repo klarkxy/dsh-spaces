@@ -22,10 +22,9 @@ const WATCH_DIRS = [
   "src",
   "packages/plugin/src",
   "packages/view-bridge/src",
-  "packages/llm-bridge/src",
   "packages/browser/src",
 ];
-const WATCH_FILES = ["plugin", "view-bridge", "llm-bridge", "browser"].map(
+const WATCH_FILES = ["plugin", "view-bridge", "browser"].map(
   (pkg) => `packages/${pkg}/cordis.patch.yml`,
 );
 

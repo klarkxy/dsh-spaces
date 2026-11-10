@@ -15,14 +15,13 @@ import type { DiagnosticsService } from "./diagnostics/diagnostics";
 import { WorkbenchLog } from "./maintenance/workbench-log";
 import { assertNotRealHome, authorizeProductHome } from "./home/home-guard";
 import { PatchWriter, SESSION_ROW_ID, extractRoot } from "./profile/patch-writer";
-import { pluginAdd } from "./products/plugin-ops";
+import { pluginAdd, pluginRemove } from "./products/plugin-ops";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./runtime/process-manager";
 import { setSelectedDshResolver } from "./runtime/dsh-cli";
 import { setPackageSource } from "./runtime/toolchain";
-import { readSpaceLlmPolicy, writeSpaceLlmPolicy } from "./llm/llm-policy-store";
+import { describeModelSync, syncMainModels, type ModelSyncSummary } from "./llm/main-model-sync";
 import { ProfileRegistry } from "./profile/profile-registry";
 import type { RuntimeStore } from "./runtime/runtime-store";
-import { assertOwnedProfilePath } from "./profile/profile-settings";
 import { validateComponentPayload, type ValidatedComponentPayload } from "./payload/component-payload";
 import { redactPublicReason } from "../../shared/public-reason";
 import type { SpaceDetail } from "../../shared/spaces-control";
@@ -102,7 +101,6 @@ import { SupervisorControl } from "./supervisor/control";
 import { SupervisorCreator } from "./supervisor/creator";
 import { UiAutomationManager } from "./supervisor/ui-automation";
 import { ChildRemoteClient, runLivePlan } from "./supervisor/child-remote";
-import { SupervisorLlmDelegation } from "./llm/delegation";
 import { SupervisorMaintenanceGate } from "./supervisor/maintenance";
 import {
   bindSelectedCli,
@@ -147,6 +145,7 @@ const SUPERVISOR_PLAN_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.stop",
   "space.restart",
   "space.delete",
+  "space.models.sync",
   "service.shutdown",
 ]);
 const REMOVED_COMMAND_KINDS = new Set([
@@ -207,7 +206,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private selectedPayload: ValidatedComponentPayload | undefined;
   private readonly instances: SupervisorInstanceRecords;
   private readonly llmOps: SupervisorLlm;
-  private readonly llmDelegation: SupervisorLlmDelegation;
   private readonly spaceAttention: SupervisorAttention;
   private readonly creator: SupervisorCreator;
   private readonly control: SupervisorControl;
@@ -261,7 +259,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       lifecycle: this.lifecycle,
       runs: this.runs,
       instances: () => this.instances,
-      llmDelegation: () => this.llmDelegation,
       processes: () => this.processes,
       options: this.options,
       lock: this.lock,
@@ -270,9 +267,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       view: (spaceId) => this.view(spaceId),
       requireServiceEpoch: () => this.stateModel.requireServiceEpoch(),
       ensureViewBridge: (profileId) => this.toolchain.ensureViewBridge(profileId),
-      ensureLlmBridge: (profileId) => this.llmOps.ensureLlmBridge(profileId),
       ensureBundledDeps: (profileId) => this.toolchain.ensureBundledDependencies(profileId),
       installComponent: (profileId, component) => this.toolchain.installComponent(profileId, component),
+      removePlugin: (profileId, packageName) => (this.options.pluginRemove ?? pluginRemove)(this.home, profileId, packageName),
       componentAligned: (profileId, component) => this.toolchain.componentAligned(profileId, component),
       readDump: (profile) => this.toolchain.readDump(profile),
       pinnedDshVersion: (spaceId) => this.toolchain.pinnedDshVersion(spaceId),
@@ -290,7 +287,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       requireSpace: (spaceId) => this.spaceInventory.requireSpace(spaceId),
       protectSpecial: (id, protectOptions) => this.spaceInventory.protectSpecial(id, protectOptions),
       ensureViewBridge: (profileId) => this.toolchain.ensureViewBridge(profileId),
-      ensureLlmBridge: (profileId) => this.llmOps.ensureLlmBridge(profileId),
+      mainProfile: () => this.mainProfile(),
+      syncMainModels: (spaceId) => this.syncMainModels(spaceId),
       hasComponent: (component) => this.toolchain.hasComponent(component),
     });
     this.stateModel = new SupervisorState({
@@ -381,8 +379,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       stopOwned: (spaceId) => this.spaceLifecycle.stopOwned(spaceId),
       stopOwnedAll: () => this.spaceLifecycle.stopOwnedAll(),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
-      readLlmPolicy: (spaceId) => readSpaceLlmPolicy(this.home, spaceId),
-      writeLlmPolicy: (spaceId, inheritMain) => writeSpaceLlmPolicy(this.home, spaceId, inheritMain),
+      mainProfile: () => this.mainProfile(),
+      syncMainModels: (spaceId) => this.syncMainModels(spaceId),
       pluginLive: (request, ctx) => {
         const client = this.childRemoteClient(request.spaceId);
         if (!client) throw new WorkbenchPublicError("workbench/unavailable", "The child remote surface is unavailable.");
@@ -401,54 +399,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       plans: this.supervisorPlans.plans,
     });
     this.llmOps = new SupervisorLlm({
-      home: this.home,
-      managerId: () => this.managerId,
-      hasComponent: (component) => this.toolchain.hasComponent(component),
-      installComponent: (profileId, component) => this.toolchain.installComponent(profileId, component),
-      componentAligned: (profileId, component) => this.toolchain.componentAligned(profileId, component),
-      devCheckout: () => this.options.devCheckoutRoot,
       runs: this.runs,
       publicStatus: (id) => this.spaceInventory.publicStatus(id),
       currentServiceEpoch: () => this.stateModel.currentServiceEpoch(),
-    });
-    this.llmDelegation = new SupervisorLlmDelegation({
-      home: this.home, origin: () => this.origin, epoch: () => this.stateModel.requireServiceEpoch(),
-      hostBearerEquals: value => this.hostBearerEquals(value),
-      assertOwner: () => {
-        this.lifecycle.assertWritable();
-        const current = this.lease.inspect(), expected = this.lifecycle.handle?.owner;
-        if (!expected || !current.held || !("owner" in current) || current.handoff || current.liveness !== "alive" ||
-            current.owner.nonce !== expected.nonce || current.owner.pid !== expected.pid || current.owner.startedAt !== expected.startedAt || this.lifecycle.closed || this.lifecycle.blocked) {
-          throw new WorkbenchPublicError("workbench/read-only");
-        }
-      },
-      assertSource: (id, generation, child) => {
-        if (id === this.managerId || this.runs.unmanaged.has(id) || this.runs.generation(id) !== generation ||
-            this.runs.spawned.get(id)?.pid !== child.pid || !child.connected || child.exitCode !== null || child.signalCode !== null) {
-          throw new WorkbenchPublicError("workbench/unmanaged");
-        }
-        this.spaceInventory.requireManaged(id);
-      },
-      assertMainProfile: profile => {
-        if (profile === this.managerId || this.runs.spawned.has(profile)) {
-          throw new WorkbenchPublicError("workbench/protected");
-        }
-        const directory = join(this.home, "profiles", profile);
-        assertOwnedProfilePath(this.home, join(directory, "package.json"));
-        const stat = lstatSync(directory), manifest = lstatSync(join(directory, "package.json"));
-        if (!stat.isDirectory() || stat.isSymbolicLink() || !manifest.isFile() || manifest.isSymbolicLink()) {
-          throw new WorkbenchPublicError("workbench/unavailable");
-        }
-      },
-      assertAllowedSpace: id => { this.spaceInventory.protectSpecial(this.spaceInventory.requireManaged(id), { allowManager: false }); },
-      inheritsMain: id => readSpaceLlmPolicy(this.home, id).inheritMain,
-      reportCleanupFailure: reason => {
-        this.lifecycle.addReason(reason);
-        const current = this.lease.inspect(), expected = this.lifecycle.handle?.owner;
-        if (expected && current.held && "owner" in current && !current.handoff && current.liveness === "alive" && current.owner.nonce === expected.nonce) {
-          this.workbenchLog().append({ level: "error", area: "llm-delegation", event: "cancel.unconfirmed", message: reason, code: "LLM_CANCEL_UNCONFIRMED" });
-        } else console.error(reason);
-      },
     });
     this.creator = new SupervisorCreator({
       home: this.home,
@@ -479,7 +432,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       maintenance: () => this.lifecycle.maintenanceFlag,
       hasComponent: component => this.toolchain.hasComponent(component),
       ensureViewBridge: profileId => this.toolchain.ensureViewBridge(profileId),
-      ensureLlmBridge: profileId => this.llmOps.ensureLlmBridge(profileId),
+      syncMainModels: spaceId => this.syncMainModels(spaceId),
       installedRuntimeBin: version => this.runtimeStore?.installedBin(version),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
       pluginAdd: (home, profile, spec) => {
@@ -507,7 +460,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       unmanaged: id => this.runs.unmanaged.has(id),
       detail: id => this.detail(id),
       diagnostics: spaceId => this.maintenanceGate.productDiagnostics(spaceId),
-      llmPolicy: spaceId => readSpaceLlmPolicy(this.home, spaceId),
       observeTaskActivity: spaceId => this.llmOps.observeTaskActivity(spaceId),
       admitSubmission: () => this.lifecycle.admitSubmission(),
       assertWritable: () => this.lifecycle.assertWritable(),
@@ -586,8 +538,31 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.bootstrap.set(randomBytes(24).toString("base64url"), this.now().getTime() + 600_000);
   }
 
-  handleLlmDelegationRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    return this.llmDelegation.handle(req, res);
+  /** The verified main profile of this service epoch, from the main-channel registration. */
+  private mainProfile(): string {
+    const profile = this.creator.registrationView()?.profile;
+    if (!profile) {
+      throw new WorkbenchPublicError("workbench/unavailable", "The main space is not connected to this Spaces service, so its models cannot be read.");
+    }
+    return profile;
+  }
+
+  /** One copy of the main space's models into a stopped space; see main-model-sync.ts. */
+  private async syncMainModels(spaceId: string): Promise<ModelSyncSummary> {
+    const mainProfile = this.mainProfile();
+    const summary = await syncMainModels({
+      home: this.home,
+      mainProfile,
+      spaceId,
+      dumpConfig: async (profile) => {
+        // The main profile runs the host DSH, so the host-bound CLI composes it.
+        const result = await this.toolchain.runBoundCli(["--profile", profile, "--dump-config"]);
+        if (result.code !== 0) throw new WorkbenchPublicError("workbench/failed", "The main space configuration could not be read.");
+        return result.stdout;
+      },
+    });
+    this.workbenchLog().append({ level: "info", area: "models", event: "sync", message: `${spaceId}: ${describeModelSync(summary)}` });
+    return summary;
   }
 
   handleCreatorRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
@@ -674,7 +649,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (this.lifecycle.closed) return;
     this.lifecycle.sealing = true;
     try {
-      await this.llmDelegation.close();
       await this.creator.close();
       await this.control.close();
       // Releases the automation browser and every session page/context;
@@ -1227,8 +1201,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
             currentEpoch: this.stateModel.currentServiceEpoch(),
           }),
         };
-        if (readSpaceLlmPolicy(this.home, profile).inheritMain) env.DSH_SPACES_LLM_INHERIT_MAIN = "1";
-        else delete env.DSH_SPACES_LLM_INHERIT_MAIN;
         const spawnFn = injected.spawn ?? children.spawn;
         const port = Number(args[args.indexOf("--port") + 1]);
         mkdirSync(this.instances.instancesDir(), { recursive: true });
@@ -1243,7 +1215,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           this.spaceAttention.attachChild(profile, child, this.runs.generation(profile), this.stateModel.currentServiceEpoch());
           if (profile !== this.managerId) this.messageBus.attach(profile, child);
           this.runs.spawned.set(profile, { pid: child.pid, startedAt: this.now().toISOString() });
-          if (profile !== this.managerId) this.llmDelegation.attachChild(profile, child, this.runs.generation(profile));
           try { this.instances.writeInstanceRecord(profile, port, this.runs.generation(profile)); }
           catch {
             this.lifecycle.maintenanceBlocked = true;
@@ -1252,7 +1223,6 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           child.once("exit", () => {
             const recorded = this.runs.spawned.get(profile);
             if (recorded?.pid === child.pid) {
-              void this.llmDelegation.retire(profile).catch(() => {}); // broker has already recorded the cleanup failure
               this.runs.spawned.delete(profile);
               this.instances.removeInstanceRecord(profile);
             }

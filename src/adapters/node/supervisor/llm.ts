@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { LLM_ERROR, LlmConfigError } from "../../../shared/llm-connections";
-import type { SpacesComponent } from "../payload/dev-checkout";
-import { profileHasLlmBridge } from "./profile-probe";
 import type { SpaceRunRegistry } from "./space-runs";
 import {
   LLM_ACTIVITY_CHANNEL,
@@ -23,15 +21,10 @@ type ActivitySession = {
   dispose(): void;
 };
 
+/** Activity reports come from the child's view bridge over the inherited IPC descriptor. */
 export interface SupervisorLlmHost {
-  home: string;
-  managerId: () => string | null;
   publicStatus: (id: string) => "running" | "stopped" | "crashed" | "unknown" | string;
   currentServiceEpoch: () => string;
-  hasComponent: (component: SpacesComponent) => boolean;
-  installComponent: (profileId: string, component: SpacesComponent) => Promise<void>;
-  componentAligned: (profileId: string, component: SpacesComponent) => boolean;
-  devCheckout: () => string | undefined;
   runs: SpaceRunRegistry;
 }
 
@@ -165,14 +158,5 @@ export class SupervisorLlm {
       await release(error);
       throw error;
     }
-  }
-
-  async ensureLlmBridge(profileId: string): Promise<void> {
-    if (!this.host.hasComponent("llm-bridge")) return;
-    if (profileId === "web" || profileId === this.host.managerId()) return;
-    if (this.host.devCheckout() !== undefined
-      ? this.host.componentAligned(profileId, "llm-bridge")
-      : profileHasLlmBridge(this.host.home, profileId)) return;
-    await this.host.installComponent(profileId, "llm-bridge");
   }
 }

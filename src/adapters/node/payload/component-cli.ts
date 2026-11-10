@@ -49,7 +49,7 @@ export function unmetDshRequirements(manifest: unknown, version: string): Record
 /** Keep each component's constraints separate; later packages cannot hide an earlier mismatch. */
 export function unmetProfileDshRequirements(profileDir: string, version: string): string[] {
   const modules = join(profileDir, "node_modules", "@dsh-spaces");
-  return ["plugin", "view-bridge", "llm-bridge", "browser"].flatMap(name => {
+  return ["plugin", "view-bridge", "browser"].flatMap(name => {
     const path = join(modules, name, "package.json");
     if (!existsSync(path)) return [];
     const manifest = readPluginManifest(path, `@dsh-spaces/${name}`);
@@ -239,12 +239,11 @@ export function payloadBridgeFiles(payloadRoot: string, bridge: string): string[
  * version, and source digest stay the same.
  */
 const CANONICAL_ALIGNMENT_ARCHIVE_ID =
-  /^dsh-spaces-(plugin|view-bridge|llm-bridge|browser)-[a-f0-9]{20}$/;
+  /^dsh-spaces-(plugin|view-bridge|browser)-[a-f0-9]{20}$/;
 
 const ALIGNMENT_PACKAGE_NAMES = {
   plugin: "@dsh-spaces/plugin",
   "view-bridge": "@dsh-spaces/view-bridge",
-  "llm-bridge": "@dsh-spaces/llm-bridge",
   browser: "@dsh-spaces/browser",
 } as const;
 

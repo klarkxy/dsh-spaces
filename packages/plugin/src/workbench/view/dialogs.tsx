@@ -174,6 +174,10 @@ function PlanDialog({
     title = t(locale, "plan.title.pluginEnable", { space: named([request.spaceId]), pluginId: request.pluginId });
     body = t(locale, "plan.body.pluginEnable");
     confirmLabel = t(locale, "plan.confirm.enable");
+  } else if (kind === "space.models.sync") {
+    title = t(locale, "plan.title.modelsSync", { space: named([request.spaceId]) });
+    body = t(locale, "detail.models.hint");
+    confirmLabel = t(locale, "plan.confirm.syncModels");
   } else if (kind === "plugin.cleanup-manager") {
     title = t(locale, "plan.title.pluginCleanup", { space: named([request.spaceId]) });
     body = t(locale, "plugins.cleanupHint");

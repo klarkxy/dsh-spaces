@@ -224,7 +224,7 @@ function makePorts(home: string, options: {
     maintenance: () => false,
     hasComponent: options.hasComponent ?? (() => false),
     ensureViewBridge: async () => undefined,
-    ensureLlmBridge: async () => undefined,
+    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
     installedRuntimeBin: () => join(home, "cli", "lib", "bin.js"),
     startSpace: options.startSpace ?? (async (spaceId) => { started.push(spaceId); return { spaceId }; }),
     pluginAdd,
@@ -498,6 +498,8 @@ test("preview freezes a bound plan and execute runs the single composed job", as
   assert.equal(steps[2]?.detail, "dsh-plugin-a@1.2.3");
   assert.equal(steps[3]?.packageName, "dsh-b");
   assert.equal(steps[3]?.detail, `klarkxy/dsh-plugins/plugins/dsh-b#${"a".repeat(40)}`);
+  // A local-source space keeps its own models: no sync ran and no policy file exists.
+  assert.equal(existsSync(join(home, "hub", "space-factory", "llm-policy.json")), false);
   assert.deepEqual(fx.created, ["space-factory"]);
   assert.deepEqual(fx.started, ["space-factory"]);
   assert.deepEqual(fx.installCalls, [
@@ -521,14 +523,14 @@ test("preview freezes a bound plan and execute runs the single composed job", as
   assert.equal(other.body.error?.code, "creator/not-found");
 });
 
-test("preview rejects a missing linked component and never submits a job", async () => {
+for (const missing of ["view-bridge"]) test(`preview rejects a missing linked ${missing} and never submits a job`, async () => {
   const home = tempHome();
   writeProfile(home, "web");
   const fx = makePorts(home, {
     hasComponent: (component) => {
-      if (component === "view-bridge") {
+      if (component === missing) {
         throw new WorkbenchPublicError("workbench/unavailable",
-          "The selected view-bridge component is unavailable: the linked @dsh-spaces/view-bridge source directory is missing.");
+          `The selected ${missing} component is unavailable: the linked @dsh-spaces/${missing} source directory is missing.`);
       }
       return true;
     },
@@ -541,7 +543,7 @@ test("preview rejects a missing linked component and never submits a job", async
   const preview = await call(fx, "createPreview", scope, { input: { name: "broken", icon: "whale", modelSource: "main" } });
   assert.equal(preview.body.ok, false, JSON.stringify(preview.body));
   assert.equal(preview.body.error?.code, "creator/unavailable");
-  assert.match(preview.body.error?.message ?? "", /view-bridge/);
+  assert.ok(preview.body.error?.message?.includes(missing));
   assert.deepEqual(fx.jobs.list(), [], "no job was submitted");
   assert.deepEqual(fx.created, []);
 });
@@ -567,7 +569,7 @@ test("a component that disappears between preview and execute fails the job at p
   const preview = await call(fx, "createPreview", scope, { input: { name: "fading", modelSource: "main" } });
   assert.equal(preview.body.ok, true, JSON.stringify(preview.body));
   const plan = preview.body.value as CreatorPlan;
-  assert.deepEqual(plan.steps.map((step) => step.step), ["prepare", "create", "view-bridge", "llm-policy", "result"]);
+  assert.deepEqual(plan.steps.map((step) => step.step), ["prepare", "create", "view-bridge", "models-sync", "result"]);
 
   viewBroken = true;
   const execution = await call(fx, "createExecute", scope, { planId: plan.id, requestId: "req-fading-1" });
@@ -576,7 +578,7 @@ test("a component that disappears between preview and execute fails the job at p
   assert.equal(finished.status, "failed");
   const steps = finished.result?.steps ?? [];
   assert.deepEqual(steps.map((row) => [row.step, row.status]), [
-    ["prepare", "failed"], ["create", "not-run"], ["view-bridge", "not-run"], ["llm-policy", "not-run"], ["result", "not-run"],
+    ["prepare", "failed"], ["create", "not-run"], ["view-bridge", "not-run"], ["models-sync", "not-run"], ["result", "not-run"],
   ]);
   assert.deepEqual(fx.created, [], "no profile was created");
   assert.equal(existsSync(join(home, "hub", "space-fading", "llm-policy.json")), false);

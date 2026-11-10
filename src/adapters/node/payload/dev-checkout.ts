@@ -4,12 +4,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { samePath } from "../home/home-guard";
 
-export type SpacesComponent = "plugin" | "view-bridge" | "llm-bridge" | "browser";
+export type SpacesComponent = "plugin" | "view-bridge" | "browser";
 
 export const DEV_COMPONENT_DIRS: Record<SpacesComponent, string> = {
   plugin: "packages/plugin",
   "view-bridge": "packages/view-bridge",
-  "llm-bridge": "packages/llm-bridge",
   browser: "packages/browser",
 };
 

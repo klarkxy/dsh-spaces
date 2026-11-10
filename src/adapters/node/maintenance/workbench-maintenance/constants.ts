@@ -29,6 +29,7 @@ export const HANDOFF_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.stop",
   "space.restart",
   "space.delete",
+  "space.models.sync",
   "service.shutdown",
 ]);
 export const PLAN_SCHEMA = 1;

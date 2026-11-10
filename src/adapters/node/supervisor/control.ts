@@ -120,8 +120,6 @@ export interface SupervisorControlPorts {
   detail(spaceId: string): Promise<{ plugins: Array<{ name: string; version: string | null }> }>;
   /** Diagnostics projection for one space (logs included, trimmed inside). */
   diagnostics(spaceId: string): WorkbenchDiagnostics;
-  /** The space's LLM policy (strict read). */
-  llmPolicy(spaceId: string): { inheritMain: boolean };
   /** Last observed task activity; must never throw for a stopped space. */
   observeTaskActivity(spaceId: string): Promise<ControlSpaceActivity>;
   /** Same admission the workbench submit path uses (writable + releasing checks). */
@@ -136,9 +134,8 @@ export interface SupervisorControlPorts {
    */
   previewPlan(request: WorkbenchPlanRequest): Promise<WorkbenchPlan>;
   /**
-   * Freeze a supervisor-local plan (space.llm-policy.set): the public preview
-   * input parser does not admit this kind, so the channel builds the request
-   * itself after its own strict parsing.
+   * Freeze a supervisor-local plan (space.models.sync, plugin.live.*): the
+   * channel builds the request itself after its own strict parsing.
    */
   previewLocalPlan(request: WorkbenchPlanRequest): WorkbenchPlan;
   /** Execute a frozen supervisor lifecycle plan inside a running job. */
@@ -201,7 +198,7 @@ interface StoredControlPlan {
  * trusted main-space identity, sharing the Creator registration but gated by
  * its own scope. Read ops (context/read) and the two-stage mutation ops
  * (plan/execute/job) are implemented — lifecycle, plugin.install/
- * remove/toggle, runtime.set and the stopped-only space.llm-policy.set;
+ * remove/toggle, runtime.set and the stopped-only models.sync;
  * `session` is a declared op that answers control/unsupported until its
  * phase lands.
  * Scope strings never appear in responses, job records or logs.
@@ -427,7 +424,6 @@ export class SupervisorControl {
         });
       } else if (section === "model") {
         result.model = await attempt((): ControlInspectModel => ({
-          inheritMain: this.ports.llmPolicy(spaceId).inheritMain,
           catalog: null,
           // The child model catalog is only readable inside the child
           // profile; the supervisor exposes it once the UI-automation or
@@ -511,7 +507,7 @@ export class SupervisorControl {
    * Validate and freeze a single-use plan bound to this registration.
    * Lifecycle ops (stop/restart/delete) freeze the same supervisor preview
    * the workbench two-stage flow produces; plugin.* and runtime.set freeze
-   * the matching maintenance plan; space.llm-policy.set is a supervisor-local
+   * the matching maintenance plan; models.sync is a supervisor-local
    * stopped-space-only plan; start is a direct command so the control plan
    * itself is the freeze, keeping the two-stage contract uniform.
    * Planning performs no mutation.
@@ -560,29 +556,23 @@ export class SupervisorControl {
         // the control plan itself is the freeze, keeping two-stage uniform.
         affectedSpaceIds = [spaceId];
         changes = ["space.start"];
-      } else if (input.op === "llm-policy.set") {
-        // Stopped-only write (D5): refuse here before freezing anything — the
+      } else if (input.op === "models.sync") {
+        // Stopped-only write: refuse here before freezing anything — the
         // channel never stops or restarts the space itself.
         if (row.status !== "stopped" && row.status !== "crashed") {
           throw new ControlPublicError(
             "control/conflict",
-            `The space ${spaceId} is ${row.status}; plan a stop first, then set its model policy.`,
+            `The space ${spaceId} is ${row.status}; plan a stop first, then sync its models.`,
           );
         }
-      let preview: WorkbenchPlan;
-      try {
-        preview = this.ports.previewLocalPlan({
-          kind: "space.llm-policy.set",
-          spaceId,
-          inheritMain: input.params.inheritMain,
-        });
-      } catch (error) {
-        throw controlError(error);
-      }
+        let preview: WorkbenchPlan;
+        try {
+          preview = this.ports.previewLocalPlan({ kind: "space.models.sync", spaceId });
+        } catch (error) {
+          throw controlError(error);
+        }
         affectedSpaceIds = preview.affectedSpaceIds;
         changes = preview.changes;
-        taskActivity = preview.taskActivity ?? activity;
-        params = { inheritMain: input.params.inheritMain };
         workbenchPlanId = preview.id;
       } else if (this.isLivePlanInput(input)) {
         // Running-space ops (path B): the child's own pluginManager writes its
@@ -890,7 +880,7 @@ export class SupervisorControl {
 
   /**
    * Inside the serialized job: run the command the control plan froze.
-   * `plugin.live.*` kinds are supervisor-local plans like llm-policy.set:
+   * `plugin.live.*` kinds are supervisor-local plans like models.sync:
    * plans.executeLocal hands them to the child-remote runner bound to the
    * frozen (spaceId, generation, epoch) inside this same job lane, so a
    * child-side write can never overlap a supervisor-side write.

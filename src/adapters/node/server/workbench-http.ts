@@ -61,7 +61,6 @@ export interface WorkbenchHttpRuntime {
   ): Promise<ViewBootstrap | { status: number; message: string }>;
   mintHandoff(): string;
   /** Private LLM delegation registration and per-owned-run transport. */
-  handleLlmDelegationRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
   /** Private Creator scoped channel for the trusted main-space identity. */
   handleCreatorRequest?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
   /** Private Control scoped channel for the trusted main-space identity. */
@@ -188,7 +187,6 @@ async function handleRequest(
       deny(res, 403, "workbench/forbidden", "Host is not the supervisor loopback entry.");
       return;
     }
-    if (await host.handleLlmDelegationRequest?.(req, res)) return;
     if (await host.handleCreatorRequest?.(req, res)) return;
     if (await host.handleControlRequest?.(req, res)) return;
     if (req.method === "OPTIONS") {

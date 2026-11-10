@@ -38,6 +38,8 @@ export function workbenchRequestOrigin(
     case "space.restart":
     case "space.delete":
       return detailOf(request.spaceId) ?? (spaces ? "spaces" : null);
+    case "space.models.sync":
+      return detailOf(request.spaceId);
     case "space.runtime.set":
       return detail && detail === request.spaceId ? `detail:${request.spaceId}:dsh` : null;
     case "space.import":

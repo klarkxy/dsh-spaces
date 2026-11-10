@@ -30,7 +30,7 @@ jobs:
       - name: Version must match the dispatch input
         env:
           EXPECTED: ${{ github.event.inputs.version }}
-        run: node -e "const fs=require('fs'); const expected=process.env.EXPECTED; for (const path of ['package.json','packages/plugin/package.json','packages/supervisor/package.json','packages/view-bridge/package.json','packages/llm-bridge/package.json','packages/doctor/package.json']) { const pkg=JSON.parse(fs.readFileSync(path,'utf8')); if (pkg.version!==expected) { console.error(path,pkg.version,'!=',expected); process.exit(1) } }"
+        run: node -e "const fs=require('fs'); const expected=process.env.EXPECTED; for (const path of ['package.json','packages/plugin/package.json','packages/supervisor/package.json','packages/view-bridge/package.json','packages/doctor/package.json']) { const pkg=JSON.parse(fs.readFileSync(path,'utf8')); if (pkg.version!==expected) { console.error(path,pkg.version,'!=',expected); process.exit(1) } }"
       - name: Pack preflight
         run: node scripts/pack-spaces-plugin.mjs --preflight
       - name: Pack outside the package trees

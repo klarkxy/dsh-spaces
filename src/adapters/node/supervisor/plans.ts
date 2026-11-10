@@ -20,6 +20,7 @@ import type { SupervisorInstanceRecords } from "./instance-records";
 import type { SupervisorLifecycle } from "./lifecycle";
 import type { SpaceRunRegistry } from "./space-runs";
 import type { StoredPlan, WorkbenchMaintenance, WorkbenchSupervisorOptions } from "./types";
+import { describeModelSync, type ModelSyncSummary } from "../llm/main-model-sync";
 
 const PLAN_TTL_MS = 5 * 60_000;
 
@@ -46,10 +47,10 @@ export interface SupervisorPlansHost {
   stopOwned: (spaceId: string) => Promise<void>;
   stopOwnedAll: () => Promise<void>;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
-  /** Strict read of the space's current LLM policy (absent file = inheritMain:false). */
-  readLlmPolicy: (spaceId: string) => { inheritMain: boolean };
-  /** Atomic write of the space's LLM policy; a failure after commit keeps the scene. */
-  writeLlmPolicy: (spaceId: string, inheritMain: boolean) => void;
+  /** Verified main profile of this epoch; throws when the main space is not connected. */
+  mainProfile: () => string;
+  /** One copy of the main space's models into a stopped space. */
+  syncMainModels: (spaceId: string) => Promise<ModelSyncSummary>;
   /**
    * Run one `plugin.live.*` request through the child's own pluginManager
    * inside the current serialized job; absent when the child remote
@@ -79,20 +80,21 @@ export class SupervisorPlans {
       if (request.kind === "space.delete") this.host.protectSpecial(id, { allowManager: false });
     }
     let policyChanges: string[] | undefined;
-    if (request.kind === "space.llm-policy.set") {
+    if (request.kind === "space.models.sync") {
       this.host.requireManaged(id);
       this.host.protectSpecial(id, { allowManager: false });
       const status = this.host.statusOf(id);
       if (status !== "stopped" && status !== "crashed") {
         throw new WorkbenchPublicError(
           "workbench/conflict",
-          `The space ${id} must be stopped before its model policy can change. Plan a stop first.`,
+          `The space ${id} must be stopped before models can be synced into it. Stop it first.`,
         );
       }
-      const current = this.host.readLlmPolicy(id).inheritMain;
+      const main = this.host.mainProfile();
       policyChanges = [
-        `Set ${id} model policy inheritMain from ${current} to ${request.inheritMain}.`,
-        "The space stays stopped; the new policy applies on its next start.",
+        `Copy the model settings of the main space (${main}) into ${id}: model routes, DeepSeek settings, the default model and the credentials they use.`,
+        "Routes this space added itself stay. Sign-in based routes (OAuth) are not copied.",
+        "This copies once. Later changes in the main space reach this space only when you sync again.",
       ];
     }
     if (request.kind === "plugin.live.install" || request.kind === "plugin.live.update" ||
@@ -211,23 +213,22 @@ export class SupervisorPlans {
         });
         return;
       }
-      case "space.llm-policy.set": {
-        ctx.phase("llm-policy");
+      case "space.models.sync": {
+        ctx.phase("models-sync");
         const id = this.host.requireManaged(request.spaceId);
         this.host.protectSpecial(id, { allowManager: false });
         const status = this.host.statusOf(id);
         if (status !== "stopped" && status !== "crashed") {
           throw new WorkbenchPublicError(
             "workbench/conflict",
-            `The space ${id} must be stopped before its model policy can change.`,
+            `The space ${id} started since the preview; models were not synced.`,
           );
         }
         // The serialized job tail plus the write lock serialize this write;
-        // a failure after the atomic commit keeps the scene as evidence.
-        await this.host.lock.run("space.llm-policy.set", async () => {
-          this.host.writeLlmPolicy(id, request.inheritMain);
-        });
-        return;
+        // a failure after a committed file keeps the scene as evidence.
+        const summary = await this.host.lock.run("space.models.sync", () => this.host.syncMainModels(id));
+        ctx.message(describeModelSync(summary));
+        return { spaceId: id, steps: [{ step: "models-sync", status: "done", detail: describeModelSync(summary) }] };
       }
       case "plugin.live.install":
       case "plugin.live.update":

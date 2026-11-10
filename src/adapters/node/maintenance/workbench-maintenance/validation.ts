@@ -24,6 +24,10 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
       expectKeys(input, ["kind", "spaceId"]);
       return { kind, spaceId: parseSpaceId(input.spaceId) };
     }
+    case "space.models.sync": {
+      expectKeys(input, ["kind", "spaceId"]);
+      return { kind, spaceId: parseSpaceId(input.spaceId) };
+    }
     case "space.delete": {
       expectKeys(input, ["kind", "spaceId", "removeData"]);
       if (typeof input.removeData !== "boolean") throw new WorkbenchMaintenanceError("workbench/invalid-input");

@@ -27,14 +27,13 @@ Spaces are upgraded through the host plugin: update the Spaces plugin in the hos
 
 ## Launch (runnable local build)
 
-Compile from the repository root with `npm run build:spaces`. Pack the plugin, view-bridge, Browser and LLM-bridge archives **outside** those package trees, and use a **disposable** Home for development — do not pass `--allow-real-home` and do not point `--home` at `~/.dsh`.
+Compile from the repository root with `npm run build:spaces`. Pack the plugin, view-bridge and Browser archives **outside** those package trees, and use a **disposable** Home for development — do not pass `--allow-real-home` and do not point `--home` at `~/.dsh`.
 
 ```powershell
 npm run build:spaces
 npm pack ./packages/plugin --ignore-scripts --pack-destination D:\dsh-packages
 npm pack ./packages/view-bridge --ignore-scripts --pack-destination D:\dsh-packages
 npm pack ./packages/browser --ignore-scripts --pack-destination D:\dsh-packages
-npm pack ./packages/llm-bridge --ignore-scripts --pack-destination D:\dsh-packages
 
 node packages/plugin/lib/supervisor/index.js `
   --home D:\dsh-workbench-dev\home `
@@ -43,14 +42,13 @@ node packages/plugin/lib/supervisor/index.js `
   --plugin-artifact D:\dsh-packages\dsh-spaces-plugin-0.5.0.tgz `
   --view-bridge-artifact D:\dsh-packages\dsh-spaces-view-bridge-0.5.0.tgz `
   --browser-artifact D:\dsh-packages\dsh-spaces-browser-0.4.0.tgz `
-  --llm-bridge-artifact D:\dsh-packages\dsh-spaces-llm-bridge-0.5.0.tgz `
   --control-tool-root D:\dsh-workbench-dev\tools `
   --component-payload <absolute-component-payload-directory> `
   --snapshot-worker <absolute-snapshot-worker-file> `
   --snapshot-root D:\dsh-workbench-dev\snapshots
 ```
 
-Do not omit `--plugin-artifact`, `--view-bridge-artifact`, `--browser-artifact`, `--llm-bridge-artifact`, `--component-payload`, `--node`, `--snapshot-worker`, or `--control-tool-root`. Mix-and-match archives from different builds fail closed. `--bin` must be an exact CLI (`--cli` is an alias). Paths must be absolute. The browser must not be asked to supply them. There is no automatic repair or retry.
+Do not omit `--plugin-artifact`, `--view-bridge-artifact`, `--browser-artifact`, `--component-payload`, `--node`, `--snapshot-worker`, or `--control-tool-root`. Mix-and-match archives from different builds fail closed. `--bin` must be an exact CLI (`--cli` is an alias). Paths must be absolute. The browser must not be asked to supply them. There is no automatic repair or retry.
 
 Ordinary workspaces only attach; they do not cold-start a second controller. A failed initialization ends that request; the next page open does not silently complete it.
 
@@ -67,7 +65,6 @@ Ordinary workspaces only attach; they do not cold-start a second controller. A f
 | `--plugin-artifact` | File path of the packed manager plugin for the manager profile. Required. |
 | `--view-bridge-artifact` | File path of the packed view bridge for ordinary spaces. Required. |
 | `--browser-artifact` | File path of the packed Browser plugin. Required. Same build group. |
-| `--llm-bridge-artifact` | File path of the packed LLM bridge. Required. Same build group. |
 | `--component-payload` | Selected component directory of the same group. Required for product cold start. |
 | `--snapshot-worker` | Same-group worker for snapshot create/delete and remaining tree IO. Runtime installation is extracted; the worker only forwards. Not restore. |
 | `--exit-with-host` | No value. Passed only by the Desktop host, paired with an IPC channel. |
@@ -105,7 +102,7 @@ Build from the repository root with `npm run build:spaces`.
 
 # 中文
 
-独立工作台监督进程，只绑 `127.0.0.1`。完整可运行命令见上方 **Launch**，包含 plugin / view-bridge / Browser / llm-bridge / node / worker / tools，缺一不可。当前架构基线见 [docs/architecture.md](../../docs/architecture.md)。故障政策见 [docs/let-it-crash.md](../../docs/let-it-crash.md)。
+独立工作台监督进程，只绑 `127.0.0.1`。完整可运行命令见上方 **Launch**，包含 plugin / view-bridge / Browser / node / worker / tools，缺一不可。当前架构基线见 [docs/architecture.md](../../docs/architecture.md)。故障政策见 [docs/let-it-crash.md](../../docs/let-it-crash.md)。
 
 开发用一次性 Home，不要加 `--allow-real-home`，不要指向 `~/.dsh`。管理你已经在用的 Home 时才同时给绝对 `--home` 和 `--allow-real-home`。快照目录必须在 Home 之外；启动需要 `--component-payload`、三份同组制品和同组 worker（正常快照与树 IO）。这不是恢复产品。没有自动修复或重试。
 

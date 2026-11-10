@@ -110,7 +110,9 @@ MIT. See [LICENSE](LICENSE).
 
 协议 2 的变更携带服务纪元和预期状态版本，请求与计划在执行时重新校验。刷新只读取原任务，不重放。关闭标签不会停止空间或 Supervisor。由官方 Desktop 启动的 Supervisor 跟随该 Desktop 退出：Desktop 宿主进程结束时，Supervisor 执行一次正常关闭（停止它管理的空间、释放运行权后退出）；关闭失败时保持原样并保留运行权，不强杀、不重试。由 Web 启动的 Supervisor 不受影响；Desktop 附着到已有 Supervisor 时不改变它的生命周期。停止全部空间与停止服务是不同操作。
 
-新普通空间可以跟随主空间模型，无需复制主空间凭据，但该调用依赖子空间、Supervisor 和主空间同时可用。旧共享连接保留启动快照和子空间直连供应商语义；本地默认与会话选择独立。见 [LLM 数据流](docs/architecture.md#6-llm-数据面)。
+每个普通空间用自己的配置调用模型。创建时选择主空间模型，会把主空间的路由、默认模型和对应 Key 复制一次到新空间；之后可在工作台空间详情里对已停止的空间再同步一次。登录授权型和表达式路由会列出并跳过。会话选择和本地默认保持各自的优先级。见 [模型配置](docs/architecture.md#6-模型配置)。
+
+主空间的 `cordis` preset 还提供 Creator 四工具及空间总控工具（`spaces_overview`、`spaces_inspect`、`spaces_logs`、`spaces_templates`、`spaces_import_preview`、`spaces_plan`、`spaces_execute`、`spaces_control_job` 和 `spaces_ui_*` 会话工具）。它们使用独立认证 scope；变更计划必须显式审批，不能成为普通空间绕过管理边界的通道。
 
 失败按真实阶段和已知原因记录，无法确定时明确未知。不自动重试、重启、重连、回滚、恢复、修复或续跑。Desktop 手动服务启动/重启例外仅以[故障政策](docs/let-it-crash.md)为准。
 

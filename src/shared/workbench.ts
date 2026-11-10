@@ -229,14 +229,11 @@ export type WorkbenchPlanRequest =
   | { kind: 'space.runtime.set'; spaceId: string; version: string }
   | {
       /**
-       * Supervisor-local plan: atomically rewrite the space's LLM policy.
-       * Only a stopped space may be targeted; the supervisor's local plan
-       * path executes it — the public preview input parser does not admit
-       * this kind and the maintenance service hands it off.
+       * Supervisor-local plan: copy the main space's model settings into a
+       * stopped space once. The maintenance service hands it off.
        */
-      kind: 'space.llm-policy.set';
+      kind: 'space.models.sync';
       spaceId: string;
-      inheritMain: boolean;
     }
   | { kind: 'runtime.remove'; version: string }
   | { kind: 'service.shutdown' };

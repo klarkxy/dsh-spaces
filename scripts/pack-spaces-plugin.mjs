@@ -35,7 +35,6 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_DIR = join(REPO, "packages", "plugin");
 const VIEW_DIR = join(REPO, "packages", "view-bridge");
 const BROWSER_DIR = join(REPO, "packages", "browser");
-const LLM_DIR = join(REPO, "packages", "llm-bridge");
 const SUPERVISOR_DIR = join(REPO, "packages", "supervisor");
 const PACK_MS = 60_000;
 
@@ -52,11 +51,8 @@ const PLUGIN_REQUIRED = [
   "LICENSE",
   "cordis.patch.yml",
   "icon.svg",
-  "llm-images.svg",
   "locale/en.json",
   "locale/zh.json",
-  "llm-images/locale/en.json",
-  "llm-images/locale/zh.json",
   "lib/index.js",
   "lib/client.js",
   "lib/typert.host.js",
@@ -77,11 +73,6 @@ const PLUGIN_REQUIRED = [
   "lib/browser/lib/index.js",
   "lib/browser/lib/client.js",
   "lib/browser/lib/typert.host.js",
-  "lib/llm-bridge/package.json",
-  "lib/llm-bridge/LICENSE",
-  "lib/llm-bridge/cordis.patch.yml",
-  "lib/llm-bridge/lib/index.js",
-  "lib/llm-bridge/lib/auxiliary.js",
   "lib/space-control.js",
   `${UI_ENGINE_REL}/package.json`,
   `${UI_ENGINE_REL}/index.mjs`,
@@ -97,15 +88,6 @@ const VIEW_REQUIRED = [
   "lib/client.js",
   "lib/settings.js",
   "lib/typert.host.js",
-];
-
-const LLM_REQUIRED = [
-  "package.json",
-  "README.md",
-  "LICENSE",
-  "cordis.patch.yml",
-  "lib/index.js",
-  "lib/auxiliary.js",
 ];
 
 const BROWSER_REQUIRED = [
@@ -379,12 +361,6 @@ function preflightOnDisk() {
     directory: "packages/browser",
     keywords: ["dsh-plugin", "deepseek-harness"],
   });
-  const llmPkg = readPkg(LLM_DIR);
-  assertManifest(llmPkg, {
-    name: "@dsh-spaces/llm-bridge",
-    directory: "packages/llm-bridge",
-    keywords: ["dsh-plugin", "deepseek-harness"],
-  });
   // space-control ships as a subpath entry inside the plugin package, never
   // as a dependency: a file:/link:/workspace: spec inside the tarball would
   // resolve against the installing profile and fail the whole install (the
@@ -429,18 +405,14 @@ function preflightOnDisk() {
   for (const rel of BROWSER_REQUIRED) {
     if (!existsSync(join(BROWSER_DIR, rel))) missing.push(`packages/browser/${rel}`);
   }
-  for (const rel of LLM_REQUIRED) {
-    if (!existsSync(join(LLM_DIR, rel))) missing.push(`packages/llm-bridge/${rel}`);
-  }
   if (missing.length) {
     throw new Error(`prebuilt entries missing (run npm run build:spaces from the repo root): ${missing.join(", ")}`);
   }
   const pluginStray = warnStrayTarballs(PLUGIN_DIR, "packages/plugin");
   const viewStray = warnStrayTarballs(VIEW_DIR, "packages/view-bridge");
   warnStrayTarballs(BROWSER_DIR, "packages/browser");
-  warnStrayTarballs(LLM_DIR, "packages/llm-bridge");
   const dest = defaultPackDest();
-  if (inside(PLUGIN_DIR, dest) || inside(VIEW_DIR, dest) || inside(BROWSER_DIR, dest) || inside(LLM_DIR, dest) || inside(SUPERVISOR_DIR, dest)) {
+  if (inside(PLUGIN_DIR, dest) || inside(VIEW_DIR, dest) || inside(BROWSER_DIR, dest) || inside(SUPERVISOR_DIR, dest)) {
     throw new Error(`pack destination is inside a package tree: ${dest}`);
   }
   nestedTgzFixture();
@@ -481,23 +453,20 @@ async function main() {
     const pluginDry = runNpmPack(nodeExe, npmCli, PLUGIN_DIR, dest, { dryRun: true });
     const viewDry = runNpmPack(nodeExe, npmCli, VIEW_DIR, dest, { dryRun: true });
     const browserDry = runNpmPack(nodeExe, npmCli, BROWSER_DIR, dest, { dryRun: true });
-    const llmDry = runNpmPack(nodeExe, npmCli, LLM_DIR, dest, { dryRun: true });
     assertPackedFiles("@dsh-spaces/plugin", pluginDry.files, PLUGIN_REQUIRED);
     assertPackedFiles("@dsh-spaces/view-bridge", viewDry.files, VIEW_REQUIRED);
     assertPackedFiles("@dsh-spaces/browser", browserDry.files, BROWSER_REQUIRED);
-    assertPackedFiles("@dsh-spaces/llm-bridge", llmDry.files, LLM_REQUIRED);
     pass("preflight dry-run file lists include prebuilt payload and exclude nested tarballs");
     const preview = join(dest, pluginDry.filename);
     printAddCommand(preview);
     console.log("(preflight: command path is the destination filename; tarball is not written)");
-    return { status: "preflight", dest, plugin: pluginDry, view: viewDry, browser: browserDry, llm: llmDry };
+    return { status: "preflight", dest, plugin: pluginDry, view: viewDry, browser: browserDry };
   }
 
   const plugin = packOne(nodeExe, npmCli, PLUGIN_DIR, dest, PLUGIN_REQUIRED, "@dsh-spaces/plugin");
   verifyPackedPayload(plugin.path, payload);
   const view = packOne(nodeExe, npmCli, VIEW_DIR, dest, VIEW_REQUIRED, "@dsh-spaces/view-bridge");
   const browser = packOne(nodeExe, npmCli, BROWSER_DIR, dest, BROWSER_REQUIRED, "@dsh-spaces/browser");
-  const llm = packOne(nodeExe, npmCli, LLM_DIR, dest, LLM_REQUIRED, "@dsh-spaces/llm-bridge");
   const command = printAddCommand(plugin.path);
   const report = {
     status: "packed",
@@ -505,7 +474,6 @@ async function main() {
     plugin,
     view,
     browser,
-    llm,
     add: command,
     unpublished: true,
     componentDigest: payload.digest,
@@ -574,7 +542,6 @@ export {
   COMPONENT_PAYLOAD_MANIFEST,
   PLUGIN_REQUIRED,
   VIEW_REQUIRED,
-  LLM_REQUIRED,
   defaultPackDest,
   assertNoSpaces,
   listTarEntries,

@@ -501,9 +501,10 @@ test("a failed issue is terminal for the endpoint: same rejection, no retry", as
   const ctx = pluginContext();
   ctx.provide("profileContext", { home, name: "web" });
   const service = tracked(new MainSpaceCreatorService(ctx));
-  await service.attach(endpointFor(refusing));
-  await assert.rejects(() => service.context(), /creator\/unavailable/);
+  // attach issues the registration at once; its refusal is the attach result.
+  await assert.rejects(() => service.attach(endpointFor(refusing)), /creator\/unavailable/);
   assert.equal(refusing.calls.filter((row) => row.op === "issue").length, 1);
+  await assert.rejects(() => service.context(), /creator\/unavailable/);
   await assert.rejects(() => service.context(), /creator\/unavailable/);
   assert.equal(
     refusing.calls.filter((row) => row.op === "issue").length,
@@ -521,8 +522,8 @@ test("an issue whose serviceEpoch differs from the attached endpoint is refused"
   const service = tracked(new MainSpaceCreatorService(ctx));
   const endpoint = endpointFor(supervisor);
   // Attach with a different epoch than the issue result will report.
-  await service.attach({ ...endpoint, serviceEpoch: "e".repeat(64) });
-  await assert.rejects(() => service.context(), /REGISTRATION_CHANGED|REGISTRATION_INVALID/);
+  await assert.rejects(() => service.attach({ ...endpoint, serviceEpoch: "e".repeat(64) }), /REGISTRATION_CHANGED|REGISTRATION_INVALID/);
+  await assert.rejects(() => service.context(), /REGISTRATION_CHANGED|REGISTRATION_INVALID|creator\/unavailable/);
 });
 
 test("approvedBuilds are surfaced in the execute approval", async () => {

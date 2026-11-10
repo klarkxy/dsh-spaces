@@ -54,7 +54,6 @@ export function bindSupervisorComponentPayload(
     if (
       options.pluginArtifact !== undefined ||
       options.viewBridgeArtifact !== undefined ||
-      options.llmBridgeArtifact !== undefined ||
       options.browserArtifact !== undefined
     ) {
       throw new WorkbenchPublicError(
@@ -74,12 +73,10 @@ export function bindSupervisorComponentPayload(
   const worker = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["installation-worker"]);
   const supervisorDir = payloadRel(selected.packageRoot, "lib/supervisor");
   const viewEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["view-bridge"]);
-  const llmEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES["llm-bridge"]);
   const browserEntry = payloadRel(selected.packageRoot, COMPONENT_PAYLOAD_ENTRIES.browser);
   assertRealFile(worker, "Selected snapshot worker");
   assertRealDirectory(supervisorDir, "Selected supervisor assets");
   assertRealFile(viewEntry, "Selected view-bridge");
-  assertRealFile(llmEntry, "Selected llm-bridge");
   assertRealFile(browserEntry, "Selected browser");
 
   if (options.snapshotWorkerFile !== undefined && !sameRealPath(options.snapshotWorkerFile, worker)) {
@@ -101,9 +98,6 @@ export function bindSupervisorComponentPayload(
   if (options.viewBridgeArtifact !== undefined) {
     assertRealFile(options.viewBridgeArtifact, "view-bridge-artifact");
   }
-  if (options.llmBridgeArtifact !== undefined) {
-    assertRealFile(options.llmBridgeArtifact, "llm-bridge-artifact");
-  }
   if (options.browserArtifact !== undefined) {
     assertRealFile(options.browserArtifact, "browser-artifact");
   }
@@ -114,7 +108,7 @@ export function bindSupervisorComponentPayload(
 }
 
 /**
- * Async group preflight: bind the v2 payload, require the plugin/view/llm
+ * Async group preflight: bind the v2 payload, require the plugin/view/browser
  * artifact tuple, and validate tar bytes against the selected manifest.
  * Call before runtime construction, HTTP, or Home writers. When `validated`
  * is the launch validation of the same payload root, its manifest/digest
@@ -131,12 +125,11 @@ export async function preflightSupervisorComponentPayload(
   if (resolved.devCheckoutRoot !== undefined) return resolved;
   const pluginArtifact = resolved.pluginArtifact;
   const viewBridgeArtifact = resolved.viewBridgeArtifact;
-  const llmBridgeArtifact = resolved.llmBridgeArtifact;
   const browserArtifact = resolved.browserArtifact;
-  if (!pluginArtifact || !viewBridgeArtifact || !browserArtifact || !llmBridgeArtifact) {
+  if (!pluginArtifact || !viewBridgeArtifact || !browserArtifact) {
     throw new WorkbenchPublicError(
       "workbench/invalid-input",
-      "A component payload requires plugin, view-bridge, browser, and llm-bridge artifacts from the same group.",
+      "A component payload requires plugin, view-bridge, and browser artifacts from the same group.",
     );
   }
   const payload = validated && validated.payloadRootLib === resolved.componentPayloadRoot
@@ -147,7 +140,6 @@ export async function preflightSupervisorComponentPayload(
       pluginArtifact,
       viewBridgeArtifact,
       browserArtifact,
-      llmBridgeArtifact,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Component payload artifacts are invalid.";

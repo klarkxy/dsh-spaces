@@ -36,7 +36,6 @@ async function buildClient(packageName, entryPoint, outfile) {
 const sdkExternal = ['@deepseek-ai/*'];
 await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal, entryPoints: {
   index: 'packages/plugin/src/index.ts',
-  'llm-images': 'packages/plugin/src/host/llm-images.ts',
   'space-control': 'packages/plugin/src/space-control/index.ts',
   'typert.host': 'packages/plugin/src/typert.host.ts',
   'typert.remote-client': 'packages/plugin/src/typert.remote-client.ts',
@@ -60,16 +59,10 @@ await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external
 await buildClient('@dsh-spaces/browser', 'packages/browser/src/client.tsx', 'packages/browser/lib/client.js');
 await copyFile(at('LICENSE'), at('packages/browser/LICENSE'));
 
-await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
-  entryPoints: {index:'packages/llm-bridge/src/index.ts',auxiliary:'packages/llm-bridge/src/auxiliary-services.ts'}, outdir: 'packages/llm-bridge/lib' });
-await copyFile(at('LICENSE'), at('packages/llm-bridge/LICENSE'));
-await rm(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true, force: true });
-await mkdir(at('packages/plugin/lib/llm-bridge/lib'), { recursive: true });
-await copyFile(at('packages/llm-bridge/lib/index.js'), at('packages/plugin/lib/llm-bridge/lib/index.js'));
-await copyFile(at('packages/llm-bridge/lib/auxiliary.js'), at('packages/plugin/lib/llm-bridge/lib/auxiliary.js'));
-for (const file of ['package.json', 'cordis.patch.yml', 'LICENSE']) {
-  await copyFile(at(`packages/llm-bridge/${file}`), at(`packages/plugin/lib/llm-bridge/${file}`));
-}
+// The retired LLM bridge payload and main-image entry are no longer built;
+// drop their outputs from earlier builds so the plugin package stays exact.
+await rm(at('packages/plugin/lib/llm-bridge'), { recursive: true, force: true });
+await rm(at('packages/plugin/lib/llm-images.js'), { force: true });
 
 // playwright-core is copied verbatim next to the supervisor bundle: it loads
 // its own sub-paths dynamically and cannot be esbuilded. The immutable

@@ -1,8 +1,7 @@
 /**
  * Creator registration transport of the trusted main host.
  *
- * Mirrors the MainLlmService handshake but is fully independent of the LLM
- * services: a plugin-owned loopback listener answers the server identity
+ * A plugin-owned loopback listener answers the server identity
  * challenge, guarded by a separate callback bearer. The issued `scope` never
  * reaches the model, the session, the endpoint record or the logs — it is
  * used only as the bearer of the Creator operation calls.

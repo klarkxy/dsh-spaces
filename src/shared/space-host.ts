@@ -225,13 +225,13 @@ export function projectSpaceCreations(jobs: unknown): PortalCreation[] {
 /**
  * Step index for the creation ring; monotonic over the job's phase path.
  * Ordinary space.create phases land on 0-2; the creator pipeline's later
- * stages (llm-policy, plugin installs, optional start, final result) share the
+ * stages (models-sync, plugin installs, optional start, final result) share the
  * last step so progress never rewinds mid-job.
  */
 export function spaceCreateStep(phase: string): { index: number; total: 4 } {
   const index = phase === "create" ? 1
     : phase === "view-bridge" ? 2
-    : phase === "llm-bridge" || phase === "llm-policy" || phase === "plugins" || phase === "plugin" || phase === "start" || phase === "result" ? 3
+    : phase === "models-sync" || phase === "plugins" || phase === "plugin" || phase === "start" || phase === "result" ? 3
     : 0;
   return { index, total: 4 };
 }

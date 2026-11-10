@@ -89,7 +89,7 @@ export type CreatorPlanStepKind =
   | 'install-runtime'
   | 'create'
   | 'view-bridge'
-  | 'llm-policy'
+  | 'models-sync'
   | 'plugin'
   | 'start'
   | 'result';

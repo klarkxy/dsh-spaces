@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isAlias, isMap, isScalar, isSeq, parseDocument, visit, YAMLMap, type Document, type Node } from "yaml";
 import { atomicWrite } from "../atomic";
-import { assertSafeSpaceId } from "../llm/llm-policy-store";
+import { assertSafeSpaceId } from "./space-data-root";
 
 const jsTag = { tag: "tag:yaml.org,2002:js", resolve: (value: string) => value };
 

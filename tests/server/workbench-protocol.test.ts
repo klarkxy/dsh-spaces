@@ -22,7 +22,7 @@ import {
 } from "../../src/adapters/node/server/workbench-protocol.ts";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../src/shared/workbench-product.ts";
 import { parsePlanRequest } from "../../src/adapters/node/supervisor/input.ts";
-import { workbenchPlanRequestSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
+import { workbenchJobResultSchema, workbenchPlanRequestSchema, workbenchPlanSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
 
 const settings: WorkbenchHomeSettings = {
   portStart: 3100,
@@ -57,6 +57,33 @@ test("global runtime installation is removed from HTTP and native plan inputs", 
   assert.equal(workbenchPlanRequestSchema.safeParse(removed).success, false);
   assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "space.runtime.set", spaceId: "space-demo", version: "0.2.0-rc.2" }).success, true);
   assert.equal(workbenchPlanRequestSchema.safeParse({ kind: "runtime.remove", version: "0.2.0-rc.2" }).success, true);
+});
+
+test("the host plugin accepts the models sync plan the Supervisor previews", () => {
+  const request = { kind: "space.models.sync", spaceId: "space-demo" };
+  assert.deepEqual(parsePlanRequest(request), request);
+  assert.equal(workbenchPlanRequestSchema.safeParse(request).success, true);
+  assert.equal(workbenchPlanRequestSchema.safeParse({ ...request, extra: true }).success, false);
+  const plan = {
+    id: "plan-1",
+    kind: "space.models.sync",
+    title: "space.models.sync",
+    scope: "space",
+    affectedSpaceIds: ["space-demo"],
+    runningSpaceIds: [],
+    changes: ["Copy the model settings of the main space (web) into space-demo."],
+    destructive: false,
+    expiresAt: new Date(0).toISOString(),
+    serviceEpoch: "a".repeat(64),
+    stateRevision: "b".repeat(64),
+  };
+  assert.equal(workbenchPlanSchema.safeParse(plan).success, true);
+  const result = {
+    spaceId: "space-demo",
+    steps: [{ step: "models-sync", status: "done", detail: "main: web; routes: gw; default: gw/m1; credentials: 1" }],
+  };
+  assert.equal(workbenchJobResultSchema.safeParse(result).success, true);
+  assert.equal(workbenchJobResultSchema.safeParse({ steps: [{ step: "x", status: "done", detail: "d".repeat(301) }] }).success, false);
 });
 
 test("home digest is deterministic and does not leak the canonical path", () => {

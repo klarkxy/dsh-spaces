@@ -38,7 +38,9 @@ Spaces 安装在现有 DSH Web 或 Desktop 宿主中。初始化后，原应用�
 
 新建空间当前使用 **Web**，选择官方 DSH 的精确版本，再选择跟随主空间模型或在此空间配置。两种选择都会在创建时记录新的模型来源策略，同名重建不会沿用保留数据中的旧策略；其他保留数据不变。版本目录读取失败会显示错误并阻止提交。
 
-主空间（web/desktop）在 Creator（`cordis` preset）下可用四个宿主工具：`spaces_context`（服务纪元/版本/可写性/忙闲/可用模型源）、`spaces_create_preview`（冻结一次性计划）、`spaces_create_execute`（单次审批后按 requestId 执行单个组合作业）、`spaces_job`（按作业 id 读结果）。执行是一个串行作业：prepare/运行时安装 → create → view-bridge → llm-policy → 逐项插件安装并读回 → 可选 start；首处失败即停止，partial 结果如实记录，不重试、不回滚。插件只接受 npm 精确版本或 GitHub 完整 commit，install script 仅在审批明确列出的 allowBuilds 键下运行。工具经独立 Creator scope 调用，不授予其他管理命令，也不依赖 LLM 服务。
+主空间（web/desktop）在 Creator（`cordis` preset）下可用四个宿主工具：`spaces_context`（服务纪元/版本/可写性/忙闲/可用模型源）、`spaces_create_preview`（冻结一次性计划）、`spaces_create_execute`（单次审批后按 requestId 执行单个组合作业）、`spaces_job`（按作业 id 读结果）。执行是一个串行作业：prepare/运行时安装 → create → view-bridge → models-sync（选择主空间模型时）→ 逐项插件安装并读回 → 可选 start；首处失败即停止，partial 结果如实记录，不重试、不回滚。插件只接受 npm 精确版本或 GitHub 完整 commit，install script 仅在审批明确列出的 allowBuilds 键下运行。工具经独立 Creator scope 调用，只授予创建相关命令。
+
+同一 preset 下还有空间总控工具：只读 `spaces_overview`、`spaces_inspect`、`spaces_logs`、`spaces_templates`、`spaces_import_preview`；两阶段变更 `spaces_plan` → `spaces_execute`，用 `spaces_control_job` 读结果；运行中空间另有 `spaces_ui_open` / `spaces_ui_snapshot` / `spaces_ui_act` / `spaces_ui_eval` / `spaces_ui_close`。变更计划绑定服务纪元、状态版本、目标指纹和有效期，执行前重验并在独立审批中列出目标与精确来源；停止态和运行中插件操作不能同时写同一 profile。`spaces_ui_eval` 每次单独审批并展示完整脚本，页面内容按不可信数据处理。
 
 Browser Space 入口当前封存：不显示创建选项，不接受 Browser 创建或启动，不开放原生浏览器展示转接。底座、版本契约和扩展实现保留，后续另行验收与启用；界面不显示封存提示。
 
@@ -70,16 +72,16 @@ queued → running → succeeded / failed / cancelled
 
 ## 6. 模型与连接
 
-当前有两种模型来源：
+每个空间用自己 profile 里的模型配置直接调用供应商。主空间模型通过一次性同步进入空间：
 
-| 来源 | 调用方式 | 主要生命周期依赖 |
+| 时机 | 入口 | 条件 |
 | --- | --- | --- |
-| 主空间继承 | 子空间经 Supervisor 使用主空间官方 LLM 服务 | 子空间、Supervisor、主空间均可用 |
-| 本地/会话选择 | 按该空间或会话的显式配置调用 | 对应空间及显式目标 |
+| 创建时 | 新建对话框选择“使用主空间模型”（默认），或主空间 Creator 工具 `modelSource: "main"` | 创建作业的 `models-sync` 步骤 |
+| 手动 | 空间详情 → 高级 →“从主空间同步模型”，或主空间 `spaces_plan` 的 `models.sync` | 空间已停止或已崩溃 |
 
-新 Web 空间默认可以跟随主空间模型，不复制主空间 Key。主空间退出后该路径不可用，不自动启动主空间或改用其他供应商。主空间的连接与默认仍由主空间官方设置拥有。Browser 不加载模型桥接。
+同步复制主空间的 `llm-pi-ai` 路由、`llm-deepseek` 配置、默认模型和这些路由引用的 Key，Key 写入该空间的 `hub/<id>/.credentials.yaml`。同名路由以主空间为准，空间自己添加的路由保留。登录授权型（OAuth）和表达式路由跳过，作业结果逐项列出；主空间凭据里缺失的 Key 名称同样列出。同步之后两边各自独立，主空间再改配置时，需要的话再点一次同步。Browser 空间和管理空间没有这个入口。
 
-空间本地默认和会话显式选择保持独立。显式目标失效时失败，不自动切换来源。设置界面剩余的收敛项见 [model-settings-redesign-20261022.md](plans/model-settings-redesign-20261022.md)，该方案不是已完成能力清单。
+空间本地默认和会话显式选择保持独立。显式目标失效时如实失败。旧委派方案的合同见 [归档](archive/llm-main-inheritance.md)；设置界面的历史收敛方案同样只作记录。
 
 ## 7. 插件、普通模板与分享
 

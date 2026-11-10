@@ -2,7 +2,7 @@ import type { SpaceBaseCreation } from './base-creation';
 import { SPACES_BROWSER_SEALED } from '../../../shared/browser-sealed';
 import type { WorkbenchCommand, WorkbenchJob } from "../../../shared/workbench";
 import type { HomeOperationLock } from "../home/home-operation-lock";
-import { writeSpaceLlmPolicy } from "../llm/llm-policy-store";
+import type { ModelSyncSummary } from "../llm/main-model-sync";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import type { ProfileRegistry } from "../profile/profile-registry";
 import type { NodeSpacesService } from "../products/spaces-service";
@@ -22,7 +22,10 @@ export interface SupervisorSpaceCommandsHost {
   requireSpace: (spaceId: string) => string;
   protectSpecial: (id: string, options: { allowManager: boolean }) => void;
   ensureViewBridge: (profileId: string) => Promise<void>;
-  ensureLlmBridge: (profileId: string) => Promise<void>;
+  /** Verified main profile of this epoch; throws when the main space is not connected. */
+  mainProfile: () => string;
+  /** One copy of the main space's models into the (not yet started) space. */
+  syncMainModels: (spaceId: string) => Promise<ModelSyncSummary>;
   hasComponent: (component: SpacesComponent) => boolean;
 }
 
@@ -49,7 +52,8 @@ export class SupervisorSpaceCommands {
     // partially built profile. In a linked checkout an unusable component
     // directory is a named failure, not "component absent".
     const viewBridge = base === 'web' && this.host.hasComponent('view-bridge');
-    if (base === 'web' && input.modelSource === 'main') this.host.hasComponent('llm-bridge');
+    // Following the main space needs its verified identity; refuse before any space exists.
+    if (base === 'web' && input.modelSource === 'main') this.host.mainProfile();
     if (base === 'browser' && (!this.host.hasComponent('browser') || !this.host.hasComponent('view-bridge'))) {
       throw new WorkbenchPublicError("workbench/unavailable", "The bundled Browser or its view bridge is unavailable.");
     }
@@ -76,13 +80,13 @@ export class SupervisorSpaceCommands {
         ctx.phase("view-bridge");
         await this.host.ensureViewBridge(spaceId);
       }
-
+      // "Use the main space's models" is one copy at creation time. A failure
+      // leaves the created space as it is and fails this job.
+      if (base === 'web' && input.modelSource === 'main') {
+        ctx.phase("models-sync");
+        await this.host.syncMainModels(spaceId);
+      }
     });
-    if (base === 'web' && input.modelSource==='main') {
-      ctx.phase("llm-policy");
-      writeSpaceLlmPolicy(this.host.home, spaceId, true);
-      await this.host.ensureLlmBridge(spaceId);
-    }
     return { spaceId };
   }
 

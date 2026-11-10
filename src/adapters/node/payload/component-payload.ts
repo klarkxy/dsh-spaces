@@ -27,7 +27,6 @@ export const COMPONENT_PAYLOAD_NAMES = [
   "manager-plugin",
   "view-bridge",
   "browser",
-  "llm-bridge",
   "installation-worker",
 ] as const;
 
@@ -38,7 +37,6 @@ export const COMPONENT_PAYLOAD_PACKAGES: Record<ComponentPayloadName, string> = 
   "manager-plugin": "@dsh-spaces/plugin",
   "view-bridge": "@dsh-spaces/view-bridge",
   browser: "@dsh-spaces/browser",
-  "llm-bridge": "@dsh-spaces/llm-bridge",
   "installation-worker": "@dsh-spaces/supervisor",
 };
 
@@ -47,7 +45,6 @@ export const COMPONENT_PAYLOAD_ENTRIES: Record<ComponentPayloadName, string> = {
   "manager-plugin": "lib/index.js",
   "view-bridge": "lib/view-bridge/lib/index.js",
   browser: "lib/browser/lib/index.js",
-  "llm-bridge": "lib/llm-bridge/lib/index.js",
   "installation-worker": "lib/supervisor/snapshot-worker.mjs",
 };
 
@@ -91,10 +88,6 @@ export const COMPONENT_PAYLOAD_REQUIRED_FILES: Record<ComponentPayloadName, read
     "lib/browser/package.json", "lib/browser/cordis.patch.yml", "lib/browser/lib/index.js",
     "lib/browser/lib/client.js", "lib/browser/lib/typert.host.js",
   ],
-  "llm-bridge": [
-    "lib/llm-bridge/package.json", "lib/llm-bridge/cordis.patch.yml",
-    "lib/llm-bridge/lib/index.js", "lib/llm-bridge/lib/auxiliary.js",
-  ],
   "installation-worker": ["lib/supervisor/snapshot-worker.mjs"],
 };
 
@@ -103,7 +96,6 @@ export const COMPONENT_PAYLOAD_OPTIONAL_FILES: Record<ComponentPayloadName, read
   "manager-plugin": ["LICENSE"],
   "view-bridge": ["lib/view-bridge/LICENSE"],
   browser: ["lib/browser/LICENSE"],
-  "llm-bridge": ["lib/llm-bridge/LICENSE"],
   "installation-worker": [],
 };
 
@@ -112,7 +104,6 @@ const IDENTITY_JSON: Record<ComponentPayloadName, string> = {
   "manager-plugin": "package.json",
   "view-bridge": "lib/view-bridge/package.json",
   browser: "lib/browser/package.json",
-  "llm-bridge": "lib/llm-bridge/package.json",
   "installation-worker": "lib/supervisor/package.json",
 };
 
@@ -709,13 +700,11 @@ const DIGEST_ID_LENGTH = 32;
 const PLUGIN_ARCHIVE_PREFIX = "dsh-spaces-plugin";
 const VIEW_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-view-bridge";
 const BROWSER_ARCHIVE_PREFIX = "dsh-spaces-browser";
-const LLM_BRIDGE_ARCHIVE_PREFIX = "dsh-spaces-llm-bridge";
 
 export type ComponentArtifactPaths = {
   pluginArtifact: string;
   viewBridgeArtifact: string;
   browserArtifact: string;
-  llmBridgeArtifact: string;
 };
 
 export interface ComponentArtifactInspection {
@@ -738,7 +727,7 @@ export async function validateComponentPayloadArtifacts(
   assertPackedMatchesPayload(await inspectComponentPayloadArtifacts(current, artifacts), current);
 }
 
-function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "browser" | "llm-bridge"): string[] {
+function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "browser"): string[] {
   const prefix = `lib/${name}/`;
   return payload.manifest.components[name].files.map((file) => {
     if (!file.path.startsWith(prefix)) {
@@ -748,7 +737,7 @@ function bridgeFiles(payload: ValidatedComponentPayload, name: "view-bridge" | "
   });
 }
 
-function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "view-bridge" | "browser" | "llm-bridge", artifact: ComponentArtifactInspection): void {
+function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "view-bridge" | "browser", artifact: ComponentArtifactInspection): void {
   const component = payload.manifest.components[name];
   const prefix = `lib/${name}/`;
   if (artifact.version !== component.version || artifact.packageName !== component.packageName) {
@@ -762,23 +751,22 @@ function assertBridgeMatchesPayload(payload: ValidatedComponentPayload, name: "v
 }
 
 async function inspectComponentPayloadArtifacts(payload: ValidatedComponentPayload, artifacts: ComponentArtifactPaths) {
-  const [plugin, viewBridge, browser, llmBridge] = await Promise.all([
+  const [plugin, viewBridge, browser] = await Promise.all([
     inspectPluginArchive(artifacts.pluginArtifact),
     inspectArtifact(artifacts.viewBridgeArtifact, COMPONENT_PAYLOAD_PACKAGES["view-bridge"], bridgeFiles(payload, "view-bridge"), VIEW_BRIDGE_ARCHIVE_PREFIX),
     inspectArtifact(artifacts.browserArtifact, COMPONENT_PAYLOAD_PACKAGES.browser, bridgeFiles(payload, "browser"), BROWSER_ARCHIVE_PREFIX),
-    inspectArtifact(artifacts.llmBridgeArtifact, COMPONENT_PAYLOAD_PACKAGES["llm-bridge"], bridgeFiles(payload, "llm-bridge"), LLM_BRIDGE_ARCHIVE_PREFIX),
   ]);
-  return { plugin, viewBridge, browser, llmBridge };
+  return { plugin, viewBridge, browser };
 }
 
 function assertPackedMatchesPayload(
-  packed: { plugin: ComponentArtifactInspection; viewBridge: ComponentArtifactInspection; browser: ComponentArtifactInspection; llmBridge: ComponentArtifactInspection },
+  packed: { plugin: ComponentArtifactInspection; viewBridge: ComponentArtifactInspection; browser: ComponentArtifactInspection },
   payload: ValidatedComponentPayload,
 ): void {
   if (packed.plugin.packageName !== COMPONENT_PAYLOAD_PACKAGES["manager-plugin"]) {
     fail("Packed plugin is not the official Spaces plugin.");
   }
-  if (packed.viewBridge.packageName !== COMPONENT_PAYLOAD_PACKAGES["view-bridge"] || packed.browser.packageName !== COMPONENT_PAYLOAD_PACKAGES.browser || packed.llmBridge.packageName !== COMPONENT_PAYLOAD_PACKAGES["llm-bridge"]) {
+  if (packed.viewBridge.packageName !== COMPONENT_PAYLOAD_PACKAGES["view-bridge"] || packed.browser.packageName !== COMPONENT_PAYLOAD_PACKAGES.browser) {
     fail("Packed workbench artifacts are not official packages.");
   }
   if (packed.plugin.version !== payload.manifest.components["manager-plugin"].version) {
@@ -787,13 +775,10 @@ function assertPackedMatchesPayload(
   if (packed.viewBridge.version !== payload.manifest.components["view-bridge"].version) {
     fail("Packed view-bridge version does not match the staged view-bridge.");
   }
-  if (packed.llmBridge.version !== payload.manifest.components["llm-bridge"].version) {
-    fail("Packed llm-bridge version does not match the staged llm-bridge.");
-  }
   if (packed.browser.version !== payload.manifest.components.browser.version) {
     fail("Packed browser version does not match the staged browser.");
   }
-  for (const [name, artifact] of [["view-bridge", packed.viewBridge], ["browser", packed.browser], ["llm-bridge", packed.llmBridge]] as const) {
+  for (const [name, artifact] of [["view-bridge", packed.viewBridge], ["browser", packed.browser]] as const) {
     assertBridgeMatchesPayload(payload, name, artifact);
   }
   for (const file of payload.files) {

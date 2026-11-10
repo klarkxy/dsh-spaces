@@ -6,7 +6,6 @@ import { lt as semverLt } from "semver";
 import { SPACES_MIN_DSH_VERSION } from "../../../shared/runtime";
 import type { ProfileStatus } from "../../../shared/types";
 import type { WorkbenchJob, WorkbenchView } from "../../../shared/workbench";
-import type { SupervisorLlmDelegation } from "../llm/delegation";
 import type { HomeOperationLock } from "../home/home-operation-lock";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import { cliLoadError, unmetProfileDshRequirements } from "../payload/component-cli";
@@ -26,7 +25,6 @@ export interface SupervisorSpaceLifecycleHost {
   lifecycle: SupervisorLifecycle;
   runs: SpaceRunRegistry;
   instances: () => SupervisorInstanceRecords;
-  llmDelegation: () => SupervisorLlmDelegation;
   processes: () => ProcessManager | undefined;
   options: WorkbenchSupervisorOptions;
   lock: HomeOperationLock;
@@ -35,9 +33,9 @@ export interface SupervisorSpaceLifecycleHost {
   view: (spaceId: string) => Promise<WorkbenchView>;
   requireServiceEpoch: () => string;
   ensureViewBridge: (profileId: string) => Promise<void>;
-  ensureLlmBridge: (profileId: string) => Promise<void>;
   ensureBundledDeps: (profileId: string) => Promise<void>;
   installComponent: (profileId: string, component: SpacesComponent) => Promise<void>;
+  removePlugin: (profileId: string, packageName: string) => Promise<void>;
   componentAligned: (profileId: string, component: SpacesComponent) => boolean;
   readDump: (profile: string) => Promise<string | undefined>;
   pinnedDshVersion: (spaceId: string) => string | undefined;
@@ -66,7 +64,6 @@ export class SupervisorSpaceLifecycle {
     }
     if (SPACES_BROWSER_SEALED && profileBase(this.host.home, id) === 'browser') throw new WorkbenchPublicError('workbench/unsupported');
     if (id !== this.host.managerId()) await this.host.ensureViewBridge(id);
-    if (profileBase(this.host.home, id) !== 'browser') await this.host.ensureLlmBridge(id);
     const gen = this.host.runs.nextGeneration(id);
     const channel = randomBytes(8).toString("hex");
     const epoch = this.host.requireServiceEpoch();
@@ -132,6 +129,7 @@ export class SupervisorSpaceLifecycle {
           home: this.host.home, profileId: spaceId, payloadRoot: this.host.options.componentPayloadRoot!,
           bin: spaceRuntime.bin, cliVersion: spaceRuntime.version,
           install: (bridge) => this.host.installComponent(spaceId, bridge),
+          remove: (packageName) => this.host.removePlugin(spaceId, packageName),
           // A linked checkout matches by link identity; packaged installs keep byte comparison.
           ...(this.host.options.devCheckoutRoot !== undefined
             ? { matches: (component: SpacesComponent) => this.host.componentAligned(spaceId, component) }
@@ -155,7 +153,6 @@ export class SupervisorSpaceLifecycle {
   async stopOwned(spaceId: string): Promise<void> {
     if (!this.host.processes()) return;
     if (this.host.runs.unmanaged.has(spaceId)) return;
-    await this.host.llmDelegation().retire(spaceId);
     await this.host.processes()!.stop(spaceId);
     this.host.runs.nextGeneration(spaceId);
     this.host.runs.views.delete(spaceId);

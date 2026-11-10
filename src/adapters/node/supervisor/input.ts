@@ -30,6 +30,9 @@ export function parsePlanRequest(input: unknown): WorkbenchPlanRequest {
         spaceId: parseSpaceName(body.spaceId),
         removeData: body.removeData === undefined ? false : body.removeData === true,
       };
+    case "space.models.sync":
+      expectKeys(body, ["kind", "spaceId"]);
+      return { kind, spaceId: parseSpaceName(body.spaceId) };
     case "controller.release":
     case "controller.shutdown":
     case "snapshot.restore":

@@ -796,14 +796,13 @@ test("portal creation entries validate strictly and project from jobs", async ()
   assert.deepEqual(spaceCreateStep("install").index, 0);
   assert.deepEqual(spaceCreateStep("create").index, 1);
   assert.deepEqual(spaceCreateStep("view-bridge").index, 2);
-  assert.deepEqual(spaceCreateStep("llm-bridge").index, 3);
-  assert.deepEqual(spaceCreateStep("llm-policy").index, 3);
+  assert.deepEqual(spaceCreateStep("models-sync").index, 3);
   // The creator pipeline's later stages share the last step instead of
   // rewinding to 0: plugin installs, the optional start and the result phase.
   for (const phase of ["plugins", "plugin", "start", "result"]) {
     assert.deepEqual(spaceCreateStep(phase).index, 3, `phase ${phase}`);
   }
-  const creatorPath = ["prepare", "install", "create", "view-bridge", "llm-policy", "plugins", "start", "result"];
+  const creatorPath = ["prepare", "install", "create", "view-bridge", "models-sync", "plugins", "start", "result"];
   const creatorSteps = creatorPath.map((phase) => spaceCreateStep(phase).index);
   assert.ok(creatorSteps.every((step, i) => i === 0 || step >= creatorSteps[i - 1]), `creator steps: ${creatorSteps.join(",")}`);
   assert.deepEqual(spaceCreateStep("mystery").index, 0);
