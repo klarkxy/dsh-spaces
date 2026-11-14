@@ -6,9 +6,27 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { DEV_PROFILE, pluginState } from '../../scripts/dev-dsh-web.mjs';
 import { dumpHasSpacesModule } from '../../scripts/verify-plugin-standard-install.mjs';
+import { PLUGIN_REQUIRED, resolveNpmCli, runNpmPack } from '../../scripts/pack-spaces-plugin.mjs';
 
 const root = resolve(import.meta.dirname, '..', '..');
 const manifest = path => JSON.parse(readFileSync(join(path, 'package.json'), 'utf8'));
+
+test('the prepared repository root packs a complete runtime without checkout-only dependencies or source trees', () => {
+  const dest = mkdtempSync(join(tmpdir(), 'spaces-git-pack-'));
+  try {
+    const packed = runNpmPack(process.execPath, resolveNpmCli(process.execPath), root, dest, { dryRun: true });
+    assert.equal(packed.name, 'dsh-spaces');
+    const files = new Set(packed.files);
+    for (const file of PLUGIN_REQUIRED) assert.ok(files.has(`packages/plugin/${file}`), file);
+    assert.ok(!packed.files.some(file => /^(?:src|scripts|tests|catalog|\.sandbox|node_modules|packages\/blueprint)\//.test(file)));
+    const pkg = manifest(root);
+    for (const spec of Object.values(pkg.dependencies ?? {})) {
+      assert.ok(!/^(?:file:|link:|workspace:)/.test(spec), 'Git-installed runtime cannot depend on omitted checkout directories');
+    }
+  } finally {
+    rmSync(dest, { recursive: true, force: true });
+  }
+});
 
 test('install verification matches module names, not a Home or unrelated package containing dsh-spaces', () => {
   assert.equal(dumpHasSpacesModule('- id: sessions\n  config:\n    root: C:/Temp/dsh-spaces-check/home/sessions\n'), false);

@@ -24,7 +24,7 @@ Official Windows Desktop 0.2.1-rc.2 uses its supported browser lease API to crea
 
 ## Installation and versions
 
-This package is not the user install unit: users add the prebuilt `dsh-spaces` tarball to their host profile and initialize Spaces. In New Space, choose **Browser** as the base, then its product version. The version list comes from the actual bundled Browser release (currently 0.4.0), independently of official Web versions. The Browser package declares its exact DSH framework dependency in `dsh.spacesBase.runtimeVersion` (currently 0.2.1-rc.2). The registry records both coordinates; selecting a Browser release never treats its version as a DSH CLI version. The DSH runtime switch is unavailable for Browser because that dependency belongs to the base release.
+This is an internal component of `dsh-spaces`, distributed through the Git root or a prebuilt archive. Browser creation, launch and native presentation remain sealed as described in the [current architecture](../../docs/architecture.md). The preserved component version is 0.4.0; its `dsh.spacesBase.runtimeVersion` records the separate framework dependency 0.2.1-rc.2. These retained metadata fields do not make Browser an available creation option.
 
 The Space details retain normal plugin installation and removal. Browser plugins can register into `browser.toolbar` and `browser.overlay`, both additive root-scoped DSH slots. These are DSH plugins, not Chrome extensions. For example, a client plugin can use `ctx.slots.inject('browser.toolbar', () => ctx.slots.register({ name: 'browser.toolbar', id: 'my-action' }, () => /* React element */ null))`. Disposing the plugin removes its UI contribution.
 

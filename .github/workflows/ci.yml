@@ -97,6 +97,13 @@ jobs:
           DSH_TEST_OUTPUT: ${{ runner.temp }}/plugin-install-latest
           DSH_PACK_DEST: ${{ runner.temp }}/plugin-pack-latest
         run: npm run validate:plugin-install
+      - name: Git repository root installation in a fresh Home
+        env:
+          DSH_TEST_BIN: ${{ runner.temp }}/plugin-tools/node_modules/@deepseek-ai/dsh/lib/bin.js
+          DSH_TEST_PNPM_CJS: ${{ runner.temp }}/plugin-tools/node_modules/pnpm/bin/pnpm.cjs
+          DSH_TEST_OUTPUT: ${{ runner.temp }}/plugin-git-install
+          DSH_TEST_PLUGIN_SPEC: github:${{ github.repository }}#${{ github.sha }}
+        run: npm run validate:plugin-install
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -105,3 +112,11 @@ jobs:
             ${{ runner.temp }}/plugin-install-latest/*.json
             ${{ runner.temp }}/plugin-install-latest/*.log
             ${{ runner.temp }}/plugin-install-latest/*.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plugin-git-install
+          path: |
+            ${{ runner.temp }}/plugin-git-install/*.json
+            ${{ runner.temp }}/plugin-git-install/*.log
+            ${{ runner.temp }}/plugin-git-install/*.png

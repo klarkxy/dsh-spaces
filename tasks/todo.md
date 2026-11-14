@@ -14,6 +14,8 @@
 
 ## 发布与真实宿主验收
 
+- [x] 纠正 Git 安装入口：根包自动 prepare 并分发完整组件，用户直接提供 Git 仓库根地址即可。隔离官方 Git 安装与生命周期、单命令构建授权和相关回归通过；公开仓库验收接入 CI。见 [实施记录](archive/git-root-install-20261114.md)。
+
 - [x] 主插件改名为 `dsh-spaces`：代码与文档已统一，旧包继续受保护，换名走显式卸载/安装；完整检查与官方 CLI 双 profile 换名验证通过，见 [改名记录](archive/package-name-20261114.md)。
 
 - [x] 公共插件目录由本仓库维护，开放独立作者贡献，支持按 npm 包名安装和版本限定的实测说明。见 [实施记录](archive/community-catalog-publishing-20261114.md)。

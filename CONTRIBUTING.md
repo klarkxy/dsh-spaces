@@ -1,6 +1,6 @@
 # Contributing to DSH Spaces
 
-To contribute a third-party plugin, use the [community catalog guide](catalog/README.md). Plugins stay in their authors' repositories and npm packages; catalog contributions need no core package publishing rights. Spaces itself is currently installed by [building from Git](docs/plugin-standard-install.md#git-source-install). Core npm publication is deferred.
+To contribute a third-party plugin, use the [community catalog guide](catalog/README.md). Plugins stay in their authors' repositories and npm packages; catalog contributions need no core package publishing rights. Spaces itself supports [direct Git repository root installation](docs/plugin-standard-install.md#git-source-install). Core npm publication is deferred.
 
 Read [docs/let-it-crash.md](docs/let-it-crash.md) first. That file is the only current fault policy. For the current product boundary read [docs/architecture.md](docs/architecture.md); current open items are in [tasks/todo.md](tasks/todo.md).
 
@@ -30,7 +30,7 @@ Historical recovery plans, tests, and screenshots are evidence of what was built
 2. `node scripts/setup-sandbox.mjs` (once, after a global `dsh` install)
 3. `npm test` and `npm run typecheck`
 4. Isolation gate: `npm run validate:isolation`
-5. `npm run dev:web` builds and links the repository root into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. The Home and link persist between launches. Click **初始化 Spaces / Initialize Spaces** in the browser. Use `npm run dev:link` for setup without starting the host. No tarball is needed for local debugging; `npm run pack:plugin` remains the distribution workflow.
+5. `npm run dev:web` builds and links the repository root into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. The Home and link persist between launches. Click **初始化 Spaces / Initialize Spaces** in the browser. Use `npm run dev:link` for setup without starting the host. Git installs run the root `prepare` automatically; `npm run pack:plugin` remains available for archive distribution.
 
 To link manually, set `DSH_HOME` to a separate development Home, create a custom profile from the official Web template, then run `dsh plugin --profile spaces-dev add .` from the repository root after `npm run build`. See [local linked development](docs/plugin-standard-install.md#local-linked-development). Rebuild and explicitly restart the host to load changed code. For Supervisor or manager changes, also stop the service from the workbench before reopening it. There is no automatic restart or hot replacement.
 

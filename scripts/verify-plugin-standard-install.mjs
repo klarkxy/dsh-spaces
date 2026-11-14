@@ -14,6 +14,8 @@
  *
  * Env: DSH_TEST_BIN, DSH_TEST_CLI_BIN, DSH_TEST_OUTPUT, DSH_TEST_PLAYWRIGHT,
  * DSH_TEST_PNPM_CJS, DSH_PACK_DEST.
+ * DSH_TEST_PLUGIN_SPEC optionally selects a pinned GitHub repository root;
+ * the isolated test profile explicitly allows this project's prepare script.
  *
  * --syntax / --preflight are static only: no DSH web, no supervisor,
  * no Playwright browser, no shared build, no real ~/.dsh.
@@ -1237,22 +1239,30 @@ async function main() {
   report.cli.resolved = { bin, version };
   pass(`using official CLI ${version} (explicit installed version)`);
 
-  const packDest = join(tmpdir(), "dsh-spaces-standard-install-pack");
-  assertNoSpaces(packDest, "staged pack dest");
-  mkdirSync(packDest, { recursive: true });
-  run(nodeExe, [PACK_SCRIPT], {
-    cwd: REPO,
-    env: { ...process.env, DSH_PACK_DEST: packDest, npm_config_offline: "true" },
-    timeoutMs: 120000,
-    label: "pack plugin",
-  });
-  const pluginTgz = join(packDest, `dsh-spaces-${JSON.parse(readFileSync(join(PLUGIN_DIR, "package.json"), "utf8")).version}.tgz`);
-  if (!existsSync(pluginTgz)) throw new Error(`packed plugin missing at ${pluginTgz}`);
-  const packedFiles = JSON.parse(readFileSync(join(packDest, "pack-report.json"), "utf8")).plugin.entries;
-  for (const rel of PLUGIN_REQUIRED) {
-    if (!packedFiles.includes(rel)) throw new Error(`packed plugin missing ${rel}`);
+  const gitSpec = process.env.DSH_TEST_PLUGIN_SPEC?.trim();
+  if (gitSpec && !/^github:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[a-f0-9]{40}$/.test(gitSpec)) {
+    throw new Error("DSH_TEST_PLUGIN_SPEC must pin a GitHub repository root to a full commit.");
   }
-  pass(`packed plugin sha256=${sha256File(pluginTgz)}`);
+  let installSpec = gitSpec;
+  if (!installSpec) {
+    const packDest = join(tmpdir(), "dsh-spaces-standard-install-pack");
+    assertNoSpaces(packDest, "staged pack dest");
+    mkdirSync(packDest, { recursive: true });
+    run(nodeExe, [PACK_SCRIPT], {
+      cwd: REPO,
+      env: { ...process.env, DSH_PACK_DEST: packDest, npm_config_offline: "true" },
+      timeoutMs: 120000,
+      label: "pack plugin",
+    });
+    installSpec = join(packDest, `dsh-spaces-${JSON.parse(readFileSync(join(PLUGIN_DIR, "package.json"), "utf8")).version}.tgz`);
+    if (!existsSync(installSpec)) throw new Error(`packed plugin missing at ${installSpec}`);
+    const packedFiles = JSON.parse(readFileSync(join(packDest, "pack-report.json"), "utf8")).plugin.entries;
+    for (const rel of PLUGIN_REQUIRED) {
+      if (!packedFiles.includes(rel)) throw new Error(`packed plugin missing ${rel}`);
+    }
+    pass(`packed plugin sha256=${sha256File(installSpec)}`);
+  }
+  report.installSpec = installSpec;
 
   const home = mkdtempSync(join(out, "home-"));
   refuseRealHome(home);
@@ -1270,14 +1280,28 @@ async function main() {
     bin,
     home,
     tooling,
-    ["plugin", "--profile", WEB_PROFILE, "add", pluginTgz],
-    PLUGIN_MS,
+    ["plugin", "--profile", WEB_PROFILE, "add", installSpec,
+      ...(gitSpec ? [`--allow-build=${CANONICAL_NAME}`] : [])],
+    gitSpec ? 600000 : PLUGIN_MS,
     "dsh plugin add web",
     join(out, "plugin-add.log"),
   );
   const afterAdd = pluginState(home, WEB_PROFILE);
   if (!afterAdd.dependency || !afterAdd.inBundles || !afterAdd.installedOnDisk) {
     throw new Error(`web add did not install bundle: ${JSON.stringify(afterAdd)}`);
+  }
+  if (gitSpec) {
+    const root = join(home, "profiles", WEB_PROFILE, "node_modules", CANONICAL_NAME);
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    assert.equal(manifest.main, "./packages/plugin/lib/index.js");
+    assert.equal(manifest.dependencies?.["@klarkxy/dsh-blueprint"], undefined);
+    for (const rel of PLUGIN_REQUIRED) {
+      assert.ok(existsSync(join(root, "packages", "plugin", rel)), `Git root package is missing ${rel}`);
+    }
+    assert.equal(existsSync(join(root, "src")), false, "Git installation must use the prepared distribution");
+    const lock = readFileSync(join(home, "profiles", WEB_PROFILE, "pnpm-lock.yaml"), "utf8");
+    assert.ok(lock.includes(gitSpec.split("#")[1]), "Git installation lost the pinned commit");
+    pass("Git repository root prepared and installed the complete component group; no manual build or tarball input");
   }
   const dumpAfterAdd = runDsh(
     nodeExe,

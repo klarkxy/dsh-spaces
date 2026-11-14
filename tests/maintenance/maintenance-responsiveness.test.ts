@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomInt } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -327,25 +328,28 @@ async function listenLocal(): Promise<{ origin: string; close: () => Promise<voi
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("ok");
     });
-    const port = await listenPort(server);
-    if (!forbiddenPort(port)) {
-      return {
-        origin: `http://127.0.0.1:${port}`,
-        close: () =>
-          new Promise((resolveClose, reject) => {
-            server.close((err) => (err ? reject(err) : resolveClose()));
-          }),
-      };
+    let port: number;
+    try {
+      // Keep the unexposed probe outside both project ranges (3100–3199,
+      // 34000–34999) and Fetch's blocked ports. listen(0) can repeatedly
+      // allocate inside a reserved range on Windows.
+      port = await listenPort(server, randomInt(49152, 65535));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      continue;
     }
-    await closeServer(server);
+    return {
+      origin: `http://127.0.0.1:${port}`,
+      close: () => closeServer(server),
+    };
   }
   throw new Error("could not bind a localhost probe port outside the reserved ranges");
 }
 
-function listenPort(server: Server): Promise<number> {
+function listenPort(server: Server, port: number): Promise<number> {
   return new Promise((resolvePort, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(port, "127.0.0.1", () => {
       server.off("error", reject);
       const addr = server.address();
       if (!addr || typeof addr === "string") {
@@ -361,10 +365,6 @@ function closeServer(server: Server): Promise<void> {
   return new Promise((resolveClose, reject) => {
     server.close((err) => (err ? reject(err) : resolveClose()));
   });
-}
-
-function forbiddenPort(port: number): boolean {
-  return (port >= 3100 && port <= 3199) || (port >= 34000 && port <= 34999);
 }
 
 function fillTree(root: string, files: number): void {

@@ -4,7 +4,7 @@
 
 ## 1. 产品边界
 
-DSH Spaces 是安装进兼容 DSH Web 或 Desktop 的多空间插件，没有独立客户端，也不修改官方 SDK。插件 tarball 是 Spaces 的唯一发行单元；蓝图协议包可以独立安装和使用的边界见 [BLUEPRINT](blueprint.md)。
+DSH Spaces 是安装进兼容 DSH Web 或 Desktop 的多空间插件，没有独立客户端，也不修改官方 SDK。Git 仓库根包和预构建插件 tarball 均携带完整组件组；蓝图协议包可以独立安装和使用的边界见 [BLUEPRINT](blueprint.md)。
 
 产品面向单机、单用户和同一 OS 用户信任域。空间隔离用于分离插件组合、会话、工作数据和管理权限，不构成恶意插件沙箱、多租户隔离或跨机器高可用。
 
@@ -139,7 +139,7 @@ Supervisor 用主空间绑定的 CLI 执行 `dsh --profile <main> --dump-config`
 
 ## 8. 制品、版本与升级
 
-主发行包保持项目级身份 `dsh-spaces`。当前通过 Git 克隆源码、按锁文件安装依赖、构建插件 tarball 后安装，具体命令见[标准安装](plugin-standard-install.md#git-source-install)。npm 发布暂缓，现行仓库没有 npm 发布工作流；手动打包工作流只生成可审阅的本地安装制品。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录贡献无需核心包发布权限。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。
+主发行包保持项目级身份 `dsh-spaces`。默认直接安装 Git 仓库根地址：安装器在获得本插件构建授权后运行根包 `prepare`，生成完整组件组并按 `files` 白名单安装。构建依赖留在准备阶段，安装后的主包不依赖被排除的源码目录或本地 Blueprint workspace。Git 安装路径位于 `node_modules`，不会触发开发检出模式；Supervisor 仍按组件摘要暂存并使用同组制品。具体命令见[标准安装](plugin-standard-install.md#git-source-install)。npm 发布暂缓，现行仓库没有 npm 发布工作流；手动打包继续提供可审阅的 tarball。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录贡献无需核心包发布权限。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。
 
 Spaces 以同一构建的不可变组件组发行 Supervisor、管理插件、view bridge、Browser 和安装 worker。制品按版本与摘要校验，不混用不同构建。
 

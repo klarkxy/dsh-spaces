@@ -74,10 +74,10 @@ function childGitEnv(home: string, repo: string, root: string): NodeJS.ProcessEn
   };
 }
 
-function pluginAdd(profile: string, spec: string, env: NodeJS.ProcessEnv) {
+function pluginAdd(profile: string, spec: string, env: NodeJS.ProcessEnv, extra: string[] = []) {
   return spawnSync(
     process.execPath,
-    [TEST_BIN, "plugin", "--profile", profile, "add", spec],
+    [TEST_BIN, "plugin", "--profile", profile, "add", spec, ...extra],
     { encoding: "utf8", timeout: 240_000, env },
   );
 }
@@ -278,4 +278,34 @@ test("the CLI accepts github:owner/repo#commit for a root package", { timeout: 3
   const installedSource = readFileSync(join(home, "profiles", profile, "node_modules", PACKAGE, "index.js"), "utf8");
   assert.ok(installedSource.includes(FIXTURE_MARK), "installed index.js is not the fixture content");
   assert.ok(!installedSource.includes("UNPINNED"), "installed index.js came from HEAD, not the pinned commit");
+});
+
+test("one CLI Git-root add can explicitly authorize prepare without a preconfigured profile", { timeout: 300_000 }, () => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-spaces-git-root-build-"));
+  temps.push(root);
+  const home = join(root, "home"), repo = join(root, "repo");
+  mkdirSync(home); mkdirSync(repo);
+  writeFixturePackage(repo);
+  const manifestPath = join(repo, "package.json");
+  const pkg = JSON.parse(readFileSync(manifestPath, "utf8"));
+  pkg.main = "lib/index.js";
+  pkg.files = ["lib", "cordis.patch.yml"];
+  pkg.scripts = { prepare: "node build.cjs" };
+  writeFileSync(manifestPath, JSON.stringify(pkg));
+  writeFileSync(join(repo, "build.cjs"),
+    `const fs=require('node:fs');fs.mkdirSync('lib',{recursive:true});fs.writeFileSync('lib/index.js','export const marker = ${JSON.stringify(FIXTURE_MARK)};\\n');\n`);
+  const env = gitEnv();
+  git(["init", "-q"], repo, env);
+  git(["add", "-A"], repo, env);
+  git(["commit", "-qm", "root-prepare"], repo, env);
+  const commit = git(["rev-parse", "HEAD"], repo, env);
+  const profile = "space-root-build";
+  writeProfile(home, profile);
+  assert.equal(existsSync(join(repo, "lib/index.js")), false);
+  assert.equal(existsSync(join(home, "profiles", profile, "pnpm-workspace.yaml")), false);
+  const added = pluginAdd(profile, `github:${REPO_ID}#${commit}`, childGitEnv(home, repo, root), [`--allow-build=${PACKAGE}`]);
+  assert.equal(added.status, 0, `${added.stderr}\n${added.stdout}`);
+  const installed = join(home, "profiles", profile, "node_modules", PACKAGE);
+  assert.ok(readFileSync(join(installed, "lib/index.js"), "utf8").includes(FIXTURE_MARK));
+  assert.equal(existsSync(join(installed, "build.cjs")), false);
 });

@@ -21,7 +21,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 - Standalone DSH runtime installation explicitly includes required npm peers instead of inheriting the checkout's development-only `legacy-peer-deps` exception.
 - The default plugin directory is now the Spaces community catalog in this repository, accepting packages from independent authors. Catalog cards show authors, repositories, runtime ranges and version-specific test evidence; an explicit npm-name entry supports installing packages before catalog inclusion.
-- Installation currently uses a Git checkout, locked dependencies and a locally built plugin archive. npm publication is deferred; its workflow and helper have been removed from the active tree, with the preparation retained in history. CI, manual archive packing and the community catalog remain available.
+- Install directly from the Git repository root: the installer's authorized `prepare` step builds the complete plugin, and the root package ships only its runtime payload. Manual clone/build/pack steps are optional maintainer workflows. npm publication is deferred; CI verifies both Git-root and archive installation, and the community catalog remains available.
 - The initial community catalog reuses dsh-plugins entries, including bilingual descriptions, categories and exact npm coordinates. The bundled snapshot excludes shared service libraries and example entries; installation rechecks published npm versions and honors the selected package source.
 - Desktop startup preferences run only on a new Desktop launch, through the serialized job queue. Web launches and confirmed service-only restarts leave child spaces stopped. State decoding accepts the preference and defaults it to off for older service responses.
 - Live model sync replaces same-named routes instead of keeping obsolete nested settings and verifies written configuration values. Diagnostic logging preserves Node's fatal rejection behavior and redacts known credential values before recording Remote failures.
@@ -47,7 +47,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 - Browser Space and Spaces blueprint workflows are sealed in 0.5.0; their implementations remain in the repository.
 - There is no in-place upgrade or migration from the 0.4.0 standalone desktop application; old spaces are not migrated.
-- `@dsh-spaces/*` packages are not published to npm; the prebuilt plugin tarball is the install unit.
+- npm publication is deferred; the main plugin can be installed directly from the Git root or a prebuilt archive, with internal components included.
 - Windows is the locally verified platform for this release; macOS and Linux are not certified, and remote HTTPS or arbitrary third-party native hosts remain unsupported.
 - Existing ordinary-space bridges are not automatically realigned to a new component group; presence of a bridge does not prove version alignment.
 - There is no automatic retry, restart, rollback, restore, repair or interrupted-job replay. Only the bounded Desktop service start/restart exception in the fault policy is allowed.

@@ -1,6 +1,6 @@
 # Manual pack of the prebuilt Spaces plugin for review / directory listing.
 # Does not npm publish, does not git tag, does not run electron-builder.
-# The plugin tarball (embedded supervisor + view-bridge) is the distribution unit.
+# The plugin tarball is the prebuilt alternative to direct Git-root installation.
 name: Plugin distribution pack
 
 on:
@@ -49,4 +49,4 @@ jobs:
             ${{ runner.temp }}/dsh-spaces-pack/*.tgz
             ${{ runner.temp }}/dsh-spaces-pack/pack-report.json
       - name: Not published
-        run: echo "Review artifact only. No Git tag, GitHub release or npm publication was created. The plugin tarball is the user install unit; there is no standalone Desktop package."
+        run: echo "Review artifact only. No Git tag, GitHub release or npm publication was created. This prebuilt archive is an alternative to direct Git-root installation; there is no standalone Desktop package."

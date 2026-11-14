@@ -1,6 +1,6 @@
 # @dsh-spaces/supervisor
 
-> This is a private, unpublished package distributed inside the Spaces plugin tarball. User flows: [docs/workbench.md](../../docs/workbench.md). Current architecture baseline: [docs/architecture.md](../../docs/architecture.md). Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
+> This is a private, unpublished component included in both Git-root and archive installations of Spaces. User flows: [docs/workbench.md](../../docs/workbench.md). Current architecture baseline: [docs/architecture.md](../../docs/architecture.md). Fault policy: [docs/let-it-crash.md](../../docs/let-it-crash.md).
 
 Independent workbench supervisor. It binds `127.0.0.1`, holds Home run rights, and serves the stable entry plus the management API.
 

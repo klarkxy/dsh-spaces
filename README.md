@@ -1,6 +1,6 @@
 # DSH Spaces
 
-Spaces uses the package name `dsh-spaces`. Install the current candidate by cloning this repository and building the plugin archive; npm publication is deferred. Existing `@dsh-spaces/plugin` installs use the [explicit package-name change](docs/plugin-standard-install.md#first-change-from-the-old-package-name). Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
+Spaces uses the package name `dsh-spaces`. Install directly from this Git repository's root; the installer prepares the complete plugin automatically. npm publication is deferred. Existing `@dsh-spaces/plugin` installs use the [explicit package-name change](docs/plugin-standard-install.md#first-change-from-the-old-package-name). Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
 
@@ -43,20 +43,16 @@ Unregistered manual DSH processes are outside managed discovery and shutdown. Ho
 
 ## Install and upgrade
 
-The next release is **0.5.0**, delivered as the prebuilt Spaces plugin for an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
+The next release is **0.5.0**, installed as a Spaces plugin in an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
 
-Clone the source, install the locked dependencies, then build and install the plugin archive. Git and a supported Node.js installation are required:
+Pass the repository root directly to the DSH plugin manager. Git and supported Node.js/npm are required:
 
 ```powershell
-git clone https://github.com/klarkxy/dsh-spaces.git
-cd dsh-spaces
-npm ci
-npm run pack:plugin
-dsh plugin --profile web add <printed-tarball-path>
+dsh plugin --profile web add github:klarkxy/dsh-spaces --allow-build=dsh-spaces
 dsh web
 ```
 
-Use the exact archive path printed by the pack command. This is a source-build installation; passing the repository URL directly to `dsh plugin add` is not supported by the current checkout. For an isolated trial, set `DSH_HOME` before installing as described in the [installation guide](docs/plugin-standard-install.md#git-source-install). No npm publishing account is required.
+The command explicitly allows this plugin's `prepare` build. The same Git source can be entered in the host's plugin page, where build approval is handled by the host; no manual clone, build or tarball is required. Pin a full commit with `github:klarkxy/dsh-spaces#<full-commit>` for a reproducible source. For an isolated trial and package-manager compatibility, see the [installation guide](docs/plugin-standard-install.md#git-source-install).
 
 In ordinary Web, open **Workbench / 工作台** and choose **Initialize Spaces / 初始化 Spaces**. That initialization is one explicit request; a later page load does not silently resume a failed request. Official Desktop starts the management service in the background when the application opens and leaves the main window usable. After a failed launch or a normal stop, the host does not automatically request another launch. Opening the application again, or the existing confirmed manual service action, starts a new operation. Refreshing the panel only rejoins the current Home record.
 
@@ -78,7 +74,7 @@ npm run dev:web
 
 Development uses an isolated Home. Never target the real `~/.dsh`, default `sessions/` / `storages/`, or `profiles/web/`. `npm run dev:link` prepares the linked development profile without starting the host. Rebuild and explicitly restart the host after changes; Supervisor changes also require a normal service shutdown and reopen.
 
-The plugin and scoped packages are local prebuilt artifacts unless their individual documentation says otherwise. Publication and marketplace listing are separate release actions.
+The root Git package prepares the full plugin during installation; prebuilt archives remain available for review and distribution. npm publication and marketplace listing are separate release actions.
 
 ## License
 
@@ -127,20 +123,16 @@ MIT. See [LICENSE](LICENSE).
 
 ## 安装与升级
 
-下一版本为 **0.5.0**，通过预构建插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
+下一版本为 **0.5.0**，作为插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
 
-目前从 Git 获取源码并构建安装，npm 发布暂缓。需要 Git 和受支持的 Node.js：
+目前直接通过 Git 仓库根地址安装，npm 发布暂缓。需要 Git 和受支持的 Node.js/npm：
 
 ```powershell
-git clone https://github.com/klarkxy/dsh-spaces.git
-cd dsh-spaces
-npm ci
-npm run pack:plugin
-dsh plugin --profile web add <实际输出的包路径>
+dsh plugin --profile web add github:klarkxy/dsh-spaces --allow-build=dsh-spaces
 dsh web
 ```
 
-使用打包命令打印的完整路径。当前不支持将仓库 URL 直接交给 `dsh plugin add`；隔离试用及没有全局 `dsh` 时的命令见[源码安装说明](docs/plugin-standard-install.md#git-source-install)。安装不需要 npm 发布账号；依赖下载和第三方插件目录仍正常使用 npm。
+命令中的参数只授权本插件执行 `prepare` 构建。也可以在宿主插件页直接填写同一个 Git 来源，并按宿主提示确认构建权限；不需要手动克隆、构建或打包。用 `github:klarkxy/dsh-spaces#<完整提交号>` 可固定源码。隔离试用及包管理器兼容说明见[安装说明](docs/plugin-standard-install.md#git-source-install)。
 
 普通 Web 打开 **工作台**，点击 **初始化 Spaces**。初始化是一次明确请求，后续打开页面不会静默续接失败请求。官方 Desktop 在打开应用时后台启动管理服务，主界面保持可用。启动失败或正常停止后，宿主不会自动请求另一次启动。再次打开应用，或使用已有的确认式手动服务操作，才是一份新启动。刷新面板只是重新加入当前 Home 记录。
 
@@ -162,7 +154,7 @@ npm run dev:web
 
 开发使用隔离 Home，禁止指向真实 `~/.dsh`、默认 `sessions/` / `storages/` 或 `profiles/web/`。`npm run dev:link` 只准备链接。修改后重新构建并显式重启宿主；Supervisor 变化还需正常停止服务后重新进入。
 
-插件和各 scoped 包是否为本地预构建制品，以各自文档为准。发布和市场收录是独立动作。
+Git 根包在安装时准备完整插件；预构建归档仍可用于审阅和分发。npm 发布和市场收录是独立动作。
 
 ## 许可证
 
