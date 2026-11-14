@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailureHash, portalFailureDetail,
   PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT, parseNativeCreateIntent,
+  parseNativeDetailIntent,
   type PortalFailure } from "../../src/shared/space-host.ts";
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 import { bindDshCli, invocationProfile } from "../../src/adapters/node/products/spaces-service.ts";
@@ -1090,4 +1091,160 @@ test("the native rail halo marks a space needing attention without replacing its
   assert.match(html, /Alpha · (尚未打开|Not opened yet) · (等待处理|Needs attention)/, "the label carries status and the attention hint");
   const betaButton = html.match(/<button[^>]*data-space-id="beta"[^>]*>/)?.[0] ?? "";
   assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no halo");
+});
+
+test("the desktop rail space menu opens settings and hands over a detail intent to open the space detail page", async () => {
+  const React = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { NativeSpaceMenu } = await import("../../packages/plugin/src/client/ui/native-space-menu.tsx");
+  const { attachSurfaceBridge, parseSurfaceIntent } = await import("../../packages/plugin/src/workbench/surface-bridge.ts");
+
+  const menuHtml = renderToStaticMarkup(
+    React.createElement(NativeSpaceMenu, {
+      space: { id: "alpha", displayName: "Alpha", status: "running", generation: 1 },
+      x: 12,
+      y: 24,
+      busy: false,
+      onAction: () => undefined,
+      onSettings: () => undefined,
+      onClose: () => undefined,
+    }),
+  );
+  assert.match(menuHtml, /打开空间设置|Space settings/);
+
+  // 1. NativeHostController.openSpaceSettings selects @settings and writes #intent/detail/1/alpha.
+  const epoch = "a".repeat(64);
+  const url = "http://127.0.0.1:3333/native/" + "a".repeat(32);
+  const loaded: string[] = [];
+  let actual = url;
+  const hostCtrl = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [{ id: "alpha", displayName: "Alpha", status: "running", generation: 1 }] }),
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await hostCtrl.start({} as HTMLElement);
+  Object.assign(hostCtrl, {
+    opening: Promise.resolve(),
+    nativeUrl: url,
+    guest: { loadURL: async (value: string) => { loaded.push(value); actual = value; }, getURL: () => actual, focus() {}, remove() {} },
+  });
+  hostCtrl.openSpaceSettings("alpha");
+  await tick();
+  assert.equal(hostCtrl.getSnapshot().pending, "@settings");
+  assert.deepEqual(loaded, [url + "#select/1/@settings"]);
+  actual = url + "#selected/1/@settings";
+  (hostCtrl as unknown as { observed(): void }).observed();
+  assert.deepEqual(loaded, [url + "#select/1/@settings", url + "#intent/detail/1/alpha"]);
+  assert.equal(hostCtrl.getSnapshot().selected, "@settings");
+  hostCtrl.openSpaceSettings("alpha");
+  assert.deepEqual(loaded, [url + "#select/1/@settings", url + "#intent/detail/1/alpha", url + "#intent/detail/2/alpha"],
+    "when already on @settings, openSpaceSettings hands over the detail intent directly without re-selecting general settings");
+  assert.deepEqual(parseNativeDetailIntent("#intent/detail/1/alpha"), { requestId: 1, spaceId: "alpha" });
+  hostCtrl.stop();
+
+  // 2. Portal page forwards #intent/detail/<id>/<spaceId> only after @settings selection, and rejects replays or invalid ids.
+  const managerOrigin = "http://127.0.0.1:3334";
+  const view = { serviceEpoch: epoch, spaceId: "hub", generation: 1, channel: "manager-channel" };
+  const makePortal = () => {
+    const listeners = new Map<string, (event?: unknown) => void>();
+    const replies: { data: unknown; origin: string }[] = [];
+    const managerWindow = { postMessage: (data: unknown, origin: string) => replies.push({ data, origin }) };
+    const location = { origin: "http://127.0.0.1:3333", hash: "", replace(hash: string) { this.hash = hash; } };
+    const script = renderPortalPage({ parentOrigin: location.origin, channel: "b".repeat(32) }, managerOrigin, true)
+      .split("<script>")[1].split("</script>")[0];
+    new Script(script + `
+frame=managerFrame;managerReady=true;managerView=${JSON.stringify(view)};
+snapshot=${JSON.stringify({ serviceEpoch: epoch, managerId: "hub", spaces: [{ id: "alpha", displayName: "Alpha", status: "running", generation: 1 }] })};
+`).runInNewContext({
+      location, URL, TextEncoder, TextDecoder, AbortController, AbortSignal,
+      managerFrame: { contentWindow: managerWindow, getBoundingClientRect: () => ({ width: 800, height: 600 }) },
+      fetch: () => new Promise(() => {}), setInterval: () => 0, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
+      window: { addEventListener: (name: string, fn: (event?: unknown) => void) => listeners.set(name, fn) },
+    });
+    return {
+      location,
+      intents: () => replies.filter(reply => (reply.data as { type?: string }).type === "intent"),
+      hash: (value: string) => { location.hash = value; listeners.get("hashchange")!(); },
+      selectSettings: (requestId: number) => {
+        location.hash = "#select/" + requestId + "/@settings";
+        listeners.get("hashchange")!();
+        listeners.get("message")!({
+          source: managerWindow,
+          origin: managerOrigin,
+          data: { source: "dsh-spaces-surface", type: "selected", requestId, target: "@settings", ...view },
+        });
+      },
+    };
+  };
+  const without = makePortal();
+  without.hash("#intent/detail/1/alpha");
+  assert.equal(without.intents().length, 0, "ignored before @settings selection");
+
+  const ready = makePortal();
+  ready.selectSettings(1);
+  ready.hash("#intent/detail/1/alpha");
+  assert.equal(ready.intents().length, 1);
+  const forwarded = JSON.parse(JSON.stringify(ready.intents()[0]));
+  assert.deepEqual(forwarded, {
+    data: {
+      source: "dsh-spaces-surface-parent",
+      type: "intent",
+      intent: "detail",
+      requestId: 1,
+      targetSpaceId: "alpha",
+      ...view,
+    },
+    origin: managerOrigin,
+  });
+  for (const bad of ["#intent/detail/1/alpha", "#intent/detail/2/", "#intent/detail/2/@settings", "#intent/detail/2/Bad_ID", "#intent/detail/2/hub", "#intent/detail/3/unknown-space"]) {
+    ready.hash(bad);
+  }
+  assert.equal(ready.intents().length, 1, "replays, manager id, unknown space id and malformed detail intents are ignored");
+
+  // 3. Surface bridge parses the forwarded message and routes to openDetail(spaceId).
+  const parentWin = { postMessage() {} };
+  const parentOrigin = ready.location.origin;
+  const surfaceView = { ...view, parentOrigin };
+  assert.deepEqual(
+    parseSurfaceIntent({ source: parentWin, origin: parentOrigin, data: forwarded.data }, parentWin, surfaceView),
+    { intent: "detail", requestId: 1, targetSpaceId: "alpha" },
+  );
+  const openedDetails: string[] = [];
+  let messageHandler: ((event: MessageEvent) => void) | null = null;
+  let uiState = {
+    boot: "ready",
+    selected: "home",
+    pendingId: null,
+    overlay: null as { type: "settings" } | null,
+    viewError: null,
+    state: { serviceEpoch: epoch, managerId: "hub", availability: "ready" },
+  };
+  const fakeWb = {
+    getSnapshot: () => uiState,
+    subscribe: () => () => undefined,
+    closeOverlay: () => { uiState = { ...uiState, overlay: null }; },
+    selectHome: () => { uiState = { ...uiState, selected: "home" }; },
+    openSettings: () => { uiState = { ...uiState, overlay: { type: "settings" } }; },
+    openCreate: () => undefined,
+    openDetail: (spaceId: string) => { openedDetails.push(spaceId); },
+  };
+  const detach = attachSurfaceBridge(
+    fakeWb as never,
+    surfaceView,
+    parentWin,
+    (fn) => { messageHandler = fn; return () => { messageHandler = null; }; },
+    () => undefined,
+  );
+  messageHandler!({
+    source: parentWin,
+    origin: parentOrigin,
+    data: { source: "dsh-spaces-surface-parent", type: "select", requestId: 1, target: "@settings", ...view },
+  } as unknown as MessageEvent);
+  messageHandler!({
+    source: parentWin,
+    origin: parentOrigin,
+    data: forwarded.data,
+  } as unknown as MessageEvent);
+  assert.deepEqual(openedDetails, ["alpha"]);
+  detach();
 });

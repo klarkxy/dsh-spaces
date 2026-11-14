@@ -20,8 +20,8 @@ Version 0.2.0-alpha.1 is a local unpublished candidate.
 - No npm publication, production installation or real DSH Home access occurred.
 
 The repository's `tasks/archive/blueprint-migration-0.2.md` separates Spaces integration
-acceptance from this standalone evidence. Local test artifacts live under
-`.sandbox/blueprint-migration/` and `.sandbox/blueprint-live-acceptance/`.
+acceptance from this standalone evidence.
+
 
 ## Historical redesign evidence — 2026-09-30
 
@@ -105,6 +105,6 @@ by the supplied pnpm version; no unrelated package-manager settings were altered
 On 2026-09-28, the former implementation had 97 passing tests and isolated packed-host
 browser checks with a host list-toolbar patch. Those checks exercised fixed append-only
 imports, previews, one-use plans and page confirmation. They do **not** certify the new
-Creator execution policy or the removed engine. Historical local evidence under
-`.scratch/blueprint-fix/` is not a shipped asset. The optional bundle page now needs no
+Creator execution policy or the removed engine.
+The optional bundle page now needs no
 list-toolbar host patch.

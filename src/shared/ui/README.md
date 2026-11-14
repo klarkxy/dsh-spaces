@@ -58,8 +58,8 @@ The mapping only adds new properties, so no existing rule has to be rewritten.
 
 ## Motion primitives
 
-Import path: `motion/react` (motion 14.4.0, the full React entry). The probe in
-`.sandbox/motion-probe/` proved this entry pulls no `react-dom` and no second
+Import path: `motion/react` (motion 14.4.0, the full React entry). This entry
+pulls no `react-dom` and no second
 React runtime into a client bundle, so the guard in `scripts/build-spaces.mjs`
 keeps passing unchanged.
 

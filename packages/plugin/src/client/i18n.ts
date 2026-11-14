@@ -26,41 +26,39 @@ function firstNavigatorLanguage(): string | undefined {
 }
 
 const guideEn = {
-  loading: "Checking this Home…",
+  loading: "Checking status…",
   blockedTitle: "Workbench unavailable",
-  blockedBody: "This Home cannot open the workbench. Locks were not cleared.",
+  blockedBody: "Cannot open the workbench right now.",
   initTitle: "Initialize Spaces",
-  initBody:
-    "This creates a dedicated manager and supervisor for this Home, then opens the authenticated workbench. It does not turn this space into the manager.",
+  initBody: "Set up Spaces for this Home and open the workbench.",
   initAction: "Initialize Spaces",
   initBusy: "Initializing Spaces…",
   enterTitle: "Enter workbench",
-  enterBody:
-    "This space is not the manager. Open the authenticated workbench, or start it if it is stopped. Management stays on the dedicated manager profile.",
+  enterBody: "Open the workbench, or start it if stopped.",
   enterAction: "Enter workbench",
   enterBusy: "Connecting…",
   startAction: "Start workbench",
   copyDetails: "Copy details",
   unavailable: "The workbench entry is not available yet.",
-  roleFailed: "This Home could not be checked.",
+  roleFailed: "Could not check service status.",
 } as const;
 
 const guideZh: Record<keyof typeof guideEn, string> = {
-  loading: "正在检查此 Home…",
+  loading: "正在检查状态…",
   blockedTitle: "工作台不可用",
-  blockedBody: "此 Home 无法打开工作台。未清除锁。",
+  blockedBody: "当前无法打开工作台。",
   initTitle: "初始化 Spaces",
-  initBody: "这将为本 Home 创建专用管理空间和监督进程，然后打开已认证的工作台。不会把当前空间变成管理空间。",
+  initBody: "初始化 Spaces 服务并打开工作台。",
   initAction: "初始化 Spaces",
   initBusy: "正在初始化 Spaces…",
   enterTitle: "进入工作台",
-  enterBody: "当前空间不是管理工作台。这里只会打开已认证的工作台入口；若工作台已停止，请启动它。管理能力仍在专用管理空间。",
+  enterBody: "打开工作台；若尚未运行，请先启动。",
   enterAction: "进入工作台",
   enterBusy: "正在连接…",
   startAction: "启动工作台",
   copyDetails: "复制详情",
   unavailable: "工作台入口暂不可用。",
-  roleFailed: "无法检查此 Home。",
+  roleFailed: "无法检查服务状态。",
 };
 
 export const GUIDE_COPY: Record<SpacesLocale, Record<keyof typeof guideEn, string>> = {

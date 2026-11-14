@@ -1,4 +1,4 @@
-export type ProfileStatus = "stopped" | "starting" | "running" | "crashed";
+export type ProfileStatus = "stopped" | "starting" | "stopping" | "running" | "crashed";
 
 export interface SpaceMeta {
   base?: 'web' | 'browser';
@@ -6,6 +6,8 @@ export interface SpaceMeta {
   displayName: string;
   icon?: string;
   order: number;
+  /** Start this space once when a user opens Desktop and its service becomes ready. */
+  startWithDesktop?: boolean;
   /** Exact DSH runtime version this space is pinned to. */
   dshVersion?: string;
   /** ISO timestamp written by Spaces when the space was created. Registers the space. */
@@ -157,7 +159,7 @@ export const DEFAULT_HUB_SETTINGS: HubSettings = {
 };
 
 export const DEFAULT_PLUGIN_CATALOG_URL =
-  "https://cdn.jsdelivr.net/gh/wgd753/awesome-dsh-plugin@main/data/repositories.json";
+  "https://klarkxy.github.io/dsh-plugins/plugins.json";
 
 export const PLUGIN_CATALOG_SCHEMA_VERSION = 1;
 

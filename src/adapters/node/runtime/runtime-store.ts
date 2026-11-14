@@ -15,6 +15,7 @@ import type { PackageSource } from "../../../shared/types";
 import { atomicWrite } from "../atomic";
 import { ProcessTerminationError } from "./terminate-process";
 import { assertNotRealHome } from "../home/home-guard";
+import { currentDiagnosticLogger } from "../diagnostics/operation-log";
 import { isAuthorizedProductHome } from "../home/home-guard";
 import { runSnapshotWorker } from "../snapshots/snapshot-executor";
 import { npmPackumentUrl, npmRegistry, sourceEnv } from "../products/package-source";
@@ -133,6 +134,8 @@ export class RuntimeStore {
   }
 
   async catalog(): Promise<RuntimeCatalog> {
+    const log = currentDiagnosticLogger();
+    const started = Date.now();
     const url = npmPackumentUrl(this.source(), DSH_RUNTIME_PACKAGE);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CATALOG_TIMEOUT_MS);
@@ -142,8 +145,11 @@ export class RuntimeStore {
         headers: { accept: "application/json", "user-agent": "dsh-spaces" },
       });
       if (!response.ok) throw new Error(`npm registry HTTP ${response.status}`);
-      return parsePackument(await response.json());
+      const result = parsePackument(await response.json());
+      log?.info("runtime.catalog", "Runtime registry metadata was read.", { status: response.status, versions: result.versions.length, durationMs: Date.now() - started });
+      return result;
     } catch (err) {
+      log?.error("runtime.catalog-failed", "Runtime registry metadata could not be read.", err, { durationMs: Date.now() - started });
       throw new Error(`failed to fetch ${DSH_RUNTIME_PACKAGE} metadata: ${describeFetchError(err)}`);
     } finally {
       clearTimeout(timer);
@@ -153,7 +159,11 @@ export class RuntimeStore {
   async install(version: string): Promise<InstalledRuntime> {
     const exact = this.requireVersion(version);
     const existing = this.inflight.get(exact);
-    if (existing) return existing;
+    if (existing) {
+      currentDiagnosticLogger()?.debug("runtime.install-shared", "Runtime installation is already in progress; its result is shared.", { version: exact });
+      return existing;
+    }
+    currentDiagnosticLogger()?.info("runtime.install-started", "Runtime installation requested.", { version: exact, source: this.source(), worker: Boolean(this.installWorker && !this.customRun) });
     const work = this.installWorker && !this.customRun
       ? runSnapshotWorker<InstalledRuntime>(this.installWorker.file, {
         operation: "runtimeInstall", home: this.installWorker.home,
@@ -162,7 +172,13 @@ export class RuntimeStore {
         packageSource: this.source(), toolchainRoot: toolchainRoot(),
       })
       : this.installOnce(exact);
-    const pending = work.finally(() => {
+    const pending = work.then(installed => {
+      currentDiagnosticLogger()?.info("runtime.install-completed", "Runtime installation completed.", { version: installed.version });
+      return installed;
+    }, error => {
+      currentDiagnosticLogger()?.error("runtime.install-failed", "Runtime installation failed.", error, { version: exact });
+      throw error;
+    }).finally(() => {
       if (this.inflight.get(exact) === pending) this.inflight.delete(exact);
     });
     this.inflight.set(exact, pending);
@@ -236,6 +252,7 @@ export class RuntimeStore {
   }
 
   private async probeVersion(bin: string): Promise<string> {
+    const log = currentDiagnosticLogger();
     if (!this.customRun && !nodeExecutable()) await ensureNode();
     const initialNode = this.nodeBin();
     const probe = (node: string) => this.run(node, [bin, "--version"], {
@@ -246,6 +263,7 @@ export class RuntimeStore {
     const result = await probe(initialNode);
     const detail = `${result.stdout}\n${result.stderr}`;
     const parsed = parseVersionText(detail);
+    log?.write({ level: result.code === 0 && parsed ? "debug" : "error", event: "runtime.version-probe", message: "Runtime version probe exited.", context: { exitCode: result.code, version: parsed ?? null } });
     if (result.code !== 0 || !parsed) {
       throw new Error(t("errors.versionParse", { code: result.code, detail: detail.slice(0, 200) }));
     }
@@ -253,8 +271,12 @@ export class RuntimeStore {
   }
 
   private async installOnce(version: string): Promise<InstalledRuntime> {
+    const log = currentDiagnosticLogger();
     const present = this.readInstalled(version);
-    if (present) return present;
+    if (present) {
+      log?.debug("runtime.install-present", "The requested runtime is already installed.", { version });
+      return present;
+    }
     if (!this.customRun) await ensureNode();
 
     const staging = join(this.root, `.tmp-dsh-${version}-${process.pid}`);
@@ -279,6 +301,7 @@ export class RuntimeStore {
           shell: false,
         },
       );
+      log?.write({ level: result.code === 0 ? "info" : "error", event: "runtime.npm-install", message: "Runtime npm installation exited.", context: { version, source, exitCode: result.code, stdout: result.stdout, stderr: result.stderr } });
       const bin = binUnder(staging);
       if (result.code !== 0 || !existsSync(bin)) {
         throw new Error(
@@ -292,6 +315,7 @@ export class RuntimeStore {
       if (readPackageVersion(bin) !== version) {
         throw new Error(`installed ${spec} but package.json is not ${version}`);
       }
+      log?.debug("runtime.install-verified", "The staged runtime version was verified.", { version });
 
       mkdirSync(this.versionsDir(), { recursive: true });
       const dest = join(this.versionsDir(), version);
@@ -306,6 +330,7 @@ export class RuntimeStore {
       await rename(staging, dest);
       const installed = this.readInstalled(version);
       if (!installed) throw new Error(`runtime ${version} failed to become readable after install`);
+      log?.debug("runtime.install-published", "The verified runtime was published in the local store.", { version });
       atomicWrite(
         join(dest, "meta.json"),
         `${JSON.stringify({ version: installed.version, bin: installed.bin, installedAt: new Date().toISOString() }, null, 2)}\n`,

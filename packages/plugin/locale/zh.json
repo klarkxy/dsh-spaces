@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DSH Spaces",
-    "description": "面向 DeepSeek Harness 的 Spaces：像切换 Discord 服务器一样切换 DSH 工作区。"
+    "description": "管理并快速切换多个独立的 DSH 工作空间。"
   }
 }

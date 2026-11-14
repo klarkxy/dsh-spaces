@@ -20,11 +20,13 @@ import type { SupervisorInstanceRecords } from "./instance-records";
 import type { SupervisorLifecycle } from "./lifecycle";
 import type { SpaceRunRegistry } from "./space-runs";
 import type { StoredPlan, WorkbenchMaintenance, WorkbenchSupervisorOptions } from "./types";
-import { describeModelSync, type ModelSyncSummary } from "../llm/main-model-sync";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
+import { assertModelSyncPreview, describeModelSync, type ModelSyncSummary, type PreparedMainModelSync } from "../llm/main-model-sync";
 
 const PLAN_TTL_MS = 5 * 60_000;
 
 export interface SupervisorPlansHost {
+  diagnosticLog: DiagnosticLogger;
   whileIdle?<T>(spaceId: string, action: () => Promise<T>): Promise<T>;
   home: string;
   lifecycle: SupervisorLifecycle;
@@ -49,8 +51,14 @@ export interface SupervisorPlansHost {
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
   /** Verified main profile of this epoch; throws when the main space is not connected. */
   mainProfile: () => string;
-  /** One copy of the main space's models into a stopped space. */
-  syncMainModels: (spaceId: string) => Promise<ModelSyncSummary>;
+  /** Read the main space afresh; its snapshot stays in Supervisor memory. */
+  prepareModelSync: (spaceId: string) => Promise<PreparedMainModelSync>;
+  /** Write through the running child, or undefined when no live surface exists. */
+  modelLive?: (
+    prepared: PreparedMainModelSync,
+    spaceId: string,
+    ctx: WorkbenchJobContext,
+  ) => Promise<WorkbenchJob["result"]>;
   /**
    * Run one `plugin.live.*` request through the child's own pluginManager
    * inside the current serialized job; absent when the child remote
@@ -72,7 +80,8 @@ export class SupervisorPlans {
 
   constructor(private readonly host: SupervisorPlansHost) {}
 
-  previewLocal(request: WorkbenchPlanRequest, observedActivity?: "idle" | "busy" | "unknown"): WorkbenchPlan {
+  async previewLocal(request: WorkbenchPlanRequest, observedActivity?: "idle" | "busy" | "unknown"): Promise<WorkbenchPlan> {
+    this.host.diagnosticLog.debug("plan.preview", "Plan preview requested.", { kind: request.kind, space: "spaceId" in request ? request.spaceId : null });
     const id = "spaceId" in request ? this.host.requireSpace(request.spaceId) : "";
     if (request.kind === "space.stop" || request.kind === "space.restart" || request.kind === "space.delete") {
       this.host.requireManaged(id);
@@ -80,19 +89,18 @@ export class SupervisorPlans {
       if (request.kind === "space.delete") this.host.protectSpecial(id, { allowManager: false });
     }
     let policyChanges: string[] | undefined;
+    let modelsSync: ModelSyncSummary | undefined;
     if (request.kind === "space.models.sync") {
       this.host.requireManaged(id);
       this.host.protectSpecial(id, { allowManager: false });
       const status = this.host.statusOf(id);
-      if (status !== "stopped" && status !== "crashed") {
-        throw new WorkbenchPublicError(
-          "workbench/conflict",
-          `The space ${id} must be stopped before models can be synced into it. Stop it first.`,
-        );
+      if (status !== "running" && status !== "stopped" && status !== "crashed") {
+        throw new WorkbenchPublicError("workbench/conflict", `The space ${id} is ${status}; model sync accepts running, stopped, or crashed spaces. Wait for the current transition to finish and preview again.`);
       }
-      const main = this.host.mainProfile();
+      // Main-space reads and their failures happen before any write.
+      modelsSync = (await this.host.prepareModelSync(id)).summary;
       policyChanges = [
-        `Copy the model settings of the main space (${main}) into ${id}: model routes, DeepSeek settings, the default model and the credentials they use.`,
+        `Copy the model settings of the main space (${modelsSync.mainProfile}) into ${id}: model routes, DeepSeek settings, the default model and the credentials they use.`,
         "Routes this space added itself stay. Sign-in based routes (OAuth) are not copied.",
         "This copies once. Later changes in the main space reach this space only when you sync again.",
       ];
@@ -125,6 +133,7 @@ export class SupervisorPlans {
       runningSpaceIds: request.kind === "service.shutdown"
         ? this.host.ownedSpaceIds().filter((name) => this.host.statusOf(name) === "running")
         : running,
+      ...(modelsSync ? { modelsSync } : {}),
       changes: policyChanges ?? (request.kind === "space.delete" ? [
         "Remove this space's profile and installed plugins.",
         request.removeData ? "Delete this space's isolated sessions and storage." : "Keep this space's isolated sessions and storage on disk.",
@@ -141,17 +150,18 @@ export class SupervisorPlans {
   }
 
   async executePlan(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
+    this.host.diagnosticLog.info("plan.execute", "Plan execution requested.", { plan: planId });
     const stored = this.plans.get(planId) ?? this.host.instances().readLifecyclePlan(planId);
     if (stored) {
       if (stored.consumed) throw new WorkbenchPublicError("workbench/not-found");
-      if (Date.parse(stored.plan.expiresAt) <= this.host.now().getTime()) {
+      if (!stored.admitted && Date.parse(stored.plan.expiresAt) <= this.host.now().getTime()) {
         this.host.instances().consumeLifecyclePlan(planId);
         throw new WorkbenchPublicError("workbench/invalid-input", "The preview expired. Request a new preview.");
       }
       if (!stored.plan.serviceEpoch || stored.plan.serviceEpoch !== this.host.currentServiceEpoch()) {
         throw new WorkbenchPublicError("workbench/conflict", "The preview belongs to another service epoch.");
       }
-      if (!stored.plan.stateRevision || stored.plan.stateRevision !== this.host.stateRevision()) {
+      if (stored.plan.scope !== "space" && (!stored.plan.stateRevision || stored.plan.stateRevision !== this.host.stateRevision())) {
         throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
       }
       const fingerprint = this.fingerprint(stored.request);
@@ -170,6 +180,36 @@ export class SupervisorPlans {
     const maintenance = this.host.maintenance();
     if (!maintenance) throw new WorkbenchPublicError("workbench/maintenance");
     return maintenance.execute(planId, ctx);
+  }
+
+  admitPlan(planId: string): { scope: WorkbenchPlan["scope"]; affectedSpaceIds: string[] } {
+    const stored = this.plans.get(planId) ?? this.host.instances().readLifecyclePlan(planId);
+    if (stored) {
+      if (stored.consumed) throw new WorkbenchPublicError("workbench/not-found");
+      if (Date.parse(stored.plan.expiresAt) <= this.host.now().getTime()) {
+        this.host.instances().consumeLifecyclePlan(planId);
+        throw new WorkbenchPublicError("workbench/invalid-input", "The preview expired. Request a new preview.");
+      }
+      if (!stored.plan.serviceEpoch || stored.plan.serviceEpoch !== this.host.currentServiceEpoch()) {
+        throw new WorkbenchPublicError("workbench/conflict", "The preview belongs to another service epoch.");
+      }
+      if (stored.plan.scope !== "space" && (!stored.plan.stateRevision || stored.plan.stateRevision !== this.host.stateRevision())) {
+        throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
+      }
+      if (this.fingerprint(stored.request) !== stored.fingerprint) {
+        throw new WorkbenchPublicError("workbench/conflict", "The target changed. Request a new preview.");
+      }
+      stored.admitted = true;
+      this.host.instances().writeLifecyclePlan(stored);
+      return {
+        scope: stored.plan.scope,
+        affectedSpaceIds: stored.plan.scope === "space" ? [...stored.plan.affectedSpaceIds] : [],
+      };
+    }
+    const maintenance = this.host.maintenance();
+    if (!maintenance) throw new WorkbenchPublicError("workbench/maintenance");
+    if (!maintenance.admitPlan) return { scope: "home", affectedSpaceIds: [] };
+    return maintenance.admitPlan(planId);
   }
 
   private async executeLocal(stored: StoredPlan, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void> {
@@ -214,19 +254,29 @@ export class SupervisorPlans {
         return;
       }
       case "space.models.sync": {
-        ctx.phase("models-sync");
         const id = this.host.requireManaged(request.spaceId);
         this.host.protectSpecial(id, { allowManager: false });
+        ctx.phase("prepare");
+        ctx.message("Reading the main space model settings before writing.");
+        const prepared = await this.host.prepareModelSync(id);
+        assertModelSyncPreview(prepared, stored.plan.modelsSync);
         const status = this.host.statusOf(id);
-        if (status !== "stopped" && status !== "crashed") {
-          throw new WorkbenchPublicError(
-            "workbench/conflict",
-            `The space ${id} started since the preview; models were not synced.`,
-          );
+        if (status !== "running" && status !== "stopped" && status !== "crashed") {
+          throw new WorkbenchPublicError("workbench/conflict", `The space ${id} is ${status}; model sync was not written. Wait for the current transition to finish and preview again.`);
         }
-        // The serialized job tail plus the write lock serialize this write;
-        // a failure after a committed file keeps the scene as evidence.
-        const summary = await this.host.lock.run("space.models.sync", () => this.host.syncMainModels(id));
+        ctx.cancellable(false);
+        ctx.phase("models-sync");
+        if (status === "running") {
+          if (!this.host.modelLive) throw new WorkbenchPublicError("workbench/unavailable", "The running space settings surface is unavailable; no model settings were written.");
+          // The child applies volatile settings itself; its process stays running.
+          this.host.diagnosticLog.info("models.live.started", "Live model sync started.", { space: id, routes: prepared.summary.routes.length, credentials: prepared.summary.credentials.length });
+          const result = await this.host.modelLive(prepared, id, ctx);
+          this.host.diagnosticLog.info("models.live.completed", "Live model sync completed.", { space: id });
+          return result;
+        }
+        // Stopped/crashed is the only supervisor-side file-write path.
+        const summary = await this.host.lock.run("space.models.sync", () => prepared.apply(id));
+        this.host.diagnosticLog.info("models.files.completed", "Stopped-space model files were written and verified.", { space: id });
         ctx.message(describeModelSync(summary));
         return { spaceId: id, steps: [{ step: "models-sync", status: "done", detail: describeModelSync(summary) }] };
       }
@@ -273,9 +323,20 @@ export class SupervisorPlans {
   }
 
   private fingerprint(request: WorkbenchPlanRequest): string {
+    const scanned = "spaceId" in request && typeof this.host.registry.scan === "function"
+      ? this.host.registry.scan().find((item) => item.name === request.spaceId)
+      : undefined;
     const spaces =
       "spaceId" in request
-        ? [{ id: request.spaceId, status: this.host.statusOf(request.spaceId), generation: this.host.runs.generation(request.spaceId) }]
+        ? [{
+            id: request.spaceId,
+            exists: Boolean(scanned),
+            status: this.host.statusOf(request.spaceId),
+            generation: this.host.runs.generation(request.spaceId),
+            dshVersion: scanned?.meta?.dshVersion ?? null,
+            displayName: scanned?.meta?.displayName ?? null,
+            icon: scanned?.meta?.icon ?? null,
+          }]
         : this.host.ownedSpaceIds().map((id) => ({ id, status: this.host.statusOf(id) }));
     return JSON.stringify({ request, spaces, owner: Boolean(this.host.lifecycle.handle) });
   }

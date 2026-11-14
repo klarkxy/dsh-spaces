@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { gte } from "semver";
 import { assertSettingsIsolation, alignProfileComponents, RETIRED_LLM_BRIDGE } from "../../src/adapters/node/profile/profile-component-alignment.ts";
 import { SupervisorSpaceLifecycle } from "../../src/adapters/node/supervisor/space-lifecycle.ts";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
 
 type Bridge = "view-bridge" | "browser";
 type Row = { id?: string; name?: string; disabled?: unknown };
@@ -368,6 +369,7 @@ test("Supervisor start admits the known transition under its writer lock before 
   const f = fixture(); const steps: string[] = []; const archiveIds: string[] = [];
   const startOwned = (SupervisorSpaceLifecycle.prototype as unknown as { startOwned(id: string): Promise<void> }).startOwned;
   const host = {
+    diagnosticLog: createDiagnosticLogger(f.home, "supervisor"),
     home: f.home, runs: { unmanaged: new Set<string>() },
     options: { componentPayloadRoot: f.input.payloadRoot, viewBridgeArtifact: join(f.home, "view.tgz") },
     lifecycle: { assertWritable: () => { steps.push("guard"); } }, statusOf: () => "stopped",
@@ -387,7 +389,7 @@ test("Supervisor start admits the known transition under its writer lock before 
     ensureBundledDeps: async () => { steps.push("deps"); },
     readDump: f.input.dump,
   };
-  const supervisor = { host };
+  const supervisor = { host, log: host.diagnosticLog };
   writeFileSync(host.options.viewBridgeArtifact, "view archive");
   await startOwned.call(supervisor, "writing");
   assert.deepEqual(steps, ["guard", "lock", "deps", "install", "unlock", "spawn"]);

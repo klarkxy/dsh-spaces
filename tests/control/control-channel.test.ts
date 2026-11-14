@@ -234,7 +234,7 @@ function makePorts(home: string, options: {
         stateRevision: fixture.mutable.revision,
       };
     },
-    previewLocalPlan: (request) => {
+    previewLocalPlan: async (request) => {
       fixture.previewCalls.push(request);
       if (fixture.previewError) throw fixture.previewError;
       const row = request as { kind: string; spaceId: string };

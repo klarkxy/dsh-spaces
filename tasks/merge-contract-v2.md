@@ -18,7 +18,7 @@
 
 `serviceEpoch` 由当前 Home 运行权持有者身份派生，使用摘要，不公开用于释放锁的原始 nonce。一次服务运行中保持不变。视图/模型实例使用 `serviceEpoch + spaceId + generation`；视图的 origin、channel、窗口 source 校验继续有效。
 
-`WorkbenchState` 携带 `protocolVersion: 2`、`serviceEpoch`、`revision`、`availability`。`revision` 是确定的管理状态摘要：至少覆盖空间元数据、实例 generation/status 和 Home 管理设置；排除轮询时间、日志和 job 列表，避免读取本身制造冲突。LLM catalog/policy 继续使用已有独立 CAS revision。
+`WorkbenchState` 携带 `protocolVersion: 2`、`serviceEpoch`、`revision`、`availability`。`revision` 是确定的管理状态摘要：至少覆盖空间元数据、实例 generation/status 和 Home 管理设置；排除轮询时间、日志和 job 列表，避免读取本身制造冲突。
 
 普通变更使用 `WorkbenchMutationContext = { serviceEpoch, expectedRevision }`。`submit(command, requestId, context)` 和 `preview(request, context)` 接受此条件；输入缺失、多余字段或格式不符明确拒绝。比较在真正的串行执行边界完成，避免两个请求同时通过预检后覆盖彼此。已接受的同 requestId、同命令读取同一 job，不能因为当前 revision 已变化而执行第二次；同 ID 不同命令拒绝。
 
@@ -54,7 +54,7 @@ endpoint 记录包含协议版本、公开服务 epoch、canonical Home 身份�
 
 ## 拓扑
 
-独立 Supervisor 是唯一管理执行器：运行权、进程监督、任务执行、稳定 HTTP。宿主入口不得创建第二套空间注册、进程管理、运行时存储、升级协调或 LLM 主宿主。管理页是 `spaces-hub` 的原生工作台；Host 只作受信任转接。工作空间独立 origin；view-bridge 不含管理能力。
+独立 Supervisor 是唯一管理执行器：运行权、进程监督、任务执行、稳定 HTTP。宿主入口不得创建第二套空间注册、进程管理、运行时存储或升级协调。管理页是 `spaces-hub` 的原生工作台；Host 只作受信任转接。工作空间独立 origin；view-bridge 不含管理能力。
 
 管理 profile 停机后若 Supervisor 仍在线，入口显示真实失败。Supervisor 不随管理 profile 停机。宿主退出销毁客户端，不停止服务。
 
@@ -68,7 +68,7 @@ Web 与 Desktop 共用同一管理工作台、任务结果和业务客户端。�
 
 ## 组件制品与正常升级
 
-同一构建的不可变清单标明 Supervisor、管理插件、view-bridge、Browser、llm-bridge 和安装 worker 的版本、摘要、协议及路径。标准插件安装与 pack 消费该清单，最终制品逐件验证；不建立新的通用注册中心。冷启动总是选择宿主插件自带的组件组；仅当选中指针摘要一致才复用旧选择。
+同一构建的不可变清单标明 Supervisor、管理插件（含 `@dsh-spaces/plugin/space-control` 子入口）、view-bridge、Browser 和安装 worker 的版本、摘要、协议及路径。标准插件安装与 pack 消费该清单，最终制品逐件验证；不建立新的通用注册中心。冷启动总是选择宿主插件自带的组件组；仅当选中指针摘要一致才复用旧选择。
 
 升级 Spaces 的正常路径是：宿主 `dsh plugin --profile web add <新包>` → 管理工作台停止服务 → 重新打开 Spaces；新的 Supervisor 在管理器启动前对齐管理插件。普通空间按需获得随组桥接，但既有桥接不能仅凭存在就视为与当前组件组版本一致。没有应用内自我更新、一次性启动器交接或服务端版本切换；中断的旧式更新遗留证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。
 

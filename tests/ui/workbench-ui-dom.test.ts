@@ -100,6 +100,9 @@ test("DOM: native settings creation entry is clickable and reveals its space", {
     await page.goto(supervisor.url);
     await page.getByRole("button", { name: "新建空间", exact: true }).click();
     const form = page.getByRole("dialog", { name: "创建空间", exact: true });
+    await form.getByRole("textbox", { name: "显示名称", exact: true }).fill("写作空间");
+    await form.locator("[data-create-id-hint=\"true\"]").waitFor({ state: "visible" });
+    await form.locator("[data-create-advanced=\"true\"] > summary").click();
     const models = form.getByRole("combobox", { name: "模型来源", exact: true });
     assert.deepEqual(await models.locator("option").evaluateAll(options => options.map(option => (option as HTMLOptionElement).value)), ["main", "local"]);
     assert.equal(await models.inputValue(), "main");
@@ -203,10 +206,10 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   await browserPage.getByRole('button', { name: 'Light', exact: true }).click();
   assert.equal(await browserPage.locator('[data-settings-dialog]').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)');
   await browserPage.getByRole('button', { name: '中文', exact: true }).click();
-  await browserPage.getByRole('button', { name: '维护', exact: true }).click();
-  await browserPage.getByRole('tab', { name: '服务', exact: true }).click();
+  await browserPage.getByRole('tab', { name: '维护', exact: true }).click();
   await browserPage.setViewportSize({ width: 390, height: 520 });
-  await browserPage.locator('[data-settings-home]').waitFor({ state: 'visible' });
+  await browserPage.getByRole('tab', { name: '服务', exact: true }).click();
+  await browserPage.locator('[data-settings-service]').waitFor({ state: 'visible' });
   await browserPage.locator('.dsh-wb-settings-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
   const rect = await close.boundingBox();
   assert.ok(rect && rect.y >= 0 && rect.y + rect.height <= 520 && rect.x + rect.width <= 390, 'close stays in the viewport');
@@ -300,11 +303,15 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   await page.goto(supervisor.url, { waitUntil: "networkidle" });
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("button", { name: "维护", exact: true }).click();
-  await page.getByRole("tab", { name: "服务" }).click();
+  await page.getByRole("tab", { name: "通用", exact: true }).click();
+  await page.locator('[data-settings-advanced="true"] > summary').click();
   await page.locator("[data-settings-home]").waitFor({ state: "visible", timeout: 15_000 });
-  const port = await page.locator("[data-settings-home] input[type=\"number\"]").first().inputValue();
+  const portInput = page.locator("[data-settings-home] input[type=\"number\"]").first();
+  const port = await portInput.inputValue();
   assert.equal(port, "3100");
+  assert.equal(await page.locator("[data-settings-home] button.primary").isDisabled(), true, "clean settings keep save disabled");
+  await portInput.fill("3110");
+  assert.equal(await page.locator("[data-settings-home] button.primary").isDisabled(), false, "dirty settings enable save");
   await page.evaluate(() => {
     const save = document.querySelector("[data-settings-home] button.primary") as HTMLButtonElement | null;
     save?.click();
@@ -313,10 +320,15 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   });
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("tab", { name: "空间模板" }).click();
+  await page.getByRole("tab", { name: "模板", exact: true }).click();
   await page.locator("[data-templates]").waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByRole("tab", { name: "导出", exact: true }).click();
-  await page.getByRole("button", { name: "导出分享" }).click();
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator('[data-space-row-actions="alpha"]').click();
+  await page.getByRole("menuitem", { name: "导出分享文件", exact: true }).click();
+  const exportDialog = page.locator('[data-export-share-dialog="true"]');
+  await exportDialog.waitFor({ state: "visible", timeout: 15_000 });
+  await exportDialog.getByRole("button", { name: "导出分享文件", exact: true }).click();
+  await exportDialog.waitFor({ state: "detached", timeout: 15_000 });
   const downloads = await page.evaluate(
     () => (window as Window & { __WB_DOWNLOADS?: Array<{ fileName: string }> }).__WB_DOWNLOADS ?? [],
   );
@@ -324,8 +336,8 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
 
   // The plugin catalogue, the published versions and the upgrade belong to the
   // plugin section of the space detail page now.
-  await page.getByRole("tab", { name: "空间", exact: true }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator('[data-space-row-actions="alpha"]').click();
+  await page.getByRole("menuitem", { name: "空间设置", exact: true }).click();
   await openDetailTab(page, "插件");
   await page.locator("[data-space-section=\"plugins\"]").waitFor({ state: "visible", timeout: 15_000 });
   await page.getByRole("button", { name: "安装插件", exact: true }).click();
@@ -434,23 +446,42 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
 
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator('[data-space-open-detail="alpha"]').click();
+  const modelCard = page.locator('[data-space-tab="general"] [data-space-section="models"]');
+  await modelCard.waitFor({ state: "visible" });
+  assert.equal(await modelCard.locator("[data-space-models-state]").getAttribute("data-space-models-state"), "unconfigured");
+  const sync = modelCard.locator("[data-space-models-sync]");
+  assert.equal(await sync.isEnabled(), true, "a running space can preview model sync directly");
+  await sync.click();
+  await page.locator("[data-plan-models-live]").waitFor({ state: "visible" });
+  assert.equal(await page.locator("[data-plan-stop-impact]").count(), 0);
+  await page.locator("[data-plan-models-summary]").waitFor({ state: "visible" });
+  assert.match(await page.getByRole("dialog").textContent() ?? "", /gw\/gw-large/);
+  await page.getByRole("button", { name: "同步", exact: true }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "取消" }).click();
+  assert.deepEqual(await previewCalls(), [{ kind: "space.models.sync", spaceId: "alpha" }]);
+
+  await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("tab", { name: "空间", exact: true }).click();
+  await page.locator('[data-space-open-detail="alpha"]').click();
   await openDetailTab(page, "高级");
   const select = page.locator("[data-dsh-target=\"true\"]");
   await select.waitFor({ state: "visible", timeout: 15_000 });
   await select.selectOption("0.2.0");
-  await page.getByRole("button", { name: "预览切换" }).click();
+  await page.getByRole("button", { name: "切换", exact: true }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
-  assert.deepEqual(await previewCalls(), [{ kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" }]);
+  assert.deepEqual((await previewCalls()).slice(1), [{ kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" }]);
   await page.getByRole("button", { name: "取消" }).click();
 
   await page.getByRole("button", { name: "设置" }).click();
-  await page.getByRole("button", { name: "维护", exact: true }).click();
-  await page.getByRole("tab", { name: "DSH 版本" }).click();
-  assert.equal(await page.getByRole("button", { name: "预览安装", exact: true }).count(), 0);
-  await page.getByRole("button", { name: "删除" }).click();
+  await page.getByRole("tab", { name: "维护", exact: true }).click();
+  await page.getByRole("tab", { name: "DSH 版本", exact: true }).click();
+  const runtimeSection = page.locator('[data-maintenance-section="runtime"]');
+  await runtimeSection.waitFor({ state: "visible", timeout: 15_000 });
+  assert.equal(await runtimeSection.getByRole("button", { name: "预览安装", exact: true }).count(), 0);
+  await runtimeSection.getByRole("button", { name: "删除" }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
-  assert.deepEqual(await previewCalls(), [
+  assert.deepEqual((await previewCalls()).slice(1), [
     { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
     { kind: "runtime.remove", version: "0.3.0" },
   ]);
@@ -459,12 +490,12 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   // D1: a stop runs from its preview, so no confirmation dialog appears.
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator('[data-space-open-detail="alpha"]').click();
   const detail = page.locator("[data-space-detail=\"true\"]");
   await detail.waitFor({ state: "visible", timeout: 15_000 });
   await detail.getByRole("button", { name: "停止", exact: true }).click();
   await page.waitForTimeout(500);
-  assert.deepEqual(await previewCalls(), [
+  assert.deepEqual((await previewCalls()).slice(1), [
     { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
     { kind: "runtime.remove", version: "0.3.0" },
     { kind: "space.stop", spaceId: "alpha" },
@@ -476,12 +507,12 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   // page to unmount before aiming at the danger zone.
   await page.getByRole("button", { name: "设置" }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator('[data-space-open-detail="alpha"]').click();
   await page.waitForFunction(() => document.querySelectorAll("[data-space-detail=\"true\"]").length === 1);
   await openDetailTab(page, "高级");
   await page.locator("[data-space-section=\"danger\"]").getByRole("button", { name: "删除", exact: true }).click();
   await page.getByRole("button", { name: "取消" }).waitFor({ state: "visible", timeout: 15_000 });
-  assert.deepEqual(await previewCalls(), [
+  assert.deepEqual((await previewCalls()).slice(1), [
     { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.0" },
     { kind: "runtime.remove", version: "0.3.0" },
     { kind: "space.stop", spaceId: "alpha" },
@@ -535,6 +566,7 @@ test("DOM: dialogs trap and restore focus, names validate live, the menu answers
   // An invalid name disables Create and shows the inline hint; a valid one enables it.
   await create.click();
   await dialog.waitFor();
+  await dialog.locator("[data-create-advanced=\"true\"] > summary").click();
   const nameField = dialog.locator('input[name="name"]');
   await nameField.fill("Bad_Name");
   await page.locator("#dsh-wb-create-name-invalid").waitFor();
@@ -566,7 +598,7 @@ test("DOM: dialogs trap and restore focus, names validate live, the menu answers
   // The copy button reports success and failure inline.
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("tab", { name: "空间", exact: true }).click();
-  await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…" }).click();
+  await page.locator('[data-space-open-detail="alpha"]').click();
   await openDetailTab(page, "高级");
   await page.locator('[data-space-section="diagnostics"]').waitFor();
   const copy = page.getByRole("button", { name: "复制脱敏日志", exact: true });
@@ -621,11 +653,11 @@ test("DOM: delayed runtime candidates derive a usable target and keep selections
         }, pin);
         await page.getByRole("button", { name: "设置", exact: true }).click();
         await page.getByRole("tab", { name: "空间", exact: true }).click();
-        await page.locator(".dsh-wb-space-row", { hasText: "Alpha" }).getByRole("button", { name: "管理…", exact: true }).click();
+        await page.locator('[data-space-open-detail="alpha"]').click();
         await openDetailTab(page, "高级");
         await page.waitForFunction(() => Boolean(window.__WB_RESOLVE_RUNTIMES));
         const select = page.locator("[data-dsh-target=\"true\"]");
-        const preview = page.getByRole("button", { name: "预览切换", exact: true });
+        const preview = page.getByRole("button", { name: "切换", exact: true });
         assert.equal(await select.locator("option").count(), 0);
         assert.equal(await preview.isDisabled(), true);
         await page.evaluate((rows) => window.__WB_RESOLVE_RUNTIMES!(rows), [runtime("0.2.0-rc.2")]);

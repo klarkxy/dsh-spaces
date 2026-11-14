@@ -27,6 +27,9 @@ export function SpaceMenu({
   const starting = space?.status === "starting";
   const crashed = space?.status === "crashed";
   const manager = controller.isManagerId(spaceId);
+  const workspaceSpaces = controller.workspaceSpaces();
+  const workspaceIndex = workspaceSpaces.findIndex((item) => item.id === spaceId);
+  const exportBlocked = manager || spaceId === "web";
   const menu = useRef<HTMLElement>(null);
   const keyboard = useMenuKeyboard(menu, { x, y, onClose: controller.closeOverlay });
   return (
@@ -77,22 +80,73 @@ export function SpaceMenu({
         <button
           type="button"
           role="menuitem"
-          disabled={!writable}
+          onClick={() => controller.openDetail(spaceId)}
+        >
+          {t(locale, "detail.manage")}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!writable || manager}
           onClick={() => controller.openRename(spaceId)}
         >
           {t(locale, "app.rename")}
         </button>
-        <button type="button" role="menuitem" disabled={!writable} onClick={() => controller.openIcon(spaceId)}>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!writable || manager}
+          onClick={() => controller.openIcon(spaceId)}
+        >
           {t(locale, "app.changeIcon")}
         </button>
-        <button type="button" role="menuitem" onClick={() => controller.openDetail(spaceId)}>
-          {t(locale, "detail.manage")}
+        {workspaceIndex >= 0 ? (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!writable || workspaceIndex <= 0}
+              onClick={() => {
+                controller.closeOverlay();
+                controller.moveSpace(spaceId, -1);
+              }}
+            >
+              {t(locale, "app.moveUp")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!writable || workspaceIndex >= workspaceSpaces.length - 1}
+              onClick={() => {
+                controller.closeOverlay();
+                controller.moveSpace(spaceId, 1);
+              }}
+            >
+              {t(locale, "app.moveDown")}
+            </button>
+          </>
+        ) : null}
+        <button
+          type="button"
+          role="menuitem"
+          disabled={exportBlocked}
+          onClick={() => controller.openExportShare(spaceId)}
+        >
+          {t(locale, "share.export")}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!writable || exportBlocked}
+          onClick={() => controller.openSaveTemplate(spaceId)}
+        >
+          {t(locale, "templates.save")}
         </button>
         {!SPACES_BLUEPRINT_SEALED ? (
           <button
             type="button"
             role="menuitem"
-            disabled={manager || spaceId === "web"}
+            disabled={exportBlocked}
             onClick={() => {
               controller.closeOverlay();
               controller.openBlueprintGenerate(spaceId);

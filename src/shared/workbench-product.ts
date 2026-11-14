@@ -106,6 +106,7 @@ export type WorkbenchProductCommand =
   | { kind: 'plugin.library.remove'; libraryId: string }
   | { kind: 'template.save'; spaceId: string; name: string; includeConfig?: boolean }
   | { kind: 'template.create'; templateId: string; name: string; displayName?: string }
+  | { kind: 'template.delete'; templateId: string }
   | { kind: 'space.import'; importId: string; name: string; displayName?: string }
   | WorkbenchBlueprintApplyCommand;
 
@@ -116,10 +117,11 @@ export type WorkbenchProductOutcome =
   | { kind: 'plugin.download'; item: WorkbenchLibraryItem }
   | { kind: 'plugin.library.remove'; libraryId: string }
   | { kind: 'template.save'; templateId: string }
+  | { kind: 'template.delete'; templateId: string }
   | { kind: 'template.create' | 'space.import'; import: SpaceImportResult }
   | WorkbenchBlueprintApplyOutcome;
 
 export function isWorkbenchProductCommand(value: { kind: string }): value is WorkbenchProductCommand {
   return ['settings.update', 'catalog.refresh', 'plugin.download', 'plugin.library.remove',
-    'template.save', 'template.create', 'space.import', 'blueprint.apply'].includes(value.kind);
+    'template.save', 'template.create', 'template.delete', 'space.import', 'blueprint.apply'].includes(value.kind);
 }

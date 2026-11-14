@@ -14,7 +14,7 @@ It adds a space rail to the existing application, runs each ordinary space in it
 - [Management contract](tasks/merge-contract-v2.md) — protocol 2, tasks, plans and concurrency.
 - [Workbench API surface](docs/workbench-api-surface.md) — public management wire semantics.
 - [Host embedding contract](docs/host/embedding.md) — presentation, origin and Desktop limits.
-- [Space control design](docs/space-control-design.md) — implemented main-space control tools.
+- [Space control contract](docs/space-control-design.md) — main-space Creator and space-control tools.
 - [Fault policy](docs/let-it-crash.md) — the sole authority for failure and recovery behavior.
 - [Changelog](CHANGELOG.md) — release history.
 - [Blueprint](docs/blueprint.md) — DSHBP1/DSHBP2 protocols. Spaces blueprint workflows are currently sealed; the independent package remains available.
@@ -29,9 +29,9 @@ It adds a space rail to the existing application, runs each ordinary space in it
 
 ## Runtime behavior
 
-Protocol 2 mutations carry a service epoch and expected revision. Requests and plans are rechecked at execution; refreshing reads existing jobs instead of replaying them. Closing a tab or host window does not stop spaces or the Supervisor. Stopping all spaces and stopping the service are separate actions.
+Protocol 2 mutations carry a service epoch and expected revision. Requests and plans are rechecked at execution; refreshing reads existing jobs instead of replaying them. Closing a tab does not stop spaces or the Supervisor. A Supervisor started by official Desktop exits with that Desktop instance via one normal shutdown (stopping its managed spaces and releasing its lease); if shutdown fails, the state and lease remain untouched without force-kill or retry. A Web-started Supervisor or an existing Supervisor attached by Desktop stays running. Stopping all spaces and stopping the service are separate actions.
 
-Each ordinary space calls its models with its own configuration. Choosing the main space's models copies the main space's routes, default model and their keys into the new space once at creation; the workbench space detail can copy them again on request while the space is stopped. Login-grant and expression routes are reported and skipped. Session selections and local defaults keep their own precedence. See [Model configuration](docs/architecture.md#6-模型配置).
+Each ordinary space calls its models with its own configuration. Choosing the main space's models copies its routes, default model and their keys once at creation; the General tab of space detail shows the saved model state and can sync again. The confirmation previews non-secret names and counts, then stops an active space, verifies the write and restarts only a space that was already running. Login-grant and expression routes are reported and skipped. Session selections and local defaults keep their own precedence. See [Model configuration](docs/architecture.md#6-模型配置).
 
 The main space's `cordis` preset also exposes the Creator four-tool set and the space-control tools (`spaces_overview`, `spaces_inspect`, `spaces_logs`, `spaces_templates`, `spaces_import_preview`, `spaces_plan`, `spaces_execute`, `spaces_control_job`, and the `spaces_ui_*` session tools). They use separate authenticated scopes; mutation plans require explicit approval and are never a management bypass for ordinary spaces.
 
@@ -93,7 +93,7 @@ MIT. See [LICENSE](LICENSE).
 - [管理合同](tasks/merge-contract-v2.md)：协议 2、任务、计划与并发。
 - [工作台 API 语义](docs/workbench-api-surface.md)：公开管理 wire 语义。
 - [宿主嵌入合同](docs/host/embedding.md)：展示、来源与 Desktop 边界。
-- [空间总控设计](docs/space-control-design.md)：已实现的主空间控制工具。
+- [空间总控契约](docs/space-control-design.md)：主空间 Creator 与空间总控工具。
 - [故障政策](docs/let-it-crash.md)：唯一的失败与恢复边界。
 - [变更记录](CHANGELOG.md)：发布历史。
 - [蓝图](docs/blueprint.md)：DSHBP1/DSHBP2 协议。Spaces 内蓝图工作流当前已封存，独立蓝图包保留。
@@ -110,7 +110,7 @@ MIT. See [LICENSE](LICENSE).
 
 协议 2 的变更携带服务纪元和预期状态版本，请求与计划在执行时重新校验。刷新只读取原任务，不重放。关闭标签不会停止空间或 Supervisor。由官方 Desktop 启动的 Supervisor 跟随该 Desktop 退出：Desktop 宿主进程结束时，Supervisor 执行一次正常关闭（停止它管理的空间、释放运行权后退出）；关闭失败时保持原样并保留运行权，不强杀、不重试。由 Web 启动的 Supervisor 不受影响；Desktop 附着到已有 Supervisor 时不改变它的生命周期。停止全部空间与停止服务是不同操作。
 
-每个普通空间用自己的配置调用模型。创建时选择主空间模型，会把主空间的路由、默认模型和对应 Key 复制一次到新空间；之后可在工作台空间详情里对已停止的空间再同步一次。登录授权型和表达式路由会列出并跳过。会话选择和本地默认保持各自的优先级。见 [模型配置](docs/architecture.md#6-模型配置)。
+每个普通空间用自己的配置调用模型。创建时选择主空间模型，会把主空间的路由、默认模型和对应 Key 复制一次到新空间；空间详情的“常规”页持续显示已保存的模型状态，并可再次同步。确认框展示不含凭据值的名称与数量。运行中的空间通过自身设置接口写入并保持运行，下一次模型请求使用新配置；已停止或异常退出的空间直接写入配置文件。启动中或停止中的空间需等待状态稳定后再同步。登录授权型和表达式路由会列出并跳过。会话选择和本地默认保持各自的优先级。见 [模型配置](docs/architecture.md#6-模型配置)。
 
 主空间的 `cordis` preset 还提供 Creator 四工具及空间总控工具（`spaces_overview`、`spaces_inspect`、`spaces_logs`、`spaces_templates`、`spaces_import_preview`、`spaces_plan`、`spaces_execute`、`spaces_control_job` 和 `spaces_ui_*` 会话工具）。它们使用独立认证 scope；变更计划必须显式审批，不能成为普通空间绕过管理边界的通道。
 

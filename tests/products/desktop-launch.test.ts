@@ -70,7 +70,7 @@ function managerState(epoch: string, status: "running" | "starting" = "running")
       status,
       generation: 1,
       managed: true,
-      dshVersion: null,
+      dshVersion: null, startWithDesktop: false,
     }],
   };
 }
@@ -104,6 +104,7 @@ test("begin returns before a held cold start and joins one process record", asyn
     },
     bootstrap: async (request) => {
       bootstraps++;
+      assert.equal(request.startDesktopSpaces, true);
       request.progress?.("prepare");
       await gate;
       request.progress?.("launch");
@@ -461,7 +462,7 @@ test("registration failure is terminal, and a later durable stop keeps that reas
     revision: "d".repeat(64),
     spaces: [
       ...managerState(endpoint!.serviceEpoch).spaces,
-      { id: "child-one", displayName: "Child", isHost: false, hasWebApp: true, icon: "", status: "stopped", generation: 0, managed: true, dshVersion: null },
+      { id: "child-one", displayName: "Child", isHost: false, hasWebApp: true, icon: "", status: "stopped", generation: 0, managed: true, dshVersion: null, startWithDesktop: false },
     ],
   });
   const runtime = new WorkbenchHostRuntime(desktopOptions(home, {
@@ -548,7 +549,7 @@ test("confirmed manual launch is the only path that replaces a stopped record", 
     revision: "d".repeat(64),
     spaces: [
       ...managerState(endpoint!.serviceEpoch).spaces,
-      { id: "child-one", displayName: "Child", isHost: false, hasWebApp: true, icon: "", status: "stopped", generation: 0, managed: true, dshVersion: null },
+      { id: "child-one", displayName: "Child", isHost: false, hasWebApp: true, icon: "", status: "stopped", generation: 0, managed: true, dshVersion: null, startWithDesktop: false },
     ],
   });
   const options = desktopOptions(home, {
@@ -584,6 +585,7 @@ test("confirmed manual launch is the only path that replaces a stopped record", 
       request.progress?.("prepare");
       request.progress?.("launch");
       const handle = new HomeLease(home, { allowRealHome: false }).acquire("web", "http://127.0.0.1:18471/");
+      assert.equal(request.startDesktopSpaces, bootstraps === 1, "only opening Desktop starts selected child spaces; manual service launches do not");
       lease = handle;
       endpoint = {
         origin: "http://127.0.0.1:18471", bearer: "c".repeat(64), protocolVersion: 2,

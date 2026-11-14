@@ -187,7 +187,11 @@ export abstract class RequestPart extends CommandPart {
     this.intentRequestIds.set(key, requestId);
     this.intentInflight.add(key);
     if (command.kind === "space.create") {
-      this.submittedCreates.set(requestId, { spaceId: command.input.name, intent: this.navigationIntent });
+      this.submittedCreates.set(requestId, {
+        spaceId: command.input.name,
+        intent: this.navigationIntent,
+        autoEnter: options.autoEnter !== false,
+      });
     }
     const cycle = this.cycle;
     this.patch({ requestOrigin: origin });

@@ -713,6 +713,12 @@ export const workbenchProductCommandSchema: z.ZodType<WorkbenchProductCommand> =
     .strict(),
   z
     .object({
+      kind: z.literal("template.delete"),
+      templateId: entityIdSchema,
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("space.import"),
       importId: entityIdSchema,
       name: spaceNameSchema,
@@ -728,6 +734,7 @@ export const workbenchProductOutcomeSchema: z.ZodType<WorkbenchProductOutcome> =
   z.object({ kind: z.literal("plugin.download"), item: libraryItemSchema }).strict(),
   z.object({ kind: z.literal("plugin.library.remove"), libraryId: libraryIdSchema }).strict(),
   z.object({ kind: z.literal("template.save"), templateId: entityIdSchema }).strict(),
+  z.object({ kind: z.literal("template.delete"), templateId: entityIdSchema }).strict(),
   z.object({ kind: z.literal("template.create"), import: spaceImportResultSchema }).strict(),
   z.object({ kind: z.literal("space.import"), import: spaceImportResultSchema }).strict(),
   blueprintApplyOutcomeSchema,

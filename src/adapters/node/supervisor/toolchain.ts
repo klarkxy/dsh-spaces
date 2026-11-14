@@ -29,6 +29,8 @@ import type { SupervisorLifecycle } from "./lifecycle";
 import { bindSelectedCli } from "./payload";
 import { profileHasViewBridge } from "./profile-probe";
 import type { BoundCli, WorkbenchSupervisorOptions } from "./types";
+import { diagnosticStep, diagnosticSyncStep } from "../diagnostics/operation-log";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
 
 export const VIEW_BRIDGE_ID = "dsh-spaces-view-bridge";
 /**
@@ -56,6 +58,7 @@ const COMPONENT_ARCHIVE_PREFIX: Record<SpacesComponent, string> = {
 };
 
 export interface SupervisorToolchainHost {
+  diagnosticLog: DiagnosticLogger;
   home: string;
   controlDir: string;
   nodeExe: string;
@@ -78,9 +81,11 @@ export interface SupervisorToolchainHost {
  * once at startup and rewritten only when the manager is reinitialized.
  */
 export class SupervisorToolchain {
+  private get log(): DiagnosticLogger { return this.host.diagnosticLog; }
   constructor(private readonly host: SupervisorToolchainHost) {}
 
   bindToolchain(): void {
+    diagnosticSyncStep(this.log, "toolchain.bind", {}, () => {
     let cli: BoundCli;
     try {
       const recorded = inspectHomeToolchain(this.host.home);
@@ -125,6 +130,7 @@ export class SupervisorToolchain {
         2,
       )}\n`,
     );
+    });
   }
 
   snapshotRoot(): string {
@@ -193,11 +199,20 @@ export class SupervisorToolchain {
   }
 
   async runBoundCli(args: readonly string[], profile?: string) {
-    if (this.host.options.runCli) return this.host.options.runCli(args);
-    const bin = this.resolveCliBin(profile);
-    if (!bin) throw new WorkbenchPublicError("workbench/incompatible");
-    const { spawnBoundCli } = await import("../products/spaces-service.ts");
-    return spawnBoundCli(this.host.nodeExe, bin, this.host.home, { ...process.env, DSH_HOME: this.host.home }, args);
+    return diagnosticStep(this.log, "cli.execute", { command: cliCommand(args), profile: profile ?? "default" }, async () => {
+      const started = Date.now();
+      const result = this.host.options.runCli
+        ? await this.host.options.runCli(args)
+        : await (async () => {
+            const bin = this.resolveCliBin(profile);
+            if (!bin) throw new WorkbenchPublicError("workbench/incompatible");
+            const { spawnBoundCli } = await import("../products/spaces-service.ts");
+            return spawnBoundCli(this.host.nodeExe, bin, this.host.home, { ...process.env, DSH_HOME: this.host.home }, args);
+          })();
+      this.log.info("cli.finished", "Bound CLI completed.", { command: cliCommand(args), profile: profile ?? "default", exitCode: result.code, durationMs: Date.now() - started, stdoutBytes: result.stdout.length, stderrBytes: result.stderr.length });
+      if (result.code !== 0) this.log.error("cli.output", "Bound CLI returned a failure.", undefined, { command: cliCommand(args), profile: profile ?? "default", stdout: result.stdout, stderr: result.stderr });
+      return result;
+    });
   }
 
   artifactDigest(artifact: string): string {
@@ -226,6 +241,7 @@ export class SupervisorToolchain {
    * installs the artifact tarball under the same archive ids as before.
    */
   async installComponent(profileId: string, component: SpacesComponent): Promise<void> {
+    return diagnosticStep(this.log, "component.install", { space: profileId, component }, async () => {
     const checkout = this.host.options.devCheckoutRoot;
     if (checkout !== undefined) {
       const problem = devComponentProblem(checkout, component);
@@ -241,6 +257,7 @@ export class SupervisorToolchain {
       throw new Error(`The selected ${component} archive is unavailable.`);
     }
     await this.installArtifact(profileId, artifact, `${COMPONENT_ARCHIVE_PREFIX[component]}-${this.artifactDigest(artifact)}`);
+    });
   }
 
   /**
@@ -324,6 +341,7 @@ export class SupervisorToolchain {
    * existing install/align stage.
    */
   async ensureBundledDependencies(profileId: string): Promise<void> {
+    return diagnosticStep(this.log, "component.dependencies", { space: profileId }, async () => {
     if (this.host.options.devCheckoutRoot === undefined) return;
     if (profileBase(this.host.home, profileId) === "browser") return;
     const requirements = this.linkedBundledRequirements(profileId);
@@ -359,6 +377,7 @@ export class SupervisorToolchain {
         throw new Error(`Linking ${required.name} into ${profileId} did not produce ${localVersion}.`);
       }
     }
+    });
   }
 
   /**
@@ -453,11 +472,12 @@ export class SupervisorToolchain {
   }
 
   async alignManagerPlugin(profileId: string): Promise<void> {
+    this.log.info("manager.align.checked", "Manager component alignment inspected.", { space: profileId });
     const pluginAligned = this.componentAligned(profileId, "plugin");
     const bridgeAligned = !this.hasComponent("view-bridge") || this.componentAligned(profileId, "view-bridge");
     const controlDisabled = this.managerControlDisabled(profileId);
     if (pluginAligned && bridgeAligned && controlDisabled && this.bundledDepsPresent(profileId)) return;
-    await this.host.lock.run("manager.align", () => this.host.observeChildWork(async () => {
+    await this.host.lock.run("manager.align", () => this.host.observeChildWork(() => diagnosticStep(this.log, "manager.align", { space: profileId }, async () => {
       if (!pluginAligned) {
         await this.installComponent(profileId, "plugin");
       }
@@ -472,7 +492,7 @@ export class SupervisorToolchain {
       }
       await this.ensureBundledDependencies(profileId);
       this.ensureManagerControlDisabled(profileId);
-    }));
+    })));
   }
 
   installedManagerPluginLib(profileId: string): string | undefined {
@@ -495,11 +515,12 @@ export class SupervisorToolchain {
   }
 
   async syncLoader(profileId: string, bootstrapDump?: string): Promise<SpacesLoaderView | undefined> {
+    this.log.debug("loader.sync.started", "Reading the profile loader configuration.", { space: profileId, reusedDump: bootstrapDump !== undefined });
     // `bootstrapDump` may only be the dump bootstrapManager just read for this
     // same profile in this same run; otherwise (other profile, no bootstrap
     // dump, later re-sync) the dump is read fresh.
     const dump = bootstrapDump ?? await this.readDump(profileId);
-    if (!dump) return undefined;
+    if (!dump) { this.log.error("loader.sync.missing", "Profile configuration could not be read."); return undefined; }
     try {
       const session = extractRoot(dump, SESSION_ROW_ID);
       const storage = extractRoot(dump, STORAGE_ROW_ID);
@@ -531,4 +552,9 @@ export class SupervisorToolchain {
       runCli: this.host.options.runCli ?? ((args) => this.runBoundCli(args)),
     });
   }
+}
+
+function cliCommand(args: readonly string[]): string {
+  const safe = args.filter(arg => !/token|key|secret|password|credential|cookie/i.test(arg));
+  return safe.map(arg => arg.startsWith("--") ? arg : arg === "web" || arg === "desktop" ? arg : "[arg]").join(" ").slice(0, 500);
 }

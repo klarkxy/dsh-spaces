@@ -81,6 +81,7 @@ export class MaintenanceCore {
   protected readonly pluginAddImpl: PluginMutator;
   protected readonly pluginRemoveImpl: PluginMutator;
   protected readonly setSpacePluginImpl: typeof defaultSetSpacePlugin;
+  protected readonly admittedPlans = new Set<string>();
   private readonly source: () => PackageSource;
   private readonly logImpl?: (message: string, error?: unknown) => void;
 
@@ -134,6 +135,18 @@ export class MaintenanceCore {
       const status = this.ports.statusOf(id);
       return status === "running" || status === "starting";
     });
+  }
+
+  protected assertPluginTargetsReady(spaceIds: string[]): void {
+    for (const id of spaceIds) {
+      const status = this.ports.statusOf(id);
+      if (status !== "running" && status !== "stopped" && status !== "crashed") {
+        throw new WorkbenchMaintenanceError(
+          "workbench/conflict",
+          `The workspace ${id} is ${status}; wait for the transition to settle before changing plugins.`,
+        );
+      }
+    }
   }
 
   protected targetSpace(spaceId: string, allowManager: boolean): string {
@@ -213,9 +226,12 @@ export class MaintenanceCore {
 
   private spaceFingerprint(spaceIds: string[]): unknown {
     const ids = spaceIds.length ? spaceIds : this.owned();
+    const metas = new Map(this.ports.registry.scan().map((row) => [row.name, row.meta]));
     return ids.map((id) => ({
       id,
       status: this.ports.statusOf(id),
+      generation: this.ports.generationOf?.(id) ?? 0,
+      dshVersion: metas.get(id)?.dshVersion ?? null,
       plugins: listProfilePluginsSafe(this.ports.home, id).map((item) => ({ name: item.name, version: item.version ?? null })),
     }));
   }
@@ -256,7 +272,10 @@ export class MaintenanceCore {
     if (!plan.public.serviceEpoch || !plan.public.stateRevision) {
       throw new WorkbenchMaintenanceError("workbench/unsupported");
     }
-    if (plan.public.serviceEpoch !== observed.serviceEpoch || plan.public.stateRevision !== observed.expectedRevision) {
+    if (plan.public.serviceEpoch !== observed.serviceEpoch) {
+      throw new WorkbenchMaintenanceError("workbench/stale");
+    }
+    if (plan.public.scope !== "space" && plan.public.stateRevision !== observed.expectedRevision) {
       throw new WorkbenchMaintenanceError("workbench/stale");
     }
   }
@@ -467,6 +486,25 @@ export class MaintenanceCore {
     if (installed) return installed.name;
     if (!enabled) return pluginId;
     throw new WorkbenchMaintenanceError("workbench/not-found");
+  }
+
+  protected resolveToggleLiveSpec(pluginId: string, packageName: string): string {
+    const library = lookupLibraryEntry(this.ports.home, pluginId) ?? lookupLibraryEntry(this.ports.home, packageName);
+    if (library) {
+      if (library.tarball) {
+        const abs = resolve(this.ports.home, library.tarball);
+        if (isHubPluginArchive(this.ports.home, abs)) return abs;
+      }
+      return library.spec;
+    }
+    const installed = this.installedBySpace();
+    for (const list of Object.values(installed)) {
+      const hit = list.find((item) => item.name === packageName && item.version && isExactRuntimeVersion(item.version));
+      if (hit?.version) return `${packageName}@${hit.version}`;
+    }
+    const catalog = this.findCatalog(pluginId);
+    if (catalog?.installSpec) return catalog.installSpec;
+    return packageName;
   }
 
   protected spaceHasPlugin(spaceId: string, packageName: string): boolean {

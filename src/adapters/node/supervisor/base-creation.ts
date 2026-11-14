@@ -9,8 +9,11 @@ import { spawnBoundCli, type BoundCliRunner } from '../products/spaces-service';
 import type { RuntimeStore } from '../runtime/runtime-store';
 import type { BoundCli, WorkbenchSupervisorOptions } from './types';
 import { WorkbenchPublicError } from './errors';
+import { diagnosticStep } from '../diagnostics/operation-log';
+import type { DiagnosticLogger } from '../diagnostics/rotating-log';
 
 export interface BaseCreationHost {
+  diagnosticLog: DiagnosticLogger;
   home: string;
   nodeExe: string;
   options: WorkbenchSupervisorOptions;
@@ -50,6 +53,7 @@ export class SpaceBaseCreation {
   }
 
   async prepare(base: SpaceBase, requested?: string, onInstall?: (version: string) => void) {
+    return diagnosticStep(this.host.diagnosticLog, 'base.prepare', { base, requestedVersion: requested ?? 'host-default' }, async () => {
     const cli = this.host.cli();
     if (!cli) throw new WorkbenchPublicError('workbench/incompatible');
     const release = base === 'browser' ? this.browserRelease() : null;
@@ -66,7 +70,7 @@ export class SpaceBaseCreation {
       onInstall?.(runtimeVersion);
       bin = (await store.install(runtimeVersion)).bin;
     }
-    const runCli: BoundCliRunner = this.host.options.runCli ?? (args => spawnBoundCli(
+    const runCli: BoundCliRunner = args => this.host.options.runCli ? this.host.options.runCli(args) : diagnosticStep(this.host.diagnosticLog, 'base.cli', { command: cliCommand(args) }, () => spawnBoundCli(
       this.host.nodeExe, bin!, this.host.home, { ...process.env, DSH_HOME: this.host.home }, args));
     return {
       base, baseVersion, runtimeVersion, runCli,
@@ -89,5 +93,10 @@ export class SpaceBaseCreation {
         atomicWrite(join(dir, 'cordis.patch.yml'), `- id: credentials\n  config:\n    path: !!js dshHomePath('hub/${name}/.credentials.yaml')\n- id: dsh-dev-index\n  disabled: true\n- id: dsh-space-control\n  disabled: true\n`);
       } : undefined,
     };
+    });
   }
+}
+
+function cliCommand(args: readonly string[]): string {
+  return args.filter(arg => !/token|key|secret|password|credential|cookie/i.test(arg)).map(arg => arg.startsWith('--') ? arg : '[arg]').join(' ').slice(0, 500);
 }

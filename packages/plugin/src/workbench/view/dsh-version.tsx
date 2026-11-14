@@ -41,7 +41,7 @@ export function DshVersionSection({
         ? host
         : (versions[0] ?? "");
   const ready = ui.runtimesStatus === "ready";
-  const disabled = !controller.canMutate() || controller.isBusy() || !ready || !target;
+  const disabled = !controller.canMutate() || controller.isSpaceBusy(space.id) || !ready || !target;
   return (
     <section data-dsh-version="true">
       <h3>{t(locale, "detail.dshVersion")}</h3>

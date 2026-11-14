@@ -13,6 +13,7 @@ import {
 } from "../../../shared/types";
 import { enqueuePlugin, findDshBin, runDsh } from "../runtime/dsh-cli";
 import { sanitizeLogText } from "../diagnostics/diagnostics";
+import { currentDiagnosticLogger } from "../diagnostics/operation-log";
 import { assertNotRealHome } from "../home/home-guard";
 import { npmPackumentUrl } from "./package-source";
 import { isBareNpmPackageName, isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases } from "../../../shared/plugin";
@@ -208,11 +209,15 @@ export async function pluginAdd(dshHome: string, name: string, spec: string, opt
   const target = addableSpec(dshHome, spec);
   const cliTarget = archiveAddArgument(dshHome, name, target);
   await enqueuePlugin(async () => {
+    const log = currentDiagnosticLogger();
+    const started = Date.now();
+    log?.info("plugin.install.started", "Plugin installation started.", { space: name, package: publicPluginSpec(spec), force: options.force === true });
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "add", cliTarget, ...(options.force ? ["--force"] : [])],
       { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
+    log?.write({ level: code === 0 ? "info" : "error", event: "plugin.install.finished", message: "Plugin installer exited.", context: { space: name, package: publicPluginSpec(spec), exitCode: code, durationMs: Date.now() - started, stdout, stderr } });
     if (code !== 0) throw pluginError(name, target, code, stdout, stderr);
   });
 }
@@ -244,11 +249,15 @@ export async function pluginLinkDirectory(
   }
   if (!valid) throw invalid();
   await enqueuePlugin(async () => {
+    const log = currentDiagnosticLogger();
+    const started = Date.now();
+    log?.info("plugin.link.started", "Linked plugin installation started.", { space: name, package: expectedName });
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "add", dir],
       { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
+    log?.write({ level: code === 0 ? "info" : "error", event: "plugin.link.finished", message: "Linked plugin installer exited.", context: { space: name, package: expectedName, exitCode: code, durationMs: Date.now() - started, stdout, stderr } });
     if (code !== 0) throw pluginError(name, dir, code, stdout, stderr);
   });
 }
@@ -262,11 +271,15 @@ export async function pluginRemove(dshHome: string, name: string, packageName: s
     throw new Error(t("errors.pluginProtected", { name: packageName }));
   }
   await enqueuePlugin(async () => {
+    const log = currentDiagnosticLogger();
+    const started = Date.now();
+    log?.info("plugin.remove.started", "Plugin removal started.", { space: name, package: packageName });
     const { stdout, stderr, code } = await runDsh(
       dshHome,
       ["plugin", "--profile", name, "remove", packageName],
       { timeoutMs: PLUGIN_TIMEOUT_MS, profile: name },
     );
+    log?.write({ level: code === 0 ? "info" : "error", event: "plugin.remove.finished", message: "Plugin remover exited.", context: { space: name, package: packageName, exitCode: code, durationMs: Date.now() - started, stdout, stderr } });
     if (code !== 0) {
       throw new Error(
         formatWorkbenchFailure({
@@ -704,10 +717,12 @@ export async function listNpmPackageVersions(
     limit?: number;
   } = {},
 ): Promise<NpmPackageVersions> {
+  if (!isBareNpmPackageName(name)) throw new Error("Use an npm package name without a version or URL.");
   const fetchImpl = options.fetchImpl ?? defaultFetcher({ metadataMaxBytes: options.metadataMaxBytes });
   const control = new AbortController();
   const onParentAbort = () => control.abort();
   options.signal?.addEventListener("abort", onParentAbort, { once: true });
+  if (options.signal?.aborted) control.abort();
   const metadataMaxBytes = options.metadataMaxBytes ?? DOWNLOAD_METADATA_MAX_BYTES;
   try {
     throwIfDownloadAborted(control.signal);
@@ -721,20 +736,25 @@ export async function listNpmPackageVersions(
       "dist-tags"?: { latest?: unknown };
       versions?: Record<string, unknown>;
     };
-    const packageName = typeof packument.name === "string" && packument.name ? packument.name : name;
-    const published = packument.versions && typeof packument.versions === "object" ? Object.keys(packument.versions) : [];
+    if (!packument || packument.name !== name || !packument.versions ||
+        typeof packument.versions !== "object" || Array.isArray(packument.versions)) {
+      throw new Error("The npm registry returned metadata for an invalid or different package.");
+    }
+    const packageName = name;
+    const published = Object.keys(packument.versions);
     const exact = published.filter((version) => isExactRuntimeVersion(version) && semverValid(version));
     // Newest first. Versions the registry published out of order keep their registry order.
-    const versions = exact
+    const sorted = exact
       .map((version, index) => ({ version, index }))
       .sort((a, b) => semverLt(a.version, b.version) ? 1 : semverLt(b.version, a.version) ? -1 : a.index - b.index)
-      .map((row) => row.version)
-      .slice(0, Math.max(0, options.limit ?? DEFAULT_PLUGIN_VERSION_LIMIT));
+      .map((row) => row.version);
+    const versions = sorted.slice(0, Math.max(0, options.limit ?? DEFAULT_PLUGIN_VERSION_LIMIT));
     // The default and the upgrade target follow the registry's latest tag when it
     // names a listed version; otherwise the newest stable version. A prerelease is
     // only offered when the publisher tagged it latest.
     const tagged = typeof packument["dist-tags"]?.latest === "string" ? packument["dist-tags"].latest : "";
-    const latest = versions.includes(tagged) ? tagged : versions.find((version) => !semverPrerelease(version)) ?? null;
+    const latest = sorted.includes(tagged) ? tagged : sorted.find((version) => !semverPrerelease(version)) ?? null;
+    if (latest && versions.length && !versions.includes(latest)) versions[versions.length - 1] = latest;
     return { packageName, versions, latest };
   } finally {
     options.signal?.removeEventListener("abort", onParentAbort);
@@ -776,6 +796,8 @@ export async function downloadPlugin(
       archiveMaxBytes: options.archiveMaxBytes ?? DOWNLOAD_ARCHIVE_MAX_BYTES,
     };
     try {
+      const log = currentDiagnosticLogger();
+      log?.info("plugin.download.started", "Plugin download started.", { package: draft.packageName, source: draft.source });
       throwIfDownloadAborted(control.signal);
       const meta = await pinDownloadMeta(draft, fetchImpl, limits);
       const existing = lookupLibraryEntry(dshHome, meta.id);
@@ -788,8 +810,10 @@ export async function downloadPlugin(
         throwIfDownloadAborted(control.signal);
         const pack = options.packGit ?? defaultGitPacker;
         await pack(meta.spec, dest);
+        log?.info("plugin.download.packed", "Git plugin package was packed.", { package: meta.packageName, source: "github" });
       } else {
         const fetched = await downloadNpmTarball(meta.spec, dest, fetchImpl, limits);
+        log?.info("plugin.download.fetched", "npm plugin archive was fetched.", { package: meta.packageName, source: "npm", bytes: existsSync(dest) ? statSync(dest).size : 0 });
         if (fetched.packageName) meta.packageName = fetched.packageName;
       }
       throwIfDownloadAborted(control.signal);
@@ -808,8 +832,10 @@ export async function downloadPlugin(
       };
       throwIfDownloadAborted(control.signal);
       upsertLibraryEntry(dshHome, entry);
+      log?.info("plugin.download.completed", "Plugin archive is available locally.", { package: entry.packageName, source: entry.source });
       return entry;
     } catch (error) {
+      currentDiagnosticLogger()?.error("plugin.download.failed", "Plugin download failed.", error, { package: draft.packageName, source: draft.source });
       if (options.signal?.aborted) throw abortError();
       if (isAbortError(error)) throw downloadFailed(draft.spec, "timed out");
       throw error;
@@ -817,6 +843,12 @@ export async function downloadPlugin(
       control.close();
     }
   });
+}
+
+function publicPluginSpec(spec: string): string {
+  if (isGitSpec(spec)) return spec.replace(/#.*$/, "#[pinned]");
+  if (isBareNpmPackageName(spec) || parseNpmNameAndVersion(spec)) return spec;
+  return "[local archive]";
 }
 
 export async function removeDownloadedPlugin(

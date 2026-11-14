@@ -48,7 +48,7 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     status: "running",
     generation: 1,
     managed: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
     ...partial,
   };
 }
@@ -135,6 +135,7 @@ function fakeApi(product: (request: WorkbenchProductRequest) => WorkbenchProduct
         hasWebApp: true,
         status: "running",
       },
+      models: { status: "unconfigured", routeNames: [], defaultModel: null, missingCredentials: [] },
       plugins: [],
       snapshots: [],
       diagnostics: [],

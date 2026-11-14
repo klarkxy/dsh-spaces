@@ -22,6 +22,7 @@ import { HOME_CONTROL_DIR_NAME, defaultPidAlive, validLaunchOwner, HomeLease } f
 import { HomeOperationLock, HomeLockBusyError } from "../../../../src/adapters/node/home/home-operation-lock";
 import { retirePreviousSupervisor, beginLaunchDiagnostics, readLaunchMarker, readLastSupervisorDiagnostics } from "../../../../src/adapters/node/home/supervisor-launch";
 import { readSupervisorDiagnostics, reportSupervisorLaunchFailure, reportSupervisorExit } from "../../../../src/adapters/node/diagnostics/supervisor-diagnostics";
+import { hostProcessDiagnosticLogger } from "../../../../src/adapters/node/diagnostics/host-log";
 import { packLocalArtifacts, validateSnapshotRoot, type PackOneRequest } from "./supervisor-pack";
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
 import {
@@ -96,6 +97,7 @@ export interface SupervisorBootstrapOptions {
   allowRealHome?: boolean;
   allowColdStart?: boolean;
   exitWithHost?: boolean;
+  startDesktopSpaces?: boolean;
   timeoutMs?: number;
   pollMs?: number;
   fetch?: WorkbenchHttpFetch;
@@ -155,6 +157,8 @@ export async function bootstrapSupervisor(
           fetch: options.fetch,
           timeoutMs: options.timeoutMs,
         });
+  const diagnostic = hostProcessDiagnosticLogger(home, { allowRealHome: options.allowRealHome === true });
+  diagnostic.debug("supervisor.discovery", "Supervisor discovery completed.", { verdict: "endpoint" in attached ? "endpoint" : "blocked" in attached ? "blocked" : "stale" in attached ? "stale" : "missing" });
   if ("endpoint" in attached) {
     return {
       connected: true,
@@ -173,7 +177,6 @@ export async function bootstrapSupervisor(
 
   const access = { allowRealHome: options.allowRealHome === true };
   if (access.allowRealHome) authorizeProductHome(home);
-
   const argv = options.argv ?? process.argv;
   const env = options.env ?? process.env;
   const execPath = options.execPath ?? process.execPath;
@@ -239,6 +242,7 @@ export async function bootstrapSupervisor(
       }
       options.progress?.("prepare");
       diagnosticFile = beginLaunchDiagnostics(home, toolsRoot);
+      diagnostic.info("supervisor.prepare-started", "A user-requested Supervisor cold start entered preparation.");
       retirePreviousSupervisor(home, "missing" in attached ? attached.previousOwner : undefined, access.allowRealHome, snapshotRoot ?? undefined);
       let bundled: ValidatedComponentPayload;
       try {
@@ -273,6 +277,7 @@ export async function bootstrapSupervisor(
         }
         if (!selected) return fail(["Selected component payload is missing."]);
       }
+      diagnostic.info("supervisor.payload-ready", "The selected Supervisor component payload is ready.", { devCheckout: Boolean(devCheckout) });
 
       const destEntry = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES.supervisor.split("/"));
       const destWorker = join(selected.packageRoot, ...COMPONENT_PAYLOAD_ENTRIES["installation-worker"].split("/"));
@@ -316,10 +321,12 @@ export async function bootstrapSupervisor(
           packedArtifacts.browserArtifact,
         );
       }
+      diagnostic.info("supervisor.artifacts-ready", "The Supervisor and child component artifacts are ready.", { devCheckout: Boolean(devCheckout) });
 
       const childArgv = [
         ...(options.allowRealHome ? ["--allow-real-home"] : []),
         ...(options.exitWithHost === true ? [SUPERVISOR_CLI_FLAGS.exitWithHost] : []),
+        ...(options.startDesktopSpaces === true ? ["--start-desktop-spaces"] : []),
         SUPERVISOR_CLI_FLAGS.home,
         home,
         SUPERVISOR_CLI_FLAGS.bin,
@@ -350,10 +357,12 @@ export async function bootstrapSupervisor(
         ipc: options.exitWithHost === true,
         });
       } catch (error) {
+        diagnostic.fault("supervisor.spawn-failed", "The Supervisor process could not be spawned.", error);
         reportSupervisorLaunchFailure(diagnosticFile, reasonOf(error));
         return fail(["The supervisor process could not be started.", ...readSupervisorDiagnostics(diagnosticFile)]);
       }
       if (spawned) {
+        diagnostic.info("supervisor.spawned", "The Supervisor process was spawned.", { pid: spawned.pid ?? null });
         spawned.once("error", (error) => {
           observation.failure = "The supervisor process could not be started.";
           reportSupervisorLaunchFailure(observation.diagnosticFile, reasonOf(error));
@@ -371,6 +380,7 @@ export async function bootstrapSupervisor(
       return await pollEndpoint(home, selected.payloadRootLib, toolsRoot, options, [], observation);
     });
     if (!result.connected && diagnosticFile) reportSupervisorLaunchFailure(diagnosticFile, result.reasons.join("\n"));
+    diagnostic.info("supervisor.launch-result", "Supervisor launch observation completed.", { connected: result.connected });
     return result;
   } catch (error) {
     if (!entered && error instanceof HomeLockBusyError) {
@@ -379,6 +389,7 @@ export async function bootstrapSupervisor(
       ]);
     }
     if (diagnosticFile) reportSupervisorLaunchFailure(diagnosticFile, reasonOf(error));
+    diagnostic.error("supervisor.launch-failed", "Supervisor launch did not complete.", error);
     return fail(["The supervisor process could not be started.", reasonOf(error)]);
   }
 }

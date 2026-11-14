@@ -47,6 +47,10 @@ test('external temp creates fresh isolated Home and temp variables without mutat
   assert.equal(first.env.DSH_HOME, join(first.directory, 'home'));
   assert.equal(first.env.DSH_SPACES_HOME, first.env.DSH_HOME);
   assert.equal(first.env.DSH_SPACES_WEB_HOME, first.env.DSH_HOME);
+  assert.equal(first.env.npm_config_cache, join(first.directory, 'npm-cache'));
+  assert.equal(first.env.npm_config_store_dir, join(first.directory, 'pnpm-store'));
+  assert.equal(first.env.pnpm_config_store_dir, first.env.npm_config_store_dir);
+  assert.equal(first.env.pnpm_config_cache_dir, join(first.directory, 'pnpm-cache'));
   assert.equal(first.env.DSH_TEST_CALLER_ENV, 'caller-value');
   assert.deepEqual(env, { DSH_TEST_CALLER_ENV: 'caller-value', DSH_HOME: 'caller-home' });
 });

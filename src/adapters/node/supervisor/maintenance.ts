@@ -8,7 +8,11 @@ import type { HomeOperationLock } from "../home/home-operation-lock";
 import type { WorkbenchLog } from "../maintenance/workbench-log";
 import type { WorkbenchJobContext, WorkbenchJobStore } from "../maintenance/workbench-jobs";
 import { WorkbenchMaintenance as WorkbenchMaintenanceService } from "../maintenance/workbench-maintenance";
-import type { WorkbenchMaintenancePorts } from "../maintenance/workbench-maintenance-ports";
+import type {
+  MaintenanceLivePluginInput,
+  MaintenanceLivePluginResult,
+  WorkbenchMaintenancePorts,
+} from "../maintenance/workbench-maintenance-ports";
 import type { ProfileRegistry } from "../profile/profile-registry";
 import { isCompatibleDshCliVersion, type NodeSpacesService } from "../products/spaces-service";
 import type { ProcessManager } from "../runtime/process-manager";
@@ -43,10 +47,12 @@ export interface SupervisorMaintenanceGateHost {
   validateSpace: (spaceId: string, allowManager?: boolean) => void;
   publicStatus: (id: string) => WorkbenchSpace["status"];
   statusOf: (name: string) => ProfileStatus;
+  generationOf: (spaceId: string) => number;
   ownedSpaceIds: () => string[];
   stopOwned: (spaceId: string) => Promise<void>;
   stopOwnedAll: () => Promise<void>;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
+  pluginLive?: (input: MaintenanceLivePluginInput, ctx: WorkbenchJobContext) => Promise<MaintenanceLivePluginResult>;
   currentRuntime: () => SnapshotRuntime;
   reinitializeManager: () => Promise<void>;
   productObservation: () => { serviceEpoch: string; expectedRevision: string };
@@ -117,10 +123,12 @@ export class SupervisorMaintenanceGate {
         this.host.validateSpace(spaceId, allowManager);
       },
       statusOf: (spaceId) => this.host.statusOf(spaceId),
+      generationOf: (spaceId) => this.host.generationOf(spaceId),
       ownedSpaceIds: () => this.host.ownedSpaceIds(),
       stopSpace: (spaceId) => this.host.stopOwned(spaceId),
       stopAll: () => this.host.stopOwnedAll(),
       startSpace: async (spaceId) => { await this.host.startSpace(spaceId, silentJobContext()); },
+      pluginLive: this.host.pluginLive ? (input, ctx) => this.host.pluginLive!(input, ctx) : undefined,
       currentRuntime: () => this.host.currentRuntime(),
       hostRuntime: () => {
         const cli = this.host.cli();

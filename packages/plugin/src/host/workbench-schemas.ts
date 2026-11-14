@@ -67,6 +67,7 @@ export const workbenchSpaceSchema = z
     isHost: z.boolean(),
     hasWebApp: z.boolean(),
     icon: z.string(),
+    startWithDesktop: z.boolean().default(false),
     status: z.enum(["running", "starting", "stopping", "stopped", "crashed", "unknown"]),
     generation: z.number().int(),
     managed: z.boolean(),
@@ -119,6 +120,8 @@ export const workbenchJobResultSchema = z
     dshVersion: exactVersionSchema.optional(),
     view: workbenchViewSchema.optional(),
     product: workbenchProductOutcomeSchema.optional(),
+    pluginApplication: z.enum(["applied", "restart-required"]).optional(),
+    restartRequiredSpaceIds: z.array(spaceIdSchema).max(256).optional(),
     steps: z
       .array(
         z
@@ -130,7 +133,7 @@ export const workbenchJobResultSchema = z
           })
           .strict(),
       )
-      .max(64)
+      .max(256)
       .optional(),
   })
   .strict();
@@ -240,9 +243,17 @@ export const spaceSummarySchema = z
   })
   .strict();
 
+export const spaceModelConfigSchema = z.object({
+  status: z.enum(["configured", "incomplete", "unconfigured"]),
+  routeNames: z.array(z.string().max(200)).max(256),
+  defaultModel: z.string().max(500).nullable(),
+  missingCredentials: z.array(z.string().max(200)).max(256),
+}).strict();
+
 export const workbenchSpaceDetailSchema = z
   .object({
     space: spaceSummarySchema,
+    models: spaceModelConfigSchema,
     plugins: z
       .array(
         z
@@ -298,6 +309,7 @@ const coreWorkbenchCommandSchema = z.discriminatedUnion("kind", [
       spaceId: spaceIdSchema,
       displayName: displayNameSchema.optional(),
       icon: iconSchema.optional(),
+      startWithDesktop: z.boolean().optional(),
     })
     .strict(),
   z.object({ kind: z.literal("space.reorder"), spaceIds: z.array(spaceIdSchema).min(1).max(256) }).strict(),
@@ -362,8 +374,23 @@ export const workbenchPlanRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("service.shutdown") }).strict(),
 ]);
 
+export const modelSyncSummarySchema = z.object({
+  mainProfile: spaceIdSchema,
+  routes: z.array(z.string().max(200)).max(256),
+  deepseek: z.boolean(),
+  defaultModel: z.string().max(500).optional(),
+  defaultModelSkipped: z.string().max(200).optional(),
+  credentials: z.array(z.string().max(200)).max(256),
+  skipped: z.array(z.object({
+    route: z.string().max(200),
+    reason: z.enum(["login-grant", "expression", "unsupported"]),
+  }).strict()).max(256),
+  missingCredentials: z.array(z.string().max(200)).max(256),
+}).strict();
+
 export const workbenchPlanSchema = z
   .object({
+    modelsSync: modelSyncSummarySchema.optional(),
     taskActivity: z.enum(["idle", "busy", "unknown"]).optional(),
     id: planIdSchema,
     kind: z.enum([

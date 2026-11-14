@@ -23,6 +23,7 @@ import {
   type WorkbenchProductOutcome,
 } from "../../src/shared/workbench-product.ts";
 import { DEFAULT_HUB_SETTINGS } from "../../src/shared/types.ts";
+import { writeTestCatalog } from "../fixtures/plugin-catalog.ts";
 
 const temps: string[] = [];
 
@@ -30,11 +31,12 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function home(): string {
+function home(withCatalog = true): string {
   const dir = mkdtempSync(join(tmpdir(), "dsh-products-"));
   temps.push(dir);
   mkdirSync(join(dir, "hub"), { recursive: true });
   mkdirSync(join(dir, "profiles"), { recursive: true });
+  if (withCatalog) writeTestCatalog(dir);
   return dir;
 }
 
@@ -92,7 +94,7 @@ function space(id: string, extra: Partial<WorkbenchSpace> = {}): WorkbenchSpace 
     status: "stopped",
     generation: 1,
     managed: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
     ...extra,
   };
 }
@@ -218,7 +220,7 @@ test("settings read returns client defaults and update preserves locale, theme, 
 });
 
 test("catalog read uses seed when cache is missing and does not write", async () => {
-  const dir = home();
+  const dir = home(false);
   let fetched = 0;
   const service = createService(dir, {
     fetchImpl: async () => {
@@ -226,11 +228,11 @@ test("catalog read uses seed when cache is missing and does not write", async ()
       throw new Error("network should not run");
     },
   });
-  const result = await service.read({ method: "catalog", query: "outline" });
+  const result = await service.read({ method: "catalog", query: "font" });
   assert.equal(result.method, "catalog");
   if (result.method !== "catalog") return;
   assert.equal(result.catalog.source, "seed");
-  assert.ok(result.catalog.entries.some((entry) => entry.id.includes("outline") || entry.installSpec === "dsh-outline"));
+  assert.ok(result.catalog.entries.some((entry) => entry.packageName === "@klarkxy/dsh-font"));
   assert.equal(existsSync(join(dir, "hub", CATALOG_CACHE_FILE)), false);
   assert.equal(fetched, 0);
 });
@@ -245,7 +247,7 @@ test("corrupt catalog cache fails instead of returning seed", async () => {
 });
 
 test("explicit catalog refresh failure does not fall back to seed", async () => {
-  const dir = home();
+  const dir = home(false);
   const service = createService(dir, {
     fetchImpl: async () => {
       throw new Error("offline");
@@ -722,6 +724,19 @@ test("template save and create reuse the recipe pipeline", async () => {
   assert.equal(createdResult.import.definition, "imported");
   assert.deepEqual(created, ["lab"]);
   assert.ok(installed.includes("dsh-outline@1.2.3"));
+
+  const { ctx: deleteCtx } = jobCtx();
+  const deletedResult = await service.execute(
+    { kind: "template.delete", templateId: listed.templates[0]!.id },
+    deleteCtx,
+  );
+  assert.equal(deletedResult.kind, "template.delete");
+  if (deletedResult.kind !== "template.delete") return;
+  assert.equal(deletedResult.templateId, listed.templates[0]!.id);
+  const afterDelete = await service.read({ method: "templates" });
+  assert.equal(afterDelete.method, "templates");
+  if (afterDelete.method !== "templates") return;
+  assert.equal(afterDelete.templates.length, 0);
 });
 
 test("pure product reads do not write settings, catalog, library, or templates", async () => {

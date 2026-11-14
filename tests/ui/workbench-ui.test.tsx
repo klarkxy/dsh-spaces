@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { SpaceDetail } from "../../src/shared/spaces-control.ts";
+import type { SpaceDetail, SpaceModelConfig } from "../../src/shared/spaces-control.ts";
 import type { SpaceSharePreview } from "../../src/shared/space-share.ts";
 import type {
   WorkbenchApi,
@@ -80,7 +80,7 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     status: "running",
     generation: 1,
     managed: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
     ...partial,
   };
 }
@@ -482,6 +482,7 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): SpyApi {
       calls.push({ method: "detail", arg: spaceId });
       return {
         space: { id: spaceId, displayName: spaceId, isHost: spaceId === "hub", hasWebApp: true, status: "running" },
+        models: { status: "configured", routeNames: ["gw"], defaultModel: "gw/gw-large", missingCredentials: [] },
         plugins: [{ name: "demo", version: "1.0.0" }],
         snapshots: [],
         diagnostics: [{ level: "warning", code: "NEED_CHECK", message: "check" }],
@@ -947,48 +948,39 @@ test("D1: a delete, a version switch and a service shutdown still ask for a conf
   }
 });
 
-test("the settings navigation groups the everyday tabs and keeps plugins and blueprints out of the top level", async () => {
+test("the settings navigation exposes four flat destinations and keeps plugins and blueprints out of the top level", async () => {
   const ctrl = controller();
   await ctrl.poll();
   ctrl.openSettings();
   const ids = (segment: string): string[] => [...segment.matchAll(/role="tab" id="settings-tab-([^"]+)"/g)].map((match) => match[1]);
-  const visibleTabIds = (html: string): string[] => {
-    const at = html.indexOf('id="dsh-wb-settings-maintenance"');
-    if (at === -1) return ids(html);
-    const main = ids(html.slice(0, at));
-    const rest = html.slice(at);
-    const tag = rest.slice(0, rest.indexOf(">"));
-    return /hidden/.test(tag) ? main : [...main, ...ids(rest)];
-  };
-  const collapsed = ready(ctrl);
-  assert.deepEqual(visibleTabIds(collapsed), ["spaces", "templates", "general"]);
-  assert.ok(!collapsed.includes('id="settings-tab-plugins"'));
-  assert.ok(!collapsed.includes('id="settings-tab-blueprints"'));
-  ctrl.toggleMaintenance();
-  const expanded = ready(ctrl);
-  assert.deepEqual(visibleTabIds(expanded), ["spaces", "templates", "general", "overview", "snapshots", "runtime", "advanced"]);
+  const html = ready(ctrl);
+  assert.deepEqual(ids(html), ["spaces", "templates", "general", "overview"]);
+  assert.ok(!html.includes('id="dsh-wb-settings-maintenance"'), "collapsible maintenance group is gone");
+  assert.ok(!html.includes('id="settings-tab-plugins"'));
+  assert.ok(!html.includes('id="settings-tab-blueprints"'));
+  assert.ok(!html.includes('id="settings-tab-snapshots"'));
+  assert.ok(!html.includes('id="settings-tab-runtime"'));
+  assert.ok(!html.includes('id="settings-tab-advanced"'));
 });
 
-test("the maintenance group stays visible, remembers its state and expands around its active tab", async () => {
+test("the maintenance page splits status, backups, runtime versions and service into sub-tabs while keeping the left nav on maintenance", async () => {
   const ctrl = controller();
   await ctrl.poll();
   ctrl.openSettings();
   const html = ready(ctrl);
   assert.ok(html.includes(t("zh", "settings.nav.maintenance")), "the maintenance group is always visible");
-  assert.match(html, /aria-expanded="false"/, "the maintenance group starts collapsed");
-  assert.match(html, /id="dsh-wb-settings-maintenance"[^>]*hidden/, "its tabs are hidden while it is collapsed");
-  ctrl.toggleMaintenance();
-  const expanded = ready(ctrl);
-  assert.match(expanded, /aria-expanded="true"/);
-  assert.doesNotMatch(expanded, /id="dsh-wb-settings-maintenance"[^>]*hidden/);
-  ctrl.toggleMaintenance();
-  assert.match(ready(ctrl), /aria-expanded="false"/, "the group remembers the state for this session");
-  // A tab inside the group opens the group.
-  ctrl.setSettingsTab("runtime");
+  for (const alias of ["runtime", "snapshots", "advanced", "overview"] as const) {
+    ctrl.setSettingsTab(alias);
+    await flush();
+    const page = ready(ctrl);
+    assert.match(page, /id="settings-tab-overview"[^>]*aria-selected="true"/);
+    assert.match(page, new RegExp(`id="maintenance-tab-${alias}"[^>]*aria-selected="true"`));
+  }
   const active = ready(ctrl);
-  assert.match(active, /aria-expanded="true"/);
-  assert.ok(active.includes('id="settings-tab-runtime"'));
-  assert.match(active, /id="settings-tab-runtime"[^>]*aria-selected="true"/);
+  assert.ok(active.includes('data-maintenance-tablist="true"'));
+  assert.ok(active.includes('data-maintenance-section="backups"'));
+  assert.ok(active.includes('data-maintenance-section="runtime"'));
+  assert.ok(active.includes('data-settings-service="true"'));
 });
 
 test("manager cannot be deleted and cannot take ordinary plugin installs", async () => {
@@ -1177,13 +1169,14 @@ test("SSR ready home shows management actions and plugin install wording", async
   assert.ok(html.includes(t("zh", "app.home")));
   // The plugin tab is the plugin section of the space detail page now.
   assert.ok(html.includes('data-space-detail="true"'));
-  assert.ok(html.includes(t("zh", "plugins.previewInstall")) || html.includes(t("zh", "plugins.removeFromSpace")));
+  assert.ok(html.includes(t("zh", "plugins.installLatest")) || html.includes(t("zh", "plugins.chooseVersion")));
   assert.ok(html.includes(t("zh", "plugins.toggleHint")));
-  assert.ok(html.includes(t("zh", "plugins.cleanup")));
+  assert.ok(!html.includes(t("zh", "plugins.cleanup")), "cleanup is hidden unless @dsh-spaces/plugin is misinstalled");
   ctrl.setHomeTab("snapshots");
   await flush();
   const snap = ready(ctrl);
   assert.ok(snap.includes(t("zh", "snapshots.create")));
+  assert.ok(snap.includes('data-snapshots-offline-hint="true"'));
   assert.ok(!snap.includes("snapshot.restore"));
   ctrl.setHomeTab("runtime");
   await flush();
@@ -1391,7 +1384,9 @@ function rowButtons(html: string, spaceId: string): string[] {
   const start = html.indexOf(marker);
   assert.notEqual(start, -1, `settings row for ${spaceId}`);
   const segment = html.slice(start, html.indexOf("</div>", start));
-  return [...segment.matchAll(/>([^<]*)<\/button>/g)].map((match) => match[1]);
+  return [...segment.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
+    .filter((match) => !match[0].includes("dsh-wb-space-row-main"))
+    .map((match) => match[1]);
 }
 
 test("settings space rows offer open, ordering and manage actions; lifecycle actions live on the detail page", async () => {
@@ -1411,15 +1406,15 @@ test("settings space rows offer open, ordering and manage actions; lifecycle act
   await ctrl.poll();
   ctrl.setHomeTab("spaces");
   const html = ready(ctrl);
-  const [enter, manage, up, down] = [
-    t("zh", "detail.enter"), t("zh", "detail.manage"), t("zh", "app.moveUp"), t("zh", "app.moveDown"),
-  ];
   assert.ok(!html.includes('data-space-id="hub"'), "the manager has no settings row");
-  assert.deepEqual(rowButtons(html, "alpha"), [enter, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "beta"), [enter, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "gamma"), [enter, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "delta"), [enter, up, down, manage]);
-  assert.deepEqual(rowButtons(html, "rogue"), [enter, up, down, manage]);
+  for (const id of ["alpha", "beta", "gamma", "delta", "rogue"]) {
+    assert.ok(html.includes(`data-space-open-detail="${id}"`), `clickable row main for ${id}`);
+    assert.ok(html.includes(`data-space-row-actions="${id}"`), `row menu trigger for ${id}`);
+    assert.deepEqual(rowButtons(html, id), ["⋯"]);
+  }
+  ctrl.openDetail("alpha");
+  await flush();
+  assert.ok(!ready(ctrl).includes('data-space-section="export"'), "export card moved out of space detail");
 });
 
 test("the space detail page offers the per-status actions and hides them for the manager and unmanaged spaces", async () => {
@@ -1520,9 +1515,10 @@ test("runtime tab shows pinned users and only offers removal for unused runtimes
   await flush();
   await flush();
   const html = ready(ctrl);
-  assert.ok(html.includes("被 Alpha、Beta 使用"));
+  const runtime = html.match(/<section[^>]*data-maintenance-section="runtime"[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.ok(runtime.includes("被 Alpha、Beta 使用"));
   assert.ok(!html.includes("预览安装"), "missing runtimes are installed only through a space version change");
-  assert.equal(html.split(`>${t("zh", "runtime.remove")}<`).length - 1, 1, "remove only for the removable runtime");
+  assert.equal(runtime.split(`>${t("zh", "runtime.remove")}<`).length - 1, 1, "remove only for the removable runtime");
 });
 
 test("create dialog keeps Web version selection and hides sealed Browser entry points", async () => {
@@ -2008,10 +2004,26 @@ test("templates tab lists templates and export without storing archives", async 
   const html = ready(ctrl);
   assert.ok(html.includes('data-templates="true"'), "the templates tab renders the space template page");
   assert.ok(html.includes("Development"));
-  // The export section of the template page carries the share export.
-  ctrl.openBlueprintGenerate("alpha");
+  assert.ok(html.includes('data-template-use="dev"'));
+  assert.ok(html.includes('data-template-delete="dev"'));
+
+  // Deleting a template dispatches template.delete.
+  ctrl.deleteTemplate("dev");
+  await flush();
+  assert.ok(
+    api.calls.some(
+      (item) =>
+        item.method === "submit" &&
+        (item.arg as { command?: { kind?: string; templateId?: string } }).command?.kind === "template.delete" &&
+        (item.arg as { command?: { templateId?: string } }).command?.templateId === "dev",
+    ),
+  );
+
+  // Share export now opens from the space context menu as ExportShareDialog.
+  ctrl.openExportShare("alpha");
   await flush();
   const exportHtml = ready(ctrl);
+  assert.ok(exportHtml.includes('data-export-share-dialog="true"'));
   assert.ok(exportHtml.includes(t("zh", "share.includeConfig")));
   assert.ok(exportHtml.includes(t("zh", "share.export")));
   ctrl.exportShare();
@@ -2584,6 +2596,64 @@ test("the space detail does not show the internal generation and managed rows", 
   assert.equal(html.includes(t("zh", "app.status.running")), true);
 });
 
+test("the general model card reports configured, incomplete and unconfigured settings", async () => {
+  const cases: Array<[SpaceModelConfig, SpaceModelConfig["status"], string]> = [
+    [{ status: "configured", routeNames: ["gw"], defaultModel: "gw/gw-large", missingCredentials: [] }, "configured", t("zh", "detail.models.configured", { model: "gw/gw-large", routes: "1" })],
+    [{ status: "incomplete", routeNames: ["gw"], defaultModel: null, missingCredentials: ["GW_KEY"] }, "incomplete", t("zh", "detail.models.incomplete")],
+    [{ status: "unconfigured", routeNames: [], defaultModel: null, missingCredentials: [] }, "unconfigured", t("zh", "detail.models.unconfigured")],
+  ];
+  for (const [models, state, message] of cases) {
+    const api = fakeApi({
+      detail: async (spaceId) => ({
+        space: { id: spaceId, displayName: spaceId, isHost: false, hasWebApp: true, status: "running" },
+        models, plugins: [], snapshots: [], diagnostics: [],
+      }),
+    });
+    const ctrl = controller(api);
+    await ctrl.poll();
+    ctrl.openSettings();
+    ctrl.openDetail("alpha");
+    await flush();
+    const html = ready(ctrl);
+    assert.ok(html.includes(`data-space-models-state="${state}"`));
+    assert.ok(html.includes(message));
+    const button = html.match(/<button[^>]*data-space-models-sync="true"[^>]*>/)?.[0] ?? "";
+    assert.equal(button.includes("disabled"), false, "running spaces can preview sync");
+  }
+});
+
+test("a completed model sync refreshes the open space model card", async () => {
+  let configured = false;
+  let reads = 0;
+  const api = fakeApi({
+    detail: async (spaceId) => {
+      reads++;
+      return {
+        space: { id: spaceId, displayName: spaceId, isHost: false, hasWebApp: true, status: "running" },
+        models: { status: configured ? "configured" : "unconfigured", routeNames: configured ? ["gw"] : [], defaultModel: configured ? "gw/gw-large" : null, missingCredentials: [] },
+        plugins: [], snapshots: [], diagnostics: [],
+      };
+    },
+    submit: async (command, requestId) => {
+      configured = true;
+      return job({ id: `job-${requestId}`, requestId, kind: command.kind, status: "succeeded", result: { spaceId: "alpha" } });
+    },
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.openDetail("alpha");
+  await flush();
+  assert.equal(ctrl.getSnapshot().detail?.models.status, "unconfigured");
+  ctrl.preview({ kind: "space.models.sync", spaceId: "alpha" });
+  await flush();
+  ctrl.confirmPlan();
+  await flush();
+  await flush();
+  assert.equal(ctrl.getSnapshot().detail?.models.status, "configured");
+  assert.equal(reads, 2);
+});
+
 test("the delete plan dialog is worded in the locale with the display name and a danger confirm", async () => {
   const api = fakeApi();
   const ctrl = controller(api);
@@ -2616,6 +2686,108 @@ test("an install plan dialog lists the target spaces by display name", async () 
   const confirm = html.match(/<button[^>]*data-plan-id="plan-1"[^>]*>([\s\S]*?)<\/button>/)?.[0] ?? "";
   assert.ok(confirm.includes('class="dsh-wb-btn primary"'), "an install confirmation is not destructive");
   assert.ok(confirm.includes(t("zh", "plan.confirm.install")));
+});
+
+test("stop-and-modify dialogs show interruption and use an explicit confirm action", async () => {
+  const operations: Array<{ request: WorkbenchPlanRequest; confirm: Parameters<typeof t>[1] }> = [
+    { request: { kind: "plugin.cleanup-manager", spaceId: "alpha" }, confirm: "plan.confirm.stopAndCleanup" },
+    { request: { kind: "space.runtime.set", spaceId: "alpha", version: "0.2.2-rc.1" }, confirm: "plan.confirm.stopAndRuntime" },
+  ];
+  for (const operation of operations) {
+    const api = fakeApi({
+      preview: async (request) => planOf(request, {
+        runningSpaceIds: ["alpha"],
+        ...(request.kind === "space.models.sync" ? { modelsSync: {
+          mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/gw-large",
+          credentials: ["GW_KEY"], skipped: [{ route: "codex", reason: "login-grant" }], missingCredentials: ["MISSING_KEY"],
+        } } : {}),
+      }),
+    });
+    const ctrl = controller(api);
+    await ctrl.poll();
+    ctrl.preview(operation.request);
+    await flush();
+    const html = ready(ctrl);
+    assert.ok(html.includes('data-plan-stop-impact="true"'));
+    assert.ok(html.includes(t("zh", "plan.stopAndRestore", { spaces: "Alpha (alpha)" })));
+    assert.ok(html.includes(t("zh", operation.confirm)));
+    assert.ok(html.indexOf('data-plan-stop-impact="true"') < html.indexOf(t("zh", "plan.details")), "the impact is above collapsed details");
+    if (operation.request.kind === "space.models.sync") {
+      assert.ok(html.includes('data-plan-models-summary="true"'));
+      assert.ok(html.includes("gw/gw-large"));
+      assert.ok(html.includes("GW_KEY"));
+      assert.ok(html.includes("MISSING_KEY"));
+      assert.ok(html.includes(t("zh", "plan.models.skip.login-grant")));
+    }
+  }
+});
+
+test("running plugin dialogs keep the space running and defer restart choice to the user", async () => {
+  const operations: Array<{ request: WorkbenchPlanRequest; confirm: Parameters<typeof t>[1] }> = [
+    { request: { kind: "plugin.install", spaceIds: ["alpha"], catalogId: "demo", version: "2.0.0" }, confirm: "plan.confirm.install" },
+    { request: { kind: "plugin.remove", spaceId: "alpha", packageName: "demo" }, confirm: "plan.confirm.removePlugin" },
+    { request: { kind: "plugin.toggle", spaceId: "alpha", pluginId: "demo", enabled: false }, confirm: "plan.confirm.remove" },
+    { request: { kind: "plugin.toggle", spaceId: "alpha", pluginId: "demo", enabled: true }, confirm: "plan.confirm.enable" },
+  ];
+  for (const operation of operations) {
+    const api = fakeApi({
+      preview: async (request) => planOf(request, { runningSpaceIds: ["alpha"] }),
+    });
+    const ctrl = controller(api);
+    await ctrl.poll();
+    ctrl.preview(operation.request);
+    await flush();
+    const html = ready(ctrl);
+    assert.ok(html.includes('data-plan-plugins-live="true"'));
+    assert.ok(html.includes(t("zh", "plan.plugins.liveBody")));
+    assert.ok(!html.includes('data-plan-stop-impact="true"'));
+    const confirm = html.match(/<button[^>]*data-plan-id="plan-1"[^>]*>([\s\S]*?)<\/button>/)?.[0] ?? "";
+    assert.ok(confirm.includes(t("zh", operation.confirm)));
+  }
+});
+
+test("a running model sync confirmation keeps the space running", async () => {
+  const api = fakeApi({
+    preview: async (request) => planOf(request, {
+      runningSpaceIds: ["alpha"],
+      modelsSync: {
+        mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/gw-large",
+        credentials: ["GW_KEY"], skipped: [{ route: "codex", reason: "login-grant" }], missingCredentials: ["MISSING_KEY"],
+      },
+    }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.preview({ kind: "space.models.sync", spaceId: "alpha" });
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes('data-plan-models-live="true"'));
+  assert.ok(html.includes(t("zh", "plan.models.liveBody")));
+  assert.equal(html.includes('data-plan-stop-impact="true"'), false);
+  assert.ok(html.includes('data-plan-models-summary="true"'));
+  assert.ok(html.includes("gw/gw-large"));
+  assert.ok(html.includes("GW_KEY"));
+  assert.ok(html.includes("MISSING_KEY"));
+  assert.ok(html.includes(t("zh", "plan.models.skip.login-grant")));
+  const button = html.match(/<button[^>]*data-plan-id="plan-1"[^>]*>([\s\S]*?)<\/button>/)?.[0] ?? "";
+  assert.ok(button.includes(t("zh", "plan.confirm.syncModels")));
+  assert.equal(button.includes("停止并同步"), false);
+});
+
+test("model sync waits for starting and stopping spaces", async () => {
+  for (const status of ["starting", "stopping"] as const) {
+    const ctrl = controller(fakeApi({
+      state: async () => state({ spaces: [manager, space({ id: "alpha", status })] }),
+    }));
+    await ctrl.poll();
+    ctrl.openSettings();
+    ctrl.openDetail("alpha");
+    await flush();
+    const html = ready(ctrl);
+    const button = html.match(/<button[^>]*data-space-models-sync="true"[^>]*>/)?.[0] ?? "";
+    assert.ok(button.includes("disabled"));
+    assert.ok(html.includes(t("zh", "detail.models.transitionHint")));
+  }
 });
 
 test("a crashed space card offers start and error details without a copy button", async () => {
@@ -2724,7 +2896,7 @@ test("the create dialog has no busy reason when nothing is running", async () =>
   assert.ok(!ready(ctrl).includes("data-create-busy"));
 });
 
-test("a space create job renders a rail placeholder and blocks starting other spaces", async () => {
+test("a space create job renders a rail placeholder while allowing starting other spaces to queue", async () => {
   const createdJob = job({ id: "create-1", kind: "space.create", status: "running", phase: "install", message: "DSH 0.9.9",
     affectedSpaceIds: ["made-space"], subject: { displayName: "Made Space", icon: "whale" } });
   let current = state({ writable: true, jobs: [createdJob] });
@@ -2740,13 +2912,13 @@ test("a space create job renders a rail placeholder and blocks starting other sp
   // Selecting a running space still works.
   ctrl.selectSpace("alpha");
   await flush();
-  // Starting a stopped space is refused locally: error set, nothing submitted.
+  // Starting an unrelated stopped space submits and queues cleanly without local refusal.
   const submits = () => api.calls.filter((item) => item.method === "submit").length;
   const before = submits();
   ctrl.selectSpace("beta");
   await flush();
-  assert.equal(submits(), before);
-  assert.match(ctrl.getSnapshot().commandError ?? "", /正在创建空间「Made Space」/);
+  assert.equal(submits(), before + 1);
+  assert.equal(ctrl.getSnapshot().commandError, null);
 });
 
 test("a failed create placeholder stays until dismissed and opens a failure dialog", async () => {
@@ -2786,8 +2958,12 @@ test("space detail page is a three-tab layout with the header carrying lifecycle
   // Header carries identity + actions.
   assert.ok(html.includes('dsh-wb-space-detail-header'), "header present");
   assert.ok(html.includes('data-space-detail-back="true"'), "back button");
-  assert.ok(html.includes(`<code class="dsh-wb-muted">alpha</code>`), "space id as muted code");
+  const headerSeg = html.slice(html.indexOf("dsh-wb-space-detail-header"), html.indexOf("data-space-tablist"));
+  assert.ok(!headerSeg.includes("<code>alpha</code>"), "internal space id moved out of header");
   assert.ok(html.includes(t("zh", "detail.enter")), "enter action in header");
+  const advancedSeg = html.slice(html.indexOf('data-space-tab="advanced"'));
+  assert.ok(advancedSeg.includes('data-space-section="identity"'), "identity card in advanced tab");
+  assert.ok(advancedSeg.includes("<code>alpha</code>"), "space id shown in advanced tab");
   // Tablist: three tabs with ARIA wiring.
   const tablistSeg = html.slice(html.indexOf("data-space-tablist"), html.indexOf('data-space-tab="general"'));
   const tabs = [...tablistSeg.matchAll(/role="tab"[^>]*aria-selected="(true|false)"[^>]*>/g)];
@@ -2880,7 +3056,7 @@ test("a plugins-origin error is also visible in the header while another tab is 
 // Creator channel (creator.create) parity with ordinary space.create jobs.
 // ---------------------------------------------------------------------------
 
-test("a running creator.create job renders the rail placeholder and blocks starting other spaces", async () => {
+test("a running creator.create job renders the rail placeholder while allowing starting other spaces to queue", async () => {
   const createdJob = job({ id: "creator-1", requestId: "creator-req-1", kind: "creator.create", status: "running",
     phase: "plugins", message: "@acme/tool",
     affectedSpaceIds: ["space-demo"], subject: { displayName: "Demo Space", icon: "whale" } });
@@ -2894,13 +3070,13 @@ test("a running creator.create job renders the rail placeholder and blocks start
   assert.match(markup, /data-creation-total="4"/);
   assert.match(markup, /Demo Space · 正在创建/);
   assert.doesNotMatch(markup, /data-space-id="space-demo"[^>]*aria-current/);
-  // Starting a stopped space is refused locally while creation runs.
+  // Starting an unrelated stopped space queues instead of being blocked.
   const submits = () => api.calls.filter((item) => item.method === "submit").length;
   const before = submits();
   ctrl.selectSpace("beta");
   await flush();
-  assert.equal(submits(), before);
-  assert.match(ctrl.getSnapshot().commandError ?? "", /正在创建空间「Demo Space」/);
+  assert.equal(submits(), before + 1);
+  assert.equal(ctrl.getSnapshot().commandError, null);
 });
 
 test("a creator.create failure keeps the seen placeholder and never enters automatically", async () => {
@@ -2943,4 +3119,183 @@ test("a succeeded creator.create shows the notice but never auto-enters", async 
   await flush();
   assert.equal(ctrl.getSnapshot().createdNotice, null);
   assert.equal(ctrl.getSnapshot().pendingId, "space-made");
+});
+
+test("per-space busy keeps unrelated spaces operable, surfaces queued status, and shows restart-now vs restart-later plugin outcome", async () => {
+  const runningAlpha = job({
+    id: "job-alpha",
+    kind: "plan.execute",
+    status: "running",
+    phase: "install",
+    affectedSpaceIds: ["alpha"],
+  });
+  const queuedBeta = job({
+    id: "job-beta",
+    kind: "space.start",
+    status: "queued",
+    phase: "queued",
+    affectedSpaceIds: ["beta"],
+  });
+  const gamma = space({ id: "gamma", displayName: "Gamma", status: "stopped" });
+  let current = state({ writable: true, spaces: [manager, alpha, beta, gamma], jobs: [runningAlpha, queuedBeta] });
+  const api = fakeApi({
+    state: async () => current,
+    preview: async (request) => planOf(request, { taskActivity: "busy", runningSpaceIds: ["alpha"] }),
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  assert.equal(ctrl.isGlobalBusy(), false);
+  assert.equal(ctrl.isSpaceBusy("alpha"), true);
+  assert.equal(ctrl.isSpaceBusy("beta"), true);
+  assert.equal(ctrl.isSpaceBusy("gamma"), false);
+
+  // Queued status shows on beta's detail page and spaces list, while gamma's detail buttons stay enabled.
+  ctrl.openSettings();
+  const listHtml = ready(ctrl);
+  assert.match(listHtml, /Beta[\s\S]*?排队中/);
+  ctrl.openDetail("beta");
+  await flush();
+  assert.ok(ready(ctrl).includes('data-space-job-status="queued"'));
+  ctrl.openDetail("gamma");
+  await flush();
+  const gammaHtml = ready(ctrl);
+  assert.doesNotMatch(gammaHtml, /data-space-job-status=/);
+  assert.match(gammaHtml, /<button[^>]*class="dsh-wb-btn"[^>]*>启动<\/button>/);
+
+  // Finish alpha's plugin job with restart-required -> shows 立即重启 and 稍后自行重启 on alpha's detail page.
+  const settledAlpha = job({
+    ...runningAlpha,
+    status: "succeeded",
+    phase: "done",
+    canCancel: false,
+    result: {
+      spaceId: "alpha",
+      pluginApplication: "restart-required",
+      restartRequiredSpaceIds: ["alpha"],
+    },
+  });
+  current = state({ writable: true, spaces: [manager, alpha, beta, gamma], jobs: [settledAlpha] });
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  const alphaHtml = ready(ctrl);
+  assert.ok(alphaHtml.includes('data-plugin-outcome="restart-required"'));
+  assert.ok(alphaHtml.includes('data-plugin-restart-now="true"'));
+  assert.ok(alphaHtml.includes('data-plugin-restart-later="true"'));
+
+  // Clicking 立即重启 previews space.restart and clears the notice for alpha.
+  ctrl.restartFromPluginOutcome("alpha");
+  await flush();
+  assert.equal(ctrl.getSnapshot().pluginOutcomeNotice, null);
+  assert.equal(ctrl.getSnapshot().pendingPlan?.request.kind, "space.restart");
+});
+
+test("settings UX: sources live in general, dirty tracks actual changes, quick plugin install and conditional cleanup work", async () => {
+  const api = fakeApi({
+    plugins: async () => [
+      { id: "catalog.demo", title: "Demo", packageName: "demo", description: "A plugin", version: "1.0.0", installedIn: ["alpha"], protected: false },
+      { id: "spaces", title: "Spaces", packageName: "@dsh-spaces/plugin", description: "Manager", version: "0.5.0", installedIn: ["beta"], protected: false },
+    ],
+  });
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.setSettingsTab("general");
+  await flush();
+  await flush();
+  const generalHtml = ready(ctrl);
+  assert.ok(generalHtml.includes('data-settings-advanced="true"'));
+  assert.ok(generalHtml.includes('data-settings-section="all"'));
+  assert.ok(generalHtml.includes(t("zh", "settings.packageSource")));
+  assert.ok(generalHtml.includes(t("zh", "settings.catalogUrl")));
+  assert.ok(generalHtml.includes(t("zh", "settings.portStart")), "ports live in unified general -> advanced");
+  assert.ok(generalHtml.includes(t("zh", "settings.portEnd")), "ports live in unified general -> advanced");
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false);
+  ctrl.saveHomeSettings();
+  assert.equal(api.calls.some((call) => call.method === "submit" && (call.arg as { kind?: string })?.kind === "settings.update"), false, "clean settings never submit");
+  ctrl.setHomeSettings({ packageSource: "china" });
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+  ctrl.setHomeSettings({ packageSource: "official" });
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false, "reverting back to saved settings clears dirty");
+
+  // Alpha does not show cleanup; Beta has misinstalled @dsh-spaces/plugin and shows cleanup.
+  ctrl.openDetail("alpha");
+  await flush();
+  await flush();
+  const alphaHtml = ready(ctrl);
+  assert.ok(!alphaHtml.includes('data-space-section="cleanup"'));
+  assert.ok(alphaHtml.includes('data-space-plugin-installed="catalog.demo"'), "installed badge rendered in catalog");
+  assert.ok(alphaHtml.includes('data-space-delete-remove-data="true"'), "delete removeData checkbox rendered");
+
+  // One-click quick install fetches versions if needed and previews latest.
+  ctrl.installCatalogPlugin("alpha", "demo");
+  await flush();
+  await flush();
+  assert.deepEqual(ctrl.getSnapshot().pendingPlan?.request, {
+    kind: "plugin.install",
+    spaceIds: ["alpha"],
+    catalogId: "demo",
+    version: "2.0.0",
+  });
+  ctrl.closePlan();
+
+  ctrl.openDetail("beta");
+  await flush();
+  await flush();
+  assert.ok(ready(ctrl).includes('data-space-section="cleanup"'), "misinstalled manager package reveals cleanup section");
+
+  // startAfterCreate: false skips automatic entry when the create job finishes.
+  ctrl.createSpace({ name: "quiet-space", displayName: "Quiet", startAfterCreate: false });
+  await flush();
+  assert.equal(ctrl.getSnapshot().selected, "home");
+});
+
+test("space menu unifies space actions and child overlays stack cleanly above web settings", async () => {
+  const ctrl = controller();
+  await ctrl.poll();
+  ctrl.openSettings();
+  ctrl.setSettingsTab("spaces");
+  await flush();
+
+  // Opening the context menu from settings keeps SettingsDialog mounted underneath.
+  ctrl.openMenu("alpha", 40, 60);
+  const menuHtml = ready(ctrl);
+  assert.ok(menuHtml.includes('role="dialog"'), "SettingsDialog remains mounted underneath SpaceMenu");
+  assert.ok(menuHtml.includes('role="menu"'), "SpaceMenu renders on top");
+  for (const label of [
+    t("zh", "detail.manage"),
+    t("zh", "app.rename"),
+    t("zh", "app.changeIcon"),
+    t("zh", "app.moveUp"),
+    t("zh", "app.moveDown"),
+    t("zh", "share.export"),
+    t("zh", "templates.save"),
+    t("zh", "app.delete"),
+  ]) {
+    assert.ok(menuHtml.includes(label), `menu includes ${label}`);
+  }
+  ctrl.closeOverlay();
+  assert.deepEqual(ctrl.getSnapshot().overlay, { type: "settings" });
+
+  // Opening SaveTemplateDialog, ExportShareDialog, and CreateDialog over settings preserves SettingsDialog.
+  ctrl.openSaveTemplate("alpha");
+  assert.ok(ready(ctrl).includes('data-save-template-dialog="true"'));
+  assert.ok(ready(ctrl).includes('id="settings-tab-spaces"'));
+  ctrl.closeOverlay();
+  assert.deepEqual(ctrl.getSnapshot().overlay, { type: "settings" });
+
+  ctrl.openExportShare("alpha");
+  assert.ok(ready(ctrl).includes('data-export-share-dialog="true"'));
+  assert.ok(ready(ctrl).includes('id="settings-tab-spaces"'));
+  ctrl.closeOverlay();
+  assert.deepEqual(ctrl.getSnapshot().overlay, { type: "settings" });
+
+  ctrl.openCreate({ mode: "template", templateId: "dev" });
+  await flush();
+  const createHtml = ready(ctrl);
+  assert.ok(createHtml.includes('data-create-dialog="true"'));
+  assert.ok(createHtml.includes('data-create-mode="template"'));
+  assert.ok(createHtml.includes('id="settings-tab-spaces"'));
+  ctrl.closeOverlay();
+  assert.deepEqual(ctrl.getSnapshot().overlay, { type: "settings" });
 });

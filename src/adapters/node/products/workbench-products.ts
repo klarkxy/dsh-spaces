@@ -30,7 +30,7 @@ import {
   parseSpaceShare,
   previewSpaceShare,
 } from "./space-share";
-import { listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
+import { deleteSpaceTemplate, listSpaceTemplates, saveSpaceTemplate } from "./space-templates";
 import {
   applySpaceRecipe,
   assertMutableRecipeSpaceId,
@@ -248,6 +248,8 @@ export class WorkbenchProductService {
         return this.saveTemplate(command, ctx);
       case "template.create":
         return this.createFromTemplate(command, ctx);
+      case "template.delete":
+        return this.deleteTemplate(command, ctx);
       case "space.import":
         return this.importSpace(command, ctx);
       case "blueprint.apply":
@@ -470,6 +472,17 @@ export class WorkbenchProductService {
       includeConfig: command.includeConfig === true,
     });
     const outcome: WorkbenchProductOutcome = { kind: "template.save", templateId: template.id };
+    recordProductResult(ctx, outcome);
+    return outcome;
+  }
+
+  private async deleteTemplate(
+    command: Extract<WorkbenchProductCommand, { kind: "template.delete" }>,
+    ctx: WorkbenchJobContext,
+  ): Promise<WorkbenchProductOutcome> {
+    if (!command.templateId.trim()) throw new Error("A template id is required.");
+    deleteSpaceTemplate(this.ports.home, command.templateId);
+    const outcome: WorkbenchProductOutcome = { kind: "template.delete", templateId: command.templateId };
     recordProductResult(ctx, outcome);
     return outcome;
   }

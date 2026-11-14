@@ -2,7 +2,7 @@
  * Control channel plan ops beyond lifecycle: plugin.install (exact source),
  * plugin.remove, plugin.toggle, runtime.set and models.sync.
  * Covers closed params validation, op → workbench plan mapping, normalized
- * params on the frozen plan, and the models.sync stopped-only rule.
+ * params on the frozen plan, and the shared models.sync planning rule.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -154,6 +154,7 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
       scope: "space" as const,
       affectedSpaceIds: target ? [target] : [],
       runningSpaceIds: fixture.mutable.running.has(target) ? [target] : [],
+      ...(request.kind === "space.models.sync" ? { modelsSync: { mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/gw-large", credentials: ["GW_KEY"], skipped: [], missingCredentials: [] } } : {}),
       changes: [`preview:${request.kind}`],
       destructive: false,
       expiresAt: new Date(fixture.mutable.nowMs + 5 * 60_000).toISOString(),
@@ -192,7 +193,7 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
       }
     },
     previewPlan: async (request) => echoPreview(request, "wbplan", fixture.previewCalls),
-    previewLocalPlan: (request) => echoPreview(request, "localplan", fixture.localPreviewCalls),
+    previewLocalPlan: async (request) => echoPreview(request, "localplan", fixture.localPreviewCalls),
     executePlan: async (planId) => {
       fixture.executeCalls.push(planId);
       return { spaceId: "space-done" };
@@ -426,7 +427,7 @@ test("remove, toggle and runtime.set map to their maintenance plans", async () =
   assert.equal(runtimePlan.taskActivity, "idle", "mutation ops carry the frozen activity snapshot");
 });
 
-test("models.sync requires a stopped space at plan time", async () => {
+test("models.sync admits running and stopped spaces through the shared local plan", async () => {
   const home = tempHome();
   writeProfile(home, "web");
   writeSpace(home, "alpha");
@@ -437,14 +438,16 @@ test("models.sync requires a stopped space at plan time", async () => {
   const scope = await issueScope(fx, listener);
 
   const running = await call(fx, "plan", scope, { op: "models.sync", spaceId: "space-beta" });
-  assert.equal(running.body.error?.code, "control/conflict");
-  assert.match(running.body.error?.message ?? "", /plan a stop first/i);
-  assert.equal(fx.localPreviewCalls.length, 0, "no plan was frozen for a running space");
+  assert.equal(running.body.ok, true, JSON.stringify(running.body));
+  assert.equal((running.body.value as ControlPlanResult).modelsSync?.defaultModel, "gw/gw-large");
 
   const stopped = await call(fx, "plan", scope, { op: "models.sync", spaceId: "space-alpha" });
   assert.equal(stopped.body.ok, true, JSON.stringify(stopped.body));
   const plan = stopped.body.value as ControlPlanResult;
-  assert.deepEqual(fx.localPreviewCalls, [{ kind: "space.models.sync", spaceId: "space-alpha" }]);
+  assert.deepEqual(fx.localPreviewCalls, [
+    { kind: "space.models.sync", spaceId: "space-beta" },
+    { kind: "space.models.sync", spaceId: "space-alpha" },
+  ]);
   assert.equal(plan.params, undefined);
 });
 

@@ -33,6 +33,32 @@ export abstract class JobPart extends RequestPart {
     if (this.handledProductJobs.has(job.id)) return;
     this.handledProductJobs.add(job.id);
     const product = job.result?.product;
+    const resultSpaceId = job.result?.spaceId;
+    if (job.status === "succeeded" && (job.kind === "plan.execute" || job.kind === "control.execute") &&
+        this.ui.detailSpaceId && (this.ui.detailSpaceId === resultSpaceId || job.affectedSpaceIds.includes(this.ui.detailSpaceId))) {
+      // Offline plugin plans can finish without a result payload. Their target
+      // inventory still needs to refresh, just like a completed live change.
+      void this.loadDetail(this.ui.detailSpaceId);
+      if (!job.result?.pluginApplication) void this.searchPlugins(this.ui.pluginQuery);
+    }
+    if (job.status === "succeeded" && job.result?.pluginApplication) {
+      const application = job.result.pluginApplication;
+      const rawTargets = application === "restart-required"
+        ? (job.result.restartRequiredSpaceIds?.length
+            ? job.result.restartRequiredSpaceIds
+            : job.result.spaceId ? [job.result.spaceId] : job.affectedSpaceIds)
+        : (job.result.spaceId ? [job.result.spaceId] : job.affectedSpaceIds);
+      const spaceIds = [...new Set(rawTargets.filter(Boolean))];
+      if (spaceIds.length > 0) {
+        this.patch({ pluginOutcomeNotice: { jobId: job.id, application, spaceIds } });
+      }
+      if (this.ui.detailSpaceId) {
+        void this.searchPlugins(this.ui.pluginQuery);
+        if (!resultSpaceId && (spaceIds.includes(this.ui.detailSpaceId) || job.affectedSpaceIds.includes(this.ui.detailSpaceId))) {
+          void this.loadDetail(this.ui.detailSpaceId);
+        }
+      }
+    }
     if (product) this.patch({ lastProductOutcome: product });
     if (job.status === "succeeded" && product?.kind === "settings.update") {
       const draft = this.ui.settingsDraft;
@@ -43,6 +69,7 @@ export abstract class JobPart extends RequestPart {
         this.patch({
           settingsDraft: {
             settings: product.settings,
+            saved: product.settings,
             observation: draft.observation,
             dirty: false,
           },
@@ -53,7 +80,7 @@ export abstract class JobPart extends RequestPart {
     } else if (job.status === "succeeded") {
       if (job.kind === "catalog.refresh" || product?.kind === "catalog.refresh") {
         this.patch({ catalogStatus: "idle" });
-        if (this.ui.homeTab === "plugins") void this.loadCatalog(this.ui.pluginQuery);
+        if (this.ui.homeTab === "plugins" || this.ui.detailSpaceId) void this.loadCatalog(this.ui.pluginQuery);
       }
       if (
         job.kind === "plugin.download" ||
@@ -66,14 +93,16 @@ export abstract class JobPart extends RequestPart {
       }
       if (
         job.kind === "template.save" ||
+        job.kind === "template.delete" ||
         job.kind === "template.create" ||
         job.kind === "space.import" ||
         product?.kind === "template.save" ||
+        product?.kind === "template.delete" ||
         product?.kind === "template.create" ||
         product?.kind === "space.import"
       ) {
         this.patch({ templatesStatus: "idle" });
-        if (this.ui.homeTab === "templates") void this.loadTemplates();
+        if (this.ui.homeTab === "templates" || this.ui.overlay?.type === "create") void this.loadTemplates();
       }
     }
   }
@@ -100,6 +129,7 @@ export abstract class JobPart extends RequestPart {
     const submitted = this.submittedCreates.get(job.requestId);
     if (!submitted) return;
     this.submittedCreates.delete(job.requestId);
+    if (!submitted.autoEnter) return;
     this.pendingAutoEnter = { spaceId: spaceId || submitted.spaceId, intent: submitted.intent };
   }
 
@@ -139,4 +169,20 @@ export abstract class JobPart extends RequestPart {
     this.selectHome();
     this.setHomeTab("overview");
   }
+
+  dismissPluginOutcome = (spaceId?: string): void => {
+    const current = this.ui.pluginOutcomeNotice;
+    if (!current) return;
+    if (!spaceId) {
+      this.patch({ pluginOutcomeNotice: null });
+      return;
+    }
+    const spaceIds = current.spaceIds.filter((id) => id !== spaceId);
+    this.patch({ pluginOutcomeNotice: spaceIds.length > 0 ? { ...current, spaceIds } : null });
+  };
+
+  restartFromPluginOutcome = (spaceId: string): void => {
+    this.dismissPluginOutcome(spaceId);
+    this.preview({ kind: "space.restart", spaceId });
+  };
 }

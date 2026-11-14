@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   SPACE_TEMPLATES_FILE,
+  deleteSpaceTemplate,
   listSpaceTemplates,
   saveSpaceTemplate,
   spaceTemplateId,
@@ -161,6 +162,26 @@ test("saving a template with secret config is rejected and original bytes stay",
   assert.throws(() => saveSpaceTemplate(dir, "coding", "example", { includeConfig: true }), /secret|credential|apiKey/i);
   assert.equal(readFileSync(path, "utf8"), original);
   assert.equal(readFileSync(path, "utf8").includes("fake-test-secret-123"), false);
+});
+
+test("deleting a template removes only that template and rejects missing or corrupt entries", () => {
+  const dir = home();
+  writeProfile(dir, "coding");
+  const dev = saveSpaceTemplate(dir, "coding", "Dev", { displayName: "Dev" });
+  const qa = saveSpaceTemplate(dir, "coding", "QA", { displayName: "QA" });
+  const remaining = deleteSpaceTemplate(dir, dev.id);
+  assert.deepEqual(remaining.map((row) => row.id), [qa.id]);
+  assert.deepEqual(listSpaceTemplates(dir).map((row) => row.id), [qa.id]);
+
+  const path = join(dir, "hub", SPACE_TEMPLATES_FILE);
+  const snapshot = readFileSync(path, "utf8");
+  assert.throws(() => deleteSpaceTemplate(dir, "missing-template"), /not found/i);
+  assert.equal(readFileSync(path, "utf8"), snapshot);
+
+  const corrupt = "{broken";
+  writeFileSync(path, corrupt);
+  assert.throws(() => deleteSpaceTemplate(dir, qa.id), /invalid|unchanged/i);
+  assert.equal(readFileSync(path, "utf8"), corrupt);
 });
 
 

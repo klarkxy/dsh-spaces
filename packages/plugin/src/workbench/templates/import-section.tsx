@@ -137,7 +137,7 @@ export async function importTemplateFile(
       onBlueprintReady();
       return;
     }
-    onError(t(locale, "templates.drop.unknown"));
+    onError(t(locale, SPACES_BLUEPRINT_SEALED ? "templates.drop.unknown" : "templates.drop.unknownWithBlueprint"));
   } catch (failure) {
     controller.reportFailure(failure);
   }

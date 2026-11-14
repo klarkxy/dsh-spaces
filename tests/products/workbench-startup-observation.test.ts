@@ -277,7 +277,7 @@ function httpState(status: "starting" | "running") {
       status,
       generation: 1,
       managed: true,
-      dshVersion: null,
+      dshVersion: null, startWithDesktop: false,
     }],
   };
 }

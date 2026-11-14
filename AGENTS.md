@@ -27,7 +27,9 @@ records; an in-session failure never automatically triggers another launch. Live
 foreign and handoff ownership, and interrupted maintenance, remain protected.
 Historical recovery plans and tests are not current requirements.
 
-Never read or write the real `~/.dsh` except read-only `dsh --help` / `dsh --dump-config`.
+Read-only diagnosis of the real `~/.dsh` is allowed. Direct writes require explicit user authorization.
+Normal user-authorized application startup, including the application's ordinary runtime writes,
+is permitted and does not violate this rule or the protected-tree rule below.
 Development and tests use `.sandbox/dsh-home` or another non-real `DSH_SPACES_HOME`.
 `web` is sacred: do not write `profiles/web/` or the default `sessions/` / `storages/` trees.
 

@@ -138,7 +138,7 @@ function IdleCard({
     <div className="dsh-wb-idle">
       <VisibleScale className="dsh-wb-dialog">
         <h2 className="dsh-wb-title">{t(locale, titleKey, { name: space.displayName })}</h2>
-        <p className="dsh-wb-muted">{crashed ? t(locale, "app.crashedBody") : t(locale, "app.idleBody")}</p>
+        {crashed ? <p className="dsh-wb-muted">{t(locale, "app.crashedBody")}</p> : null}
         {!space.managed && <p className="dsh-wb-notice">{t(locale, "app.unmanaged")}</p>}
         <div className="dsh-wb-actions">
           <button

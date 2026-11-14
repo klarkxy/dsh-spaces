@@ -22,7 +22,7 @@ import {
 } from "../../src/adapters/node/server/workbench-protocol.ts";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../src/shared/workbench-product.ts";
 import { parsePlanRequest } from "../../src/adapters/node/supervisor/input.ts";
-import { workbenchJobResultSchema, workbenchPlanRequestSchema, workbenchPlanSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
+import { workbenchJobResultSchema, workbenchPlanRequestSchema, workbenchPlanSchema, workbenchSpaceDetailSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
 
 const settings: WorkbenchHomeSettings = {
   portStart: 3100,
@@ -38,7 +38,7 @@ const space = (id: string, generation = 1): WorkbenchRevisionSpace => ({
   generation,
   status: "stopped",
   managed: true,
-  dshVersion: null,
+  dshVersion: null, startWithDesktop: false,
   isHost: id === "hub",
   hasWebApp: true,
 });
@@ -70,7 +70,11 @@ test("the host plugin accepts the models sync plan the Supervisor previews", () 
     title: "space.models.sync",
     scope: "space",
     affectedSpaceIds: ["space-demo"],
-    runningSpaceIds: [],
+    runningSpaceIds: ["space-demo"],
+    modelsSync: {
+      mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/m1",
+      credentials: ["GW_KEY"], skipped: [{ route: "codex", reason: "login-grant" }], missingCredentials: ["OTHER_KEY"],
+    },
     changes: ["Copy the model settings of the main space (web) into space-demo."],
     destructive: false,
     expiresAt: new Date(0).toISOString(),
@@ -78,12 +82,24 @@ test("the host plugin accepts the models sync plan the Supervisor previews", () 
     stateRevision: "b".repeat(64),
   };
   assert.equal(workbenchPlanSchema.safeParse(plan).success, true);
+  assert.equal(workbenchPlanSchema.safeParse({ ...plan, modelsSync: { ...plan.modelsSync, secret: "credential-value" } }).success, false);
+  assert.equal(workbenchPlanSchema.safeParse({ ...plan, modelsSync: { ...plan.modelsSync, skipped: [{ route: "x", reason: "unknown" }] } }).success, false);
   const result = {
     spaceId: "space-demo",
     steps: [{ step: "models-sync", status: "done", detail: "main: web; routes: gw; default: gw/m1; credentials: 1" }],
   };
   assert.equal(workbenchJobResultSchema.safeParse(result).success, true);
   assert.equal(workbenchJobResultSchema.safeParse({ steps: [{ step: "x", status: "done", detail: "d".repeat(301) }] }).success, false);
+});
+
+test("space detail carries the target model state without credential values", () => {
+  const detail = {
+    space: { id: "space-demo", displayName: "Demo", isHost: false, hasWebApp: true, status: "running" },
+    models: { status: "incomplete", routeNames: ["gw"], defaultModel: null, missingCredentials: ["GW_KEY"] },
+    plugins: [], snapshots: [], diagnostics: [],
+  };
+  assert.equal(workbenchSpaceDetailSchema.safeParse(detail).success, true);
+  assert.equal(workbenchSpaceDetailSchema.safeParse({ ...detail, models: { ...detail.models, secret: "credential-value" } }).success, false);
 });
 
 test("home digest is deterministic and does not leak the canonical path", () => {
@@ -118,7 +134,7 @@ test("revision is deterministic for same-order copies and key permutation", () =
   assert.match(first, /^[a-f0-9]{64}$/);
   const keyPermuted: WorkbenchRevisionSpace = {
     hasWebApp: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
     managed: true,
     status: "stopped",
     generation: 1,

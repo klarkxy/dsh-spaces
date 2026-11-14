@@ -7,6 +7,7 @@ import {
   bindSupervisorDiagnostics,
   type SupervisorDiagnosticsReporter,
 } from "../../../src/adapters/node/diagnostics/supervisor-diagnostics.ts";
+import { createDiagnosticLogger, installProcessDiagnosticLogging, type DiagnosticLogger } from "../../../src/adapters/node/diagnostics/rotating-log.ts";
 import {
   bindSupervisorComponentPayload,
   createWorkbenchSupervisor,
@@ -38,9 +39,13 @@ export type { SupervisorCliOptions };
 export async function main(
   argv: string[] = process.argv.slice(2),
   diagnostics?: SupervisorDiagnosticsReporter,
+  log?: DiagnosticLogger,
 ): Promise<number> {
-  assertSupportedNode();
   const options = parseSupervisorArgs(argv);
+  const logger = log ?? createDiagnosticLogger(options.home, "supervisor", { allowRealHome: options.allowRealHome });
+  logger.info("supervisor.starting", "Supervisor launch began.");
+  try {
+  assertSupportedNode();
   let hostChannel: HostChannel | undefined;
   if (options.exitWithHost) {
     hostChannel = requireHostChannel(process.send ? process : undefined);
@@ -85,6 +90,7 @@ export async function main(
     },
   });
   const handle = await handlePromise;
+  logger.info("supervisor.ready", "Supervisor accepted its management endpoint.", { port: new URL(handle.origin).port });
   process.stdout.write(`origin=${handle.origin}\n`);
   process.stdout.write(`bootstrap=${handle.bootstrapUrl}\n`);
   recordQuietly(diagnostics, (reporter) => reporter.recordReady());
@@ -92,6 +98,10 @@ export async function main(
   process.on("SIGTERM", () => lifetime.onSignal("SIGTERM"));
   await new Promise(() => undefined);
   return 0;
+  } catch (error) {
+    logger.fault("supervisor.launch-failed", "Supervisor launch failed.", error);
+    throw error;
+  }
 }
 
 function recordQuietly(
@@ -109,8 +119,17 @@ function recordQuietly(
 function runInvokedSupervisor(): void {
   const diagnostics = bindSupervisorDiagnostics();
   recordQuietly(diagnostics, (reporter) => reporter.recordStarting());
-  main(process.argv.slice(2), diagnostics).then(
+  let logger: DiagnosticLogger | undefined;
+  try {
+    const parsed = parseSupervisorArgs(process.argv.slice(2));
+    logger = createDiagnosticLogger(parsed.home, "supervisor", { allowRealHome: parsed.allowRealHome });
+    installProcessDiagnosticLogging(logger);
+  } catch {
+    // Argument failures still reach main and its existing launch-failure report.
+  }
+  main(process.argv.slice(2), diagnostics, logger).then(
     (code) => {
+      logger?.info("supervisor.normal-exit", "Supervisor completed its requested stop.", { exitCode: code });
       recordQuietly(diagnostics, (reporter) => reporter.recordNormalStop({ exit: code }));
       process.exit(code);
     },

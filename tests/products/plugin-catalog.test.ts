@@ -76,19 +76,16 @@ test("plugin search matches tokenized names without pinning aliases", () => {
   assert.equal(matchesPluginQuery(autoevo, "modlens"), false);
 });
 
-test("seed catalog parses and only verified entries are one-click installable", () => {
+test("seed catalog uses published dsh-plugins bundles without examples or service libraries", () => {
   const seed = seedCatalog();
   assert.equal(seed.meta.schemaVersion, 1);
   assert.ok(seed.entries.length >= 5);
-  const npm = seed.entries.find((item) => item.id === "urzeye/dsh-outline");
+  const npm = seed.entries.find((item) => item.id === "@klarkxy/dsh-font");
   assert.ok(npm);
   assert.equal(isInstallableEntry(npm), true);
-  const likely = seed.entries.find((item) => item.tier === "likely-plugin");
-  assert.ok(likely);
-  assert.equal(isInstallableEntry(likely), false);
-  const related = seed.entries.find((item) => item.tier === "related");
-  assert.ok(related);
-  assert.equal(isInstallableEntry(related), false);
+  assert.ok(seed.entries.every((entry) => entry.installSpec?.startsWith(`${entry.packageName}@`)));
+  assert.ok(seed.entries.every((entry) => !entry.id.startsWith("example/")));
+  assert.equal(seed.entries.some((entry) => entry.packageName === "@klarkxy/dsh-plugin-kit"), false);
 });
 
 test("parseCatalog skips broken entries and refuses a newer major schema", () => {
@@ -114,7 +111,7 @@ test("loadPluginCatalog falls back to seed when fetch fails", async () => {
   };
   const snap = await loadPluginCatalog(dir, { fetchImpl: fail });
   assert.equal(snap.source, "seed");
-  assert.ok(snap.entries.some((item) => item.installSpec === "dsh-outline"));
+  assert.ok(snap.entries.some((item) => item.packageName === "@klarkxy/dsh-font"));
 });
 
 test("loadPluginCatalog caches a remote document and reuses it on 304", async () => {
@@ -307,4 +304,24 @@ test("historical topic dumps and current catalog envelopes stay readable", () =>
     /unsupported plugin catalog schema/,
   );
   assert.throws(() => parseAnyCatalog({}), /unsupported plugin catalog/);
+});
+
+test("published dsh-plugins feed preserves package identity, translations and exact npm pins", () => {
+  const plugin = {
+    package: "@klarkxy/dsh-font", version: "1.2.3", kind: "plugin", category: "workflow",
+    title: { zh: "字体", en: "Font" }, summary: { zh: "选择字体。", en: "Choose a font." },
+    repository: "https://github.com/klarkxy/dsh-plugins",
+    install: ["ignore arbitrary commands in the feed"],
+  };
+  const feed = { generatedAt: "2026-11-14T00:00:00Z", plugins: [plugin, { kind: "service", package: "@klarkxy/dsh-plugin-kit" }] };
+  const parsed = parseAnyCatalog(feed);
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].id, plugin.package);
+  assert.equal(parsed.entries[0].installSpec, "@klarkxy/dsh-font@1.2.3");
+  assert.equal(parsed.entries[0].summary, "选择字体。");
+  assert.equal(parsed.entries[0].summaryEn, "Choose a font.");
+  assert.equal(parsed.entries[0].category, "workflow");
+  assert.throws(() => parseAnyCatalog({ ...feed, plugins: [{ ...plugin, version: "latest" }] }), /Invalid/);
+  assert.throws(() => parseAnyCatalog({ ...feed, plugins: [{ ...plugin, package: "github:owner/repo" }] }), /Invalid/);
+  assert.throws(() => parseAnyCatalog({ ...feed, plugins: [plugin, plugin] }), /Duplicate/);
 });

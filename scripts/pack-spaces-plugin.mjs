@@ -112,6 +112,17 @@ function pass(m) {
   console.log(`PASS  ${m}`);
 }
 
+function assertDistributionLogLevel() {
+  for (const file of [
+    join(PLUGIN_DIR, "lib", "index.js"),
+    join(PLUGIN_DIR, "lib", "supervisor", "index.js"),
+  ]) {
+    if (!readFileSync(file, "utf8").includes('DEFAULT_DIAGNOSTIC_LOG_LEVEL = true ? "info" : "debug"')) {
+      throw new Error(`Package logging must default to info; rebuild with npm run pack:plugin: ${file}`);
+    }
+  }
+}
+
 function hasSpace(path) {
   return /\s/.test(path);
 }
@@ -342,6 +353,7 @@ function printAddCommand(pluginTgz) {
 }
 
 function preflightOnDisk() {
+  assertDistributionLogLevel();
   const pluginPkg = readPkg(PLUGIN_DIR);
   const viewPkg = readPkg(VIEW_DIR);
   const supervisorPkg = readPkg(SUPERVISOR_DIR);

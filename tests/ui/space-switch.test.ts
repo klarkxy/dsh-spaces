@@ -14,7 +14,7 @@ function fixture(t: TestContext) {
     managerId: "hub", owner: { kind: "web", since: "2026-10-27T00:00:00Z" }, writable: true,
     mode: "verified-full", dshVersion: "0.2.1-rc.2", maintenance: false, reasons: [], jobs: [],
     spaces: ["hub", "alpha", "beta"].map(id => ({ id, displayName: id, isHost: id === "hub", hasWebApp: true,
-      icon: "", status: "running", generation: 1, managed: true, dshVersion: null })),
+      icon: "", status: "running", generation: 1, managed: true, dshVersion: null, startWithDesktop: false })),
   };
   let reads = 0, views = 0;
   const timers: Array<() => void> = [];

@@ -21,6 +21,7 @@ import { CopyButton } from "./view/shared";
 import { useModalDialog } from "./view/use-modal-dialog";
 import { LayoutIndicator, springSoft, StaggerItem, StaggerList } from "../../../../src/shared/ui/motion";
 import { PressableButton, VisibleScale, VisibleSlide } from "./feature-motion";
+import { ACTIVE_JOB } from "./store/constants";
 
 export function ThemeSwitch({
   locale,
@@ -60,17 +61,25 @@ export function ThemeSwitch({
 export function HomeSettingsFields({
   ui,
   controller,
+  section = "all",
 }: {
   ui: WorkbenchUiState;
   controller: WorkbenchController;
+  section?: "sources" | "ports" | "all";
 }): ReactElement {
   const locale = ui.locale;
   const writable = controller.canMutate();
-  const busy = controller.isBusy();
   const draft = ui.settingsDraft;
+  const savingSettings = (ui.state?.jobs ?? []).some((job) => ACTIVE_JOB.has(job.status) && job.kind === "settings.update");
+  const saveLocked = !writable || controller.isGlobalBusy() || ui.commandPending || savingSettings;
+  const canSave = Boolean(draft?.dirty) && !saveLocked;
+  const showSources = section === "sources" || section === "all";
+  const showPorts = section === "ports" || section === "all";
+  const origin = section === "ports" ? "service:settings" : "general:settings";
+  const titleKey = section === "sources" ? "settings.sourcesTitle" : "settings.homeSettings";
   return (
-    <section data-settings-home="true">
-      <h3 className="dsh-wb-title">{t(locale, "settings.homeSettings")}</h3>
+    <section data-settings-home="true" data-settings-section={section}>
+      <h3 className="dsh-wb-title">{t(locale, titleKey)}</h3>
       {ui.settingsStatus === "loading" ? (
         <p role="status" className="dsh-wb-status-line">
           <span className="dsh-wb-spin" aria-hidden="true" />
@@ -82,7 +91,7 @@ export function HomeSettingsFields({
           {ui.readError.settings ?? t(locale, "app.genericError")}
         </p>
       ) : null}
-      <InlineErrors ui={ui} origin="service:settings" />
+      <InlineErrors ui={ui} origin={origin} />
       {draft ? (
         <VisibleSlide
           as="form"
@@ -93,60 +102,73 @@ export function HomeSettingsFields({
             controller.saveHomeSettings();
           }}
         >
-          <label className="dsh-wb-field">
-            {t(locale, "settings.portStart")}
-            <input
-              type="number"
-              min={1024}
-              max={65535}
-              value={draft.settings.portStart}
-              disabled={!writable}
-              onChange={(event) =>
-                controller.setHomeSettings({ portStart: Number(event.target.value) })
-              }
-            />
-          </label>
-          <label className="dsh-wb-field">
-            {t(locale, "settings.portEnd")}
-            <input
-              type="number"
-              min={1024}
-              max={65535}
-              value={draft.settings.portEnd}
-              disabled={!writable}
-              onChange={(event) =>
-                controller.setHomeSettings({ portEnd: Number(event.target.value) })
-              }
-            />
-          </label>
-          <label className="dsh-wb-field">
-            {t(locale, "settings.packageSource")}
-            <select
-              value={draft.settings.packageSource}
-              disabled={!writable}
-              onChange={(event) =>
-                controller.setHomeSettings({
-                  packageSource: event.target.value === "china" ? "china" : "official",
-                })
-              }
-            >
-              <option value="official">{t(locale, "settings.packageSource.official")}</option>
-              <option value="china">{t(locale, "settings.packageSource.china")}</option>
-            </select>
-          </label>
-          <label className="dsh-wb-field">
-            {t(locale, "settings.catalogUrl")}
-            <input
-              value={draft.settings.catalogUrl}
-              disabled={!writable}
-              onChange={(event) => controller.setHomeSettings({ catalogUrl: event.target.value })}
-            />
-          </label>
-          <p className="dsh-wb-muted">{t(locale, "settings.catalogUrlHint")}</p>
+          {showSources ? (
+            <>
+              <label className="dsh-wb-field">
+                {t(locale, "settings.packageSource")}
+                <select
+                  value={draft.settings.packageSource}
+                  disabled={!writable}
+                  onChange={(event) =>
+                    controller.setHomeSettings({
+                      packageSource: event.target.value === "china" ? "china" : "official",
+                    })
+                  }
+                >
+                  <option value="official">{t(locale, "settings.packageSource.official")}</option>
+                  <option value="china">{t(locale, "settings.packageSource.china")}</option>
+                </select>
+              </label>
+              <label className="dsh-wb-field">
+                {t(locale, "settings.catalogUrl")}
+                <input
+                  value={draft.settings.catalogUrl}
+                  disabled={!writable}
+                  placeholder={t(locale, "settings.catalogUrlHint")}
+                  onChange={(event) => controller.setHomeSettings({ catalogUrl: event.target.value })}
+                />
+              </label>
+            </>
+          ) : null}
+          {showPorts ? (
+            <>
+              <label className="dsh-wb-field">
+                {t(locale, "settings.portStart")}
+                <input
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={draft.settings.portStart}
+                  disabled={!writable}
+                  onChange={(event) =>
+                    controller.setHomeSettings({ portStart: Number(event.target.value) })
+                  }
+                />
+              </label>
+              <label className="dsh-wb-field">
+                {t(locale, "settings.portEnd")}
+                <input
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={draft.settings.portEnd}
+                  disabled={!writable}
+                  onChange={(event) =>
+                    controller.setHomeSettings({ portEnd: Number(event.target.value) })
+                  }
+                />
+              </label>
+            </>
+          ) : null}
           <div className="dsh-wb-actions">
-            <PressableButton type="submit" className="dsh-wb-btn primary" disabled={!writable || busy}>
-              {t(locale, "settings.saveHome")}
+            <PressableButton type="submit" className="dsh-wb-btn primary" disabled={!canSave}>
+              {t(locale, section === "sources" ? "settings.saveSources" : "settings.saveHome")}
             </PressableButton>
+            {draft.dirty ? (
+              <span className="dsh-wb-muted" data-settings-unsaved="true">
+                {t(locale, "detail.unsaved")}
+              </span>
+            ) : null}
           </div>
         </VisibleSlide>
       ) : null}
@@ -160,6 +182,7 @@ export function ImportPreviewDialog({
   importName,
   importDisplayName,
   busy,
+  error,
   onName,
   onDisplayName,
   onCancel,
@@ -170,6 +193,7 @@ export function ImportPreviewDialog({
   importName: string;
   importDisplayName: string;
   busy: boolean;
+  error?: string | null;
   onName: (value: string) => void;
   onDisplayName: (value: string) => void;
   onCancel: () => void;
@@ -191,6 +215,7 @@ export function ImportPreviewDialog({
       >
         <h2 id="dsh-wb-import-title" className="dsh-wb-title">{t(locale, "share.preview")}</h2>
         <SharePreviewBody locale={locale} preview={preview.preview} fileName={preview.fileName} />
+        {error ? <p className="dsh-wb-alert" role="alert">{error}</p> : null}
         <label className="dsh-wb-field">
           {t(locale, "create.name")}
           <input value={importName} onChange={(event) => onName(event.target.value)} autoComplete="off" />
@@ -267,11 +292,7 @@ export function ProductOutcomeCard({
     return <BlueprintApplyResult locale={locale} outcome={outcome} />;
   }
   if (outcome.kind !== "template.create" && outcome.kind !== "space.import") {
-    return (
-      <p className="dsh-wb-notice" data-product-outcome={outcome.kind}>
-        {outcome.kind}
-      </p>
-    );
+    return null;
   }
   return <ImportResultCard locale={locale} result={outcome.import} />;
 }
@@ -309,17 +330,19 @@ export function DiagnosticsSection({
   ui,
   locale,
   text,
+  onRefresh,
 }: {
   ui: WorkbenchUiState;
   locale: WorkbenchLocale;
   /** The redacted diagnostics text, read at click time. */
   text: () => string;
+  onRefresh?: () => void;
 }): ReactElement {
   const diag = ui.diagnostics;
+  const refreshing = ui.diagnosticsStatus === "loading" || ui.detailStatus === "loading";
   return (
     <section data-diagnostics="true">
       <h3>{t(locale, "detail.diagnostics")}</h3>
-      <p className="dsh-wb-muted">{t(locale, "detail.noRecovery")}</p>
       {ui.diagnosticsStatus === "loading" ? (
         <p role="status" className="dsh-wb-status-line">
           <span className="dsh-wb-spin" aria-hidden="true" />
@@ -353,6 +376,17 @@ export function DiagnosticsSection({
       </StaggerList>
       {diag?.logError ? <p className="dsh-wb-alert">{diag.logError}</p> : null}
       <div className="dsh-wb-actions">
+        {onRefresh ? (
+          <button
+            type="button"
+            className="dsh-wb-btn"
+            data-diagnostics-refresh="true"
+            disabled={refreshing}
+            onClick={onRefresh}
+          >
+            {t(locale, "detail.refresh")}
+          </button>
+        ) : null}
         <CopyButton locale={locale} className="dsh-wb-btn" text={text} label={t(locale, "app.copyLogs")} />
       </div>
     </section>

@@ -6,6 +6,7 @@
  * reachable with the keyboard and with a screen reader.
  */
 import React, { useRef, useState, type DragEvent, type ReactElement } from "react";
+import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
 import { t, type WorkbenchLocale } from "../i18n";
 import { PressableButton } from "../feature-motion";
 
@@ -36,7 +37,7 @@ export function TemplateDropZone({
       }}
     >
       <p className="dsh-wb-dropzone-title">{t(locale, "templates.drop.title")}</p>
-      <p className="dsh-wb-muted">{t(locale, "templates.drop.hint")}</p>
+      <p className="dsh-wb-muted">{t(locale, SPACES_BLUEPRINT_SEALED ? "templates.drop.hint" : "templates.drop.hintWithBlueprint")}</p>
       <PressableButton
         
         type="button"
@@ -49,7 +50,7 @@ export function TemplateDropZone({
         ref={inputRef}
         className="dsh-wb-visually-hidden"
         type="file"
-        accept=".dshspace,.json,.txt,application/zip,application/json,text/plain"
+        accept={SPACES_BLUEPRINT_SEALED ? ".dshspace,application/zip" : ".dshspace,.json,.txt,application/zip,application/json,text/plain"}
         aria-label={t(locale, "templates.drop.choose")}
         onChange={(event) => {
           const file = event.target.files?.[0];

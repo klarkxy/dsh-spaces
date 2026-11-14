@@ -16,7 +16,7 @@ const EPOCH = "ab".repeat(32);
 test("the host workbench schema accepts the projected attention field and only its closed values", () => {
   const space = {
     id: "alpha", displayName: "Alpha", isHost: false, hasWebApp: true, icon: "",
-    status: "running", generation: 2, managed: true, dshVersion: null,
+    status: "running", generation: 2, managed: true, dshVersion: null, startWithDesktop: false,
   };
   assert.equal(workbenchSpaceSchema.safeParse(space).success, true, "older states without attention stay valid");
   for (const attention of ["required", "none", "unknown"]) {

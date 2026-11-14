@@ -26,21 +26,28 @@
  * endpoint outside the closed whitelist fails honestly.
  */
 import { randomUUID } from "node:crypto";
+import { gt as semverGt, valid as semverValid } from "semver";
 import {
   CONTROL_LIVE_PLUGIN_LIMIT,
   ControlPublicError,
   type ControlInspectLive,
 } from "../../../shared/control";
-import type { WorkbenchJob, WorkbenchPlanRequest } from "../../../shared/workbench";
+import type { WorkbenchJob, WorkbenchJobStep, WorkbenchPlanRequest } from "../../../shared/workbench";
 import { parsePluginSource, PluginSourceError } from "../../../shared/plugin-source";
 import { PROTECTED_PLUGIN_PACKAGES } from "../../../shared/types";
 import { FULL_SPACES_PACKAGE, isFullSpacesManagerSpec } from "../../../shared/plugin-spec";
 import { installSpecFor, parseGitDependencySource } from "../products/plugin-exact-source";
+import { applyXpEmbedCompatibility, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from "../diagnostics/xp-compatibility";
 import { dshSessionCookie } from "../runtime/dsh-endpoint";
 import { redactCredentials } from "./ui-shared";
 import { redactPublicReason } from "../../../shared/public-reason";
 import { sanitizeLogText } from "../diagnostics/diagnostics";
+import { currentDiagnosticLogger, currentOperationDetails, diagnosticNested } from "../diagnostics/operation-log";
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
+import type {
+  MaintenanceLivePluginInput,
+  MaintenanceLivePluginResult,
+} from "../maintenance/workbench-maintenance-ports";
 
 const REMOTE_REQUEST_MAX_BYTES = 64 * 1024;
 const REMOTE_RESPONSE_MAX_BYTES = 512 * 1024;
@@ -65,7 +72,15 @@ type PluginManagerMethod =
   | "pluginManager/removeBundle"
   | "pluginManager/setPluginEnabled";
 
-type RemoteMethod = PluginManagerMethod;
+type ModelSettingsMethod =
+  | "settings/describe"
+  | "settings/update"
+  | "settings/mutate"
+  | "settings/replace"
+  | "credentials/describe"
+  | "credentials/set";
+
+type RemoteMethod = PluginManagerMethod | ModelSettingsMethod;
 
 const REMOTE_METHODS = new Set<RemoteMethod>([
   "pluginManager/listPlugins",
@@ -80,6 +95,12 @@ const REMOTE_METHODS = new Set<RemoteMethod>([
   "pluginManager/updateBundle",
   "pluginManager/removeBundle",
   "pluginManager/setPluginEnabled",
+  "settings/describe",
+  "settings/update",
+  "settings/mutate",
+  "settings/replace",
+  "credentials/describe",
+  "credentials/set",
 ]);
 
 /** Exact args fields each endpoint may carry — extras are refused locally. */
@@ -96,6 +117,12 @@ const ARGS_FIELDS: Record<RemoteMethod, readonly string[]> = {
   "pluginManager/updateBundle": ["name", "version", "options"],
   "pluginManager/removeBundle": ["name"],
   "pluginManager/setPluginEnabled": ["id", "enabled"],
+  "settings/describe": [],
+  "settings/update": ["ns", "patch", "expectedRevision"],
+  "settings/mutate": ["ns", "ops", "expectedRevision"],
+  "settings/replace": ["ns", "section", "expectedRevision"],
+  "credentials/describe": ["refs"],
+  "credentials/set": ["ref", "value"],
 };
 
 /** Packages that may never be changed through the child's own manager. */
@@ -179,6 +206,21 @@ interface RemoteUpdateResult {
 }
 
 export class ChildRemoteClient {
+  private get log() { return currentDiagnosticLogger(); }
+  private callStarted(method: string): number | undefined {
+    if (!this.log) return undefined;
+    const started = Date.now();
+    this.log?.debug("remote.started", "A child-space Remote call started.", { space: this.spaceId, generation: this.generation, method, ...currentOperationDetails() });
+    return started;
+  }
+  private callCompleted(method: string, started: number | undefined, status: number): void {
+    if (started === undefined) return;
+    this.log?.info("remote.completed", "A child-space Remote call completed.", { space: this.spaceId, generation: this.generation, method, status, durationMs: Date.now() - started, ...currentOperationDetails() });
+  }
+  private callFailed(method: string, started: number | undefined, error: unknown): void {
+    if (started === undefined) return;
+    this.log?.error("remote.failed", "A child-space Remote call failed.", error, { space: this.spaceId, generation: this.generation, method, durationMs: Date.now() - started, ...currentOperationDetails() });
+  }
   constructor(
     private readonly ports: ChildRemotePorts,
     private readonly spaceId: string,
@@ -240,6 +282,16 @@ export class ChildRemoteClient {
    * is reported with its own code and sanitized message — never retried.
    */
   async call(method: RemoteMethod, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    const log = this.log;
+    return log ? diagnosticNested(log, () => this.callLogged(method, args, signal)) : this.callLogged(method, args, signal);
+  }
+
+  private async callLogged(method: RemoteMethod, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    const started = this.callStarted(method);
+    return await this.callInner(method, args, signal, started);
+  }
+
+  private async callInner(method: RemoteMethod, args: Record<string, unknown>, signal: AbortSignal | undefined, started: number | undefined): Promise<unknown> {
     if (!REMOTE_METHODS.has(method)) {
       throw new ControlPublicError("control/unsupported", `The remote method ${method} is not in the control whitelist.`);
     }
@@ -260,6 +312,8 @@ export class ChildRemoteClient {
       ? AbortSignal.any([signal, AbortSignal.timeout(COOKIE_EXCHANGE_TIMEOUT_MS)])
       : AbortSignal.timeout(COOKIE_EXCHANGE_TIMEOUT_MS);
     const session = await this.session(exchangeSignal);
+    // Model keys may appear in a provider refusal; redact them like the cookie.
+    if (method === "credentials/set" && typeof args.value === "string") session.secrets.push(args.value);
     this.requireRunning();
     const rpcId = randomUUID();
     const callSignal = signal
@@ -281,12 +335,15 @@ export class ChildRemoteClient {
         body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
       });
     } catch (error) {
-      throw new ControlPublicError("control/unavailable", this.safeReason(error, "The child request failed.", session.secrets));
+      const failure = new ControlPublicError("control/unavailable", this.safeReason(error, "The child request failed.", session.secrets));
+      this.callFailed(method, started, failure);
+      throw failure;
     }
     if (response.status === 401 || response.status === 403) {
       throw new ControlPublicError("control/unavailable", `The child refused the request (HTTP ${response.status}).`);
     }
     if (!response.ok) {
+      this.callFailed(method, started, new Error(`Child Remote HTTP ${response.status}.`));
       throw new ControlPublicError("control/unavailable", `The child request failed (HTTP ${response.status}).`);
     }
     if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
@@ -322,7 +379,9 @@ export class ChildRemoteClient {
         !result || typeof result !== "object" || result.ok !== true) {
       throw new ControlPublicError("control/failed", "The child returned an unexpected response envelope.");
     }
-    if (Buffer.byteLength(JSON.stringify(result.value), "utf8") > REMOTE_RESPONSE_MAX_BYTES) {
+    this.callCompleted(method, started, response.status);
+    if (result.value !== undefined &&
+        Buffer.byteLength(JSON.stringify(result.value), "utf8") > REMOTE_RESPONSE_MAX_BYTES) {
       throw new ControlPublicError("control/failed", "The child response exceeds the byte limit.");
     }
     return result.value;
@@ -684,4 +743,276 @@ async function listInstalledBundles(client: ChildRemoteClient): Promise<LiveBund
   const rows = await client.call("pluginManager/listBundles", {});
   if (!Array.isArray(rows)) throw new ControlPublicError("control/failed", "pluginManager/listBundles returned a malformed result.");
   return rows.filter(isLiveBundleRow).filter((row) => row.installed === true || row.enabled === true || row.source !== undefined);
+}
+
+function normalizePluginApplication(application: string | undefined): "applied" | "restart-required" {
+  return application === "applied" ? "applied" : "restart-required";
+}
+
+async function settleLiveInstall(
+  client: ChildRemoteClient,
+  spec: string,
+  packageName: string,
+  approvedBuilds: readonly string[],
+  signal: AbortSignal,
+  steps: WorkbenchJobStep[],
+): Promise<RemoteChangeResult> {
+  const requestId = `workbench-${randomUUID()}`;
+  const options: Record<string, unknown> = {
+    saveExact: true,
+    requestId,
+    ...(approvedBuilds.length ? { approvedBuilds: [...approvedBuilds] } : {}),
+  };
+  let change = asChangeResult(
+    await client.call("pluginManager/installBundle", { spec, options }, signal),
+    "installBundle",
+  );
+  const settled = await client.call("pluginManager/waitForInstall", { requestId }, signal);
+  if (settled !== null && settled !== undefined) {
+    change = asChangeResult(settled, "waitForInstall");
+  }
+  steps.push({
+    step: "install",
+    status: change.error || change.application === "failed" || change.application === "cancelled" ? "failed" : "done",
+    packageName,
+    detail: `application=${change.application ?? "?"}`,
+  });
+  if (Array.isArray(change.pendingBuilds) && change.pendingBuilds.length) {
+    const pending = change.pendingBuilds.filter((k): k is string => typeof k === "string").slice(0, 32);
+    throw new Error(`Pending builds awaiting approval: ${pending.join(", ")}`);
+  }
+  if (
+    change.error ||
+    change.application === "failed" ||
+    change.application === "cancelled" ||
+    change.changed !== true
+  ) {
+    throw new Error(`The install did not apply: ${managementReason(change)}`);
+  }
+  return change;
+}
+
+/**
+ * Execute a Workbench plugin plan directly inside a running space through its
+ * own `pluginManager` without stopping or restarting the space.
+ */
+export async function runMaintenanceLivePlugin(
+  client: ChildRemoteClient,
+  home: string,
+  input: MaintenanceLivePluginInput,
+  ctx: WorkbenchJobContext,
+): Promise<MaintenanceLivePluginResult> {
+  const steps: WorkbenchJobStep[] = [];
+  const signal = ctx.signal;
+  const spaceId = input.spaceId;
+  switch (input.kind) {
+    case "install": {
+      const { packageName, version } = input;
+      assertNoProtectedPackage(packageName);
+      const initial = await listInstalledBundles(client);
+      const current = initial.find((item) => item.name.toLowerCase() === packageName.toLowerCase());
+      let application: "applied" | "restart-required";
+      if (current?.installed === true && current.version === version && current.enabled !== false) {
+        steps.push({ step: "install", status: "done", packageName, detail: "application=applied" });
+        application = "applied";
+      } else if (
+        current?.installed === true &&
+        current.updatable === true &&
+        current.version &&
+        semverValid(version) &&
+        semverValid(current.version) &&
+        semverGt(version, current.version)
+      ) {
+        const requestId = `workbench-${randomUUID()}`;
+        ctx.phase("install");
+        ctx.cancellable(false);
+        ctx.message(`Updating ${packageName} to ${version} in ${spaceId}.`);
+        const updated = await client.call(
+          "pluginManager/updateBundle",
+          { name: packageName, version, options: { requestId } },
+          signal,
+        );
+        const outcome = updated as RemoteUpdateResult;
+        const change = outcome?.result;
+        if (!outcome || typeof outcome !== "object" || !change || typeof change !== "object") {
+          throw new Error("updateBundle returned a malformed result.");
+        }
+        const failed =
+          change.error ||
+          outcome.restore !== undefined ||
+          change.application === "failed" ||
+          change.application === "cancelled" ||
+          outcome.step !== "install" ||
+          change.changed !== true;
+        steps.push({
+          step: outcome.step === "check" ? "update-check" : "update",
+          status: failed ? "failed" : "done",
+          packageName,
+          detail: outcome.restore
+            ? `restored: ${managementReason(outcome.restore as RemoteChangeResult)}`
+            : `application=${change.application ?? "?"}`,
+        });
+        if (failed) {
+          throw new Error(
+            `The update did not apply (step=${outcome.step ?? "?"}): ${managementReason(change)}${outcome.restore ? "; the child reinstalled the previous version." : ""}`,
+          );
+        }
+        application = normalizePluginApplication(change.application);
+      } else {
+        ctx.phase("install");
+        ctx.cancellable(false);
+        ctx.message(`Installing ${packageName}@${version} in ${spaceId}.`);
+        const change = await settleLiveInstall(client, `${packageName}@${version}`, packageName, [], signal, steps);
+        application = normalizePluginApplication(change.application);
+      }
+      ctx.phase("verify");
+      const bundles = await listInstalledBundles(client);
+      const row = bundles.find((item) => item.name.toLowerCase() === packageName.toLowerCase());
+      if (!row || row.installed !== true || row.version !== version) {
+        throw new Error(`Plugin ${packageName} read back version ${row?.version ?? "?"} instead of ${version}.`);
+      }
+      if (packageName === XP_PACKAGE_NAME && version === XP_SUPPORTED_VERSION) {
+        const compat = applyXpEmbedCompatibility(home, spaceId);
+        if (compat.applied) application = "restart-required";
+      }
+      steps.push({ step: "verify", status: "done", packageName });
+      ctx.message(`Installed ${packageName}@${version} in ${spaceId} (application=${application}).`);
+      return { application, steps };
+    }
+    case "install.spec": {
+      const plugin = input.plugin;
+      assertNoProtectedPackage(plugin.packageName);
+      ctx.phase("install");
+      ctx.cancellable(false);
+      ctx.message(`Installing ${plugin.packageName} in ${spaceId}.`);
+      const change = await settleLiveInstall(
+        client,
+        installSpecFor(plugin),
+        plugin.packageName,
+        plugin.approvedBuilds,
+        signal,
+        steps,
+      );
+      let application = normalizePluginApplication(change.application);
+      ctx.phase("verify");
+      const bundles = await listInstalledBundles(client);
+      const row = bundles.find((item) => item.name.toLowerCase() === plugin.packageName.toLowerCase());
+      if (!row || row.installed !== true) {
+        throw new Error(`Plugin ${plugin.packageName} was not read back as installed after the live install.`);
+      }
+      if (plugin.kind === "npm" && row.version !== plugin.version) {
+        throw new Error(
+          `Plugin ${plugin.packageName} read back version ${row.version ?? "?"} instead of ${plugin.version}.`,
+        );
+      }
+      if (plugin.kind === "github") {
+        const declared = parseGitDependencySource(row.source ?? "");
+        const expectedRepo = `${plugin.owner}/${plugin.repo}`;
+        const expectedPath = plugin.path ? `/${plugin.path}` : undefined;
+        if (!declared || declared.repo !== expectedRepo || declared.commit !== plugin.commit || declared.path !== expectedPath) {
+          throw new Error(
+            `Plugin ${plugin.packageName} was not read back from the pinned source ${expectedRepo}${expectedPath ?? ""}#${plugin.commit}.`,
+          );
+        }
+      }
+      if (plugin.kind === "npm" && plugin.packageName === XP_PACKAGE_NAME && plugin.version === XP_SUPPORTED_VERSION) {
+        const compat = applyXpEmbedCompatibility(home, spaceId);
+        if (compat.applied) application = "restart-required";
+      }
+      steps.push({ step: "verify", status: "done", packageName: plugin.packageName });
+      ctx.message(
+        `Installed ${plugin.packageName}${plugin.kind === "npm" ? `@${plugin.version}` : ""} in ${spaceId} (application=${application}).`,
+      );
+      return { application, steps };
+    }
+    case "remove": {
+      const { packageName } = input;
+      assertNoProtectedPackage(packageName);
+      ctx.phase("remove");
+      ctx.cancellable(false);
+      ctx.message(`Removing ${packageName} from ${spaceId}.`);
+      const change = asChangeResult(
+        await client.call("pluginManager/removeBundle", { name: packageName }, signal),
+        "removeBundle",
+      );
+      steps.push({
+        step: "remove",
+        status: change.error || change.application === "failed" || change.application === "cancelled" ? "failed" : "done",
+        packageName,
+        detail: `application=${change.application ?? "?"}`,
+      });
+      if (change.error || change.application === "failed" || change.application === "cancelled" || change.changed !== true) {
+        throw new Error(`The removal did not apply: ${managementReason(change)}`);
+      }
+      const application = normalizePluginApplication(change.application);
+      ctx.phase("verify");
+      const bundles = await listInstalledBundles(client);
+      const still = bundles.find((item) => item.name.toLowerCase() === packageName.toLowerCase());
+      if (still && still.installed === true) {
+        throw new Error(`Plugin ${packageName} is still installed after the live removal.`);
+      }
+      steps.push({ step: "verify", status: "done", packageName });
+      ctx.message(`Removed ${packageName} from ${spaceId} (application=${application}).`);
+      return { application, steps };
+    }
+    case "toggle": {
+      const { packageName, enabled } = input;
+      assertNoProtectedPackage(packageName);
+      const initial = await listInstalledBundles(client);
+      const current = initial.find((item) => item.name.toLowerCase() === packageName.toLowerCase());
+      if (!enabled) {
+        if (!current || current.installed !== true) {
+          steps.push({ step: "remove", status: "done", packageName, detail: "application=applied" });
+          steps.push({ step: "verify", status: "done", packageName });
+          return { application: "applied", steps };
+        }
+        ctx.phase("toggle");
+        ctx.cancellable(false);
+        ctx.message(`Removing ${packageName} from ${spaceId}.`);
+        const change = asChangeResult(
+          await client.call("pluginManager/removeBundle", { name: packageName }, signal),
+          "removeBundle",
+        );
+        steps.push({
+          step: "remove",
+          status: change.error || change.application === "failed" || change.application === "cancelled" ? "failed" : "done",
+          packageName,
+          detail: `application=${change.application ?? "?"}`,
+        });
+        if (change.error || change.application === "failed" || change.application === "cancelled" || change.changed !== true) {
+          throw new Error(`The removal did not apply: ${managementReason(change)}`);
+        }
+        const application = normalizePluginApplication(change.application);
+        ctx.phase("verify");
+        const bundles = await listInstalledBundles(client);
+        const still = bundles.find((item) => item.name.toLowerCase() === packageName.toLowerCase());
+        if (still && still.installed === true) {
+          throw new Error(`Plugin ${packageName} is still installed after the live removal.`);
+        }
+        steps.push({ step: "verify", status: "done", packageName });
+        ctx.message(`Removed ${packageName} from ${spaceId} (application=${application}).`);
+        return { application, steps };
+      }
+      if (current?.installed === true && current.enabled !== false) {
+        steps.push({ step: "install", status: "done", packageName, detail: "application=applied" });
+        steps.push({ step: "verify", status: "done", packageName });
+        return { application: "applied", steps };
+      }
+      const spec = input.installSpec ?? packageName;
+      ctx.phase("toggle");
+      ctx.cancellable(false);
+      ctx.message(`Installing ${packageName} in ${spaceId}.`);
+      const change = await settleLiveInstall(client, spec, packageName, [], signal, steps);
+      const application = normalizePluginApplication(change.application);
+      ctx.phase("verify");
+      const bundles = await listInstalledBundles(client);
+      const after = bundles.find((item) => item.name.toLowerCase() === packageName.toLowerCase());
+      if (!after || after.installed !== true) {
+        throw new Error(`Plugin ${packageName} was not read back as installed after enabling.`);
+      }
+      steps.push({ step: "verify", status: "done", packageName });
+      ctx.message(`Enabled ${packageName} in ${spaceId} (application=${application}).`);
+      return { application, steps };
+    }
+  }
 }

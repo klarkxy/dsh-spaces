@@ -141,7 +141,7 @@ export function BrowserApp({ connection, toolbar, overlay }: { connection: Brows
         externalUrl={active?.url ?? null} pending={pending || booting}
         onChange={setDraft} onSubmit={() => { void open(draft); }} />
       {toolbar}
-      {!nativeDesktop && active?.requestedUrl && <p role="note" className="dsh-browser-hint">Web preview: some sites do not allow embedded pages. If the page is blank or shows a refusal, use Open externally. The Browser cannot determine the cause or track links and redirects inside a cross-origin page.</p>}
+      {!nativeDesktop && active?.requestedUrl && <p role="note" className="dsh-browser-hint">If a site refuses embedding, use Open externally.</p>}
       {error && <BrowserFailurePanel message={error} />}
       <main ref={pageRef} className="dsh-browser-page">
         {!nativeDesktop && tabs.map(tab => tab.requestedUrl && <iframe key={tab.id} title={tab.title || tab.url || tab.requestedUrl} src={tab.requestedUrl}

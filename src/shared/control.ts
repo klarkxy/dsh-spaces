@@ -81,11 +81,11 @@ export type ControlReadView = (typeof CONTROL_READ_VIEWS)[number];
 export const CONTROL_IMPORT_PREVIEW_BODY_LIMIT = MAX_WORKBENCH_SHARE_BASE64 + 64 * 1024;
 
 /**
- * Lifecycle + plugin/runtime/model-policy ops the plan/execute flow covers.
- * The `plugin.live.*` family writes through the running child space's own
- * `pluginManager` @Remote (path B in space-control-extensions.md); every
- * other op writes through the supervisor while the space is stopped or is
- * stopped inside the job. The two paths are never mixed on one profile.
+ * Lifecycle, plugin, runtime, model-sync, template, and share ops the
+ * plan/execute flow covers. The `plugin.live.*` family writes through the
+ * running child space's own `pluginManager` @Remote. Model sync likewise uses
+ * the child's settings surface when running; file writes require a stopped
+ * target. The two paths are never mixed on one profile.
  */
 export const CONTROL_PLAN_OPS = [
   'start',
@@ -411,6 +411,8 @@ export type ControlPlanInput =
   | { op: 'space.import'; params: { importId: string; name: string; displayName?: string } };
 
 export interface ControlPlanResult {
+  /** Approved non-secret summary for models.sync; execution compares it afresh. */
+  modelsSync?: import('./workbench').ModelSyncSummary;
   protocolVersion: typeof CONTROL_PROTOCOL_VERSION;
   controlPlanId: string;
   fingerprint: string;

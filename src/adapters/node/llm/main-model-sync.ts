@@ -1,9 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { isAbsolute, join, normalize } from "node:path";
 import { Document, isMap, isScalar, isSeq, parseDocument, visit, type Node, type YAMLMap } from "yaml";
 import { atomicWrite } from "../atomic";
 import { spaceDataRoot } from "../profile/space-data-root";
 import { WorkbenchPublicError } from "../supervisor/errors";
+import type { ModelSyncSummary } from "../../../shared/workbench";
+import type { SpaceModelConfig } from "../../../shared/spaces-control";
+import { currentDiagnosticLogger } from "../diagnostics/operation-log";
 
 /**
  * One-shot copy of the main space's model configuration into a managed
@@ -40,17 +44,7 @@ export interface MainModelSnapshot {
   missingCredentials: string[];
 }
 
-/** Names only: safe for plans, job steps and logs. */
-export interface ModelSyncSummary {
-  mainProfile: string;
-  routes: string[];
-  deepseek: boolean;
-  defaultModel?: string;
-  defaultModelSkipped?: string;
-  credentials: string[];
-  skipped: ModelSyncSkip[];
-  missingCredentials: string[];
-}
+export type { ModelSyncSummary } from "../../../shared/workbench";
 
 export interface ModelSyncInput {
   home: string;
@@ -297,30 +291,117 @@ function needsCredentials(snapshot: MainModelSnapshot): boolean {
   return Object.keys(snapshot.refs).length > 0 || Object.keys(snapshot.records).length > 0;
 }
 
-/** Read-only: what a sync would copy right now. */
-export async function previewMainModelSync(input: ModelSyncInput): Promise<ModelSyncSummary> {
-  const snapshot = readMainModelSnapshot(await input.dumpConfig(input.mainProfile), input.home);
-  return summarizeSnapshot(input.mainProfile, snapshot);
+export interface PreparedMainModelSync {
+  readonly summary: ModelSyncSummary;
+  /** Supervisor memory only: never serialize this snapshot into plans, jobs or logs. */
+  readonly snapshot: MainModelSnapshot;
+  /** Direct-file writer for a stopped or crashed target. */
+  apply(spaceId: string): Promise<ModelSyncSummary>;
 }
 
-/**
- * Copy once. The caller holds the Home operation lock and guarantees the
- * space is not running. Credentials are written before the patch; a failure
- * between the two writes is reported as is and nothing is rolled back.
- */
-export async function syncMainModels(input: ModelSyncInput): Promise<ModelSyncSummary> {
+/** Read the main space before any target is stopped; credentials stay in this preparation. */
+export async function prepareMainModelSync(input: ModelSyncInput): Promise<PreparedMainModelSync> {
   if (input.spaceId === "web" || input.spaceId === input.mainProfile) fail("The main space cannot be a sync target.");
-  const patchPath = join(input.home, "profiles", input.spaceId, "cordis.patch.yml");
-  if (!existsSync(patchPath)) fail(`The space ${input.spaceId} has no profile patch.`);
   const snapshot = readMainModelSnapshot(await input.dumpConfig(input.mainProfile), input.home);
-  const patched = applySnapshotToPatch(readFileSync(patchPath, "utf8"), snapshot);
-  if (needsCredentials(snapshot)) {
-    const credentialsPath = join(spaceDataRoot(input.home, input.spaceId), CREDENTIALS_FILE);
-    const current = existsSync(credentialsPath) ? readFileSync(credentialsPath, "utf8") : undefined;
-    atomicWrite(credentialsPath, applySnapshotToCredentials(current, snapshot));
+  const summary = summarizeSnapshot(input.mainProfile, snapshot);
+  currentDiagnosticLogger()?.info("models.snapshot-read", "The main-space model snapshot was read.", {
+    main: input.mainProfile,
+    space: input.spaceId,
+    routes: summary.routes.length,
+    credentials: summary.credentials.length,
+    skipped: summary.skipped.length,
+    missingCredentials: summary.missingCredentials.length,
+    defaultModel: summary.defaultModel ?? null,
+  });
+  return {
+    summary,
+    snapshot,
+    apply: async (spaceId: string) => applyMainModelSnapshot(input.home, input.mainProfile, spaceId, snapshot),
+  };
+}
+
+/** Read-only: what a sync would copy right now. */
+export async function previewMainModelSync(input: ModelSyncInput): Promise<ModelSyncSummary> {
+  return (await prepareMainModelSync(input)).summary;
+}
+
+/** Compare the freshly read summary with the one the user approved, before any write. */
+export function assertModelSyncPreview(prepared: PreparedMainModelSync, expected: ModelSyncSummary | undefined): void {
+  if (!expected || !isDeepStrictEqual(prepared.summary, expected)) {
+    throw new WorkbenchPublicError(
+      "workbench/conflict",
+      "The main space model settings changed after this preview. Preview the sync again; the target was not changed.",
+    );
   }
+  currentDiagnosticLogger()?.debug("models.preview-matched", "The freshly read model snapshot matches the approved preview.", { main: prepared.summary.mainProfile });
+}
+
+/** The target's own model settings, for the persistent card. No model calls are made. */
+export function readSpaceModelConfig(home: string, spaceId: string): SpaceModelConfig {
+  const patchPath = join(home, "profiles", spaceId, "cordis.patch.yml");
+  if (!existsSync(patchPath)) return { status: "unconfigured", routeNames: [], defaultModel: null, missingCredentials: [] };
+  const patch = parse(readFileSync(patchPath, "utf8"), "space patch");
+  const credentialsPath = join(spaceDataRoot(home, spaceId), CREDENTIALS_FILE);
+  const credentials = parseCredentials(existsSync(credentialsPath) ? readFileSync(credentialsPath, "utf8") : undefined, "space credentials");
+  const routeNames: string[] = [];
+  const missing = new Set<string>();
+  const providers = configOf(onlyRow(patch, PI_AI_ROW, "space patch"))?.get("providers", true);
+  if (isMap(providers)) {
+    for (const pair of providers.items) {
+      const route = keyName(pair.key);
+      routeNames.push(route);
+      if (!isMap(pair.value)) continue;
+      const ref = plainString(pair.value.get("apiKeyEnv", true));
+      if (ref && !credentials.refs.has(ref) && !credentials.records.has(`${PI_AI_RECORD_SCOPE}/${route}`)) missing.add(ref);
+    }
+  }
+  const deepseek = configOf(onlyRow(patch, DEEPSEEK_ROW, "space patch"));
+  if (deepseek) {
+    const configuredRef = plainString(deepseek.get("apiKeyEnv", true));
+    const ref = configuredRef ?? DEEPSEEK_DEFAULT_KEY_REF;
+    if (!credentials.refs.has(ref)) missing.add(ref);
+  }
+  const selection = configOf(onlyRow(patch, DEFAULT_MODEL_ROW, "space patch"));
+  const provider = plainString(selection?.get("provider", true));
+  const model = plainString(selection?.get("model", true));
+  const defaultModel = provider && model ? `${provider}/${model}` : null;
+  const hasModels = routeNames.length > 0 || Boolean(deepseek);
+  const missingCredentials = [...missing].sort();
+  return {
+    status: !hasModels && !defaultModel ? "unconfigured" : defaultModel && missingCredentials.length === 0 ? "configured" : "incomplete",
+    routeNames,
+    defaultModel,
+    missingCredentials,
+  };
+}
+
+/** Write both files, then read both back. A failure leaves the real files as they are. */
+async function applyMainModelSnapshot(home: string, mainProfile: string, spaceId: string, snapshot: MainModelSnapshot): Promise<ModelSyncSummary> {
+  const log = currentDiagnosticLogger();
+  if (spaceId === "web" || spaceId === mainProfile) fail("The main space cannot be a sync target.");
+  const patchPath = join(home, "profiles", spaceId, "cordis.patch.yml");
+  if (!existsSync(patchPath)) fail(`The space ${spaceId} has no profile patch.`);
+  const patched = applySnapshotToPatch(readFileSync(patchPath, "utf8"), snapshot);
+  const credentialsPath = join(spaceDataRoot(home, spaceId), CREDENTIALS_FILE);
+  const current = existsSync(credentialsPath) ? readFileSync(credentialsPath, "utf8") : undefined;
+  const patchedCredentials = needsCredentials(snapshot) ? applySnapshotToCredentials(current, snapshot) : undefined;
+  if (patchedCredentials !== undefined) {
+    log?.info("models.credentials-write", "Referenced credentials are being written; values are omitted.", { space: spaceId, count: Object.keys(snapshot.refs).length + Object.keys(snapshot.records).length });
+    atomicWrite(credentialsPath, patchedCredentials);
+  }
+  log?.info("models.patch-write", "Model settings are being written.", { space: spaceId, routes: Object.keys(snapshot.providers).length });
   atomicWrite(patchPath, patched);
-  return summarizeSnapshot(input.mainProfile, snapshot);
+  if (patchedCredentials !== undefined && readFileSync(credentialsPath, "utf8") !== patchedCredentials) {
+    fail(`The space ${spaceId} credentials could not be verified after writing.`);
+  }
+  if (readFileSync(patchPath, "utf8") !== patched) fail(`The space ${spaceId} model patch could not be verified after writing.`);
+  log?.info("models.write-verified", "Model settings and credentials readback matched the prepared changes.", { space: spaceId });
+  return summarizeSnapshot(mainProfile, snapshot);
+}
+
+/** Creation-time copy; explicit syncs prepare and recheck through SupervisorPlans. */
+export async function syncMainModels(input: ModelSyncInput): Promise<ModelSyncSummary> {
+  return (await prepareMainModelSync(input)).apply(input.spaceId);
 }
 
 /** Job step details are public records capped at this length. */

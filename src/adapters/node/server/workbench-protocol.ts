@@ -34,6 +34,7 @@ export type WorkbenchRevisionSpace = Pick<
   | "id"
   | "displayName"
   | "icon"
+  | "startWithDesktop"
   | "generation"
   | "status"
   | "managed"
@@ -80,6 +81,7 @@ export function computeWorkbenchRevision(input: WorkbenchRevisionInput): string 
     id: space.id,
     isHost: space.isHost,
     managed: space.managed,
+    startWithDesktop: space.startWithDesktop === true,
     status: space.status,
   }));
   const payload = {

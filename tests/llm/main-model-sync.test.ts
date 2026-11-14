@@ -7,6 +7,9 @@ import { parse } from "yaml";
 import {
   applySnapshotToCredentials,
   applySnapshotToPatch,
+  assertModelSyncPreview,
+  prepareMainModelSync,
+  readSpaceModelConfig,
   describeModelSync,
   MODEL_SYNC_DETAIL_MAX,
   readMainModelSnapshot,
@@ -141,6 +144,57 @@ test("syncMainModels writes the space patch and its isolated credentials once", 
   assert.equal(describeModelSync(summary).includes("test-"), false);
   assert.match(describeModelSync(summary), /skipped: codex \(login-grant\), computed \(expression\)/);
   assert.equal(existsSync(join(dir, "profiles", "web")), false);
+});
+
+test("preparation compares only public summaries and does not write before approval", async () => {
+  const dir = home();
+  mkdirSync(join(dir, "profiles", "space-a"), { recursive: true });
+  writeFileSync(join(dir, "profiles", "space-a", "cordis.patch.yml"), "[]\n");
+  writeFileSync(join(dir, ".credentials.yaml"), MAIN_CREDENTIALS);
+  const prepared = await prepareMainModelSync({ home: dir, mainProfile: "web", spaceId: "space-a", dumpConfig: async () => DUMP });
+  assert.equal(prepared.summary.defaultModel, "gw/gw-large");
+  assert.doesNotThrow(() => assertModelSyncPreview(prepared, prepared.summary));
+  assert.throws(() => assertModelSyncPreview(prepared, { ...prepared.summary, defaultModel: "gw/changed" }), /Preview the sync again/);
+  assert.throws(() => assertModelSyncPreview(prepared, undefined), /Preview the sync again/);
+  assert.equal(readFileSync(join(dir, "profiles", "space-a", "cordis.patch.yml"), "utf8"), "[]\n");
+  assert.equal(JSON.stringify(prepared.summary).includes("test-gw-value"), false);
+});
+
+test("the persistent model card reads the target's own routes, default and missing keys", async () => {
+  const dir = home();
+  mkdirSync(join(dir, "profiles", "space-a"), { recursive: true });
+  writeFileSync(join(dir, "profiles", "space-a", "cordis.patch.yml"), "[]\n");
+  writeFileSync(join(dir, ".credentials.yaml"), MAIN_CREDENTIALS);
+  await syncMainModels({ home: dir, mainProfile: "web", spaceId: "space-a", dumpConfig: async () => DUMP });
+  const synced = readSpaceModelConfig(dir, "space-a");
+  assert.equal(synced.status, "incomplete");
+  assert.deepEqual(synced.missingCredentials, ["ENV_ONLY_KEY"]);
+  writeFileSync(join(dir, "profiles", "space-a", "cordis.patch.yml"), `- id: llm-pi-ai
+  config:
+    providers:
+      gw: { apiKeyEnv: GW_KEY }
+- id: agent-default-model
+  config: { provider: gw, model: gw-large }
+`);
+  const configured = readSpaceModelConfig(dir, "space-a");
+  assert.deepEqual(configured, { status: "configured", routeNames: ["gw"], defaultModel: "gw/gw-large", missingCredentials: [] });
+  assert.equal(JSON.stringify(configured).includes("test-gw-value"), false);
+  writeFileSync(join(dir, "profiles", "space-a", "cordis.patch.yml"), `- id: llm-pi-ai
+  config:
+    providers:
+      gw:
+        apiKeyEnv: MISSING_KEY
+- id: agent-default-model
+  config: { provider: gw, model: gw-large }
+`);
+  assert.deepEqual(readSpaceModelConfig(dir, "space-a"), { status: "incomplete", routeNames: ["gw"], defaultModel: "gw/gw-large", missingCredentials: ["MISSING_KEY"] });
+  writeFileSync(join(dir, "profiles", "space-a", "cordis.patch.yml"), `- id: llm-pi-ai
+  config:
+    providers:
+      gw: { apiKeyEnv: GW_KEY }
+`);
+  assert.equal(readSpaceModelConfig(dir, "space-a").status, "incomplete");
+  assert.equal(readSpaceModelConfig(dir, "space-empty").status, "unconfigured");
 });
 
 test("the main profile is never a sync target", async () => {

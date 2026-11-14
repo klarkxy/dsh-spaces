@@ -39,7 +39,6 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
   const restart = useServiceRestart(controller, onRestarted, ui.serviceStopRequest);
   const texts = nativeTexts();
   const [menu, setMenu] = useState<{ spaceId: string; x: number; y: number } | null>(null);
-  const [scopeHelp, setScopeHelp] = useState(false);
   const closeMenu = useCallback(() => setMenu(null), []);
   const menuSpace = ui.inventory?.spaces.find(space => space.id === menu?.spaceId);
   const anchor = useRef<HTMLDivElement>(null), container = useRef<HTMLDivElement>(null), layout = useRef<ReturnType<typeof attachHostLayout> | null>(null);
@@ -107,9 +106,9 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
             attention={s.attention}
             spaceId={s.id}
             onSelect={() => controller.select(s.id)}
-            onContextMenu={event => { if (!controller.supportsSpaceActions) return; event.preventDefault(); setMenu({ spaceId: s.id, x: event.clientX, y: event.clientY }); }}
+            onContextMenu={event => { if (railLocked) return; event.preventDefault(); setMenu({ spaceId: s.id, x: event.clientX, y: event.clientY }); }}
             onKeyDown={event => {
-              if (!controller.supportsSpaceActions || !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) return;
+              if (railLocked || !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) return;
               event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect();
               setMenu({ spaceId: s.id, x: bounds.right, y: bounds.top });
             }}
@@ -132,13 +131,14 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
           <span aria-hidden="true">＋</span>
         </HostRailButton>
       </HostRailList>
-      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={texts.scopeHelpLabel} title={texts.scopeHelpHint} onSelect={() => setScopeHelp(true)}><span aria-hidden="true">ⓘ</span></HostRailButton>
       {button("@settings", ui.phase === "service-stopped" ? texts.settingsStopped : ui.phase === "failed" ? texts.settingsUnavailable : texts.settings,
         <><span aria-hidden="true">⚙</span>{ui.phase === "failed" && <span className="dsh-native-service-error" aria-hidden="true">!</span>}</>)}
       {startupLabel && <p className="dsh-native-startup-status" role="status" aria-live="polite" aria-label={startupLabel} data-startup-phase={ui.phase}>{startupLabel}</p>}
     </HostRail>
     {menu && menuSpace && <NativeSpaceMenu space={menuSpace} x={menu.x} y={menu.y} busy={!!ui.operation || ui.phase !== "ready"}
-      onClose={closeMenu} onAction={action => { closeMenu(); void controller.spaceAction(menuSpace.id, action); }} />}
+      supportsSpaceActions={controller.supportsSpaceActions}
+      onClose={closeMenu} onAction={action => { closeMenu(); void controller.spaceAction(menuSpace.id, action); }}
+      onSettings={() => { closeMenu(); controller.openSpaceSettings(menuSpace.id); }} />}
     {ui.operationError && <div className="dsh-native-operation-error" role="alert">{ui.operationError}
       <button type="button" aria-label={texts.dismissOperationError} onClick={controller.dismissOperationError}>×</button></div>}
     <div ref={container} className="dsh-host-surface dsh-native-container" hidden={ui.selected === "current" || ui.guide} />
@@ -172,16 +172,6 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
       <p>{ui.spaceConfirmation.activity === "busy" ? texts.confirmBusyBody : texts.confirmUnknownBody}{texts.confirmInterruptTail}</p>
       <div className="dsh-native-confirm-actions"><PressButton type="button" className="dsh-host-action" onClick={controller.cancelSpaceAction}>{texts.cancel}</PressButton>
         <PressButton type="button" className="dsh-host-action danger" onClick={controller.confirmSpaceAction}>{ui.spaceConfirmation.request.action === "stop" ? texts.stopSpace : texts.restartSpace}</PressButton></div>
-    </NativeDialog>}
-    {scopeHelp && <NativeDialog label={texts.scopeHelpLabel} onCancel={() => setScopeHelp(false)}>
-      <h3>{texts.scopeHelpTitle}</h3>
-      <p>{texts.scopeHelpClose}</p>
-      <p>{texts.scopeHelpQuit}</p>
-      <p>{texts.scopeHelpStopSpace}</p>
-      <p>{texts.scopeHelpStopService}</p>
-      <p>{texts.scopeHelpNote}</p>
-      <div className="dsh-native-confirm-actions"><PressButton className="dsh-host-action" type="button" onClick={() => setScopeHelp(false)}>{texts.scopeHelpOk}</PressButton>
-        <PressButton className="dsh-host-action" type="button" disabled={railLocked} onClick={() => { setScopeHelp(false); controller.select("@settings"); }}>{texts.scopeHelpGoSettings}</PressButton></div>
     </NativeDialog>}
     {ui.creationFailed && <CreationFailureDialog creation={ui.creationFailed}
       onView={() => { controller.closeCreationFailed(); controller.select("@settings"); }}

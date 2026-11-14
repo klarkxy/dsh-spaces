@@ -22,7 +22,7 @@ function write(path: string, value: unknown): void {
   writeFileSync(path, typeof value === "string" ? value : JSON.stringify(value));
 }
 function row(id: string): WorkbenchSpace {
-  return { id, displayName: id, isHost: false, hasWebApp: true, icon: "box", status: "stopped", generation: 1, managed: true, dshVersion: null };
+  return { id, displayName: id, isHost: false, hasWebApp: true, icon: "box", status: "stopped", generation: 1, managed: true, dshVersion: null, startWithDesktop: false };
 }
 function document(packages = [
   { name: "alpha", version: "1.0.0", source: "npm" },

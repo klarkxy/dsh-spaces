@@ -13,9 +13,17 @@ import { MainSpaceControlService } from "./main-space-control";
 import { installMainSpaceGuidance } from "./main-space-guidance";
 import { installMainSpaceTools } from "./main-space-tools";
 import { shareWelcomeNotice } from "./welcome-notice";
+import type { DiagnosticLogger } from "../../../../src/adapters/node/diagnostics/rotating-log";
+import { attachHostDiagnosticLogger, hostProcessDiagnosticLogger } from "../../../../src/adapters/node/diagnostics/host-log";
 
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 const HANDOFF_PATH = "/dsh-spaces/handoff";
+
+export function hostDiagnosticLogger(runtime: WorkbenchHostRuntime): DiagnosticLogger | undefined {
+  const identity = runtime.identity;
+  if (!identity.confirmed || !identity.home) return undefined;
+  return hostProcessDiagnosticLogger(identity.home, { allowRealHome: runtime.allowRealHome });
+}
 
 /**
  * Package default plugin. Registers the guide Remote with presentation and
@@ -39,6 +47,9 @@ export class SpacesPlugin {
   constructor(ctx: Context, config: SpacesRemoteConfig = {}, runtime?: WorkbenchHostRuntime) {
     assertSupportedNode();
     this.runtime = runtime ?? runtimeFromContext(ctx, config);
+    const diagnostic = hostDiagnosticLogger(this.runtime);
+    diagnostic?.info("host.plugin-loaded", "Spaces host plugin loaded.", { role: this.runtime.identity.role, profile: this.runtime.identity.profileId });
+    if (diagnostic) ctx.effect(() => attachHostDiagnosticLogger(ctx, diagnostic));
     shareWelcomeNotice(ctx, this.runtime);
     this.guide = new WorkbenchGuideHost(ctx, this.runtime);
     if (this.runtime.shouldRegisterManager) {
@@ -115,7 +126,9 @@ export class SpacesPlugin {
  * launch waits for that registration. One launch per process start.
  */
 function scheduleConfirmedDesktopLaunch(ctx: Context, runtime: WorkbenchHostRuntime): void {
+  hostDiagnosticLogger(runtime)?.info("host.desktop-launch", "Desktop requested its single service launch.");
   void runtime.beginDesktopLaunch().catch((error: unknown) => {
+    hostDiagnosticLogger(runtime)?.error("host.desktop-launch-failed", "Desktop service launch failed.", error);
     ctx.logger.error(publicReason(error));
   });
 }

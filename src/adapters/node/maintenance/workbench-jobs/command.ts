@@ -3,7 +3,7 @@ import type { WorkbenchCommand } from "../../../../shared/workbench";
 import { isWorkbenchProductCommand } from "../../../../shared/workbench-product";
 import { parseWorkbenchProductCommand } from "../../../../shared/workbench-product-schemas";
 import { WorkbenchJobError } from "./contract";
-import { SPACE_NAME_RE } from "../../../../shared/types";
+import { SPACE_NAME_RE, spaceIdFromName } from "../../../../shared/types";
 import { ENTITY_ID_RE, isPlainObject, parseStringArray } from "./util";
 
 const SECRET_COMMAND_KEYS = new Set(["key", "apiKey", "secret", "credential", "token", "authorization"]);
@@ -18,12 +18,13 @@ export function parseCommand(input: unknown): WorkbenchCommand {
       return { kind, input: parseCreateInput(input.input) };
     }
     case "space.update": {
-      expectKeys(input, ["kind", "spaceId"], ["displayName", "icon"]);
+      expectKeys(input, ["kind", "spaceId"], ["displayName", "icon", "startWithDesktop"]);
       return {
         kind,
         spaceId: parseEntityId(input.spaceId),
         ...(input.displayName !== undefined ? { displayName: parseOptionalString(input.displayName) } : {}),
         ...(input.icon !== undefined ? { icon: parseOptionalString(input.icon) } : {}),
+        ...(input.startWithDesktop !== undefined ? { startWithDesktop: parseBoolean(input.startWithDesktop) } : {}),
       };
     }
     case "space.reorder": {
@@ -130,6 +131,11 @@ function parseOptionalString(value: unknown): string {
   return value;
 }
 
+function parseBoolean(value: unknown): boolean {
+  if (typeof value !== "boolean") throw new WorkbenchJobError("workbench/invalid-input");
+  return value;
+}
+
 
 function expectKeys(
   value: Record<string, unknown>,
@@ -148,9 +154,11 @@ function expectKeys(
 export function affectedSpaceIds(command: WorkbenchCommand): string[] {
   switch (command.kind) {
     case "space.create":
-      return ["space-" + command.input.name];
+      return [spaceIdFromName(command.input.name)];
     case "creator.create":
-      return ["space-" + command.name];
+    case "template.create":
+    case "space.import":
+      return [spaceIdFromName(command.name)];
     case "space.update":
     case "space.start":
     case "control.execute":

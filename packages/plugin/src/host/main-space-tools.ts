@@ -201,7 +201,7 @@ export function installMainSpaceTools(
             displayName: { type: "string", description: "Optional display name." },
             icon: { type: "string", description: "Optional icon spec." },
             baseVersion: { type: "string", description: "Exact DSH base version; omit for the host CLI version." },
-            modelSource: { type: "string", enum: ["main", "local"], description: "LLM policy: inherit the main host model or a local model. Default main." },
+            modelSource: { type: "string", enum: ["main", "local"], description: "Model source: copy the main space model configuration once at creation (main) or configure models in the space (local). Default main." },
             startAfterCreate: { type: "boolean", description: "Start the space after creation. Default false." },
             plugins: {
               type: "array",

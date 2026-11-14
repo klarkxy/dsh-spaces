@@ -16,7 +16,7 @@ import { workbenchRequestOrigin } from "../origin";
 import { OverlayPart } from "./overlays";
 
 export abstract class CommandPart extends OverlayPart {
-  createSpace = (input: { name: string; displayName?: string; icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }): void => {
+  createSpace = (input: { name: string; displayName?: string; icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string; startAfterCreate?: boolean }): void => {
     const name = input.name.trim().toLowerCase();
     // The create dialog owns the failure of its own form.
     const origin = this.ui.overlay?.type === "create" ? "create" : null;
@@ -33,6 +33,7 @@ export abstract class CommandPart extends OverlayPart {
       this.patch({ commandError: this.msg(icon.reason === "too-large" ? "app.iconTooLarge" : "app.iconInvalid"), requestOrigin: origin });
       return;
     }
+    const restore = this.restoreOverlay();
     void this.submit(
       {
         kind: "space.create",
@@ -48,6 +49,7 @@ export abstract class CommandPart extends OverlayPart {
       },
       {
         origin,
+        autoEnter: input.startAfterCreate !== false,
         // The dialog closes when the request is accepted. A failed job keeps it
         // open with the reason next to the form.
         onJob: (job) => {
@@ -55,13 +57,13 @@ export abstract class CommandPart extends OverlayPart {
             this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }) });
             return;
           }
-          this.patch({ overlay: this.ui.overlay?.type === "create" ? null : this.ui.overlay });
+          this.patch({ overlay: this.ui.overlay?.type === "create" ? restore : this.ui.overlay });
         },
       },
     );
   };
 
-  updateSpace = (spaceId: string, patch: { displayName?: string; icon?: string }): void => {
+  updateSpace = (spaceId: string, patch: { displayName?: string; icon?: string; startWithDesktop?: boolean }): void => {
     if (patch.icon !== undefined) {
       const icon = validateWorkbenchIcon(patch.icon);
       if (!icon.ok) {
@@ -71,6 +73,7 @@ export abstract class CommandPart extends OverlayPart {
       patch = { ...patch, icon: icon.icon };
     }
     const dialog = this.ui.overlay?.type === "rename" || this.ui.overlay?.type === "icon" ? this.ui.overlay.type : null;
+    const restore = this.restoreOverlay();
     void this.submit({ kind: "space.update", spaceId, ...patch }, {
       origin: this.updateOrigin(spaceId),
       // Like the create dialog, the rename and icon dialogs close only once the
@@ -81,7 +84,7 @@ export abstract class CommandPart extends OverlayPart {
           this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }) });
           return;
         }
-        if (dialog && this.ui.overlay?.type === dialog) this.patch({ overlay: null });
+        if (dialog && this.ui.overlay?.type === dialog) this.patch({ overlay: restore });
       },
     });
   };
@@ -96,7 +99,7 @@ export abstract class CommandPart extends OverlayPart {
     copy.splice(next, 0, item);
     const managerId = this.ui.state?.managerId;
     const spaceIds = managerId && !copy.includes(managerId) ? [managerId, ...copy] : copy;
-    void this.submit({ kind: "space.reorder", spaceIds }, { origin: "spaces" });
+    void this.submit({ kind: "space.reorder", spaceIds }, { origin: workbenchRequestOrigin(this.ui, { kind: "space.reorder" }) });
   };
 
   refreshCatalog = (): void => {
@@ -143,21 +146,58 @@ export abstract class CommandPart extends OverlayPart {
     this.preview(request);
   };
 
+  /**
+   * One-click install of the newest published version of a catalog entry.
+   *
+   * If published versions have not been read yet, reads them once first. A
+   * failed read leaves the entry expanded with its error and never guesses a
+   * version.
+   */
+  installCatalogPlugin = (spaceId: string, catalogId: string): void => {
+    const trimmed = catalogId.trim();
+    if (!spaceId || !trimmed) return;
+    const key = trimmed.toLowerCase();
+    const existing = this.ui.pluginVersions[key];
+    if (existing?.status === "ready" && existing.latest) {
+      this.patch({ pluginCatalogId: trimmed, pluginVersion: existing.latest });
+      this.preview({ kind: "plugin.install", spaceIds: [spaceId], catalogId: trimmed, version: existing.latest });
+      return;
+    }
+    const cycle = this.cycle;
+    this.patch({ pluginCatalogId: trimmed, pluginVersion: "" });
+    void this.loadPluginVersions(trimmed, true).then(() => {
+      if (!this.stillOpen(cycle)) return;
+      const loaded = this.ui.pluginVersions[key];
+      if (loaded?.status !== "ready" || !loaded.latest) return;
+      if (this.ui.pluginCatalogId.trim().toLowerCase() !== key) return;
+      this.patch({ pluginVersion: loaded.latest });
+      this.preview({ kind: "plugin.install", spaceIds: [spaceId], catalogId: trimmed, version: loaded.latest });
+    });
+  };
+
   setHomeSettings = (patch: Partial<WorkbenchHomeSettings>): void => {
     const draft = this.ui.settingsDraft;
     if (!draft) return;
+    const saved = draft.saved ?? draft.settings;
+    const settings = { ...draft.settings, ...patch };
+    const dirty =
+      settings.portStart !== saved.portStart ||
+      settings.portEnd !== saved.portEnd ||
+      settings.packageSource !== saved.packageSource ||
+      settings.catalogUrl !== saved.catalogUrl;
     this.patch({
       settingsDraft: {
-        settings: { ...draft.settings, ...patch },
+        settings,
+        saved,
         observation: draft.observation,
-        dirty: true,
+        dirty,
       },
     });
   };
 
   saveHomeSettings = (): void => {
     const draft = this.ui.settingsDraft;
-    if (!draft) return;
+    if (!draft || !draft.dirty) return;
     this.submittedSettingsJson = JSON.stringify(draft.settings);
     void this.submit({ kind: "settings.update", settings: draft.settings }, { context: draft.observation });
   };
@@ -165,10 +205,13 @@ export abstract class CommandPart extends OverlayPart {
   saveTemplate = (): void => {
     const spaceId = this.ui.templateSpaceId;
     const name = this.ui.templateName.trim();
+    const origin = workbenchRequestOrigin(this.ui, { kind: "template.save" });
     if (!spaceId || !name) {
-      this.patch({ commandError: this.msg("templates.needName") });
+      this.patch({ commandError: this.msg("templates.needName"), requestOrigin: origin });
       return;
     }
+    const dialogOpen = this.ui.overlay?.type === "save-template";
+    const restore = this.restoreOverlay();
     void this.submit(
       {
         kind: "template.save",
@@ -176,21 +219,47 @@ export abstract class CommandPart extends OverlayPart {
         name,
         includeConfig: this.ui.templateIncludeConfig,
       },
-      { origin: workbenchRequestOrigin(this.ui, { kind: "template.save" }) },
+      {
+        origin,
+        onJob: (job) => {
+          if (job.status === "failed") {
+            this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }), requestOrigin: origin });
+            return;
+          }
+          if (dialogOpen && this.ui.overlay?.type === "save-template") {
+            this.patch({ overlay: restore });
+          }
+        },
+      },
+    );
+  };
+
+  deleteTemplate = (templateId: string): void => {
+    const trimmed = templateId.trim();
+    if (!trimmed) return;
+    void this.submit(
+      { kind: "template.delete", templateId: trimmed },
+      { origin: workbenchRequestOrigin(this.ui, { kind: "template.delete" }) },
     );
   };
 
   createFromTemplate = (): void => {
     const templateId = this.ui.templateId;
     const name = this.ui.templateName.trim().toLowerCase();
-    if (!templateId || !NAME_RE.test(name)) {
-      this.patch({ commandError: this.msg("app.nameInvalid") });
+    const origin = workbenchRequestOrigin(this.ui, { kind: "template.create" });
+    if (!templateId) {
+      this.patch({ commandError: this.msg("templates.needSelection"), requestOrigin: origin });
+      return;
+    }
+    if (!NAME_RE.test(name)) {
+      this.patch({ commandError: this.msg("app.nameInvalid"), requestOrigin: origin });
       return;
     }
     if (RESERVED.has(name)) {
-      this.patch({ commandError: this.msg("app.nameReserved") });
+      this.patch({ commandError: this.msg("app.nameReserved"), requestOrigin: origin });
       return;
     }
+    const restore = this.restoreOverlay();
     void this.submit(
       {
         kind: "template.create",
@@ -198,17 +267,30 @@ export abstract class CommandPart extends OverlayPart {
         name,
         displayName: this.ui.templateDisplayName.trim() || undefined,
       },
-      { origin: workbenchRequestOrigin(this.ui, { kind: "template.create" }) },
+      {
+        origin,
+        onJob: (job) => {
+          if (job.status === "failed") {
+            this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }), requestOrigin: origin });
+            return;
+          }
+          if (this.ui.overlay?.type === "create") this.patch({ overlay: restore });
+        },
+      },
     );
   };
 
   exportShare = (): void => {
     const spaceId = this.ui.shareSpaceId;
+    const dialogOpen = this.ui.overlay?.type === "export-share";
+    const origin = dialogOpen ? "export-share" : workbenchRequestOrigin(this.ui, { kind: "space.import" });
     if (!spaceId) {
-      this.patch({ commandError: this.msg("share.needSpace"), requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
+      this.patch({ commandError: this.msg("share.needSpace"), requestOrigin: origin });
       return;
     }
+    const restore = this.restoreOverlay();
     const cycle = this.cycle;
+    this.patch({ requestOrigin: origin });
     void this.wrap(async () => {
       const result = await this.api.product({
         method: "share.export",
@@ -220,16 +302,21 @@ export abstract class CommandPart extends OverlayPart {
         throw wrongProduct("share.export", result.method);
       }
       this.env.downloadFile(result.fileName, result.archiveBase64);
+      if (dialogOpen && this.ui.overlay?.type === "export-share") {
+        this.patch({ overlay: restore, commandError: null });
+      }
     });
   };
 
   previewImportArchive = (archiveBase64: string, fileName: string): void => {
+    const origin = workbenchRequestOrigin(this.ui, { kind: "space.import" });
     if (archiveBase64.length > MAX_WORKBENCH_SHARE_BASE64) {
-      this.patch({ commandError: this.msg("share.tooLarge"), importPreview: null, requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
+      this.patch({ commandError: this.msg("share.tooLarge"), importPreview: null, requestOrigin: origin });
       return;
     }
+    const overSettings = this.hasSettingsUnderlay();
     const cycle = this.cycle;
-    this.patch({ requestOrigin: workbenchRequestOrigin(this.ui, { kind: "space.import" }) });
+    this.patch({ requestOrigin: origin });
     void this.wrap(async () => {
       const result = await this.api.product({ method: "share.previewImport", archiveBase64 });
       if (!this.stillOpen(cycle)) return;
@@ -237,7 +324,7 @@ export abstract class CommandPart extends OverlayPart {
         throw wrongProduct("share.previewImport", result.method);
       }
       this.patch({
-        overlay: { type: "import" },
+        overlay: { type: "import", ...(overSettings ? { overSettings: true } : {}) },
         importPreview: {
           importId: result.importId,
           expiresAt: result.expiresAt,
@@ -278,7 +365,8 @@ export abstract class CommandPart extends OverlayPart {
       return;
     }
     const importId = preview.importId;
-    this.patch({ overlay: null, importPreview: null });
+    const restore = this.ui.overlay?.type === "import" ? this.restoreOverlay() : null;
+    this.patch({ overlay: restore, importPreview: null });
     void this.submit(
       {
         kind: "space.import",

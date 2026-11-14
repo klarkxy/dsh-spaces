@@ -8,6 +8,8 @@ import { ensureDshCli, runDsh, spawnNode } from "./dsh-cli";
 import { PatchWriter, PatchVerifyError } from "../profile/patch-writer";
 import { dshSessionCookie, dshSessionList, dshBrowserReady, waitForDshEndpoint } from "./dsh-endpoint";
 import { StartFailureError } from "./start-failure";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
+import { currentOperationDetails } from "../diagnostics/operation-log";
 
 export type StatusListener = (
   name: string,
@@ -261,6 +263,7 @@ export class ProcessManager {
     portStart = DEFAULT_PORT_START,
     portEnd = DEFAULT_PORT_END,
     runtime: Partial<ProcessRuntime> = {},
+    private readonly diagnosticLog?: DiagnosticLogger,
   ) {
     this.portStart = portStart;
     this.portEnd = portEnd;
@@ -283,6 +286,7 @@ export class ProcessManager {
   }
 
   statusOf(name: string): ProfileStatus {
+    if (this.stopping.has(name)) return "stopping";
     return this.instances.get(name)?.status ?? (this.errors.has(name) ? "crashed" : "stopped");
   }
 
@@ -372,6 +376,8 @@ export class ProcessManager {
   }
 
   private async startOnce(name: string, gen: number): Promise<{ port: number }> {
+    const started = Date.now();
+    this.diagnosticLog?.info("space.launch.started", "Space launch requested.", { space: name, generation: gen, ...currentOperationDetails() });
     if (this.generationOf(name) !== gen) throw cancelledError();
 
     const existing = this.instances.get(name);
@@ -403,6 +409,7 @@ export class ProcessManager {
       // DSH builds profiles/node_modules non-atomically. Initialize it once
       // before parallel dump-config checks or long-running space processes.
       if (!this.homePreparation) {
+        this.diagnosticLog?.debug("space.prepare-home", "Preparing shared DSH Home dependencies.", { space: name });
         this.homePreparation = this.runtime.prepareHome(this.dshHome).catch(error => {
           this.homePreparation = undefined;
           throw error;
@@ -410,8 +417,10 @@ export class ProcessManager {
       }
       await this.homePreparation;
       ensureGen();
+      this.diagnosticLog?.debug("space.prepare-home-complete", "Shared DSH Home dependency preparation completed.", { space: name });
 
       if (name !== "web") {
+        this.diagnosticLog?.debug("space.verify-patch", "Verifying managed profile isolation.", { space: name });
         try {
           await this.patchWriter.verify(name);
         } catch (err) {
@@ -428,9 +437,11 @@ export class ProcessManager {
       ensureGen();
       const bin = await this.runtime.ensureCli(name);
       ensureGen();
+      this.diagnosticLog?.debug("space.runtime-resolved", "Space runtime executable resolved.", { space: name });
 
       port = await this.reservePort();
       ensureGen();
+      this.diagnosticLog?.debug("space.port-reserved", "Loopback port reserved for a space.", { space: name, port });
       this.emit(name, "starting", { port });
 
       const child = this.runtime.spawn(
@@ -447,6 +458,7 @@ export class ProcessManager {
       );
 
       const instance: RunningInstance = { name, port, child, status: "starting", gen };
+      this.diagnosticLog?.info("space.spawned", "Space process spawned.", { space: name, generation: gen, childPid: child.pid ?? null, port });
       this.instances.set(name, instance);
       this.attachLogs(name, child);
       this.watchChild(instance, abort);
@@ -461,8 +473,10 @@ export class ProcessManager {
       const readyAt = Date.now();
       stage = "endpoint";
       instance.url = await waitForDshEndpoint(child, port, abort.signal, this.runtime.readyTimeoutMs);
+      this.diagnosticLog?.debug("space.endpoint-ready", "Space loopback endpoint responded.", { space: name, durationMs: Date.now() - readyAt });
       stage = "auth";
       const cookie = await dshSessionCookie(instance.url, this.runtime.fetch, fetchSignal(abort.signal, Math.max(1, this.runtime.readyTimeoutMs - (Date.now() - readyAt))));
+      this.diagnosticLog?.debug("space.auth-ready", "Space session exchange completed.", { space: name, durationMs: Date.now() - readyAt });
       stage = "api";
       if (this.runtime.base?.(name) === 'browser') {
         await dshBrowserReady(port, this.runtime.fetch, fetchSignal(abort.signal, this.runtime.fetchTimeoutMs), cookie);
@@ -474,9 +488,11 @@ export class ProcessManager {
         throw new Error(t("errors.exitedBeforeApi", { name }));
       }
       current.status = "running";
+      this.diagnosticLog?.info("space.launch.ready", "Space became ready.", { space: name, generation: gen, port, durationMs: Date.now() - started });
       this.emit(name, "running", { port });
       return { port };
     } catch (err) {
+      this.diagnosticLog?.error("space.launch.failed", "Space launch failed.", err, { space: name, generation: gen, stage, port: port ?? null, durationMs: Date.now() - started });
       const cancelled =
         isStartCancelled(err) ||
         isStartCancelled(abort.signal.reason) ||
@@ -520,6 +536,8 @@ export class ProcessManager {
   }
 
   private async stopOnce(name: string): Promise<void> {
+    const started = Date.now();
+    this.diagnosticLog?.info("space.stop.started", "Space stop requested.", { space: name });
     this.stopping.add(name);
     try {
       const instance = this.instances.get(name);
@@ -531,6 +549,10 @@ export class ProcessManager {
       }
       this.errors.delete(name);
       this.emit(name, "stopped");
+      this.diagnosticLog?.info("space.stop.completed", "Space stopped.", { space: name, durationMs: Date.now() - started });
+    } catch (error) {
+      this.diagnosticLog?.error("space.stop.failed", "Space stop failed.", error, { space: name, durationMs: Date.now() - started });
+      throw error;
     } finally {
       this.stopping.delete(name);
     }
@@ -543,11 +565,13 @@ export class ProcessManager {
       this.forgetInstance(current);
       if (this.stopping.has(instance.name) || isStartCancelled(abort.signal.reason)) return;
       if (current.status === "starting") {
+        this.diagnosticLog?.error("space.exited-before-ready", "Space exited before becoming ready.", undefined, { space: instance.name, exitCode: instance.child.exitCode, signal: instance.child.signalCode });
         abort.abort(new Error(t("errors.exitedBeforeReady")));
         return;
       }
       const code = instance.child.exitCode;
       const signal = instance.child.signalCode;
+      this.diagnosticLog?.fault("space.exited", "A running space exited unexpectedly.", undefined, { space: instance.name, exitCode: code, signal });
       this.fail(
         instance.name,
         formatWorkbenchFailure({
@@ -569,6 +593,12 @@ export class ProcessManager {
       const assembler = new LineAssembler();
       const emit = (lines: string[]) => {
         for (const line of lines) {
+          this.diagnosticLog?.write({
+            level: stream === "stderr" ? "error" : "debug",
+            event: "space.output",
+            message: line.trimEnd() || "[blank output line]",
+            context: { space: name, stream },
+          });
           for (const listener of this.logListeners) listener(name, stream, line.replace(/([?&]token=)[^\s&#]+/gi, "$1[redacted]"));
         }
       };

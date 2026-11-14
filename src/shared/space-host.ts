@@ -22,6 +22,22 @@ export function parseNativeCreateIntent(hash: string): number | null {
   const requestId = Number(match[1]);
   return Number.isSafeInteger(requestId) ? requestId : null;
 }
+/**
+ * The closed fragment the desktop shell writes into the portal page after it
+ * has opened the settings page to show one space's detail page. Presentation
+ * only: no management right or credential travels with it.
+ */
+export function nativeDetailIntentHash(requestId: number, spaceId: string): string {
+  if (!PORTAL_SPACE_RE.test(spaceId)) throw new Error("Invalid native detail space id.");
+  return "#intent/detail/" + String(requestId) + "/" + spaceId;
+}
+/** Self-contained parser (embedded into the portal script via `.toString()`). */
+export function parseNativeDetailIntent(hash: string): { requestId: number; spaceId: string } | null {
+  const match = /^#intent\/detail\/([1-9][0-9]{0,9})\/([a-z0-9][a-z0-9-]{0,38})$/.exec(hash);
+  if (!match) return null;
+  const requestId = Number(match[1]);
+  return Number.isSafeInteger(requestId) ? { requestId, spaceId: match[2] } : null;
+}
 export function isNativeSpaceTarget(value: unknown): value is NativeSpaceTarget {
   return value === "@settings" || typeof value === "string" && PORTAL_SPACE_RE.test(value);
 }

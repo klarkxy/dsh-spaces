@@ -1,6 +1,6 @@
 # DSH Spaces — 现行需求
 
-> 版本：2.1（2026-11-09）。本文定义当前产品需求，不记录实施落点。架构说明见 [docs/architecture.md](docs/architecture.md)，故障政策唯一权威为 [docs/let-it-crash.md](docs/let-it-crash.md)。
+> 版本：2.2（2026-11-10）。本文定义当前产品需求，不记录实施落点。架构说明见 [docs/architecture.md](docs/architecture.md)，故障政策唯一权威为 [docs/let-it-crash.md](docs/let-it-crash.md)。
 >
 > 本文取代早期的独立 Electron 客户端、应用内自我更新、统一共享全部设置、快照/配置恢复和故障后自动接管方案。历史需求和验收记录保留原事实，但不作为现行门槛。
 
@@ -33,7 +33,7 @@ DSH Spaces 是安装进兼容 DSH Web / Desktop 的多空间插件。它保留�
 
 主应用是用户原有 DSH Web 或 Desktop 宿主。它保留自己的会话、设置、凭据和界面，不作为普通空间被删除、停止或收养。
 
-主应用可以向普通空间提供官方 LLM 能力；提供该能力不等于授予它其他空间的管理写权。
+主应用可作为模型配置的复制来源（在创建普通空间或用户显式执行模型配置同步时一次性复制模型路由、默认模型与关联 API Key），并在 `cordis` 预设下持有 Creator 与空间总控工具；普通子空间在模型调用时使用自身配置独立运行，不向主空间发起实时模型委派。
 
 ### 2.2 管理空间
 
@@ -60,7 +60,7 @@ DSH Spaces 是安装进兼容 DSH Web / Desktop 的多空间插件。它保留�
 - 插件组合与配置层；
 - 会话和工作区数据；
 - 本地设置与本地凭据；
-- 模型来源策略和本地默认选择；
+- 本地模型配置与默认模型选择；
 - 运行代次、诊断和失败记录。
 
 任何配置都不得把普通空间指向主应用、其他空间或控制目录。启动前必须验证实际组合后的隔离结果；验证失败就拒绝启动，不静默使用不安全配置。
@@ -116,8 +116,8 @@ queued → running → succeeded / failed / cancelled
 
 主空间（web/desktop）在 `cordis` preset 下可以获得两组受权工具：
 
-- Creator：`spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`，只用于一次冻结计划的组合式空间创建；
-- 空间总控：只读的 `spaces_overview` / `spaces_inspect` / `spaces_logs` / `spaces_templates` / `spaces_import_preview`，两阶段变更的 `spaces_plan` / `spaces_execute` / `spaces_control_job`，以及运行中空间的 `spaces_ui_*` 界面会话工具。
+- Creator：`spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`，用于一次冻结计划的组合式空间创建与作业查询；
+- 空间总控：只读的 `spaces_overview` / `spaces_inspect` / `spaces_logs` / `spaces_templates`（在可信主空间任意会话可用），两阶段变更的 `spaces_import_preview` / `spaces_plan` / `spaces_execute` / `spaces_control_job`，以及运行中空间的 `spaces_ui_open` / `spaces_ui_snapshot` / `spaces_ui_act` / `spaces_ui_eval` / `spaces_ui_close` 界面自动化工具。
 
 这些工具不经过管理 Remote，不向普通空间授予管理写权；计划绑定服务纪元、状态版本、目标指纹和有效期，执行需要显式审批，首处失败即停止且不回滚。界面自动化只对运行中的受管空间开放，`spaces_ui_eval` 每次单独审批。
 
@@ -149,24 +149,22 @@ queued → running → succeeded / failed / cancelled
 - 错误输出必须脱敏，不能泄露 token、Cookie、凭据或聊天内容。
 - Desktop 手动服务启动/重启仅按 [docs/let-it-crash.md](docs/let-it-crash.md) 的有限例外执行。
 
-## 7. LLM 需求
+## 7. 模型配置与同步需求
 
-### 7.1 主空间继承
+### 7.1 主空间模型配置同步
 
-新普通空间的零配置路径可以跟随主空间模型。
+新普通空间在创建时可选择从主空间同步模型配置（`modelSource: "main"`，对应创建步骤 `models-sync`），已有普通空间也可由用户显式触发一次“从主空间同步模型配置”（`models.sync`）。
 
-- 主空间拥有官方连接、adapter、调用准备和凭据。
-- 子空间保留自己的 Agent、工具、会话和附件授权。
-- 不向子空间复制主空间 provider 配置或 Key。
-- Supervisor 可以中转请求和响应，但不得记录模型正文、附件或 replay state。
-- 每次调用准备时固定目标，在途请求不随默认变化重新路由。
-- 主空间或 Supervisor 不可用时真实失败，不自动代启、改读配置或切换供应商。
+- 同步为一次性复制：将主空间的 `llm-pi-ai` 路由、`llm-deepseek` 配置、`agent-default-model` 默认模型选择以及这些配置引用的 API Key 写入目标空间自身的 `cordis.patch.yml` 与隔离的 `.credentials.yaml`。
+- 跳过 `type === 'oauth'`、含 `grant` 的凭据以及含 `!!js` 标签的配置项；当默认模型指向被跳过的 OAuth 路由时，不同步默认模型选择，不猜测替代模型。
+- 同步完成后，普通空间直接使用自身配置调用模型，运行期不依赖主空间在线，也不经 Supervisor 中转实时 LLM 请求（旧版实时模型委派 `@dsh-spaces/llm-bridge` 与持久化 `llm-policy.json` 已退役，老空间首次启动前一次性移除旧桥接行）。
+- 手动同步先预览非密模型摘要，执行时重新读取主空间并比较；主空间未连接、读取失败或摘要变化均在任何写入之前拒绝。运行中目标通过子空间自身的 `settings` / `credentials` Remote 接口写入并读回校验，保持运行，下一次模型请求使用新配置；`stopped` / `crashed` 目标直接写入配置文件；`starting` / `stopping` 目标需等待状态稳定后重试。首处失败保留现场，逐项列出已写入、失败和未执行项，不静默回退。
 
-### 7.2 来源和默认选择
+### 7.2 空间独立配置与分享边界
 
-主空间继承、空间本地默认和会话选择必须可区分。模型来源切换是独立、明确的用户决定，其他设置保存不得暗中改变来源。显式目标失效时不得自动回退到另一来源。
+选择“在空间内自行配置”（`modelSource: "local"`）的普通空间不从主空间复制模型配置。主空间后续修改模型或密钥不会后台自动扩散到已有子空间；子空间内的模型与默认选择修改也仅作用于该空间自身。
 
-直接创建、普通模板和分享导入必须遵守同一来源规则。导入只能表达模型需求，由接收方完成本地映射；不得携带发送方凭据、实例、令牌或授权。蓝图相关工作流封存期间不适用，唤醒时必须重新核对该规则。
+普通模板和 `.dshspace` 分享归档不携带 API Key、OAuth 凭据、令牌或授权。蓝图相关工作流封存期间不作为空间创建入口，后续若唤醒仍须遵守不携带凭据与授权的边界。
 
 ## 8. 插件、空间配方与跨空间能力
 
@@ -234,8 +232,8 @@ queued → running → succeeded / failed / cancelled
 3. 多空间同时运行时，会话、插件和工作数据不串写。
 4. 多客户端写入具有明确的串行结果或版本冲突，旧请求和旧计划不能重复生效。
 5. 单空间重启和失败不影响健康空间。
-6. 视图、管理、消息和 LLM 权限不能通过伪造来源、旧实例或普通页面提升。
-7. 主空间继承、空间本地默认和会话选择的来源、生效状态及失败均准确可见。
+6. 视图、管理、消息、Creator 与空间总控权限不能通过伪造来源、旧实例或普通页面提升。
+7. 主空间模型配置一次性同步、空间本地模型配置及失败原因均准确可见，无隐式跨空间委派或静默回退。
 8. 所有创建入口分别报告定义、安装、配置和启动结果，不把部分成功伪装成整体成功。
 9. 组件升级与运行时切换不发生混组、双写、自动回退或任务重放。
 10. 任何失败路径都不引入自动重试、修复、恢复、接管或秘密泄露。

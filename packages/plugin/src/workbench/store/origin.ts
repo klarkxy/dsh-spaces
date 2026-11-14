@@ -6,7 +6,7 @@
  * `workbench/store.ts` and move here unchanged.
  */
 
-import type { WorkbenchUiState } from "./types";
+import { isSettingsOverlay, type WorkbenchUiState } from "./types";
 
 /**
  * The surface that owns the failure of a command.
@@ -19,7 +19,7 @@ export function workbenchRequestOrigin(
   ui: WorkbenchUiState,
   request: { kind: string; spaceId?: string; spaceIds?: string[] },
 ): string | null {
-  const settings = ui.overlay?.type === "settings";
+  const settings = isSettingsOverlay(ui.overlay);
   const tab = ui.settingsTab;
   const detail = ui.detailSpaceId;
   const templates = settings && (tab === "templates" || tab === "blueprints");
@@ -43,7 +43,13 @@ export function workbenchRequestOrigin(
     case "space.runtime.set":
       return detail && detail === request.spaceId ? `detail:${request.spaceId}:dsh` : null;
     case "space.import":
-      return templates ? "templates:import" : null;
+      return ui.overlay?.type === "create"
+        ? "create"
+        : ui.overlay?.type === "import"
+          ? "import"
+          : templates
+            ? "templates:import"
+            : null;
     case "plugin.install":
       return detail && (request.spaceIds ?? []).includes(detail) ? `detail:${detail}:plugins` : null;
     case "plugin.toggle":
@@ -56,17 +62,23 @@ export function workbenchRequestOrigin(
       return detail ? `detail:${detail}:plugins` : null;
     case "snapshot.create":
     case "snapshot.delete":
-      return settings && tab === "snapshots" ? "backups" : null;
+      return settings && (tab === "overview" || tab === "snapshots") ? "backups" : null;
     case "runtime.remove":
-      return settings && tab === "runtime" ? "dshVersions" : null;
+      return settings && (tab === "overview" || tab === "runtime") ? "dshVersions" : null;
     case "service.shutdown":
-      return settings && tab === "advanced" ? "service" : null;
+      return settings && (tab === "overview" || tab === "advanced") ? "service" : null;
     case "settings.update":
-      return settings && tab === "advanced" ? "service:settings" : null;
+      return settings && tab === "general"
+        ? "general:settings"
+        : settings && tab === "advanced"
+          ? "service:settings"
+          : null;
     case "template.save":
-      return templates ? "templates:export" : null;
+      return ui.overlay?.type === "save-template" ? "save-template" : templates ? "templates:export" : null;
     case "template.create":
-      return templates ? "templates:create" : null;
+      return ui.overlay?.type === "create" ? "create" : templates ? "templates:create" : null;
+    case "template.delete":
+      return templates ? "templates" : null;
     default:
       return null;
   }
@@ -82,13 +94,26 @@ export function requestOriginMounted(ui: WorkbenchUiState): boolean {
   const origin = ui.requestOrigin;
   if (origin === null) return false;
   const overlay = ui.overlay?.type;
-  if (origin === "create" || origin === "rename" || origin === "icon") return overlay === origin;
-  if (overlay !== "settings") return false;
+  if (
+    origin === "create" ||
+    origin === "rename" ||
+    origin === "icon" ||
+    origin === "save-template" ||
+    origin === "export-share" ||
+    origin === "import"
+  ) {
+    return overlay === origin;
+  }
+  if (!isSettingsOverlay(ui.overlay)) return false;
   const tab = ui.settingsTab;
   if (origin === "spaces") return tab === "spaces" && !ui.detailSpaceId;
-  if (origin === "dshVersions") return tab === "runtime";
-  if (origin === "service" || origin === "service:settings") return tab === "advanced";
-  if (origin === "templates:import" || origin === "templates:export") return tab === "templates" || tab === "blueprints";
+  if (origin === "dshVersions") return tab === "overview" || tab === "runtime";
+  if (origin === "general:settings") return tab === "general";
+  if (origin === "service") return tab === "overview" || tab === "advanced";
+  if (origin === "service:settings") return tab === "advanced";
+  if (origin === "templates" || origin === "templates:import" || origin === "templates:export") {
+    return tab === "templates" || tab === "blueprints";
+  }
   const detail = /^detail:([a-z0-9][a-z0-9-]{0,38})(?::(plugins|dsh))?$/.exec(origin);
   if (detail) return tab === "spaces" && ui.detailSpaceId === detail[1];
   // "backups", "templates:create" and any future origin without a rendered

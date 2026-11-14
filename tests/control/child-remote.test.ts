@@ -11,17 +11,23 @@
  * ordering view, and single-writer serialization through the job tail.
  */
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   ChildRemoteClient,
   readLivePluginView,
   runLivePlan,
+  runMaintenanceLivePlugin,
   type ChildRemotePorts,
 } from "../../src/adapters/node/supervisor/child-remote.ts";
 import { ControlPublicError } from "../../src/shared/control.ts";
 import type { WorkbenchJobContext } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import type { LivePlanRequest } from "../../src/adapters/node/supervisor/child-remote.ts";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
+import { diagnosticOperation } from "../../src/adapters/node/diagnostics/operation-log.ts";
 
 const COOKIE_NAME = "dsh-auth-aaaa";
 const COOKIE_VALUE = "signed-cookie-value-0123456789abcdef";
@@ -205,6 +211,38 @@ test("unary call uses the verified client-request wire shape and cookie gate", a
   assert.equal(call.body?.method, "pluginManager/listPlugins");
   assert.deepEqual(call.body?.payload, { args: {} });
   assert.ok(typeof call.body?.rpcId === "string" && call.body.rpcId.length > 0);
+});
+
+test("Remote completion is written at info with its operation correlation", async () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-remote-log-"));
+  const fake = await startFakeChild();
+  fake.answers.set("pluginManager/listPlugins", { ok: true, value: [] });
+  const { client } = await clientFor(fake);
+  const log = createDiagnosticLogger(home, "supervisor");
+  try {
+    await diagnosticOperation(log, "plugin.inspect", {}, () => client.call("pluginManager/listPlugins", {}), "diagnostic-remote");
+    const rows = readFileSync(log.file, "utf8").trim().split("\n").map(line => JSON.parse(line) as { level?: string; event?: string; context?: { operationId?: string; space?: string; status?: number; durationMs?: number } });
+    const completed = rows.find(row => row.event === "remote.completed");
+    assert.equal(completed?.level, "info");
+    assert.equal(completed?.context?.operationId, "diagnostic-remote");
+    assert.equal(completed?.context?.space, "space-alpha");
+    assert.equal(completed?.context?.status, 200);
+    assert.equal(typeof completed?.context?.durationMs, "number");
+    assert.equal(readFileSync(log.file, "utf8").includes(COOKIE_VALUE), false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("void Remote results are accepted without a value field", async () => {
+  const fake = await startFakeChild();
+  fake.answers.set("credentials/set", { ok: true, value: undefined });
+  const { client } = await clientFor(fake);
+
+  const value = await client.call("credentials/set", { ref: "SPACES_TEST_KEY", value: "test-only-secret" });
+
+  assert.equal(value, undefined);
+  assert.deepEqual(fake.calls[0]?.body?.payload, { args: { ref: "SPACES_TEST_KEY", value: "test-only-secret" } });
 });
 
 test("a failed exchange and a refused cookie surface as control/unavailable", async () => {
@@ -554,4 +592,106 @@ test("a generation change between exchange and call refuses control/not-running"
     (error) => code(error) === "control/not-running",
   );
   assert.equal(fake.calls.length, 0);
+});
+
+test("runMaintenanceLivePlugin handles install, updatable upgrade, exact github spec, toggle, and restart-required remove", async () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-spaces-live-maint-"));
+  try {
+    const fake = await startFakeChild();
+    const { client } = await clientFor(fake);
+
+    // 1) Fresh install -> applied
+    let bundles: Array<Record<string, unknown>> = [];
+    fake.answers.set("pluginManager/listBundles", { ok: true, get value() { return bundles; } });
+    fake.answers.set("pluginManager/installBundle", {
+      ok: true,
+      get value() {
+        bundles = [{ name: "dsh-plugin-a", version: "1.0.0", enabled: true, installed: true, updatable: true }];
+        return { changed: true, application: "applied", stage: "enable", target: "dsh-plugin-a@1.0.0" };
+      },
+    });
+    fake.answers.set("pluginManager/waitForInstall", { ok: true, value: null });
+    const installed = await runMaintenanceLivePlugin(
+      client,
+      home,
+      { kind: "install", spaceId: "space-alpha", packageName: "dsh-plugin-a", version: "1.0.0" },
+      jobContext(),
+    );
+    assert.equal(installed.application, "applied");
+
+    // 2) Updatable semver upgrade -> updateBundle + restart-required
+    fake.answers.set("pluginManager/updateBundle", {
+      ok: true,
+      get value() {
+        bundles = [{ name: "dsh-plugin-a", version: "1.2.0", enabled: true, installed: true, updatable: true }];
+        return {
+          from: "1.0.0",
+          to: "1.2.0",
+          step: "install",
+          result: { changed: true, application: "restart-required", stage: "install", target: "dsh-plugin-a" },
+        };
+      },
+    });
+    const upgraded = await runMaintenanceLivePlugin(
+      client,
+      home,
+      { kind: "install", spaceId: "space-alpha", packageName: "dsh-plugin-a", version: "1.2.0" },
+      jobContext(),
+    );
+    assert.equal(upgraded.application, "restart-required");
+    assert.ok(fake.calls.some((row) => row.url.endsWith("/pluginManager/updateBundle")));
+
+    // 3) Exact github install.spec verifies commit & path readback
+    const commit = "a".repeat(40);
+    fake.answers.set("pluginManager/installBundle", {
+      ok: true,
+      get value() {
+        bundles = [{
+          name: "dsh-git-b",
+          version: "0.1.0",
+          enabled: true,
+          installed: true,
+          source: `github:org/repo#${commit}&path:/plugins/dsh-git-b`,
+        }];
+        return { changed: true, application: "applied", stage: "enable", target: "dsh-git-b" };
+      },
+    });
+    const gitInstalled = await runMaintenanceLivePlugin(
+      client,
+      home,
+      {
+        kind: "install.spec",
+        spaceId: "space-alpha",
+        plugin: {
+          kind: "github",
+          owner: "org",
+          repo: "repo",
+          commit,
+          path: "plugins/dsh-git-b",
+          packageName: "dsh-git-b",
+          approvedBuilds: ["dsh-git-b"],
+        },
+      },
+      jobContext(),
+    );
+    assert.equal(gitInstalled.application, "applied");
+
+    // 4) Remove -> restart-required when child reports restart-required
+    fake.answers.set("pluginManager/removeBundle", {
+      ok: true,
+      get value() {
+        bundles = [];
+        return { changed: true, application: "restart-required", stage: "remove", target: "dsh-git-b" };
+      },
+    });
+    const removed = await runMaintenanceLivePlugin(
+      client,
+      home,
+      { kind: "remove", spaceId: "space-alpha", packageName: "dsh-git-b" },
+      jobContext(),
+    );
+    assert.equal(removed.application, "restart-required");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

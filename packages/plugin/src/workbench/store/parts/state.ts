@@ -46,12 +46,23 @@ export abstract class StatePart extends WorkbenchCore {
         : pluginSpaceId;
     const protocolError =
       state.protocolVersion !== 2 ? localizeError(this.ui.locale, "workbench/unsupported") : this.ui.error;
+    let pluginOutcomeNotice = epochChanged ? null : this.ui.pluginOutcomeNotice;
+    if (pluginOutcomeNotice) {
+      const kept = pluginOutcomeNotice.spaceIds.filter((id) => {
+        const found = state.spaces.find((space) => space.id === id);
+        if (!found) return false;
+        if (pluginOutcomeNotice!.application === "restart-required" && found.status !== "running") return false;
+        return true;
+      });
+      pluginOutcomeNotice = kept.length > 0 ? { ...pluginOutcomeNotice, spaceIds: kept } : null;
+    }
     this.patch({
       boot: "ready",
       error: state.protocolVersion === 2 ? null : protocolError,
       state,
       selected,
       createdNotice: epochChanged || noticeId === selected || noticeRemoved ? null : this.ui.createdNotice,
+      pluginOutcomeNotice,
       pluginSpaceId,
       templateSpaceId,
       shareSpaceId,
@@ -102,6 +113,25 @@ export abstract class StatePart extends WorkbenchCore {
 
   isBusy(): boolean {
     return this.ui.commandPending || this.hasActiveJobs() || this.ui.state?.maintenance === true;
+  }
+
+  isGlobalBusy(): boolean {
+    if (this.ui.state?.maintenance === true) return true;
+    return (this.ui.state?.jobs ?? []).some(
+      (job) => ACTIVE_JOB.has(job.status) && job.affectedSpaceIds.length === 0,
+    );
+  }
+
+  activeJobForSpace(spaceId: string): import("../../../../../../src/shared/workbench").WorkbenchJob | undefined {
+    return (this.ui.state?.jobs ?? []).find(
+      (job) =>
+        ACTIVE_JOB.has(job.status) &&
+        (job.affectedSpaceIds.length === 0 || job.affectedSpaceIds.includes(spaceId)),
+    );
+  }
+
+  isSpaceBusy(spaceId: string): boolean {
+    return this.ui.commandPending || Boolean(this.activeJobForSpace(spaceId)) || this.ui.state?.maintenance === true;
   }
 
   protected workspaceSpacesFrom(state: WorkbenchState): WorkbenchSpace[] {

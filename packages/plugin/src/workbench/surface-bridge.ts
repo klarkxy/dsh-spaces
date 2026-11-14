@@ -1,6 +1,6 @@
 import type { WorkbenchController } from "./store";
 import type { SpaceSurfaceView as ViewHandshakeConfig } from "../../../../src/shared/space-host";
-import { isNativeSpaceTarget } from "../../../../src/shared/space-host";
+import { PORTAL_SPACE_RE, isNativeSpaceTarget } from "../../../../src/shared/space-host";
 
 export interface SurfaceSelection { requestId: number; target: string | null; targetGeneration?: number }
 export function parseSurfaceSelection(event: { source: unknown; origin: string; data: unknown },
@@ -19,22 +19,33 @@ export function parseSurfaceSelection(event: { source: unknown; origin: string; 
     ...("targetGeneration" in row ? { targetGeneration: row.targetGeneration as number } : {}) };
 }
 
-export interface SurfaceIntent { requestId: number }
+export type SurfaceIntent =
+  | { intent: "create"; requestId: number }
+  | { intent: "detail"; requestId: number; targetSpaceId: string };
 /**
- * The desktop shell asks the manager for a new space with one closed intent.
- * It is a presentation request inside the existing manager handshake: it
- * carries no right, no credential and no management request.
+ * The desktop shell asks the manager for a new space or a space detail page
+ * with one closed intent. Presentation only inside the existing manager
+ * handshake: no right, no credential and no management request.
  */
 export function parseSurfaceIntent(event: { source: unknown; origin: string; data: unknown },
   parent: unknown, view: ViewHandshakeConfig): SurfaceIntent | null {
   if (!parent || event.source !== parent || event.origin !== view.parentOrigin || !event.data ||
       typeof event.data !== "object" || Array.isArray(event.data)) return null;
   const row = event.data as Record<string, unknown>;
-  if (Object.keys(row).sort().join(",") !== "channel,generation,intent,requestId,serviceEpoch,source,spaceId,type" ||
-      row.source !== "dsh-spaces-surface-parent" || row.type !== "intent" || row.intent !== "create" ||
+  if (row.source !== "dsh-spaces-surface-parent" || row.type !== "intent" ||
       row.serviceEpoch !== view.serviceEpoch || row.spaceId !== view.spaceId || row.generation !== view.generation ||
       row.channel !== view.channel || !Number.isSafeInteger(row.requestId) || (row.requestId as number) < 1) return null;
-  return { requestId: row.requestId as number };
+  const keys = Object.keys(row).sort().join(",");
+  if (row.intent === "create") {
+    if (keys !== "channel,generation,intent,requestId,serviceEpoch,source,spaceId,type") return null;
+    return { intent: "create", requestId: row.requestId as number };
+  }
+  if (row.intent === "detail") {
+    if (keys !== "channel,generation,intent,requestId,serviceEpoch,source,spaceId,targetSpaceId,type") return null;
+    if (typeof row.targetSpaceId !== "string" || !PORTAL_SPACE_RE.test(row.targetSpaceId)) return null;
+    return { intent: "detail", requestId: row.requestId as number, targetSpaceId: row.targetSpaceId };
+  }
+  return null;
 }
 
 /** Navigation only, authorized by the existing manager parent handshake. No start/stop/submit relay. */
@@ -99,11 +110,13 @@ export function attachSurfaceBridge(controller: WorkbenchController, view: ViewH
       if (stopped || intent.requestId <= lastIntent) return;
       lastIntent = intent.requestId;
       // Only the native surface knows this intent, and only its settings page
-      // may open the create dialog on top of it.
+      // may open the create dialog or space detail on top of it.
       if (!systemPage || page !== "settings") return;
       const ui = controller.getSnapshot();
-      if (ui.selected !== "home" || ui.overlay?.type !== "settings") return;
-      controller.openCreate();
+      const onSettings = ui.overlay?.type === "settings" || Boolean(ui.overlay && "overSettings" in ui.overlay && ui.overlay.overSettings);
+      if (ui.selected !== "home" || !onSettings) return;
+      if (intent.intent === "create") controller.openCreate();
+      else controller.openDetail(intent.targetSpaceId);
       return;
     }
     const request = parseSurfaceSelection(event, parent, view);

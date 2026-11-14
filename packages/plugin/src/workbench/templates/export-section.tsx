@@ -26,8 +26,8 @@ export function TemplatesExportSection({
   const locale = ui.locale;
   const spaces = controller.workspaceSpaces();
   const writable = controller.canMutate();
-  const busy = controller.isBusy();
   const spaceId = ui.blueprint.sourceSpaceId || ui.shareSpaceId;
+  const busy = spaceId ? controller.isSpaceBusy(spaceId) : controller.isGlobalBusy();
   const [saveError, setSaveError] = useState<string | null>(null);
   const generating = ui.blueprint.mode === "generate";
   return (
@@ -79,15 +79,6 @@ export function TemplatesExportSection({
               aria-label={t(locale, "templates.export.templateName")}
               autoComplete="off"
               onChange={(event) => controller.setTemplateName(event.target.value)}
-            />
-          </label>
-          <label className="dsh-wb-field">
-            {t(locale, "create.displayName")}
-            <input
-              value={ui.templateDisplayName}
-              aria-label={t(locale, "create.displayName")}
-              autoComplete="off"
-              onChange={(event) => controller.setTemplateDisplayName(event.target.value)}
             />
           </label>
           <label className="dsh-wb-check">

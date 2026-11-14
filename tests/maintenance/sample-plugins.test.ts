@@ -82,6 +82,7 @@ test("workbench installs sample plugins from packed tarballs and keeps A when B 
   const { home, maintenance, state } = harness(packed);
   writeManifest(home, "notes", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
   writeManifest(home, "lab", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+  state.status.coding = "stopped";
   state.status.notes = "stopped";
   state.status.lab = "stopped";
 

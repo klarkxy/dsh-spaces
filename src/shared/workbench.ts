@@ -70,6 +70,8 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   base?: 'web' | 'browser';
   baseVersion?: string;
   icon: string;
+  /** This space's own choice to start once when Desktop opens. Defaults to off. */
+  startWithDesktop: boolean;
   status: 'running' | 'starting' | 'stopping' | 'stopped' | 'crashed' | 'unknown';
   generation: number;
   managed: boolean;
@@ -137,6 +139,8 @@ export type WorkbenchJobResult = {
   dshVersion?: string;
   view?: WorkbenchView;
   product?: WorkbenchProductOutcome;
+  pluginApplication?: 'applied' | 'restart-required';
+  restartRequiredSpaceIds?: string[];
   steps?: WorkbenchJobStep[];
 };
 
@@ -158,7 +162,7 @@ export interface WorkbenchJob {
 
 export type WorkbenchCommand =
   | { kind: 'space.create'; input: CreateSpaceInput & { icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string } }
-  | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string }
+  | { kind: 'space.update'; spaceId: string; displayName?: string; icon?: string; startWithDesktop?: boolean }
   | { kind: 'space.reorder'; spaceIds: string[] }
   | { kind: 'space.start'; spaceId: string }
   | { kind: 'plan.execute'; planId: string }
@@ -188,6 +192,18 @@ export type WorkbenchCommand =
       spaceId: string;
     }
   | WorkbenchProductCommand;
+
+/** Names and counts only. A plan can carry this summary, never credential values. */
+export interface ModelSyncSummary {
+  mainProfile: string;
+  routes: string[];
+  deepseek: boolean;
+  defaultModel?: string;
+  defaultModelSkipped?: string;
+  credentials: string[];
+  skipped: Array<{ route: string; reason: 'login-grant' | 'expression' | 'unsupported' }>;
+  missingCredentials: string[];
+}
 
 export type WorkbenchPlanRequest =
   | { kind: 'space.stop' | 'space.restart'; spaceId: string }
@@ -229,8 +245,8 @@ export type WorkbenchPlanRequest =
   | { kind: 'space.runtime.set'; spaceId: string; version: string }
   | {
       /**
-       * Supervisor-local plan: copy the main space's model settings into a
-       * stopped space once. The maintenance service hands it off.
+       * Supervisor-local plan: preview and copy the main space's model settings.
+       * SupervisorPlans selects live Remote writes or stopped-space file writes.
        */
       kind: 'space.models.sync';
       spaceId: string;
@@ -247,6 +263,8 @@ export interface WorkbenchPlan {
   scope: 'space' | 'home' | 'controller';
   affectedSpaceIds: string[];
   runningSpaceIds: string[];
+  /** Frozen, non-secret main-space model summary for space.models.sync. */
+  modelsSync?: ModelSyncSummary;
   changes: string[];
   destructive: boolean;
   expiresAt: string;

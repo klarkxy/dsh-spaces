@@ -1,8 +1,6 @@
 # 空间总控扩展：安装、插件顺序、调试
 
-> 状态：设计记录，2026-11-09。相关控制面 P1–P7 已实现，以下设计中的安装、插件、运行时、导入和只读扩展子集已落地；`reorder`、config 读写、HMR/dev link 和任意代理明确不作为能力。父设计见 [space-control-design.md](space-control-design.md)。故障政策只以 [let-it-crash.md](let-it-crash.md) 为准。官方行为以运行时 **DSH 0.2.2-rc.1**（Desktop `dsh-desktop-runtime` 与 tag `dsh-v0.2.2-rc.1` / `66491b05`）为准。当前官网文档未钉版本，只作索引，不覆盖 checkout。
->
-> 本文件不改 `src/shared/control.ts`、`src/shared/creator.ts`、`src/adapters/node/supervisor/{creator,control}.ts`。下文 Creator 行号是设计时只读所见，施工中的文件以合并后的源码为准。
+> 历史归档：本文件为 2026-11-09 空间总控扩展设计记录，仅作历史依据保留，不作为当前需求或发布门。现行空间总控契约见 [docs/space-control-design.md](../space-control-design.md)；父设计原稿见 [space-control-design-20261109.md](space-control-design-20261109.md)；故障政策只以 [docs/let-it-crash.md](../let-it-crash.md) 为准。
 
 ## 1. 两条写者，不能同时写同一 profile
 

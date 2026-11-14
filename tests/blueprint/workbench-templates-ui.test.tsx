@@ -18,6 +18,7 @@ import { SpaceTemplatesPage, sectionForMode } from "../../packages/plugin/src/wo
 import { detectTemplateFile } from "../../packages/plugin/src/workbench/templates/detect.ts";
 import { importTemplateFile } from "../../packages/plugin/src/workbench/templates/import-section.tsx";
 import { TemplatesError } from "../../packages/plugin/src/workbench/templates/errors.tsx";
+import { CreateDialog, ExportShareDialog, SaveTemplateDialog } from "../../packages/plugin/src/workbench/view/create-dialog.tsx";
 import { WorkbenchController, type WorkbenchEnv } from "../../packages/plugin/src/workbench/store.ts";
 import { t } from "../../packages/plugin/src/workbench/i18n.ts";
 
@@ -45,7 +46,7 @@ function space(partial: Partial<WorkbenchSpace> & Pick<WorkbenchSpace, "id">): W
     status: "running",
     generation: 1,
     managed: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
     ...partial,
   };
 }
@@ -100,6 +101,25 @@ const blueprint: Blueprint = {
 };
 
 function defaultProduct(request: WorkbenchProductRequest): WorkbenchProductResult {
+  if (request.method === "templates") {
+    return {
+      method: "templates",
+      templates: [
+        {
+          id: "dev",
+          name: "dev",
+          displayName: "Development",
+          plugins: [{ packageName: "dsh-outline", resolvedVersion: "1.2.0", source: "npm" }],
+          createdAt: "2026-09-21T00:00:00.000Z",
+          recipe: { schemaVersion: 1, displayName: "Development", plugins: [] },
+        },
+      ],
+      observation: OBSERVATION,
+    };
+  }
+  if (request.method === "base.versions") {
+    return { method: "base.versions", base: request.base, versions: ["0.1.5-rc.2"], preferred: "0.1.5-rc.2", observation: OBSERVATION };
+  }
   if (request.method === "blueprint.inspect") {
     return { method: "blueprint.inspect", blueprint, diagnostics: [], observation: OBSERVATION };
   }
@@ -125,6 +145,7 @@ function fakeApi(product: (request: WorkbenchProductRequest) => WorkbenchProduct
     startupStatus: async () => ({ serviceEpoch: "a".repeat(64), managerId: "hub", phase: "ready" as const, reasons: [], failure: null }),
     detail: async (spaceId) => ({
       space: { id: spaceId, displayName: spaceId, isHost: false, hasWebApp: true, status: "running" },
+      models: { status: "unconfigured", routeNames: [], defaultModel: null, missingCredentials: [] },
       plugins: [],
       snapshots: [],
       diagnostics: [],
@@ -199,32 +220,33 @@ function file(name: string, bytes: Uint8Array): File {
   } as unknown as File;
 }
 
-test("the page shows one section at a time and marks the open one", async () => {
+test("the templates page manages saved local templates and shows an empty state when none exist", async () => {
+  const emptyCtrl = controller(
+    fakeApi((req) =>
+      req.method === "templates"
+        ? { method: "templates", templates: [], observation: OBSERVATION }
+        : defaultProduct(req),
+    ),
+  );
+  await emptyCtrl.poll();
+  emptyCtrl.setHomeTab("templates");
+  await flush();
+  const emptyPage = html(emptyCtrl);
+  assert.ok(emptyPage.includes('data-templates="true"'));
+  assert.ok(emptyPage.includes('data-templates-empty="true"'));
+  assert.equal(emptyPage.includes('data-blueprints="true"'), false);
+  assert.equal(emptyPage.includes('data-templates-action="share-code"'), false);
+
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
-
-  const create = html(ctrl);
-  assert.ok(create.includes('data-templates="true"'));
-  assert.equal(create.includes('data-blueprints="true"'), false);
-  assert.ok(create.includes('data-templates-section="create"'));
-  assert.equal(create.includes('data-templates-section="import"'), false);
-  assert.equal(create.includes('data-templates-section="export"'), false);
-  assert.ok(create.includes('role="tablist"'));
-  assert.equal(create.split('aria-selected="true"').length - 1, 1);
-
-  const importSection = html(ctrl, "import");
-  assert.ok(importSection.includes('data-templates-section="import"'));
-  assert.ok(importSection.includes('data-templates-panel="import"'));
-  assert.ok(importSection.includes('data-templates-dropzone="true"'));
-  assert.equal(importSection.includes('data-templates-section="create"'), false);
-  assert.equal(importSection.includes('data-templates-section="export"'), false);
-
-  const exportSection = html(ctrl, "export");
-  assert.ok(exportSection.includes('data-templates-section="export"'));
-  assert.ok(exportSection.includes('data-templates-panel="export"'));
-  assert.ok(exportSection.includes(t("zh", "share.export")));
-  assert.equal(exportSection.includes('data-templates-dropzone="true"'), false);
-  assert.equal(exportSection.includes('data-templates-section="create"'), false);
+  ctrl.setHomeTab("templates");
+  await flush();
+  const populated = html(ctrl);
+  assert.ok(populated.includes('data-template-card="true"'));
+  assert.ok(populated.includes('data-template-use="dev"'));
+  assert.ok(populated.includes('data-template-delete="dev"'));
+  assert.ok(populated.includes("Development"));
+  assert.ok(populated.includes("dsh-outline"));
 });
 
 test("a blueprint session decides the section", () => {
@@ -232,30 +254,71 @@ test("a blueprint session decides the section", () => {
   assert.equal(sectionForMode("generate"), "export");
 });
 
-test("the export section keeps ordinary sharing but hides sealed blueprint generation", async () => {
+test("the create dialog switches cleanly across blank, template and file import modes", async () => {
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
-  ctrl.blueprint.setMode("generate");
-  const page = html(ctrl);
-  assert.ok(page.includes('data-templates-section="export"'));
-  assert.ok(page.includes(t("zh", "share.export")));
-  assert.ok(page.includes(t("zh", "share.includeConfig")));
-  assert.equal(page.includes('data-templates-action="share-code"'), false);
-  assert.equal(page.includes('data-templates-dropzone="true"'), false);
+  await ctrl.loadTemplates();
+
+  const renderCreate = (mode: "blank" | "template" | "import", templateId?: string) =>
+    renderToStaticMarkup(
+      React.createElement(CreateDialog, {
+        ui: ctrl.getSnapshot(),
+        controller: ctrl,
+        initialMode: mode,
+        initialTemplateId: templateId,
+        error: null,
+      }),
+    );
+
+  const blank = renderCreate("blank");
+  assert.ok(blank.includes('data-create-mode="blank"'));
+  assert.ok(blank.includes('role="tablist"'));
+  assert.equal(blank.split('aria-selected="true"').length - 1, 1);
+  assert.equal(blank.includes('data-templates-dropzone="true"'), false);
+
+  const fromTemplate = renderCreate("template", "dev");
+  assert.ok(fromTemplate.includes('data-create-mode="template"'));
+  assert.ok(fromTemplate.includes('data-create-template-select="true"'));
+  assert.ok(fromTemplate.includes("Development"));
+  assert.ok(fromTemplate.includes(t("zh", "templates.createConfirm")));
+
+  const fromFile = renderCreate("import");
+  assert.ok(fromFile.includes('data-create-mode="import"'));
+  assert.ok(fromFile.includes('data-templates-dropzone="true"'));
+  assert.ok(fromFile.includes(t("zh", "templates.drop.hint")));
+  assert.ok(fromFile.includes('accept=".dshspace,application/zip"'));
 });
 
-test("openBlueprintGenerate lands in the export section with the space preselected", async () => {
+test("save-template and export-share dialogs preselect the target space and hide sealed blueprint actions", async () => {
   const ctrl = controller(fakeApi(defaultProduct));
   await ctrl.poll();
-  ctrl.openBlueprintGenerate("beta");
-  await flush();
-  const page = html(ctrl);
-  assert.equal(ctrl.getSnapshot().homeTab, "blueprints");
-  assert.equal(page.includes('data-blueprint-mode="generate"'), false);
-  assert.equal(page.includes('data-templates-action="share-code"'), false);
-  assert.ok(page.includes('data-templates-section="export"'));
-  assert.ok(page.includes('<option value="beta" selected=""'));
-  assert.equal(page.includes('data-templates-section="create"'), false);
+  ctrl.openSaveTemplate("beta");
+  const saveHtml = renderToStaticMarkup(
+    React.createElement(SaveTemplateDialog, {
+      ui: ctrl.getSnapshot(),
+      controller: ctrl,
+      spaceId: "beta",
+      error: null,
+    }),
+  );
+  assert.ok(saveHtml.includes('data-save-template-dialog="true"'));
+  assert.ok(saveHtml.includes("Beta"));
+  assert.ok(!saveHtml.includes(`aria-label="${t("zh", "create.displayName")}"`), "saving a local template only asks for a single template name");
+
+  ctrl.openExportShare("beta");
+  const exportHtml = renderToStaticMarkup(
+    React.createElement(ExportShareDialog, {
+      ui: ctrl.getSnapshot(),
+      controller: ctrl,
+      spaceId: "beta",
+      error: null,
+    }),
+  );
+  assert.ok(exportHtml.includes('data-export-share-dialog="true"'));
+  assert.ok(exportHtml.includes("Beta"));
+  assert.ok(exportHtml.includes(t("zh", "share.includeConfig")));
+  assert.ok(exportHtml.includes(t("zh", "share.export")));
+  assert.equal(exportHtml.includes('data-templates-action="share-code"'), false);
 });
 
 test("the drop zone tells a share file, a blueprint and an unknown file apart", () => {

@@ -74,7 +74,7 @@ function space(id: string): WorkbenchSpace {
     status: "stopped",
     generation: 1,
     managed: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
   };
 }
 

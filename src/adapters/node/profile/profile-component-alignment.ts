@@ -7,6 +7,7 @@ import { isMap, isScalar, isSeq, parseDocument, type Document, type YAMLMap } fr
 import { isBareNpmPackageName } from "../../../shared/plugin";
 import { cliLoadError, payloadBridgeFiles } from "../payload/component-cli";
 import { assertOwnedProfilePath, profileSettingsPath } from "./profile-settings";
+import { currentDiagnosticLogger, diagnosticStep } from "../diagnostics/operation-log";
 
 type Bridge = "view-bridge";
 /** Retired bundle removed once from older spaces during alignment. */
@@ -186,8 +187,13 @@ export async function alignProfileComponents(input: {
   for (const path of [patch, join(profile, "package.json"), join(profile, "node_modules")]) {
     assertOwnedProfilePath(home, path);
   }
+  const log = currentDiagnosticLogger();
+  const context = { space: profileId };
   const marker = join(profile, ".dsh-spaces-component-alignment.json");
-  if (existsSync(marker)) throw new Error("Interrupted component alignment; evidence was preserved and will not be replayed.");
+  if (existsSync(marker)) {
+    log?.error("components.alignment-interrupted", "An interrupted component alignment was detected; its evidence is preserved.", undefined, context);
+    throw new Error("Interrupted component alignment; evidence was preserved and will not be replayed.");
+  }
   const manifestBefore = readFileSync(join(profile, "package.json"), "utf8");
   const manifest = JSON.parse(manifestBefore);
   const initialBundles: string[] = manifest.dsh?.profile?.bundles ?? [];
@@ -199,23 +205,27 @@ export async function alignProfileComponents(input: {
   const bundles = initialBundles.filter(name => name !== RETIRED_LLM_BRIDGE);
   if (retired) {
     if (!input.remove) throw new Error("The managed profile carries the retired LLM bridge and no removal was provided.");
+    log?.info("components.retired-remove-started", "A retired model bridge is being removed once during alignment.", context);
     writeFileSync(marker, JSON.stringify({ version: 1, profileId, remove: [RETIRED_LLM_BRIDGE] }), { flag: "wx" });
     // Leave the marker on failure: an interrupted removal is evidence, not replayed.
     await input.remove(RETIRED_LLM_BRIDGE);
     const removed = JSON.parse(readFileSync(join(profile, "package.json"), "utf8"));
     if (JSON.stringify(removed.dsh?.profile?.bundles ?? []) !== JSON.stringify(bundles)) throw new Error("The retired LLM bridge removal left an unexpected bundle membership.");
     unlinkSync(marker);
+    log?.info("components.retired-remove-completed", "The retired model bridge was removed and its membership was verified.", context);
   }
   const manifestAligned = readFileSync(join(profile, "package.json"), "utf8");
   const before = readFileSync(patch, "utf8");
   const homePatch = join(home, "cordis.patch.yml");
   const homeBefore = existsSync(homePatch) ? readFileSync(homePatch, "utf8") : undefined;
-  const declared = await declaredProfile(home, profile, bundles, input.bin);
+  const declared = log
+    ? await diagnosticStep(log, "components.declared-read", context, () => declaredProfile(home, profile, bundles, input.bin))
+    : await declaredProfile(home, profile, bundles, input.bin);
   const active = (["view-bridge"] as Bridge[])
     .filter(bridge => bundles.includes(`@dsh-spaces/${bridge}`));
   if (!active.includes("view-bridge")) throw new Error("The managed profile has no active canonical view bridge.");
   if (disabled(bridgeEntry(declared.rows, "view-bridge"))) throw new Error("The managed profile has no active canonical view bridge.");
-  const initialDump = await input.dump();
+  const initialDump = log ? await diagnosticStep(log, "components.initial-dump", context, input.dump) : await input.dump();
   if (declared.rows.some(row => (row.id === "settings" && row.disabled === false)
     || (row.id === "dsh-spaces-settings" && disabled(row)))) {
     throw new Error("The profile explicitly overrides scoped settings isolation.");
@@ -276,6 +286,7 @@ export async function alignProfileComponents(input: {
   // Known, byte-checked transitions are the only temporary peer exemption.
   // Unknown active plugins fail before the marker or any installation writes.
   admission(declared, pending);
+  log?.info("components.alignment-plan", "Component alignment inspection completed.", { ...context, bundles: bundles.length, pending: pending.join(","), runtime: cliVersion });
   for (const bridge of pending) {
     compatible(declared.appBoot, JSON.parse(readFileSync(join(payloadRoot, bridge, "package.json"), "utf8")));
   }
@@ -294,15 +305,19 @@ export async function alignProfileComponents(input: {
   writeFileSync(marker, JSON.stringify({ version: 1, profileId, target: cliVersion, bridges: pending }), { flag: "wx" });
   // Leave marker and partial results on every failure. Never restore or retry.
   for (const component of pending) {
+    log?.info("components.install-started", "A selected component is being installed.", { ...context, component });
     await input.install(component);
     if (!matches(component)) {
       throw new Error(`The installed ${component} did not match the selected component.`);
     }
+    log?.info("components.install-verified", "An installed component matched the selected component.", { ...context, component });
   }
   assertUnchanged();
-  const afterDeclared = await declaredProfile(home, profile, bundles, input.bin);
+  const afterDeclared = log
+    ? await diagnosticStep(log, "components.readback-declared", context, () => declaredProfile(home, profile, bundles, input.bin))
+    : await declaredProfile(home, profile, bundles, input.bin);
   admission(afterDeclared, []);
-  const composed = await input.dump();
+  const composed = log ? await diagnosticStep(log, "components.readback-dump", context, input.dump) : await input.dump();
   verifyHost(composed);
   unlinkSync(marker);
 }

@@ -40,6 +40,7 @@ import type { SnapshotExecutor } from "../../src/adapters/node/snapshots/snapsho
 import type { SnapshotRuntime } from "../../src/shared/snapshots.ts";
 import type { WorkbenchPlanRequest } from "../../src/shared/workbench.ts";
 import type { ProfileStatus } from "../../src/shared/types.ts";
+import { writeTestCatalog } from "../fixtures/plugin-catalog.ts";
 
 const BASE = "@deepseek-ai/dsh-base";
 const WEB = "@deepseek-ai/dsh-web-app";
@@ -169,8 +170,9 @@ test("cleanup-manager only removes the management package from an ordinary profi
   assert.deepEqual(state.started, ["space-coding"]);
 });
 
-test("plugin install and remove write profile files that listProfilePlugins can read back", async () => {
+test("offline plugin install and remove write profile files that listProfilePlugins can read back", async () => {
   const { home, maintenance, state } = harness();
+  state.status["space-coding"] = "stopped";
   const plan = await maintenance.preview({
     kind: "plugin.install",
     spaceIds: ["space-coding"],
@@ -179,16 +181,16 @@ test("plugin install and remove write profile files that listProfilePlugins can 
   });
   assert.equal(plan.scope, "space");
   assert.ok(plan.changes.some((line) => line.includes("dsh-outline@1.2.3")));
-  assert.ok(plan.changes.some((line) => /restart/i.test(line)));
-  assert.deepEqual(plan.runningSpaceIds, ["space-coding"]);
+  assert.ok(plan.changes.some((line) => /stay stopped/i.test(line)));
+  assert.deepEqual(plan.runningSpaceIds, []);
   const result = await maintenance.execute(plan.id, jobCtx());
   assert.equal(result, undefined);
   const installed = listProfilePlugins(home, "space-coding");
   assert.equal(installed.some((item) => item.name === "dsh-outline" && item.version === "1.2.3"), true);
   const library = readPluginLibrary(home);
   assert.equal(library.some((entry) => entry.packageName === "dsh-outline" && entry.spec === "dsh-outline@1.2.3"), true);
-  assert.deepEqual(state.stopped, ["space-coding"]);
-  assert.deepEqual(state.started, ["space-coding"]);
+  assert.deepEqual(state.stopped, []);
+  assert.deepEqual(state.started, []);
 
   const remove = await maintenance.preview({ kind: "plugin.remove", spaceId: "space-coding", packageName: "dsh-outline" });
   await maintenance.execute(remove.id, jobCtx());
@@ -204,6 +206,7 @@ test("batch plugin install stops at the first failure and does not run later spa
   });
   writeManifest(home, "space-notes", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
   writeManifest(home, "space-lab", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+  state.status["space-coding"] = "stopped";
   state.status["space-notes"] = "stopped";
   state.status["space-lab"] = "stopped";
   const plan = await maintenance.preview({
@@ -245,11 +248,12 @@ test("readonly plugin query does not sync the library or write the catalog cache
   const { home, maintenance } = harness();
   const libraryPath = join(home, "hub", PLUGIN_LIBRARY_FILE);
   const cachePath = join(home, "hub", CATALOG_CACHE_FILE);
+  rmSync(cachePath);
   mkdirSync(join(home, "hub"), { recursive: true });
   writeFileSync(libraryPath, `${JSON.stringify({ plugins: [] }, null, 2)}\n`);
   const before = readFileSync(libraryPath, "utf8");
-  const rows = await maintenance.plugins("outline");
-  assert.ok(rows.some((row) => row.packageName === "dsh-outline"));
+  const rows = await maintenance.plugins("font");
+  assert.ok(rows.some((row) => row.packageName === "@klarkxy/dsh-font"));
   assert.equal(readFileSync(libraryPath, "utf8"), before);
   assert.equal(existsSync(cachePath), false);
   assert.ok(rows.every((row) => !("tarball" in row) && !("spec" in row) && !("path" in row)));
@@ -265,6 +269,7 @@ test("exact npm id query returns a server-side catalog candidate without writing
       },
     }),
   });
+  rmSync(join(home, "hub", CATALOG_CACHE_FILE));
   const rows = await maintenance.plugins("dsh-new-plugin");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].packageName, "dsh-new-plugin");
@@ -281,7 +286,7 @@ test("exact npm id query returns a server-side catalog candidate without writing
   assert.ok(plan.changes.some((line) => line.includes("dsh-new-plugin@2.0.0")));
 });
 
-test("toggle plan uses install/remove semantics and says a restart is required", async () => {
+test("toggle plan uses install/remove semantics and applies live without stopping running spaces", async () => {
   const { maintenance } = harness();
   const plan = await maintenance.preview({
     kind: "plugin.toggle",
@@ -290,7 +295,8 @@ test("toggle plan uses install/remove semantics and says a restart is required",
     enabled: true,
   });
   assert.ok(plan.changes.some((line) => /install\/remove/i.test(line)));
-  assert.ok(plan.changes.some((line) => /not a hot toggle/i.test(line)));
+  assert.ok(plan.changes.some((line) => /without stopping/i.test(line)));
+  assert.ok(plan.changes.some((line) => /you decide when to restart/i.test(line)));
 });
 
 test("snapshot create failure does not reinitialize or restart the manager", async () => {
@@ -805,8 +811,9 @@ test("lost progress persistence or uncertain child termination keeps the plan op
 
 test("cancel is honored before mutation and ignored after the irreversible point", async () => {
   const { home, maintenance, state } = harness();
+  state.status["space-coding"] = "stopped";
   const aborting = new AbortController();
-  state.onStop = () => aborting.abort();
+  aborting.abort();
   const cancelled = await maintenance.preview({
     kind: "plugin.install",
     spaceIds: ["space-coding"],
@@ -818,7 +825,7 @@ test("cancel is honored before mutation and ignored after the irreversible point
     (error: unknown) => error instanceof WorkbenchJobAbortError,
   );
   assert.equal(listProfilePlugins(home, "space-coding").some((item) => item.name === "dsh-outline"), false);
-  assert.deepEqual(state.started, ["space-coding"]);
+  assert.deepEqual(state.started, []);
 
   const late = new AbortController();
   const { maintenance: second, home: home2, state: state2 } = harness({
@@ -827,6 +834,7 @@ test("cancel is honored before mutation and ignored after the irreversible point
       await addFromTarball(dshHome, profile, spec);
     },
   });
+  state2.status["space-coding"] = "stopped";
   const plan = await second.preview({
     kind: "plugin.install",
     spaceIds: ["space-coding"],
@@ -835,7 +843,7 @@ test("cancel is honored before mutation and ignored after the irreversible point
   });
   await second.execute(plan.id, jobCtx(late.signal));
   assert.equal(listProfilePlugins(home2, "space-coding").some((item) => item.name === "dsh-outline"), true);
-  assert.deepEqual(state2.started, ["space-coding"]);
+  assert.deepEqual(state2.started, []);
 });
 
 test("plugin mutation failure keeps diagnostic files, stops the target, and does not fake a manifest rollback", async () => {
@@ -849,6 +857,7 @@ test("plugin mutation failure keeps diagnostic files, stops the target, and does
       );
     },
   });
+  state.status["space-coding"] = "stopped";
   const before = readManifest(home, "space-coding");
   const plan = await maintenance.preview({
     kind: "plugin.install",
@@ -865,11 +874,12 @@ test("plugin mutation failure keeps diagnostic files, stops the target, and does
 });
 
 test("plugin install failure names space, stage, and package", async () => {
-  const { maintenance } = harness({
+  const { maintenance, state } = harness({
     pluginAdd: async () => {
       throw new Error("cli exited 1: missing peer");
     },
   });
+  state.status["space-coding"] = "stopped";
   const plan = await maintenance.preview({
     kind: "plugin.install",
     spaceIds: ["space-coding"],
@@ -899,6 +909,7 @@ test("plugin lock mismatch fails verification and interrupted mutation stays ope
       writeFileSync(join(dshHome, "profiles", profile, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
     },
   });
+  state.status["space-coding"] = "stopped";
   writeFileSync(join(home, "profiles", "space-coding", "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   const plan = await maintenance.preview({
     kind: "plugin.install",
@@ -912,13 +923,14 @@ test("plugin lock mismatch fails verification and interrupted mutation stays ope
 });
 
 test("owned file tarball pins are verified against the actual installed version", async () => {
-  const { home, maintenance } = harness({ pluginAdd: async (dshHome, profile, spec) => {
+  const { home, maintenance, state } = harness({ pluginAdd: async (dshHome, profile, spec) => {
     await addFromTarball(dshHome, profile, spec);
     const manifest = readManifest(dshHome, profile);
     manifest.dependencies!["dsh-outline"] = `file:${spec.replaceAll("\\", "/")}`;
     writeFileSync(join(dshHome, "profiles", profile, "package.json"), JSON.stringify(manifest));
     writeFixtureLock(dshHome, profile, manifest.dependencies!);
   } });
+  state.status["space-coding"] = "stopped";
   const plan = await maintenance.preview({ kind: "plugin.install", spaceIds: ["space-coding"], catalogId: "urzeye/dsh-outline", version: "1.2.3" });
   await maintenance.execute(plan.id, jobCtx());
   assert.match(readManifest(home, "space-coding").dependencies!["dsh-outline"], /^file:/);
@@ -926,10 +938,11 @@ test("owned file tarball pins are verified against the actual installed version"
 });
 
 test("manifest-only plugin installation cannot be reported as successful", async () => {
-  const { maintenance } = harness({ pluginAdd: async (dshHome, profile, spec) => {
+  const { maintenance, state } = harness({ pluginAdd: async (dshHome, profile, spec) => {
     await addFromTarball(dshHome, profile, spec);
     rmSync(join(dshHome, "profiles", profile, "node_modules", "dsh-outline", "package.json"));
   } });
+  state.status["space-coding"] = "stopped";
   const plan = await maintenance.preview({ kind: "plugin.install", spaceIds: ["space-coding"], catalogId: "urzeye/dsh-outline", version: "1.2.3" });
   await assert.rejects(() => maintenance.execute(plan.id, jobCtx()), matchCode("workbench/failed"));
 });
@@ -1089,6 +1102,9 @@ interface HarnessOverrides {
   fetch?: MaintenanceFetcher;
   compatible?: (version: string) => boolean;
   pluginAdd?: (home: string, profile: string, spec: string) => Promise<void>;
+  pluginLive?: WorkbenchMaintenancePorts["pluginLive"];
+  generationOf?: (spaceId: string) => number;
+  observation?: () => { serviceEpoch: string; expectedRevision: string };
   snapshotsCreate?: SnapshotExecutor["create"];
   log?: (message: string, error?: unknown) => void;
   inventory?: () => { installed: Array<{ version: string; bin: string; dir: string }> };
@@ -1100,6 +1116,7 @@ interface HarnessOverrides {
 
 function harness(overrides: HarnessOverrides = {}) {
   const home = tempDir("dsh-spaces-maint-");
+  writeTestCatalog(home);
   writeManifest(home, "space-coding", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
   writeManifest(home, "spaces-hub", {
     bundles: [BASE, WEB, FULL_SPACES_PACKAGE],
@@ -1174,6 +1191,7 @@ function createMaintenance(
       if (!allowManager && spaceId === "spaces-hub") throw new Error("manager protected");
     },
     statusOf: (spaceId: string) => state.status[spaceId] ?? "stopped",
+    generationOf: overrides.generationOf,
     ownedSpaceIds: () => [...new Set(["spaces-hub", "space-coding", ...Object.keys(state.status)])],
     stopSpace: async (spaceId: string) => {
       state.onStop?.();
@@ -1194,6 +1212,7 @@ function createMaintenance(
       state.started.push(spaceId);
       state.status[spaceId] = "running";
     },
+    pluginLive: overrides.pluginLive,
     currentRuntime: () => runtime,
     hostRuntime: overrides.hostRuntime ?? (() => ({ bin: "bin.js", version: runtime.version })),
     reinitializeManager: async () => {
@@ -1204,7 +1223,7 @@ function createMaintenance(
       state.maintenance.push(active);
     },
     isCompatibleRuntime: overrides.compatible ?? ((version: string) => version === "0.1.5-rc.1"),
-    observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) }),
+    observation: overrides.observation ?? (() => ({ serviceEpoch: "c".repeat(64), expectedRevision: "d".repeat(64) })),
   };
   return new WorkbenchMaintenance(ports, {
     now: overrides.now,
@@ -1548,7 +1567,7 @@ test("plugin.install.spec npm: writes allowBuilds verbatim, installs the pinned 
       await addNamed(dshHome, profile, name === "" ? spec : name, version);
     },
   });
-  state.status["space-coding"] = "running";
+  state.status["space-coding"] = "stopped";
 
   const plan = await maintenance.preview({
     kind: "plugin.install.spec",
@@ -1557,7 +1576,7 @@ test("plugin.install.spec npm: writes allowBuilds verbatim, installs the pinned 
   });
   assert.ok(plan.changes.some((line) => line.includes("dsh-plugin-a@1.2.3")));
   assert.ok(plan.changes.some((line) => /dsh-plugin-a, dep@1\.0\.0/.test(line)));
-  assert.ok(plan.changes.some((line) => /Stop and restart/.test(line)));
+  assert.ok(plan.changes.some((line) => /stays stopped/i.test(line)));
 
   await maintenance.execute(plan.id, jobCtx());
   assert.deepEqual(specs, ["space-coding <- dsh-plugin-a@1.2.3"]);
@@ -1567,17 +1586,18 @@ test("plugin.install.spec npm: writes allowBuilds verbatim, installs the pinned 
   assert.match(policy, /dep@1\.0\.0: true/);
   const installed = listProfilePlugins(home, "space-coding");
   assert.ok(installed.some((item) => item.name === "dsh-plugin-a" && item.version === "1.2.3"));
-  assert.deepEqual(state.stopped, ["space-coding"]);
-  assert.deepEqual(state.started, ["space-coding"]);
+  assert.deepEqual(state.stopped, []);
+  assert.deepEqual(state.started, []);
 });
 
 test("plugin.install.spec github: lockfile read-back proves repo, commit and subdirectory", async () => {
   const goodSpec = `github:org/repo#${"a".repeat(40)}&path:/plugins/dsh-b`;
   const badSpec = `github:org/repo#${"b".repeat(40)}&path:/plugins/dsh-b`;
   for (const spec of [goodSpec, badSpec]) {
-    const { home, maintenance } = harness({
+    const { home, maintenance, state } = harness({
       pluginAdd: async (dshHome, profile) => addGitFixture(dshHome, profile, "dsh-b", spec),
     });
+    state.status["space-coding"] = "stopped";
     const plan = await maintenance.preview({
       kind: "plugin.install.spec",
       spaceId: "space-coding",
@@ -1595,7 +1615,7 @@ test("plugin.install.spec github: lockfile read-back proves repo, commit and sub
 });
 
 test("plugin.install.spec reports pending build keys without approving them", async () => {
-  const { home, maintenance } = harness({
+  const { home, maintenance, state } = harness({
     pluginAdd: async () => {
       throw new Error(
         `dsh plugin add failed (exit 1): ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED\n` +
@@ -1603,6 +1623,7 @@ test("plugin.install.spec reports pending build keys without approving them", as
       );
     },
   });
+  state.status["space-coding"] = "stopped";
   const plan = await maintenance.preview({
     kind: "plugin.install.spec",
     spaceId: "space-coding",
@@ -1615,4 +1636,125 @@ test("plugin.install.spec reports pending build keys without approving them", as
   // Deny-by-default policy was still written before the attempted install.
   const policy = readFileSync(join(home, "profiles", "space-coding", "pnpm-workspace.yaml"), "utf8");
   assert.match(policy, /dangerouslyAllowAllBuilds: false/);
+});
+
+test("running plugin plans apply live without stopping, surface restart-required, and partition mixed running/stopped targets", async () => {
+  const liveCalls: Array<{ kind: string; spaceId: string }> = [];
+  const offlineCalls: string[] = [];
+  const { home, maintenance, state } = harness({
+    pluginAdd: async (dshHome, profile, spec) => {
+      offlineCalls.push(profile);
+      await addFromTarball(dshHome, profile, spec);
+    },
+    pluginLive: async (input) => {
+      liveCalls.push({ kind: input.kind, spaceId: input.spaceId });
+      return {
+        application: input.kind === "remove" ? "restart-required" : "applied",
+        steps: [{ step: `live:${input.kind}:${input.spaceId}`, status: "done" }],
+      };
+    },
+  });
+  writeManifest(home, "space-stopped", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+  state.status["space-coding"] = "running";
+  state.status["space-stopped"] = "stopped";
+
+  const installPlan = await maintenance.preview({
+    kind: "plugin.install",
+    spaceIds: ["space-coding", "space-stopped"],
+    catalogId: "urzeye/dsh-outline",
+    version: "1.2.3",
+  });
+  assert.deepEqual(installPlan.runningSpaceIds, ["space-coding"]);
+  const installResult = await maintenance.execute(installPlan.id, jobCtx());
+  assert.deepEqual(state.stopped, [], "running space was never stopped");
+  assert.deepEqual(state.started, [], "stopped space stayed stopped");
+  assert.deepEqual(offlineCalls, ["space-stopped"]);
+  assert.deepEqual(liveCalls, [{ kind: "install", spaceId: "space-coding" }]);
+  assert.equal(installResult?.pluginApplication, "applied");
+  assert.equal(installResult?.restartRequiredSpaceIds, undefined);
+  assert.equal(listProfilePlugins(home, "space-stopped").some((item) => item.name === "dsh-outline"), true);
+
+  // Simulate the plugin now present in space-coding and remove it live -> restart-required.
+  await addNamed(home, "space-coding", "dsh-outline", "1.2.3");
+  const removePlan = await maintenance.preview({
+    kind: "plugin.remove",
+    spaceId: "space-coding",
+    packageName: "dsh-outline",
+  });
+  const removeResult = await maintenance.execute(removePlan.id, jobCtx());
+  assert.deepEqual(state.stopped, []);
+  assert.equal(removeResult?.pluginApplication, "restart-required");
+  assert.deepEqual(removeResult?.restartRequiredSpaceIds, ["space-coding"]);
+});
+
+test("space-scoped maintenance plans ignore unrelated revision moves, reject target drift, and honor submit-time TTL admission", async () => {
+  const clock = { now: Date.parse("2026-11-11T00:00:00.000Z") };
+  let expectedRevision = "1".repeat(64);
+  let codingGeneration = 1;
+  const { home, maintenance, state } = harness({
+    now: () => new Date(clock.now),
+    observation: () => ({ serviceEpoch: "c".repeat(64), expectedRevision }),
+    generationOf: (spaceId) => (spaceId === "space-coding" ? codingGeneration : 0),
+    pluginLive: async () => ({ application: "applied", steps: [] }),
+  });
+  writeManifest(home, "space-other", { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+  state.status["space-other"] = "stopped";
+
+  const plan = await maintenance.preview({
+    kind: "plugin.install",
+    spaceIds: ["space-coding"],
+    catalogId: "urzeye/dsh-outline",
+    version: "1.2.3",
+  });
+  // Admit at submit time while fresh.
+  const admitted = maintenance.admitPlan(plan.id);
+  assert.deepEqual(admitted, { scope: "space", affectedSpaceIds: ["space-coding"] });
+
+  // Another space changes and global revision advances AND 10 minutes pass in the queue.
+  state.status["space-other"] = "running";
+  expectedRevision = "2".repeat(64);
+  clock.now += WORKBENCH_PLAN_TTL_MS + 60_000;
+  const executed = await maintenance.execute(plan.id, jobCtx());
+  assert.equal(executed?.pluginApplication, "applied");
+
+  // Target space generation drift is still rejected even when admitted.
+  const staleTargetPlan = await maintenance.preview({
+    kind: "plugin.install",
+    spaceIds: ["space-coding"],
+    catalogId: "urzeye/dsh-outline",
+    version: "1.2.3",
+  });
+  maintenance.admitPlan(staleTargetPlan.id);
+  codingGeneration = 2;
+  await assert.rejects(() => maintenance.execute(staleTargetPlan.id, jobCtx()), matchCode("workbench/stale"));
+
+  // Whole-Home plans still enforce global expectedRevision.
+  const homePlan = await maintenance.preview({ kind: "snapshot.create" });
+  expectedRevision = "3".repeat(64);
+  assert.throws(() => maintenance.admitPlan(homePlan.id), matchCode("workbench/stale"));
+});
+
+test("a live plugin batch preserves completed, failed and unattempted space outcomes", async () => {
+  const calls: string[] = [];
+  const { home, maintenance, state } = harness({
+    pluginLive: async (input) => {
+      calls.push(input.spaceId);
+      if (input.spaceId === "space-failing") throw new Error("fixture live refusal");
+      return { application: "restart-required", steps: [{ step: "verify", status: "done" }] };
+    },
+  });
+  for (const id of ["space-failing", "space-later"]) {
+    writeManifest(home, id, { bundles: [BASE, WEB], dependencies: { [BASE]: "1", [WEB]: "1" } });
+    state.status[id] = "running";
+  }
+  const plan = await maintenance.preview({
+    kind: "plugin.install", spaceIds: ["space-coding", "space-failing", "space-later"],
+    catalogId: "urzeye/dsh-outline", version: "1.2.3",
+  });
+  let partial: import("../../src/shared/workbench.ts").WorkbenchJobResult | undefined;
+  await assert.rejects(maintenance.execute(plan.id, { ...jobCtx(), result: (result) => { partial = result; } }), /fixture live refusal/);
+  assert.deepEqual(calls, ["space-coding", "space-failing"]);
+  assert.deepEqual(partial?.steps?.map(step => step.status), ["done", "failed", "not-run"]);
+  assert.deepEqual(partial?.restartRequiredSpaceIds, ["space-coding"]);
+  assert.deepEqual(state.stopped, []);
 });

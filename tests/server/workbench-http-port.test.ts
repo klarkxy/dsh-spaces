@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
+import { currentOperationDetails } from "../../src/adapters/node/diagnostics/operation-log.ts";
 import { afterEach, describe, test } from "node:test";
 import {
   bindInitialLoopbackHttp,
@@ -108,6 +113,32 @@ test("local profile cookie headers remain bounded without bypassing authenticati
   assert.equal(oversized.status, 431);
   await oversized.arrayBuffer();
   assert.equal(dispatched, 1);
+});
+
+test("a real management HTTP request shares its operationId with dispatched steps", async () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-spaces-http-log-"));
+  let origin = "";
+  const host = runtime(() => origin);
+  host.diagnosticLog = createDiagnosticLogger(home, "supervisor");
+  host.dispatch = async () => {
+    host.diagnosticLog?.info("test.dispatched", "Dispatched under an HTTP request.", currentOperationDetails());
+    return { accepted: true };
+  };
+  const started = await startWorkbenchHttp(host);
+  origin = started.origin;
+  closers.push(started.close);
+  try {
+    const response = await fetchState(origin);
+    assert.equal(response.status, 200);
+    const rows = readFileSync(join(home, ".dsh-spaces-control", "logs", "supervisor.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { event?: string; context?: { operationId?: string; request?: string } });
+    const dispatched = rows.find(row => row.event === "test.dispatched");
+    const http = rows.find(row => row.event === "http.completed");
+    assert.ok(dispatched?.context?.operationId);
+    assert.equal(http?.context?.operationId, dispatched.context?.operationId);
+    assert.equal(http?.context?.request, dispatched.context?.operationId);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 async function freeBlockedPort(): Promise<number> {

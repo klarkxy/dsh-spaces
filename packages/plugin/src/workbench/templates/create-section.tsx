@@ -164,7 +164,7 @@ function TemplateCreateForm({
   const locale = ui.locale;
   const [error, setError] = useState<string | null>(null);
   const writable = controller.canMutate();
-  const busy = controller.isBusy();
+  const busy = controller.isGlobalBusy() || ui.commandPending;
   return (
     <div className="dsh-wb-template-form" data-templates-form="template">
       <h4 className="dsh-wb-title">{templateName}</h4>

@@ -2,17 +2,15 @@
  * The settings surface.
  *
  * It renders either as a dialog on top of the stage or as the native settings
- * page. The navigation follows the task the user has in mind: four everyday
- * groups first, the operational ones inside a maintenance group that stays
- * visible but collapsed. The selected tab carries a shared-layout indicator
+ * page. The navigation keeps four flat destinations: spaces, templates,
+ * general and maintenance. The selected tab carries a shared-layout indicator
  * that slides down the navigation, and the tab panel slides in (opacity pinned
  * at 1, so a failure reason in it is readable from the first frame).
  */
 
-import React, { useEffect, useRef, type ReactElement } from "react";
+import React, { useEffect, useRef, useState, type ReactElement } from "react";
 import { LayoutIndicator, VisibleScale, VisibleSlide } from "../../../../../src/shared/ui/motion";
 import { HomeSettingsFields, ThemeSwitch } from "../product-ui";
-import { InlineErrors } from "../inline-error";
 import { t } from "../i18n";
 import { CreatedNotice, type WorkbenchViewProps } from "./shared";
 import { ManagementContent, StatusBanners } from "./management";
@@ -20,49 +18,49 @@ import { LanguageSwitch } from "./jobs";
 
 type SettingsTab = WorkbenchViewProps["ui"]["settingsTab"];
 
-/** The everyday destinations, in the order the plan gives them. */
-const MAIN_TABS: Array<[SettingsTab, Parameters<typeof t>[1]]> = [
+/** The four top-level settings destinations. */
+const SETTINGS_TABS: Array<[SettingsTab, Parameters<typeof t>[1]]> = [
   ["spaces", "settings.nav.spaces"],
   ["templates", "settings.nav.templates"],
   ["general", "settings.nav.general"],
+  ["overview", "settings.nav.maintenance"],
 ];
 
-/** The operational destinations. They live in the collapsible maintenance group. */
-const MAINTENANCE_TABS: Array<[SettingsTab, Parameters<typeof t>[1]]> = [
-  ["overview", "settings.nav.overview"],
-  ["snapshots", "settings.nav.backups"],
-  ["runtime", "settings.nav.runtime"],
-  ["advanced", "settings.nav.service"],
-];
+function canonicalNavTab(tab: SettingsTab): SettingsTab {
+  if (tab === "plugins") return "spaces";
+  if (tab === "blueprints") return "templates";
+  if (tab === "snapshots" || tab === "runtime" || tab === "advanced") return "overview";
+  return tab;
+}
 
 export function SettingsDialog({ ui, controller, systemPage, requestServiceStop }: WorkbenchViewProps): ReactElement {
   const asPage = systemPage === "settings";
   const locale = ui.locale;
-  const writable = controller.canMutate();
-  const busy = controller.isBusy();
   const dialog = useRef<HTMLDivElement>(null);
-  // Keyboard navigation can land on a tab that is only rendered after this
-  // update (crossing into a collapsed maintenance group), so focus follows the
-  // render instead of running synchronously in the key handler.
   const focusTab = useRef<SettingsTab | null>(null);
+  const activeTab = canonicalNavTab(ui.settingsTab);
+  const hasChildOverlay = Boolean(ui.overlay && ui.overlay.type !== "settings") || Boolean(ui.pendingPlan);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const hasSettingsAlert =
+    ui.settingsStatus === "error" ||
+    (ui.requestOrigin === "general:settings" && Boolean(ui.commandError || ui.planError));
+  useEffect(() => {
+    if (hasSettingsAlert) setAdvancedOpen(true);
+  }, [hasSettingsAlert]);
   useEffect(() => {
     const tab = focusTab.current;
     if (!tab) return;
     focusTab.current = null;
     document.getElementById(`settings-tab-${tab}`)?.focus();
-  }, [ui.settingsTab]);
+  }, [activeTab]);
   useEffect(() => {
     const previous = document.activeElement;
     dialog.current?.querySelector<HTMLButtonElement>(asPage ? '[role="tab"][aria-selected="true"]' : "[data-settings-close]")?.focus();
     return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
   }, []);
-  // The maintenance group is expanded while one of its tabs is open, so the
-  // active tab is never hidden behind a collapsed group.
-  const maintenanceOpen = ui.maintenanceExpanded || MAINTENANCE_TABS.some(([tab]) => tab === ui.settingsTab);
-  const visibleTabs = [...MAIN_TABS, ...(maintenanceOpen ? MAINTENANCE_TABS : [])];
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     if (asPage) return;
-    if (ui.pendingPlan) return;
+    if (hasChildOverlay) return;
     if (event.key === "Escape") { event.preventDefault(); controller.closeOverlay(); }
     if (event.key === "Tab") {
       const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, a[href], [tabindex="0"]') ?? []).filter((el) => el.getClientRects().length > 0);
@@ -72,7 +70,7 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
     }
   };
   const onBackdrop = (event: React.MouseEvent<HTMLElement>): void => {
-    if (!asPage && event.target === event.currentTarget && !ui.pendingPlan) controller.closeOverlay();
+    if (!asPage && event.target === event.currentTarget && !hasChildOverlay) controller.closeOverlay();
   };
   const tabButton = ([tab, label]: [SettingsTab, Parameters<typeof t>[1]]): ReactElement => (
     <button
@@ -81,22 +79,22 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
       role="tab"
       id={`settings-tab-${tab}`}
       aria-controls="settings-panel"
-      aria-selected={ui.settingsTab === tab}
-      tabIndex={ui.settingsTab === tab ? 0 : -1}
+      aria-selected={activeTab === tab}
+      tabIndex={activeTab === tab ? 0 : -1}
       className="dsh-wb-tab"
       onClick={() => controller.setSettingsTab(tab)}
       onKeyDown={(event) => {
-        const index = visibleTabs.findIndex(([candidate]) => candidate === tab);
-        const next = event.key === "ArrowDown" ? (index + 1) % visibleTabs.length : event.key === "ArrowUp" ? (index + visibleTabs.length - 1) % visibleTabs.length : event.key === "Home" ? 0 : event.key === "End" ? visibleTabs.length - 1 : -1;
+        const index = SETTINGS_TABS.findIndex(([candidate]) => candidate === tab);
+        const next = event.key === "ArrowDown" ? (index + 1) % SETTINGS_TABS.length : event.key === "ArrowUp" ? (index + SETTINGS_TABS.length - 1) % SETTINGS_TABS.length : event.key === "Home" ? 0 : event.key === "End" ? SETTINGS_TABS.length - 1 : -1;
         if (next < 0) return;
         event.preventDefault();
-        const target = visibleTabs[next][0];
-        if (target === ui.settingsTab) { document.getElementById(`settings-tab-${target}`)?.focus(); return; }
+        const target = SETTINGS_TABS[next][0];
+        if (target === activeTab) { document.getElementById(`settings-tab-${target}`)?.focus(); return; }
         focusTab.current = target;
         controller.setSettingsTab(target);
       }}
     >
-      {ui.settingsTab === tab ? <LayoutIndicator as="span" layoutId="dsh-wb-settings-tab" className="dsh-wb-settings-tab-indicator" /> : null}
+      {activeTab === tab ? <LayoutIndicator as="span" layoutId="dsh-wb-settings-tab" className="dsh-wb-settings-tab-indicator" /> : null}
       {t(locale, label)}
     </button>
   );
@@ -111,37 +109,16 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
       <div className="dsh-wb-settings-body">
         <div className="dsh-wb-settings-nav">
           <div className="dsh-wb-settings-tablist" role="tablist" aria-label={t(locale, "settings.title")} aria-orientation="vertical">
-            {MAIN_TABS.map(tabButton)}
-          </div>
-          <button
-            type="button"
-            className="dsh-wb-settings-group-toggle"
-            aria-expanded={maintenanceOpen}
-            aria-controls="dsh-wb-settings-maintenance"
-            data-settings-maintenance="true"
-            onClick={controller.toggleMaintenance}
-          >
-            <span className="dsh-wb-settings-group-caret" aria-hidden="true">{maintenanceOpen ? "▾" : "▸"}</span>
-            {t(locale, "settings.nav.maintenance")}
-          </button>
-          <div
-            className="dsh-wb-settings-tablist"
-            id="dsh-wb-settings-maintenance"
-            role="tablist"
-            aria-label={t(locale, "settings.nav.maintenance")}
-            aria-orientation="vertical"
-            hidden={!maintenanceOpen}
-          >
-            {MAINTENANCE_TABS.map(tabButton)}
+            {SETTINGS_TABS.map(tabButton)}
           </div>
         </div>
         <VisibleSlide
-          key={ui.settingsTab}
+          key={activeTab}
           from={8}
           className="dsh-wb-settings-content"
           role="tabpanel"
           id="settings-panel"
-          aria-labelledby={`settings-tab-${ui.settingsTab}`}
+          aria-labelledby={`settings-tab-${activeTab}`}
           tabIndex={0}
         >
           <StatusBanners ui={ui} />
@@ -150,19 +127,19 @@ export function SettingsDialog({ ui, controller, systemPage, requestServiceStop 
             <h3 className="dsh-wb-title">{t(locale, "settings.clientPrefs")}</h3>
             <div className="dsh-wb-preference-row"><span>{t(locale, "settings.locale")}</span><LanguageSwitch locale={locale} onChange={controller.setLocale} /></div>
             <div className="dsh-wb-preference-row"><span>{t(locale, "settings.theme")}</span><ThemeSwitch locale={locale} theme={ui.theme} onChange={controller.setTheme} /></div>
+            <details
+              className="dsh-wb-create-advanced"
+              data-settings-advanced="true"
+              open={advancedOpen}
+              onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+            >
+              <summary>{t(locale, "settings.advancedTitle")}</summary>
+              <div className="dsh-wb-create-advanced-body">
+                <HomeSettingsFields ui={ui} controller={controller} section="all" />
+              </div>
+            </details>
           </>}
-          {ui.settingsTab === "advanced" && <>
-            <HomeSettingsFields ui={ui} controller={controller} />
-            <section className="dsh-wb-settings-service dsh-wb-danger-zone" data-settings-service="true">
-              <h3 className="dsh-wb-title">{t(locale, "settings.service.danger")}</h3>
-              <h4 className="dsh-wb-title">{t(locale, "settings.service.stopTitle")}</h4>
-              <p className="dsh-wb-muted">{t(locale, "settings.service.stopHint")}</p>
-              <p className="dsh-wb-muted">{t(locale, "settings.shutdownVsExit")}</p>
-              <InlineErrors ui={ui} origin="service" />
-              <div><button type="button" className="dsh-wb-btn danger" disabled={!writable || busy} onClick={requestServiceStop ?? (() => controller.preview({ kind: "service.shutdown" }))}>{t(locale, "settings.service.stop")}</button></div>
-            </section>
-          </>}
-          <ManagementContent ui={ui} controller={controller} />
+          <ManagementContent ui={ui} controller={controller} requestServiceStop={requestServiceStop} />
         </VisibleSlide>
       </div>
     </>

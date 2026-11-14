@@ -98,9 +98,10 @@ export class SupervisorSpaceCommands {
     const id = this.host.requireSpace(command.spaceId);
     this.host.protectSpecial(id, { allowManager: true });
     await this.host.lock.run("space.update", async () => {
-      const patch: { displayName?: string; icon?: string } = {};
+      const patch: { displayName?: string; icon?: string; startWithDesktop?: boolean } = {};
       if (command.displayName !== undefined) patch.displayName = command.displayName;
       if (command.icon !== undefined) patch.icon = parseIcon(command.icon);
+      if (command.startWithDesktop !== undefined) patch.startWithDesktop = command.startWithDesktop;
       this.host.registry.updateMeta(id, patch);
     });
   }

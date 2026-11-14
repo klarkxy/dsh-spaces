@@ -52,6 +52,7 @@ export class MaintenancePlans extends MaintenanceRuntime {
   ): Promise<StoredPlan> {
     const spaceIds = unique(request.spaceIds.map((spaceId) => this.targetSpace(spaceId, false)));
     if (spaceIds.length === 0) throw new WorkbenchMaintenanceError("workbench/invalid-input");
+    this.assertPluginTargetsReady(spaceIds);
     const version = requireExactVersion(request.version);
     const entry = await this.resolveNpmCatalog(request.catalogId, version, true);
     const packageName = requirePackageName(entry);
@@ -67,9 +68,11 @@ export class MaintenancePlans extends MaintenanceRuntime {
     const changes = [
       `Install ${packageName}@${version} into ${spaceIds.join(", ")}.`,
       runningSpaceIds.length
-        ? `Stop and restart running workspaces: ${runningSpaceIds.join(", ")}.`
+        ? `Apply live inside running workspaces without stopping them: ${runningSpaceIds.join(", ")}.`
         : "No running workspace needs to stop.",
-      "The plugin change is not a hot reload; restart is required.",
+      runningSpaceIds.length
+        ? "If a plugin requires a restart to take full effect, you decide when to restart."
+        : "Stopped workspaces stay stopped after the plugin change.",
       ...(packageName === XP_PACKAGE_NAME && version === XP_SUPPORTED_VERSION ? [XP_EMBED_COMPATIBILITY_NOTE] : []),
     ];
     return this.storeable(id, createdAt, expiresAt, command, {
@@ -98,6 +101,7 @@ export class MaintenancePlans extends MaintenanceRuntime {
     request: Extract<WorkbenchPlanRequest, { kind: "plugin.install.spec" }>,
   ): Promise<StoredPlan> {
     const spaceId = this.targetSpace(request.spaceId, false);
+    this.assertPluginTargetsReady([spaceId]);
     let plugin: ExactPluginSource;
     try {
       plugin = parsePluginSource(request.source);
@@ -117,9 +121,11 @@ export class MaintenancePlans extends MaintenanceRuntime {
         ? `The installed package is verified against ${plugin.owner}/${plugin.repo}${plugin.path ? `/${plugin.path}` : ""}#${plugin.commit} via the lockfile.`
         : `The installed package must resolve to ${plugin.packageName}@${plugin.version}.`,
       runningSpaceIds.length
-        ? `Stop and restart running workspace: ${spaceId}.`
+        ? `Apply live inside running workspace ${spaceId} without stopping it.`
         : "The workspace is stopped and stays stopped.",
-      "The plugin change is not a hot reload; restart is required.",
+      runningSpaceIds.length
+        ? "If the plugin requires a restart to take full effect, you decide when to restart."
+        : "Stopped workspace stays stopped after the plugin change.",
       ...(plugin.kind === "npm" && plugin.packageName === XP_PACKAGE_NAME && plugin.version === XP_SUPPORTED_VERSION
         ? [XP_EMBED_COMPATIBILITY_NOTE]
         : []),
@@ -143,6 +149,7 @@ export class MaintenancePlans extends MaintenanceRuntime {
     request: Extract<WorkbenchPlanRequest, { kind: "plugin.remove" }>,
   ): Promise<StoredPlan> {
     const spaceId = this.targetSpace(request.spaceId, false);
+    this.assertPluginTargetsReady([spaceId]);
     const packageName = requirePackageName({ packageName: request.packageName, installSpec: request.packageName });
     assertGuardedPackage(packageName);
     if (!this.spaceHasPlugin(spaceId, packageName)) {
@@ -158,8 +165,12 @@ export class MaintenancePlans extends MaintenanceRuntime {
       runningSpaceIds,
       changes: [
         `Remove ${packageName} from ${spaceId}.`,
-        runningSpaceIds.length ? `Stop and restart ${spaceId}.` : "Workspace is stopped.",
-        "The plugin change is not a hot reload; restart is required.",
+        runningSpaceIds.length
+          ? `Remove live inside running workspace ${spaceId} without stopping it.`
+          : "Workspace is stopped.",
+        runningSpaceIds.length
+          ? "If a restart is required to unload active hooks, you decide when to restart."
+          : "Stopped workspace stays stopped.",
       ],
       destructive: true,
       expiresAt,
@@ -173,6 +184,7 @@ export class MaintenancePlans extends MaintenanceRuntime {
     request: Extract<WorkbenchPlanRequest, { kind: "plugin.toggle" }>,
   ): Promise<StoredPlan> {
     const spaceId = this.targetSpace(request.spaceId, false);
+    this.assertPluginTargetsReady([spaceId]);
     const packageName = this.resolveTogglePackage(spaceId, request.pluginId, request.enabled);
     assertGuardedPackage(packageName);
     const runningSpaceIds = this.runningOf([spaceId]);
@@ -192,8 +204,12 @@ export class MaintenancePlans extends MaintenanceRuntime {
       runningSpaceIds,
       changes: [
         `${action} ${packageName} on ${spaceId} using the existing install/remove semantics.`,
-        runningSpaceIds.length ? `Stop and restart ${spaceId}.` : "Workspace is stopped.",
-        "This is not a hot toggle; the workspace must restart to apply the change.",
+        runningSpaceIds.length
+          ? `${action} live inside running workspace ${spaceId} without stopping it.`
+          : "Workspace is stopped.",
+        runningSpaceIds.length
+          ? "If a restart is required to finish applying the change, you decide when to restart."
+          : "Stopped workspace stays stopped.",
       ],
       destructive: !request.enabled,
       expiresAt,

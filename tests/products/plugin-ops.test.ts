@@ -14,9 +14,11 @@ import {
   pluginRemove,
   resolveInstallSpec,
 } from "../../src/adapters/node/products/plugin-ops.ts";
-import { seedCatalog } from "../../src/adapters/node/products/plugin-catalog.ts";
+import { testCatalog, writeTestCatalog } from "../fixtures/plugin-catalog.ts";
 import { resetDshBinCache, setSelectedDshResolver } from "../../src/adapters/node/runtime/dsh-cli.ts";
 import { applyAppLocale, t } from "../../src/shared/i18n/index.ts";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
+import { diagnosticOperation } from "../../src/adapters/node/diagnostics/operation-log.ts";
 
 const temps: string[] = [];
 
@@ -27,6 +29,7 @@ afterEach(() => {
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), "dsh-spaces-ops-"));
   temps.push(dir);
+  writeTestCatalog(dir);
   return dir;
 }
 
@@ -129,7 +132,7 @@ test("resolveInstallSpec uses catalog id not a renderer spec", async () => {
     spec: "-evil",
   });
   assert.equal(spec, "dsh-outline");
-  const likely = seedCatalog().entries.find((entry) => entry.tier === "likely-plugin");
+  const likely = testCatalog.entries.find((entry) => entry.tier === "likely-plugin");
   assert.ok(likely);
   await assert.rejects(resolveInstallSpec(dir, { catalogId: likely.id }), /not one-click|不能一键/);
   await assert.rejects(resolveInstallSpec(dir, { spec: "-foo" }), /not allowed|不合法/);
@@ -210,6 +213,32 @@ test("listNpmPackageVersions reports the registry failure and keeps the limit", 
   assert.equal(capped.latest, "1.0.60");
 });
 
+test("npm version lookup checks identity, honors cancellation and retains a latest tag outside the page", async () => {
+  const response = (data: unknown) => ({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => data, arrayBuffer: async () => new ArrayBuffer(0),
+  });
+  await assert.rejects(listNpmPackageVersions("dsh-font", {
+    fetchImpl: async () => response({ name: "other-package", versions: { "1.0.0": {} } }),
+  }), /different package/);
+  const abort = new AbortController();
+  abort.abort();
+  let fetched = false;
+  await assert.rejects(listNpmPackageVersions("dsh-font", {
+    signal: abort.signal, fetchImpl: async () => { fetched = true; return response({}); },
+  }));
+  assert.equal(fetched, false);
+  const result = await listNpmPackageVersions("dsh-font", {
+    limit: 2,
+    fetchImpl: async () => response({
+      name: "dsh-font", "dist-tags": { latest: "1.0.0" },
+      versions: { "1.0.0": {}, "2.0.0-rc.1": {}, "2.0.0-rc.2": {}, "2.0.0-rc.3": {} },
+    }),
+  });
+  assert.equal(result.latest, "1.0.0");
+  assert.deepEqual(result.versions, ["2.0.0-rc.3", "1.0.0"]);
+});
+
 test("pluginLinkDirectory rejects anything but an absolute outside-Home package dir", async () => {
   const dir = home();
   mkdirSync(join(dir, "profiles", "coding"), { recursive: true });
@@ -244,13 +273,14 @@ test("pluginAdd error keeps generic dsh stderr and the pnpm stdout tail", async 
       "process.stderr.write('dsh: pnpm failed in profile directory\\n');",
       `process.stdout.write(${JSON.stringify(`${"y".repeat(2000)}${stdoutTail}`)});`,
       "process.exit(1);",
+      "process.stdout.write('token=plugin-test-secret\\n');",
     ].join("\n"),
   );
   setSelectedDshResolver(() => bin);
   resetDshBinCache();
   try {
     await assert.rejects(
-      pluginAdd(dir, "coding", "dsh-outline@1.2.3"),
+      diagnosticOperation(createDiagnosticLogger(dir, "supervisor"), "plugin.install", {}, () => pluginAdd(dir, "coding", "dsh-outline@1.2.3")),
       (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.match(error.message, /dsh: pnpm failed in profile directory/);
@@ -264,6 +294,12 @@ test("pluginAdd error keeps generic dsh stderr and the pnpm stdout tail", async 
     setSelectedDshResolver(() => undefined);
     resetDshBinCache();
   }
+  const log = readFileSync(join(dir, ".dsh-spaces-control", "logs", "supervisor.jsonl"), "utf8");
+  assert.match(log, /plugin\.install\.finished/);
+  assert.match(log, /"operationId":"op-/);
+  assert.match(log, /"exitCode":1/);
+  assert.match(log, /EPERM cannot unlink node_modules/);
+  assert.equal(log.includes("plugin-test-secret"), false);
 });
 
 test("pluginAdd resolves the pinned runtime bin of the target space", async () => {

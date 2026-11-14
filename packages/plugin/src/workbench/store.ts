@@ -19,7 +19,9 @@ export { WorkbenchController } from "./store/controller";
 export { createDefaultEnv } from "./store/env";
 export { pollDelayMs } from "./store/polling";
 export { requestOriginMounted, workbenchRequestOrigin } from "./store/origin";
+export { isSettingsOverlay } from "./store/types";
 export type {
+  CreateDialogMode,
   HomeTab,
   ImportPreviewState,
   OverlayKind,

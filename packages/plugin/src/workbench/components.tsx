@@ -10,6 +10,7 @@ import React, { useEffect, type ReactElement } from "react";
 import { MotionRoot } from "../../../../src/shared/ui/motion";
 import { installBrowserRelay } from "./browser-relay";
 import { t } from "./i18n";
+import { isSettingsOverlay } from "./store";
 import { WORKBENCH_CSS } from "./styles";
 import { CreatedNotice, type WorkbenchViewProps } from "./view/shared";
 import { Rail } from "./view/rail";
@@ -33,6 +34,7 @@ export function WorkbenchView({ ui, controller, homeUrl, contained = false, nati
   useEffect(() => installBrowserRelay(controller), [controller]);
   const locale = ui.locale;
   const visibleSystemPage = ui.selected === "home" ? systemPage : null;
+  const settingsModal = isSettingsOverlay(ui.overlay);
   return (
     <MotionRoot>
       <div className="dsh-workbench dsh-ui" lang={locale === "zh" ? "zh-CN" : "en"} data-locale={locale} data-theme={ui.theme} data-contained={contained ? "true" : undefined} data-native-surface={nativeSurface ? "true" : undefined}>
@@ -42,7 +44,7 @@ export function WorkbenchView({ ui, controller, homeUrl, contained = false, nati
           <button type="button" className="dsh-wb-btn" onClick={controller.openCreate} disabled={!controller.canMutate()}>{t(locale, "app.newSpace")}</button>
           <button type="button" className="dsh-wb-btn" onClick={controller.openSettings}>{t(locale, "app.settings")}</button>
         </nav> : <Rail ui={ui} controller={controller} />}
-        <div className="dsh-wb-main" inert={ui.overlay?.type === "settings" || undefined}>
+        <div className="dsh-wb-main" inert={settingsModal || undefined}>
           {!nativeSurface && homeUrl && <iframe className="dsh-wb-frame dsh-wb-home-frame" title="DSH" src={homeUrl} data-home-view="true" allow="clipboard-write" hidden={ui.selected !== "home"} referrerPolicy="no-referrer" />}
           <WorkspaceFrames ui={ui} controller={controller} />
           {ui.boot === "loading" && (
@@ -62,7 +64,7 @@ export function WorkbenchView({ ui, controller, homeUrl, contained = false, nati
 
           {visibleSystemPage !== "settings" && <CreatedNotice ui={ui} controller={controller} />}
           <WorkspaceChrome ui={ui} controller={controller} />
-          {ui.overlay?.type !== "settings" && visibleSystemPage !== "settings" && <div className="dsh-wb-global-status"><StatusBanners ui={ui} /></div>}
+          {!settingsModal && visibleSystemPage !== "settings" && <div className="dsh-wb-global-status"><StatusBanners ui={ui} /></div>}
         </div>
         <Overlays ui={ui} controller={controller} systemPage={visibleSystemPage} requestServiceStop={requestServiceStop} />
       </div>

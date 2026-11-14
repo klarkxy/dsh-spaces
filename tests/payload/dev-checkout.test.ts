@@ -21,6 +21,7 @@ import {
 } from "../../src/adapters/node/supervisor/payload.ts";
 import { SupervisorLifecycle } from "../../src/adapters/node/supervisor/lifecycle.ts";
 import { SupervisorToolchain, type SupervisorToolchainHost } from "../../src/adapters/node/supervisor/toolchain.ts";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
 import type { HomeOperationLock } from "../../src/adapters/node/home/home-operation-lock.ts";
 import type { ProfileRegistry } from "../../src/adapters/node/profile/profile-registry.ts";
 import type { WorkbenchSupervisorOptions } from "../../src/adapters/node/supervisor/types.ts";
@@ -114,6 +115,7 @@ function linkComponent(home: string, profileId: string, spec: string): void {
 
 function toolchainHost(home: string, options: Partial<WorkbenchSupervisorOptions>): SupervisorToolchainHost {
   return {
+    diagnosticLog: createDiagnosticLogger(home, "supervisor"),
     home,
     controlDir: join(home, ".control"),
     nodeExe: process.execPath,

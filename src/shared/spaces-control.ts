@@ -22,7 +22,16 @@ export interface SpacesOverview {
   spaces: SpaceSummary[];
 }
 
+export interface SpaceModelConfig {
+  status: 'configured' | 'incomplete' | 'unconfigured';
+  routeNames: string[];
+  defaultModel: string | null;
+  missingCredentials: string[];
+}
+
 export interface SpaceDetail {
+  /** Read from this space's own patch and credentials; no model requests are sent. */
+  models: SpaceModelConfig;
   space: SpaceSummary;
   plugins: Array<{ name: string; version: string | null }>;
   snapshots: Array<{ id: string; createdAt: string; runtimeVersion: string | null }>;

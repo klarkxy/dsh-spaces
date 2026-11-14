@@ -14,6 +14,7 @@ import { SpaceRunRegistry } from "../../src/adapters/node/supervisor/space-runs.
 import { SupervisorPlans } from "../../src/adapters/node/supervisor/plans.ts";
 import { HomeOperationLock } from "../../src/adapters/node/home/home-operation-lock.ts";
 import { ProfileRegistry } from "../../src/adapters/node/profile/profile-registry.ts";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
 
 const homes: string[] = [];
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -227,6 +228,7 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
     const messageBus = new SpaceMessageRouter();
     const options = { home, bin: "", onNormalExit: () => { exited = true; } };
     const supervisorPlans = new SupervisorPlans({
+      diagnosticLog: createDiagnosticLogger(home, "supervisor"),
       home, lifecycle, runs, messageBus, options,
       jobs: () => jobs,
       instances: () => { throw new Error("not used"); },
@@ -243,7 +245,7 @@ test("an earlier queued plan cannot authorize shutdown using its own persisted s
       stopOwned: async () => {}, stopOwnedAll: async () => {},
       startSpace: async () => undefined,
       mainProfile: () => "web",
-      syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
+      prepareModelSync: async () => { const summary = { mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }; return { summary, snapshot: { providers: {}, deepseek: false, refs: {}, records: {}, skipped: [], missingCredentials: [] }, apply: async () => summary }; },
       currentServiceEpoch: () => "", stateRevision: () => "",
       productObservation: () => ({ serviceEpoch: "", expectedRevision: "" }),
       assertLiveContext: () => {},
@@ -293,6 +295,7 @@ test("shutdown persistence diagnostics distinguish failure before stopping from 
     });
     const epoch = "a".repeat(64);
     const plans = new SupervisorPlans({
+      diagnosticLog: createDiagnosticLogger(home, "supervisor"),
       home, lifecycle, runs: new SpaceRunRegistry(), messageBus: new SpaceMessageRouter(),
       options: { home, bin: "", onNormalExit: () => { normalExit = true; } },
       lock: new HomeOperationLock(home), registry: new ProfileRegistry(home),
@@ -305,13 +308,13 @@ test("shutdown persistence diagnostics distinguish failure before stopping from 
       stopOwned: async () => {}, stopOwnedAll: async () => { stopCalls++; },
       startSpace: async () => undefined,
       mainProfile: () => "web",
-      syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
+      prepareModelSync: async () => { const summary = { mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }; return { summary, snapshot: { providers: {}, deepseek: false, refs: {}, records: {}, skipped: [], missingCredentials: [] }, apply: async () => summary }; },
       currentServiceEpoch: () => epoch,
       stateRevision: () => "revision",
       productObservation: () => ({ serviceEpoch: epoch, expectedRevision: "revision" }),
       assertLiveContext: () => {},
     });
-    const plan = plans.previewLocal({ kind: "service.shutdown" });
+    const plan = await plans.previewLocal({ kind: "service.shutdown" });
     await jobs.submit({ kind: "plan.execute", planId: plan.id }, "phase-write-failure", async ctx => {
       lifecycle.activeJobId = "phase-write-failure";
       try { await plans.executePlan(plan.id, ctx); }

@@ -1,5 +1,5 @@
 import { isNativeSpaceTarget, parseNativeSpaceHash, parseNativePortalFailureHash, portalFailureDetail,
-  parsePortalSnapshot, nativeCreateIntentHash, parseNativeCreateIntent,
+  parsePortalSnapshot, nativeCreateIntentHash, parseNativeCreateIntent, nativeDetailIntentHash, parseNativeDetailIntent, PORTAL_SPACE_RE,
   type NativeSpaceTarget, type PortalSnapshot, type PortalFailure, type PortalCreation } from "../../../../../src/shared/space-host";
 import { BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, type BrowserRelay } from "../../../../../src/shared/browser-guest";
 import type { DesktopSpaceAction, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
@@ -41,7 +41,7 @@ export function desktopBrowserBridge(root: typeof globalThis = globalThis): Desk
 }
 
 type NativeLaunchPhase = DesktopLaunchState["phase"];
-type NativeNavigationIntent = "settings" | "create";
+type NativeNavigationIntent = "settings" | "create" | "detail";
 type NativeState = { phase: "loading" | NativeLaunchPhase | "ready" | "stopping" | "service-stopped" | "failed"; inventory: PortalSnapshot | null;
   selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; detail: string | null;
   cleanupDetail: string | null; instanceRetained: boolean | null;
@@ -90,8 +90,10 @@ export class NativeHostController {
   private channel = Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, "0")).join("");
   /** Set while the next settings selection must also open the create dialog. */
   private createIntent = false;
+  /** Set while the next settings selection must open one space's detail page. */
+  private detailIntentSpaceId: string | null = null;
   /** Latest settings or create choice. Main, failure and stop clear it. */
-  private intent: "settings" | "create" | null = null;
+  private intent: NativeNavigationIntent | null = null;
   /** Monotonic id of the last create intent handed to the portal page. */
   private intentSequence = 0;
   /** First-navigation diagnosis. Calls must not change navigation. */
@@ -301,7 +303,7 @@ export class NativeHostController {
   }
   private finishStopped(snapshot: DesktopLaunchState) {
     const diagnostics = this.launchDiagnostics(snapshot);
-    this.intent = null; this.createIntent = false; this.desiredGuest = 0;
+    this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null; this.desiredGuest = 0;
     this.patch({ phase: "service-stopped", guide: false, selected: "current", pending: null, navigationIntent: null, createHandoff: false,
       error: null, detail: diagnostics.detail, cleanupDetail: diagnostics.cleanupDetail, instanceRetained: diagnostics.instanceRetained, inventory: null });
   }
@@ -312,20 +314,30 @@ export class NativeHostController {
     this.patch({ navigationIntent: null });
     if (intent === "create") {
       this.createIntent = true;
+      this.detailIntentSpaceId = null;
       this.selectingCreate = true;
       this.patch({ createHandoff: true });
       this.select("@settings");
       this.selectingCreate = false;
       return;
     }
+    if (intent === "detail" && this.detailIntentSpaceId) {
+      this.createIntent = false;
+      this.selectingCreate = true;
+      this.patch({ createHandoff: false });
+      this.select("@settings");
+      this.selectingCreate = false;
+      return;
+    }
     this.createIntent = false;
+    this.detailIntentSpaceId = null;
     this.patch({ createHandoff: false });
     this.select("@settings");
   }
   showCurrent = () => {
     this.browserRequest = undefined; this.browser?.hide();
     this.sequence++; this.desiredGuest = 0; clearTimeout(this.selectionTimer);
-    this.createIntent = false; this.intent = null;
+    this.createIntent = false; this.detailIntentSpaceId = null; this.intent = null;
     this.patch({ selected: "current", pending: null, guide: false, navigationIntent: null, createHandoff: false });
   };
 
@@ -345,8 +357,40 @@ export class NativeHostController {
       return;
     }
     this.createIntent = true;
+    this.detailIntentSpaceId = null;
     this.intent = "create";
     this.patch({ navigationIntent: "create", createHandoff: true, ...(this.state.phase === "ready" ? {} : { guide: true }) });
+    if (this.state.phase !== "ready") return;
+    this.selectingCreate = true;
+    this.select("@settings");
+    this.selectingCreate = false;
+  };
+  /**
+   * Open one space's detail page inside the workbench settings surface.
+   *
+   * Navigates the guest to `@settings` first and then hands over a closed
+   * `#intent/detail/<requestId>/<spaceId>` fragment through the portal.
+   */
+  openSpaceSettings = (spaceId: string) => {
+    if (!PORTAL_SPACE_RE.test(spaceId) || spaceId === "desktop" || spaceId === this.state.inventory?.managerId) return;
+    if (this.stopped) { this.clearNavigationIntent(); this.select("@settings"); return; }
+    if (this.state.phase === "failed" || this.state.phase === "service-stopped" || this.state.phase === "stopping") {
+      this.clearNavigationIntent();
+      if (this.state.phase !== "stopping") this.select("@settings");
+      return;
+    }
+    if (this.state.phase === "ready" && this.state.selected === "@settings" && !this.state.pending &&
+        !this.state.guide && !this.state.operation && this.guest && this.nativeUrl) {
+      this.clearNavigationIntent();
+      this.browserRequest = undefined; this.browser?.hide();
+      this.guest.focus();
+      this.handOverDetailIntent(spaceId);
+      return;
+    }
+    this.createIntent = false;
+    this.detailIntentSpaceId = spaceId;
+    this.intent = "detail";
+    this.patch({ navigationIntent: "detail", createHandoff: false, ...(this.state.phase === "ready" ? {} : { guide: true }) });
     if (this.state.phase !== "ready") return;
     this.selectingCreate = true;
     this.select("@settings");
@@ -362,12 +406,14 @@ export class NativeHostController {
     if (this.state.phase !== "ready") {
       if (target !== "@settings" || this.selectingCreate) return;
       this.createIntent = false;
+      this.detailIntentSpaceId = null;
       this.intent = this.state.phase === "failed" || this.state.phase === "service-stopped" ? null : "settings";
       this.patch({ navigationIntent: this.intent, createHandoff: false, guide: true });
       return;
     }
     if (target === "@settings" && !this.selectingCreate) {
       this.createIntent = false;
+      this.detailIntentSpaceId = null;
       this.intent = null;
       this.patch({ navigationIntent: null, createHandoff: false });
     }
@@ -609,8 +655,8 @@ export class NativeHostController {
       }
       return;
     }
-    // A create intent is a request, never an answer and never a failure.
-    if (parseNativeCreateIntent(url.hash) !== null) return;
+    // Create and detail intents are requests, never answers and never failures.
+    if (parseNativeCreateIntent(url.hash) !== null || parseNativeDetailIntent(url.hash) !== null) return;
     const answer = parseNativeSpaceHash(url.hash);
     if (!answer || answer.kind === "select" || answer.requestId !== this.sequence || answer.target !== this.state.pending) return;
     clearTimeout(this.selectionTimer);
@@ -625,7 +671,12 @@ export class NativeHostController {
     this.patch({ selected: answer.target, pending: null, guide: false }); this.guest.focus();
     if (this.createIntent && answer.target === "@settings") {
       this.createIntent = false;
+      this.detailIntentSpaceId = null;
       this.handOverCreateIntent();
+    } else if (this.detailIntentSpaceId && answer.target === "@settings") {
+      const spaceId = this.detailIntentSpaceId;
+      this.detailIntentSpaceId = null;
+      this.handOverDetailIntent(spaceId);
     }
     this.navOutcome("ready", true);
   }
@@ -644,6 +695,14 @@ export class NativeHostController {
       } catch { this.patch({ guide: true, error: nativeTexts().createDialogFailed, detail: null }); }
     });
   }
+  private handOverDetailIntent(spaceId: string) {
+    const intent = this.nativeUrl + nativeDetailIntentHash(++this.intentSequence, spaceId);
+    void this.guest!.loadURL(intent).catch(() => {
+      try {
+        if (this.guest?.getURL() !== intent) this.patch({ guide: true, error: nativeTexts().spaceSettingsFailed, detail: null });
+      } catch { this.patch({ guide: true, error: nativeTexts().spaceSettingsFailed, detail: null }); }
+    });
+  }
   private async presentBrowser(request: BrowserRelay, requestUrl: string) {
     const identity = request.identity, inventory = this.state.inventory;
     if (!this.browser || identity.serviceEpoch !== inventory?.serviceEpoch || !inventory.spaces.some(row =>
@@ -660,7 +719,7 @@ export class NativeHostController {
     catch { if (!this.stopped && this.guest?.getURL() !== responseUrl && this.browserRequest === request.requestId) this.fail(); }
   }
   private clearNavigationIntent() {
-    this.intent = null; this.createIntent = false;
+    this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null;
     if (this.state.navigationIntent || this.state.createHandoff) this.patch({ navigationIntent: null, createHandoff: false });
   }
   private fail(detail: string | null = null, portalFailure: PortalFailure | null = null, diagnostics?: { cleanupDetail: string | null; instanceRetained: boolean | null }) {
@@ -670,7 +729,7 @@ export class NativeHostController {
     // failure terminal and inspectable; show it immediately only when the user
     // is already using or opening a Spaces surface.
     this.launchSettled = true;
-    this.intent = null; this.createIntent = false; this.desiredGuest = 0;
+    this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null; this.desiredGuest = 0;
     const guide = this.state.guide || this.state.selected !== "current" || this.state.pending !== null;
     this.patch({ phase: "failed", pending: null, operation: null, inventory: null, selected: "current", guide,
       navigationIntent: null, createHandoff: false, error: nativeTexts().serviceUnavailable, detail,

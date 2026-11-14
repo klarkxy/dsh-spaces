@@ -117,6 +117,11 @@ export function publicResult(value: unknown): WorkbenchJobResult | undefined {
       /* drop unsafe product payloads instead of persisting them */
     }
   }
+  if (value.pluginApplication === "applied" || value.pluginApplication === "restart-required") {
+    result.pluginApplication = value.pluginApplication;
+  }
+  const restartRequired = publicSpaceIds(value.restartRequiredSpaceIds);
+  if (restartRequired) result.restartRequiredSpaceIds = restartRequired;
   const steps = publicSteps(value.steps);
   if (steps) result.steps = steps;
   return result;
@@ -124,7 +129,17 @@ export function publicResult(value: unknown): WorkbenchJobResult | undefined {
 
 function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   if (!isPlainObject(value)) return undefined;
-  const allowed = new Set(["spaceId", "snapshotId", "runtimeVersion", "dshVersion", "view", "product", "steps"]);
+  const allowed = new Set([
+    "spaceId",
+    "snapshotId",
+    "runtimeVersion",
+    "dshVersion",
+    "view",
+    "product",
+    "pluginApplication",
+    "restartRequiredSpaceIds",
+    "steps",
+  ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return undefined;
   if (value.spaceId !== undefined && (typeof value.spaceId !== "string" || !ENTITY_ID_RE.test(value.spaceId))) {
     return undefined;
@@ -139,6 +154,16 @@ function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
     if (typeof value.dshVersion !== "string" || !isExactRuntimeVersion(value.dshVersion)) return undefined;
   }
   if (value.view !== undefined && !publicView(value.view)) return undefined;
+  if (
+    value.pluginApplication !== undefined &&
+    value.pluginApplication !== "applied" &&
+    value.pluginApplication !== "restart-required"
+  ) {
+    return undefined;
+  }
+  if (value.restartRequiredSpaceIds !== undefined && !publicSpaceIds(value.restartRequiredSpaceIds)) {
+    return undefined;
+  }
   if (value.steps !== undefined && !publicSteps(value.steps)) return undefined;
   if (value.product !== undefined) {
     try {
@@ -150,10 +175,20 @@ function parseStrictResult(value: unknown): WorkbenchJobResult | undefined {
   return publicResult(value) ?? {};
 }
 
+function publicSpaceIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > 256) return undefined;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !ENTITY_ID_RE.test(item)) return undefined;
+    ids.push(item);
+  }
+  return ids;
+}
+
 const JOB_STEP_STATUSES = new Set(["done", "failed", "not-run"]);
 
 function publicSteps(value: unknown): WorkbenchJobStep[] | undefined {
-  if (!Array.isArray(value) || value.length > 64) return undefined;
+  if (!Array.isArray(value) || value.length > 256) return undefined;
   const steps: WorkbenchJobStep[] = [];
   for (const row of value) {
     if (!isPlainObject(row)) return undefined;

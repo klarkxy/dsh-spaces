@@ -2631,7 +2631,7 @@ test("a create that installs a missing runtime reports the install phase and res
   assert.equal(record.phase, "create");
 });
 
-test("a space.start submitted mid-install with a pre-create revision", async () => {
+test("a space.start submitted mid-install queues cleanly behind space.create and succeeds when its own target did not change", async () => {
   const home = tempHome();
   const runtimeRoot = join(home, "runtimes");
   writeSpace(home, "running-one", {}, { dshVersion: "0.2.0-rc.2" });
@@ -2659,15 +2659,14 @@ test("a space.start submitted mid-install with a pre-create revision", async () 
   const start = (await mutate(handle.origin, cookie, "submit", {
     command: { kind: "space.start", spaceId: "space-running-one" },
     requestId: "start-behind-create",
-  })).body.value as { status: string };
+  })).body.value as { status: string; affectedSpaceIds: string[] };
   assert.equal(start.status, "queued");
+  assert.deepEqual(start.affectedSpaceIds, ["space-running-one"]);
   writeFileSync(join(runtimeRoot, "install-gate"), "go");
   const finishedCreate = await waitJob(handle.origin, cookie, "create-gate");
   assert.equal(finishedCreate.status, "succeeded");
-  // Premise confirmed: with the revision captured before the space existed,
-  // the queued start fails the live-context check when it runs.
-  const finishedStart = await waitJob(handle.origin, cookie, "start-behind-create", "failed");
-  assert.equal((finishedStart.error as { code?: string } | undefined)?.code, "workbench/conflict");
+  const finishedStart = await waitJob(handle.origin, cookie, "start-behind-create");
+  assert.equal(finishedStart.status, "succeeded");
 });
 
 test("a create on the host runtime installs that version into the store and pins it", async () => {
@@ -2690,4 +2689,150 @@ test("a create on the host runtime installs that version into the store and pins
   };
   assert.equal(registry.meta["space-host-space"]?.dshVersion, "0.2.0-rc.2",
     "the space is pinned to the host version it was created at");
+});
+
+test("space-scoped lifecycle plans execute across unrelated space mutations and honor submit-time TTL while rejecting target drift", async () => {
+  const home = tempHome();
+  let nowMs = Date.parse("2026-11-11T00:00:00.000Z");
+  const runtimeRoot = join(home, "runtimes");
+  writeSpace(home, "alpha", { name: "space-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  writeSpace(home, "beta", { name: "space-beta" }, { dshVersion: "0.2.0-rc.2" });
+  const handle = await startSupervisor(home, {
+    now: () => new Date(nowMs),
+    runtimeRoot,
+    snapshotWorkerFile: writeFakeRuntimeWorker(home, true),
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.start", spaceId: "space-alpha" },
+    requestId: "start-alpha",
+  });
+  await waitJob(handle.origin, cookie, "start-alpha");
+
+  // Preview restarting alpha, then mutate beta (changing global stateRevision).
+  const previewAlpha = await mutate(handle.origin, cookie, "preview", {
+    request: { kind: "space.restart", spaceId: "space-alpha" },
+  });
+  assert.equal(previewAlpha.body.ok, true);
+  const alphaPlan = previewAlpha.body.value as WorkbenchPlan;
+
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "space-beta", displayName: "Beta Renamed" },
+    requestId: "rename-beta",
+  });
+  await waitJob(handle.origin, cookie, "rename-beta");
+
+  // Block the queue with a gated create on gamma, submit alpha's plan while fresh, then advance clock past 5m TTL.
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.create", input: { name: "gamma", modelSource: "local", baseVersion: "0.9.9" } },
+    requestId: "create-gamma",
+  });
+  for (let i = 0; i < 200; i++) {
+    const j = (await api(handle.origin, cookie, "job", { id: "create-gamma" })).body.value as { phase?: string };
+    if (j.phase === "install") break;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  const queuedPlan = await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "plan.execute", planId: alphaPlan.id },
+    requestId: "exec-alpha-restart",
+  });
+  assert.equal(queuedPlan.body.ok, true);
+  assert.deepEqual((queuedPlan.body.value as { affectedSpaceIds: string[] }).affectedSpaceIds, ["space-alpha"]);
+  nowMs += 6 * 60_000;
+  writeFileSync(join(runtimeRoot, "install-gate"), "go");
+  await waitJob(handle.origin, cookie, "create-gamma");
+  const settledAlpha = await waitJob(handle.origin, cookie, "exec-alpha-restart");
+  assert.equal(settledAlpha.status, "succeeded");
+
+  // Conversely, mutating the target space itself before submitting invalidates its plan.
+  const previewAlpha2 = await mutate(handle.origin, cookie, "preview", {
+    request: { kind: "space.restart", spaceId: "space-alpha" },
+  });
+  const alphaPlan2 = previewAlpha2.body.value as WorkbenchPlan;
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: "space-alpha", displayName: "Alpha Renamed" },
+    requestId: "rename-alpha",
+  });
+  await waitJob(handle.origin, cookie, "rename-alpha");
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "plan.execute", planId: alphaPlan2.id },
+    requestId: "exec-stale-alpha",
+  });
+  const failedStale = await waitJob(handle.origin, cookie, "exec-stale-alpha", "failed");
+  assert.equal((failedStale.error as { code?: string } | undefined)?.code, "workbench/conflict");
+});
+
+test("each space starts with Desktop only when its own setting is enabled", async () => {
+  const home = tempHome();
+  const enabled = writeSpace(home, "enabled", { name: "space-enabled" }, { dshVersion: "0.2.0-rc.2" });
+  const disabled = writeSpace(home, "disabled", { name: "space-disabled" }, { dshVersion: "0.2.0-rc.2" });
+  const failing = writeSpace(home, "failing", { name: "space-failing" }, { dshVersion: "0.2.0-rc.2" });
+  const registryPath = join(home, "hub", "spaces.json");
+  const registry = JSON.parse(readFileSync(registryPath, "utf8")) as {
+    meta: Record<string, { startWithDesktop?: boolean }>;
+  };
+  registry.meta[enabled]!.startWithDesktop = true;
+  registry.meta[failing]!.startWithDesktop = true;
+  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+  let failingStarts = 0;
+  const handle = await startSupervisor(home, {
+    startDesktopSpaces: true,
+    processRuntime: {
+      spawn: (args: string[], options: SpawnOptions = {}) => {
+        const profile = String(args[args.indexOf("--profile") + 1] ?? "");
+        if (profile === failing) {
+          failingStarts += 1;
+          const child = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(1), 20)"], options);
+          live.push(child);
+          return child;
+        }
+        return spawnFixture("ok")(args, options);
+      },
+      prepareHome: async () => undefined,
+      gracefulWaitMs: 40,
+      forceWaitMs: 20,
+      readyTimeoutMs: 1_000,
+      fetchTimeoutMs: 1_000,
+      pollMs: 40,
+      kill: async () => undefined,
+    },
+  });
+  const cookie = await bootstrap(handle.origin, handle.bootstrapUrl);
+  let state = (await api(handle.origin, cookie, "state", {})).body.value as {
+    spaces: Array<{ id: string; status: string; startWithDesktop: boolean }>;
+    reasons: string[];
+  };
+  const statusOf = (id: string) => state.spaces.find((space) => space.id === id);
+  assert.equal(statusOf(enabled)?.status, "running");
+  assert.equal(statusOf(enabled)?.startWithDesktop, true);
+  assert.equal(statusOf(disabled)?.status, "stopped");
+  assert.equal(statusOf(disabled)?.startWithDesktop, false);
+  assert.equal(statusOf(failing)?.status, "crashed");
+  assert.equal(statusOf(failing)?.startWithDesktop, true);
+  assert.equal(failingStarts, 1);
+
+  await mutate(handle.origin, cookie, "submit", {
+    command: { kind: "space.update", spaceId: disabled, startWithDesktop: true },
+    requestId: "enable-disabled",
+  });
+  assert.equal((await waitJob(handle.origin, cookie, "enable-disabled")).status, "succeeded");
+  state = (await api(handle.origin, cookie, "state", {})).body.value as typeof state;
+  assert.equal(statusOf(disabled)?.startWithDesktop, true);
+  assert.equal(statusOf(disabled)?.status, "stopped");
+  const saved = JSON.parse(readFileSync(registryPath, "utf8")) as {
+    meta: Record<string, { startWithDesktop?: boolean }>;
+  };
+  assert.equal(saved.meta[disabled]?.startWithDesktop, true);
+  assert.equal(failingStarts, 1);
+});
+
+test("an ordinary service launch leaves Desktop-selected spaces stopped", async () => {
+  const home = tempHome();
+  const id = writeSpace(home, "selected", { name: "space-selected" }, { dshVersion: "0.2.0-rc.2" });
+  const path = join(home, "hub", "spaces.json");
+  const registry = JSON.parse(readFileSync(path, "utf8"));
+  registry.meta[id].startWithDesktop = true;
+  writeFileSync(path, JSON.stringify(registry));
+  const handle = await startSupervisor(home);
+  assert.equal((await handle.runtime.state()).spaces.find(space => space.id === id)?.status, "stopped");
 });

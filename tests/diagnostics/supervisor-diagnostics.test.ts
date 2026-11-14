@@ -484,7 +484,7 @@ test("supervisor CLI binds diagnostics before main and does not restart on failu
   const diagnosticsSource = readFileSync(diagnosticsModule, "utf8");
   const bindAt = source.indexOf("bindSupervisorDiagnostics");
   const startingAt = source.indexOf("recordStarting");
-  const mainCallAt = source.indexOf("main(process.argv.slice(2), diagnostics)");
+  const mainCallAt = source.indexOf("main(process.argv.slice(2), diagnostics, logger)");
   assert.ok(bindAt >= 0);
   assert.ok(startingAt >= 0);
   assert.ok(mainCallAt >= 0);

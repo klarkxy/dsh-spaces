@@ -75,6 +75,7 @@ import type {
   WorkbenchCommand,
   WorkbenchJob,
   WorkbenchMutationContext,
+  ModelSyncSummary,
   WorkbenchPlan,
   WorkbenchPlanRequest,
   WorkbenchSpace,
@@ -137,7 +138,7 @@ export interface SupervisorControlPorts {
    * Freeze a supervisor-local plan (space.models.sync, plugin.live.*): the
    * channel builds the request itself after its own strict parsing.
    */
-  previewLocalPlan(request: WorkbenchPlanRequest): WorkbenchPlan;
+  previewLocalPlan(request: WorkbenchPlanRequest): Promise<WorkbenchPlan>;
   /** Execute a frozen supervisor lifecycle plan inside a running job. */
   executePlan(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void>;
   /** The owned space start the `space.start` command runs inside a job. */
@@ -198,7 +199,7 @@ interface StoredControlPlan {
  * trusted main-space identity, sharing the Creator registration but gated by
  * its own scope. Read ops (context/read) and the two-stage mutation ops
  * (plan/execute/job) are implemented — lifecycle, plugin.install/
- * remove/toggle, runtime.set and the stopped-only models.sync;
+ * remove/toggle, runtime.set and live/stopped models.sync;
  * `session` is a declared op that answers control/unsupported until its
  * phase lands.
  * Scope strings never appear in responses, job records or logs.
@@ -507,8 +508,8 @@ export class SupervisorControl {
    * Validate and freeze a single-use plan bound to this registration.
    * Lifecycle ops (stop/restart/delete) freeze the same supervisor preview
    * the workbench two-stage flow produces; plugin.* and runtime.set freeze
-   * the matching maintenance plan; models.sync is a supervisor-local
-   * stopped-space-only plan; start is a direct command so the control plan
+   * the matching maintenance plan; models.sync uses the shared supervisor-local
+   * live-or-stopped write/verify plan; start is a direct command so the control plan
    * itself is the freeze, keeping the two-stage contract uniform.
    * Planning performs no mutation.
    */
@@ -526,6 +527,7 @@ export class SupervisorControl {
     let affectedSpaceIds: string[];
     let changes: string[];
     let taskActivity: ControlSpaceActivity | undefined;
+    let modelsSync: ModelSyncSummary | undefined;
     let params: ControlPlanResult["params"];
     let workbenchPlanId = "";
     let sourceDigest: string | undefined;
@@ -557,22 +559,17 @@ export class SupervisorControl {
         affectedSpaceIds = [spaceId];
         changes = ["space.start"];
       } else if (input.op === "models.sync") {
-        // Stopped-only write: refuse here before freezing anything — the
-        // channel never stops or restarts the space itself.
-        if (row.status !== "stopped" && row.status !== "crashed") {
-          throw new ControlPublicError(
-            "control/conflict",
-            `The space ${spaceId} is ${row.status}; plan a stop first, then sync its models.`,
-          );
-        }
+        // The same plan and execution path as the workbench: read and compare
+        // the main-space summary, write through the appropriate surface and verify.
         let preview: WorkbenchPlan;
         try {
-          preview = this.ports.previewLocalPlan({ kind: "space.models.sync", spaceId });
+          preview = await this.ports.previewLocalPlan({ kind: "space.models.sync", spaceId });
         } catch (error) {
           throw controlError(error);
         }
         affectedSpaceIds = preview.affectedSpaceIds;
         changes = preview.changes;
+        modelsSync = preview.modelsSync;
         workbenchPlanId = preview.id;
       } else if (this.isLivePlanInput(input)) {
         // Running-space ops (path B): the child's own pluginManager writes its
@@ -588,7 +585,7 @@ export class SupervisorControl {
         }
         let preview: WorkbenchPlan;
         try {
-          preview = this.ports.previewLocalPlan(this.livePlanRequest(input, spaceId));
+          preview = await this.ports.previewLocalPlan(this.livePlanRequest(input, spaceId));
         } catch (error) {
           throw controlError(error);
         }
@@ -643,6 +640,7 @@ export class SupervisorControl {
       displayName,
       affectedSpaceIds,
       changes,
+      ...(modelsSync ? { modelsSync } : {}),
       ...(params !== undefined ? { params } : {}),
       ...(taskActivity !== undefined ? { taskActivity } : {}),
       expiresAt: new Date(this.ports.now().getTime() + CONTROL_PLAN_TTL_MS).toISOString(),

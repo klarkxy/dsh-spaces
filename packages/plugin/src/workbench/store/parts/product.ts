@@ -32,6 +32,10 @@ export abstract class ProductPart extends JobPart {
     void this.loadPluginVersions(pluginCatalogId, true);
   };
 
+  clearPluginCatalog = (): void => {
+    this.patch({ pluginCatalogId: "", pluginVersion: "" });
+  };
+
   setPluginVersion = (pluginVersion: string): void => this.patch({ pluginVersion });
 
   setPluginSpec = (pluginSpec: string): void => this.patch({ pluginSpec });
@@ -188,7 +192,12 @@ export abstract class ProductPart extends JobPart {
       if (this.ui.settingsDraft?.dirty) return;
       this.applyClientDefaults(result.clientDefaults);
       this.patch({
-        settingsDraft: { settings: result.settings, observation: result.observation, dirty: false },
+        settingsDraft: {
+          settings: result.settings,
+          saved: result.settings,
+          observation: result.observation,
+          dirty: false,
+        },
         settingsStatus: "ready",
         readError: this.readErrors("settings"),
       });

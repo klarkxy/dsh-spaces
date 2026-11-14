@@ -182,3 +182,15 @@ export function saveSpaceTemplate(
   return template;
 }
 
+export function deleteSpaceTemplate(dshHome: string, templateId: string): SpaceTemplate[] {
+  assertNotRealHome(dshHome);
+  const current = listSpaceTemplates(dshHome);
+  if (!current.some((row) => row.id === templateId)) {
+    throw new Error("That template was not found.");
+  }
+  return writeSpaceTemplates(
+    dshHome,
+    current.filter((row) => row.id !== templateId),
+  );
+}
+

@@ -53,6 +53,23 @@ export class WorkbenchMaintenance extends MaintenanceExecution {
     }
   }
 
+  admitPlan(planId: string): { scope: WorkbenchPlan["scope"]; affectedSpaceIds: string[] } {
+    this.assertWritable();
+    try {
+      const stored = this.readPlan(planId);
+      if (stored.status !== "previewed") throw new WorkbenchMaintenanceError("workbench/conflict");
+      this.assertPlanIdentity(stored);
+      this.assertFresh(stored);
+      this.admittedPlans.add(planId);
+      const affectedSpaceIds = stored.public.scope === "space"
+        ? [...stored.public.affectedSpaceIds]
+        : [];
+      return { scope: stored.public.scope, affectedSpaceIds };
+    } catch (error) {
+      throw this.fail(error, "admitPlan");
+    }
+  }
+
   async plugins(query: string): Promise<WorkbenchPlugin[]> {
     if (typeof query !== "string" || query.length > 80) {
       throw new WorkbenchMaintenanceError("workbench/invalid-input");

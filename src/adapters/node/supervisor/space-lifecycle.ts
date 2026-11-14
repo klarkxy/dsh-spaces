@@ -17,8 +17,11 @@ import type { SupervisorInstanceRecords } from "./instance-records";
 import type { SupervisorLifecycle } from "./lifecycle";
 import type { SpaceRunRegistry } from "./space-runs";
 import type { WorkbenchSupervisorOptions } from "./types";
+import { diagnosticStep } from "../diagnostics/operation-log";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
 
 export interface SupervisorSpaceLifecycleHost {
+  diagnosticLog: DiagnosticLogger;
   home: string;
   origin: () => string;
   managerId: () => string | null;
@@ -47,6 +50,7 @@ export interface SupervisorSpaceLifecycleHost {
  * the run registry; an unmanaged leftover is never adopted or stopped here.
  */
 export class SupervisorSpaceLifecycle {
+  private get log(): DiagnosticLogger { return this.host.diagnosticLog; }
   constructor(private readonly host: SupervisorSpaceLifecycleHost) {}
 
   async startSpace(spaceId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"]> {
@@ -102,6 +106,7 @@ export class SupervisorSpaceLifecycle {
   }
 
   async startOwned(spaceId: string): Promise<void> {
+    return diagnosticStep(this.log, "space.start", { space: spaceId }, async () => {
     this.host.lifecycle.assertWritable();
     if (!this.host.processes()) throw new WorkbenchPublicError("workbench/read-only");
     if (this.host.runs.unmanaged.has(spaceId)) throw new WorkbenchPublicError("workbench/unmanaged");
@@ -114,6 +119,7 @@ export class SupervisorSpaceLifecycle {
       );
     }
     const spaceRuntime = this.host.resolveSpaceRuntime(spaceId);
+    this.log.info("space.runtime-selected", "Space runtime selected.", { space: spaceId, version: spaceRuntime.version });
     if (profileBase(this.host.home, spaceId) === 'browser') {
       if (SPACES_BROWSER_SEALED) throw new WorkbenchPublicError('workbench/unsupported');
       assertBrowserRelease(this.host.home, spaceId, spaceRuntime.version);
@@ -121,7 +127,7 @@ export class SupervisorSpaceLifecycle {
       if (incompatible.length) throw new WorkbenchPublicError('workbench/incompatible', cliLoadError(spaceRuntime.version, incompatible));
     } else if (this.host.options.componentPayloadRoot) {
       if (!["stopped", "crashed"].includes(this.host.statusOf(spaceId))) throw new WorkbenchPublicError("workbench/conflict");
-      await this.host.lock.run("space.components-align", async () => {
+      await this.host.lock.run("space.components-align", () => diagnosticStep(this.log, "space.components-align", { space: spaceId }, async () => {
         // Bundled dependencies become profile-level bundle entries; they must
         // exist before alignment reads the profile's bundle membership.
         await this.host.ensureBundledDeps(spaceId);
@@ -140,14 +146,15 @@ export class SupervisorSpaceLifecycle {
             return dump;
           },
         });
-      });
+      }));
     } else {
       const cliBlock = unmetProfileDshRequirements(join(this.host.home, "profiles", spaceId), spaceRuntime.version);
       if (cliBlock.length) {
         throw new WorkbenchPublicError("workbench/incompatible", cliLoadError(spaceRuntime.version, cliBlock));
       }
     }
-    await this.host.processes()!.start(spaceId);
+    await diagnosticStep(this.log, "space.process-ready", { space: spaceId }, () => this.host.processes()!.start(spaceId));
+    });
   }
 
   async stopOwned(spaceId: string): Promise<void> {

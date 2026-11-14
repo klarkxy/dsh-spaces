@@ -299,6 +299,7 @@ async function startFakeSupervisor(home: string): Promise<FakeSupervisor> {
             displayName: spaceId === "space-alpha" ? "Alpha" : spaceId,
             affectedSpaceIds: [spaceId],
             changes: [body.op === "delete" ? "Remove this space's profile and installed plugins." : `space.${body.op}`],
+            ...(body.op === "models.sync" ? { modelsSync: { mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/gw-large", credentials: ["GW_KEY"], skipped: [{ route: "codex", reason: "login-grant" }], missingCredentials: ["MISSING_KEY"] } } : {}),
             ...(echoedParams ? { params: echoedParams } : {}),
             ...(body.op === "stop" || body.op === "restart" ? { taskActivity: "busy" } : {}),
             expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -840,7 +841,14 @@ test("runtime.set and models.sync approvals name the change", async () => {
     execArgs({ agent }),
   ) as { controlPlanId: string };
   await execute.execute({ planId: pol.controlPlanId, requestId: "req-pol" }, execArgs({ agent }));
-  assert.match(approvalSeen.at(-1)?.reason ?? "", /Copy the main space model settings and their keys into "Alpha" \(space-alpha\)/);
+  const reason = approvalSeen.at(-1)?.reason ?? "";
+  assert.match(reason, /Copy the main space model settings and their keys into "Alpha" \(space-alpha\)/);
+  assert.match(reason, /running spaces stay running and use the new settings on the next request/);
+  assert.match(reason, /stopped spaces are written directly/);
+  assert.match(reason, /default gw\/gw-large/);
+  assert.match(reason, /key names 1 \(GW_KEY\)/);
+  assert.match(reason, /codex \(login-grant\)/);
+  assert.match(reason, /missing keys MISSING_KEY/);
 });
 
 test("plugin.live.* approvals name the running-space application and the exact target", async () => {

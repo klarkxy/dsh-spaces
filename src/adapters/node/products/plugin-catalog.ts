@@ -13,6 +13,7 @@ import {
 import { atomicWrite } from "../atomic";
 import { assertNotRealHome } from "../home/home-guard";
 import { parseCatalogUrl } from "../home/hub-settings";
+import { parsePublishedPluginCatalog } from "./published-plugin-catalog";
 
 export const CATALOG_CACHE_FILE = "plugin-catalog.json";
 export const CATALOG_ETAG_FILE = "plugin-catalog.etag";
@@ -212,6 +213,7 @@ function isTopicDump(value: Record<string, unknown>): boolean {
 export function parseAnyCatalog(value: unknown): { meta: PluginCatalogMeta; entries: PluginCatalogEntry[] } {
   if (!isRecord(value)) throw new Error("unsupported plugin catalog");
   if (isRecord(value.meta) && Array.isArray(value.entries)) return parseCatalog(value);
+  if (Array.isArray(value.plugins)) return parsePublishedPluginCatalog(value);
   if (isTopicDump(value)) return parseTopicDump(value);
   throw new Error("unsupported plugin catalog");
 }

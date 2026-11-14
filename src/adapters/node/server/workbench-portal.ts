@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { browserProtocolScript } from "../../../shared/browser-guest";
 import { navDiagPortalPrelude } from "../../../shared/nav-diag";
 import { parseSpaceHostAudience, parsePortalSnapshot, parsePortalFailure, nativePortalFailureHash,
-  parseNativeCreateIntent, parseNativeSpaceHash, projectSpaceCreations, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
+  parseNativeCreateIntent, parseNativeDetailIntent, parseNativeSpaceHash, projectSpaceCreations, PORTAL_FAILURE_REASONS, PORTAL_FAILURE_CODES, NATIVE_PORTAL_FAILURE_HASH_LIMIT,
   type SpaceHostAudience } from "../../../shared/space-host";
 
 /** Bounded, process-local, audience-bound entry grants. No disk state or cross-restart replay. */
@@ -77,6 +77,7 @@ const nativePortalFailureHash = ${nativePortalFailureHash.toString()};
 const parseSnapshot = ${parsePortalSnapshot.toString()};
 const projectSpaceCreations = ${projectSpaceCreations.toString()};
 const parseNativeCreateIntent = ${parseNativeCreateIntent.toString()};
+const parseNativeDetailIntent = ${parseNativeDetailIntent.toString()};
 const parseNativeSpaceHash = ${parseNativeSpaceHash.toString()};
 ${browserProtocolScript()}
 let lastNativeRequest = 0, lastNativeIntent = 0, serviceStopPreview = 0;
@@ -322,6 +323,8 @@ function nativeSelection() {
   }
   const intent = parseNativeCreateIntent(location.hash);
   if (intent !== null) { forwardCreateIntent(intent); return; }
+  const detailIntent = parseNativeDetailIntent(location.hash);
+  if (detailIntent !== null) { forwardDetailIntent(detailIntent); return; }
   const request = parseNativeSpaceHash(location.hash);
   if (!request || request.kind !== "select" || request.requestId <= lastNativeRequest) return;
   const { requestId, target, targetGeneration } = request; lastNativeRequest = requestId;
@@ -343,6 +346,16 @@ function forwardCreateIntent(requestId) {
   lastNativeIntent = requestId;
   if (!managerReady || !frame || !managerView || pending || lastNativeTarget !== "@settings") return;
   frame.contentWindow.postMessage({ source: "dsh-spaces-surface-parent", type: "intent", intent: "create", requestId,
+    serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
+    channel: managerView.channel }, audience.managerOrigin);
+}
+function forwardDetailIntent(detailIntent) {
+  if (detailIntent.requestId <= lastNativeIntent) return;
+  lastNativeIntent = detailIntent.requestId;
+  if (!managerReady || !frame || !managerView || pending || lastNativeTarget !== "@settings") return;
+  if (!snapshot || !snapshot.spaces.some(row => row.id === detailIntent.spaceId && row.id !== snapshot.managerId)) return;
+  frame.contentWindow.postMessage({ source: "dsh-spaces-surface-parent", type: "intent", intent: "detail",
+    requestId: detailIntent.requestId, targetSpaceId: detailIntent.spaceId,
     serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
     channel: managerView.channel }, audience.managerOrigin);
 }

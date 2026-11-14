@@ -24,13 +24,13 @@ import { ATTENTION_RING_CSS } from "../../../../src/shared/ui/attention-ring";
 export const HOST_SHELL_CSS = `${UI_TOKENS_CSS}${HOST_UI_TOKEN_CSS}${HOST_LIGHT_MATERIAL_CSS}
 [data-spaces-host-rail] > [data-spaces-host-covered] { visibility: hidden !important; pointer-events: none !important; }
 .dsh-host-dock { position:fixed; inset:0; pointer-events:none; font:14px/1.5 system-ui; color:var(--host-text,var(--dsw-alias-label-primary,#202127)); }
-.dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-bg-base,var(--host-rail-bg,#f0f1f5)); border-right:1px solid var(--dsw-alias-border-l3,var(--host-border,#d6d8de)); transition:box-shadow var(--host-dur-base) var(--host-ease-standard); }
+.dsh-host-rail { pointer-events:auto; position:absolute; top:var(--dsh-frame-top-clearance,0px); bottom:0; left:0; width:72px; box-sizing:border-box; padding:10px 8px; display:flex; gap:8px; flex-direction:column; align-items:center; background:var(--dsw-alias-bg-base,var(--host-rail-bg,#f0f1f5)); border-right:0.5px solid var(--dsw-alias-border-l2,var(--host-border,#d6d8de)); transition:box-shadow var(--host-dur-base) var(--host-ease-standard); }
 .dsh-host-rail[data-busy="true"] { box-shadow:inset -1px 0 0 0 color-mix(in srgb,var(--host-accent) 45%,transparent); }
-.dsh-host-rail-divider { flex:none; width:32px; height:2px; margin:2px 0; border-radius:1px; background:color-mix(in srgb,currentColor 18%,transparent); }
+.dsh-host-rail-divider { flex:none; width:28px; height:1px; margin:2px 0; background:var(--dsw-alias-border-l2,color-mix(in srgb,currentColor 14%,transparent)); }
 .dsh-host-rail-list { flex:1; min-height:0; overflow-y:auto; width:100%; display:flex; flex-direction:column; align-items:center; gap:8px; }
 .dsh-host-rail button { flex-shrink:0; width:48px; height:48px; border:1px solid transparent; border-radius:14px; background:transparent; color:inherit; font:inherit; cursor:pointer; overflow:hidden; }
-.dsh-host-rail button:hover { background:color-mix(in srgb,currentColor 10%,transparent); }
-.dsh-host-rail button[aria-current=true] { border-color:currentColor; background:color-mix(in srgb,currentColor 12%,transparent); }
+.dsh-host-rail button:hover { background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,currentColor 8%,transparent)); }
+.dsh-host-rail button[aria-current=true] { border-color:transparent; background:var(--dsw-alias-interactive-bg-active,color-mix(in srgb,currentColor 10%,transparent)); }
 .dsh-host-rail button:focus-visible { outline:2px solid currentColor; outline-offset:1px; }
 .dsh-host-rail button:has(.dsh-wb-glyph-img) { padding:0; }
 .dsh-host-rail .dsh-wb-glyph-img { display:block; width:100% !important; height:100% !important; max-width:100%; max-height:100%; object-fit:cover; }
@@ -49,14 +49,14 @@ iframe.dsh-host-surface { width:calc(100% - var(--dsh-spaces-rail-width,72px)); 
   position:relative;
   transition:transform var(--host-dur-base) var(--host-ease-spring,cubic-bezier(0.34,1.56,0.64,1)), border-radius var(--host-dur-base) var(--host-ease-standard), background-color var(--host-dur-fast) linear, box-shadow var(--host-dur-base) var(--host-ease-standard);
 }
-.dsh-host-rail-btn:hover:not(:disabled) { transform:translateY(-2px) scale(1.06); border-radius:18px; box-shadow:var(--host-elev-sm,0 1px 2px rgba(0,0,0,0.2)); }
-.dsh-host-rail-btn:active:not(:disabled) { transform:translateY(0) scale(0.96); }
-.dsh-host-rail-btn[aria-current] { box-shadow:var(--host-glow,0 0 24px -6px rgba(88,101,242,0.6)); }
+.dsh-host-rail-btn:hover:not(:disabled) { border-radius:14px; }
+.dsh-host-rail-btn:active:not(:disabled) { transform:scale(0.96); }
+.dsh-host-rail-btn[aria-current] { box-shadow:none; }
 .dsh-host-rail-btn > *:not(.dsh-host-rail-pill) { position:relative; z-index:1; }
 .dsh-host-rail-pill {
   position:absolute; inset:0; z-index:2; pointer-events:none;
   border-radius:inherit;
-  border:2px solid var(--host-accent,#5865f2);
+  background:var(--dsw-alias-interactive-bg-active,color-mix(in srgb,currentColor 10%,transparent));
 }
 
 /* Guide and loading material. */

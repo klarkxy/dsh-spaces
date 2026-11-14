@@ -67,6 +67,7 @@ export class SupervisorSpaces {
           icon: row.meta.icon ?? "",
           base: row.meta.base,
           baseVersion: row.meta.baseVersion,
+          startWithDesktop: row.meta.startWithDesktop === true,
           status,
           generation: view?.generation ?? this.host.runs.generation(row.name),
           managed: Boolean(this.host.lifecycle.handle) && !leftover,
@@ -98,6 +99,7 @@ export class SupervisorSpaces {
     if (!processes) return "stopped";
     const status = processes.statusOf(name);
     if (status === "starting") return "starting";
+    if (status === "stopping") return "stopping";
     if (status === "running") return "running";
     if (status === "crashed") return "crashed";
     return "stopped";

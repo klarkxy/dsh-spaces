@@ -31,16 +31,16 @@ export const HOST_UI_TOKEN_CSS = uiTokenMixin(".dsh-host-dock", {
   "--host-bg": "var(--dsw-alias-bg-base, #ffffff)",
   "--host-rail-bg": "var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base, #f0f1f5))",
   "--host-border": "var(--dsw-alias-border-l3, #d6d8de)",
-  "--host-hover": "color-mix(in srgb, var(--host-text) 10%, transparent)",
-  "--host-active": "color-mix(in srgb, var(--host-text) 12%, transparent)",
-  "--host-accent": "var(--dsw-alias-button-primary-fill, #5865f2)",
+  "--host-hover": "var(--dsw-alias-interactive-bg-hover, color-mix(in srgb, var(--host-text) 8%, transparent))",
+  "--host-active": "var(--dsw-alias-interactive-bg-active, color-mix(in srgb, var(--host-text) 10%, transparent))",
+  "--host-accent": "var(--dsw-alias-button-primary-fill, #356dda)",
   "--host-danger": "var(--dsw-alias-label-error, #d1242f)",
-  "--host-elev-sm": "var(--dsh-ui-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.2))",
-  "--host-elev-md": "var(--dsh-ui-shadow-md, 0 10px 26px -14px rgba(0, 0, 0, 0.45))",
-  "--host-elev-lg": "var(--dsh-ui-shadow-lg, 0 24px 48px -20px rgba(0, 0, 0, 0.55))",
-  "--host-glow": "var(--dsh-ui-glow, 0 0 24px -6px rgba(88, 101, 242, 0.6))",
-  "--host-glass": "color-mix(in srgb, var(--host-bg) 78%, transparent)",
-  "--host-glass-blur": "var(--dsh-ui-glass-blur, blur(16px) saturate(140%))",
+  "--host-elev-sm": "var(--dsh-ui-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.16))",
+  "--host-elev-md": "var(--dsh-ui-shadow-md, 0 4px 14px -6px rgba(0, 0, 0, 0.32))",
+  "--host-elev-lg": "var(--dsh-ui-shadow-lg, 0 12px 32px -12px rgba(0, 0, 0, 0.45))",
+  "--host-glow": "none",
+  "--host-glass": "var(--host-bg)",
+  "--host-glass-blur": "none",
   "--host-radius-sm": "var(--dsh-ui-radius-sm, 8px)",
   "--host-radius-md": "var(--dsh-ui-radius-md, 12px)",
   "--host-radius-lg": "var(--dsh-ui-radius-lg, 16px)",
@@ -50,10 +50,10 @@ export const HOST_UI_TOKEN_CSS = uiTokenMixin(".dsh-host-dock", {
   "--host-dur-slow": "var(--dsh-ui-dur-slow, 360ms)",
   "--host-ease-standard": "var(--dsh-ui-ease-standard, cubic-bezier(0.2, 0, 0, 1))",
   "--host-ease-spring": "var(--dsh-ui-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1))",
-  "--host-accent-gradient": "var(--dsh-ui-accent-gradient, linear-gradient(135deg, #5865f2 0%, #8b5cf6 100%))",
+  "--host-accent-gradient": "none",
   "--host-shimmer": "linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--host-text) 14%, transparent) 42%, transparent 64%)",
   /** Attention halo colour: the shared accent-2 hue, distinct from the warn status pulse. */
-  "--dsh-spaces-attention": "var(--dsh-ui-accent-2, #8b5cf6)",
+  "--dsh-spaces-attention": "var(--dsh-ui-accent-2, #3b76e6)",
 });
 
 /**
@@ -64,18 +64,18 @@ export const HOST_UI_TOKEN_CSS = uiTokenMixin(".dsh-host-dock", {
 export const HOST_LIGHT_MATERIAL_CSS = `
 ${HOST_LIGHT} .dsh-spaces,
 ${HOST_LIGHT} .dsh-host-dock {
-  --dsh-ui-shadow-sm: 0 1px 2px rgba(16, 17, 26, 0.1);
-  --dsh-ui-shadow-md: 0 6px 18px -8px rgba(16, 17, 26, 0.22);
-  --dsh-ui-shadow-lg: 0 20px 48px -16px rgba(16, 17, 26, 0.28);
-  --dsh-ui-glow: 0 0 24px -6px rgba(88, 101, 242, 0.45);
+  --dsh-ui-shadow-sm: 0 1px 2px rgba(16, 17, 26, 0.06);
+  --dsh-ui-shadow-md: 0 4px 14px -6px rgba(16, 17, 26, 0.14);
+  --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16, 17, 26, 0.20);
+  --dsh-ui-glow: none;
 }
 @media (prefers-color-scheme: light) {
   ${HOST_SYSTEM} ${HOST_NOT_DARK} .dsh-spaces,
   ${HOST_SYSTEM} ${HOST_NOT_DARK} .dsh-host-dock {
-    --dsh-ui-shadow-sm: 0 1px 2px rgba(16, 17, 26, 0.1);
-    --dsh-ui-shadow-md: 0 6px 18px -8px rgba(16, 17, 26, 0.22);
-    --dsh-ui-shadow-lg: 0 20px 48px -16px rgba(16, 17, 26, 0.28);
-    --dsh-ui-glow: 0 0 24px -6px rgba(88, 101, 242, 0.45);
+    --dsh-ui-shadow-sm: 0 1px 2px rgba(16, 17, 26, 0.06);
+    --dsh-ui-shadow-md: 0 4px 14px -6px rgba(16, 17, 26, 0.14);
+    --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16, 17, 26, 0.20);
+    --dsh-ui-glow: none;
   }
 }
 `;

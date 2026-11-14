@@ -29,7 +29,7 @@ function fixture(t: TestContext, live = true) {
     availability: "ready", role: "manager", managerId: "spaces-hub", owner: { kind: "web", since: new Date().toISOString() },
     writable: true, mode: "verified-full", dshVersion: COMPATIBLE_DSH_CLI_VERSION, maintenance: false, reasons: [], jobs: [],
     spaces: ["spaces-hub", "coding"].map(id => ({ id, displayName: id === "coding" ? "Coding" : "Manager", isHost: id === "spaces-hub",
-      hasWebApp: true, icon: "", status: "running", generation: 1, managed: true, dshVersion: null })) };
+      hasWebApp: true, icon: "", status: "running", generation: 1, managed: true, dshVersion: null, startWithDesktop: false })) };
   let starts = 0, stops = 0, plans = 0, status = "succeeded", refuseSubmit = false, release = true;
   const saved = join(home, ".dsh-spaces-control", "jobs", "shutdown-job.json");
   const api = { state: async () => state,

@@ -24,25 +24,25 @@
 export const UI_TOKENS_CSS = `
 .dsh-ui {
   /* Material colours (dark default). */
-  --dsh-ui-bg: #0f1012;
+  --dsh-ui-bg: #141518;
   --dsh-ui-surface: #18191d;
   --dsh-ui-surface-2: #1f2025;
-  --dsh-ui-text: #f2f3f5;
-  --dsh-ui-muted: #9aa0a6;
-  --dsh-ui-faint: #6e7378;
-  --dsh-ui-border: color-mix(in srgb, var(--dsh-ui-text) 15%, transparent);
-  --dsh-ui-accent: #5865f2;
-  --dsh-ui-accent-2: #8b5cf6;
+  --dsh-ui-text: #eceef2;
+  --dsh-ui-muted: #989ea8;
+  --dsh-ui-faint: #6b717b;
+  --dsh-ui-border: color-mix(in srgb, var(--dsh-ui-text) 10%, transparent);
+  --dsh-ui-accent: #4c8dff;
+  --dsh-ui-accent-2: #3b76e6;
   --dsh-ui-accent-ink: #ffffff;
-  --dsh-ui-danger: #d1242f;
-  --dsh-ui-ok: #3ba55d;
-  --dsh-ui-warn: #c9a227;
+  --dsh-ui-danger: #e05252;
+  --dsh-ui-ok: #39bf83;
+  --dsh-ui-warn: #d9a441;
 
   /* Elevation. */
-  --dsh-ui-shadow-sm: 0 1px 2px rgba(0,0,0,0.32);
-  --dsh-ui-shadow-md: 0 6px 18px -8px rgba(0,0,0,0.55);
-  --dsh-ui-shadow-lg: 0 20px 48px -16px rgba(0,0,0,0.65);
-  --dsh-ui-glow: 0 0 24px -6px color-mix(in srgb, var(--dsh-ui-accent) 70%, transparent);
+  --dsh-ui-shadow-sm: 0 1px 2px rgba(0,0,0,0.18);
+  --dsh-ui-shadow-md: 0 4px 14px -6px rgba(0,0,0,0.36);
+  --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(0,0,0,0.48);
+  --dsh-ui-glow: none;
 
   /* Radii. */
   --dsh-ui-radius-xs: 6px;
@@ -71,45 +71,47 @@ export const UI_TOKENS_CSS = `
   --dsh-ui-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* Glass surface. */
-  --dsh-ui-glass-bg: color-mix(in srgb, var(--dsh-ui-surface) 72%, transparent);
-  --dsh-ui-glass-blur: blur(18px) saturate(140%);
+  --dsh-ui-glass-bg: var(--dsh-ui-surface);
+  --dsh-ui-glass-blur: none;
 
   /* Accent gradient and focus ring. */
-  --dsh-ui-accent-gradient: linear-gradient(135deg, var(--dsh-ui-accent) 0%, var(--dsh-ui-accent-2) 100%);
-  --dsh-ui-focus-ring: 0 0 0 2px var(--dsh-ui-bg), 0 0 0 4px var(--dsh-ui-accent);
+  --dsh-ui-accent-gradient: none;
+  --dsh-ui-focus-ring: 0 0 0 2px color-mix(in srgb, var(--dsh-ui-accent) 28%, transparent);
 }
 .dsh-ui[data-theme="light"] {
-  --dsh-ui-bg: #f6f7f9;
+  --dsh-ui-bg: #f7f8fa;
   --dsh-ui-surface: #ffffff;
-  --dsh-ui-surface-2: #eceef2;
-  --dsh-ui-text: #16171a;
-  --dsh-ui-muted: #5c6166;
-  --dsh-ui-faint: #8a9096;
-  --dsh-ui-border: color-mix(in srgb, var(--dsh-ui-text) 15%, transparent);
-  --dsh-ui-accent: #5865f2;
-  --dsh-ui-accent-2: #7c3aed;
-  --dsh-ui-glass-bg: color-mix(in srgb, var(--dsh-ui-surface) 78%, transparent);
-  --dsh-ui-shadow-sm: 0 1px 2px rgba(16,17,26,0.10);
-  --dsh-ui-shadow-md: 0 6px 18px -8px rgba(16,17,26,0.22);
-  --dsh-ui-shadow-lg: 0 20px 48px -16px rgba(16,17,26,0.28);
-  --dsh-ui-glow: 0 0 24px -6px color-mix(in srgb, var(--dsh-ui-accent) 45%, transparent);
+  --dsh-ui-surface-2: #f2f3f6;
+  --dsh-ui-text: #1f2329;
+  --dsh-ui-muted: #646a73;
+  --dsh-ui-faint: #8f959e;
+  --dsh-ui-border: color-mix(in srgb, var(--dsh-ui-text) 10%, transparent);
+  --dsh-ui-accent: #356dda;
+  --dsh-ui-accent-2: #2b5bb8;
+  --dsh-ui-danger: #d1242f;
+  --dsh-ui-glass-bg: var(--dsh-ui-surface);
+  --dsh-ui-shadow-sm: 0 1px 2px rgba(16,17,26,0.06);
+  --dsh-ui-shadow-md: 0 4px 14px -6px rgba(16,17,26,0.14);
+  --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16,17,26,0.20);
+  --dsh-ui-glow: none;
 }
 @media (prefers-color-scheme: light) {
   .dsh-ui[data-theme="system"] {
-    --dsh-ui-bg: #f6f7f9;
+    --dsh-ui-bg: #f7f8fa;
     --dsh-ui-surface: #ffffff;
-    --dsh-ui-surface-2: #eceef2;
-    --dsh-ui-text: #16171a;
-    --dsh-ui-muted: #5c6166;
-    --dsh-ui-faint: #8a9096;
-    --dsh-ui-border: color-mix(in srgb, var(--dsh-ui-text) 15%, transparent);
-    --dsh-ui-accent: #5865f2;
-    --dsh-ui-accent-2: #7c3aed;
-    --dsh-ui-glass-bg: color-mix(in srgb, var(--dsh-ui-surface) 78%, transparent);
-    --dsh-ui-shadow-sm: 0 1px 2px rgba(16,17,26,0.10);
-    --dsh-ui-shadow-md: 0 6px 18px -8px rgba(16,17,26,0.22);
-    --dsh-ui-shadow-lg: 0 20px 48px -16px rgba(16,17,26,0.28);
-    --dsh-ui-glow: 0 0 24px -6px color-mix(in srgb, var(--dsh-ui-accent) 45%, transparent);
+    --dsh-ui-surface-2: #f2f3f6;
+    --dsh-ui-text: #1f2329;
+    --dsh-ui-muted: #646a73;
+    --dsh-ui-faint: #8f959e;
+    --dsh-ui-border: color-mix(in srgb, var(--dsh-ui-text) 10%, transparent);
+    --dsh-ui-accent: #356dda;
+    --dsh-ui-accent-2: #2b5bb8;
+    --dsh-ui-danger: #d1242f;
+    --dsh-ui-glass-bg: var(--dsh-ui-surface);
+    --dsh-ui-shadow-sm: 0 1px 2px rgba(16,17,26,0.06);
+    --dsh-ui-shadow-md: 0 4px 14px -6px rgba(16,17,26,0.14);
+    --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16,17,26,0.20);
+    --dsh-ui-glow: none;
   }
 }
 @keyframes dsh-ui-fade-in {

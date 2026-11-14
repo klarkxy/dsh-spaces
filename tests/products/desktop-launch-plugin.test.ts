@@ -112,7 +112,7 @@ function managerState(epoch: string) {
       status: "running",
       generation: 1,
       managed: true,
-      dshVersion: null,
+      dshVersion: null, startWithDesktop: false,
     }],
   };
 }

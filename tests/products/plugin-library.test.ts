@@ -20,6 +20,7 @@ import {
 import { enqueuePlugin } from "../../src/adapters/node/runtime/dsh-cli.ts";
 import { applyAppLocale, t } from "../../src/shared/i18n/index.ts";
 import { setTimeout as delay } from "node:timers/promises";
+import { writeTestCatalog } from "../fixtures/plugin-catalog.ts";
 
 const temps: string[] = [];
 
@@ -30,6 +31,7 @@ afterEach(() => {
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), "dsh-spaces-lib-"));
   temps.push(dir);
+  writeTestCatalog(dir);
   return dir;
 }
 

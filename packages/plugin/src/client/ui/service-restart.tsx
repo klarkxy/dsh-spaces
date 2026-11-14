@@ -53,7 +53,6 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
       {preview && <>
         <h3>{preview.action === "stop" ? texts.serviceStopTitle : preview.action === "restart" ? texts.serviceRestartTitle : texts.serviceStartTitle}</h3>
         <p>{preview.action === "stop" ? texts.serviceStopBody : preview.action === "restart" ? texts.serviceRestartBody : texts.serviceStartBody}</p>
-        <p>{texts.serviceMainSpaceNote}</p>
         {preview.spaces.length > 0 && <ul>{preview.spaces.map(space => <li key={space.id}>{space.displayName}{space.running ? ` · ${texts.serviceSpaceRunning}` : ` · ${texts.serviceSpaceManaged}`}</li>)}</ul>}
         <details><summary>{texts.serviceConfirmDetails}</summary><p>{texts.serviceConfirmValid.replace("{time}", expiresAt)}</p></details>
         <div className="dsh-native-confirm-actions">

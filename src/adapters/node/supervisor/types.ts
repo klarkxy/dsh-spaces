@@ -15,10 +15,12 @@ import type { BoundCliRunner } from "../products/spaces-service";
 import type { WorkbenchJobContext, WorkbenchJobsInject } from "../maintenance/workbench-jobs";
 import type { WorkbenchMaintenancePorts } from "../maintenance/workbench-maintenance-ports";
 import type { WorkbenchSupervisorRuntime } from "../workbench-supervisor";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
 
 export interface WorkbenchMaintenance {
   preview(request: WorkbenchPlanRequest): Promise<WorkbenchPlan>;
   execute(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"] | void>;
+  admitPlan?(planId: string): { scope: WorkbenchPlan["scope"]; affectedSpaceIds: string[] };
   plugins(query: string): Promise<WorkbenchPlugin[]>;
   snapshots(): Promise<WorkbenchSnapshot[]>;
   snapshot(id: string): Promise<WorkbenchSnapshot>;
@@ -48,9 +50,12 @@ export interface WorkbenchSupervisorOptions {
   jobsInject?: WorkbenchJobsInject;
   runtimeRoot?: string;
   allowRealHome?: boolean;
+  /** Only a new Desktop opening opts into saved per-space startup preferences. */
+  startDesktopSpaces?: boolean;
   portStart?: number;
   portEnd?: number;
   now?: () => Date;
+  diagnosticLog?: DiagnosticLogger;
   fetch?: typeof fetch;
   pidAlive?: PidAliveFn;
   processRuntime?: Partial<ProcessRuntime>;
@@ -92,6 +97,7 @@ export interface StoredPlan {
   request: WorkbenchPlanRequest;
   fingerprint: string;
   consumed?: boolean;
+  admitted?: boolean;
 }
 
 export interface BoundCli {

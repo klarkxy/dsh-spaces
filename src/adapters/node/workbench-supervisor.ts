@@ -13,17 +13,21 @@ import { observeMaintenanceChild, withChildObservation } from "./runtime/owned-p
 import { sanitizeLogText } from "./diagnostics/diagnostics";
 import type { DiagnosticsService } from "./diagnostics/diagnostics";
 import { WorkbenchLog } from "./maintenance/workbench-log";
+import { createDiagnosticLogger, type DiagnosticLogger } from "./diagnostics/rotating-log";
+import { currentOperationDetails, diagnosticNested, diagnosticStep } from "./diagnostics/operation-log";
 import { assertNotRealHome, authorizeProductHome } from "./home/home-guard";
 import { PatchWriter, SESSION_ROW_ID, extractRoot } from "./profile/patch-writer";
-import { pluginAdd, pluginRemove } from "./products/plugin-ops";
+import { pluginAdd, pluginLinkDirectory, pluginRemove } from "./products/plugin-ops";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./runtime/process-manager";
 import { setSelectedDshResolver } from "./runtime/dsh-cli";
 import { setPackageSource } from "./runtime/toolchain";
-import { describeModelSync, syncMainModels, type ModelSyncSummary } from "./llm/main-model-sync";
+import { describeModelSync, prepareMainModelSync, readSpaceModelConfig, syncMainModels, type ModelSyncSummary, type PreparedMainModelSync, type ModelSyncInput } from "./llm/main-model-sync";
+import { runLiveModelSync } from "./llm/live-model-sync";
 import { ProfileRegistry } from "./profile/profile-registry";
 import type { RuntimeStore } from "./runtime/runtime-store";
 import { validateComponentPayload, type ValidatedComponentPayload } from "./payload/component-payload";
 import { redactPublicReason } from "../../shared/public-reason";
+import { spaceIdFromName } from "../../shared/types";
 import type { SpaceDetail } from "../../shared/spaces-control";
 import type {
   WorkbenchApi,
@@ -37,6 +41,7 @@ import type {
   WorkbenchRuntime as WorkbenchRuntimeDto,
   WorkbenchSnapshot,
   WorkbenchState,
+  WorkbenchSpace,
   WorkbenchView,
 } from "../../shared/workbench";
 import type { WorkbenchStartupStatus } from "../../shared/workbench-startup";
@@ -100,7 +105,7 @@ import { SupervisorLlm } from "./supervisor/llm";
 import { SupervisorControl } from "./supervisor/control";
 import { SupervisorCreator } from "./supervisor/creator";
 import { UiAutomationManager } from "./supervisor/ui-automation";
-import { ChildRemoteClient, runLivePlan } from "./supervisor/child-remote";
+import { ChildRemoteClient, runLivePlan, runMaintenanceLivePlugin } from "./supervisor/child-remote";
 import { SupervisorMaintenanceGate } from "./supervisor/maintenance";
 import {
   bindSelectedCli,
@@ -184,6 +189,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly registry: ProfileRegistry;
   private readonly patchWriter: PatchWriter;
   private readonly now: () => Date;
+  readonly diagnosticLog: DiagnosticLogger;
+  private withDiagnostics<T>(action: () => T): T { return diagnosticNested(this.diagnosticLog, action); }
   private readonly fetchImpl: typeof fetch;
   private readonly lifecycle = new SupervisorLifecycle(() => this.spaceInventory.assertRegistryReadable());
   private readonly startup = new SupervisorStartup();
@@ -219,7 +226,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly toolchain: SupervisorToolchain;
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
     assertSupportedNode();
-    this.options = { ...options };
+    const original = { ...options };
+    this.options = {
+      ...original,
+      ...(original.pluginAdd ? {} : { pluginAdd: (home, profile, spec, addOptions) => this.withDiagnostics(() => pluginAdd(home, profile, spec, addOptions)) }),
+      ...(original.pluginRemove ? {} : { pluginRemove: (home, profile, packageName) => this.withDiagnostics(() => pluginRemove(home, profile, packageName)) }),
+      ...(original.pluginLink ? {} : { pluginLink: (home, profile, dir, expectedName) => this.withDiagnostics(() => pluginLinkDirectory(home, profile, dir, expectedName)) }),
+    };
     this.home = canonicalHome(options.home, { allowRealHome: options.allowRealHome });
     if (options.allowRealHome) authorizeProductHome(this.home);
     if (!options.allowRealHome) assertNotRealHome(this.home);
@@ -233,6 +246,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.registry = new ProfileRegistry(this.home, { allowRealHome: options.allowRealHome });
     this.patchWriter = options.patchWriter ?? new PatchWriter(this.home);
     this.now = options.now ?? (() => new Date());
+    this.diagnosticLog = createDiagnosticLogger(this.home, "supervisor", {
+      now: this.now,
+      allowRealHome: options.allowRealHome,
+    });
+    this.diagnosticLog.debug("supervisor.runtime-created", "Supervisor runtime constructed.", { devCheckout: options.devCheckoutRoot !== undefined });
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.pidAlive = options.pidAlive ?? defaultPidAlive;
     if (options.componentPayloadRoot) {
@@ -253,6 +271,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       attentionOf: (id) => this.spaceAttention.attentionOf(id),
     });
     this.spaceLifecycle = new SupervisorSpaceLifecycle({
+      diagnosticLog: this.diagnosticLog,
       home: this.home,
       origin: () => this.origin,
       managerId: () => this.managerId,
@@ -275,7 +294,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       pinnedDshVersion: (spaceId) => this.toolchain.pinnedDshVersion(spaceId),
       resolveSpaceRuntime: (spaceId) => this.toolchain.resolveSpaceRuntime(spaceId),
     });
-    this.bases = new SpaceBaseCreation({ home: this.home, nodeExe: this.nodeExe, options: this.options, cli: () => this.cli, runtimes: () => this.runtimeStore });
+    this.bases = new SpaceBaseCreation({ diagnosticLog: this.diagnosticLog, home: this.home, nodeExe: this.nodeExe, options: this.options, cli: () => this.cli, runtimes: () => this.runtimeStore });
     this.spaceCommands = new SupervisorSpaceCommands({
       bases: this.bases,
       home: this.home,
@@ -332,15 +351,22 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       validateSpace: (spaceId, allowManager) => this.spaceInventory.validateSpace(spaceId, allowManager),
       publicStatus: (id) => this.spaceInventory.publicStatus(id),
       statusOf: (name) => this.spaceInventory.statusOf(name),
+      generationOf: (spaceId) => this.runs.generation(spaceId),
       ownedSpaceIds: () => this.spaceInventory.ownedSpaceIds(),
       stopOwned: (spaceId) => this.spaceLifecycle.stopOwned(spaceId),
       stopOwnedAll: () => this.spaceLifecycle.stopOwnedAll(),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
+      pluginLive: (input, ctx) => {
+        const client = this.childRemoteClient(input.spaceId);
+        if (!client) throw new WorkbenchPublicError("workbench/unavailable", "The child remote surface is unavailable.");
+        return runMaintenanceLivePlugin(client, this.home, input, ctx);
+      },
       currentRuntime: () => this.toolchain.currentRuntime(),
       reinitializeManager: () => this.reinitializeManager(),
       productObservation: () => this.stateModel.productObservation(),
     });
     this.toolchain = new SupervisorToolchain({
+      diagnosticLog: this.diagnosticLog,
       home: this.home,
       controlDir: this.controlDir,
       nodeExe: this.nodeExe,
@@ -357,6 +383,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       observeChildWork: (action) => this.observeChildWork(action),
     });
     this.supervisorPlans = new SupervisorPlans({
+      diagnosticLog: this.diagnosticLog,
       whileIdle: (id, action) => this.llmOps.whileIdle(id, action),
       home: this.home,
       lifecycle: this.lifecycle,
@@ -380,7 +407,12 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       stopOwnedAll: () => this.spaceLifecycle.stopOwnedAll(),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
       mainProfile: () => this.mainProfile(),
-      syncMainModels: (spaceId) => this.syncMainModels(spaceId),
+      prepareModelSync: (spaceId) => this.prepareModelSync(spaceId),
+      modelLive: (prepared, spaceId, ctx) => {
+        const client = this.childRemoteClient(spaceId);
+        if (!client) throw new WorkbenchPublicError("workbench/unavailable", "The child settings surface is unavailable.");
+        return runLiveModelSync(client, prepared, spaceId, ctx);
+      },
       pluginLive: (request, ctx) => {
         const client = this.childRemoteClient(request.spaceId);
         if (!client) throw new WorkbenchPublicError("workbench/unavailable", "The child remote surface is unavailable.");
@@ -404,6 +436,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       currentServiceEpoch: () => this.stateModel.currentServiceEpoch(),
     });
     this.creator = new SupervisorCreator({
+      diagnosticLog: this.diagnosticLog,
       home: this.home,
       origin: () => this.origin,
       now: this.now,
@@ -547,12 +580,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     return profile;
   }
 
-  /** One copy of the main space's models into a stopped space; see main-model-sync.ts. */
-  private async syncMainModels(spaceId: string): Promise<ModelSyncSummary> {
-    const mainProfile = this.mainProfile();
-    const summary = await syncMainModels({
+  private modelSyncInput(spaceId: string): ModelSyncInput {
+    return {
       home: this.home,
-      mainProfile,
+      mainProfile: this.mainProfile(),
       spaceId,
       dumpConfig: async (profile) => {
         // The main profile runs the host DSH, so the host-bound CLI composes it.
@@ -560,7 +591,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         if (result.code !== 0) throw new WorkbenchPublicError("workbench/failed", "The main space configuration could not be read.");
         return result.stdout;
       },
-    });
+    };
+  }
+
+  private prepareModelSync(spaceId: string): Promise<PreparedMainModelSync> {
+    return prepareMainModelSync(this.modelSyncInput(spaceId));
+  }
+
+  /** Creation-time copy; explicit syncs are prepared and executed by SupervisorPlans. */
+  private async syncMainModels(spaceId: string): Promise<ModelSyncSummary> {
+    const summary = await syncMainModels(this.modelSyncInput(spaceId));
     this.workbenchLog().append({ level: "info", area: "models", event: "sync", message: `${spaceId}: ${describeModelSync(summary)}` });
     return summary;
   }
@@ -597,8 +637,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   async tryOwn(): Promise<void> {
+    this.diagnosticLog.info("supervisor.ownership", "Supervisor run-rights inspection began.");
     const inspection = this.lease.inspect();
     if (inspection.held) {
+      this.diagnosticLog.info("supervisor.ownership-result", "Supervisor run-rights inspection completed.", { acquired: false, reason: "held" });
       this.lifecycle.reasons = this.heldReasons(inspection);
       this.startup.fail(this.lifecycle.reasons[0] ?? "Another controller holds run rights. This entry stays read-only.", "ownership", {
         reasons: this.lifecycle.reasons,
@@ -611,11 +653,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       if (error instanceof HomeControlBusyError) {
         this.lifecycle.reasons = this.heldReasons(error.inspection);
         this.startup.fail(this.lifecycle.reasons[0] ?? error, "ownership", { reasons: this.lifecycle.reasons });
+        this.diagnosticLog.error("supervisor.ownership-failed", "Supervisor could not acquire run rights.", error, { stage: "ownership" });
         return;
       }
       this.lifecycle.blocked = true;
       this.lifecycle.reasons = [WRITABLE_STARTUP_FAILED_REASON];
       this.startup.fail(error, "acquire", { reasons: [WRITABLE_STARTUP_FAILED_REASON] });
+      this.diagnosticLog.error("supervisor.ownership-failed", "Supervisor could not acquire run rights.", error, { stage: "acquire" });
       return;
     }
     try {
@@ -628,8 +672,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         WRITABLE_STARTUP_FAILED_REASON,
       ];
       this.startup.fail(error, "prepare", { reasons: [WRITABLE_STARTUP_FAILED_REASON] });
+      this.diagnosticLog.error("supervisor.prepare-failed", "Supervisor endpoint preparation failed.", error, { stage: "endpoint" });
       return;
     }
+    this.diagnosticLog.info("supervisor.ownership-result", "Supervisor run rights and endpoint were published.", { acquired: true });
     this.lifecycle.initializing = true;
     try {
       await this.initWritable();
@@ -640,13 +686,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         WRITABLE_STARTUP_FAILED_REASON,
       ];
       this.startup.fail(error, "prepare", { reasons: [WRITABLE_STARTUP_FAILED_REASON] });
+      this.diagnosticLog.error("supervisor.initialize-failed", "Supervisor writable initialization failed.", error, { stage: "prepare" });
     } finally {
       this.lifecycle.initializing = false;
     }
+    this.diagnosticLog.info("supervisor.initialization", "Supervisor writable initialization completed.", { blocked: this.lifecycle.blocked });
   }
 
   async close(): Promise<void> {
     if (this.lifecycle.closed) return;
+    this.diagnosticLog.info("supervisor.stopping", "Supervisor shutdown began.");
     this.lifecycle.sealing = true;
     try {
       await this.creator.close();
@@ -661,16 +710,23 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.lifecycle.maintenanceBlocked = true;
       this.lifecycle.blocked = true;
       this.lifecycle.addReason(STOP_KEPT_REASON);
+      this.diagnosticLog.fault("supervisor.stop-failed", "Supervisor shutdown failed; run rights and failure evidence are preserved.", error);
       throw error instanceof Error ? error : new Error(STOP_NOT_FORCED);
     }
     this.dropWritable();
     this.lifecycle.closed = true;
     await this.httpClose?.();
+    this.diagnosticLog.info("supervisor.stopped", "Supervisor shutdown completed.");
   }
 
   async dispatch(method: WorkbenchApiMethod, payload: unknown): Promise<unknown> {
+    const started = Date.now();
+    const correlation = currentOperationDetails();
+    this.diagnosticLog.debug("request.started", "Workbench request accepted for dispatch.", { event: dispatchEventName(method, payload), ...correlation, request: correlation?.operationId ?? null });
     try {
-      return await this.dispatchRequest(method, payload);
+      const result = await this.dispatchRequest(method, payload);
+      this.diagnosticLog.debug("request.completed", "Workbench request completed.", { event: dispatchEventName(method, payload), durationMs: Date.now() - started, ...currentOperationDetails() });
+      return result;
     } catch (error) {
       this.rememberDispatchFailure(method, payload, error);
       throw error;
@@ -821,6 +877,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         name: row.name,
         version: publicPluginVersion(row.version),
       })),
+      models: readSpaceModelConfig(this.home, id),
       snapshots: [],
       diagnostics: this.lifecycle.reasons.map((message) => ({ level: "warning" as const, code: "WORKBENCH", message })),
     };
@@ -840,23 +897,89 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.lifecycle.admitSubmission();
     if (!this.jobs) throw new WorkbenchPublicError("workbench/read-only");
     const parsedCommand = isWorkbenchProductCommand(command) ? parseWorkbenchProductCommand(command) : command;
+    const epochMatches = parsedContext.serviceEpoch === this.stateModel.currentServiceEpoch();
+    let planAdmission: { scope: WorkbenchPlan["scope"]; affectedSpaceIds: string[] } | undefined;
+    let planAdmitError: unknown;
+    let submitTargetSpace: { spaceId: string; fingerprint: string } | undefined;
+    if (epochMatches && parsedCommand?.kind === "plan.execute" && typeof parsedCommand.planId === "string") {
+      try {
+        planAdmission = this.supervisorPlans.admitPlan(parsedCommand.planId);
+      } catch (error) {
+        planAdmitError = error;
+      }
+    } else if (epochMatches && parsedContext.expectedRevision === this.stateModel.stateRevision()) {
+      const targetSpaceId = this.directTargetSpaceId(parsedCommand);
+      if (targetSpaceId) {
+        submitTargetSpace = {
+          spaceId: targetSpaceId,
+          fingerprint: this.spaceMutationFingerprint(targetSpaceId),
+        };
+      }
+    }
     const job = await this.jobs.submit(parsedCommand, requestId, (ctx) => {
       this.lifecycle.activeJobId = requestId;
       return this.observeChildWork(async () => {
         try {
           this.lifecycle.assertWritable();
-          this.stateModel.assertLiveContext(parsedContext);
+          if (parsedCommand.kind === "plan.execute") {
+            if (parsedContext.serviceEpoch !== this.stateModel.requireServiceEpoch()) {
+              throw new WorkbenchPublicError("workbench/conflict", "Mutation context belongs to another service epoch.");
+            }
+            if (planAdmitError !== undefined) throw planAdmitError;
+            if (planAdmission?.scope !== "space") {
+              this.stateModel.assertLiveContext(parsedContext);
+            }
+          } else if (submitTargetSpace) {
+            if (parsedContext.serviceEpoch !== this.stateModel.requireServiceEpoch()) {
+              throw new WorkbenchPublicError("workbench/conflict", "Mutation context belongs to another service epoch.");
+            }
+            if (this.spaceMutationFingerprint(submitTargetSpace.spaceId) !== submitTargetSpace.fingerprint) {
+              throw new WorkbenchPublicError("workbench/conflict", "The target space changed since the request was submitted.");
+            }
+          } else {
+            this.stateModel.assertLiveContext(parsedContext);
+          }
           return await this.runCommand(parsedCommand, ctx);
         } finally {
           this.lifecycle.activeJobId = undefined;
         }
       });
-    });
+    }, planAdmission ? { affectedSpaceIds: planAdmission.affectedSpaceIds } : undefined);
     if (parsedCommand.kind === "plan.execute") {
       const jobId = job.id;
       void this.jobs.whenIdle().then(() => this.supervisorPlans.afterPlanJobSettled(jobId));
     }
     return job;
+  }
+
+  private directTargetSpaceId(command: WorkbenchCommand): string | null {
+    if (!command || typeof command !== "object") return null;
+    switch (command.kind) {
+      case "space.start":
+      case "space.update":
+      case "template.save":
+        return typeof command.spaceId === "string" && command.spaceId.length > 0 ? command.spaceId : null;
+      case "space.create":
+        return typeof command.input?.name === "string" && command.input.name.trim().length > 0
+          ? spaceIdFromName(command.input.name.trim().toLowerCase())
+          : null;
+      case "template.create":
+      case "space.import":
+        return typeof command.name === "string" && command.name.trim().length > 0
+          ? spaceIdFromName(command.name.trim().toLowerCase())
+          : null;
+      default:
+        return null;
+    }
+  }
+
+  private spaceMutationFingerprint(spaceId: string): string {
+    const space = this.spaceInventory.listSpaces().find((item) => item.id === spaceId) ?? null;
+    return JSON.stringify({
+      spaceId,
+      space,
+      plugins: space ? this.spaceInventory.readPlugins(spaceId) : [],
+    });
   }
 
   async job(id: string): Promise<WorkbenchJob> {
@@ -951,15 +1074,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   }
 
   private async initWritable(): Promise<void> {
+    this.diagnosticLog.info("manager.initialize.started", "Manager initialization started.");
     this.spaceInventory.assertRegistryReadable();
     this.assertManagerBootstrapNotInterrupted();
     this.toolchain.bindToolchain();
     mkdirSync(this.controlDir, { recursive: true });
     const identity = await this.lease.ensureManager();
+    this.diagnosticLog.info("manager.identity", "Manager identity allocated.", { manager: identity.profileId });
     this.managerId = identity.profileId;
     this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
-    this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject });
+    this.jobs = new WorkbenchJobStore({ home: this.home, now: this.now, inject: this.options.jobsInject, diagnosticLog: this.diagnosticLog });
     this.processes = this.createProcessManager();
+    this.diagnosticLog.debug("manager.process-runtime", "Manager process runtime created.");
     this.bindProductService();
     this.instances.reconcileInstanceRecords();
     if (this.maintenanceGate.hasMaintenanceEvidence() || this.lock.inspect().held || this.runs.unmanaged.size) {
@@ -1003,6 +1129,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         managerDump = await this.observeChildWork(() => this.bootstrapManager(identity.profileId));
         this.managerInstall = inspectManagerInstall(this.home, identity.profileId);
       } catch (error) {
+        this.diagnosticLog.error("manager.bootstrap-failed", "Manager bootstrap failed; initialization evidence is retained.", error, { space: identity.profileId });
         this.lifecycle.blocked = true;
         this.lifecycle.managerBootstrapFailure = "Manager initialization did not complete.";
         this.lifecycle.reasons = [this.lifecycle.managerBootstrapFailure];
@@ -1027,13 +1154,15 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.spaces = this.toolchain.createSpacesServiceWithLoader(loader);
     try {
       this.maintenance = this.maintenanceGate.createMaintenance();
-    } catch {
+    } catch (error) {
+      this.diagnosticLog.error("manager.maintenance-compose-failed", "Maintenance could not be composed.", error);
       this.lifecycle.reasons.push("Maintenance could not be composed.");
     }
     if (this.managerInstall === "manager" && this.selectedPayload && this.toolchain.hasComponent("plugin")) {
       try {
         await this.toolchain.alignManagerPlugin(identity.profileId);
       } catch (error) {
+        this.diagnosticLog.error("manager.align-failed", "Manager plugin alignment failed.", error, { space: identity.profileId });
         this.lifecycle.blocked = true;
         const detail = sanitizeLogText(error instanceof Error ? error.message : String(error)).slice(0, 400);
         this.lifecycle.managerStartFailure = `The manager plugin could not be aligned with the selected Spaces version. ${detail}`.trim();
@@ -1053,7 +1182,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       try {
         await this.spaceLifecycle.startSpace(identity.profileId, silentJobContext());
         this.startup.ready();
+        if (this.options.startDesktopSpaces) await this.startDesktopSpaces();
       } catch (error) {
+        this.diagnosticLog.error("manager.start-failed", "The management space did not become ready.", error, { space: identity.profileId });
         this.lifecycle.blocked = true;
         const failure = startupFailureFrom(error, "start");
         const status = this.processes?.statusOf(identity.profileId);
@@ -1066,6 +1197,37 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     } else {
       const reason = this.lifecycle.reasons[0] ?? "The start failed.";
       this.startup.fail(reason, this.cli ? "prepare" : "cli", { reasons: this.lifecycle.reasons });
+    }
+  }
+
+  /** One start for each ordinary space that chose to start with Desktop. */
+  private async startDesktopSpaces(): Promise<void> {
+    let spaces: WorkbenchSpace[];
+    try {
+      spaces = this.spaceInventory.listSpaces();
+    } catch (error) {
+      this.diagnosticLog.error("desktop-start.inventory-failed", "Desktop space startup could not read the space inventory.", error);
+      return;
+    }
+    for (const space of spaces) {
+      if (!space.startWithDesktop || space.isHost || !space.managed) continue;
+      const status = this.spaceInventory.publicStatus(space.id);
+      if (status !== "stopped" && status !== "crashed") continue;
+      try {
+        const jobs = this.jobs!;
+        const job = await jobs.submit({ kind: "space.start", spaceId: space.id }, `desktop-start-${randomBytes(12).toString("hex")}`, async (ctx) => {
+          this.lifecycle.assertWritable();
+          const current = this.spaceInventory.publicStatus(space.id);
+          if (current !== "stopped" && current !== "crashed") return;
+          return this.spaceLifecycle.startSpace(space.id, ctx);
+        });
+        await jobs.whenIdle();
+        if (jobs.job(job.id).status === "failed") {
+          this.diagnosticLog.error("desktop-start.space-failed", "A space selected to start with Desktop did not start.", undefined, { space: space.id });
+        }
+      } catch (error) {
+        this.diagnosticLog.error("desktop-start.space-failed", "A space selected to start with Desktop did not start.", error, { space: space.id });
+      }
     }
   }
 
@@ -1119,7 +1281,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
    * callers must treat undefined as "read fresh".
    */
   private async bootstrapManager(profileId: string, lockHeld = false): Promise<string | undefined> {
-    const initialize = async () => this.observeChildWork(async (): Promise<string | undefined> => {
+    const initialize = async () => this.observeChildWork(() => diagnosticStep(this.diagnosticLog, "manager.bootstrap", { space: profileId }, async (): Promise<string | undefined> => {
       this.assertManagerBootstrapNotInterrupted();
       const existing = inspectManagerInstall(this.home, profileId);
       if (existing === "ordinary" || existing === "damaged") {
@@ -1166,7 +1328,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.registry.updateMeta(profileId, { displayName: "Spaces", order: 0 });
       unlinkSync(marker);
       return dump;
-    });
+    }));
     if (lockHeld) return await initialize();
     return await this.lock.run("bootstrap-manager", initialize);
   }
@@ -1252,10 +1414,16 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.options.portStart ?? 3100,
       this.options.portEnd ?? 3199,
       runtime,
+      this.diagnosticLog,
     );
     // A space leaving "running" invalidates its UI automation session and
     // the open-time authorization together — the manager releases the page.
     manager.onStatus((name, status) => this.uiAutomation.spaceStatusChanged(name, status));
+    manager.onStatus((name, status, extra) => {
+      const input = { space: name, ...(extra?.port !== undefined ? { port: extra.port } : {}) };
+      if (status === "crashed") this.diagnosticLog.error("space.status", "Space entered a failed state.", extra?.error, input);
+      else this.diagnosticLog.info("space.status", "Space process status changed.", { ...input, status });
+    });
     return manager;
   }
 
@@ -1273,6 +1441,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     const message = redactPublicReason(sanitizeLogText(raw)) || "The workbench request failed.";
     const event = dispatchEventName(method, payload);
     const signature = `${event}\n${code}\n${message}`;
+      this.diagnosticLog.error("request.failed", "A workbench request failed.", error, { event, ...(code ? { code } : {}), ...currentOperationDetails() });
     if (signature === this.lastDispatchLog) return;
     try {
       this.workbenchLog().append({

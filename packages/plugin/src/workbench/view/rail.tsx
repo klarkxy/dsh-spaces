@@ -14,6 +14,7 @@ import { spaceCreateStep, type PortalCreation } from "../../../../../src/shared/
 import { CreationRing } from "../../../../../src/shared/ui/creation-ring";
 import { SpaceGlyph } from "../space-glyph";
 import { t, type WorkbenchLocale } from "../i18n";
+import { isSettingsOverlay } from "../store";
 import { statusKey, type WorkbenchViewProps } from "./shared";
 
 /** Custom properties need a cast; React types only know the standard ones. */
@@ -39,7 +40,7 @@ export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
   const spaces = controller.workspaceSpaces().filter((space) => !creatingIds.has(space.id));
   const writable = controller.canMutate();
   return (
-    <aside className="dsh-wb-rail" inert={ui.overlay?.type === "settings" || undefined} aria-label={t(locale, "app.title")}>
+    <aside className="dsh-wb-rail" inert={isSettingsOverlay(ui.overlay) || undefined} aria-label={t(locale, "app.title")}>
       <RailSlot active={ui.selected === "home"} delay="0ms">
         <RailButton
           label={t(locale, "app.home")}

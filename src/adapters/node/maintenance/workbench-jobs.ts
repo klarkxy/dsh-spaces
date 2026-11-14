@@ -35,6 +35,8 @@ import {
   type StoredJob,
 } from "./workbench-jobs/record";
 import { REQUEST_ID_RE, canonicalize, isPlainObject, sanitizeJobText } from "./workbench-jobs/util";
+import { diagnosticOperation } from "../diagnostics/operation-log";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
 
 export {
   WORKBENCH_CONTROL_DIR_NAME,
@@ -82,12 +84,14 @@ export class WorkbenchJobStore {
   /** Filenames kept as evidence; never overwritten. */
   private readonly evidenceOnly = new Set<string>();
   private queue: Promise<void> = Promise.resolve();
+  private readonly log?: DiagnosticLogger;
 
   constructor(options: WorkbenchJobsOptions) {
     this.home = canonicalHome(options.home);
     this.jobsDir = join(this.home, WORKBENCH_CONTROL_DIR_NAME, WORKBENCH_JOBS_DIR_NAME);
     this.inject = options.inject;
     this.now = options.now ?? (() => new Date());
+    this.log = options.diagnosticLog;
     this.loadFromDisk();
   }
 
@@ -123,9 +127,10 @@ export class WorkbenchJobStore {
     command: WorkbenchCommand,
     requestId: string,
     handler: WorkbenchJobHandler,
+    options?: { affectedSpaceIds?: string[] },
   ): Promise<WorkbenchJob> {
     try {
-      return Promise.resolve(this.accept(command, requestId, handler));
+      return Promise.resolve(this.accept(command, requestId, handler, options));
     } catch (error) {
       return Promise.reject(error);
     }
@@ -211,6 +216,7 @@ export class WorkbenchJobStore {
     command: WorkbenchCommand,
     requestId: string,
     handler: WorkbenchJobHandler,
+    options?: { affectedSpaceIds?: string[] },
   ): WorkbenchJob {
     if (typeof handler !== "function") {
       throw new WorkbenchJobError("workbench/invalid-input");
@@ -226,6 +232,7 @@ export class WorkbenchJobStore {
       return publicJob(existing);
     }
     const timestamp = this.isoNow();
+    const explicitSpaces = options?.affectedSpaceIds?.filter((item) => typeof item === "string" && item.length > 0);
     const record: StoredJob = {
       schemaVersion: SCHEMA_VERSION,
       id,
@@ -236,12 +243,13 @@ export class WorkbenchJobStore {
       status: "queued",
       phase: "queued",
       message: "",
-      affectedSpaceIds: affectedSpaceIds(parsed),
+      affectedSpaceIds: explicitSpaces ? [...new Set(explicitSpaces)] : affectedSpaceIds(parsed),
       createdAt: timestamp,
       updatedAt: timestamp,
       canCancel: true,
     };
     this.write(record);
+    this.log?.info("job.queued", "Workbench job accepted.", { job: id, kind: parsed.kind, spaces: record.affectedSpaceIds.join(",") });
     this.enqueue(() => this.run(id, handler));
     return publicJob(record);
   }
@@ -278,6 +286,13 @@ export class WorkbenchJobStore {
   }
 
   private async run(id: string, handler: WorkbenchJobHandler): Promise<void> {
+    const kind = this.records.get(id)?.kind ?? "unknown";
+    const body = () => this.runBody(id, handler);
+    if (this.log) await diagnosticOperation(this.log, kind, { job: id }, body, id);
+    else await body();
+  }
+
+  private async runBody(id: string, handler: WorkbenchJobHandler): Promise<void> {
     try {
       const record = this.records.get(id);
       if (!record || record.status !== "queued") return;
@@ -285,6 +300,7 @@ export class WorkbenchJobStore {
       record.phase = record.phase === "queued" ? "running" : record.phase;
       record.canCancel = false;
       record.updatedAt = this.isoNow();
+      this.log?.info("job.started", "Workbench job started.", { job: id, kind: record.kind });
       try {
         this.write(record);
       } catch {
@@ -307,6 +323,7 @@ export class WorkbenchJobStore {
         current.canCancel = false;
         current.updatedAt = this.isoNow();
         current.error = undefined;
+        this.log?.info("job.succeeded", "Workbench job succeeded.", { job: id, kind: current.kind, phase: current.phase });
         if (result && Object.keys(result).length) {
           current.result = result;
           if (result.spaceId && !current.affectedSpaceIds.includes(result.spaceId)) {
@@ -333,6 +350,7 @@ export class WorkbenchJobStore {
           current.result = undefined;
           current.error = undefined;
           this.write(current);
+          this.log?.info("job.cancelled", "Workbench job cancelled.", { job: id, kind: current.kind });
           return;
         }
         current.status = "failed";
@@ -342,6 +360,7 @@ export class WorkbenchJobStore {
         const partial = this.pendingResults.get(id);
         current.result = partial && Object.keys(partial).length ? partial : undefined;
         current.error = publicErrorFromUnknown(error);
+        this.log?.error("job.failed", "Workbench job failed.", error, { job: id, kind: current.kind, phase: current.phase });
         if (!current.message) current.message = current.error.message;
         try {
           this.write(current);
@@ -364,6 +383,7 @@ export class WorkbenchJobStore {
     return {
       signal,
       phase: (phase: string) => {
+        this.log?.info("job.phase", "Workbench job entered a new phase.", { job: id, phase, previousPhase: this.records.get(id)?.phase ?? "unknown" });
         this.patch(id, { phase: parsePhase(phase) });
       },
       message: (message: string) => {

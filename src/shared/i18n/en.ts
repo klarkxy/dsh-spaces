@@ -24,7 +24,7 @@ export const en = {
   "errors.exitedUnexpectedly": "The space closed unexpectedly.",
   "errors.exitedBeforeApi": "{name} closed before it was ready to open.",
   "errors.startCancelled": "Start was cancelled.",
-  "errors.stopFailed": "Couldn't stop every space: {detail}. They may still be running.",
+  "errors.stopFailed": "Couldn't stop every space: {detail}.",
   "errors.processStillRunning": "{name} is still running after stop.",
   "errors.missingDumpRow": "Missing row {id} in dump-config for {name}",
   "errors.dumpRootMismatch": "{id} root is {actual}, expected hub/{name}/{kind}",

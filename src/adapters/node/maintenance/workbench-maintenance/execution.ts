@@ -10,10 +10,11 @@ import { requestFromCommand } from "./validation";
  */
 export class MaintenanceExecution extends MaintenancePlans {
   protected async executeLocked(planId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJobResult | void> {
+    const wasAdmitted = this.admittedPlans.delete(planId);
     const stored = this.readPlan(planId);
     if (stored.status !== "previewed") throw new WorkbenchMaintenanceError("workbench/conflict");
     this.assertPlanIdentity(stored);
-    this.assertFresh(stored);
+    if (!wasAdmitted) this.assertFresh(stored);
     const rebuilt = await this.buildPlan(requestFromCommand(stored.command));
     if (rebuilt.fingerprint !== stored.fingerprint) {
       throw new WorkbenchMaintenanceError("workbench/stale");
@@ -31,30 +32,30 @@ export class MaintenanceExecution extends MaintenancePlans {
         return work();
       };
       switch (stored.command.kind) {
-        case "plugin.install":
-          await this.runPluginInstall(stored.command, ctx, stored.id, () => {
+        case "plugin.install": {
+          const command = stored.command;
+          return await this.finishPlan(stored, () => this.runPluginInstall(command, ctx, stored.id, () => {
             irreversible = true;
-          });
-          this.markPlan(stored, "succeeded");
-          return;
-        case "plugin.install.spec":
-          await this.runPluginInstallSpec(stored.command, ctx, stored.id, () => {
+          }));
+        }
+        case "plugin.install.spec": {
+          const command = stored.command;
+          return await this.finishPlan(stored, () => this.runPluginInstallSpec(command, ctx, stored.id, () => {
             irreversible = true;
-          });
-          this.markPlan(stored, "succeeded");
-          return;
-        case "plugin.remove":
-          await this.runPluginRemove(stored.command, ctx, stored.id, () => {
+          }));
+        }
+        case "plugin.remove": {
+          const command = stored.command;
+          return await this.finishPlan(stored, () => this.runPluginRemove(command, ctx, stored.id, () => {
             irreversible = true;
-          });
-          this.markPlan(stored, "succeeded");
-          return;
-        case "plugin.toggle":
-          await this.runPluginToggle(stored.command, ctx, stored.id, () => {
+          }));
+        }
+        case "plugin.toggle": {
+          const command = stored.command;
+          return await this.finishPlan(stored, () => this.runPluginToggle(command, ctx, stored.id, () => {
             irreversible = true;
-          });
-          this.markPlan(stored, "succeeded");
-          return;
+          }));
+        }
         case "plugin.cleanup-manager":
           await this.runCleanupManager(stored.command, ctx, stored.id, () => {
             irreversible = true;

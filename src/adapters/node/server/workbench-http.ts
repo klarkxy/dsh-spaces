@@ -5,6 +5,7 @@ import { CONTAINED_MANAGEMENT_PARAM } from "../../../shared/space-host";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { redactPublicReason } from "../../../shared/public-reason";
 import { sanitizeLogText } from "../diagnostics/diagnostics";
+import { diagnosticCorrelation, diagnosticNested } from "../diagnostics/operation-log";
 import { MAX_SPACE_ICON_FILE_BYTES } from "../../../shared/space-icon";
 import {
   isBlueprintLargeRequestMethod,
@@ -44,6 +45,7 @@ export interface ViewBootstrap {
 }
 
 export interface WorkbenchHttpRuntime {
+  diagnosticLog?: import("../diagnostics/rotating-log").DiagnosticLogger;
   cookieName(): string;
   sessionCookie(): string;
   sessionEquals(value: string): boolean;
@@ -324,6 +326,8 @@ async function handleApi(
   res: ServerResponse,
   url: URL,
 ): Promise<void> {
+  const started = Date.now();
+  const requestId = `http-${process.pid}-${++httpRequestSequence}`;
   if (req.method !== "POST") {
     deny(res, 405, "workbench/invalid-input", "Workbench API methods are POST JSON.");
     return;
@@ -368,13 +372,17 @@ async function handleApi(
     return;
   }
   try {
-    const value = await host.dispatch(method, payload);
+    const value = await (host.diagnosticLog ? diagnosticNested(host.diagnosticLog, () => diagnosticCorrelation(requestId, () => host.dispatch(method, payload))) : host.dispatch(method, payload));
     json(res, 200, { ok: true, value }, corsHeaders(req, host));
+    host.diagnosticLog?.debug("http.completed", "Management HTTP request completed.", { request: requestId, operationId: requestId, method, durationMs: Date.now() - started });
   } catch (error) {
+    host.diagnosticLog?.error("http.failed", "Management HTTP request failed.", error, { request: requestId, operationId: requestId, method, durationMs: Date.now() - started });
     const mapped = publicError(error);
     json(res, 200, { ok: false, error: mapped }, corsHeaders(req, host));
   }
 }
+
+let httpRequestSequence = 0;
 
 async function handleView(
   host: WorkbenchHttpRuntime,

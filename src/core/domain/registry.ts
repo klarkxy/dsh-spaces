@@ -30,6 +30,9 @@ export function normalizeSpacesFile(parsed: SpacesFile): SpacesFile {
       typeof meta.displayName !== "string" || !Number.isFinite(meta.order)) {
       throw new Error("Space registry metadata is invalid.");
     }
+    if (meta.startWithDesktop !== undefined && typeof meta.startWithDesktop !== "boolean") {
+      throw new Error("Space registry metadata is invalid.");
+    }
     parseSpaceBaseSelection(meta);
   }
   return {

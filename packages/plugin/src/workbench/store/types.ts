@@ -37,18 +37,28 @@ export type { SpaceImportResult };
 
 export type HomeTab = "overview" | "spaces" | "plugins" | "snapshots" | "runtime" | "templates" | "blueprints";
 
+export type CreateDialogMode = "blank" | "template" | "import";
+
 export type OverlayKind =
-  | { type: "create" }
-  | { type: "rename"; spaceId: string }
-  | { type: "icon"; spaceId: string }
+  | { type: "create"; mode?: CreateDialogMode; templateId?: string; overSettings?: boolean }
+  | { type: "rename"; spaceId: string; overSettings?: boolean }
+  | { type: "icon"; spaceId: string; overSettings?: boolean }
+  | { type: "save-template"; spaceId: string; overSettings?: boolean }
+  | { type: "export-share"; spaceId: string; overSettings?: boolean }
   | { type: "settings" }
-  | { type: "import" }
-  | { type: "menu"; spaceId: string; x: number; y: number }
+  | { type: "import"; overSettings?: boolean }
+  | { type: "menu"; spaceId: string; x: number; y: number; overSettings?: boolean }
   | { type: "creation-failed"; jobId: string }
   | null;
 
+/** Whether the settings surface is open, either directly or beneath a child overlay. */
+export function isSettingsOverlay(overlay: OverlayKind): boolean {
+  return overlay?.type === "settings" || Boolean(overlay && "overSettings" in overlay && overlay.overSettings);
+}
+
 export interface SettingsDraft {
   settings: WorkbenchHomeSettings;
+  saved?: WorkbenchHomeSettings;
   observation: WorkbenchProductObservation;
   dirty: boolean;
 }
@@ -82,6 +92,8 @@ export interface SubmitOptions {
   context?: WorkbenchMutationContext;
   /** The surface that owns the failure of this command. */
   origin?: string | null;
+  /** For space.create, whether to start and enter the space automatically upon completion. */
+  autoEnter?: boolean;
   /** Called with the accepted job, before the next poll. */
   onJob?: (job: WorkbenchJob) => void;
 }
@@ -168,6 +180,11 @@ export interface WorkbenchUiState {
   importName: string;
   importDisplayName: string;
   lastProductOutcome: WorkbenchProductOutcome | null;
+  pluginOutcomeNotice: {
+    jobId: string;
+    application: "applied" | "restart-required";
+    spaceIds: string[];
+  } | null;
   blueprint: BlueprintUiState;
 }
 

@@ -39,6 +39,7 @@ import { listProfilePlugins } from "../products/plugin-ops";
 import { parseIcon } from "./input";
 import type { BoundCli } from "./types";
 import type { SpacesComponent } from "../payload/dev-checkout";
+import type { DiagnosticLogger } from "../diagnostics/rotating-log";
 import { admitNativeRequest, ChannelBodyRejection, readChannelJsonBody } from "./native-request";
 import {
   installSpecFor,
@@ -75,6 +76,7 @@ interface StoredCreatorPlan {
 }
 
 export interface SupervisorCreatorPorts {
+  diagnosticLog?: DiagnosticLogger;
   home: string;
   origin(): string;
   now(): Date;
@@ -248,6 +250,7 @@ export class SupervisorCreator {
       controlScopeDigest: scopeDigest(controlScope),
     };
     this.registration = registration;
+    this.ports.diagnosticLog?.info("creator.registered", "The main space registered its Creator and Control channels.", { main: input.profile, registration: registration.registrationId });
     return { registrationId: registration.registrationId, scopes: { creator: creatorScope, control: controlScope }, serviceEpoch: registration.serviceEpoch };
   }
 
@@ -260,6 +263,7 @@ export class SupervisorCreator {
     }
     this.registration = undefined;
     this.plans.clear();
+    this.ports.diagnosticLog?.info("creator.unregistered", "The main-space registration was retired.", { registration: registrationId });
     return { unregistered: true };
   }
 
@@ -319,6 +323,7 @@ export class SupervisorCreator {
     this.evictExpiredPlans();
     if (this.plans.size >= PLAN_LIMIT) throw new CreatorPublicError("creator/unavailable", "Too many open previews; execute or wait for expiry.");
     this.plans.set(plan.id, { plan, registrationId: registration.registrationId, consumed: false });
+    this.ports.diagnosticLog?.info("creator.preview", "A space-creation plan was frozen.", { plan: plan.id, steps: plan.steps.length, modelSource: input.modelSource, startAfterCreate: input.startAfterCreate });
     return plan;
   }
 
@@ -488,12 +493,14 @@ export class SupervisorCreator {
       const index = stepIndex(kind, packageName);
       if (index >= 0) steps[index].status = "failed";
       publish();
+      this.ports.diagnosticLog?.error("creator.step-failed", "A space-creation step failed; no later step is attempted.", error, { plan: plan.id, space: spaceId || null, step: kind, package: packageName ?? null });
       throw creatorError(error);
     };
     const done = (kind: string, packageName?: string): void => {
       const index = stepIndex(kind, packageName);
       if (index >= 0) steps[index].status = "done";
       publish();
+      this.ports.diagnosticLog?.info("creator.step", "A space-creation step completed.", { plan: plan.id, space: spaceId || null, step: kind, package: packageName ?? null });
     };
     try {
       await this.ports.lock.run("creator.create", async () => {
@@ -659,6 +666,7 @@ export class SupervisorCreator {
       reply(status, { ok: false, error: { code, message } });
     const failOp = (error: unknown): void => {
       const mapped = error instanceof CreatorPublicError ? error : creatorError(error);
+      this.ports.diagnosticLog?.error("creator.request-failed", "A main-space Creator request failed.", error, { operation: op });
       deny(200, mapped.code, mapped.message);
     };
     try {

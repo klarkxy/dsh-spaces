@@ -105,6 +105,10 @@ export class WorkbenchHostRuntime {
     this.snapshotRoot = typeof options.snapshotRoot === "string" ? options.snapshotRoot : undefined;
   }
 
+  get allowRealHome(): boolean {
+    return this.options.allowRealHome === true;
+  }
+
   get identity(): HostIdentity {
     return resolveHostIdentity(this.options);
   }
@@ -556,7 +560,7 @@ export class WorkbenchHostRuntime {
     };
   }
 
-  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult, record?: DesktopLaunchRecord): Promise<WorkbenchBootstrapResult> {
+  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult, record?: DesktopLaunchRecord, startDesktopSpaces = false): Promise<WorkbenchBootstrapResult> {
     const home = this.identity.home;
     if (!home) {
       return {
@@ -598,6 +602,7 @@ export class WorkbenchHostRuntime {
       snapshotRoot: this.snapshotRoot,
       allowRealHome: this.options.allowRealHome === true,
       allowColdStart,
+      startDesktopSpaces,
       exitWithHost:
         this.identity.confirmed &&
         !this.identity.recoveryRequired &&
@@ -732,7 +737,7 @@ export class WorkbenchHostRuntime {
     const denied = this.desktopIdentityRejection();
     if (denied) throw new Error(denied);
     const { record, created } = joinLaunch(this.launchHomeKey());
-    if (created) void this.runLaunch(record).catch(() => undefined);
+    if (created) void this.runLaunch(record, undefined, true).catch(() => undefined);
     return snapshotLaunch(record);
   }
 
@@ -787,9 +792,9 @@ export class WorkbenchHostRuntime {
     return this.finishInitialize(current.managerId ?? this.currentManagerId());
   }
 
-  private async runLaunch(record: DesktopLaunchRecord, priorDiscovery?: SupervisorAttachResult): Promise<WorkbenchBootstrapResult> {
+  private async runLaunch(record: DesktopLaunchRecord, priorDiscovery?: SupervisorAttachResult, startDesktopSpaces = false): Promise<WorkbenchBootstrapResult> {
     try {
-      const result = await this.connectSupervisor(true, priorDiscovery, record);
+      const result = await this.connectSupervisor(true, priorDiscovery, record, startDesktopSpaces);
       if (!result.connected) this.failRecord(record, result.reasons);
       return result;
     } catch (error) {

@@ -19,6 +19,7 @@ import {
   assertDumpPatched,
 } from "../profile/patch-writer";
 import { ProfileRegistry } from "../profile/profile-registry";
+import { readSpaceModelConfig } from "../llm/main-model-sync";
 import { SNAPSHOT_ID_RE } from "../../../shared/snapshots";
 import type {
   CreateSpaceInput,
@@ -189,6 +190,7 @@ export class NodeSpacesService implements SpacesApi {
     if (!space) throw new SpacesPublicError("spaces/not-found");
     return {
       space,
+      models: readSpaceModelConfig(this.options.home, name),
       plugins: this.readPlugins(name),
       snapshots: this.readSnapshots(name).items,
       diagnostics: this.detailDiagnostics(name, capabilities),

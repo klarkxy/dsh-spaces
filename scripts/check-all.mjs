@@ -28,7 +28,12 @@ export function createCheckEnvironment({ tempRoot = tmpdir(), repo = REPO, platf
   const directory = mkdtempSync(join(parent, 'dsh-spaces-check-'));
   const home = join(directory, 'home');
   return { directory, env: { ...env, TMP: directory, TEMP: directory, TMPDIR: directory,
-    DSH_HOME: home, DSH_SPACES_HOME: home, DSH_SPACES_WEB_HOME: home } };
+    DSH_HOME: home, DSH_SPACES_HOME: home, DSH_SPACES_WEB_HOME: home,
+    npm_config_cache: join(directory, 'npm-cache'),
+    npm_config_store_dir: join(directory, 'pnpm-store'),
+    pnpm_config_store_dir: join(directory, 'pnpm-store'),
+    pnpm_config_cache_dir: join(directory, 'pnpm-cache'),
+  } };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -56,7 +61,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`RUN ${check}`);
     let code, error;
     try {
-      const child = spawn(process.execPath, [npm, 'run', check], { cwd: REPO, env: isolated.env,
+      const child = spawn(process.execPath, [npm, 'run', check], { cwd: REPO, env: { ...isolated.env, DSH_SPACES_BUILD_TARGET: 'npm' },
         windowsHide: true, stdio: ['ignore', fd, fd] });
       [code] = await once(child, 'close');
     } catch (cause) { code = null; error = String(cause); }

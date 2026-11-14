@@ -41,7 +41,7 @@ function space(id: string, displayName: string): WorkbenchSpace {
     status: "running",
     generation: 1,
     managed: true,
-    dshVersion: null,
+    dshVersion: null, startWithDesktop: false,
   };
 }
 
@@ -260,7 +260,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
         status: "running",
         generation: 1,
         managed: true,
-        dshVersion: null,
+        dshVersion: null, startWithDesktop: false,
       },
     ]
     : [
@@ -273,7 +273,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
       status: "running",
       generation: 1,
       managed: true,
-      dshVersion: null,
+      dshVersion: null, startWithDesktop: false,
     },
     { ...space("alpha", "Alpha"), dshVersion: "0.1.5-rc.1" },
     space("beta", "Beta"),
@@ -332,6 +332,7 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
         hasWebApp: true,
         status: "running",
       },
+      models: { status: "unconfigured", routeNames: [], defaultModel: null, missingCredentials: [] },
       plugins: [],
       snapshots: [],
       diagnostics: [],
@@ -357,7 +358,8 @@ function makeApi(supervisor: string, child: string): WorkbenchApi {
         title: request.kind,
         scope: request.kind === "service.shutdown" ? "controller" : "space",
         affectedSpaceIds: [],
-        runningSpaceIds: [],
+        runningSpaceIds: request.kind === "space.models.sync" ? ["alpha"] : [],
+        modelsSync: request.kind === "space.models.sync" ? { mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/gw-large", credentials: ["GW_KEY"], skipped: [{ route: "codex", reason: "login-grant" }], missingCredentials: ["MISSING_KEY"] } : undefined,
         taskActivity: "idle",
         changes: ["x"],
         destructive: request.kind === "service.shutdown",

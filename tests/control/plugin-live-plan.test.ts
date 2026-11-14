@@ -20,7 +20,8 @@ import {
   type ControlPlanResult,
 } from "../../src/shared/control.ts";
 import type { CreatorIssueResult } from "../../src/shared/creator.ts";
-import type { WorkbenchPlanRequest } from "../../src/shared/workbench.ts";
+import type { ModelSyncSummary, WorkbenchPlanRequest } from "../../src/shared/workbench.ts";
+import type { MainModelSnapshot } from "../../src/adapters/node/llm/main-model-sync.ts";
 import { SupervisorControl, type SupervisorControlPorts } from "../../src/adapters/node/supervisor/control.ts";
 import { SupervisorCreator, type SupervisorCreatorPorts } from "../../src/adapters/node/supervisor/creator.ts";
 import { SupervisorPlans } from "../../src/adapters/node/supervisor/plans.ts";
@@ -38,6 +39,7 @@ import type { NodeSpacesService } from "../../src/adapters/node/products/spaces-
 import type { SupervisorPlansHost } from "../../src/adapters/node/supervisor/plans.ts";
 import { SpaceMessageRouter } from "../../src/adapters/node/message-bus/router.ts";
 import type { ChildRemoteClient } from "../../src/adapters/node/supervisor/child-remote.ts";
+import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
 
 const temps: string[] = [];
 const listeners: Server[] = [];
@@ -92,15 +94,21 @@ interface Fixture {
     revision: string;
     nowMs: number;
     running: Set<string>;
+    starting: Set<string>;
+    stopping: Set<string>;
     spawned: Set<string>;
     generations: Map<string, number>;
   };
   localPreviewCalls: WorkbenchPlanRequest[];
   liveCalls: Array<{ request: WorkbenchPlanRequest }>;
   liveAnswer?: (request: WorkbenchPlanRequest) => Promise<unknown>;
+  modelSyncSummary: ModelSyncSummary;
+  modelSyncSnapshot: MainModelSnapshot;
+  modelSyncCalls: string[];
+  modelApplyError?: Error;
 }
 
-function makeFixture(home: string, options: { running?: string[] } = {}): Fixture {
+function makeFixture(home: string, options: { running?: string[]; starting?: string[]; stopping?: string[] } = {}): Fixture {
   const fixture = {
     home,
     origin: "http://127.0.0.1:1",
@@ -109,12 +117,17 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
       revision: REVISION,
       nowMs: Date.now(),
       running: new Set(options.running ?? []),
+      starting: new Set(options.starting ?? []),
+      stopping: new Set(options.stopping ?? []),
       spawned: new Set(options.running ?? []),
       generations: new Map((options.running ?? []).map((id) => [id, 1])),
     },
     localPreviewCalls: [] as WorkbenchPlanRequest[],
     liveCalls: [] as Array<{ request: WorkbenchPlanRequest }>,
-  } as Fixture;
+    modelSyncSummary: { mainProfile: "web", routes: ["gw"], deepseek: false, defaultModel: "gw/gw-large", credentials: ["GW_KEY"], skipped: [], missingCredentials: [] },
+    modelSyncSnapshot: { providers: { gw: { apiKeyEnv: "GW_KEY" } }, deepseek: false, refs: { GW_KEY: "test-gw-value" }, records: {}, skipped: [], missingCredentials: [], defaultModel: { provider: "gw", model: "gw-large" } },
+    modelSyncCalls: [] as string[],
+  } as unknown as Fixture;
   const lifecycle = new SupervisorLifecycle(() => {});
   let ownerAlive = true;
   lifecycle.handle = {
@@ -132,7 +145,7 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
   const runs = new SpaceRunRegistry();
   const jobs = new WorkbenchJobStore({ home });
   const processes = {
-    statusOf: (name: string) => (fixture.mutable.running.has(name) ? "running" : "stopped"),
+    statusOf: (name: string) => (fixture.mutable.running.has(name) ? "running" : fixture.mutable.starting.has(name) ? "starting" : fixture.mutable.stopping.has(name) ? "stopping" : "stopped"),
   } as unknown as ProcessManager;
   const inventory = new SupervisorSpaces({
     home, registry, lifecycle, runs,
@@ -169,6 +182,7 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
   } satisfies SupervisorCreatorPorts);
 
   const plansHost: SupervisorPlansHost = {
+    diagnosticLog: createDiagnosticLogger(home, "supervisor"),
     home,
     lifecycle,
     runs,
@@ -185,13 +199,38 @@ function makeFixture(home: string, options: { running?: string[] } = {}): Fixtur
     requireSpace: (id) => inventory.requireSpace(id),
     requireManaged: (id) => inventory.requireSpace(id),
     protectSpecial: (id, opts) => inventory.protectSpecial(id, opts),
-    statusOf: (id) => (fixture.mutable.running.has(id) ? "running" : "stopped"),
+    statusOf: (id) => (fixture.mutable.running.has(id) ? "running" : fixture.mutable.starting.has(id) ? "starting" : fixture.mutable.stopping.has(id) ? "stopping" : "stopped"),
     ownedSpaceIds: () => inventory.ownedSpaceIds(),
-    stopOwned: async () => undefined,
+    stopOwned: async (id) => {
+      fixture.modelSyncCalls.push(`stop:${id}`);
+      fixture.mutable.running.delete(id);
+      fixture.mutable.starting.delete(id);
+      fixture.mutable.stopping.delete(id);
+    },
     stopOwnedAll: async () => undefined,
-    startSpace: async (id) => ({ spaceId: id }),
+    startSpace: async (id) => {
+      fixture.modelSyncCalls.push(`start:${id}`);
+      fixture.mutable.running.add(id);
+      return { spaceId: id };
+    },
     mainProfile: () => "web",
-    syncMainModels: async () => ({ mainProfile: "web", routes: [], deepseek: false, credentials: [], skipped: [], missingCredentials: [] }),
+    prepareModelSync: async (id) => {
+      fixture.modelSyncCalls.push(`prepare:${id}`);
+      const summary = fixture.modelSyncSummary;
+      return {
+        summary,
+        snapshot: fixture.modelSyncSnapshot,
+        apply: async () => {
+          fixture.modelSyncCalls.push(`apply:${id}`);
+          if (fixture.modelApplyError) throw fixture.modelApplyError;
+          return summary;
+        },
+      };
+    },
+    modelLive: async (_prepared, id) => {
+      fixture.modelSyncCalls.push(`live:${id}`);
+      return { spaceId: id, steps: [{ step: "live-models", status: "done" }] };
+    },
     pluginLive: async (request) => {
       fixture.liveCalls.push({ request });
       if (fixture.liveAnswer) await fixture.liveAnswer(request);
@@ -490,7 +529,7 @@ test("execute-time fingerprint refuses a restarted generation before pluginLive 
   const scope = await issueScope(fx, listener);
 
   // Freeze via the supervisor-local plan path exactly like the channel does.
-  const plan = fx.plans.previewLocal({ kind: "plugin.live.update", spaceId, packageName: "dsh-plugin-a", version: "1.2.3" });
+  const plan = await fx.plans.previewLocal({ kind: "plugin.live.update", spaceId, packageName: "dsh-plugin-a", version: "1.2.3" });
   // Restart bumps the generation: the execute-time fingerprint recomputes
   // and refuses before pluginLive sees the request.
   fx.plansHostRuns.nextGeneration(spaceId);
@@ -502,20 +541,91 @@ test("execute-time fingerprint refuses a restarted generation before pluginLive 
   assert.equal(fx.liveCalls.length, 0);
 });
 
+test("models.sync uses the running child's writer and direct files only while stopped", async () => {
+  for (const state of ["running", "stopped"] as const) {
+    const home = tempHome();
+    writeProfile(home, "web");
+    writeSpace(home, "alpha");
+    const fx = makeFixture(home, state === "stopped" ? {} : { running: ["space-alpha"] });
+    const plan = await fx.plans.previewLocal({ kind: "space.models.sync", spaceId: "space-alpha" });
+    assert.deepEqual(plan.runningSpaceIds, state === "running" ? ["space-alpha"] : []);
+    assert.equal(plan.modelsSync?.defaultModel, "gw/gw-large");
+    assert.equal(JSON.stringify(plan).includes("credential-value"), false);
+    const job = await fx.jobs.submit({ kind: "plan.execute", planId: plan.id }, `model-sync-${state}`, (ctx) =>
+      fx.plans.executePlan(plan.id, ctx),
+    );
+    await fx.jobs.whenIdle();
+    assert.equal(fx.jobs.job(job.id).status, "succeeded", JSON.stringify(fx.jobs.job(job.id)));
+    assert.deepEqual(fx.modelSyncCalls, [
+      "prepare:space-alpha",
+      "prepare:space-alpha",
+      state === "running" ? "live:space-alpha" : "apply:space-alpha",
+    ]);
+    assert.equal(fx.mutable.running.has("space-alpha"), state === "running");
+  }
+});
+
+test("models.sync refuses starting and stopping spaces before reading or writing", async () => {
+  for (const state of ["starting", "stopping"] as const) {
+    const home = tempHome();
+    writeProfile(home, "web");
+    writeSpace(home, "alpha");
+    const fx = makeFixture(home, { [state]: ["space-alpha"] });
+    await assert.rejects(
+      fx.plans.previewLocal({ kind: "space.models.sync", spaceId: "space-alpha" }),
+      /model sync accepts running, stopped, or crashed spaces/,
+    );
+    assert.deepEqual(fx.modelSyncCalls, []);
+  }
+});
+
+test("models.sync refuses a changed main-space summary before writing", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  writeSpace(home, "alpha");
+  const fx = makeFixture(home, { running: ["space-alpha"] });
+  const plan = await fx.plans.previewLocal({ kind: "space.models.sync", spaceId: "space-alpha" });
+  fx.modelSyncSummary = { ...fx.modelSyncSummary, defaultModel: "gw/changed" };
+  const job = await fx.jobs.submit({ kind: "plan.execute", planId: plan.id }, "model-sync-drift", (ctx) =>
+    fx.plans.executePlan(plan.id, ctx),
+  );
+  await fx.jobs.whenIdle();
+  assert.equal(fx.jobs.job(job.id).status, "failed");
+  assert.match(fx.jobs.job(job.id).error?.message ?? "", /Preview the sync again/);
+  assert.deepEqual(fx.modelSyncCalls, ["prepare:space-alpha", "prepare:space-alpha"]);
+  assert.equal(fx.mutable.running.has("space-alpha"), true);
+});
+
+test("a stopped-space write failure does not start the space or recover automatically", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  writeSpace(home, "alpha");
+  const fx = makeFixture(home);
+  fx.modelApplyError = new Error("controlled model write failure");
+  const plan = await fx.plans.previewLocal({ kind: "space.models.sync", spaceId: "space-alpha" });
+  const job = await fx.jobs.submit({ kind: "plan.execute", planId: plan.id }, "model-sync-write-failure", (ctx) =>
+    fx.plans.executePlan(plan.id, ctx),
+  );
+  await fx.jobs.whenIdle();
+  assert.equal(fx.jobs.job(job.id).status, "failed");
+  assert.deepEqual(fx.modelSyncCalls, ["prepare:space-alpha", "prepare:space-alpha", "apply:space-alpha"]);
+  assert.equal(fx.mutable.running.has("space-alpha"), false);
+});
+
 test("previewLocal refuses live ops on stopped and protected spaces", async () => {
   const home = tempHome();
   writeProfile(home, "web");
   writeSpace(home, "alpha");
   const fx = makeFixture(home, { running: ["space-alpha"] });
-  assert.throws(
-    () => fx.plans.previewLocal({ kind: "plugin.live.remove", spaceId: "space-ghost", packageName: "x" }),
+  await assert.rejects(
+    fx.plans.previewLocal({ kind: "plugin.live.remove", spaceId: "space-ghost", packageName: "x" }),
     (error) => error instanceof WorkbenchPublicError && (error.code === "workbench/not-found" || error.code === "workbench/conflict"),
   );
   // Reserved profiles are refused before any freeze — not-found when they
   // are not registered spaces, protected when they are.
   for (const id of ["web", "desktop", "spaces-hub"]) {
-    assert.throws(
-      () => fx.plans.previewLocal({ kind: "plugin.live.remove", spaceId: id, packageName: "x" }),
+    await assert.rejects(
+      fx.plans.previewLocal({ kind: "plugin.live.remove", spaceId: id, packageName: "x" }),
       (error) => error instanceof WorkbenchPublicError &&
         (error.code === "workbench/protected" || error.code === "workbench/not-found"),
       `${id} must be refused`,
@@ -523,8 +633,8 @@ test("previewLocal refuses live ops on stopped and protected spaces", async () =
   }
   // A registered but stopped space conflicts at previewLocal too.
   writeSpace(home, "beta");
-  assert.throws(
-    () => fx.plans.previewLocal({ kind: "plugin.live.remove", spaceId: "space-beta", packageName: "x" }),
+  await assert.rejects(
+    fx.plans.previewLocal({ kind: "plugin.live.remove", spaceId: "space-beta", packageName: "x" }),
     (error) => error instanceof WorkbenchPublicError && error.code === "workbench/conflict",
   );
 });

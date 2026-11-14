@@ -10,21 +10,18 @@
  * surface (see `space-detail.tsx`).
  */
 
-import React, { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
+import React, { useRef, useState, type FormEvent, type ReactElement } from "react";
 import { motion } from "motion/react";
 import type { WorkbenchPlan, WorkbenchPlanRequest, WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { springSoft, VisibleScale } from "../../../../../src/shared/ui/motion";
-import { SPACE_AVATARS } from "../../../../../src/shared/space-avatars";
-import { SPACE_NAME_RE } from "../../../../../src/shared/types";
-import { SPACES_BLUEPRINT_SEALED } from "../../../../../src/shared/blueprint-sealed";
-import { SPACES_BROWSER_SEALED } from "../../../../../src/shared/browser-sealed";
 import { ImportPreviewDialog } from "../product-ui";
 import { formatDateTime, t, type WorkbenchLocale } from "../i18n";
-import type { WorkbenchController } from "../store";
+import { isSettingsOverlay, type WorkbenchController } from "../store";
 import type { WorkbenchViewProps } from "./shared";
 import { SpaceMenu } from "./menu";
 import { SettingsDialog } from "./settings";
 import { IconPicker, type IconPickState } from "./icon-picker";
+import { CreateDialog, ExportShareDialog, SaveTemplateDialog } from "./create-dialog";
 import { useModalDialog } from "./use-modal-dialog";
 
 export { IconPicker } from "./icon-picker";
@@ -36,11 +33,15 @@ const MotionForm = motion.form;
 export function Overlays({ ui, controller, systemPage, requestServiceStop }: WorkbenchViewProps): ReactElement | null {
   return (
     <>
+      {(systemPage === "settings" || isSettingsOverlay(ui.overlay)) && (
+        <SettingsDialog ui={ui} controller={controller} systemPage={systemPage} requestServiceStop={requestServiceStop} />
+      )}
       {ui.overlay?.type === "create" && (
         <CreateDialog
-          locale={ui.locale}
+          ui={ui}
           controller={controller}
-          hostVersion={ui.state?.dshVersion ?? null}
+          initialMode={ui.overlay.mode}
+          initialTemplateId={ui.overlay.templateId}
           error={ui.requestOrigin === "create" ? ui.commandError : null}
         />
       )}
@@ -60,14 +61,30 @@ export function Overlays({ ui, controller, systemPage, requestServiceStop }: Wor
           error={ui.requestOrigin === "icon" ? ui.commandError : null}
         />
       )}
-      {(systemPage === "settings" || ui.overlay?.type === "settings") && <SettingsDialog ui={ui} controller={controller} systemPage={systemPage} requestServiceStop={requestServiceStop} />}
+      {ui.overlay?.type === "save-template" && (
+        <SaveTemplateDialog
+          ui={ui}
+          controller={controller}
+          spaceId={ui.overlay.spaceId}
+          error={ui.requestOrigin === "save-template" ? ui.commandError : null}
+        />
+      )}
+      {ui.overlay?.type === "export-share" && (
+        <ExportShareDialog
+          ui={ui}
+          controller={controller}
+          spaceId={ui.overlay.spaceId}
+          error={ui.requestOrigin === "export-share" ? ui.commandError : null}
+        />
+      )}
       {ui.overlay?.type === "import" && ui.importPreview && (
         <ImportPreviewDialog
           locale={ui.locale}
           preview={ui.importPreview}
           importName={ui.importName}
           importDisplayName={ui.importDisplayName}
-          busy={controller.isBusy()}
+          busy={controller.isGlobalBusy() || ui.commandPending}
+          error={ui.requestOrigin === "import" ? ui.commandError : null}
           onName={controller.setImportName}
           onDisplayName={controller.setImportDisplayName}
           onCancel={controller.closeImport}
@@ -199,6 +216,24 @@ function PlanDialog({
     body = plan.title;
     confirmLabel = t(locale, "app.confirm");
   }
+  const livePluginPlan =
+    kind === "plugin.install" ||
+    kind === "plugin.install.spec" ||
+    kind === "plugin.remove" ||
+    kind === "plugin.toggle";
+  const stopsAndRestores =
+    plan.runningSpaceIds.length > 0 &&
+    !lifecycle &&
+    !livePluginPlan &&
+    kind !== "space.delete" &&
+    kind !== "snapshot.create" &&
+    kind !== "space.models.sync";
+  if (stopsAndRestores) {
+    const key = kind === "plugin.cleanup-manager" ? "plan.confirm.stopAndCleanup"
+      : kind === "space.runtime.set" ? "plan.confirm.stopAndRuntime"
+      : "plan.confirm.stopAndApply";
+    confirmLabel = t(locale, key);
+  }
   const danger = plan.destructive || PLAN_DANGER_KINDS.has(kind);
   return (
     <div className="dsh-wb-overlay">
@@ -207,6 +242,25 @@ function PlanDialog({
           {title}
         </h2>
         <p>{body}</p>
+        {plan.modelsSync ? (
+          <dl className="dsh-wb-dl" data-plan-models-summary="true">
+            <dt>{t(locale, "plan.models.summary")}</dt>
+            <dd>{plan.modelsSync.mainProfile}</dd>
+            <dt>{t(locale, "plan.models.default")}</dt>
+            <dd>{plan.modelsSync.defaultModel ?? (plan.modelsSync.defaultModelSkipped ? t(locale, "plan.models.skippedDefault") : t(locale, "plan.none"))}</dd>
+            <dt>{t(locale, "plan.models.routes")}</dt>
+            <dd>{plan.modelsSync.routes.length} · {plan.modelsSync.routes.join(", ") || t(locale, "plan.none")}</dd>
+            <dt>{t(locale, "plan.models.keys")}</dt>
+            <dd>{plan.modelsSync.credentials.length} · {plan.modelsSync.credentials.join(", ") || t(locale, "plan.none")}</dd>
+            <dt>{t(locale, "plan.models.skipped")}</dt>
+            <dd>{plan.modelsSync.skipped.map((skip) => `${skip.route} (${t(locale, `plan.models.skip.${skip.reason}`)})`).join(", ") || t(locale, "plan.none")}</dd>
+            <dt>{t(locale, "plan.models.missing")}</dt>
+            <dd>{plan.modelsSync.missingCredentials.join(", ") || t(locale, "plan.none")}</dd>
+          </dl>
+        ) : null}
+        {kind === "space.models.sync" && plan.runningSpaceIds.includes(request.spaceId) ? <p data-plan-models-live="true">{t(locale, "plan.models.liveBody")}</p> : null}
+        {livePluginPlan && plan.runningSpaceIds.length > 0 ? <p data-plan-plugins-live="true">{t(locale, "plan.plugins.liveBody")}</p> : null}
+        {stopsAndRestores ? <p data-plan-stop-impact="true">{t(locale, "plan.stopAndRestore", { spaces: named(plan.runningSpaceIds) })}</p> : null}
         {plan.taskActivity === "unknown" && <p>{t(locale, "plan.taskUnknown")}</p>}
         <dl className="dsh-wb-dl">
           <dt>{t(locale, "plan.targets")}</dt>
@@ -239,146 +293,6 @@ function PlanDialog({
           </button>
         </div>
       </VisibleScale>
-    </div>
-  );
-}
-
-function CreateDialog({
-  locale,
-  controller,
-  hostVersion,
-  error,
-}: {
-  locale: WorkbenchLocale;
-  controller: WorkbenchController;
-  hostVersion: string | null;
-  /** The failure of this form. The dialog stays open and shows it here. */
-  error: string | null;
-}): ReactElement {
-  const panel = useRef<HTMLFormElement>(null);
-  const modal = useModalDialog(panel, { onCancel: controller.closeOverlay });
-  const [name, setName] = useState("");
-  const displayRef = useRef<HTMLInputElement>(null);
-  const iconRef = useRef<string>(SPACE_AVATARS[0].image);
-  const modelSourceRef = useRef<HTMLSelectElement>(null);
-  const [base, setBase] = useState<'web' | 'browser'>('web');
-  const [version, setVersion] = useState('');
-  const [catalog, setCatalog] = useState<{ base: 'web' | 'browser'; versions: string[] } | null>(null);
-  const [versionError, setVersionError] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    setCatalog(null); setVersion(''); setVersionError(null);
-    void controller.baseVersions(base).then(result => {
-      if (!active) return;
-      setCatalog(result); setVersion(result.preferred ?? '');
-    }, error => { if (active) setVersionError(error instanceof Error ? error.message : String(error)); });
-    return () => { active = false; };
-  }, [controller, base]);
-  const versionReady = catalog?.base === base && catalog.versions.includes(version);
-  const iconState = useRef<IconPickState>("idle");
-  const [iconBlocked, setIconBlocked] = useState(false);
-  const onIconState = (state: IconPickState): void => {
-    iconState.current = state;
-    setIconBlocked(state !== "idle");
-  };
-  const nameInvalid = name.length > 0 && !SPACE_NAME_RE.test(name);
-  const submit = (event: FormEvent): void => {
-    event.preventDefault();
-    if (iconState.current !== "idle" || !versionReady || !name || nameInvalid) return;
-    controller.createSpace({
-      name,
-      displayName: displayRef.current?.value,
-      icon: iconRef.current,
-      base, baseVersion: version,
-      ...(base === 'web' ? {modelSource:modelSourceRef.current?.value === 'local' ? 'local' : 'main'} : {}),
-    });
-  };
-  return (
-    <div className="dsh-wb-overlay">
-      <MotionForm
-        ref={panel}
-        className="dsh-wb-dialog dsh-wb-create-dialog"
-        onSubmit={submit}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="dsh-wb-create-title"
-        onKeyDown={modal.onKeyDown}
-        initial={{ opacity: 1, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={springSoft}
-      >
-        <h2 id="dsh-wb-create-title" className="dsh-wb-title">{t(locale, "create.title")}</h2>
-        <div className="dsh-wb-create-fields">
-        <p className="dsh-wb-muted">{t(locale, "create.hint")}</p>
-        {!SPACES_BLUEPRINT_SEALED ? (
-          <button type="button" className="dsh-wb-btn" onClick={controller.openBlueprintUse}>
-            {t(locale, "blueprints.createFrom")}
-          </button>
-        ) : null}
-        {!SPACES_BROWSER_SEALED ? <label className="dsh-wb-field">
-          {t(locale, 'create.base')}
-          <select name="base" value={base} onChange={event => setBase(event.target.value as 'web' | 'browser')}>
-            <option value="web">Web</option><option value="browser">Browser</option>
-          </select>
-        </label> : null}
-        <label className="dsh-wb-field">
-          {t(locale, SPACES_BROWSER_SEALED ? 'create.webVersion' : 'create.baseVersion')}
-          <select name="baseVersion" value={versionReady ? version : ''} onChange={event => setVersion(event.target.value)} disabled={catalog?.base !== base} required>
-            {!versionReady ? <option value="">{t(locale, 'create.versionPending')}</option> : null}
-            {catalog?.base === base ? catalog.versions.map(value => <option key={value} value={value}>{value}</option>) : null}
-          </select>
-        </label>
-        <p className="dsh-wb-muted">{t(locale, base === 'browser' ? 'create.browserBaseHint' : 'create.webBaseHint')}</p>
-        {versionError ? <p className="dsh-wb-alert" role="alert">{versionError}</p> : null}
-        <label className="dsh-wb-field">
-          {t(locale, "create.name")}
-          <input
-            name="name"
-            required
-            autoComplete="off"
-            maxLength={33}
-            spellCheck={false}
-            data-autofocus="true"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            aria-invalid={nameInvalid || undefined}
-            aria-describedby={nameInvalid ? "dsh-wb-create-name-invalid" : undefined}
-          />
-          {nameInvalid ? (
-            <span id="dsh-wb-create-name-invalid" className="dsh-wb-muted" role="alert">
-              {t(locale, "app.nameInvalid")}
-            </span>
-          ) : null}
-        </label>
-        <label className="dsh-wb-field">
-          {t(locale, "create.displayName")}
-          <input ref={displayRef} name="displayName" autoComplete="off" />
-        </label>
-        {base === 'web' ? <>
-        <label className="dsh-wb-field">
-          {t(locale,'create.modelSource')}
-          <select ref={modelSourceRef} name="modelSource" defaultValue="main">
-            <option value="main">{t(locale,'create.mainModel')}</option>
-            <option value="local">{t(locale,'create.localModel')}</option>
-          </select>
-        </label>
-        <p className="dsh-wb-muted">{t(locale,'create.modelSourceHint')}</p>
-        </> : null}
-        <IconPicker locale={locale} value={iconRef.current} onChange={(icon) => (iconRef.current = icon)} onState={onIconState} />
-        {error ? <p className="dsh-wb-alert" role="alert" data-create-error="true">{error}</p> : null}
-        </div>
-        {controller.hasActiveJobs() ? (
-          <p className="dsh-wb-muted" role="status" data-create-busy="true">{t(locale, "create.busy")}</p>
-        ) : null}
-        <div className="dsh-wb-actions">
-          <button type="button" className="dsh-wb-btn" onClick={controller.closeOverlay}>
-            {t(locale, "app.cancel")}
-          </button>
-          <button type="submit" className="dsh-wb-btn primary" disabled={controller.isBusy() || iconBlocked || !versionReady || !name || nameInvalid}>
-            {t(locale, "app.create")}
-          </button>
-        </div>
-      </MotionForm>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { dshBrowserReady } from '../../src/adapters/node/runtime/dsh-endpoint';
 import type { RuntimeStore } from '../../src/adapters/node/runtime/runtime-store';
 import { SupervisorSpaceCommands, type SupervisorSpaceCommandsHost } from '../../src/adapters/node/supervisor/space-commands';
 import type { WorkbenchJobContext } from '../../src/adapters/node/maintenance/workbench-jobs';
+import { createDiagnosticLogger } from '../../src/adapters/node/diagnostics/rotating-log';
 
 test('base catalogs and creation keep Browser product version separate from its framework', async () => {
   const home = mkdtempSync(join(tmpdir(), 'browser-base-'));
@@ -20,7 +21,7 @@ test('base catalogs and creation keep Browser product version separate from its 
     const calls: readonly string[][] = [];
     const mutableCalls = calls as string[][];
     const installs: string[] = [];
-    const bases = new SpaceBaseCreation({ home, nodeExe: process.execPath,
+    const bases = new SpaceBaseCreation({ home, nodeExe: process.execPath, diagnosticLog: createDiagnosticLogger(home, 'supervisor'),
       cli: () => ({ bin: 'host-cli', version: '0.2.1-rc.2' }),
       runtimes: () => ({ catalog: async () => ({ versions: [{ version: '0.2.1-rc.2' }, { version: '0.3.0' }], distTags: {} }),
         installedBin: () => undefined,

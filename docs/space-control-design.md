@@ -1,213 +1,100 @@
-# 主空间空间总控插件设计（space-control）
+# 主空间 Creator 与空间总控契约（space-control）
 
-> 状态：2026-11-09 已按修订分期实现 P1–P7（原会话代理 P4/P5 已撤销，改为界面操控；space-control 实际以宿主插件子入口 `@dsh-spaces/plugin/space-control` 分发，不是 §3 写的独立包）。实现与验收记录见 [tasks/archive/todo-2026-11.md](../tasks/archive/todo-2026-11.md)；本文正文保留设计原稿，未逐节改写。故障政策以 [let it crash](let-it-crash.md) 为唯一权威；角色与通道基线见 [architecture.md](architecture.md)；主空间注册与 Creator 通道实现见 §依据。官方 API 以运行时 DSH 0.2.2-rc.1 版本锁定源码为准。2026-11-10 修订：`llm-policy.set` 与 `hub/<id>/llm-policy.json` 已随 LLM 委派退役，现行操作是不带参数的 `models.sync`（从主空间复制一次模型配置，目标空间须已停止），`spaces_inspect` 的 model 段只返回目录占位；正文中涉及 llm-policy 与 llm-bridge 的段落是设计原稿。
+> 维护态权威规范（2026-11-10）。故障政策以 [let it crash](let-it-crash.md) 为唯一权威；产品角色与通道基线见 [architecture.md](architecture.md)。早期设计演进与界面自动化调研已归档至 `docs/archive/space-control-*-20261109.md`。
 
-## 1. 目标与非目标
+## 1. 范围与边界
 
-### 目标
+在身份确认的可信主空间（官方 `web` 或 `desktop` profile）中，宿主插件 `@dsh-spaces/plugin` 提供两套受权 Agent 能力面：
 
-让**身份确认的可信主空间**（官方 `web` / `desktop` profile）里的 Agent 能通过一组宿主工具，查看并操作同一 DSH Home 下由 Spaces 管理的普通空间。第一版能力覆盖四类：
+1. **Creator（创建流）**：主入口 `@dsh-spaces/plugin` 注册 `spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`，通过 `/internal/creator/v1/*` 预览并执行新空间创建。
+2. **空间总控（space-control）**：插件包内子入口 `@dsh-spaces/plugin/space-control`（配置项 `id: dsh-space-control`）通过宿主 Cordis Service `spacesMainChannel` 与 `/internal/control/v1/*` 查看并操作同一 DSH Home 下已注册的普通空间。
 
-| 能力域 | 内容 |
-| --- | --- |
-| 空间生命周期 | start / stop / restart / delete（含受影响预览与忙碌保护） |
-| 子空间会话 | 列表、搜索、读取（分页有界）；创建与发送（每次审批） |
-| 子空间插件与模型 | 读：插件组合、模型策略、模型目录；写：插件安装/移除/启停、运行时切换、模型策略切换 |
-| 日志与诊断 | 子空间诊断与脱敏日志尾部，有界返回 |
+### 非目标与硬性边界
 
-### 非目标
+- **主空间限定**：`spaces-hub` 管理空间与普通子空间永远不注册 Creator 或 space-control 工具；`spaces-hub` patch 与 Browser base 显式将该子入口设为 `disabled: true`。
+- **受保护目标**：`web`、`desktop`、`spaces-hub` 与未纳入 Spaces 注册表的目录一律拒绝控制面写操作（返回 `control/protected` 或 `control/not-found`）。
+- **单写者与不恢复**：所有空间与插件变更均经 Supervisor 串行作业队列与 epoch/revision CAS 执行；任何失败保留现场与证据，不自动重试、不回滚、不代为恢复。
+- **凭据不入上下文**：Creator scope、control scope 与子空间认证 cookie 仅保存在宿主或 Supervisor 进程内存中，绝不进入模型上下文、工具返回值、日志或磁盘记录。
 
-- 不做新 UI。现有管理工作台（spaces-hub）和主空间侧栏就是面板；本设计只交付 Agent 工具。
-- 不读、不写主空间自身 profile 的会话与凭据；不授予对 `web`/`desktop`/`spaces-hub` 的管理写。
-- 不做跨机器、多租户、恶意插件沙箱；隔离目标仍是单机同 OS 用户信任域（architecture.md:9）。
-- 不绕过 Home 单写者：所有变更仍过 Supervisor 的 job 串行 tail 与 epoch/revision CAS。
-- 不实现蓝图工作流；蓝图当前封存（architecture.md:151）。
-
-## 2. 角色与信任边界
+## 2. 通道、鉴权与打包形态
 
 ```text
-主空间 Agent
-   │ 宿主工具（spaces_overview / spaces_inspect / spaces_plan / spaces_execute / ...）
-   ▼
-@dsh-spaces/plugin/space-control 子入口（主空间进程内，宿主插件包内模块）
-   │ inject: spacesMainChannel（dsh-spaces 宿主插件提供的 Cordis Service）
-   ▼
-dsh-spaces 宿主插件（主空间进程内）
-   │ POST /internal/control/v1/<op>  loopback 原生请求 + control scope bearer
-   ▼
-Supervisor（每 Home 一个，唯一管理写者）
-   ├─ 复用管理面：state / detail / product(diagnostics,logs) / jobs / plans
-   ├─ 新增控制面：controlPlan（带 activity 快照）→ job
-   └─ 子空间数据面代理：以已认证浏览器会话客户端调用子进程 /api Remote
-        ▲                                    ▲
-        │ launch token → dsh-auth-* cookie   │ sessionController / pluginManager @Remote
-   子空间 DSH 进程（spawned，owned，per-generation）
+可信主空间 Agent（web / desktop）
+   ├─ Creator 工具（spaces_context / spaces_create_preview / spaces_create_execute / spaces_job）
+   │    └─ MainSpaceCreatorService ──► POST /internal/creator/v1/<op>（creator scope bearer）
+   └─ 空间总控工具（spaces_overview / spaces_inspect / spaces_logs / spaces_templates / spaces_import_preview / spaces_plan / spaces_execute / spaces_control_job / spaces_ui_*）
+        └─ @dsh-spaces/plugin/space-control 子入口
+             └─ inject: spacesMainChannel ──► MainSpaceControlService ──► POST /internal/control/v1/<op>（control scope bearer）
+                                                                                │
+                                                                                ▼
+                                                                   Supervisor（每 Home 唯一管理写者）
+                                                                     ├─ 串行作业与计划（controlPlan / jobs / maintenance）
+                                                                     ├─ 运行中子空间 @Remote 代理（ChildSessionClient）
+                                                                     └─ 子空间界面自动化（UiAutomationManager + playwright-core）
 ```
 
-信任要点：
+- **双 scope 同源签发**：主空间身份确认后，向 Supervisor 发起一次注册并同时签发 `scopes.creator` 与 `scopes.control`（绑定当前 `serviceEpoch`，仅存 SHA-256 摘要）。
+- **原生请求准入**：`/internal/creator/v1/*` 与 `/internal/control/v1/*` 均要求 loopback 原生请求（拒绝携带 `Origin`、`Cookie` 或 `sec-fetch-*` 头，校验精确 `Host`），天然排除浏览器脚本伪造。
+- **包内子入口分发**：`@dsh-spaces/plugin/space-control` 构建产物为 `packages/plugin/lib/space-control.js`，随 `manager-plugin` 不可变组件组载荷清单一同校验与分发，不使用独立 npm 包或 `file:` 依赖。
 
-- control scope 与 Creator scope 同源：由同一份主身份注册签发，仅作 `Authorization: Bearer`，不进会话、日志、端点记录（main-space-creator.ts:6-8、creator.ts:212-220）。
-- 通道要求原生请求：无 Origin / Cookie / sec-fetch-site，Host 精确匹配（creator.ts:688-699）——与 Creator 同一准入，天然排除浏览器。
-- 普通空间 profile 永远不会被注册为控制主体：注册断言复用 `assertMainProfile`（creator.ts:400-414）。
-- 子空间会话内容回入主空间上下文时一律按不可信数据处理（见 §6）。
+## 3. 工具契约
 
-## 3. 包与预装
+### 3.1 预设门（Preset Gate）与审批
 
-**实现修订（2026-11-09，取代原“独立 bundle”方案）**：space-control 不再是独立 npm 包。原方案把 `@dsh-spaces/space-control` 作为 `file:lib/space-control` 嵌进宿主插件 dependencies，真实 tarball 安装时 pnpm 将该 file: 路径按**安装方 profile 根**解析而非 tarball 内部，整条安装失败（ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND）。改为宿主插件包内子入口：源码在 `packages/plugin/src/space-control/`，构建产物 `packages/plugin/lib/space-control.js`，经 package.json `exports["./space-control"]` 暴露为 `@dsh-spaces/plugin/space-control`。Cordis Loader 的 `name` 即 Node 模块 specifier，patch 行照常解析子路径（entry.ts/tree.ts 经 `import.meta.resolve` / 内部 loader）。
+- **只读工具**（`spaces_overview`、`spaces_inspect`、`spaces_logs`、`spaces_templates`）：在可信主空间的任意会话中可用，无需审批。
+- **Creator 与空间总控变更/作业/界面工具**（`spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`、`spaces_import_preview`、`spaces_plan`、`spaces_execute`、`spaces_control_job`、`spaces_ui_*`）：调用会话的预设必须为 `cordis`（防止在默认免批的 `danger-full-access` 会话中绕过人工确认）。
+- **人工审批（`approveEscalation`）**：
+  - `spaces_create_execute` 与 `spaces_execute`：每次执行冻结计划前触发一次审批，审批文案必须完整列出操作类型、目标空间、精确插件来源、`approvedBuilds` 构建脚本白名单、受影响空间及忙碌状态警告；`models.sync` 另展示路由、默认模型、Key 名称、跳过项、缺失 Key 与停止/恢复启动语义。
+  - `spaces_ui_open`：打开子空间自动化页面前触发一次审批，授权绑定 `(spaceId, generation, serviceEpoch)`；空间停止、重启或调用 `spaces_ui_close` 后授权立即失效。授权期内 `spaces_ui_act` 不逐次弹窗。
+  - `spaces_ui_eval`：在子空间页面上下文执行脚本属调试操作，不被 `spaces_ui_open` 授权覆盖，**每次调用均须单独审批**，并在审批文案中展示完整脚本内容与同源数据读取提示。
 
-落地：
+### 3.2 Creator 工具（`@dsh-spaces/plugin`）
 
-1. `packages/plugin/cordis.patch.yml` 行 `insert: { id: dsh-space-control, name: '@dsh-spaces/plugin/space-control' }`；id 不变，用户仍按行 id 单独禁用。
-2. `packages/plugin/package.json` 不再有 `@dsh-spaces/space-control` 依赖；`packages/space-control` 目录撤销，根 `file:packages/space-control` 依赖一并移除。pack 预检硬性拒绝插件包内任何 `file:`/`link:`/`workspace:`/`portal:` 依赖与 `@dsh-spaces/*` 自依赖。
-3. `packages/view-bridge` 与 `packages/llm-bridge` 的 patch **不加**此行；manager（spaces-hub）profile patch 与 Browser base 显式 `disabled: true` 该行（Browser 先例见 base-creation.ts:89）。本入口只服务于主空间。
-4. `SupervisorToolchain.ensureBundledDependencies` 收敛回单一 `@klarkxy/dsh-dev-index`：space-control 随插件包本体走，开发 link 与 tarball 都不需要 profile 层补依赖。
-5. `lib/space-control.js` 纳入同一不可变组件组 manager-plugin 的 payload 清单（component-payload.ts）。
-
-## 4. 通道与认证
-
-### 4.1 注册与 scope
-
-Creator 通道每 service epoch 只允许一个注册（creator.ts:209-211）；space-control 不自行 issue。设计：
-
-- `CreatorIssueResult` 语义扩展：issue 响应增 `capabilities: ['creator','control']`，并签第二份 scope；或签发单一 scope、服务端按 op 前缀区分。两种都是 wire 变更，取其一实现（待定项 D1）。推荐**单一注册 + 两个 scope**（`scopes.creator` / `scopes.control`）：能力边界显式，吊销粒度清楚，digest 存储不变。
-- 宿主插件侧：现有 `MainSpaceCreatorService` 持有 endpoint、issue 与预览表；新增同构的 `MainSpaceControlService` 复用同一插件级身份监听（loopback `/identity` 回调）与 issue 结果中的 `scopes.control`。
-- 宿主插件新提供 Cordis Service `spacesMainChannel`（`ctx.provide`，Service 模式参照 `SpaceMessages`：view-bridge/src/message-service.ts:4-17）。space-control 包 `inject: ["spacesMainChannel"]` 后调用其方法；scope 字符串不暴露给工具或模型，Service 只暴露操作级方法。
-
-### 4.2 Supervisor 侧通道
-
-新增前缀 `/internal/control/v1/`，与 Creator 完全同构的原生请求路由（建议从 `SupervisorCreator.handle` 抽出共享的 native-request 准入，避免两份校验漂移）。操作表：
-
-| op | 鉴权 | 语义 |
+| 工具 | 审批 | 语义 |
 | --- | --- | --- |
-| `issue` / `unregister` | Host bearer | 与 Creator issue 同一注册记录；返回 `{ registrationId, scopes: { creator?, control }, serviceEpoch }` |
-| `context` | control scope | epoch、revision、writable、maintenance、busy、各空间 activity 快照 |
-| `read` | control scope | 只读投影：overview / space detail / diagnostics / logs tail / plugin 列表 / llm-policy / model 目录代理读 |
-| `plan` | control scope | 冻结 control 计划：目标指纹 + activity 快照 + TTL + 一次性 |
-| `execute` | control scope | 提交冻结计划为串行 job（requestId 幂等） |
-| `session` | control scope | 子空间 sessionController 代理调用（list/search/events/create/prompt/cancel） |
-| `job` | control scope | 读本注册提交的 control 作业 |
+| `spaces_context` | 否（需 `cordis`） | 读取当前 `serviceEpoch`、`revision`、可写状态、维护锁与宿主基础 DSH 版本。 |
+| `spaces_create_preview` | 否（需 `cordis`） | 冻结新空间创建计划（含精确插件来源与 `modelSource: "main" \| "local"`），返回 `planId`、`fingerprint` 与步骤列表。`modelSource: "main"` 表示在创建步骤 `models-sync` 中从主空间一次性复制模型配置。 |
+| `spaces_create_execute` | 一次审批 | 校验 `planId`、`fingerprint` 与一次性请求后提交创建作业，幂等键为 `requestId`。 |
+| `spaces_job` | 否（需 `cordis`） | 查询本主空间注册提交的 Creator 创建作业状态。 |
 
-错误码沿用 `creator/*` 风格新增 `control/*` 封闭集合（invalid-input / not-found / conflict / unregistered / request-conflict / plan-expired / plan-consumed / read-only / unavailable / unsupported / busy / failed），透传规则与 `creatorError` 一致（creator.ts:104-123）。
+### 3.3 空间总控只读工具（`@dsh-spaces/plugin/space-control`）
 
-### 4.3 子空间认证凭据（关键查证结论）
-
-**Supervisor 可以从 Node 侧以已认证浏览器客户端身份调用子空间 `/api`。**
-
-- 子进程 spawn 携带 `--no-open --host 127.0.0.1 --port`，stdout 宣告含 token 的 launch URL；`waitForDshEndpoint` 只截取 endpoint（process-manager.ts:440-465、dsh-endpoint.ts:6-39）。
-- `dshSessionCookie(url, fetch, signal)` 已把 launch token 换成 `dsh-auth-*` 会话 cookie（dsh-endpoint.ts:42-56）；启动链路 `auth → api` 阶段即用该 cookie 调 `session.list`/`session/list` 探活（process-manager.ts:465-469、dsh-endpoint.ts:59-77）。
-- launch URL 保存在 `instance.url`，经 `urlOf()` 提供但注释明确“main-process-only；不入 status IPC 与日志”（process-manager.ts:293-296）。`viewEntry` 已按次重新交换 cookie 再下发浏览器（workbench-supervisor.ts:695-738），证明**同一 launch token 可重复交换新 cookie**（启动时一次 + 每次视图入口一次）。
-- 结论：无需凭据转发、无服务账号需求。新增 `ChildSessionClient`：按 (spaceId, generation, epoch) 取 `urlOf` 重换一个 control 专用 cookie，再以 `cookie` + `Origin: http://127.0.0.1:<port>` + `connection: close` 的 native fetch 调 `POST http://127.0.0.1:<port>/api/<method>`（transport 形态同 dshSessionList：`{type:'client-request', rpcId, method, payload:{args:...}}`；remote.mux 走法以 0.2.2-rc.1 源码核对为准）。cookie 只存在于 Supervisor 内存，绑定当前 (generation, epoch)，进程停即废；不落盘、不回应给主空间。
-- 注意：会话读经由 `sessionController.events`（分页）；官方 `sessionQuery` 无 `@Remote`，不可依赖（见待决问题）。
-
-## 5. 工具契约
-
-工具注册参照 `installMainSpaceTools`（main-space-tools.ts:202-362）：space-control 在可信主空间条件下经 `ctx.inject(["spacesMainChannel","tools","sandboxPolicy","profileContext","agentPresets","approval"])` 注册；参数对象封闭（additionalProperties:false + `closedArgs`），输出 `output.render` 为 JSON 文本。`ToolSchema` 无 permission 字段；审批由工具 execute 内调 `approveEscalation`（`@deepseek-ai/dsh-sandbox`），approval.request 不带参数，**审批文案必须自带目标与操作细节**。
-
-### 只读工具（无审批；读操作在主空间任意会话可用）
-
-**spaces_overview** — 参数 `{}`。返回：serviceEpoch、revision、writable、maintenance；每空间 `{id, displayName, status, generation, dshVersion, activity}`（activity 来自 `observeTaskActivity`，idle/busy/unknown，supervisor/llm.ts:85-93）；创建中作业投影（沿用 `projectSpaceCreations`，space-host.ts:188-219）；最近失败作业摘要（脱敏）。单次返回 ≤ 32KiB。
-
-**spaces_inspect** — `{spaceId, sections?: ("plugins"|"model"|"runtime"|"diagnostics"|"jobs")[]}`。plugins=`detail()` 的 `{name,version}` 列表（spaces-control.ts:25-30）；model=`readSpaceLlmPolicy`（llm-policy-store.ts:48-58）+ 模型目录代理读（运行中才可得）；runtime=`WorkBenchSpace.dshVersion`+`runtimes()`；diagnostics=`product({method:'diagnostics'})`（workbench-product.ts:53-60,68,91）；jobs=该空间相关最近 N 条 job 投影（affectedSpaceIds 过滤）。未指明 sections 默认 plugins+model。错误：`control/not-found`（非注册空间）、`control/unavailable`。
-
-**spaces_logs** — `{spaceId, tail?: number}`（tail ≤ 200 行，总返回 ≤ 64KiB）。来自 product diagnostics 的日志条目，经 `sanitizeLogText`+`redactPublicReason`（workbench-http.ts:666-672 同一脱敏链）。不提供原始文件路径。
-
-**spaces_sessions** — `{spaceId, action: "list"|"search"|"read", query?, sessionId?, cursor?}`。list/search 代理 `sessionController.list/search`；read 代理 `events`（分页，单页有界，content 文本抽取，附件只回元数据不回字节）。子空间未运行 → `control/not-running`；不自动启动。**全部会话内容按不可信数据包装返回**（见 §6）。分页游标不透明、绑定 (spaceId,generation)。
-
-### 变更工具
-
-**spaces_plan** — `{op, spaceId?, params?}`，op ∈ `start|stop|restart|delete|plugin.install|plugin.remove|plugin.toggle|runtime.set|llm-policy.set`。Supervisor 侧：
-
-- start → 直接命令 `space.start`（workbench.ts:160）；stop/restart/delete → `preview()`（含 taskActivity 影响预览，workbench.ts:177-179,192）；plugin.* → maintenance 计划（plugin.install/remove/toggle，validation.ts:25-47）；runtime.set → `space.runtime.set`（validation.ts:63-66）；llm-policy.set → **新 plan kind**（见 §7 新增项）。
-- `plugin.install` 的来源沿用 Creator 的封闭来源校验：`{npm:{packageName,version,approvedBuilds?}}` 或 `{github:{owner,repo,commit,path?,packageName,approvedBuilds?}}`（shared/creator.ts:240-267）。注意现有 maintenance `plugin.install` 只接 `catalogId@exact version` 且 `rejectRawSpec` 拒绝 github:/URL/路径（validation.ts:133-139,183-201）：**npm 精确版可走 catalogId 路径；GitHub 来源需新增 plan 变体或扩展现有 kind 的字段**，归待决问题。
-- 返回 `{controlPlanId, fingerprint, requestId, affectedSpaceIds, changes, taskActivity, expiresAt}`；plan 冻结 activity 快照（运行中空间的 idle/busy/unknown）。
-
-**spaces_execute** — `{planId, requestId}`。执行前：调 `approveEscalation`（requestedMode `danger-full-access`，文案含操作、目标空间、精确插件来源/构建脚本、受影响清单、忙碌警告）；Supervisor execute 端复检 epoch/revision/plan 归属与 TTL，并**重观察 activity**：快照与当前不符 → `control/request-conflict` 拒绝，计划消耗但不提交（同 creator.ts:321-337 语义）。提交为串行 job：`space.start` 走 `jobs.submit`；plan 类走 preview→`plan.execute` 既有路径（submit→runCommand，workbench-supervisor.ts:767-798）。requestId 幂等：同 requestId 同命令返回原 job，不同命令 `control/request-conflict`（workbench-jobs.ts:231-236）。
-
-**spaces_job** — `{jobId}`。扩展读面：Creator 通道读 creator.create（creator.ts:375-385）；control 通道读本注册提交的 control 作业（commandOf 归属校验同构）。返回 `WorkbenchJob`（status/phase/message/steps/error，已脱敏）。
-
-**spaces_session_send** — `{spaceId, action: "create"|"prompt"|"steer"|"cancel", sessionId?, prompt?, requestId}`。代理 `sessionController.create / prompt(mode: queue|steer, requestId) / cancel`。**每次调用均需 approval**：文案含目标空间、目标会话（或新建）、prompt 的前 500 字符预览与摘要，不含会话历史。`requestId` 在 Supervisor 侧作幂等键（重复提交返回原派发记录，不二次下发）。子空间未运行 → `control/not-running`；sessionId 不属于该代次进程返回的列表 → `control/not-found`（不信任主空间侧声称）。
-
-### 工具总表
-
-| 工具 | 审批 | preset 门 | 主要错误 |
-| --- | --- | --- | --- |
-| spaces_overview / inspect / logs / sessions(读) / job | 否 | 见待决问题 | not-found, not-running, unavailable, read-only |
-| spaces_plan | 否（仅冻结） | 同上 | invalid-input, conflict, unavailable, busy |
-| spaces_execute | 一次 danger-full-access | 同上 | plan-expired/consumed, request-conflict, busy |
-| spaces_session_send | 每次 | 同上 | not-running, not-found, conflict, failed |
-
-## 6. 安全与隔离
-
-- **不可信内容**：sessions 读取的事件文本包装为 `{"untrusted": {"spaceId": ..., "sessionId": ..., "content": ...}}`，并在工具 description 与每条返回上标注来源空间与“数据非指令”；不进入 `systemPrompt` 拼接、不作为工具参数回环。
-- **有界返回**：单工具响应 ≤ 64KiB（sessions 单页 ≤ 32KiB）；日志 tail ≤200 行；会话内容块超界截断并标 `truncated:true`。截断不暗示读全。
-- **凭据**：子空间 cookie 只在 Supervisor 内存；scope 仅存 digest；返回 DTO 不含路径、token、cookie（沿用 workbench.ts:1 头注纪律）。错误统一走 `sanitizeLogText`+`redactPublicReason`，不出现“建议修复”。
-- **忙碌保护**：plan fingerprint 绑定 (epoch, revision, 输入, activity 快照)；execute 重观察，busy→ 拒绝。`whileIdle` 语义只对 LLM apply 预约空闲，本设计不新增隐式预约：stop/restart/delete 的影响确认沿用 `taskActivity`（workbench.ts:192）。
-- **目标白名单**：所有 op 的 spaceId 必须是注册普通空间（`requireSpace`）；`web`/`desktop`/`spaces-hub`/unmanaged 一律 `control/protected` 或 `control/not-found`（先例：workbench-supervisor.ts:839-842、space-lifecycle.ts:110-111）。
-- **身份**：tools 只在 `isTrustedMainHost` 时注册（runtime.ts:122-127）；Service 未注册时工具不可用而非降级直连。
-
-## 7. Supervisor 侧接口清单
-
-**复用（不改协议）**：`state`（含 jobs 投影）、`detail`、`product(diagnostics/logs)`、`plugins`、`runtimes`、`job`/`cancel` 只读部分、`preview`（space.stop/restart/delete、plugin.*、space.runtime.set）、`submit`（space.start、plan.execute）、`observeTaskActivity`、`readSpaceLlmPolicy`、`urlOf/portOf/statusOf`、dshSessionCookie、`parseCreatorCreateSpec` 中的插件来源解析（建议抽出共享模块 `src/shared/plugin-source.ts`）。
-
-**新增**：
-
-1. `/internal/control/v1/` 路由 + `SupervisorControl` 类（issue 共享注册、scope 校验、op 分发、controlPlan 存取）——主体可复用 `SupervisorCreator` 的注册/计划骨架。
-2. `ChildSessionClient`：launch-token→cookie 交换、`/api` Remote 代理（方法白名单：sessionController.list/search/events/state/create/prompt/cancel、pluginManager.listPlugins/listBundles/modelCatalog），输入输出 bounded、非 JSON/越权如实失败。
-3. 新 plan kind `space.llm-policy.set`：`{spaceId, inheritMain: boolean}`。写 `hub/<id>/llm-policy.json` 走 `writeSpaceLlmPolicy` 原子写（llm-policy-store.ts:60-65）；语义：仅停止空间可写策略（运行中空间的 `DSH_SPACES_LLM_INHERIT_MAIN` 在 spawn env 时生效）；计划含“需要停止/重启”的 changes 文案；执行在写锁内，先停（若计划含 restart）→ 原子写 → 可选重启；失败保留现场不回滚。是否并入 maintenance plans 或 Supervisor 本地 plans 视写权边界定。
-4. `plugin.install` 的 GitHub 精确来源变体（若采纳）：installSpec 生成与读回校验复用 Creator 的 `installSpecFor`/`gitResolutionFor`（creator.ts:441-449,859-921）；allowBuilds 写 `pnpm-workspace.yaml` 复用 `writeBuildPolicy`（creator.ts:792-812）。
-5. `spaces_context`/`spaces_job` 工具的读面扩展（context 增 `controlBusy`；job 识别 control 作业归属）。
-
-## 8. 失败语义
-
-- 不重试、不重连、不自动启动子空间、不续跑中断作业；issue 失败对当前 endpoint 终态（main-space-creator.ts:103-108 同构）；cookie 交换失败即 `control/unavailable`，不做第二次交换。
-- 批量语义：A 成功、B 失败、C 未执行；`plugin.install` 多空间沿用 `runBatch`（plugin-batch.ts:41-54）。中断 job 保留 failed 与现场，读面如实展示。
-- 计划语义：预览消耗后拒绝重复执行；提交失败记录 submissionFailed；requestId 重放只返回原 job。
-- 会话发送：超时≠未送达（bus 同原则，view-bridge README:13）；工具如实返回 `control/failed` + 状态，不代为“确认成功”。
-- 浏览器刷新/模型重述：刷新只重新读取同一 job；不产生第二个 execute。
-
-## 9. 分期与验收
-
-每期交付前必须跑：`npm run check:test-lists`、`npm run typecheck`、受影响组定向测试；提交前完整 `npm run check:all`（含 browser 需 Playwright Chromium；Windows rename 检查需仓库外可写临时目录，`--temp-root`，拒绝仓库内 temp）。禁止读写真实 `~/.dsh`；全部验收在 `.sandbox` Home。
-
-| 期 | 范围 | 验收标准 |
+| 工具 | 参数概要 | 语义与边界 |
 | --- | --- | --- |
-| P1 只读 | 包骨架 + spacesMainChannel + /internal/control/v1 的 issue/context/read/job + spaces_overview/inspect/logs/job | 隔离 Home：web profile 加载后四工具注册、hub/子空间无注册；read-only Supervisor 下只读可用、变更工具报 read-only；伪造 Origin/Cookie 的请求 403；scope 不出现在日志 |
-| P2 生命周期 | controlPlan + spaces_plan/execute（start/stop/restart/delete） | 审批文案含目标/操作/忙碌；fingerprint 变更拒绝；requestId 幂等；中断留证不重放；stop 含 taskActivity 影响预览 |
-| P3 插件与模型 | plugin.install/remove/toggle、runtime.set、llm-policy.set；model 读 | npm/GitHub 精确来源读回校验；protected 包拒绝；策略原子写、运行中语义如实；allowBuilds 白名单原样持久 |
-| ~~P4 会话只读~~ | **2026-11-09 用户否决，已撤销**：不同组合的空间可能没有会话功能 | — |
-| ~~P5 会话发送~~ | **已撤销**，由界面操控取代 | — |
-| P4 界面操控 | 见 [space-control-ui-automation.md](space-control-ui-automation.md)：Supervisor 内 playwright-core（系统 Chrome/Edge，不下载浏览器）+ spaces_ui_open/snapshot/act/close | 已定：引擎 playwright-core；`spaces_ui_open` 审批一次，授权绑定 (spaceId, generation, 页面)，关闭/空间重启即失效，act 不逐次弹窗；截图经 attachments 返回图片；凭据不进模型上下文 |
-| P5 安装扩展 | 见 [space-control-extensions.md](space-control-extensions.md)：停机 Supervisor 写 / 运行中子空间 pluginManager 写，二者互斥 | 并入 P3 的部分随 P3 验收 |
-| P6 导入 / P7 插件条目启停 | 见 space-control-extensions.md | 插件顺序调整不做（官方无 reorder），只读展示顺序 |
+| `spaces_overview` | `{}` | 返回所有注册普通空间的状态、`generation`、锁定 DSH 版本、任务活动（`idle` / `busy` / `unknown`）、进行中的创建作业及最近脱敏失败作业摘要（≤ 32 KiB）。 |
+| `spaces_inspect` | `{ spaceId, sections? }` | 按需读取：`plugins`（已安装插件名与版本）、`plugins.live`（运行中子空间的 loader 条目加载顺序与 bundle 列表，未运行报 `control/not-running`）、`model`（模型目录占位说明；各空间在空间内独立管理模型目录）、`runtime`（空间锁定版本与本机已装运行时目录）、`diagnostics`（状态、最近脱敏错误、配置备份列表）、`jobs`（涉及该空间的最近作业）。默认返回 `plugins` + `model`。 |
+| `spaces_logs` | `{ spaceId, tail? }` | 读取目标空间的脱敏诊断日志尾部（`tail` ≤ 200 行，响应 ≤ 64 KiB），不暴露宿主机文件路径。 |
+| `spaces_templates` | `{}` | 列出本 DSH Home 保存的空间模板（`templateId`、名称、来源空间、锁定版本、是否含配置及精确插件配方）。 |
 
-> §4.3 子空间认证结论仍有效，改由界面操控（向自动化浏览器注入 cookie）使用；`spaces_sessions` / `spaces_session_send` 不再实现。
+### 3.4 空间总控计划与执行工具（`@dsh-spaces/plugin/space-control`）
 
-## 10. 待决问题
+通过 `spaces_plan` 冻结一次性计划（返回 `controlPlanId`、`fingerprint`、`requestId`、`affectedSpaceIds`、`changes`、`taskActivity`、`expiresAt`；`models.sync` 另返回非密 `modelsSync` 摘要），再经 `spaces_execute { planId, requestId }` 审批并提交串行作业，并通过 `spaces_control_job { jobId }` 读取作业进度与结果。
 
-| # | 问题 | 证据/影响 |
+同一空间存在两条互斥的插件写路径，单次计划只选其一，绝不混用或自动切换：
+
+- **路径 A（Supervisor 停机写）**：适用于已停止空间，或计划内明确包含先停止空间的操作。
+  - 生命周期：`start`、`stop`、`restart`、`delete`。
+  - 插件与运行时：`plugin.install`（支持 `npm` 精确版本、`github` 40 位 commit SHA 及显式 `approvedBuilds`）、`plugin.remove`、`plugin.toggle`、`runtime.set`。
+  - 模型配置同步（`stopped` / `crashed`）：`models.sync` 与工作台共用同一作业，直接写目标配置文件并读回校验。
+  - 模板与分享导入：`space.from-template`、`space.import`（配合 `spaces_import_preview` 暂存的 `importId` 创建新空间，创建后保持停止；非精确 npm 插件列入 `pendingManual`，不自动补装）。
+- **路径 B（运行中子空间 `@Remote` 写）**：要求目标空间处于 `running` 状态，且执行时 `generation` 与计划一致，经 `ChildRemoteClient` 调用子空间自身的 `pluginManager`、`settings` 或 `credentials`：
+  - `plugin.live.install`（`installBundle`）、`plugin.live.update`（`updateBundle`）、`plugin.live.remove`（`removeBundle`）、`plugin.live.entry`（`setPluginEnabled`，仅按 `entryId` 修改该条目 `disabled` 状态，不改变插件顺序）。
+  - 模型配置同步（`running`）：`models.sync` 通过目标自身的 `settings` / `credentials` 接口写入并读回，保持运行，下一次模型请求使用新配置。两条模型写入路径都先读取主空间、冻结并非密摘要，执行前重新读取并深比较；`starting` / `stopping` 拒绝，首处失败保留现场并列出逐项结果。
+
+### 3.5 子空间界面操控工具（`@dsh-spaces/plugin/space-control`）
+
+界面自动化由 Supervisor 内的 `UiAutomationManager` 驱动（使用 `playwright-core` 连接本机已安装的 Chrome 或 Edge，固定 1280×720 视口，不自动下载浏览器）。Supervisor 将子空间 launch token 交换为会话 cookie 后注入隔离的 `BrowserContext`，再导航至子空间根路径；URL、端口与 cookie 均不暴露给模型。
+
+| 工具 | 审批 | 语义 |
 | --- | --- | --- |
-| D1 | **已定（2026-11-09）：双 scope** `scopes:{creator,control}`，同一注册记录签发；旧版 Supervisor 无 control 路由时如实报 `control/unsupported`，不降级 | creator.ts:157-221 |
-| D2 | **已定：变更工具（plan/execute/session_send）与 Creator 一样要求 `cordis` preset**；只读工具在可信主空间任意会话可用。理由：danger-full-access 会话的审批策略为 never，审批不能单独兜底 | main-space-tools.ts:95-100 |
-| D3 | `sessionController` 各 `@Remote` 在 0.2.2-rc.1 的确切方法名/参数形状（`prompt(mode queue|steer)`、events 分页协议、remote.mux 帧格式）须以版本锁定源码二次核对后再冻结 wire；`sessionQuery` 无 @Remote，read 只能走 events | 本仓库无引用；dsh-endpoint.ts:59-77 的 client-request 形态是现存先例 |
-| D4 | **已定并实现（P3）**：不放宽 `rejectRawSpec`；新增 maintenance 计划 `plugin.install.spec`，npm 精确版与 GitHub 40 位 commit 共用 `src/shared/plugin-source.ts` 与 `products/plugin-exact-source.ts`（Creator 同源）。原问题：GitHub 来源扩展现有 maintenance kind 字段，还是新增 `plugin.install.spec`？现有 `rejectRawSpec` 明确拒绝 github:/URL（validation.ts:183-201），需新校验路径 + maintenance journal 投影 | creator.ts:441-449,859-921 |
-| D5 | **已定并实现（P3）**：Supervisor 本地计划，只允许已停止或已崩溃的空间，plan 与 execute 两阶段都检查；不自动停止或启动空间，原子写入。原问题：Supervisor 本地 plan（如 space.delete）还是 maintenance plan？涉及停止空间 + 原子写 + 可选重启的组合语义 | space-lifecycle.ts:127-145、llm-policy-store.ts:60-65 |
-| D6 | 会话事件分页游标与 generation/epoch 的绑定强度（严格绑定 vs 接受并标注代次） | space-runs.ts:19-45 |
-| D7 | **已定：不合并**。`spacesMainChannel` 只承载 control；Creator 现有传输不动，两者只共享身份监听与 issue | main-space-creator.ts 与新增服务 |
-| D8 | spaces_inspect 的 model 目录读取：经子空间 sessionController.modelCatalog（需运行中）还是仅 llm-policy + WorkbenchRuntime？未运行时如实返回“运行中可得” | — |
+| `spaces_ui_open` | 一次审批 | 为运行中的目标空间打开或复用隔离自动化页面，返回 `{ uiSessionId, spaceId, generation, viewport }`。 |
+| `spaces_ui_snapshot` | 否（需 `cordis`） | 采集当前页面或指定 `[ref=eN]` 元素的快照：`aria`（默认，带 `[ref=eN]` 引用）、`text`、`html`（清洗内联脚本/样式与大块 `data:` URI，上限 256 KiB）或 `screenshot`（经 `attachments.saveImage` 存为持久化图片附件返回）。所有页面文本均包装在 `untrusted` 字段中。 |
+| `spaces_ui_act` | 授权期内免批 | 执行单个界面动作（`click`、`type`、`press`、`scroll`、`select`、`wait`），以 `requestId` 保证幂等。`ref` 失效或超时如实返回 `control/failed`，不猜测近邻元素。 |
+| `spaces_ui_eval` | **每次审批** | 在子空间页面上下文中执行受限长度（≤ 16 KiB）的脚本函数体，返回值经同源凭据脱敏与不可信包装（≤ 64 KiB），以 `requestId` 保证幂等。 |
+| `spaces_ui_close` | 否（需 `cordis`） | 关闭目标空间的自动化页面并释放授权。 |
 
-## 11. 依据
+## 4. 安全与失败语义
 
-官方接口（父代理已由 cordis_inspect 与版本锁定源码核对，运行时 DSH 0.2.2-rc.1）：`ctx.tools.register` 与 ToolSchema 无 permission；审批 `approveEscalation` + `ctx.approval.request` 不带参数；子空间 `sessionController`（list/search/create/prompt/cancel/events/state/follow/modelCatalog/selectModel）与 `pluginManager`（listPlugins/listBundles/installBundle/setBundleEnabled/setPluginEnabled/removeBundle/updateBundle）为 `@Remote`，以该 profile 的已认证 Web 客户端身份调用；无跨 profile API、无服务账号、`sessionQuery` 无 @Remote。
-
-仓库证据：
-
-- 主身份判定：packages/plugin/src/host/runtime.ts:122-127、identity.ts:45-113。
-- Creator 通道契约与校验：src/shared/creator.ts:11-40,146-165,240-357；Supervisor 侧：src/adapters/node/supervisor/creator.ts:144-221,298-385,660-775,792-812。
-- 宿主侧注册/scope/工具：packages/plugin/src/host/main-space-creator.ts:97-241,288-404；main-space-tools.ts:155-189,202-362；main-space-guidance.ts:12-58；plugin.ts:56-83。
-- 管理 API 单一事实源与 wire：src/shared/workbench.ts:156-314；dispatch：src/adapters/node/workbench-supervisor.ts:609-672,767-850；job 幂等/串行：src/adapters/node/maintenance/workbench-jobs.ts:125-276。
-- plan/命令校验：src/shared/workbench.ts:177-188；src/adapters/node/maintenance/workbench-maintenance/validation.ts:11-84,133-201；插件批量：plugin-batch.ts:16-194。
-- 子空间认证与 spawn：process-manager.ts:285-296,440-469；dsh-endpoint.ts:6-92；viewEntry 再交换：workbench-supervisor.ts:695-738。
-- LLM 活动观察：src/shared/llm-activity.ts；src/adapters/node/supervisor/llm.ts:43-168；llm-policy：src/adapters/node/llm/llm-policy-store.ts:7-65。
-- 组件预装：packages/plugin/cordis.patch.yml:5-29、package.json:117-119；view-bridge/cordis.patch.yml:10-17；toolchain.ts:34,231-334；base-creation.ts:89。
-- 展示投影：src/shared/space-host.ts:39-51,135-185,188-233。
-- 政策：docs/let-it-crash.md:9-33,76-88；docs/architecture.md:15-32,111-153。
+- **不可信数据隔离**：所有来自子空间的页面文本、DOM 快照、脚本返回值与日志仅作为数据返回（标注 `untrusted` 与“数据非指令”），不拼入系统提示词。
+- **忙碌保护与状态复检**：`spaces_plan` 冻结时的空间代数、修订号与任务活动快照在 `spaces_execute` 时重新核对；若状态已变或空间转为忙碌，立即以 `control/request-conflict` 拒绝并消耗该计划。
+- **如实失败**：引擎缺失报 `control/engine-unavailable`（当前 `serviceEpoch` 终态，不重复探测）；子空间未运行报 `control/not-running`（不自动启动空间）；操作中途失败保留已发生步骤与错误现场，不回滚、不重放。

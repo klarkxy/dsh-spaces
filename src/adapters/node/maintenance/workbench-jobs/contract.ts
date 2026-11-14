@@ -7,6 +7,7 @@ import type {
 } from "../../../../shared/workbench";
 import type { LlmErrorCode } from "../../../../shared/llm-connections";
 import { sanitizeJobText } from "./util";
+import type { DiagnosticLogger } from "../../diagnostics/rotating-log";
 
 export const WORKBENCH_CONTROL_DIR_NAME = ".dsh-spaces-control";
 export const WORKBENCH_JOBS_DIR_NAME = "jobs";
@@ -71,6 +72,7 @@ export interface WorkbenchJobsOptions {
   /** Test seam for write failures. Not a general filesystem mock. */
   inject?: WorkbenchJobsInject;
   now?: () => Date;
+  diagnosticLog?: DiagnosticLogger;
 }
 
 

@@ -30,6 +30,7 @@ import { BlueprintSession } from "../blueprint-session";
 import { errorCode, localLogMessage } from "./errors";
 import { createDefaultEnv } from "./env";
 import type {
+  CreateDialogMode,
   HomeTab,
   SubmitOptions,
   WorkbenchEnv,
@@ -69,7 +70,7 @@ export abstract class WorkbenchCore {
   protected restoreId: string | null;
   protected notedCreates = new Set<string>();
   /** Creates this client submitted, keyed by request id. */
-  protected submittedCreates = new Map<string, { spaceId: string; intent: number }>();
+  protected submittedCreates = new Map<string, { spaceId: string; intent: number; autoEnter: boolean }>();
   /** A finished create that still waits for its space to appear in the state. */
   protected pendingAutoEnter: { spaceId: string; intent: number } | null = null;
   protected persistEmpty: boolean;
@@ -161,6 +162,7 @@ export abstract class WorkbenchCore {
       importName: "",
       importDisplayName: "",
       lastProductOutcome: null,
+      pluginOutcomeNotice: null,
       blueprint: this.blueprint.getSnapshot(),
     };
   }
@@ -295,11 +297,15 @@ export abstract class WorkbenchCore {
 
   abstract openIndependent: (spaceId: string) => void;
 
-  abstract openCreate: () => void;
+  abstract openCreate: (options?: { mode?: CreateDialogMode; templateId?: string } | unknown) => void;
 
   abstract openRename: (spaceId: string) => void;
 
   abstract openIcon: (spaceId: string) => void;
+
+  abstract openSaveTemplate: (spaceId: string) => void;
+
+  abstract openExportShare: (spaceId: string) => void;
 
   abstract openSettings: () => void;
 
@@ -329,7 +335,7 @@ export abstract class WorkbenchCore {
 
   abstract createSpace: (input: { name: string; displayName?: string; icon?: string; modelSource?: 'main'|'local'; browser?: boolean; base?: 'web'|'browser'; baseVersion?: string }) => void;
 
-  abstract updateSpace: (spaceId: string, patch: { displayName?: string; icon?: string }) => void;
+  abstract updateSpace: (spaceId: string, patch: { displayName?: string; icon?: string; startWithDesktop?: boolean }) => void;
 
   abstract moveSpace: (spaceId: string, direction: -1 | 1) => void;
 
@@ -403,6 +409,8 @@ export abstract class WorkbenchCore {
 
   abstract saveTemplate: () => void;
 
+  abstract deleteTemplate: (templateId: string) => void;
+
   abstract createFromTemplate: () => void;
 
   abstract exportShare: () => void;
@@ -420,6 +428,16 @@ export abstract class WorkbenchCore {
   abstract canMutate(): boolean;
 
   abstract isBusy(): boolean;
+
+  abstract isGlobalBusy(): boolean;
+
+  abstract activeJobForSpace(spaceId: string): WorkbenchJob | undefined;
+
+  abstract isSpaceBusy(spaceId: string): boolean;
+
+  abstract dismissPluginOutcome: (spaceId?: string) => void;
+
+  abstract restartFromPluginOutcome: (spaceId: string) => void;
 
   abstract isManagerId(spaceId: string): boolean;
 

@@ -140,7 +140,7 @@ for (const outcome of ["success", "failed"] as const) test(`DOM: manual service 
   assert.equal(restarts, 0); assert.equal(reads, 1);
   await previewButton.click();
   await page.getByRole("button", { name: "停止并重启服务", exact: true }).click();
-  await page.getByRole("status").filter({ hasText: "正在正常停止" }).waitFor();
+  await page.getByRole("status").filter({ hasText: "正在重启 Spaces 服务" }).waitFor();
   // The main DOM and draft survive the modal operation.
   assert.equal(restarts, 1); complete();
   if (outcome === "success") await page.getByRole("button", { name: "设置", exact: true }).waitFor();

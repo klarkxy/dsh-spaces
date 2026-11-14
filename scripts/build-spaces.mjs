@@ -7,7 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const at = path => resolve(root, path);
+const distribution = process.argv.includes('--npm') || process.env.DSH_SPACES_BUILD_TARGET === 'npm';
 const common = { bundle: true, format: 'esm', target: 'es2022', logLevel: 'info', absWorkingDir: root };
+const diagnosticBuild = { define: { __DSH_SPACES_LOG_LEVEL__: JSON.stringify(distribution ? 'info' : 'debug') } };
 const nodeRequire = 'import { createRequire as __spacesCreateRequire } from "node:module"; const require = __spacesCreateRequire(import.meta.url);';
 
 // Spaces consumes the independently packaged Blueprint protocol, including v1.
@@ -17,7 +19,7 @@ if (blueprintBuild.status !== 0) throw new Error('Blueprint build failed', { cau
 async function buildNodeCli(entryPoint, outfile, extra = {}) {
   const source = await readFile(at(entryPoint), 'utf8');
   const banner = source.startsWith('#!') ? nodeRequire : `#!/usr/bin/env node\n${nodeRequire}`;
-  await build({ ...common, platform: 'node', banner: { js: banner }, entryPoints: [entryPoint], outfile, ...extra });
+  await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: banner }, entryPoints: [entryPoint], outfile, ...extra });
   const check = spawnSync(process.execPath, ['--check', at(outfile)], { cwd: root, stdio: 'inherit', windowsHide: true });
   if (check.status !== 0) throw new Error(`Invalid bundled CLI: ${outfile}`);
 }
@@ -34,7 +36,7 @@ async function buildClient(packageName, entryPoint, outfile) {
 }
 
 const sdkExternal = ['@deepseek-ai/*'];
-await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal, entryPoints: {
+await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal, entryPoints: {
   index: 'packages/plugin/src/index.ts',
   'space-control': 'packages/plugin/src/space-control/index.ts',
   'typert.host': 'packages/plugin/src/typert.host.ts',
@@ -43,18 +45,18 @@ await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external
 await buildClient('@dsh-spaces/plugin', 'packages/plugin/src/client/index.tsx', 'packages/plugin/lib/client.js');
 await copyFile(at('LICENSE'), at('packages/plugin/LICENSE'));
 
-await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
+await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
   entryPoints: ['packages/view-bridge/src/index.ts'], outfile: 'packages/view-bridge/lib/index.js' });
-await build({ ...common, platform: 'node', external: sdkExternal,
+await build({ ...common, ...diagnosticBuild, platform: 'node', external: sdkExternal,
   entryPoints: ['packages/view-bridge/src/settings.ts'], outfile: 'packages/view-bridge/lib/settings.js' });
-await build({ ...common, platform: 'node', external: sdkExternal,
+await build({ ...common, ...diagnosticBuild, platform: 'node', external: sdkExternal,
   entryPoints: ['packages/view-bridge/src/typert.host.ts'], outfile: 'packages/view-bridge/lib/typert.host.js' });
 await buildClient('@dsh-spaces/view-bridge', 'packages/view-bridge/src/client.ts', 'packages/view-bridge/lib/client.js');
 await copyFile(at('LICENSE'), at('packages/view-bridge/LICENSE'));
 
-await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
+await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
   entryPoints: ['packages/browser/src/index.ts'], outfile: 'packages/browser/lib/index.js' });
-await build({ ...common, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
+await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,
   entryPoints: ['packages/browser/src/typert.host.ts'], outfile: 'packages/browser/lib/typert.host.js' });
 await buildClient('@dsh-spaces/browser', 'packages/browser/src/client.tsx', 'packages/browser/lib/client.js');
 await copyFile(at('LICENSE'), at('packages/browser/LICENSE'));
@@ -81,7 +83,7 @@ await cp(at('node_modules/playwright-core'), at('packages/supervisor/lib/ui-engi
 // The supervisor bundle resolves playwright-core only from ./ui-engine next
 // to itself (see src/adapters/node/supervisor/ui-playwright.ts).
 await buildNodeCli('packages/supervisor/src/index.ts', 'packages/supervisor/lib/index.js');
-await build({ ...common, platform: 'node', banner: { js: nodeRequire },
+await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nodeRequire },
   entryPoints: ['src/adapters/node/snapshots/snapshot-worker.ts'], outfile: 'packages/supervisor/lib/snapshot-worker.mjs' });
 await copyFile(at('LICENSE'), at('packages/supervisor/LICENSE'));
 
