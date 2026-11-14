@@ -572,7 +572,7 @@ test("removeDownloadedPlugin refuses plugins still installed on a space", async 
 test("unused exact cache version can be removed while an older exact version stays installed", async () => {
   applyAppLocale("en");
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   mkdirSync(join(dir, "hub", "plugins"), { recursive: true });
   mkdirSync(join(dir, "pack"), { recursive: true });
   const oldHubTar = join(dir, "hub", "plugins", "dsh-spaces-plugin.tgz");
@@ -614,7 +614,7 @@ test("unused exact cache version can be removed while an older exact version sta
 test("same exact installed version keeps the matching cache entry in use", async () => {
   applyAppLocale("en");
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const id = `${pkg}@0.3.0`;
   const tarball = writeLibraryTarball(dir, id);
   writeProfile(
@@ -641,7 +641,7 @@ test("same exact installed version keeps the matching cache entry in use", async
 test("unknown actual version keeps an exact cache entry protected", async () => {
   applyAppLocale("en");
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const id = `${pkg}@0.3.1-test.1`;
   const tarball = writeLibraryTarball(dir, id);
   writeProfile(dir, "web", [pkg], { [pkg]: `${pkg}@0.3.0` });
@@ -662,7 +662,7 @@ test("unknown actual version keeps an exact cache entry protected", async () => 
 test("file: reference to this cache tarball stays in use even when resolved version differs", async () => {
   applyAppLocale("en");
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const id = `${pkg}@0.3.1-test.1`;
   const tarball = writeLibraryTarball(dir, id);
   writeProfile(
@@ -696,7 +696,7 @@ test("file: reference to this cache tarball stays in use even when resolved vers
 test("file: reference through a directory junction to this cache tarball stays protected", async () => {
   applyAppLocale("en");
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const id = `${pkg}@0.3.1-test.1`;
   const tarball = writeLibraryTarball(dir, id);
   const archive = join(dir, tarball);
@@ -769,7 +769,7 @@ test("bare spec with a pinned id stays unpinned and remains protected", async ()
 test("malformed file: requestedSpec stays protected even when actual version differs", async () => {
   applyAppLocale("en");
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const id = `${pkg}@0.3.1-test.1`;
   const tarball = writeLibraryTarball(dir, id);
   writeProfile(dir, "web", [pkg], { [pkg]: "file://" }, { [pkg]: "0.3.0" });

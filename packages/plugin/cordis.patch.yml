@@ -1,10 +1,10 @@
-# Bundle patch for @dsh-spaces/plugin. Official `dsh plugin add` appends this
+# Bundle patch for dsh-spaces. Official `dsh plugin add` appends this
 # package to dsh.profile.bundles; `dsh plugin remove` drops the layer.
 # Profile cordis.patch.yml may overlay this row by id (whole `config` replace).
 
 - insert:
     - id: dsh-spaces
-      name: '@dsh-spaces/plugin'
+      name: 'dsh-spaces'
       config: {}
 # Bundled dev-index: same canonical id as the package's own cordis.patch.yml row,
 # so an explicit `dsh plugin add @klarkxy/dsh-dev-index` and this row can never
@@ -15,10 +15,10 @@
       name: '@klarkxy/dsh-dev-index'
 # Bundled main-space control tools: a subpath entry inside this same package
 # so no separate dependency is
-# installed and the row resolves wherever @dsh-spaces/plugin does. The module
+# installed and the row resolves wherever dsh-spaces does. The module
 # injects spacesMainChannel, provided only by the trusted main host; manager
 # (spaces-hub) and Browser-space profile patches must override this row with
 # `disabled: true`.
 - insert:
     - id: dsh-space-control
-      name: '@dsh-spaces/plugin/space-control'
+      name: 'dsh-spaces/space-control'

@@ -96,7 +96,7 @@ async function stubPack(request: { packageRoot: string; destination: string }): 
 test("packLocalArtifacts packs the plugin and view-bridge", async () => {
   const packed = await packLocalArtifacts({
     home: tempDir("dsh-pack-home-"),
-    pluginPackageRoot: writeNamedPackage(tempDir("dsh-pack-plugin-"), "@dsh-spaces/plugin"),
+    pluginPackageRoot: writeNamedPackage(tempDir("dsh-pack-plugin-"), "dsh-spaces"),
     viewBridgeRoot: writeNamedPackage(tempDir("dsh-pack-view-"), "@dsh-spaces/view-bridge"),
     artifactDir: tempDir("dsh-pack-dest-"),
     execPath: process.execPath,
@@ -144,7 +144,7 @@ test("bootstrap packs view-bridge and passes --view-bridge-artifact", async () =
 test("bootstrap links a source checkout without staging, pointer writes, or packing", async () => {
   const home = tempDir("dsh-boot-dev-home-");
   const checkout = tempDir("dsh-boot-dev-co-");
-  writeFileSync(join(checkout, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
+  writeFileSync(join(checkout, "package.json"), `${JSON.stringify({ name: "dsh-spaces", private: true })}\n`);
   const payloadRoot = writeV2Plugin(join(checkout, "packages", "plugin"));
   const toolsRoot = tempDir("dsh-boot-dev-tools-");
   const bin = writeCli(home);
@@ -193,7 +193,7 @@ test("bootstrap links a source checkout without staging, pointer writes, or pack
 
 test("bootstrap may stage a standard plugin install that lives inside a temp Home", async () => {
   const home = tempDir("dsh-boot-std-home-");
-  const pluginRoot = join(home, "profiles", "web", "node_modules", "@dsh-spaces", "plugin");
+  const pluginRoot = join(home, "profiles", "web", "node_modules", "dsh-spaces");
   const payloadRoot = writeV2Plugin(pluginRoot);
   const toolsRoot = tempDir("dsh-boot-std-tools-");
   const bin = writeCli(home);

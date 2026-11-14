@@ -11,6 +11,8 @@ import { currentDiagnosticLogger, diagnosticStep } from "../diagnostics/operatio
 
 type Bridge = "view-bridge";
 /** Retired bundle removed once from older spaces during alignment. */
+import { SPACES_COMPONENT_PACKAGES } from "../../../shared/plugin-spec";
+
 export const RETIRED_LLM_BRIDGE = "@dsh-spaces/llm-bridge";
 type SpacesComponent = Bridge | "browser";
 type Entry = { id?: unknown; name?: unknown; disabled?: unknown; group?: unknown; config?: unknown };
@@ -126,7 +128,7 @@ function bridgeEntry(rows: ObservedEntry[], bridge: Bridge): ObservedEntry {
 
 function ownedComponentRoot(home: string, profile: string, component: SpacesComponent): string {
   const modules = join(profile, "node_modules");
-  const path = join(modules, "@dsh-spaces", component);
+  const path = join(modules, ...SPACES_COMPONENT_PACKAGES[component].split("/"));
   assertOwnedProfilePath(home, path);
   const root = realpathSync(path);
   const rel = relative(realpathSync(modules), root);
@@ -150,7 +152,7 @@ function componentFilesMatch(home: string, payloadRoot: string, component: Space
 /** True when the profile's installed Spaces-owned component bytes match the selected payload. */
 export function installedComponentMatches(home: string, profileId: string, payloadRoot: string, component: SpacesComponent): boolean {
   const profile = join(home, "profiles", profileId);
-  if (!existsSync(join(profile, "node_modules", "@dsh-spaces", component))) return false;
+  if (!existsSync(join(profile, "node_modules", ...SPACES_COMPONENT_PACKAGES[component].split("/")))) return false;
   return componentFilesMatch(home, payloadRoot, component, ownedComponentRoot(home, profile, component));
 }
 
@@ -238,7 +240,7 @@ export async function alignProfileComponents(input: {
     const root = ownedComponentRoot(home, profile, component);
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     for (const file of ["package.json", "lib/index.js", "cordis.patch.yml"]) assertOwnedProfilePath(home, join(root, file));
-    if (pkg.name !== `@dsh-spaces/${component}`) {
+    if (pkg.name !== SPACES_COMPONENT_PACKAGES[component]) {
       throw new Error(`Installed ${component} does not match the selected component.`);
     }
     pending.push(component);

@@ -430,7 +430,7 @@ test("plugin download rejects URLs, credentials, local paths, and commands", asy
     /URL|credential|local path|not allowed/i,
   );
   await assert.rejects(
-    service.execute({ kind: "plugin.download", spec: "npm:@dsh-spaces/plugin" }, ctx),
+    service.execute({ kind: "plugin.download", spec: "npm:dsh-spaces" }, ctx),
     /URL|credential|local path|not allowed/i,
   );
   await assert.rejects(
@@ -494,7 +494,7 @@ test("library remove refuses plugins still in use", async () => {
 
 test("library installedIn distinguishes exact cache versions", async () => {
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const older = `${pkg}@0.3.0`;
   const candidate = `${pkg}@0.3.1-test.1`;
   mkdirSync(join(dir, "hub", "plugins"), { recursive: true });
@@ -531,7 +531,7 @@ test("library installedIn distinguishes exact cache versions", async () => {
 
 test("library remove deletes an unused exact candidate while an older exact install stays", async () => {
   const dir = home();
-  const pkg = "@dsh-spaces/plugin";
+  const pkg = "dsh-spaces";
   const older = `${pkg}@0.3.0`;
   const candidate = `${pkg}@0.3.1-test.1`;
   mkdirSync(join(dir, "hub", "plugins"), { recursive: true });

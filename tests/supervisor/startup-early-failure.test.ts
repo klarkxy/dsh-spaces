@@ -43,7 +43,7 @@ test("an existing manager with no CLI settles failed without another launch", as
   const profile = join(home, "profiles", "spaces-hub");
   mkdirSync(profile, { recursive: true });
   writeFileSync(join(profile, "package.json"), JSON.stringify({
-    dependencies: { "@dsh-spaces/plugin": "0.5.0" },
+    dependencies: { "dsh-spaces": "0.5.0" },
   }));
   mkdirSync(join(home, ".dsh-spaces-control"), { recursive: true });
   writeFileSync(join(home, ".dsh-spaces-control", "manager.json"), JSON.stringify({

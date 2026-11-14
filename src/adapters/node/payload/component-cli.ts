@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { gte, satisfies, valid } from "semver";
 import { isBareNpmPackageName } from "../../../shared/plugin";
+import { FULL_SPACES_PACKAGE, LEGACY_SPACES_PACKAGE, SPACES_COMPONENT_PACKAGES } from "../../../shared/plugin-spec";
 
 const DSH_PEER = /^@deepseek-ai\/dsh(?:-|$)/;
 // Official dsh-v0.2.1-alpha.4 introduced engines.dsh precedence over peers.
@@ -48,13 +49,13 @@ export function unmetDshRequirements(manifest: unknown, version: string): Record
 
 /** Keep each component's constraints separate; later packages cannot hide an earlier mismatch. */
 export function unmetProfileDshRequirements(profileDir: string, version: string): string[] {
-  const modules = join(profileDir, "node_modules", "@dsh-spaces");
-  return ["plugin", "view-bridge", "browser"].flatMap(name => {
-    const path = join(modules, name, "package.json");
+  const modules = join(profileDir, "node_modules");
+  return [...Object.values(SPACES_COMPONENT_PACKAGES), LEGACY_SPACES_PACKAGE].flatMap(name => {
+    const path = join(modules, ...name.split("/"), "package.json");
     if (!existsSync(path)) return [];
-    const manifest = readPluginManifest(path, `@dsh-spaces/${name}`);
+    const manifest = readPluginManifest(path, name);
     return Object.entries(unmetDshRequirements(manifest, version))
-      .map(([dependency, range]) => `@dsh-spaces/${name} (${dependency}@${range})`);
+      .map(([dependency, range]) => `${name} (${dependency}@${range})`);
   });
 }
 
@@ -103,7 +104,7 @@ export function unmetDshPeers(version: string, ranges: Record<string, string>): 
  * Installed third-party DSH requirements that do not accept this runtime.
  * A declared dependency counts when its bundle is disabled. An enabled bundle
  * counts without a dependency key. Official @deepseek-ai/* and Spaces
- * @dsh-spaces/* packages are outside this scan. A missing manifest imposes no
+ * dsh-spaces / @dsh-spaces/* packages are outside this scan. A missing manifest imposes no
  * constraint. Manifest paths stay inside the profile node_modules tree.
  * Workspace tokens and prereleases use unmetDshPeers.
  */
@@ -134,7 +135,7 @@ function installedThirdPartyNames(profileDir: string): string[] {
   if (!isRecord(dependencies)) throw peerScanError();
   const names = new Set<string>();
   for (const name of [...Object.keys(dependencies), ...enabledBundleNames(parsed)]) {
-    if (name.startsWith("@deepseek-ai/") || name.startsWith("@dsh-spaces/")) continue;
+    if (name === FULL_SPACES_PACKAGE || name.startsWith("@deepseek-ai/") || name.startsWith("@dsh-spaces/")) continue;
     if (!isBareNpmPackageName(name) || name.split("/").some((part) => part === "." || part === "..")) {
       throw new Error(`Installed plugin ${name} is not a package name, so its DSH peer declaration could not be checked.`);
     }
@@ -241,11 +242,7 @@ export function payloadBridgeFiles(payloadRoot: string, bridge: string): string[
 const CANONICAL_ALIGNMENT_ARCHIVE_ID =
   /^dsh-spaces-(plugin|view-bridge|browser)-[a-f0-9]{20}$/;
 
-const ALIGNMENT_PACKAGE_NAMES = {
-  plugin: "@dsh-spaces/plugin",
-  "view-bridge": "@dsh-spaces/view-bridge",
-  browser: "@dsh-spaces/browser",
-} as const;
+const ALIGNMENT_PACKAGE_NAMES = SPACES_COMPONENT_PACKAGES;
 
 export class AlignmentArchiveError extends Error {
   constructor(message: string) {

@@ -139,7 +139,7 @@ Supervisor 用主空间绑定的 CLI 执行 `dsh --profile <main> --dump-config`
 
 ## 8. 制品、版本与升级
 
-主发行包保持项目级身份 `@dsh-spaces/plugin`。当前通过 Git 克隆源码、按锁文件安装依赖、构建插件 tarball 后安装，具体命令见[标准安装](plugin-standard-install.md#git-source-install)。npm 发布暂缓，现行仓库没有 npm 发布工作流；手动打包工作流只生成可审阅的本地安装制品。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录贡献无需核心包发布权限。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。
+主发行包保持项目级身份 `dsh-spaces`。当前通过 Git 克隆源码、按锁文件安装依赖、构建插件 tarball 后安装，具体命令见[标准安装](plugin-standard-install.md#git-source-install)。npm 发布暂缓，现行仓库没有 npm 发布工作流；手动打包工作流只生成可审阅的本地安装制品。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录贡献无需核心包发布权限。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。
 
 Spaces 以同一构建的不可变组件组发行 Supervisor、管理插件、view bridge、Browser 和安装 worker。制品按版本与摘要校验，不混用不同构建。
 

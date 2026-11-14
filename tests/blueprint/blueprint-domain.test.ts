@@ -139,7 +139,7 @@ test("omitted fields are not null, and null is rejected outside placeholders", (
 });
 
 test("host and Spaces control packages cannot be selected or bundled", () => {
-  for (const name of [...BLUEPRINT_HOST_PACKAGES, "@dsh-spaces/plugin"]) {
+  for (const name of [...BLUEPRINT_HOST_PACKAGES, "dsh-spaces"]) {
     assertThrowsCode(
       () =>
         parseBlueprint(

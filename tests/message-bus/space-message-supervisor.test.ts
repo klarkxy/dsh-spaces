@@ -11,7 +11,7 @@ import type { PatchWriter } from '../../src/adapters/node/profile/patch-writer.t
 import { writeRegisteredSpace } from '../fixtures/space.ts';
 function profile(home: string, id: string, manager = false) {
   const root = join(home, 'profiles', id); mkdirSync(root, { recursive: true });
-  const packages = ['@deepseek-ai/dsh-web-app', manager ? '@dsh-spaces/plugin' : '@dsh-spaces/view-bridge'];
+  const packages = ['@deepseek-ai/dsh-web-app', manager ? 'dsh-spaces' : '@dsh-spaces/view-bridge'];
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: Object.fromEntries(packages.map(p => [p, '0.2.0-rc.2'])), dsh: { profile: { bundles: packages } } }));
   writeFileSync(join(root, 'cordis.patch.yml'), '- id: storage-json\n  config:\n    root: isolated\n');
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import type { SnapshotRuntime } from "../../../shared/snapshots";
@@ -31,13 +31,14 @@ import { profileHasViewBridge } from "./profile-probe";
 import type { BoundCli, WorkbenchSupervisorOptions } from "./types";
 import { diagnosticStep, diagnosticSyncStep } from "../diagnostics/operation-log";
 import type { DiagnosticLogger } from "../diagnostics/rotating-log";
+import { LEGACY_SPACES_PACKAGE, SPACES_COMPONENT_PACKAGES } from "../../../shared/plugin-spec";
 
 export const VIEW_BRIDGE_ID = "dsh-spaces-view-bridge";
 /**
  * The closed list of bundled dependencies the component patch rows reference
  * outside the component set. Each entry is a linked component's declared
  * exact registry version; the checkout's own installed copy is linked in.
- * space-control is not here: it ships as the @dsh-spaces/plugin/space-control
+ * space-control is not here: it ships as the dsh-spaces/space-control
  * subpath inside the plugin package itself.
  */
 const BUNDLED_DEPENDENCY_PACKAGES = ["@klarkxy/dsh-dev-index"] as const;
@@ -249,7 +250,7 @@ export class SupervisorToolchain {
         throw new WorkbenchPublicError("workbench/unavailable", `The selected ${component} component is unavailable: ${problem}.`);
       }
       const add = this.host.options.pluginLink ?? pluginLinkDirectory;
-      await add(this.host.home, profileId, devComponentDir(checkout, component), `@dsh-spaces/${component}`);
+      await add(this.host.home, profileId, devComponentDir(checkout, component), SPACES_COMPONENT_PACKAGES[component]);
       return;
     }
     const artifact = this.componentArtifact(component);
@@ -280,17 +281,17 @@ export class SupervisorToolchain {
       try {
         manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
       } catch (error) {
-        throw new Error(`Linked @dsh-spaces/${component} manifest could not be read: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Linked ${SPACES_COMPONENT_PACKAGES[component]} manifest could not be read: ${error instanceof Error ? error.message : String(error)}`);
       }
       for (const name of BUNDLED_DEPENDENCY_PACKAGES) {
         if (requirements.has(name)) continue;
         const spec = manifest.dependencies?.[name];
         if (spec === undefined) continue;
         if (typeof spec !== "string") {
-          throw new Error(`Linked @dsh-spaces/${component} declares ${name}@${String(spec)}, which is not a dependency spec.`);
+          throw new Error(`Linked ${SPACES_COMPONENT_PACKAGES[component]} declares ${name}@${String(spec)}, which is not a dependency spec.`);
         }
         if (!EXACT_VERSION_RE.test(spec)) {
-          throw new Error(`Linked @dsh-spaces/${component} declares ${name}@${spec}, which is not an exact registry version.`);
+          throw new Error(`Linked ${SPACES_COMPONENT_PACKAGES[component]} declares ${name}@${spec}, which is not an exact registry version.`);
         }
         requirements.set(name, { name, version: spec, source: join(checkout, "node_modules", ...name.split("/")) });
       }
@@ -472,6 +473,14 @@ export class SupervisorToolchain {
   }
 
   async alignManagerPlugin(profileId: string): Promise<void> {
+    const manifestPath = join(this.host.home, "profiles", profileId, "package.json");
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      if (Object.hasOwn(manifest.dependencies ?? {}, LEGACY_SPACES_PACKAGE) ||
+          manifest.dsh?.profile?.bundles?.includes(LEGACY_SPACES_PACKAGE)) {
+        throw new Error(`The manager still declares ${LEGACY_SPACES_PACKAGE}. Complete the documented package-name change to dsh-spaces before starting it; both packages must not be installed together.`);
+      }
+    }
     this.log.info("manager.align.checked", "Manager component alignment inspected.", { space: profileId });
     const pluginAligned = this.componentAligned(profileId, "plugin");
     const bridgeAligned = !this.hasComponent("view-bridge") || this.componentAligned(profileId, "view-bridge");
@@ -496,7 +505,7 @@ export class SupervisorToolchain {
   }
 
   installedManagerPluginLib(profileId: string): string | undefined {
-    const target = join(this.host.home, "profiles", profileId, "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
+    const target = join(this.host.home, "profiles", profileId, "node_modules", "dsh-spaces", "lib", "index.js");
     let st;
     try {
       st = lstatSync(target);

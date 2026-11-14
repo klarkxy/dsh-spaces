@@ -13,6 +13,7 @@ test('linked repository resolves the same plugin, client, remotes and patch as t
   const home = mkdtempSync(join(tmpdir(), 'spaces-root-link-'));
   try {
     const repo = manifest(root);
+    assert.equal(repo.name, 'dsh-spaces');
     const published = manifest(join(root, 'packages/plugin'));
     assert.equal(repo.name, published.name);
     assert.equal(repo.version, published.version);
@@ -23,7 +24,7 @@ test('linked repository resolves the same plugin, client, remotes and patch as t
     assert.equal(resolve(root, repo.dsh.bundle.patch), resolve(root, 'packages/plugin', published.dsh.bundle.patch));
 
     const profile = join(home, 'profiles', DEV_PROFILE);
-    const scope = join(profile, 'node_modules/@dsh-spaces');
+    const scope = join(profile, 'node_modules');
     mkdirSync(scope, { recursive: true });
     writeFileSync(join(profile, 'package.json'), JSON.stringify({
       name: 'linked-plugin-test',
@@ -31,7 +32,7 @@ test('linked repository resolves the same plugin, client, remotes and patch as t
       dsh: { profile: { bundles: [repo.name] } },
     }));
     try {
-      symlinkSync(root, join(scope, 'plugin'), process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(root, join(scope, repo.name), process.platform === 'win32' ? 'junction' : 'dir');
     } catch (error) {
       if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
       t.skip('This environment does not permit directory links; run with link permission for runtime resolution evidence.');
@@ -57,10 +58,25 @@ test('development link inspection does not mistake a copied package for the chec
   const home = mkdtempSync(join(tmpdir(), 'spaces-copied-plugin-'));
   try {
     const profile = join(home, 'profiles', DEV_PROFILE);
-    const installed = join(profile, 'node_modules/@dsh-spaces/plugin');
+    const installed = join(profile, 'node_modules/dsh-spaces');
     mkdirSync(installed, { recursive: true });
-    writeFileSync(join(installed, 'package.json'), JSON.stringify({ name: '@dsh-spaces/plugin' }));
+    writeFileSync(join(installed, 'package.json'), JSON.stringify({ name: 'dsh-spaces' }));
     assert.equal(pluginState(home).linkedToCheckout, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('development link refuses the old package identity without changing the profile', () => {
+  const home = mkdtempSync(join(tmpdir(), 'spaces-legacy-link-'));
+  try {
+    const profile = join(home, 'profiles', DEV_PROFILE);
+    mkdirSync(profile, { recursive: true });
+    const path = join(profile, 'package.json');
+    const text = JSON.stringify({ dependencies: { '@dsh-spaces/plugin': 'link:old-checkout' } });
+    writeFileSync(path, text);
+    assert.throws(() => pluginState(home), /still declares @dsh-spaces\/plugin/);
+    assert.equal(readFileSync(path, 'utf8'), text);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

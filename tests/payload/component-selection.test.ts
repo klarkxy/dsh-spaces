@@ -91,7 +91,7 @@ test("stage copies the v2 payload under components/<digest> outside Home", () =>
 test("stage reads a validated payload from profiles/web inside the target Home", () => {
   const home = tempDir("dsh-sel-home-");
   const tools = tempDir("dsh-sel-tools-");
-  const pluginRoot = join(home, "profiles", "web", "node_modules", "@dsh-spaces", "plugin");
+  const pluginRoot = join(home, "profiles", "web", "node_modules", "dsh-spaces");
   const files: Array<[string, string]> = [
     ["package.json", `${JSON.stringify({ name: COMPONENT_PAYLOAD_PACKAGES["manager-plugin"], version: "1.0.0" })}\n`],
     ["cordis.patch.yml", "plugin: dummy\n"],

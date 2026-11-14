@@ -15,6 +15,7 @@
 import React, { useEffect, useState, type ReactElement } from "react";
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import type { SpaceDetail } from "../../../../../src/shared/spaces-control";
+import { isFullSpacesManagerSpec } from "../../../../../src/shared/plugin-spec";
 import { t, type WorkbenchLocale } from "../i18n";
 import type { WorkbenchController, WorkbenchUiState } from "../store";
 import { CopyButton, statusKey } from "./shared";
@@ -67,8 +68,8 @@ export function SpaceDetailPage({
   const startable = space.status === "stopped" || space.status === "crashed";
   const active = space.status === "running" || space.status === "starting";
   const hasMisinstalledSpaces =
-    (ui.detail?.space.id === space.id && ui.detail.plugins.some((item) => item.name === "@dsh-spaces/plugin")) ||
-    ui.plugins.some((plugin) => plugin.packageName === "@dsh-spaces/plugin" && plugin.installedIn.includes(space.id));
+    (ui.detail?.space.id === space.id && ui.detail.plugins.some((item) => isFullSpacesManagerSpec(item.name))) ||
+    ui.plugins.some((plugin) => isFullSpacesManagerSpec(plugin.packageName) && plugin.installedIn.includes(space.id));
   return (
     <div className="dsh-wb-space-detail" data-space-detail="true" data-space-id={space.id}>
       <header className="dsh-wb-space-detail-header">

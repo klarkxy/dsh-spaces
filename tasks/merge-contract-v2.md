@@ -68,7 +68,7 @@ Web 与 Desktop 共用同一管理工作台、任务结果和业务客户端。�
 
 ## 组件制品与正常升级
 
-同一构建的不可变清单标明 Supervisor、管理插件（含 `@dsh-spaces/plugin/space-control` 子入口）、view-bridge、Browser 和安装 worker 的版本、摘要、协议及路径。标准插件安装与 pack 消费该清单，最终制品逐件验证；不建立新的通用注册中心。冷启动总是选择宿主插件自带的组件组；仅当选中指针摘要一致才复用旧选择。
+同一构建的不可变清单标明 Supervisor、管理插件（含 `dsh-spaces/space-control` 子入口）、view-bridge、Browser 和安装 worker 的版本、摘要、协议及路径。标准插件安装与 pack 消费该清单，最终制品逐件验证；不建立新的通用注册中心。冷启动总是选择宿主插件自带的组件组；仅当选中指针摘要一致才复用旧选择。
 
 升级 Spaces 的正常路径是：宿主 `dsh plugin --profile web add <新包>` → 管理工作台停止服务 → 重新打开 Spaces；新的 Supervisor 在管理器启动前对齐管理插件。普通空间按需获得随组桥接，但既有桥接不能仅凭存在就视为与当前组件组版本一致。没有应用内自我更新、一次性启动器交接或服务端版本切换；中断的旧式更新遗留证据（`workbench-upgrade.json`、`.dsh-spaces-upgrade/journal.json`）仍阻止写入。
 

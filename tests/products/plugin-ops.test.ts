@@ -244,12 +244,12 @@ test("pluginLinkDirectory rejects anything but an absolute outside-Home package 
   mkdirSync(join(dir, "profiles", "coding"), { recursive: true });
   const pkg = mkdtempSync(join(tmpdir(), "dsh-spaces-link-"));
   temps.push(pkg);
-  writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@dsh-spaces/plugin" }));
-  await assert.rejects(pluginLinkDirectory(dir, "coding", "relative/path", "@dsh-spaces/plugin"), /spec/i);
-  await assert.rejects(pluginLinkDirectory(dir, "coding", join(pkg, "package.json"), "@dsh-spaces/plugin"), /spec/i);
-  await assert.rejects(pluginLinkDirectory(dir, "coding", join(dir, "profiles", "coding"), "@dsh-spaces/plugin"), /spec/i);
+  writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "dsh-spaces" }));
+  await assert.rejects(pluginLinkDirectory(dir, "coding", "relative/path", "dsh-spaces"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", join(pkg, "package.json"), "dsh-spaces"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", join(dir, "profiles", "coding"), "dsh-spaces"), /spec/i);
   await assert.rejects(pluginLinkDirectory(dir, "coding", pkg, "@dsh-spaces/other"), /spec/i);
-  await assert.rejects(pluginLinkDirectory(dir, "coding", join(pkg, "missing"), "@dsh-spaces/plugin"), /spec/i);
+  await assert.rejects(pluginLinkDirectory(dir, "coding", join(pkg, "missing"), "dsh-spaces"), /spec/i);
 });
 
 test("pluginAdd still rejects a raw absolute directory", async () => {
@@ -257,7 +257,7 @@ test("pluginAdd still rejects a raw absolute directory", async () => {
   mkdirSync(join(dir, "profiles", "coding"), { recursive: true });
   const pkg = mkdtempSync(join(tmpdir(), "dsh-spaces-rawdir-"));
   temps.push(pkg);
-  writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@dsh-spaces/plugin" }));
+  writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "dsh-spaces" }));
   await assert.rejects(pluginAdd(dir, "coding", pkg));
 });
 

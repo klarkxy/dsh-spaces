@@ -1197,7 +1197,7 @@ test("SSR ready home shows management actions and plugin install wording", async
   assert.ok(html.includes('data-space-detail="true"'));
   assert.ok(html.includes(t("zh", "plugins.installLatest")) || html.includes(t("zh", "plugins.chooseVersion")));
   assert.ok(html.includes(t("zh", "plugins.toggleHint")));
-  assert.ok(!html.includes(t("zh", "plugins.cleanup")), "cleanup is hidden unless @dsh-spaces/plugin is misinstalled");
+  assert.ok(!html.includes(t("zh", "plugins.cleanup")), "cleanup is hidden unless dsh-spaces is misinstalled");
   ctrl.setHomeTab("snapshots");
   await flush();
   const snap = ready(ctrl);
@@ -3220,7 +3220,7 @@ test("settings UX: sources live in general, dirty tracks actual changes, quick p
   const api = fakeApi({
     plugins: async () => [
       { id: "catalog.demo", title: "Demo", packageName: "demo", description: "A plugin", version: "1.0.0", installedIn: ["alpha"], protected: false },
-      { id: "spaces", title: "Spaces", packageName: "@dsh-spaces/plugin", description: "Manager", version: "0.5.0", installedIn: ["beta"], protected: false },
+      { id: "spaces", title: "Spaces", packageName: "dsh-spaces", description: "Manager", version: "0.5.0", installedIn: ["beta"], protected: false },
     ],
   });
   const ctrl = controller(api);
@@ -3244,7 +3244,7 @@ test("settings UX: sources live in general, dirty tracks actual changes, quick p
   ctrl.setHomeSettings({ packageSource: "official" });
   assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false, "reverting back to saved settings clears dirty");
 
-  // Alpha does not show cleanup; Beta has misinstalled @dsh-spaces/plugin and shows cleanup.
+  // Alpha does not show cleanup; Beta has misinstalled dsh-spaces and shows cleanup.
   ctrl.openDetail("alpha");
   await flush();
   await flush();

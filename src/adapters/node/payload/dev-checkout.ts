@@ -3,6 +3,7 @@ import { lstatSync, realpathSync } from "../../../shared/node/filesystem";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { samePath } from "../home/home-guard";
+import { SPACES_COMPONENT_PACKAGES } from "../../../shared/plugin-spec";
 
 export type SpacesComponent = "plugin" | "view-bridge" | "browser";
 
@@ -14,7 +15,7 @@ export const DEV_COMPONENT_DIRS: Record<SpacesComponent, string> = {
 
 /**
  * Checkout root iff `payloadRootLib` is `<root>/packages/plugin/lib` of a
- * source checkout (private root manifest named @dsh-spaces/plugin), else
+ * source checkout (private root manifest named dsh-spaces), else
  * undefined. A packed or staged install never qualifies: staged copies live
  * under a tools `components/` tree and standard installs live under
  * node_modules, whose root manifest is neither private nor the plugin package.
@@ -43,7 +44,7 @@ export function detectDevCheckout(payloadRootLib: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (manifest.name !== "@dsh-spaces/plugin" || manifest.private !== true) return undefined;
+  if (manifest.name !== "dsh-spaces" || manifest.private !== true) return undefined;
   return root;
 }
 
@@ -53,7 +54,7 @@ export function devComponentDir(checkout: string, component: SpacesComponent): s
 }
 
 /**
- * True iff the profile's `@dsh-spaces/<component>` dependency is recorded as a
+ * True iff the profile's component package dependency is recorded as a
  * `link:` spec, its node_modules entry is a symlink/junction, and that link
  * resolves to this checkout's component directory.
  */
@@ -69,12 +70,12 @@ export function devComponentLinked(
     const manifest = JSON.parse(readFileSync(join(profileDir, "package.json"), "utf8")) as {
       dependencies?: Record<string, unknown>;
     };
-    spec = manifest.dependencies?.[`@dsh-spaces/${component}`];
+    spec = manifest.dependencies?.[SPACES_COMPONENT_PACKAGES[component]];
   } catch {
     return false;
   }
   if (typeof spec !== "string" || !spec.startsWith("link:")) return false;
-  const link = join(profileDir, "node_modules", "@dsh-spaces", component);
+  const link = join(profileDir, "node_modules", ...SPACES_COMPONENT_PACKAGES[component].split("/"));
   let stat;
   try {
     stat = lstatSync(link);
@@ -98,7 +99,7 @@ export function devComponentLinked(
  * opaque plugin-add failure.
  */
 export function devComponentProblem(checkout: string, component: SpacesComponent): string | undefined {
-  const expected = `@dsh-spaces/${component}`;
+  const expected = SPACES_COMPONENT_PACKAGES[component];
   const dir = devComponentDir(checkout, component);
   let stat;
   try {

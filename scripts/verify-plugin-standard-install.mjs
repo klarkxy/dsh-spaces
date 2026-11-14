@@ -65,7 +65,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const THIS_FILE = fileURLToPath(import.meta.url);
 const PACK_SCRIPT = join(REPO, "scripts", "pack-spaces-plugin.mjs");
 const PLUGIN_DIR = join(REPO, "packages", "plugin");
-const CANONICAL_NAME = "@dsh-spaces/plugin";
+const CANONICAL_NAME = "dsh-spaces";
 const WEB_PROFILE = "web";
 const SPACE_USER_NAME = "coding";
 const SPACE_ID = "space-coding";
@@ -1242,7 +1242,7 @@ async function main() {
     timeoutMs: 120000,
     label: "pack plugin",
   });
-  const pluginTgz = join(packDest, `dsh-spaces-plugin-${JSON.parse(readFileSync(join(PLUGIN_DIR, "package.json"), "utf8")).version}.tgz`);
+  const pluginTgz = join(packDest, `dsh-spaces-${JSON.parse(readFileSync(join(PLUGIN_DIR, "package.json"), "utf8")).version}.tgz`);
   if (!existsSync(pluginTgz)) throw new Error(`packed plugin missing at ${pluginTgz}`);
   const packedFiles = JSON.parse(readFileSync(join(packDest, "pack-report.json"), "utf8")).plugin.entries;
   for (const rel of PLUGIN_REQUIRED) {
@@ -1291,7 +1291,7 @@ async function main() {
   report.webProtection = {
     beforeOrdinaryBoot: webProtectedPresence(afterAddProtected),
   };
-  pass("ordinary web standard add registered @dsh-spaces/plugin; no manager created before initialize");
+  pass("ordinary web standard add registered dsh-spaces; no manager created before initialize");
 
   const playwright = await loadPlaywright();
   const { chromium } = playwright;

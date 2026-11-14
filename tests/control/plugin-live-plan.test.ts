@@ -442,7 +442,7 @@ test("closed params are enforced for the live ops before any freeze", async () =
     { op: "plugin.live.update", spaceId: "space-alpha", params: { packageName: "@deepseek-ai/dsh-base", version: "0.2.2-rc.1" } },
     { op: "plugin.live.entry", spaceId: "space-alpha", params: { entryId: "has space", enabled: true } },
     { op: "plugin.live.entry", spaceId: "space-alpha", params: { entryId: "include:e1" } },
-    { op: "plugin.live.remove", spaceId: "space-alpha", params: { packageName: "@dsh-spaces/plugin" } },
+    { op: "plugin.live.remove", spaceId: "space-alpha", params: { packageName: "dsh-spaces" } },
     { op: "plugin.live.remove", spaceId: "space-alpha", params: { packageName: "x", extra: 1 } },
   ];
   for (const body of invalid) {

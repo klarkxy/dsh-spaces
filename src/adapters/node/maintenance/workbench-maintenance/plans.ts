@@ -5,7 +5,7 @@ import { parsePluginSource, PluginSourceError } from "../../../../shared/plugin-
 import { pinDetailFor } from "../../products/plugin-exact-source";
 import type { WorkbenchPlanRequest } from "../../../../shared/workbench";
 import { MaintenanceRuntime } from "./runtime";
-import { FULL_SPACES_PACKAGE, WORKBENCH_PLAN_TTL_MS } from "./constants";
+import { FULL_SPACES_PACKAGES, WORKBENCH_PLAN_TTL_MS } from "./constants";
 import { WorkbenchMaintenanceError } from "./errors";
 import type { ResolvedCommand, StoredPlan } from "./types";
 import { assertGuardedPackage, requireExactVersion, requirePackageName } from "./validation";
@@ -223,14 +223,15 @@ export class MaintenancePlans extends MaintenanceRuntime {
     request: Extract<WorkbenchPlanRequest, { kind: "plugin.cleanup-manager" }>,
   ): Promise<StoredPlan> {
     const spaceId = this.targetSpace(request.spaceId, false);
-    if (!this.spaceHasPlugin(spaceId, FULL_SPACES_PACKAGE)) {
+    const packageName = FULL_SPACES_PACKAGES.find(name => this.spaceHasPlugin(spaceId, name));
+    if (!packageName) {
       throw new WorkbenchMaintenanceError("workbench/not-found");
     }
     const runningSpaceIds = this.runningOf([spaceId]);
     const command: ResolvedCommand = {
       kind: "plugin.cleanup-manager",
       spaceId,
-      packageName: FULL_SPACES_PACKAGE,
+      packageName,
     };
     return this.storeable(id, createdAt, expiresAt, command, {
       kind: "plugin.cleanup-manager",
@@ -239,7 +240,7 @@ export class MaintenancePlans extends MaintenanceRuntime {
       affectedSpaceIds: [spaceId],
       runningSpaceIds,
       changes: [
-        `Remove ${FULL_SPACES_PACKAGE} from ordinary workspace ${spaceId}.`,
+        `Remove ${packageName} from ordinary workspace ${spaceId}.`,
         "User data is not copied or migrated.",
         runningSpaceIds.length ? `Stop and restart ${spaceId}.` : "Workspace is stopped.",
       ],

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pack @dsh-spaces/plugin and @dsh-spaces/view-bridge outside the package
+ * Pack dsh-spaces and @dsh-spaces/view-bridge outside the package
  * trees. Default destination is a local directory without spaces.
  *
  * Does not delete stray *.tgz already sitting in packages/plugin or
@@ -358,7 +358,7 @@ function preflightOnDisk() {
   const viewPkg = readPkg(VIEW_DIR);
   const supervisorPkg = readPkg(SUPERVISOR_DIR);
   assertManifest(pluginPkg, {
-    name: "@dsh-spaces/plugin",
+    name: "dsh-spaces",
     directory: "packages/plugin",
     keywords: ["dsh-plugin", "deepseek-harness"],
   });
@@ -378,7 +378,7 @@ function preflightOnDisk() {
   // resolve against the installing profile and fail the whole install (the
   // ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND defect this guard exists to catch).
   for (const [dep, spec] of Object.entries(pluginPkg.dependencies ?? {})) {
-    if (typeof spec !== "string" || /^(?:file|link|workspace|portal):/.test(spec) || dep.startsWith("@dsh-spaces/")) {
+    if (typeof spec !== "string" || /^(?:file|link|workspace|portal):/.test(spec) || dep === pluginPkg.name || dep.startsWith("@dsh-spaces/")) {
       throw new Error(`packages/plugin dependency ${dep}@${String(spec)} is not installable from the tarball`);
     }
   }
@@ -387,8 +387,8 @@ function preflightOnDisk() {
   }
   const patchText = readFileSync(join(PLUGIN_DIR, "cordis.patch.yml"), "utf8");
   const controlRow = /id:\s*dsh-space-control\b[\s\S]*?name:\s*['"]([^'"]+)['"]/.exec(patchText);
-  if (controlRow?.[1] !== "@dsh-spaces/plugin/space-control") {
-    throw new Error(`packages/plugin cordis.patch.yml must name dsh-space-control @dsh-spaces/plugin/space-control, got ${controlRow?.[1] ?? "(row missing)"}`);
+  if (controlRow?.[1] !== "dsh-spaces/space-control") {
+    throw new Error(`packages/plugin cordis.patch.yml must name dsh-space-control dsh-spaces/space-control, got ${controlRow?.[1] ?? "(row missing)"}`);
   }
   const engineManifest = readPkg(join(PLUGIN_DIR, "lib", "supervisor", "ui-engine", "node_modules", "playwright-core"));
   if (engineManifest.name !== "playwright-core" || engineManifest.version !== UI_ENGINE_VERSION) {
@@ -465,7 +465,7 @@ async function main() {
     const pluginDry = runNpmPack(nodeExe, npmCli, PLUGIN_DIR, dest, { dryRun: true });
     const viewDry = runNpmPack(nodeExe, npmCli, VIEW_DIR, dest, { dryRun: true });
     const browserDry = runNpmPack(nodeExe, npmCli, BROWSER_DIR, dest, { dryRun: true });
-    assertPackedFiles("@dsh-spaces/plugin", pluginDry.files, PLUGIN_REQUIRED);
+    assertPackedFiles("dsh-spaces", pluginDry.files, PLUGIN_REQUIRED);
     assertPackedFiles("@dsh-spaces/view-bridge", viewDry.files, VIEW_REQUIRED);
     assertPackedFiles("@dsh-spaces/browser", browserDry.files, BROWSER_REQUIRED);
     pass("preflight dry-run file lists include prebuilt payload and exclude nested tarballs");
@@ -475,7 +475,7 @@ async function main() {
     return { status: "preflight", dest, plugin: pluginDry, view: viewDry, browser: browserDry };
   }
 
-  const plugin = packOne(nodeExe, npmCli, PLUGIN_DIR, dest, PLUGIN_REQUIRED, "@dsh-spaces/plugin");
+  const plugin = packOne(nodeExe, npmCli, PLUGIN_DIR, dest, PLUGIN_REQUIRED, "dsh-spaces");
   verifyPackedPayload(plugin.path, payload);
   const view = packOne(nodeExe, npmCli, VIEW_DIR, dest, VIEW_REQUIRED, "@dsh-spaces/view-bridge");
   const browser = packOne(nodeExe, npmCli, BROWSER_DIR, dest, BROWSER_REQUIRED, "@dsh-spaces/browser");

@@ -311,8 +311,8 @@ test("disabled and dependency-only third-party packages stay installed and untou
 });
 
 test("the old management plugin has no transition exemption", async () => {
-  const f = fixture(); f.add("@dsh-spaces/plugin", "^0.1.7-alpha.1");
-  await assert.rejects(alignProfileComponents(f.input), /@dsh-spaces\/plugin.*cannot load/);
+  const f = fixture(); f.add("dsh-spaces", "^0.1.7-alpha.1");
+  await assert.rejects(alignProfileComponents(f.input), /dsh-spaces.*cannot load/);
   assert.deepEqual(f.calls, []); assert.equal(existsSync(f.marker), false);
 });
 

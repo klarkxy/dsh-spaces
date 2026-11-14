@@ -147,25 +147,30 @@ test("manager profile, official packages, and full Spaces cannot be mutated", as
     matchCode("workbench/forbidden"),
   );
   await assert.rejects(
+    () => maintenance.preview({ kind: "plugin.remove", spaceId: "space-coding", packageName: "@dsh-spaces/plugin" }),
+    matchCode("workbench/forbidden"),
+  );
+  await assert.rejects(
     () => maintenance.preview({ kind: "plugin.toggle", spaceId: "spaces-hub", pluginId: "dsh-outline", enabled: true }),
     matchCode("workbench/forbidden"),
   );
 });
 
-test("cleanup-manager only removes the management package from an ordinary profile and does not copy data", async () => {
+for (const packageName of [FULL_SPACES_PACKAGE, "@dsh-spaces/plugin"]) test(`cleanup-manager removes ${packageName} from an ordinary profile without copying data`, async () => {
   const { home, maintenance, state } = harness();
   writeManifest(home, "space-coding", {
-    bundles: [BASE, WEB, FULL_SPACES_PACKAGE],
-    dependencies: { [BASE]: "1", [WEB]: "1", [FULL_SPACES_PACKAGE]: "0.2.0" },
+    bundles: [BASE, WEB, packageName],
+    dependencies: { [BASE]: "1", [WEB]: "1", [packageName]: "0.2.0" },
   });
   mkdirSync(join(home, "hub", "space-coding"), { recursive: true });
   writeFileSync(join(home, "hub", "space-coding", "notes.txt"), "keep-user-data\n");
   const plan = await maintenance.preview({ kind: "plugin.cleanup-manager", spaceId: "space-coding" });
   assert.equal(plan.destructive, true);
+  assert.ok(plan.changes.some(change => change.includes(packageName)));
   assert.match(plan.changes.join("\n"), /not copied or migrated/i);
   await maintenance.execute(plan.id, jobCtx());
   const plugins = listProfilePlugins(home, "space-coding").map((item) => item.name);
-  assert.equal(plugins.includes(FULL_SPACES_PACKAGE), false);
+  assert.equal(plugins.includes(packageName), false);
   assert.equal(readFileSync(join(home, "hub", "space-coding", "notes.txt"), "utf8"), "keep-user-data\n");
   assert.deepEqual(state.started, ["space-coding"]);
 });
@@ -1524,7 +1529,7 @@ test("plugin.install.spec preview rejects anything that is not a closed exact so
     { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "latest" } } },
     { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "p", version: "^1.0.0" } } },
     { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "@deepseek-ai/dsh-web-app", version: "0.2.0-rc.2" } } },
-    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "@dsh-spaces/plugin", version: "1.0.0" } } },
+    { kind: "plugin.install.spec", spaceId: "space-coding", source: { npm: { packageName: "dsh-spaces", version: "1.0.0" } } },
     { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "main", packageName: "p" } } },
     { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "a".repeat(39), packageName: "p" } } },
     { kind: "plugin.install.spec", spaceId: "space-coding", source: { github: { owner: "o", repo: "r", commit: "a".repeat(40), path: "../x", packageName: "p" } } },

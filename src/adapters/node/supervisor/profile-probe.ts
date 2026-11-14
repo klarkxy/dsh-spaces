@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isExactRuntimeVersion } from "../../../shared/runtime";
-
-const SPACES_PLUGIN = "@dsh-spaces/plugin";
+import { FULL_SPACES_PACKAGES } from "../../../shared/plugin-spec";
 
 export function publicPluginVersion(spec: unknown): string | null {
   if (typeof spec !== "string") return null;
@@ -38,7 +37,7 @@ export function inspectManagerInstall(home: string, profileId: string): "missing
     };
     const bundles = Array.isArray(pkg.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : [];
     const deps = pkg.dependencies ?? {};
-    if (bundles.includes(SPACES_PLUGIN) || Object.prototype.hasOwnProperty.call(deps, SPACES_PLUGIN)) {
+    if (FULL_SPACES_PACKAGES.some(name => bundles.includes(name) || Object.prototype.hasOwnProperty.call(deps, name))) {
       return "manager";
     }
     return "ordinary";

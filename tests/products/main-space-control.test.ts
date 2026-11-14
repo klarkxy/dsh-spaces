@@ -444,7 +444,7 @@ test("the plugin patch row and package metadata carry the canonical ids", () => 
   const pluginPatch = load(readFileSync(join(repo, "packages/plugin/cordis.patch.yml"), "utf8")) as Array<{ insert?: Array<{ id?: string; name?: string }> }>;
   const row = pluginPatch.flatMap((patch) => (Array.isArray(patch.insert) ? patch.insert : [])).find((entry) => entry.id === "dsh-space-control");
   assert.ok(row, "packages/plugin/cordis.patch.yml must insert dsh-space-control");
-  assert.equal(row.name, "@dsh-spaces/plugin/space-control");
+  assert.equal(row.name, "dsh-spaces/space-control");
 
   // space-control is a subpath export inside the plugin package, never a
   // dependency: a file:/link: spec inside the tarball cannot be installed.

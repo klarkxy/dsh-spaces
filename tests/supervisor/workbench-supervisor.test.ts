@@ -203,7 +203,7 @@ test("ROOT: failed manager installation blocks writes and a later launch keeps i
     pluginAdd: async (_home: string, profile: string) => {
       installs += 1;
       if (fail) throw new Error("install interrupted");
-      writeProfile(home, profile, { dependencies: { "@dsh-spaces/plugin": "0.2.0" } });
+      writeProfile(home, profile, { dependencies: { "dsh-spaces": "0.2.0" } });
     },
   };
   const first = await startSupervisor(home, extra);
@@ -358,8 +358,8 @@ test("HTTP state during owned manager bootstrap stays limited without latching b
       enteredAdd = true;
       await held;
       writeProfile(home, profile, {
-        dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-        dsh: { profile: { bundles: ["@dsh-spaces/plugin"] } },
+        dependencies: { "dsh-spaces": "0.2.0" },
+        dsh: { profile: { bundles: ["dsh-spaces"] } },
       });
       const match = /^(@?[a-z0-9-]+(?:\/[a-z0-9-]+)?)@([^@]+)$/.exec(spec);
       if (match) {
@@ -699,8 +699,8 @@ async function startSupervisor(
       }
       if (args.includes("--from-default-profile")) {
         writeProfile(home, profile, {
-          dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-          dsh: { profile: { bundles: ["@dsh-spaces/plugin"] } },
+          dependencies: { "dsh-spaces": "0.2.0" },
+          dsh: { profile: { bundles: ["dsh-spaces"] } },
         });
       } else if (profile === "web" && args.includes("--dump-config")) {
         writeProfile(home, "web");
@@ -1592,8 +1592,8 @@ test("first startup clones the shipped preset into the manager without materiali
       }
       if (argv.includes("--from-default-profile")) {
         writeProfile(home, profile, {
-          dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-          dsh: { profile: { bundles: ["@dsh-spaces/plugin"] } },
+          dependencies: { "dsh-spaces": "0.2.0" },
+          dsh: { profile: { bundles: ["dsh-spaces"] } },
         });
       } else if (profile === "web" && argv.includes("--dump-config")) {
         writeProfile(home, "web");
@@ -1806,7 +1806,7 @@ function writeFakeCliWithWebApp(home: string, version = "0.2.0-rc.2"): string {
 }
 
 function installManagerModules(home: string, payload: ValidatedComponentPayload, pluginRoot: string): void {
-  cpSync(pluginRoot, join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
+  cpSync(pluginRoot, join(home, "profiles", "spaces-hub", "node_modules", "dsh-spaces"), { recursive: true });
   cpSync(join(payload.payloadRootLib, "view-bridge"), join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "view-bridge"), { recursive: true });
 }
 
@@ -1915,8 +1915,8 @@ function alignProcessRuntime(spawned: string[]): Partial<ProcessRuntime> {
 test("startup aligns a mismatched manager plugin once before the manager starts", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   writeManagerRecord(home);
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-payload-")), "aligned");
@@ -1936,7 +1936,7 @@ test("startup aligns a mismatched manager plugin once before the manager starts"
       specs.push(basename(spec));
       if (!spec.includes("dsh-spaces-plugin")) return;
       installs += 1;
-      cpSync(payload.packageRoot, join(addedHome, "profiles", profile, "node_modules", "@dsh-spaces", "plugin"), { recursive: true });
+      cpSync(payload.packageRoot, join(addedHome, "profiles", profile, "node_modules", "dsh-spaces"), { recursive: true });
     },
   });
   const state = await handle.runtime.state();
@@ -1950,11 +1950,40 @@ test("startup aligns a mismatched manager plugin once before the manager starts"
   assert.ok(state.managerId && spawned.includes(state.managerId));
 });
 
+test("legacy manager identity blocks package alignment without installing a second manager package", async () => {
+  const home = tempHome();
+  writeProfile(home, "spaces-hub", {
+    dependencies: { "@dsh-spaces/plugin": "0.5.0" },
+    dsh: { profile: { bundles: ["@dsh-spaces/plugin"] } },
+  });
+  writeManagerRecord(home);
+  const manifestPath = join(home, "profiles", "spaces-hub", "package.json");
+  const before = readFileSync(manifestPath, "utf8");
+  const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-rename-payload-")), "renamed");
+  const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
+  const spawned: string[] = [];
+  let installs = 0;
+  const handle = await startSupervisor(home, {
+    bin: writeFakeCliWithWebApp(home),
+    componentPayloadRoot: payload.payloadRootLib,
+    ...artifacts,
+    dumpConfig: async (profile) => profile === "spaces-hub" ? alphaDump(profile) : dumpText(profile),
+    processRuntime: alignProcessRuntime(spawned),
+    pluginAdd: async () => { installs++; },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(state.role, "manager");
+  assert.ok(state.reasons.some(reason => reason.includes("still declares @dsh-spaces/plugin")));
+  assert.equal(installs, 0);
+  assert.deepEqual(spawned, []);
+  assert.equal(readFileSync(manifestPath, "utf8"), before);
+});
+
 test("startup skips the manager plugin align when the installed payload matches", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   writeManagerRecord(home);
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-same-")), "same");
@@ -1978,8 +2007,8 @@ test("startup skips the manager plugin align when the installed payload matches"
 test("a matching manager plugin does not block alignment of a drifted manager view bridge", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   writeManagerRecord(home);
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-drift-")), "drift");
@@ -2008,8 +2037,8 @@ test("a matching manager plugin does not block alignment of a drifted manager vi
 test("startup blocks and does not start the manager when the align cannot be verified", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   writeManagerRecord(home);
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-fail-")), "failing");
@@ -2049,8 +2078,8 @@ test("startup blocks and does not start the manager when the align cannot be ver
 test("same-coordinate drift adds the alternate archive once and keeps the drifted tree", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-r1-")), "fresh");
   const stale = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-r1-stale-")), "stale");
@@ -2062,12 +2091,12 @@ test("same-coordinate drift adds the alternate archive once and keeps the drifte
   mkdirSync(dirname(canonical), { recursive: true });
   writeFileSync(canonical, readFileSync(artifacts.pluginArtifact));
   const canonicalBytes = readFileSync(canonical);
-  const drifted = join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
+  const drifted = join(home, "profiles", "spaces-hub", "node_modules", "dsh-spaces", "lib", "index.js");
   const driftedBytes = Buffer.from("drifted-bytes;\n");
   writeFileSync(drifted, driftedBytes);
   const pkgPath = join(home, "profiles", "spaces-hub", "package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { dependencies: Record<string, string> };
-  pkg.dependencies["@dsh-spaces/plugin"] = `file:${canonical.replaceAll("\\", "/")}`;
+  pkg.dependencies["dsh-spaces"] = `file:${canonical.replaceAll("\\", "/")}`;
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   writeManagerRecord(home);
   const added: Array<{ spec: string; force?: boolean }> = [];
@@ -2086,8 +2115,8 @@ test("same-coordinate drift adds the alternate archive once and keeps the drifte
   assert.equal(readFileSync(drifted).equals(driftedBytes), true);
   assert.equal(readFileSync(canonical).equals(canonicalBytes), true);
   assert.equal(existsSync(archiveAbsPath(home, `${id}-r1`)), true);
-  const installed = JSON.parse(readFileSync(join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin", "package.json"), "utf8")) as { name: string; version: string };
-  assert.equal(installed.name, "@dsh-spaces/plugin");
+  const installed = JSON.parse(readFileSync(join(home, "profiles", "spaces-hub", "node_modules", "dsh-spaces", "package.json"), "utf8")) as { name: string; version: string };
+  assert.equal(installed.name, "dsh-spaces");
   assert.equal(installed.version, "0.2.0");
   assert.notEqual(state.spaces.find((space) => space.id === state.managerId)?.status, "running");
   assert.ok(state.reasons.some((reason) => reason.includes("manager plugin could not be aligned")));
@@ -2096,8 +2125,8 @@ test("same-coordinate drift adds the alternate archive once and keeps the drifte
 test("a malformed manager manifest fails alignment before plugin add", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   writeManagerRecord(home);
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-align-bad-manifest-")), "bad");
@@ -2105,11 +2134,11 @@ test("a malformed manager manifest fails alignment before plugin add", async () 
   installManagerModules(home, payload, stale.packageRoot);
   const artifacts = packPayloadArtifacts(payload, join(home, "artifacts"));
   const pkgPath = join(home, "profiles", "spaces-hub", "package.json");
-  const drifted = join(home, "profiles", "spaces-hub", "node_modules", "@dsh-spaces", "plugin", "lib", "index.js");
+  const drifted = join(home, "profiles", "spaces-hub", "node_modules", "dsh-spaces", "lib", "index.js");
   const driftedBytes = readFileSync(drifted);
   writeFileSync(pkgPath, `${JSON.stringify({
     dependencies: null,
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   })}\n`);
   let installs = 0;
   const handle = await startSupervisor(home, {
@@ -2524,8 +2553,8 @@ test("runtime.upgrade previews are rejected as unsupported", async () => {
 test("startup performs no official plugin installs on the manager", async () => {
   const home = tempHome();
   writeProfile(home, "spaces-hub", {
-    dependencies: { "@dsh-spaces/plugin": "0.2.0" },
-    dsh: { profile: { bundles: ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"] } },
+    dependencies: { "dsh-spaces": "0.2.0" },
+    dsh: { profile: { bundles: ["dsh-spaces", "@dsh-spaces/view-bridge"] } },
   });
   writeManagerRecord(home);
   const payload = writePayload(mkdtempSync(join(tmpdir(), "dsh-official-payload-")), "official");

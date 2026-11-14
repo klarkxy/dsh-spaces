@@ -19,6 +19,7 @@ export const BLUEPRINT_TEST_CHECKS = ["install", "compose", "start", "interactio
 export const BLUEPRINT_HOST_PACKAGES = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"] as const;
 export const BLUEPRINT_FORBIDDEN_SETTINGS = ["llm-pi-ai", "agent-default-model"] as const;
 export const BLUEPRINT_SPACES_CONTROL_PACKAGES = [
+  "dsh-spaces",
   "@dsh-spaces/plugin",
   "@dsh-spaces/view-bridge",
   "@dsh-spaces/llm-bridge",

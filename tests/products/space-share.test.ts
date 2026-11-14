@@ -122,6 +122,7 @@ test("export records plugin composition and omits host packages", () => {
 });
 
 test("export omits bundled components even when they are not marked protected", () => {
+  assert.equal(pluginToShare({ name: "@dsh-spaces/plugin", requestedSpec: "0.5.0", resolvedVersion: "0.5.0", protected: false }), null);
   for (const name of new Set(Object.entries(COMPONENT_PAYLOAD_PACKAGES).filter(([component])=>component!=="browser").map(([,name])=>name))) {
     assert.equal(pluginToShare({
       name,

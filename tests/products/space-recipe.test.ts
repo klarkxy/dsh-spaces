@@ -185,9 +185,18 @@ test("share parts from formatVersion 1 round-trip as a recipe", () => {
 });
 
 test("full Spaces manager specs and unresolved aliases are not installable recipe plugins", () => {
-  assert.equal(isFullSpacesManagerSpec("@dsh-spaces/plugin"), true);
-  assert.equal(isFullSpacesManagerSpec("@dsh-spaces/plugin@0.2.0"), true);
-  assert.equal(isFullSpacesManagerSpec("npm:@dsh-spaces/plugin"), true);
+  assert.equal(isFullSpacesManagerSpec("dsh-spaces"), true);
+  assert.equal(isFullSpacesManagerSpec("dsh-spaces@0.2.0"), true);
+  assert.equal(isFullSpacesManagerSpec("npm:dsh-spaces"), true);
+  for (const name of ["dsh-spaces", "@dsh-spaces/plugin"]) {
+    for (const spec of [name, `${name}@0.5.0`, `npm:${name}`, `node:${name}/space-control`]) {
+      assert.equal(isFullSpacesManagerSpec(spec), true, spec);
+    }
+    assert.equal(canonicalNpmInstallSpec({ packageName: name, source: "npm", resolvedVersion: "0.5.0" }), null);
+  }
+  for (const name of ["dsh-spaces-tools", "@someone/dsh-spaces-tools", "@dsh-spaces/plugin-extra"]) {
+    assert.equal(isFullSpacesManagerSpec(`npm:${name}`), false, name);
+  }
   assert.equal(isFullSpacesManagerSpec("dsh-outline"), false);
   assert.equal(
     canonicalNpmInstallSpec({
@@ -198,7 +207,7 @@ test("full Spaces manager specs and unresolved aliases are not installable recip
     }),
     null,
   );
-  assert.equal(isUnresolvedPluginAlias("npm:@dsh-spaces/plugin"), true);
+  assert.equal(isUnresolvedPluginAlias("npm:dsh-spaces"), true);
   assert.equal(isUnresolvedPluginAlias("node:foo"), true);
   assert.equal(isUnresolvedPluginAlias("file:../hub/plugins/foo.tgz"), true);
   assert.equal(isUnresolvedPluginAlias("dsh-outline@1.2.3"), false);

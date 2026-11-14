@@ -723,7 +723,7 @@ test("v1 supervisor manifest is not a successful payload", async () => {
   writeProfile(home, "web");
   const pluginRoot = tempDir("dsh-wb-v1-pkg-");
   mkdirSync(join(pluginRoot, "lib", "supervisor"), { recursive: true });
-  writeFileSync(join(pluginRoot, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", version: "0.2.0" })}\n`);
+  writeFileSync(join(pluginRoot, "package.json"), `${JSON.stringify({ name: "dsh-spaces", version: "0.2.0" })}\n`);
   writeFileSync(join(pluginRoot, "lib", "supervisor", "manifest.json"), `${JSON.stringify({ version: "0.2.0", entry: "index.js" })}\n`);
   writeFileSync(join(pluginRoot, "lib", "supervisor", "index.js"), "export {};\n");
   writeFileSync(join(pluginRoot, "lib", "supervisor", "snapshot-worker.mjs"), "export {};\n");

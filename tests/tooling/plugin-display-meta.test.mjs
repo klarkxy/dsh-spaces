@@ -70,11 +70,11 @@ test('the declared icon is a self-contained image the DSH metadata reader accept
 test('a linked install resolves the icon and locale resources the DSH metadata reader requests', t => {
   const home = mkdtempSync(join(tmpdir(), 'spaces-display-meta-'));
   try {
-    const scope = join(home, 'node_modules/@dsh-spaces');
+    const scope = join(home, 'node_modules');
     mkdirSync(scope, { recursive: true });
     writeFileSync(join(home, 'package.json'), JSON.stringify({ name: 'display-meta-test', private: true }));
     try {
-      symlinkSync(join(root, 'packages/plugin'), join(scope, 'plugin'), process.platform === 'win32' ? 'junction' : 'dir');
+      symlinkSync(join(root, 'packages/plugin'), join(scope, 'dsh-spaces'), process.platform === 'win32' ? 'junction' : 'dir');
     } catch (error) {
       if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
       t.skip('This environment does not permit directory links; run with link permission for resolution evidence.');
@@ -82,10 +82,10 @@ test('a linked install resolves the icon and locale resources the DSH metadata r
     }
     const require = createRequire(join(home, 'package.json'));
     const resolved = {
-      manifest: require.resolve('@dsh-spaces/plugin/package.json'),
-      english: require.resolve('@dsh-spaces/plugin/locale/en.json'),
-      chinese: require.resolve('@dsh-spaces/plugin/locale/zh.json'),
-      icon: require.resolve('@dsh-spaces/plugin/icon'),
+      manifest: require.resolve('dsh-spaces/package.json'),
+      english: require.resolve('dsh-spaces/locale/en.json'),
+      chinese: require.resolve('dsh-spaces/locale/zh.json'),
+      icon: require.resolve('dsh-spaces/icon'),
     };
     assert.equal(realpathSync(resolved.manifest), realpathSync(join(root, 'packages/plugin', 'package.json')));
     assert.equal(realpathSync(resolved.english), realpathSync(join(root, 'packages/plugin', 'locale', 'en.json')));

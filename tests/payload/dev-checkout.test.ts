@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { createDirectoryLink } from "../../src/shared/node/filesystem.ts";
+import { SPACES_COMPONENT_PACKAGES } from "../../src/shared/plugin-spec.ts";
 import {
   detectDevCheckout,
   devComponentDir,
@@ -45,10 +46,10 @@ function writeRel(root: string, rel: string, content: string): void {
 
 /** Minimal source checkout: private root manifest plus installable packages/<c> dirs. */
 function writeCheckout(root: string): string {
-  writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
-  for (const dir of ["plugin", "view-bridge", "browser"]) {
+  writeFileSync(join(root, "package.json"), `${JSON.stringify({ name: "dsh-spaces", private: true })}\n`);
+  for (const dir of ["plugin", "view-bridge", "browser"] as const) {
     writeRel(join(root, "packages", dir), "package.json", `${JSON.stringify({
-      name: `@dsh-spaces/${dir}`, version: "0.5.0", main: "./lib/index.js",
+      name: SPACES_COMPONENT_PACKAGES[dir], version: "0.5.0", main: "./lib/index.js",
       dsh: { bundle: { patch: "./cordis.patch.yml" } },
     })}\n`);
     writeRel(join(root, "packages", dir), "cordis.patch.yml", "[]\n");
@@ -106,9 +107,9 @@ function linkComponent(home: string, profileId: string, spec: string): void {
   const manifest = JSON.parse(existsSync(manifestPath) ? readFileSync(manifestPath, "utf8") : "{}") as {
     dependencies: Record<string, string>;
   };
-  manifest.dependencies[`@dsh-spaces/${component}`] = `link:${spec}`;
+  manifest.dependencies[SPACES_COMPONENT_PACKAGES[component]] = `link:${spec}`;
   writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
-  const dest = join(profile, "node_modules", "@dsh-spaces", component);
+  const dest = join(profile, "node_modules", ...SPACES_COMPONENT_PACKAGES[component].split("/"));
   mkdirSync(dirname(dest), { recursive: true });
   createDirectoryLink(spec, dest);
 }
@@ -139,12 +140,12 @@ test("detectDevCheckout finds a source checkout and rejects installed or foreign
   assert.equal(detectDevCheckout(devComponentDir(checkout, "plugin") + "/lib"), checkout);
   assert.equal(detectDevCheckout(join(checkout, "missing")), undefined);
 
-  const installed = join(tempDir("dsh-dev-nm-"), "node_modules", "@dsh-spaces", "plugin", "lib");
+  const installed = join(tempDir("dsh-dev-nm-"), "node_modules", "dsh-spaces", "lib");
   mkdirSync(installed, { recursive: true });
   assert.equal(detectDevCheckout(installed), undefined);
 
   const notPrivate = writeCheckout(tempDir("dsh-dev-np-"));
-  writeFileSync(join(notPrivate, "package.json"), `${JSON.stringify({ name: "@dsh-spaces/plugin" })}\n`);
+  writeFileSync(join(notPrivate, "package.json"), `${JSON.stringify({ name: "dsh-spaces" })}\n`);
   assert.equal(detectDevCheckout(join(notPrivate, "packages", "plugin", "lib")), undefined);
 
   const wrongName = writeCheckout(tempDir("dsh-dev-wn-"));
@@ -253,7 +254,7 @@ test("dev alignManagerPlugin links plugin and view-bridge for an unlinked manage
   }));
   await toolchain.alignManagerPlugin("spaces-hub");
   assert.deepEqual(specs, [devComponentDir(checkout, "plugin"), devComponentDir(checkout, "view-bridge")]);
-  assert.deepEqual(names, ["@dsh-spaces/plugin", "@dsh-spaces/view-bridge"]);
+  assert.deepEqual(names, ["dsh-spaces", "@dsh-spaces/view-bridge"]);
   specs.length = 0;
   await toolchain.alignManagerPlugin("spaces-hub");
   assert.deepEqual(specs, [], "aligned components are not reinstalled");

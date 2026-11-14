@@ -1,5 +1,7 @@
 # tasks/archive
 
+- [2026-11-14 主插件改名为 dsh-spaces](package-name-20261114.md)
+
 - [2026-11-14 Git 安装与发布流程清理](git-install-cleanup-20261114.md)
 
 - [2026-11-14 公共插件目录与 npm 发布准备](community-catalog-publishing-20261114.md)

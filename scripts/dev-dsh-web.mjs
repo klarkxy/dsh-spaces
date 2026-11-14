@@ -29,7 +29,7 @@ const SHARED_SANDBOX_HOME = join(REPO, ".sandbox", "dsh-home");
 const DEFAULT_HOME = join(REPO, ".sandbox", "dsh-link-home");
 const REAL_HOME = join(homedir(), ".dsh");
 export const DEV_PROFILE = "spaces-dev";
-const CANONICAL_NAME = "@dsh-spaces/plugin";
+const CANONICAL_NAME = "dsh-spaces";
 const BUILD_SCRIPT = join(REPO, "scripts", "build-spaces.mjs");
 const DSH_DLX_SPEC = "@deepseek-ai/dsh@0.2.2-rc.1";
 const BUILD_MS = 180_000;
@@ -177,6 +177,9 @@ export function pluginState(home) {
   const pkg = existsSync(pkgPath) ? JSON.parse(readFileSync(pkgPath, "utf8")) : null;
   const deps = pkg?.dependencies ?? {};
   const bundles = Array.isArray(pkg?.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : [];
+  if (Object.hasOwn(deps, "@dsh-spaces/plugin") || bundles.includes("@dsh-spaces/plugin")) {
+    throw new Error("This development profile still declares @dsh-spaces/plugin. Stop its service and explicitly remove the old package before linking dsh-spaces; keep the existing Home and user data.");
+  }
   const installDir = join(home, "profiles", DEV_PROFILE, "node_modules", ...CANONICAL_NAME.split("/"));
   const installedOnDisk = existsSync(join(installDir, "package.json"));
   return {
@@ -189,7 +192,7 @@ export function pluginState(home) {
 }
 
 function dumpHasPlugin(dump) {
-  return /^- id:\s*dsh-spaces\b/m.test(dump) && dump.includes(CANONICAL_NAME);
+  return /^- id:\s*dsh-spaces\b/m.test(dump) && /^\s*name:\s*['"]?dsh-spaces['"]?\s*$/m.test(dump);
 }
 
 function startWeb(cli, home) {

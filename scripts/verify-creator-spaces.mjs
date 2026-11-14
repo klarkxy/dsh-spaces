@@ -9,7 +9,7 @@
  *
  *   isolated Home
  *   -> @deepseek-ai/dsh-app-boot initProfile(desktop, [dsh-base, dsh-web-app])
- *   -> manifest registers @dsh-spaces/plugin in dsh.profile.bundles; the
+ *   -> manifest registers dsh-spaces in dsh.profile.bundles; the
  *      read-only observer is the Home-level patch layer written BEFORE any
  *      supervisor exists (file-URL row, loads in every profile of this Home)
  *   -> pnpm install -> app-boot loadProfile / createRuntimeResolution /
@@ -81,7 +81,7 @@ const THIS_FILE = fileURLToPath(import.meta.url);
 const OBSERVER_DIR = join(REPO, "tests", "fixtures", "creator-acceptance", "observer");
 const OBSERVER_NAME = "@dsh-spaces/creator-tools-observer";
 const PLUGIN_ENTRY = join(REPO, "packages", "plugin", "lib", "index.js");
-const CANONICAL_NAME = "@dsh-spaces/plugin";
+const CANONICAL_NAME = "dsh-spaces";
 const MAIN_PROFILE = "desktop";
 const SPACE_NAME = "creator-ok";
 const DEV_INDEX = { packageName: "@klarkxy/dsh-dev-index", version: "0.2.8" };

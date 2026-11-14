@@ -4,10 +4,10 @@
 
 ## 1. 范围与边界
 
-在身份确认的可信主空间（官方 `web` 或 `desktop` profile）中，宿主插件 `@dsh-spaces/plugin` 提供两套受权 Agent 能力面：
+在身份确认的可信主空间（官方 `web` 或 `desktop` profile）中，宿主插件 `dsh-spaces` 提供两套受权 Agent 能力面：
 
-1. **Creator（创建流）**：主入口 `@dsh-spaces/plugin` 注册 `spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`，通过 `/internal/creator/v1/*` 预览并执行新空间创建。
-2. **空间总控（space-control）**：插件包内子入口 `@dsh-spaces/plugin/space-control`（配置项 `id: dsh-space-control`）通过宿主 Cordis Service `spacesMainChannel` 与 `/internal/control/v1/*` 查看并操作同一 DSH Home 下已注册的普通空间。
+1. **Creator（创建流）**：主入口 `dsh-spaces` 注册 `spaces_context`、`spaces_create_preview`、`spaces_create_execute`、`spaces_job`，通过 `/internal/creator/v1/*` 预览并执行新空间创建。
+2. **空间总控（space-control）**：插件包内子入口 `dsh-spaces/space-control`（配置项 `id: dsh-space-control`）通过宿主 Cordis Service `spacesMainChannel` 与 `/internal/control/v1/*` 查看并操作同一 DSH Home 下已注册的普通空间。
 
 ### 非目标与硬性边界
 
@@ -23,7 +23,7 @@
    ├─ Creator 工具（spaces_context / spaces_create_preview / spaces_create_execute / spaces_job）
    │    └─ MainSpaceCreatorService ──► POST /internal/creator/v1/<op>（creator scope bearer）
    └─ 空间总控工具（spaces_overview / spaces_inspect / spaces_logs / spaces_templates / spaces_import_preview / spaces_plan / spaces_execute / spaces_control_job / spaces_ui_*）
-        └─ @dsh-spaces/plugin/space-control 子入口
+        └─ dsh-spaces/space-control 子入口
              └─ inject: spacesMainChannel ──► MainSpaceControlService ──► POST /internal/control/v1/<op>（control scope bearer）
                                                                                 │
                                                                                 ▼
@@ -35,7 +35,7 @@
 
 - **双 scope 同源签发**：主空间身份确认后，向 Supervisor 发起一次注册并同时签发 `scopes.creator` 与 `scopes.control`（绑定当前 `serviceEpoch`，仅存 SHA-256 摘要）。
 - **原生请求准入**：`/internal/creator/v1/*` 与 `/internal/control/v1/*` 均要求 loopback 原生请求（拒绝携带 `Origin`、`Cookie` 或 `sec-fetch-*` 头，校验精确 `Host`），天然排除浏览器脚本伪造。
-- **包内子入口分发**：`@dsh-spaces/plugin/space-control` 构建产物为 `packages/plugin/lib/space-control.js`，随 `manager-plugin` 不可变组件组载荷清单一同校验与分发，不使用独立 npm 包或 `file:` 依赖。
+- **包内子入口分发**：`dsh-spaces/space-control` 构建产物为 `packages/plugin/lib/space-control.js`，随 `manager-plugin` 不可变组件组载荷清单一同校验与分发，不使用独立 npm 包或 `file:` 依赖。
 
 ## 3. 工具契约
 
@@ -48,7 +48,7 @@
   - `spaces_ui_open`：打开子空间自动化页面前触发一次审批，授权绑定 `(spaceId, generation, serviceEpoch)`；空间停止、重启或调用 `spaces_ui_close` 后授权立即失效。授权期内 `spaces_ui_act` 不逐次弹窗。
   - `spaces_ui_eval`：在子空间页面上下文执行脚本属调试操作，不被 `spaces_ui_open` 授权覆盖，**每次调用均须单独审批**，并在审批文案中展示完整脚本内容与同源数据读取提示。
 
-### 3.2 Creator 工具（`@dsh-spaces/plugin`）
+### 3.2 Creator 工具（`dsh-spaces`）
 
 | 工具 | 审批 | 语义 |
 | --- | --- | --- |
@@ -57,7 +57,7 @@
 | `spaces_create_execute` | 一次审批 | 校验 `planId`、`fingerprint` 与一次性请求后提交创建作业，幂等键为 `requestId`。 |
 | `spaces_job` | 否（需 `cordis`） | 查询本主空间注册提交的 Creator 创建作业状态。 |
 
-### 3.3 空间总控只读工具（`@dsh-spaces/plugin/space-control`）
+### 3.3 空间总控只读工具（`dsh-spaces/space-control`）
 
 | 工具 | 参数概要 | 语义与边界 |
 | --- | --- | --- |
@@ -66,7 +66,7 @@
 | `spaces_logs` | `{ spaceId, tail? }` | 读取目标空间的脱敏诊断日志尾部（`tail` ≤ 200 行，响应 ≤ 64 KiB），不暴露宿主机文件路径。 |
 | `spaces_templates` | `{}` | 列出本 DSH Home 保存的空间模板（`templateId`、名称、来源空间、锁定版本、是否含配置及精确插件配方）。 |
 
-### 3.4 空间总控计划与执行工具（`@dsh-spaces/plugin/space-control`）
+### 3.4 空间总控计划与执行工具（`dsh-spaces/space-control`）
 
 通过 `spaces_plan` 冻结一次性计划（返回 `controlPlanId`、`fingerprint`、`requestId`、`affectedSpaceIds`、`changes`、`taskActivity`、`expiresAt`；`models.sync` 另返回非密 `modelsSync` 摘要），再经 `spaces_execute { planId, requestId }` 审批并提交串行作业，并通过 `spaces_control_job { jobId }` 读取作业进度与结果。
 
@@ -81,7 +81,7 @@
   - `plugin.live.install`（`installBundle`）、`plugin.live.update`（`updateBundle`）、`plugin.live.remove`（`removeBundle`）、`plugin.live.entry`（`setPluginEnabled`，仅按 `entryId` 修改该条目 `disabled` 状态，不改变插件顺序）。
   - 模型配置同步（`running`）：`models.sync` 通过目标自身的 `settings` / `credentials` 接口写入并读回，保持运行，下一次模型请求使用新配置。两条模型写入路径都先读取主空间、冻结并非密摘要，执行前重新读取并深比较；`starting` / `stopping` 拒绝，首处失败保留现场并列出逐项结果。
 
-### 3.5 子空间界面操控工具（`@dsh-spaces/plugin/space-control`）
+### 3.5 子空间界面操控工具（`dsh-spaces/space-control`）
 
 界面自动化由 Supervisor 内的 `UiAutomationManager` 驱动（使用 `playwright-core` 连接本机已安装的 Chrome 或 Edge，固定 1280×720 视口，不自动下载浏览器）。Supervisor 将子空间 launch token 交换为会话 cookie 后注入隔离的 `BrowserContext`，再导航至子空间根路径；URL、端口与 cookie 均不暴露给模型。
 

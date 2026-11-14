@@ -5,7 +5,6 @@ import { applyXpEmbedCompatibility, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from
 import { installSpecFor, pendingBuildKeys, writeBuildPolicy } from "../../products/plugin-exact-source";
 import { WorkbenchJobAbortError, WorkbenchJobError, type WorkbenchJobContext } from "../workbench-jobs";
 import type { MaintenanceLivePluginInput } from "../workbench-maintenance-ports";
-import { FULL_SPACES_PACKAGE } from "./constants";
 import { MaintenanceCore } from "./core";
 import { PluginBatchItemError, WorkbenchMaintenanceError } from "./errors";
 import { verifyPluginReadback } from "./plugin-readback";
@@ -257,7 +256,7 @@ export class MaintenancePluginBatch extends MaintenanceCore {
         markIrreversible();
         ctx.cancellable(false);
         ctx.phase("cleanup");
-        ctx.message(`Removing ${FULL_SPACES_PACKAGE}.`);
+        ctx.message(`Removing ${command.packageName}.`);
         await this.pluginRemoveImpl(this.ports.home, command.spaceId, command.packageName);
       },
     );

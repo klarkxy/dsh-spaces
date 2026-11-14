@@ -55,7 +55,7 @@ test("startupStatus is a readonly canonical method", () => {
   assert.deepEqual(WORKBENCH_API_CODECS.startupStatus.params, {});
   assert.equal(
     WORKBENCH_API_CODECS.startupStatus.result.typeSymbol,
-    "@dsh-spaces/plugin/types#WorkbenchStartupStatus",
+    "dsh-spaces/types#WorkbenchStartupStatus",
   );
   const names = TYPERT.invocations.map((row) => `${row.namespace}/${row.method}`);
   assert.equal(names[names.indexOf("workbench/state") + 1], "workbench/startupStatus");

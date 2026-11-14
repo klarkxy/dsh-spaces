@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Explicit @dsh-spaces/plugin version; must match packages/plugin/package.json
+        description: Explicit dsh-spaces version; must match packages/plugin/package.json
         required: true
         type: string
 
@@ -44,7 +44,7 @@ jobs:
         run: node scripts/pack-spaces-plugin.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: dsh-spaces-plugin-${{ inputs.version }}
+          name: dsh-spaces-${{ inputs.version }}
           path: |
             ${{ runner.temp }}/dsh-spaces-pack/*.tgz
             ${{ runner.temp }}/dsh-spaces-pack/pack-report.json

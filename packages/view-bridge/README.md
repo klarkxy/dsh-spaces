@@ -14,7 +14,7 @@ Cross-space messages use Supervisor-bound source identities and target-owned exa
 
 ## Installation and versions
 
-This package is **not** the user install unit. Users add the prebuilt `@dsh-spaces/plugin` tarball to ordinary `web`, then click **初始化 Spaces** / **Initialize Spaces**. The supervisor installs this bridge onto an ordinary space when that space does not have one yet.
+This package is **not** the user install unit. Users add the prebuilt `dsh-spaces` tarball to ordinary `web`, then click **初始化 Spaces** / **Initialize Spaces**. The supervisor installs this bridge onto an ordinary space when that space does not have one yet.
 
 An already-installed space bridge is **not** automatically re-aligned to the current component group. A space that already has a bridge keeps it until the user performs an explicit maintenance operation; the actual bridge state must be shown rather than assumed. The manager plugin is the one component that is aligned with the current group before the manager starts.
 

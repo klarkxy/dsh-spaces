@@ -564,7 +564,7 @@ test("protected packages are refused locally for install, update and remove", as
   const { client } = await clientFor(fake);
   for (const request of [
     { kind: "plugin.live.install", spaceId: "space-alpha", source: { npm: { packageName: "@dsh-spaces/view-bridge", version: "1.0.0" } } },
-    { kind: "plugin.live.install", spaceId: "space-alpha", source: { npm: { packageName: "@dsh-spaces/plugin", version: "0.5.0" } } },
+    { kind: "plugin.live.install", spaceId: "space-alpha", source: { npm: { packageName: "dsh-spaces", version: "0.5.0" } } },
     { kind: "plugin.live.update", spaceId: "space-alpha", packageName: "@dsh-spaces/view-bridge", version: "1.0.1" },
     { kind: "plugin.live.remove", spaceId: "space-alpha", packageName: "@deepseek-ai/dsh-base" },
     { kind: "plugin.live.remove", spaceId: "space-alpha", packageName: "@klarkxy/dsh-dev-index" },

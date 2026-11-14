@@ -39,7 +39,7 @@ node packages/plugin/lib/supervisor/index.js `
   --home D:\dsh-workbench-dev\home `
   --bin D:\path\to\@deepseek-ai\dsh\lib\bin.js `
   --node D:\path\to\node.exe `
-  --plugin-artifact D:\dsh-packages\dsh-spaces-plugin-0.5.0.tgz `
+  --plugin-artifact D:\dsh-packages\dsh-spaces-0.5.0.tgz `
   --view-bridge-artifact D:\dsh-packages\dsh-spaces-view-bridge-0.5.0.tgz `
   --browser-artifact D:\dsh-packages\dsh-spaces-browser-0.4.0.tgz `
   --control-tool-root D:\dsh-workbench-dev\tools `

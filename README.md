@@ -1,6 +1,6 @@
 # DSH Spaces
 
-Spaces uses the project package identity `@dsh-spaces/plugin`. Install the current candidate by cloning this repository and building the plugin archive; npm publication is deferred. Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
+Spaces uses the package name `dsh-spaces`. Install the current candidate by cloning this repository and building the plugin archive; npm publication is deferred. Existing `@dsh-spaces/plugin` installs use the [explicit package-name change](docs/plugin-standard-install.md#first-change-from-the-old-package-name). Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
 

@@ -421,7 +421,7 @@ test("bound CLI timeout waits for the child and caps output", async () => {
 
 test("Typert descriptors are strict spaces remotes and Host injects loader", () => {
   assert.deepEqual(SpacesRemote.inject, ["loader"]);
-  assert.equal(TYPERT.package, "@dsh-spaces/plugin");
+  assert.equal(TYPERT.package, "dsh-spaces");
   assert.equal(TYPERT.face, "host");
   assert.deepEqual(
     TYPERT.invocations.map((row) => `${row.namespace}/${row.method}`),
@@ -458,7 +458,7 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
       "workbench/backups",
     ],
   );
-  assert.equal(TYPERT_REMOTE.package, "@dsh-spaces/plugin");
+  assert.equal(TYPERT_REMOTE.package, "dsh-spaces");
   assert.equal(TYPERT_REMOTE.descriptors.length, TYPERT.invocations.length);
   const actionCodec = TYPERT.invocations.find(row => row.method === "spaceAction")!.parameters[0].codec.create();
   const action = { spaceId: "coding", action: "open", serviceEpoch: "a".repeat(64) };

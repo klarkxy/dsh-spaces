@@ -1,12 +1,13 @@
 import { PROTECTED_PLUGIN_PACKAGES } from "../../../../shared/types";
 import type { WorkbenchPlanRequest } from "../../../../shared/workbench";
+import { FULL_SPACES_PACKAGES } from "../../../../shared/plugin-spec";
+export { FULL_SPACES_PACKAGE, FULL_SPACES_PACKAGES } from "../../../../shared/plugin-spec";
 
 export const WORKBENCH_PLANS_DIR_NAME = "plans";
 export const WORKBENCH_PLUGIN_REGISTRY_FILE = "plugin-registry.json";
 export const WORKBENCH_PLUGIN_MUTATION_FILE = "plugin-mutation.json";
 export const WORKBENCH_PLUGIN_MUTATION_FILES_DIR = "plugin-mutation-files";
 export const WORKBENCH_PLAN_TTL_MS = 5 * 60 * 1000;
-export const FULL_SPACES_PACKAGE = "@dsh-spaces/plugin";
 
 export const WORKBENCH_MAINTENANCE_ERROR = {
   "workbench/invalid-input": "The request is not a valid workbench maintenance plan.",
@@ -24,7 +25,7 @@ export const WORKBENCH_MAINTENANCE_ERROR = {
 export type WorkbenchMaintenanceErrorCode = keyof typeof WORKBENCH_MAINTENANCE_ERROR;
 
 export const DOWNLOAD_TIMEOUT_MS = 20_000;
-export const PROTECTED_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, FULL_SPACES_PACKAGE]);
+export const PROTECTED_PACKAGES = new Set<string>([...PROTECTED_PLUGIN_PACKAGES, ...FULL_SPACES_PACKAGES]);
 export const HANDOFF_KINDS = new Set<WorkbenchPlanRequest["kind"]>([
   "space.stop",
   "space.restart",

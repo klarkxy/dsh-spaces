@@ -17,7 +17,7 @@ test("component peers reject an older CLI and accept the alpha release", () => {
   const lib = join(root, "lib");
   mkdirSync(join(lib, "view-bridge"), { recursive: true });
   writeFileSync(join(root, "package.json"), JSON.stringify({
-    name: "@dsh-spaces/plugin",
+    name: "dsh-spaces",
     peerDependencies: { "@deepseek-ai/dsh-client-connection": "^0.1.7-alpha.1", zod: "^4.4.3" },
   }));
   writeFileSync(join(lib, "view-bridge", "package.json"), JSON.stringify({
@@ -104,7 +104,7 @@ test("alignment archive id toggles only a same-file coordinate and rejects a bad
   const revisionId = `${canonicalId}-r1`;
   const canonical = join(profile, "hub", `${canonicalId}.tgz`);
   const declared = `file:${canonical.replaceAll("\\", "/")}`;
-  const installed = join(profile, "node_modules", "@dsh-spaces", "plugin", "package.json");
+  const installed = join(profile, "node_modules", "dsh-spaces", "package.json");
   try {
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), canonicalId);
     assert.equal(revisionId.endsWith("-r1"), true);
@@ -114,51 +114,51 @@ test("alignment archive id toggles only a same-file coordinate and rejects a bad
     assert.throws(() => alignmentArchiveId(profile, canonicalId, canonical), /could not be read/);
     writeFileSync(join(profile, "package.json"), JSON.stringify({ dependencies: null }));
     assert.throws(() => alignmentArchiveId(profile, canonicalId, canonical), /could not be read/);
-    writeFileSync(join(profile, "package.json"), JSON.stringify({ dependencies: { "@dsh-spaces/plugin": 1 } }));
+    writeFileSync(join(profile, "package.json"), JSON.stringify({ dependencies: { "dsh-spaces": 1 } }));
     assert.throws(() => alignmentArchiveId(profile, canonicalId, canonical), /could not be read/);
     writeFileSync(join(profile, "package.json"), JSON.stringify({ dependencies: {} }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), canonicalId);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": "0.2.0" },
+      dependencies: { "dsh-spaces": "0.2.0" },
     }));
     mkdirSync(dirname(installed), { recursive: true });
-    writeFileSync(installed, JSON.stringify({ name: "@dsh-spaces/plugin", version: "0.2.0" }));
+    writeFileSync(installed, JSON.stringify({ name: "dsh-spaces", version: "0.2.0" }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), canonicalId);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
       name: "dsh-profile",
-      dependencies: { "@dsh-spaces/plugin": declared },
+      dependencies: { "dsh-spaces": declared },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), revisionId);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": `file:${canonical}` },
+      dependencies: { "dsh-spaces": `file:${canonical}` },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), revisionId);
     const revision = join(profile, "hub", `${revisionId}.tgz`);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": `file:${revision.replaceAll("\\", "/")}` },
+      dependencies: { "dsh-spaces": `file:${revision.replaceAll("\\", "/")}` },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), canonicalId);
     rmSync(installed);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": declared },
+      dependencies: { "dsh-spaces": declared },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), revisionId);
     const relativeSpec = "file:" + relative(profile, canonical).replaceAll("\\", "/");
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": relativeSpec },
+      dependencies: { "dsh-spaces": relativeSpec },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), revisionId);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": "file:./" + relative(profile, canonical).replaceAll("\\", "/") },
+      dependencies: { "dsh-spaces": "file:./" + relative(profile, canonical).replaceAll("\\", "/") },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), revisionId);
     const spelled = ["..", basename(profile), relative(profile, canonical).replaceAll("\\", "/")].join("/");
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": "file:" + spelled },
+      dependencies: { "dsh-spaces": "file:" + spelled },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), revisionId);
     writeFileSync(join(profile, "package.json"), JSON.stringify({
-      dependencies: { "@dsh-spaces/plugin": "file:../outside.tgz" },
+      dependencies: { "dsh-spaces": "file:../outside.tgz" },
     }));
     assert.equal(alignmentArchiveId(profile, canonicalId, canonical), canonicalId);
     assert.equal(existsSync(join(profile, "outside.tgz")), false);

@@ -34,7 +34,7 @@ export type ComponentPayloadName = (typeof COMPONENT_PAYLOAD_NAMES)[number];
 
 export const COMPONENT_PAYLOAD_PACKAGES: Record<ComponentPayloadName, string> = {
   supervisor: "@dsh-spaces/supervisor",
-  "manager-plugin": "@dsh-spaces/plugin",
+  "manager-plugin": "dsh-spaces",
   "view-bridge": "@dsh-spaces/view-bridge",
   browser: "@dsh-spaces/browser",
   "installation-worker": "@dsh-spaces/supervisor",

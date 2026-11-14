@@ -51,7 +51,7 @@ export async function packLocalArtifacts(options: PackArtifactsOptions): Promise
   if (options.browserRoot !== undefined && !browserRoot) {
     return { reasons: ["browser package directory is missing."] };
   }
-  if (!packageNameIs(pluginRoot, "@dsh-spaces/plugin") || !packageNameIs(viewRoot, "@dsh-spaces/view-bridge")) {
+  if (!packageNameIs(pluginRoot, "dsh-spaces") || !packageNameIs(viewRoot, "@dsh-spaces/view-bridge")) {
     return { reasons: ["Artifact sources are not the installed Spaces plugin and view-bridge packages."] };
   }
   if (browserRoot && !packageNameIs(browserRoot, "@dsh-spaces/browser")) {

@@ -53,7 +53,7 @@ export function apply(ctx: Context): void {
     // on resource tags rendered inside the replaceable root slot.
     if (typeof document !== "undefined") {
       for (const [name, css] of [["workbench.css", WORKBENCH_CSS]] as const) {
-        ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", name, css));
+        ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", name, css));
       }
     }
     const api = createWorkbenchRemote(connection);
@@ -71,7 +71,7 @@ export function apply(ctx: Context): void {
   const nativeBridge = desktopBrowserBridge();
   if (nativeBridge) {
     const native = new NativeHostController(guide, nativeBridge);
-    ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
+    ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
     ctx.slots.inject("shell.overlay", () => ctx.slots.register(
       { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () =>
         createElement(MotionRoot, null, createElement(NativeHostShell, { controller: native })),
@@ -79,7 +79,7 @@ export function apply(ctx: Context): void {
     return;
   }
   const host = new HostShellController(guide);
-  if (typeof document !== "undefined") ctx.effect(() => mountStaticClientStyle(document, "@dsh-spaces/plugin", "host-shell.css", HOST_SHELL_CSS));
+  if (typeof document !== "undefined") ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", "host-shell.css", HOST_SHELL_CSS));
   // The host keeps its own root, branding, native chrome and live conversation.
   ctx.slots.inject("shell.overlay", () => ctx.slots.register(
     { name: "shell.overlay", id: "dsh-spaces-host-shell" }, () =>

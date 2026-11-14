@@ -1,10 +1,12 @@
-# @dsh-spaces/plugin
+# dsh-spaces
 
 DSH-native Spaces workbench, with a dedicated manager and an independent local supervisor.
 
 Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment. Current architecture baseline: [现行架构](../../docs/architecture.md).
 
 当前通过 Git 获取源码、构建本地插件包后安装，npm 发布暂缓。新安装默认固定官方 CLI **`0.2.2-rc.1`**；已有运行时通过正常升级操作更新。本仓库使用 `0.2.2-rc.1` SDK 构建；peer 保留原有下限，并显式接纳这个预发布版本，不构成 CLI 白名单。
+
+原主包名为 `@dsh-spaces/plugin`。已有安装需先正常停止服务，再按[换名步骤](../../docs/plugin-standard-install.md#first-change-from-the-old-package-name)显式替换宿主和已有管理空间的包；不要同时保留新旧两个主包。
 
 ## Install from Git source
 
@@ -39,7 +41,7 @@ For development, `npm run dev:web` builds and links the checkout into the custom
 
 Closing a browser tab does not stop the supervisor or spaces. Use the workbench's explicit shutdown action to stop them. Stopping the ordinary Web process also leaves the independent workbench running; spaces keep calling their models with their own configuration.
 
-`dsh plugin --profile web remove @dsh-spaces/plugin` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor.
+`dsh plugin --profile web remove dsh-spaces` removes the entry from that profile. It does not delete spaces, chats, or the separate manager and does not implicitly shut down its supervisor.
 
 Upgrading Spaces means three separate user actions: add a newer version of this plugin to the host profile, shut the service down from the manager UI, and reopen Spaces. The new Supervisor then selects the host plugin's component group and aligns the manager plugin before the manager starts. Ordinary spaces receive the group's bridge when they do not have one yet; an already-installed space bridge is not automatically re-aligned to the new group, so its presence must not be treated as proof of version alignment. There is no in-app self-update and no automatic component handoff.
 
@@ -47,7 +49,7 @@ Upgrading Spaces means three separate user actions: add a newer version of this 
 
 ## Distribution
 
-The private repository root also exposes `@dsh-spaces/plugin` for local linked development, forwarding its entries to this package's build output. Build first, then link the root with `dsh plugin --profile spaces-dev add .` in a separate development Home. Distribute the built package from `packages/plugin` or its tarball. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
+The private repository root also exposes `dsh-spaces` for local linked development, forwarding its entries to this package's build output. Build first, then link the root with `dsh plugin --profile spaces-dev add .` in a separate development Home. Distribute the built package from `packages/plugin` or its tarball. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
 
 Metadata includes `repository.directory`, `keywords` (`dsh-plugin`, `deepseek-harness`), public publish configuration and MIT license. Core npm publication is deferred; local pack success is not a public release. The public third-party plugin catalog accepts contributions independently.
 

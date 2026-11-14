@@ -42,7 +42,7 @@ await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nod
   'typert.host': 'packages/plugin/src/typert.host.ts',
   'typert.remote-client': 'packages/plugin/src/typert.remote-client.ts',
 }, outdir: 'packages/plugin/lib' });
-await buildClient('@dsh-spaces/plugin', 'packages/plugin/src/client/index.tsx', 'packages/plugin/lib/client.js');
+await buildClient('dsh-spaces', 'packages/plugin/src/client/index.tsx', 'packages/plugin/lib/client.js');
 await copyFile(at('LICENSE'), at('packages/plugin/LICENSE'));
 
 await build({ ...common, ...diagnosticBuild, platform: 'node', banner: { js: nodeRequire }, external: sdkExternal,

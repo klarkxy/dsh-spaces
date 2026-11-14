@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import { createDirectoryLink } from "../../src/shared/node/filesystem.ts";
+import { SPACES_COMPONENT_PACKAGES } from "../../src/shared/plugin-spec.ts";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
@@ -45,12 +46,12 @@ function writeRel(root: string, rel: string, content: string): void {
 }
 
 function writeCheckout(root: string): string {
-  writeRel(root, "package.json", `${JSON.stringify({ name: "@dsh-spaces/plugin", private: true })}\n`);
-  for (const dir of ["plugin", "view-bridge", "browser"]) {
+  writeRel(root, "package.json", `${JSON.stringify({ name: "dsh-spaces", private: true })}\n`);
+  for (const dir of ["plugin", "view-bridge", "browser"] as const) {
     const dependencies: Record<string, string> = {};
     if (dir === "plugin" || dir === "view-bridge") dependencies[DEV_INDEX] = DEV_INDEX_VERSION;
     writeRel(root, `packages/${dir}/package.json`, `${JSON.stringify({
-      name: `@dsh-spaces/${dir}`, version: "0.5.0", main: "./lib/index.js",
+      name: SPACES_COMPONENT_PACKAGES[dir], version: "0.5.0", main: "./lib/index.js",
       dsh: { bundle: { patch: "./cordis.patch.yml" } },
       ...(Object.keys(dependencies).length ? { dependencies } : {}),
     })}\n`);
@@ -182,7 +183,7 @@ test("dev-manager align links the checkout's dev-index copy once, at the declare
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   linkInto(home, "spaces-hub", devComponentDir(checkout, "view-bridge"), "@dsh-spaces/view-bridge");
 
   // Before the ensure the patch-row package does not resolve through the
@@ -242,7 +243,7 @@ test("a profile's own dev-index choice is never rewritten", async () => {
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   linkInto(home, "spaces-hub", devComponentDir(checkout, "view-bridge"), "@dsh-spaces/view-bridge");
 
   await toolchain.alignManagerPlugin("spaces-hub");
@@ -263,7 +264,7 @@ test("a declared-but-missing dev-index fails clearly instead of being repaired",
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   linkInto(home, "spaces-hub", devComponentDir(checkout, "view-bridge"), "@dsh-spaces/view-bridge");
 
   await assert.rejects(
@@ -286,7 +287,7 @@ test("a checkout without the declared dev-index copy fails instead of fetching",
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   linkInto(home, "spaces-hub", devComponentDir(checkout, "view-bridge"), "@dsh-spaces/view-bridge");
 
   await assert.rejects(
@@ -330,7 +331,7 @@ test("a corrupt linked component manifest fails the ensure itself, before any wr
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   writeFileSync(join(checkout, "packages", "plugin", "package.json"), "{ not json\n");
 
   await assert.rejects(
@@ -353,7 +354,7 @@ test("a profile manifest that cannot be inspected rejects before any write", asy
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   // A manifest that can no longer be parsed fails the ensure itself (the
   // profile base cannot be read); nothing is written.
   writeFileSync(join(profile, "package.json"), "{ broken\n");
@@ -363,7 +364,7 @@ test("a profile manifest that cannot be inspected rejects before any write", asy
 });
 
 test("space-control is no bundled dependency: the subpath file needs no profile install", async () => {
-  // @dsh-spaces/plugin/space-control resolves inside the linked plugin
+  // dsh-spaces/space-control resolves inside the linked plugin
   // package itself, so ensureBundledDependencies only still handles dev-index.
   const home = tempDir("dsh-ctl-home-");
   const checkout = writeCheckout(tempDir("dsh-ctl-co-"));
@@ -377,7 +378,7 @@ test("space-control is no bundled dependency: the subpath file needs no profile 
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "space-main", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "space-main", devComponentDir(checkout, "plugin"), "dsh-spaces");
 
   await toolchain.ensureBundledDependencies("space-main");
   const links = added.filter((a) => a.kind === "link");
@@ -399,7 +400,7 @@ test("a non-exact bundled dependency spec is rejected", async () => {
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "space-main", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "space-main", devComponentDir(checkout, "plugin"), "dsh-spaces");
   const manifestPath = join(checkout, "packages", "plugin", "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { dependencies: Record<string, string> };
   manifest.dependencies[DEV_INDEX] = "latest";
@@ -423,7 +424,7 @@ test("the manager patch gains a disabled dsh-space-control row exactly once", as
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   linkInto(home, "spaces-hub", devComponentDir(checkout, "view-bridge"), "@dsh-spaces/view-bridge");
 
   await toolchain.alignManagerPlugin("spaces-hub");
@@ -456,7 +457,7 @@ test("a profile-declared space-control package is left untouched, not repaired",
     pluginLink: hooks.pluginLink,
     pluginAdd: hooks.pluginAdd,
   }));
-  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "@dsh-spaces/plugin");
+  linkInto(home, "spaces-hub", devComponentDir(checkout, "plugin"), "dsh-spaces");
   linkInto(home, "spaces-hub", devComponentDir(checkout, "view-bridge"), "@dsh-spaces/view-bridge");
 
   // A declared-but-missing bundled dep still fails clearly, nothing installed.

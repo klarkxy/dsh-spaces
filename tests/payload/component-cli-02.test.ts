@@ -52,13 +52,13 @@ test("engine precedence starts at alpha.4 and component constraints cannot overw
   assert.deepEqual(unmetDshRequirements(manifest, "0.2.1-alpha.4"), {});
   const root = mkdtempSync(join(tmpdir(), "spaces-component-requirements-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  for (const [name, range] of [["plugin", "<0.1.0"], ["view-bridge", ">=0.2.0-0"]]) {
-    const dir = join(root, "node_modules", "@dsh-spaces", name!);
+  for (const [name, range] of [["dsh-spaces", "<0.1.0"], ["@dsh-spaces/view-bridge", ">=0.2.0-0"]]) {
+    const dir = join(root, "node_modules", ...name!.split("/"));
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ ...manifest, name: `@dsh-spaces/${name}`, engines: { dsh: range } }));
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ ...manifest, name, engines: { dsh: range } }));
   }
-  assert.deepEqual(unmetProfileDshRequirements(root, DSH_DEFAULT_VERSION), ["@dsh-spaces/plugin (engines.dsh@<0.1.0)"]);
-  writeFileSync(join(root, "node_modules", "@dsh-spaces", "plugin", "package.json"), "{");
+  assert.deepEqual(unmetProfileDshRequirements(root, DSH_DEFAULT_VERSION), ["dsh-spaces (engines.dsh@<0.1.0)"]);
+  writeFileSync(join(root, "node_modules", "dsh-spaces", "package.json"), "{");
   assert.throws(() => unmetProfileDshRequirements(root, DSH_DEFAULT_VERSION), /could not be read/);
 });
 

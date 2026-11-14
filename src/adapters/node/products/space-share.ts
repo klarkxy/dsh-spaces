@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isGitSpec } from "../../../shared/plugin";
 import { isExactRuntimeVersion } from "../../../shared/runtime";
-import { FULL_SPACES_PACKAGE } from "../../../shared/plugin-spec";
+import { FULL_SPACES_PACKAGES } from "../../../shared/plugin-spec";
 import {
   SPACE_SHARE_FORMAT_VERSION,
   SPACE_SHARE_KIND,
@@ -33,7 +33,7 @@ import { RETIRED_LLM_BRIDGE } from "../profile/profile-component-alignment";
 
 const HOST_PACKAGES = new Set<string>([
   ...PROTECTED_PLUGIN_PACKAGES,
-  FULL_SPACES_PACKAGE,
+  ...FULL_SPACES_PACKAGES,
   // An older space keeps the retired bridge until its next start removes it.
   RETIRED_LLM_BRIDGE,
   ...Object.entries(COMPONENT_PAYLOAD_PACKAGES).filter(([component]) => component !== "browser").map(([, name]) => name),

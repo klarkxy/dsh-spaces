@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-spaces/plugin",
+  "name": "dsh-spaces",
   "version": "0.5.0",
   "license": "MIT",
   "description": "Spaces for DeepSeek Harness — switch DSH workspaces like Discord servers.",

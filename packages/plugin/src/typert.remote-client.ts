@@ -82,7 +82,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
 }
 
 export const TYPERT_REMOTE: TypertRemoteContribution = {
-  package: "@dsh-spaces/plugin",
+  package: "dsh-spaces",
   descriptors: TYPERT.invocations.map((row) => ({
     id: row.id,
     service: row.service,
