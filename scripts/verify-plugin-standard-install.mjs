@@ -1272,6 +1272,7 @@ async function main() {
   report.home = home;
   const tooling = Object.fromEntries(["shim", "pnpmHome", "store", "cache"].map((key) => [key, join(out, key)]));
   Object.values(tooling).forEach((path) => mkdirSync(path, { recursive: true }));
+  if (npmVersion) tooling.registry = "https://registry.npmjs.org/";
   writePnpmShim(tooling.shim, nodeExe, resolvePnpmCjs());
   const env = stripSecrets(isolatedEnv(home, nodeExe, tooling));
 

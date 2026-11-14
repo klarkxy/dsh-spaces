@@ -147,7 +147,7 @@ function isolatedEnv(home, nodeExe, tooling) {
     PNPM_HOME: tooling.pnpmHome,
     npm_config_store_dir: tooling.store,
     npm_config_cache: tooling.cache,
-    npm_config_registry: REGISTRY,
+    npm_config_registry: tooling.registry ?? REGISTRY,
     npm_config_fund: "false",
     npm_config_audit: "false",
     npm_config_update_notifier: "false",
