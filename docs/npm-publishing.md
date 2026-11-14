@@ -15,9 +15,28 @@
 
 ## 凭据
 
-仓库的 Actions Secret **`NPM_TOKEN`** 保存有包写权限的 npm token。需要非交互发布时，token 必须允许绕过发布所需的 2FA。token 只传给发布步骤；依赖安装、构建、测试和打包不接收该值。发布使用官方 npm 源，并在 GitHub Actions 中生成 provenance。
+当前仓库的 Actions Secret **`NPM_TOKEN`** 保存有包写权限的 npm token。需要非交互发布时，token 必须允许绕过发布所需的 2FA。token 只传给发布步骤；依赖安装、构建、测试和打包不接收该值。发布使用官方 npm 源，并在 GitHub Actions 中生成 provenance。
 
 本机环境变量不会自动传入 GitHub Actions。首次配置或轮换时，将新值通过标准输入交给 `gh secret set NPM_TOKEN --repo klarkxy/dsh-spaces`，不要把值写进命令参数、提交文件或日志。token 到期前需要更新仓库 Secret。
+
+### 切换到 Trusted Publishing
+
+npm 已公告在 **2027 年 1 月**取消 granular token 直接发布新版本的能力。长期自动发布应使用 npm Trusted Publishing；只更新 token 的到期时间不能绕过这项平台变更。
+
+工作流已声明 `id-token: write`，发布脚本也接受 GitHub OIDC 身份。维护者在 npm 的包设置中添加 Trusted Publisher：
+
+| 字段 | 值 |
+| --- | --- |
+| Provider | GitHub Actions |
+| Repository owner | `klarkxy` |
+| Repository | `dsh-spaces` |
+| Workflow filename | `npm-publish.yml` |
+| Environment | 留空；当前工作流没有绑定 Environment |
+| Allowed action | 明确允许 `npm publish`；仅允许 `npm stage publish` 不能直接发布 |
+
+保存信任配置需要维护者完成 npm 的交互式 2FA。配置完成后移除仓库的 `NPM_TOKEN` Secret，让后续 Release 使用 OIDC，并在首次运行中核对发布身份和 provenance。当前保存 token 不等于已经配置 Trusted Publisher。
+
+平台规则见 [npm access tokens](https://docs.npmjs.com/about-access-tokens/) 和 [Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)。
 
 ## 失败与核对
 

@@ -2,7 +2,9 @@
 
 All notable changes to DSH Spaces are recorded here. This project follows Keep a Changelog style; version ranges follow the repository's own 0.x policy.
 
-## [0.5.0] — release candidate, not published
+## [0.5.0] — GitHub Release 2026-11-14; npm pending
+
+The npm publication request was accepted, but the registry currently exposes only a temporary `0.0.0-stage` holding version. The real 0.5.0 npm version and its public-install acceptance remain pending. The GitHub Release archive is available and its download matches the approved package.
 
 - The main plugin is now named `dsh-spaces`, including its client module, bundle entries and local archive. Existing `@dsh-spaces/plugin` installations require the documented explicit package-name change; the old identity remains protected and is never treated as an ordinary workspace plugin.
 

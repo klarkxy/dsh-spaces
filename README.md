@@ -1,5 +1,7 @@
 # DSH Spaces
 
+0.5.0 is available as a GitHub Release archive. Its npm publication request has been accepted, but the registry currently exposes only a temporary `0.0.0-stage` holding version; npm installation of 0.5.0 is pending. See the [publication record](tasks/archive/npm-release-20261114.md).
+
 Spaces uses the package name `dsh-spaces`. Published versions install directly from npm; Git-root installation also prepares the complete plugin automatically. Existing `@dsh-spaces/plugin` installs use the [explicit package-name change](docs/plugin-standard-install.md#first-change-from-the-old-package-name). Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
@@ -44,7 +46,7 @@ Unregistered manual DSH processes are outside managed discovery and shutdown. Ho
 
 ## Install and upgrade
 
-The next release is **0.5.0**, installed as a Spaces plugin in an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
+Version **0.5.0** installs as a Spaces plugin in an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
 
 For a published version, install the prebuilt npm package:
 
@@ -92,6 +94,8 @@ MIT. See [LICENSE](LICENSE).
 
 # DSH Spaces（中文）
 
+0.5.0 的 GitHub Release 归档已发布。npm 发布请求已接受，但目前只有 `0.0.0-stage` 暂存占位，真实版本尚未公开；当前请使用 Git 根地址或 Release 归档。见[本次发布记录](tasks/archive/npm-release-20261114.md)。
+
 **安装在兼容 DSH Web / Desktop 中的多空间插件，没有独立客户端。**
 
 它在原应用内增加空间栏，每个普通空间使用独立 DSH 进程，每个 Home 只有一个 Supervisor 持有 Spaces 管理写权。原应用保留，普通空间不会变成第二个管理器。
@@ -131,7 +135,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## 安装与升级
 
-下一版本为 **0.5.0**，作为插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
+**0.5.0** 作为插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
 
 已发布版本可直接安装预构建 npm 包：
 

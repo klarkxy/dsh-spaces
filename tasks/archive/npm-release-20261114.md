@@ -26,4 +26,18 @@ GitHub Release `v0.5.0` 指向 `4d8f890684dda424adcafdacb6a5404f006940c1`。首�
 
 受限检查遗留的测试进程树（根 PID 69896）只尝试过一次非强制结束，Windows 拒绝正常终止。未使用强杀或删除现场；该失败检查始终不计入通过证据。
 
-真实 npm 发布、公开安装及最终 Actions 结果将在取得证据后补充。
+## 提交与当前公开状态
+
+- 本机按用户授权只执行了一次 `npm publish`，CLI 退出 0 并返回 `+ dsh-spaces@0.5.0`。发布前检查分发源码、包元数据及构建/打包脚本与 `v0.5.0` 标签一致；本次本机发布没有 GitHub Actions provenance。
+- 已审阅主包为 `dsh-spaces-0.5.0.tgz`，SHA-256 `e82770380a51d07cd353ee1a397f6b351fc5cca26ca7188fc2f0f548324b6e13`。主包内组件 manifest 摘要为 `da1ff2dcb64f54c30c78f0e162b5ef65721413bcc1c703399da0f2e5e05667f6`。
+- 首次公开核对返回 HTTP 404，保留状态 `published-verification-failed`，没有再次发布。之后查询可见归属 `klarkxy` 的 `dsh-spaces` 包，但 `latest` 和唯一公开版本仍为 `0.0.0-stage`；包页说明真实版本已提交审核、等待 staged release。不能将 CLI 的成功回执当作真实版本已公开。
+- 通过 token 查询 `/-/stage?package=dsh-spaces` 返回 200、0 个条目。浏览器包页同样显示占位，当前浏览器未登录 npm，无法核实账号内部是否存在审批提示。尚不能确定只需等待还是需要额外账号操作。
+- GitHub Release 已附加主包和提交状态报告。重新从 Release 下载 tarball，SHA-256 与审阅归档一致，结果为 `.sandbox/npm-release-20261114-first-package/github-asset-verification.json`。Release 正文明确注明 npm 待公开，避免把占位版本作为可用插件安装。
+- 修正后的远端 CI `43605347447`（`ee5f5b6cbe6f8c4c75667859aede5b178bd5167f`）全部通过，包括 Node 24.21.0 / Node 26.10.0、真实官方 CLI 和 Web 安装、Git 根安装、空间操作、正常关闭与重开。首轮 Release 自动发布 run 的 prepare 失败记录保留，不能宣称自动实发通过。
+- 已用真实 GitHub Release 数据执行修正后的 `prepare`，正确产生 `version=0.5.0` / `tag=latest`；发布回归最终 6/6 通过。
+
+## 凭据后续
+
+当前 token 到期时间为 2027-01-09 09:01（北京时间）。npm 已公告 2027 年 1 月移除 token 直接发布新版本的能力，因此长期自动发布需要在 npm 后台配置允许 `npm publish` 的 GitHub Trusted Publisher。工作流已有 `id-token: write`，脚本接受 token 或 GitHub OIDC；信任配置仍需维护者在 npm 完成交互式 2FA，当前没有宣称该绑定已经完成。
+
+真实 npm 版本公开、完整性/渠道核对和从 npm 安装的生命周期验收仍待完成；不将 GitHub 归档可下载等同于 npm 可安装。

@@ -20,7 +20,9 @@
 
 - [x] 公共插件目录由本仓库维护，开放独立作者贡献，支持按 npm 包名安装和版本限定的实测说明。见 [实施记录](archive/community-catalog-publishing-20261114.md)。
 - [x] 清理当前发布流程并统一 Git 源码构建安装说明，保留目录与本地打包；完整检查中的浏览器禁用端口问题已修正，受影响组 27/27 通过。见 [清理记录](archive/git-install-cleanup-20261114.md)。
-- [ ] 2026-11-14 已授权恢复 npm 发布：发布 `dsh-spaces@0.5.0`，并配置 GitHub Release 自动检查、打包、发布和公开归档核对。实施及实测进行中；维护说明见 [npm 发布](../docs/npm-publishing.md)。
+- [x] 配置 GitHub Release 自动检查、打包、npm 发布和公开归档核对，保存仓库 `NPM_TOKEN` Secret；修正独立 Browser 版本校验后，远端 Node 24/26 与真实 Web 验收通过。维护说明见 [npm 发布](../docs/npm-publishing.md)。
+- [ ] `dsh-spaces@0.5.0` 首次 npm 发布请求已接受，但注册表仍为 `0.0.0-stage` 占位，真实版本公开及 npm 安装验收待完成。GitHub Release 归档已发布且下载字节一致，首轮自动流程和本机提交证据见 [发布记录](archive/npm-release-20261114.md)。不重复提交。
+- [ ] 2027 年 1 月前完成 npm Trusted Publisher 的交互式 2FA 配置并切换 OIDC；工作流和发布脚本已支持，当前仍使用有有效期的 token。见 [凭据维护](../docs/npm-publishing.md#切换到-trusted-publishing)。
 
 - [ ] dsh² 个人工作宇宙后续验收：八空间/十三次插件安装完成，六个前端可展示，两组合加载失败；实机素材已交付。仍需定位 `settingsScope`、pixel-whale 模块注册、长期门户超时及基础测试 45 个失败条目；主空间总控/模型同步本轮未验。见 [实机记录](archive/dsh2-personal-web-20261110.md)，不视为全量通过。
 

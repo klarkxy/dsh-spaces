@@ -122,7 +122,10 @@ export async function publishOnce(plan, { fetchManifest = readRegistryJson, publ
 }
 
 function publishNpm(plan) {
-  if (!process.env.NODE_AUTH_TOKEN) throw new Error('The repository NPM_TOKEN secret is required');
+  if (!process.env.NODE_AUTH_TOKEN &&
+      !(process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN)) {
+    throw new Error('npm publication requires the repository NPM_TOKEN secret or configured GitHub OIDC publishing');
+  }
   execFileSync(process.execPath, [resolveNpmCli(process.execPath), 'publish', plan.archive,
     '--ignore-scripts', '--access', 'public', '--tag', plan.tag, '--provenance',
     '--registry=https://registry.npmjs.org/', '--fetch-retries=0', '--fetch-timeout=120000'],
