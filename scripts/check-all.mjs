@@ -9,7 +9,7 @@ import { refuseRealHome } from './lib/distribution-harness.mjs';
 const REPO = resolve(import.meta.dirname, '..');
 const CHECKS = ['check:test-lists', 'catalog:check', 'test:catalog', 'typecheck', 'typecheck:spaces', 'typecheck:tests', 'build',
   'test', 'test:spaces', 'test:workbench', 'test:workbench:recovery', 'test:llm',
-  'test:blueprints', 'test:browser', 'check:plugin-package', 'test:workbench:browser'];
+  'test:blueprints', 'test:browser', 'check:plugin-package', 'test:workbench:browser', 'test:release'];
 
 export function assertCheckTempRoot(tempRoot, repo = REPO, platform = process.platform) {
   refuseRealHome(tempRoot);

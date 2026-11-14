@@ -1,6 +1,6 @@
 # Contributing to DSH Spaces
 
-To contribute a third-party plugin, use the [community catalog guide](catalog/README.md). Plugins stay in their authors' repositories and npm packages; catalog contributions need no core package publishing rights. Spaces itself supports [direct Git repository root installation](docs/plugin-standard-install.md#git-source-install). Core npm publication is deferred.
+To contribute a third-party plugin, use the [community catalog guide](catalog/README.md). Plugins stay in their authors' repositories and npm packages; catalog contributions need no core package publishing rights. Spaces supports direct Git installation and prebuilt npm packages. Published GitHub Releases trigger the [npm release workflow](docs/npm-publishing.md).
 
 Read [docs/let-it-crash.md](docs/let-it-crash.md) first. That file is the only current fault policy. For the current product boundary read [docs/architecture.md](docs/architecture.md); current open items are in [tasks/todo.md](tasks/todo.md).
 

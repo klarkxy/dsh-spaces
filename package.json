@@ -114,7 +114,8 @@
     "catalog:build": "node --import tsx scripts/plugin-catalog.mjs build",
     "catalog:check": "node --import tsx scripts/plugin-catalog.mjs check",
     "catalog:verify": "node --import tsx scripts/plugin-catalog.mjs verify",
-    "test:catalog": "node --import tsx --test tests/tooling/community-catalog.test.mjs"
+    "test:catalog": "node --import tsx --test tests/tooling/community-catalog.test.mjs",
+    "test:release": "node --test tests/tooling/npm-release.test.mjs"
   },
   "dependencies": {
     "@klarkxy/dsh-dev-index": "0.2.8"

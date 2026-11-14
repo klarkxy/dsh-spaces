@@ -4,10 +4,11 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ## [0.5.0] — release candidate, not published
 
-- The main plugin is now named `dsh-spaces`, including its client module, bundle entries and local archive. Existing `@dsh-spaces/plugin` installations require the documented explicit package-name change; the old identity remains protected and is never treated as an ordinary workspace plugin. npm publication remains deferred.
+- The main plugin is now named `dsh-spaces`, including its client module, bundle entries and local archive. Existing `@dsh-spaces/plugin` installations require the documented explicit package-name change; the old identity remains protected and is never treated as an ordinary workspace plugin.
 
 ### Added
 
+- Published GitHub Releases automatically run CI, pack and publish the exact `dsh-spaces` archive to npm, then verify its public metadata, bytes and channel. Stable versions use `latest`; prereleases use `next`. The verified package and publication report are attached to the Release.
 - Local rotating JSONL diagnostics for the host, Supervisor and managed-space output: `debug`/`info`/`error`/`fault` levels, seven-day or 100 MiB active-file rotation, seven-day/100 MiB archive retention, and an `info` default for distribution builds. Credentials, bootstrap tokens and local paths are redacted before disk writes; log failures never trigger recovery.
 - The Spaces plugin now runs inside compatible DSH Web and Desktop hosts, with the original application preserved and a space rail added.
 - Four main-space Creator tools: `spaces_context`, `spaces_create_preview`, `spaces_create_execute` and `spaces_job` for one frozen, serial creation plan.
@@ -21,7 +22,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 - Standalone DSH runtime installation explicitly includes required npm peers instead of inheriting the checkout's development-only `legacy-peer-deps` exception.
 - The default plugin directory is now the Spaces community catalog in this repository, accepting packages from independent authors. Catalog cards show authors, repositories, runtime ranges and version-specific test evidence; an explicit npm-name entry supports installing packages before catalog inclusion.
-- Install directly from the Git repository root: the installer's authorized `prepare` step builds the complete plugin, and the root package ships only its runtime payload. Manual clone/build/pack steps are optional maintainer workflows. npm publication is deferred; CI verifies both Git-root and archive installation, and the community catalog remains available.
+- Install published prebuilt npm versions or directly from the Git repository root: the installer's authorized `prepare` step builds the complete Git plugin, and the root package ships only its runtime payload. Manual clone/build/pack steps are optional maintainer workflows. CI verifies Git-root and archive installation, and the community catalog remains available.
 - The initial community catalog reuses dsh-plugins entries, including bilingual descriptions, categories and exact npm coordinates. The bundled snapshot excludes shared service libraries and example entries; installation rechecks published npm versions and honors the selected package source.
 - Desktop startup preferences run only on a new Desktop launch, through the serialized job queue. Web launches and confirmed service-only restarts leave child spaces stopped. State decoding accepts the preference and defaults it to off for older service responses.
 - Live model sync replaces same-named routes instead of keeping obsolete nested settings and verifies written configuration values. Diagnostic logging preserves Node's fatal rejection behavior and redacts known credential values before recording Remote failures.
@@ -47,7 +48,6 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 - Browser Space and Spaces blueprint workflows are sealed in 0.5.0; their implementations remain in the repository.
 - There is no in-place upgrade or migration from the 0.4.0 standalone desktop application; old spaces are not migrated.
-- npm publication is deferred; the main plugin can be installed directly from the Git root or a prebuilt archive, with internal components included.
 - Windows is the locally verified platform for this release; macOS and Linux are not certified, and remote HTTPS or arbitrary third-party native hosts remain unsupported.
 - Existing ordinary-space bridges are not automatically realigned to a new component group; presence of a bridge does not prove version alignment.
 - There is no automatic retry, restart, rollback, restore, repair or interrupted-job replay. Only the bounded Desktop service start/restart exception in the fault policy is allowed.

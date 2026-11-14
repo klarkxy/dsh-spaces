@@ -2,11 +2,20 @@
 
 DSH-native Spaces workbench, with a dedicated manager and an independent local supervisor.
 
-Fault policy: [let it crash](../../docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment. Current architecture baseline: [现行架构](../../docs/architecture.md).
+Fault policy: [let it crash](https://github.com/klarkxy/dsh-spaces/blob/main/docs/let-it-crash.md). Plugin combinations may fail. This package reports the failure; it does not recover the environment. Current architecture baseline: [现行架构](https://github.com/klarkxy/dsh-spaces/blob/main/docs/architecture.md).
 
-当前直接通过 Git 仓库根地址安装，安装器负责构建，npm 发布暂缓。新安装默认固定官方 CLI **`0.2.2-rc.1`**；已有运行时通过正常升级操作更新。本仓库使用 `0.2.2-rc.1` SDK 构建；peer 保留原有下限，并显式接纳这个预发布版本，不构成 CLI 白名单。
+已发布版本可以通过 npm 包名安装，也支持由安装器构建的 Git 根地址安装。新安装默认固定官方 CLI **`0.2.2-rc.1`**；已有运行时通过正常升级操作更新。本仓库使用 `0.2.2-rc.1` SDK 构建；peer 保留原有下限，并显式接纳这个预发布版本，不构成 CLI 白名单。
 
-原主包名为 `@dsh-spaces/plugin`。已有安装需先正常停止服务，再按[换名步骤](../../docs/plugin-standard-install.md#first-change-from-the-old-package-name)显式替换宿主和已有管理空间的包；不要同时保留新旧两个主包。
+原主包名为 `@dsh-spaces/plugin`。已有安装需先正常停止服务，再按[换名步骤](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md#first-change-from-the-old-package-name)显式替换宿主和已有管理空间的包；不要同时保留新旧两个主包。
+
+## Install from npm
+
+```powershell
+dsh plugin --profile web add dsh-spaces@0.5.0
+dsh web
+```
+
+The npm package is prebuilt and carries the complete component group. In the ordinary DSH sidebar choose **工作台 / Workbench**, then **初始化 Spaces / Initialize Spaces**.
 
 ## Install from Git source
 
@@ -19,7 +28,7 @@ The root package prepares the build during Git installation. Approve this plugin
 
 No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1` in place of `dsh`. A prebuilt local archive from `npm run pack:plugin` remains an alternative. Keep the CLI's default `autoInstallPeers: false`: its shared SDK is supplied by the runtime, and installing another copy can split Cordis service identity.
 
-For development, `npm run dev:web` builds and links the checkout into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. Existing development data stays; `npm run dev:link` only prepares the link. See [local linked development](../../docs/plugin-standard-install.md#local-linked-development).
+For development, `npm run dev:web` builds and links the checkout into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. Existing development data stays; `npm run dev:link` only prepares the link. See [local linked development](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md#local-linked-development).
 
 初始化使用当前 DSH Home。上面的安装步骤和初始化点击针对普通 Web：普通页面保持原有界面，只有用户点击初始化后才创建管理空间和启动监督程序；失败会显示原因，该次请求结束，下次打开不会自动补装或续接。再次进入时点击“进入工作台”。只需在一个已有 Web profile 安装完整入口，工作台新建的空间自动使用轻量 view-bridge。
 
@@ -43,12 +52,12 @@ Closing a browser tab does not stop the supervisor or spaces. Use the workbench'
 
 Upgrading Spaces means three separate user actions: add a newer version of this plugin to the host profile, shut the service down from the manager UI, and reopen Spaces. The new Supervisor then selects the host plugin's component group and aligns the manager plugin before the manager starts. Ordinary spaces receive the group's bridge when they do not have one yet; an already-installed space bridge is not automatically re-aligned to the new group, so its presence must not be treated as proof of version alignment. There is no in-app self-update and no automatic component handoff.
 
-安装时可能需要联网获取官方依赖。早期 alpha 的管理器与隔离验证见 [历史迁移记录](../../tasks/archive/alpha-migration.md)；它不作为当前版本验收。当前宿主与平台范围以 [宿主嵌入合同](../../docs/host/embedding.md) 及其指向的最新验收记录为准。
+安装时可能需要联网获取官方依赖。早期 alpha 的管理器与隔离验证见 [历史迁移记录](../../tasks/archive/alpha-migration.md)；它不作为当前版本验收。当前宿主与平台范围以 [宿主嵌入合同](https://github.com/klarkxy/dsh-spaces/blob/main/docs/host/embedding.md) 及其指向的最新验收记录为准。
 
 ## Distribution
 
 The private repository root is installable directly from Git: `prepare` builds this package and `files` selects the runtime payload. Its exports point into `packages/plugin`, while build-only workspaces are excluded from runtime dependencies. The same root supports local linked development after dependencies are installed, using `dsh plugin --profile spaces-dev add .` in a separate development Home. `@dsh-spaces/supervisor` remains private because its runtime is embedded here.
 
-Metadata includes `repository.directory`, `keywords` (`dsh-plugin`, `deepseek-harness`), public publish configuration and MIT license. Core npm publication is deferred; local pack success is not a public release. The public third-party plugin catalog accepts contributions independently.
+Metadata includes `repository.directory`, `keywords` (`dsh-plugin`, `deepseek-harness`), public publish configuration and MIT license. Published GitHub Releases trigger CI, packing, npm publication and public archive verification. The public third-party plugin catalog accepts contributions independently.
 
 [Installation guide](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md) · [Host embedding contract](https://github.com/klarkxy/dsh-spaces/blob/main/docs/host/embedding.md) · [Current architecture](https://github.com/klarkxy/dsh-spaces/blob/main/docs/architecture.md)

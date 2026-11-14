@@ -1,6 +1,6 @@
 # DSH Spaces
 
-Spaces uses the package name `dsh-spaces`. Install directly from this Git repository's root; the installer prepares the complete plugin automatically. npm publication is deferred. Existing `@dsh-spaces/plugin` installs use the [explicit package-name change](docs/plugin-standard-install.md#first-change-from-the-old-package-name). Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
+Spaces uses the package name `dsh-spaces`. Published versions install directly from npm; Git-root installation also prepares the complete plugin automatically. Existing `@dsh-spaces/plugin` installs use the [explicit package-name change](docs/plugin-standard-install.md#first-change-from-the-old-package-name). Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
 
@@ -19,6 +19,7 @@ It adds a space rail to the existing application, runs each ordinary space in it
 - [Space control contract](docs/space-control-design.md) — main-space Creator and space-control tools.
 - [Fault policy](docs/let-it-crash.md) — the sole authority for failure and recovery behavior.
 - [Changelog](CHANGELOG.md) — release history.
+- [npm publishing](docs/npm-publishing.md) — automatic publication from GitHub Releases.
 - [Blueprint](docs/blueprint.md) — DSHBP1/DSHBP2 protocols. Spaces blueprint workflows are currently sealed; the independent package remains available.
 
 ## Data and identity
@@ -45,7 +46,14 @@ Unregistered manual DSH processes are outside managed discovery and shutdown. Ho
 
 The next release is **0.5.0**, installed as a Spaces plugin in an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
 
-Pass the repository root directly to the DSH plugin manager. Git and supported Node.js/npm are required:
+For a published version, install the prebuilt npm package:
+
+```powershell
+dsh plugin --profile web add dsh-spaces@0.5.0
+dsh web
+```
+
+Git source installation is also supported. Git and supported Node.js/npm are required:
 
 ```powershell
 dsh plugin --profile web add github:klarkxy/dsh-spaces --allow-build=dsh-spaces
@@ -125,7 +133,14 @@ MIT. See [LICENSE](LICENSE).
 
 下一版本为 **0.5.0**，作为插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
 
-目前直接通过 Git 仓库根地址安装，npm 发布暂缓。需要 Git 和受支持的 Node.js/npm：
+已发布版本可直接安装预构建 npm 包：
+
+```powershell
+dsh plugin --profile web add dsh-spaces@0.5.0
+dsh web
+```
+
+也支持 Git 仓库根地址安装，需要 Git 和受支持的 Node.js/npm：
 
 ```powershell
 dsh plugin --profile web add github:klarkxy/dsh-spaces --allow-build=dsh-spaces
@@ -154,7 +169,7 @@ npm run dev:web
 
 开发使用隔离 Home，禁止指向真实 `~/.dsh`、默认 `sessions/` / `storages/` 或 `profiles/web/`。`npm run dev:link` 只准备链接。修改后重新构建并显式重启宿主；Supervisor 变化还需正常停止服务后重新进入。
 
-Git 根包在安装时准备完整插件；预构建归档仍可用于审阅和分发。npm 发布和市场收录是独立动作。
+Git 根包在安装时准备完整插件；预构建归档仍可用于审阅和分发。发布 GitHub Release 后，[自动发布流程](docs/npm-publishing.md)完成检查、打包、npm 发布和公开内容核对。
 
 ## 许可证
 

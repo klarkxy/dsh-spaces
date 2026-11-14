@@ -1,0 +1,86 @@
+name: Publish Spaces to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spaces-npm-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'klarkxy/dsh-spaces'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.10.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Check release identity and component versions
+        id: release
+        run: node scripts/npm-release.mjs prepare
+
+  checks:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  pack:
+    needs: [prepare, checks]
+    uses: ./.github/workflows/plugin-distribution.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+
+  publish:
+    needs: [prepare, pack]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.10.0'
+          registry-url: https://registry.npmjs.org/
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: dsh-spaces-${{ needs.prepare.outputs.version }}
+          path: release-artifact
+      - name: Verify the exact packed artifact
+        run: node scripts/npm-release.mjs check release-artifact/pack-report.json
+      - name: Publish once and verify the public archive
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/npm-release.mjs publish release-artifact/pack-report.json
+      - name: Attach the verified package to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_REF" "release-artifact/dsh-spaces-$RELEASE_VERSION.tgz" release-artifact/publication.json --repo "$GITHUB_REPOSITORY"
+      - name: Preserve publication result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-publication-${{ github.run_id }}
+          path: release-artifact/publication.json
+          if-no-files-found: ignore

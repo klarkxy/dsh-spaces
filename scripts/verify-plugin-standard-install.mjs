@@ -14,8 +14,8 @@
  *
  * Env: DSH_TEST_BIN, DSH_TEST_CLI_BIN, DSH_TEST_OUTPUT, DSH_TEST_PLAYWRIGHT,
  * DSH_TEST_PNPM_CJS, DSH_PACK_DEST.
- * DSH_TEST_PLUGIN_SPEC optionally selects a pinned GitHub repository root;
- * the isolated test profile explicitly allows this project's prepare script.
+ * DSH_TEST_PLUGIN_SPEC optionally selects dsh-spaces@<exact-version> or a
+ * pinned GitHub root; only Git installs allow this project's prepare script.
  *
  * --syntax / --preflight are static only: no DSH web, no supervisor,
  * no Playwright browser, no shared build, no real ~/.dsh.
@@ -40,6 +40,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { valid as validVersion } from "semver";
 import {
   BOOT_MS,
   DUMP_MS,
@@ -1239,11 +1240,13 @@ async function main() {
   report.cli.resolved = { bin, version };
   pass(`using official CLI ${version} (explicit installed version)`);
 
-  const gitSpec = process.env.DSH_TEST_PLUGIN_SPEC?.trim();
-  if (gitSpec && !/^github:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[a-f0-9]{40}$/.test(gitSpec)) {
-    throw new Error("DSH_TEST_PLUGIN_SPEC must pin a GitHub repository root to a full commit.");
+  const requestedSpec = process.env.DSH_TEST_PLUGIN_SPEC?.trim();
+  const gitSpec = /^github:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[a-f0-9]{40}$/.test(requestedSpec ?? "") ? requestedSpec : undefined;
+  const npmVersion = requestedSpec?.startsWith(`${CANONICAL_NAME}@`) ? requestedSpec.slice(CANONICAL_NAME.length + 1) : undefined;
+  if (requestedSpec && !gitSpec && (!npmVersion || validVersion(npmVersion) !== npmVersion)) {
+    throw new Error("DSH_TEST_PLUGIN_SPEC must select dsh-spaces@<exact-version> or a GitHub root pinned to a full commit.");
   }
-  let installSpec = gitSpec;
+  let installSpec = requestedSpec;
   if (!installSpec) {
     const packDest = join(tmpdir(), "dsh-spaces-standard-install-pack");
     assertNoSpaces(packDest, "staged pack dest");
@@ -1289,6 +1292,15 @@ async function main() {
   const afterAdd = pluginState(home, WEB_PROFILE);
   if (!afterAdd.dependency || !afterAdd.inBundles || !afterAdd.installedOnDisk) {
     throw new Error(`web add did not install bundle: ${JSON.stringify(afterAdd)}`);
+  }
+  if (npmVersion) {
+    const root = join(home, "profiles", WEB_PROFILE, "node_modules", CANONICAL_NAME);
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    assert.equal(manifest.version, npmVersion);
+    for (const rel of PLUGIN_REQUIRED) {
+      assert.ok(existsSync(join(root, rel)), `npm package is missing ${rel}`);
+    }
+    pass(`public npm package ${CANONICAL_NAME}@${npmVersion} installed the complete prebuilt component group`);
   }
   if (gitSpec) {
     const root = join(home, "profiles", WEB_PROFILE, "node_modules", CANONICAL_NAME);

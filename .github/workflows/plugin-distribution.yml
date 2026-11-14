@@ -4,6 +4,12 @@
 name: Plugin distribution pack
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact version from the GitHub Release
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -48,5 +54,5 @@ jobs:
           path: |
             ${{ runner.temp }}/dsh-spaces-pack/*.tgz
             ${{ runner.temp }}/dsh-spaces-pack/pack-report.json
-      - name: Not published
-        run: echo "Review artifact only. No Git tag, GitHub release or npm publication was created. This prebuilt archive is an alternative to direct Git-root installation; there is no standalone Desktop package."
+      - name: Package prepared
+        run: echo "This job only packs the plugin. The release workflow publishes the checked archive to npm after all checks pass."

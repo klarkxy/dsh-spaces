@@ -1,11 +1,15 @@
 /** Public registry reads only: no credentials, redirects, retries or code loading. */
-export async function readRegistryJson(name, version, { fetchImpl = fetch } = {}) {
+export async function readRegistryJson(name, version, { fetchImpl = fetch, allowMissing = false } = {}) {
   const url = `https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
   const response = await fetchImpl(url, {
     signal: AbortSignal.timeout(20_000), redirect: 'error',
     headers: { accept: 'application/json' },
   });
-  if (!response.ok) { await response.body?.cancel(); throw new Error(`${name}@${version}: npm returned HTTP ${response.status}`); }
+  if (!response.ok) {
+    await response.body?.cancel();
+    if (allowMissing && response.status === 404) return null;
+    throw new Error(`${name}@${version}: npm returned HTTP ${response.status}`);
+  }
   const chunks = [];
   let length = 0;
   try {

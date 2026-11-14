@@ -4,17 +4,28 @@
 
 展示合同见 [宿主嵌入](host/embedding.md)，当前架构基线见 [现行架构](architecture.md)：初始化后留在原应用，空间栏在宿主内展开，右侧嵌入实际管理工作台及空间 WebUI。用于隔离验收的官方 Windows Desktop 0.2.1-rc.2 已通过本机隔离 Home，该历史记录也覆盖当时的原生 Browser Space；当前 Browser 入口封存，远程宿主未验收。下面的发行状态和旧验收记录不自动构成本批通过证据。
 
-用户入口：把 Git 仓库根地址 `github:klarkxy/dsh-spaces` 交给 DSH 插件管理器安装。安装器通过根包的 `prepare` 构建脚本生成完整插件，不需要用户手动克隆、构建或打包。npm 发布继续暂缓。普通 Web 再启动 DSH Web，打开左侧“工作台”并点击“初始化 Spaces”。官方 Desktop 在打开应用时后台初始化并启动管理服务，主界面保留，无需先点击初始化。两种入口都无需手动传入管理器、worker 或数据目录路径。故障政策见 [let it crash](let-it-crash.md)。
+用户入口：已发布版本通过 npm 包名 `dsh-spaces` 安装预构建插件，也支持把 Git 根地址 `github:klarkxy/dsh-spaces` 交给 DSH 插件管理器，由根包的 `prepare` 构建脚本生成完整插件。普通 Web 再启动 DSH Web，打开左侧“工作台”并点击“初始化 Spaces”。官方 Desktop 在打开应用时后台初始化并启动管理服务，主界面保留，无需先点击初始化。两种入口都无需手动传入管理器、worker 或数据目录路径。故障政策见 [let it crash](let-it-crash.md)。
 
 普通 Web 的初始化是一次明确的用户操作。失败就结束该次请求并说明原因（缺哪一步、已知错误或明确未知）。下次打开页面时不会自动补装、重建或续接。用户再次点击初始化，是一份新请求。官方 Desktop 由宿主进程按当前 Home 保存该次终态；刷新界面只是重新加入。失败或正常停止不会自动重启。再次打开应用，或使用已有的确认式手动服务操作，才是一份新启动。子空间仍要等用户点击。缺少启动观察接口是明确的兼容失败，不改走自动恢复，也不能据此断定服务没有启动。健康的旧服务可以直接连接。
 
 新安装默认固定官方 **`0.2.2-rc.1`**。每个空间固定一个精确 DSH 版本：已有空间首次启动时固定为其实际运行的版本，新空间默认宿主版本；切换在空间详情中发起（禁止降级，不自动建快照，不兼容的第三方插件会阻止切换；官方插件内置于所选运行时并随之变化，Spaces 不会把它们安装进 profile）。管理空间（spaces-hub）跟随宿主 CLI，低于 `0.2.0-rc.2` 的空间拒绝启动；不再使用的运行时可在设置中删除。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add <完整包路径>` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1 web` 启动。
 
-现行验收命令是 `npm run validate:plugin-install`；设置 `DSH_TEST_PLUGIN_SPEC=github:klarkxy/dsh-spaces#<完整提交号>` 时验证 Git 根安装，否则验证预构建 tarball。0.2 迁移的历史验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/archive/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。`dsh-spaces` **尚未发布到 npm**。
+现行验收命令是 `npm run validate:plugin-install`；设置 `DSH_TEST_PLUGIN_SPEC=dsh-spaces@<精确版本>` 时验证 npm 安装，使用 `github:klarkxy/dsh-spaces#<完整提交号>` 时验证 Git 根安装，否则验证预构建 tarball。0.2 迁移的历史验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/archive/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。
 
 Git 根包和预构建插件 tarball 携带同一结构的完整组件组。Supervisor 等内部组件随主包分发，用户不需要第二个包；`@dsh-spaces/supervisor` 保持私有。
 
 新安装默认官方 CLI 版本：官方 **`0.2.2-rc.1`**。未经测试的版本号本身不构成只读结论。
+
+## npm install
+
+对已发布版本使用精确版本号；预构建包不需要 Git 或本地编译：
+
+```powershell
+dsh plugin --profile web add dsh-spaces@0.5.0
+dsh web
+```
+
+也可在宿主插件页输入同一个 npm 来源。后续 npm 发行由 [GitHub Release 工作流](npm-publishing.md)发布；预发布版进入 `next` 渠道。
 
 ## Git source install
 
@@ -87,7 +98,7 @@ Git 安装后的路径位于 `node_modules` 中，不会被误判为开发检出
 | --- | --- |
 | **Git root acceptance** | A pinned repository root is installed through the official CLI, prepared by the installer and exercised through the same real Web lifecycle as a tarball. Build authorization is limited to the project under test. |
 | **Local tarball acceptance** | `pnpm run pack:plugin` → `dsh plugin --profile web add` → `dsh web` → Initialize. The recorded result of `pnpm run validate:plugin-install` determines acceptance. The [merge acceptance record](../tasks/archive/merge-execution.md) is historical and does not prove the current package; the command itself is not proof. |
-| **Core npm publication, deferred** | Spaces itself is not installable by npm package name. Its public third-party plugin catalog remains available; authors publish under their own package names. |
+| **Core npm publication** | A published GitHub Release triggers checks and publication of the prebuilt `dsh-spaces` package. Publication, archive verification and real npm installation are recorded separately. |
 | **Not a release** | GitHub root is the monorepo. A CI pack artifact is for review, not `npm publish`; there is no standalone Desktop package. |
 
 ## Upgrade

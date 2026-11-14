@@ -139,7 +139,7 @@ Supervisor 用主空间绑定的 CLI 执行 `dsh --profile <main> --dump-config`
 
 ## 8. 制品、版本与升级
 
-主发行包保持项目级身份 `dsh-spaces`。默认直接安装 Git 仓库根地址：安装器在获得本插件构建授权后运行根包 `prepare`，生成完整组件组并按 `files` 白名单安装。构建依赖留在准备阶段，安装后的主包不依赖被排除的源码目录或本地 Blueprint workspace。Git 安装路径位于 `node_modules`，不会触发开发检出模式；Supervisor 仍按组件摘要暂存并使用同组制品。具体命令见[标准安装](plugin-standard-install.md#git-source-install)。npm 发布暂缓，现行仓库没有 npm 发布工作流；手动打包继续提供可审阅的 tarball。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录贡献无需核心包发布权限。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。
+主发行包保持项目级身份 `dsh-spaces`。默认直接安装 Git 仓库根地址：安装器在获得本插件构建授权后运行根包 `prepare`，生成完整组件组并按 `files` 白名单安装。构建依赖留在准备阶段，安装后的主包不依赖被排除的源码目录或本地 Blueprint workspace。Git 安装路径位于 `node_modules`，不会触发开发检出模式；Supervisor 仍按组件摘要暂存并使用同组制品。具体命令见[标准安装](plugin-standard-install.md#git-source-install)。npm 发行包由已发布 GitHub Release 触发，在标签提交完成 CI、打包、发布及公开字节核对；正式版使用 latest，预发布版使用 next。手动打包继续提供可审阅的 tarball，流程见 [npm 发布](npm-publishing.md)。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录贡献无需核心包发布权限。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。
 
 Spaces 以同一构建的不可变组件组发行 Supervisor、管理插件、view bridge、Browser 和安装 worker。制品按版本与摘要校验，不混用不同构建。
 

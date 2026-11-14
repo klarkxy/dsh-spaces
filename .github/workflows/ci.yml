@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main, master]
   pull_request:
@@ -28,6 +29,7 @@ jobs:
       - run: node scripts/prepare-ci-environment.mjs
       - run: npm run catalog:check
       - run: npm run test:catalog
+      - run: npm run test:release
       - run: npm run check:test-lists
       - run: npm run typecheck
       - run: npm run typecheck:spaces
@@ -39,6 +41,7 @@ jobs:
       - run: npm run test:llm
       - run: npm run test:workbench
       - run: npm run test:workbench:recovery
+      - run: npm run test:browser
       - name: Install official DSH CLI (0.2.2-rc.1)
         run: |
           pnpm --version
