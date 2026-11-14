@@ -4,16 +4,16 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { resolve } from "node:path";
 import { build } from "esbuild";
 import { chromium, type Browser, type Page } from "playwright";
+import { bindInitialLoopbackHttp } from "../../src/adapters/node/server/workbench-http.ts";
 
 const PAGE = `<!doctype html><style>html,body,#root{height:100%;margin:0}#root{position:relative}main{height:100%;padding:25px;box-sizing:border-box}textarea{position:absolute;bottom:15px;width:80%;height:140px;box-sizing:border-box}[data-shell-overlay]{position:absolute;inset:0;pointer-events:none}</style><div id="root"><main id="main"><h1>Original main</h1><textarea aria-label="Main draft"></textarea></main><div data-shell-overlay></div></div><script src="/client.js"></script>`;
 
 async function serve(script: string) {
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const { server, port } = await bindInitialLoopbackHttp(() => createServer((req: IncomingMessage, res: ServerResponse) => {
     if (req.url === "/client.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(script); return; }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(PAGE);
-  });
-  await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
-  return { origin: `http://127.0.0.1:${(server.address() as { port: number }).port}`, close: () => new Promise<void>(done => { server.closeAllConnections(); server.close(() => done()); }) };
+  }));
+  return { origin: `http://127.0.0.1:${port}`, close: () => new Promise<void>(done => { server.closeAllConnections(); server.close(() => done()); }) };
 }
 
 async function open(browser: Browser, origin: string, locale: string, path = "/") {

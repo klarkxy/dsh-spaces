@@ -4,11 +4,6 @@
 name: Plugin distribution pack
 
 on:
-  workflow_call:
-    inputs:
-      version:
-        required: true
-        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -22,7 +17,7 @@ permissions:
 jobs:
   pack:
     env:
-      DSH_SPACES_BUILD_TARGET: npm
+      DSH_SPACES_BUILD_TARGET: distribution
     runs-on: windows-latest
     timeout-minutes: 30
     steps:

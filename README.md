@@ -1,6 +1,6 @@
 # DSH Spaces
 
-Spaces uses the project package identity `@dsh-spaces/plugin`. Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name. See [npm publishing](docs/npm-publishing.md) for the maintainer release workflow. The current candidate is not yet published.
+Spaces uses the project package identity `@dsh-spaces/plugin`. Install the current candidate by cloning this repository and building the plugin archive; npm publication is deferred. Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name.
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
 
@@ -33,7 +33,7 @@ It adds a space rail to the existing application, runs each ordinary space in it
 
 Protocol 2 mutations carry a service epoch and expected revision. Requests and plans are rechecked at execution; refreshing reads existing jobs instead of replaying them. Closing a tab does not stop spaces or the Supervisor. A Supervisor started by official Desktop exits with that Desktop instance via one normal shutdown (stopping its managed spaces and releasing its lease); if shutdown fails, the state and lease remain untouched without force-kill or retry. A Web-started Supervisor or an existing Supervisor attached by Desktop stays running. Stopping all spaces and stopping the service are separate actions.
 
-Each ordinary space calls its models with its own configuration. Choosing the main space's models copies its routes, default model and their keys once at creation; the General tab of space detail shows the saved model state and can sync again. The confirmation previews non-secret names and counts, then stops an active space, verifies the write and restarts only a space that was already running. Login-grant and expression routes are reported and skipped. Session selections and local defaults keep their own precedence. See [Model configuration](docs/architecture.md#6-模型配置).
+Each ordinary space calls its models with its own configuration. Choosing the main space's models copies its routes, default model and their keys once at creation; the General tab of space detail shows the saved model state and can sync again. The confirmation previews non-secret names and counts. Running spaces apply and verify the configuration through their own settings interface without stopping; the next model request uses it. Stopped or crashed spaces receive file updates; starting or stopping spaces must finish that transition first. Login-grant and expression routes are reported and skipped. Session selections and local defaults keep their own precedence. See [Model configuration](docs/architecture.md#6-模型配置).
 
 The main space's `cordis` preset also exposes the Creator four-tool set and the space-control tools (`spaces_overview`, `spaces_inspect`, `spaces_logs`, `spaces_templates`, `spaces_import_preview`, `spaces_plan`, `spaces_execute`, `spaces_control_job`, and the `spaces_ui_*` session tools). They use separate authenticated scopes; mutation plans require explicit approval and are never a management bypass for ordinary spaces.
 
@@ -45,13 +45,18 @@ Unregistered manual DSH processes are outside managed discovery and shutdown. Ho
 
 The next release is **0.5.0**, delivered as the prebuilt Spaces plugin for an existing DSH host. Browser Space and Spaces blueprint entry points are withheld. See the [release notes](docs/releases/v0.5.0.md) for the supported scope and transition from the old standalone distribution.
 
-Build and pack the prebuilt plugin, then install it into the existing host profile:
+Clone the source, install the locked dependencies, then build and install the plugin archive. Git and a supported Node.js installation are required:
 
 ```powershell
-pnpm run pack:plugin
+git clone https://github.com/klarkxy/dsh-spaces.git
+cd dsh-spaces
+npm ci
+npm run pack:plugin
 dsh plugin --profile web add <printed-tarball-path>
 dsh web
 ```
+
+Use the exact archive path printed by the pack command. This is a source-build installation; passing the repository URL directly to `dsh plugin add` is not supported by the current checkout. For an isolated trial, set `DSH_HOME` before installing as described in the [installation guide](docs/plugin-standard-install.md#git-source-install). No npm publishing account is required.
 
 In ordinary Web, open **Workbench / 工作台** and choose **Initialize Spaces / 初始化 Spaces**. That initialization is one explicit request; a later page load does not silently resume a failed request. Official Desktop starts the management service in the background when the application opens and leaves the main window usable. After a failed launch or a normal stop, the host does not automatically request another launch. Opening the application again, or the existing confirmed manual service action, starts a new operation. Refreshing the panel only rejoins the current Home record.
 
@@ -124,11 +129,18 @@ MIT. See [LICENSE](LICENSE).
 
 下一版本为 **0.5.0**，通过预构建插件安装到已有 DSH 宿主；Browser Space 和 Spaces 蓝图入口暂不开放。[发布说明](docs/releases/v0.5.0.md)列出本版范围及旧独立桌面发行方式的变化。
 
+目前从 Git 获取源码并构建安装，npm 发布暂缓。需要 Git 和受支持的 Node.js：
+
 ```powershell
-pnpm run pack:plugin
+git clone https://github.com/klarkxy/dsh-spaces.git
+cd dsh-spaces
+npm ci
+npm run pack:plugin
 dsh plugin --profile web add <实际输出的包路径>
 dsh web
 ```
+
+使用打包命令打印的完整路径。当前不支持将仓库 URL 直接交给 `dsh plugin add`；隔离试用及没有全局 `dsh` 时的命令见[源码安装说明](docs/plugin-standard-install.md#git-source-install)。安装不需要 npm 发布账号；依赖下载和第三方插件目录仍正常使用 npm。
 
 普通 Web 打开 **工作台**，点击 **初始化 Spaces**。初始化是一次明确请求，后续打开页面不会静默续接失败请求。官方 Desktop 在打开应用时后台启动管理服务，主界面保持可用。启动失败或正常停止后，宿主不会自动请求另一次启动。再次打开应用，或使用已有的确认式手动服务操作，才是一份新启动。刷新面板只是重新加入当前 Home 记录。
 

@@ -7,7 +7,7 @@ import { resolveNpmCli } from './pack-spaces-plugin.mjs';
 import { refuseRealHome } from './lib/distribution-harness.mjs';
 
 const REPO = resolve(import.meta.dirname, '..');
-const CHECKS = ['check:test-lists', 'catalog:check', 'test:distribution', 'typecheck', 'typecheck:spaces', 'typecheck:tests', 'build',
+const CHECKS = ['check:test-lists', 'catalog:check', 'test:catalog', 'typecheck', 'typecheck:spaces', 'typecheck:tests', 'build',
   'test', 'test:spaces', 'test:workbench', 'test:workbench:recovery', 'test:llm',
   'test:blueprints', 'test:browser', 'check:plugin-package', 'test:workbench:browser'];
 
@@ -61,7 +61,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`RUN ${check}`);
     let code, error;
     try {
-      const child = spawn(process.execPath, [npm, 'run', check], { cwd: REPO, env: { ...isolated.env, DSH_SPACES_BUILD_TARGET: 'npm' },
+      const child = spawn(process.execPath, [npm, 'run', check], { cwd: REPO, env: { ...isolated.env, DSH_SPACES_BUILD_TARGET: 'distribution' },
         windowsHide: true, stdio: ['ignore', fd, fd] });
       [code] = await once(child, 'close');
     } catch (cause) { code = null; error = String(cause); }

@@ -4,12 +4,11 @@ on:
   push:
     branches: [main, master]
   pull_request:
-  workflow_call:
 
 jobs:
   windows-gate:
     env:
-      DSH_SPACES_BUILD_TARGET: npm
+      DSH_SPACES_BUILD_TARGET: distribution
     runs-on: windows-latest
     timeout-minutes: 40
     strategy:
@@ -28,7 +27,7 @@ jobs:
       - run: npm ci
       - run: node scripts/prepare-ci-environment.mjs
       - run: npm run catalog:check
-      - run: npm run test:distribution
+      - run: npm run test:catalog
       - run: npm run check:test-lists
       - run: npm run typecheck
       - run: npm run typecheck:spaces
@@ -70,7 +69,7 @@ jobs:
 
   plugin-install:
     env:
-      DSH_SPACES_BUILD_TARGET: npm
+      DSH_SPACES_BUILD_TARGET: distribution
     runs-on: windows-latest
     timeout-minutes: 30
     steps:

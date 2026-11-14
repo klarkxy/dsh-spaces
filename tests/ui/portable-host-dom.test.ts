@@ -5,16 +5,16 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { build } from "esbuild";
 import { chromium } from "playwright";
-import { startWorkbenchHttp, type WorkbenchHttpRuntime } from "../../src/adapters/node/server/workbench-http.ts";
+import { bindInitialLoopbackHttp, startWorkbenchHttp, type WorkbenchHttpRuntime } from "../../src/adapters/node/server/workbench-http.ts";
 import { expectedAuthCookieName } from "../../src/adapters/node/server/workbench-http.ts";
 import { mintSupervisorPortal } from "../../packages/plugin/src/host/workbench-http.ts";
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 
 const EPOCH = "aa".repeat(32), REVISION = "bb".repeat(32);
 async function serve(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) {
-  const server = createServer((req, res) => { Promise.resolve(handler(req,res)).catch(() => { res.writeHead(500); res.end("fixture-failure"); }); });
-  await new Promise<void>(done => server.listen(0,"127.0.0.1",done));
-  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const { server, port } = await bindInitialLoopbackHttp(() =>
+    createServer((req, res) => { Promise.resolve(handler(req,res)).catch(() => { res.writeHead(500); res.end("fixture-failure"); }); }));
+  const origin = `http://127.0.0.1:${port}`;
   return { origin, close: () => new Promise<void>(done => { server.closeAllConnections(); server.close(() => done()); }) };
 }
 async function body(req: IncomingMessage) { const chunks: Buffer[]=[]; for await (const chunk of req) chunks.push(Buffer.from(chunk)); return JSON.parse(Buffer.concat(chunks).toString() || "{}"); }

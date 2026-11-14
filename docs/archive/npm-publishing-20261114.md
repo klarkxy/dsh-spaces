@@ -1,6 +1,8 @@
 # 发布 Spaces 到 npm
 
-Spaces 使用项目级包名 `@dsh-spaces/plugin`，与第三方作者的 npm scope 分开。第三方插件通过[公共目录](../catalog/README.md)贡献，作者无需获得 Spaces 核心包的发布权限。
+> 历史方案，已于 2026-11-14 暂缓。本文描述当时准备的发布流程，不是当前操作指南；相关工作流、脚本和测试已从现行代码移除，可从提交 `cad426a5ce02b4bdcc9c2bd118bd33314be20b11` 查阅。恢复发布工作前须重新核对账号权限、平台规则和最终制品。当前使用 [Git 源码构建安装](../plugin-standard-install.md)。
+
+Spaces 使用项目级包名 `@dsh-spaces/plugin`，与第三方作者的 npm scope 分开。第三方插件通过[公共目录](../../catalog/README.md)贡献，作者无需获得 Spaces 核心包的发布权限。
 
 发布入口是 GitHub Actions 的 **Publish Spaces to npm**。它只响应维护者手动触发，不因普通推送、目录收录或第三方 PR 自动发布。唯一发行包是包含同组组件的插件 `.tgz`，不单独发布 Supervisor。
 

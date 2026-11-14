@@ -8,6 +8,7 @@ import * as esbuild from "esbuild";
 import { MAX_ICON_DATA_URL_CHARS, MAX_ICON_SVG_BYTES } from "../../packages/plugin/src/workbench/icons.ts";
 import { MAX_ICON_SOURCE_BYTES } from "../../packages/plugin/src/workbench/fit-icon.ts";
 import { WORKBENCH_CSS } from "../../packages/plugin/src/workbench/styles.ts";
+import { bindInitialLoopbackHttp } from "../../src/adapters/node/server/workbench-http.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const playwrightRoot = process.env.DSH_TEST_PLAYWRIGHT || join(root, "node_modules/playwright");
@@ -331,22 +332,13 @@ button, img, aside, div { width: auto !important; height: auto !important; max-w
   }
 });
 
-function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
+async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
   url: string;
   close: () => Promise<void>;
 }> {
-  const server = createServer(handler);
-  return new Promise((resolve, reject) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("no address"));
-        return;
-      }
-      resolve({
-        url: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise((done, fail) => server.close((error) => (error ? fail(error) : done()))),
-      });
-    });
-  });
+  const { server, port } = await bindInitialLoopbackHttp(() => createServer(handler));
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((done, fail) => server.close((error) => (error ? fail(error) : done()))),
+  };
 }

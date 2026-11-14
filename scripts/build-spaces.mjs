@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const at = path => resolve(root, path);
-const distribution = process.argv.includes('--npm') || process.env.DSH_SPACES_BUILD_TARGET === 'npm';
+const distribution = process.argv.includes('--distribution') || process.env.DSH_SPACES_BUILD_TARGET === 'distribution';
 const common = { bundle: true, format: 'esm', target: 'es2022', logLevel: 'info', absWorkingDir: root };
 const diagnosticBuild = { define: { __DSH_SPACES_LOG_LEVEL__: JSON.stringify(distribution ? 'info' : 'debug') } };
 const nodeRequire = 'import { createRequire as __spacesCreateRequire } from "node:module"; const require = __spacesCreateRequire(import.meta.url);';

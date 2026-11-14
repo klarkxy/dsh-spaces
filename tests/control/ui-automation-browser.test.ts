@@ -12,6 +12,7 @@ import { after, before, test } from "node:test";
 import { ControlPublicError } from "../../src/shared/control.ts";
 import { UiAutomationManager, type UiAutomationPorts } from "../../src/adapters/node/supervisor/ui-automation.ts";
 import { findBrowserChannel, PlaywrightUiEngine } from "../../src/adapters/node/supervisor/ui-playwright.ts";
+import { bindInitialLoopbackHttp } from "../../src/adapters/node/server/workbench-http.ts";
 
 const TOKEN = randomBytes(12).toString("hex");
 const COOKIE = `dsh-auth-fixture=${randomBytes(12).toString("hex")}`;
@@ -37,7 +38,7 @@ const REG = "reg-1";
 const mutable = { status: "running" as const, generation: 3, epoch: "e".repeat(64) };
 
 before(async () => {
-  server = createServer((req, res) => {
+  const bound = await bindInitialLoopbackHttp(() => createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1`);
     if (url.searchParams.get("token") === TOKEN) {
       // Simulated launch exchange: 303 + Set-Cookie + clean redirect.
@@ -53,9 +54,9 @@ before(async () => {
     }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(PAGE);
-  });
-  await new Promise<void>((accept) => server.listen(0, "127.0.0.1", accept));
-  origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  }));
+  server = bound.server;
+  origin = `http://127.0.0.1:${bound.port}`;
   const ports: UiAutomationPorts = {
     requireSpace: (spaceId) => (spaceId === "space-fixture" ? spaceId : (() => { throw new Error("not found"); })()),
     managerId: () => "spaces-hub",

@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { createRequire } from "node:module";
 import * as esbuild from "esbuild";
 import type { Page } from "playwright";
+import { bindInitialLoopbackHttp } from "../../src/adapters/node/server/workbench-http.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
@@ -51,25 +52,15 @@ async function launchChromium(chromium: {
   }
 }
 
-function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
+async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
   url: string;
   close: () => Promise<void>;
 }> {
-  const server = createServer(handler);
-  return new Promise((resolve, reject) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("no address"));
-        return;
-      }
-      resolve({
-        url: `http://127.0.0.1:${address.port}`,
-        close: () =>
-          new Promise((done, fail) => { server.closeAllConnections(); server.close((error) => (error ? fail(error) : done())); }),
-      });
-    });
-  });
+  const { server, port } = await bindInitialLoopbackHttp(() => createServer(handler));
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((done, fail) => { server.closeAllConnections(); server.close((error) => (error ? fail(error) : done())); }),
+  };
 }
 
 test("DOM: native settings creation entry is clickable and reveals its space", { timeout: 120_000 }, async (t) => {

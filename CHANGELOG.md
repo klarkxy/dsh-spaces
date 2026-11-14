@@ -6,7 +6,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ### Added
 
-- Local rotating JSONL diagnostics for the host, Supervisor and managed-space output: `debug`/`info`/`error`/`fault` levels, seven-day or 100 MiB active-file rotation, seven-day/100 MiB archive retention, and an `info` default for npm/package builds. Credentials, bootstrap tokens and local paths are redacted before disk writes; log failures never trigger recovery.
+- Local rotating JSONL diagnostics for the host, Supervisor and managed-space output: `debug`/`info`/`error`/`fault` levels, seven-day or 100 MiB active-file rotation, seven-day/100 MiB archive retention, and an `info` default for distribution builds. Credentials, bootstrap tokens and local paths are redacted before disk writes; log failures never trigger recovery.
 - The Spaces plugin now runs inside compatible DSH Web and Desktop hosts, with the original application preserved and a space rail added.
 - Four main-space Creator tools: `spaces_context`, `spaces_create_preview`, `spaces_create_execute` and `spaces_job` for one frozen, serial creation plan.
 - Main-space space-control tools for lifecycle, plugin, runtime, model-sync and bounded UI automation work: `spaces_overview`, `spaces_inspect`, `spaces_logs`, `spaces_templates`, `spaces_import_preview`, `spaces_plan`, `spaces_execute`, `spaces_control_job` and `spaces_ui_*`.
@@ -19,7 +19,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 - Standalone DSH runtime installation explicitly includes required npm peers instead of inheriting the checkout's development-only `legacy-peer-deps` exception.
 - The default plugin directory is now the Spaces community catalog in this repository, accepting packages from independent authors. Catalog cards show authors, repositories, runtime ranges and version-specific test evidence; an explicit npm-name entry supports installing packages before catalog inclusion.
-- Maintainers can prepare or explicitly publish the verified plugin archive through a manual npm workflow that reuses CI and packaging, uses npm OIDC, and verifies the published bytes and dist-tag. Ordinary pushes and catalog contributions do not publish npm packages.
+- Installation currently uses a Git checkout, locked dependencies and a locally built plugin archive. npm publication is deferred; its workflow and helper have been removed from the active tree, with the preparation retained in history. CI, manual archive packing and the community catalog remain available.
 - The initial community catalog reuses dsh-plugins entries, including bilingual descriptions, categories and exact npm coordinates. The bundled snapshot excludes shared service libraries and example entries; installation rechecks published npm versions and honors the selected package source.
 - Desktop startup preferences run only on a new Desktop launch, through the serialized job queue. Web launches and confirmed service-only restarts leave child spaces stopped. State decoding accepts the preference and defaults it to off for older service responses.
 - Live model sync replaces same-named routes instead of keeping obsolete nested settings and verifies written configuration values. Diagnostic logging preserves Node's fatal rejection behavior and redacts known credential values before recording Remote failures.
