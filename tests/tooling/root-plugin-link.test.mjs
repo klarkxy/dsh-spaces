@@ -5,9 +5,17 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { DEV_PROFILE, pluginState } from '../../scripts/dev-dsh-web.mjs';
+import { dumpHasSpacesModule } from '../../scripts/verify-plugin-standard-install.mjs';
 
 const root = resolve(import.meta.dirname, '..', '..');
 const manifest = path => JSON.parse(readFileSync(join(path, 'package.json'), 'utf8'));
+
+test('install verification matches module names, not a Home or unrelated package containing dsh-spaces', () => {
+  assert.equal(dumpHasSpacesModule('- id: sessions\n  config:\n    root: C:/Temp/dsh-spaces-check/home/sessions\n'), false);
+  assert.equal(dumpHasSpacesModule('- id: other\n  name: dsh-spaces-tools\n'), false);
+  assert.equal(dumpHasSpacesModule("- id: dsh-spaces\n  name: 'dsh-spaces'\n"), true);
+  assert.equal(dumpHasSpacesModule('- id: dsh-space-control\n  name: dsh-spaces/space-control\n'), true);
+});
 
 test('linked repository resolves the same plugin, client, remotes and patch as the distribution', t => {
   const home = mkdtempSync(join(tmpdir(), 'spaces-root-link-'));

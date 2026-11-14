@@ -288,8 +288,12 @@ function assertManagerAbsent(home, label) {
   }
 }
 
+export function dumpHasSpacesModule(dump) {
+  return /^\s*name:\s*['"]?dsh-spaces(?:\/[a-zA-Z0-9._/-]+)?['"]?\s*$/m.test(dump);
+}
+
 function dumpHasPlugin(dump) {
-  return /^- id:\s*dsh-spaces\b/m.test(dump) && dump.includes(CANONICAL_NAME);
+  return /^- id:\s*dsh-spaces\b/m.test(dump) && dumpHasSpacesModule(dump);
 }
 
 function stripSecrets(env) {
@@ -1492,7 +1496,7 @@ async function main() {
     DUMP_MS,
     "dump after remove",
   );
-  if (dumpHasPlugin(dumpAfterRemove) || dumpAfterRemove.includes(CANONICAL_NAME)) {
+  if (dumpHasSpacesModule(dumpAfterRemove)) {
     throw new Error("web dump-config still contains the plugin after remove");
   }
   assertWebPathsProtected(home, webBefore, "after web remove");
