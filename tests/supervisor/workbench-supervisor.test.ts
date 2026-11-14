@@ -2662,6 +2662,8 @@ test("a space.start submitted mid-install queues cleanly behind space.create and
   })).body.value as { status: string; affectedSpaceIds: string[] };
   assert.equal(start.status, "queued");
   assert.deepEqual(start.affectedSpaceIds, ["space-running-one"]);
+  // The job can report "install" before the worker creates its directory.
+  mkdirSync(runtimeRoot, { recursive: true });
   writeFileSync(join(runtimeRoot, "install-gate"), "go");
   const finishedCreate = await waitJob(handle.origin, cookie, "create-gate");
   assert.equal(finishedCreate.status, "succeeded");
@@ -2727,11 +2729,13 @@ test("space-scoped lifecycle plans execute across unrelated space mutations and 
     command: { kind: "space.create", input: { name: "gamma", modelSource: "local", baseVersion: "0.9.9" } },
     requestId: "create-gamma",
   });
+  let observedInstall = false;
   for (let i = 0; i < 200; i++) {
     const j = (await api(handle.origin, cookie, "job", { id: "create-gamma" })).body.value as { phase?: string };
-    if (j.phase === "install") break;
+    if (j.phase === "install") { observedInstall = true; break; }
     await new Promise((r) => setTimeout(r, 25));
   }
+  assert.equal(observedInstall, true, "the create must be blocked in installation before testing queued plan expiry");
   const queuedPlan = await mutate(handle.origin, cookie, "submit", {
     command: { kind: "plan.execute", planId: alphaPlan.id },
     requestId: "exec-alpha-restart",
@@ -2739,6 +2743,7 @@ test("space-scoped lifecycle plans execute across unrelated space mutations and 
   assert.equal(queuedPlan.body.ok, true);
   assert.deepEqual((queuedPlan.body.value as { affectedSpaceIds: string[] }).affectedSpaceIds, ["space-alpha"]);
   nowMs += 6 * 60_000;
+  mkdirSync(runtimeRoot, { recursive: true });
   writeFileSync(join(runtimeRoot, "install-gate"), "go");
   await waitJob(handle.origin, cookie, "create-gamma");
   const settledAlpha = await waitJob(handle.origin, cookie, "exec-alpha-restart");

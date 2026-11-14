@@ -317,9 +317,10 @@ async function until(check, label, timeout = 120000) {
 async function startWeb(nodeExe, bin, home, tooling, logPath) {
   const port = await ephemeralPort();
   writeFileSync(logPath, "", "utf8");
-  const child = spawn(nodeExe, [bin, "--profile", WEB_PROFILE, "--no-open", "--host", HOST, "--port", String(port)], {
+  const signalHarness = fileURLToPath(new URL("./lib/cli-signal-harness.mjs", import.meta.url));
+  const child = spawn(nodeExe, [signalHarness, bin, "--profile", WEB_PROFILE, "--no-open", "--host", HOST, "--port", String(port)], {
     env: stripSecrets(isolatedEnv(home, nodeExe, tooling)),
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     windowsHide: true,
   });
   if (!child.pid) throw new Error("failed to spawn web");
@@ -1410,9 +1411,11 @@ async function main() {
     assertWebPathsProtected(home, webBefore, "repeat enter");
     pass("repeat enter did not add a second manager");
 
-    // Stop only this ordinary Web host. A process-tree kill would also kill
-    // the detached supervisor whose independence this restart is testing.
-    web.child.kill();
+    // Run the official CLI's normal disposal, including unregistering the main
+    // scope. Windows child.kill() is abrupt termination, not a normal close.
+    await new Promise((accept, reject) => web.child.send({ type: "test-owned-cli-stop" }, error => error ? reject(error) : accept()));
+    await until(() => web.child.exitCode !== null || web.child.signalCode !== null, "ordinary web graceful exit", PORT_MS);
+    assert.equal(web.child.exitCode, 0, "ordinary Web must finish its normal shutdown before reopening");
     await waitPortClosed(web.port, PORT_MS);
     web = await startWeb(nodeExe, bin, home, tooling, join(out, "web-restart.log"));
     await openAuthorizedWeb(page, web.launchUrl);
