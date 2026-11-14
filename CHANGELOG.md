@@ -17,6 +17,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ### Changed
 
+- Standalone DSH runtime installation explicitly includes required npm peers instead of inheriting the checkout's development-only `legacy-peer-deps` exception.
 - The default plugin directory is now the Spaces community catalog in this repository, accepting packages from independent authors. Catalog cards show authors, repositories, runtime ranges and version-specific test evidence; an explicit npm-name entry supports installing packages before catalog inclusion.
 - Maintainers can prepare or explicitly publish the verified plugin archive through a manual npm workflow that reuses CI and packaging, uses npm OIDC, and verifies the published bytes and dist-tag. Ordinary pushes and catalog contributions do not publish npm packages.
 - The initial community catalog reuses dsh-plugins entries, including bilingual descriptions, categories and exact npm coordinates. The bundled snapshot excludes shared service libraries and example entries; installation rechecks published npm versions and honors the selected package source.

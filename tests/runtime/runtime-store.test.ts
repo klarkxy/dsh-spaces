@@ -104,6 +104,21 @@ function store(options: {
   };
 }
 
+test("standalone runtime installs include required peers despite inherited development settings", async (t) => {
+  const previous = process.env.npm_config_legacy_peer_deps;
+  process.env.npm_config_legacy_peer_deps = "true";
+  t.after(() => {
+    if (previous === undefined) delete process.env.npm_config_legacy_peer_deps;
+    else process.env.npm_config_legacy_peer_deps = previous;
+  });
+  const commands: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
+  const { runtime } = store({ run: mockRun({ commands }) });
+  await runtime.install("0.2.2-rc.1");
+  const install = commands.find(command => command.args.includes("install"));
+  assert.ok(install?.args.includes("--legacy-peer-deps=false"));
+  assert.ok(install?.args.includes("--include=peer"));
+});
+
 test("runtime publication reports the first rename failure without retry or publishing a result", async (t) => {
   const failure = Object.assign(new Error("runtime destination busy"), { code: "EBUSY" });
   let attempts = 0;

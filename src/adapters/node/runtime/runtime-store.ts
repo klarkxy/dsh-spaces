@@ -294,7 +294,9 @@ export class RuntimeStore {
       const spec = `${DSH_RUNTIME_PACKAGE}@${version}`;
       const result = await this.run(
         this.nodeBin(),
-        [this.npmJs(), "install", "--prefix", staging, "--no-audit", "--no-fund", spec],
+        // npm run exports the checkout's legacy-peer-deps setting. That
+        // development exception must not strip required peers from a runtime.
+        [this.npmJs(), "install", "--prefix", staging, "--no-audit", "--no-fund", "--legacy-peer-deps=false", "--include=peer", spec],
         {
           timeoutMs: INSTALL_TIMEOUT_MS,
           env: toolchainEnv(sourceEnv(source)),

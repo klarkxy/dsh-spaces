@@ -27,3 +27,7 @@
 上一轮远端 CI `43545432430` 失败，日志显示 Windows runner 的 `RUNNER~1` 短路径临时目录被真实路径检查拒绝，并影响日志与快照用例。本轮让两个 Windows CI job 和打包 job 共用经过 realpath 规范化的隔离目录与包缓存，不放宽产品路径守卫。
 
 当前 npm 身份在受限和普通进程中均返回 HTTP 401，尚不能确认项目 scope 的发布权。首次发布需要 npm 账号授权以及包/Trusted Publisher 设置，具体字段见 `docs/npm-publishing.md`。本轮没有创建已发布记录，也没有将已有真实 Desktop 和长期运行待验项关闭。
+
+后续远端 CI `43557518848` 已确认短路径问题消失，又暴露三个发布前差异：Node 24 不支持当前测试目录参数、英文系统下一个渲染断言错误地默认中文、标准安装创建空间时官方运行时缺少 `@deepseek-ai/cordis-plugin-group`。前两项分别改为明确测试文件清单、在断言内固定并还原语言环境。第三项通过两个全新目录对照确认：`legacy-peer-deps=true` 安装退出 0 但 CLI 导入失败，`false` 安装及 `--version` 均成功。独立运行时安装现在明确使用 `--legacy-peer-deps=false --include=peer`，不继承仓库开发安装例外；未对失败环境做重装、修复或重试。对照证据在 `.sandbox/runtime-peer-probe/`。
+
+这些补丁完成列表检查、三组类型检查、LLM、蓝图、运行时/语言 59 项定向回归、重建与包预检；结果均通过（蓝图保留 4 个平台符号链接跳过项）。最终本机归档改为 `.sandbox/community-release-artifact-final/dsh-spaces-plugin-0.5.0.tgz`，SHA-256 `aa5707867fcf8403b4600373d5e8026eed8f5e4a71620370bde16f9ae449cfc3`，新发布入口只读检查通过。此前归档与失败 CI 记录保留，不混作最终制品。

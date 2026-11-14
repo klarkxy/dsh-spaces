@@ -857,7 +857,13 @@ test("host rail shows active creations and keeps seen failed ones until dismisse
   f.controller.stop();
 });
 
-test("creation rail entries and failure dialog render labels, steps and actions", async () => {
+test("creation rail entries and failure dialog render labels, steps and actions", async (t) => {
+  const navigatorBefore = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "zh-CN", languages: ["zh-CN"] } });
+  t.after(() => {
+    if (navigatorBefore) Object.defineProperty(globalThis, "navigator", navigatorBefore);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  });
   const { renderToStaticMarkup } = await import("react-dom/server");
   const React = await import("react");
   const { CreationRailEntry, CreationFailureDialog } = await import("../../packages/plugin/src/client/ui/creation-rail.tsx");
