@@ -342,6 +342,15 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   await page.locator("[data-space-section=\"plugins\"]").waitFor({ state: "visible", timeout: 15_000 });
   await page.getByRole("button", { name: "安装插件", exact: true }).click();
   await page.locator("[data-space-plugin-install-area=\"true\"]").waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator('[data-plugin-direct-install] summary').click();
+  await page.locator('[data-plugin-package-name]').fill('@community/new-plugin');
+  await page.getByRole('button', { name: '查询版本', exact: true }).click();
+  await page.waitForFunction(() => (window as Window & {
+    __WB_CALLS?: Array<{ method: string; arg?: unknown }>;
+  }).__WB_CALLS?.some(call => {
+    const request = call.arg as { method?: string; catalogId?: string } | undefined;
+    return call.method === 'product' && request?.method === 'plugin.versions' && request.catalogId === '@community/new-plugin';
+  }));
   await page.locator("[data-space-plugin-entry=\"catalog.demo\"]").click();
   await page.waitForFunction(() => {
     const select = document.querySelector<HTMLSelectElement>("[data-space-plugin-versions=\"true\"]");

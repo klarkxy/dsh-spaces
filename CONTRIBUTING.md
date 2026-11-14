@@ -1,10 +1,12 @@
 # Contributing to DSH Spaces
 
+To contribute a third-party plugin, use the [community catalog guide](catalog/README.md). Plugins stay in their authors' repositories and npm packages; contributing a catalog entry does not require membership in the Spaces npm organization. Core package publishing is documented in [npm publishing](docs/npm-publishing.md).
+
 Read [docs/let-it-crash.md](docs/let-it-crash.md) first. That file is the only current fault policy. For the current product boundary read [docs/architecture.md](docs/architecture.md); current open items are in [tasks/todo.md](tasks/todo.md).
 
 ## Safety
 
-- Never read or write the real `~/.dsh` except read-only `dsh --help` / `dsh --dump-config`.
+- Read-only diagnosis of the real `~/.dsh` is allowed. Direct writes require explicit authorization; normal authorized application startup may perform its ordinary runtime writes.
 - All development and tests must use `.sandbox/dsh-home` (or another non-real `DSH_SPACES_HOME`).
 - `web` is sacred: do not write `profiles/web/` or the default `sessions/` / `storages/` trees.
 
@@ -34,7 +36,7 @@ To link manually, set `DSH_HOME` to a separate development Home, create a custom
 
 ## Full local checks
 
-Run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain defaults to Node 26.10.0. This runs the required list/type/build checks and seven test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
+Run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain defaults to Node 26.10.0. This runs catalog and release validation, the required list/type/build checks and product test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
 
 The runner gives child processes a fresh temporary directory and non-real DSH Home. On Windows that directory must be outside the checkout. A workspace reader can briefly open a staging child and make the single atomic directory rename fail with `EPERM`, even when the reader permits delete sharing. `.gitignore` alone does not stop every external reader. The runner rejects an inherited repository-local TMP, including a directory alias into it, before starting checks. If needed, choose an existing external directory explicitly:
 

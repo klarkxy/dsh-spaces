@@ -75,6 +75,11 @@ export interface PluginCatalogEntry {
   description: string;
   summary?: string;
   summaryEn?: string;
+  title?: string;
+  titleEn?: string;
+  dshRange?: string;
+  nodeRange?: string;
+  tested?: { pluginVersion: string; dshVersion: string; platform: string; evidence: string };
   category?: string;
   tags: string[];
   stars: number;
@@ -159,7 +164,7 @@ export const DEFAULT_HUB_SETTINGS: HubSettings = {
 };
 
 export const DEFAULT_PLUGIN_CATALOG_URL =
-  "https://klarkxy.github.io/dsh-plugins/plugins.json";
+  "https://raw.githubusercontent.com/klarkxy/dsh-spaces/main/catalog/index.json";
 
 export const PLUGIN_CATALOG_SCHEMA_VERSION = 1;
 

@@ -348,7 +348,7 @@ function printAddCommand(pluginTgz) {
   console.log("User install (ordinary web). Pack first with: pnpm run pack:plugin");
   console.log(`  ${command}`);
   console.log("  dsh web");
-  console.log("Then click 初始化 Spaces / Initialize Spaces. This package is not on the npm registry.");
+  console.log("Then click 初始化 Spaces / Initialize Spaces. This command installs the local archive; packing does not publish to npm.");
   return command;
 }
 
@@ -489,7 +489,7 @@ async function main() {
     add: command,
     unpublished: true,
     componentDigest: payload.digest,
-    note: `${pluginPkg.name}@${pluginPkg.version} is the distribution unit. Supervisor stays private. Not on npm.`,
+    note: `${pluginPkg.name}@${pluginPkg.version} is the distribution unit. Supervisor stays private. Packing does not publish to npm.`,
     at: new Date().toISOString(),
   };
   writeFileSync(join(dest, "pack-report.json"), `${JSON.stringify(report, null, 2)}\n`);

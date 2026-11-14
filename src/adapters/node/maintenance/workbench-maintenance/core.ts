@@ -399,6 +399,7 @@ export class MaintenanceCore {
     if (!response.ok) throw new WorkbenchMaintenanceError("workbench/not-found");
     const json = await response.json();
     if (!json || typeof json !== "object") throw new WorkbenchMaintenanceError("workbench/failed");
+    if (!("name" in json) || json.name !== name) throw new WorkbenchMaintenanceError("workbench/failed", "The npm registry returned a different package identity.");
     return json as Packument;
   }
 

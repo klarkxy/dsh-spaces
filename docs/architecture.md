@@ -139,6 +139,8 @@ Supervisor 用主空间绑定的 CLI 执行 `dsh --profile <main> --dump-config`
 
 ## 8. 制品、版本与升级
 
+主发行包保持项目级身份 `@dsh-spaces/plugin`。公共插件清单保存在本仓库 `catalog/`，接受独立作者提交；目录权限与核心 npm 发布权限分离。目录生成只读取 npm 元数据，不运行插件代码；收录不代表实际兼容性认证。发布工作流仅由维护者手动触发，复用 CI 和同组制品打包，默认只准备审阅归档，发布后再校验公开归档；账户与 OIDC 配置见 [npm 发布](npm-publishing.md)。
+
 Spaces 以同一构建的不可变组件组发行 Supervisor、管理插件、view bridge、Browser 和安装 worker。制品按版本与摘要校验，不混用不同构建。
 
 当前目标宿主和默认新空间运行时为 `@deepseek-ai/dsh` **0.2.2-rc.1**（Cordis 4.1.0、loader 1.1.0、schemastery 3.19）；普通空间最低运行时为 0.2.0-rc.2。宿主自身要求 Node ≥24.9；本项目 engines 为 Node 24.21+ 的 24.x 或 26.x。宿主插件声明的 peer 范围接受 0.2.0-rc.2 / 0.2.1-rc.2 / 0.2.2-rc.1；官方升级指南只记录到 v0.2.2-alpha.3，rc.1 差异（Cordis `internal/config` 首参由 config 改为 fiber、`agent/request` 标记 deprecated、`GenerateOptions.purpose` 改为生产方声明合并、fs-observation-policy 默认禁用并新增 `apply_patch`）以版本锁定源码为补充依据。这些语义差异不改变本产品的授权、隔离和失败政策。

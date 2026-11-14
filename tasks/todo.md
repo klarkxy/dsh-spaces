@@ -14,6 +14,9 @@
 
 ## 发布与真实宿主验收
 
+- [x] 公共插件目录与 npm 发布流程：目录由本仓库维护，开放独立作者贡献，补齐按 npm 包名安装和版本限定的实测说明；维护者手动发布流程默认只打包，复用 CI、OIDC 与发布后归档校验。见 [实施记录](archive/community-catalog-publishing-20261114.md)。
+- [ ] npm 首次发布账号准备：本机 `npm whoami` 返回 401；需确认 `@dsh-spaces` 组织发布权限、建立包及绑定 `npm-publish.yml` 的 Trusted Publisher。代码和实际归档已验证，未执行 npm 发布。
+
 - [ ] dsh² 个人工作宇宙后续验收：八空间/十三次插件安装完成，六个前端可展示，两组合加载失败；实机素材已交付。仍需定位 `settingsScope`、pixel-whale 模块注册、长期门户超时及基础测试 45 个失败条目；主空间总控/模型同步本轮未验。见 [实机记录](archive/dsh2-personal-web-20261110.md)，不视为全量通过。
 
 - [ ] 最终 0.5.0 制品验收：按错误页现有预览/确认流程完成一次真实服务重启（旧 space-control bundle 清理后的实际服务重启仍未执行）。见 [归档记录](archive/todo-2026-11.md) 2026-11-09 管理空间残留旧 space-control bundle。

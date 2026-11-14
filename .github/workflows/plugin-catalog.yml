@@ -1,0 +1,30 @@
+name: Community plugin catalog
+
+on:
+  pull_request:
+    paths: ['catalog/**', 'scripts/plugin-catalog.mjs', 'scripts/lib/npm-registry.mjs', 'tests/tooling/community-catalog.test.mjs', '.github/workflows/plugin-catalog.yml']
+  push:
+    branches: [main]
+    paths: ['catalog/**', 'scripts/plugin-catalog.mjs', 'scripts/lib/npm-registry.mjs', 'tests/tooling/community-catalog.test.mjs', '.github/workflows/plugin-catalog.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.10.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:blueprint
+      - run: npm run catalog:check
+      - run: node --import tsx --test tests/tooling/community-catalog.test.mjs
+      - run: npm run catalog:verify

@@ -222,6 +222,9 @@ interface IdentityServer {
 async function startIdentityServer(expected: { home: string; profile: string }): Promise<IdentityServer> {
   const bearer = "c".repeat(64);
   const server = createServer((req, res) => {
+    // Every fixture owns a short-lived listener. Do not leave pooled sockets
+    // available for a subsequent test that receives the same ephemeral port.
+    res.setHeader("connection", "close");
     const fail = (status: number) => { res.writeHead(status); res.end(); };
     if (req.method !== "POST" || req.headers.authorization !== `Bearer ${bearer}`) return fail(401);
     const chunks: Buffer[] = [];
@@ -249,7 +252,7 @@ async function startIdentityServer(expected: { home: string; profile: string }):
 async function call(fx: Fixture, op: string, bearer: string, body: unknown) {
   const response = await fetch(`${fx.origin}${CONTROL_CHANNEL_PREFIX}${op}`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${bearer}`, connection: "close" },
     body: JSON.stringify(body),
   });
   const parsed = (await response.json()) as { ok?: boolean; value?: unknown; error?: { code?: string; message?: string } };

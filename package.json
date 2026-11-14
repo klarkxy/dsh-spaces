@@ -100,7 +100,11 @@
     "validate:a8": "node --import tsx scripts/verify-a8.mjs",
     "setup:sandbox": "node scripts/setup-sandbox.mjs",
     "build:blueprint": "npm run build --workspace @klarkxy/dsh-blueprint",
-    "test:blueprint-plugin": "npm test --workspace @klarkxy/dsh-blueprint"
+    "test:blueprint-plugin": "npm test --workspace @klarkxy/dsh-blueprint",
+    "catalog:build": "node --import tsx scripts/plugin-catalog.mjs build",
+    "catalog:check": "node --import tsx scripts/plugin-catalog.mjs check",
+    "catalog:verify": "node --import tsx scripts/plugin-catalog.mjs verify",
+    "test:distribution": "node --import tsx --test tests/tooling/community-catalog.test.mjs tests/tooling/npm-release.test.mjs"
   },
   "dependencies": {
     "@klarkxy/dsh-blueprint": "file:packages/blueprint",

@@ -1,5 +1,7 @@
 # DSH Spaces
 
+Spaces uses the project package identity `@dsh-spaces/plugin`. Third-party authors keep their own npm packages and can submit them to the [public plugin catalog](catalog/README.md); users can browse the catalog or install by npm package name. See [npm publishing](docs/npm-publishing.md) for the maintainer release workflow. The current candidate is not yet published.
+
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/klarkxy/badge.svg)](https://hub.xerj.org/contributors/klarkxy)
 
 **DSH Spaces is a multi-space plugin for compatible DSH Web and Desktop hosts. There is no standalone client.**

@@ -17,7 +17,9 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ### Changed
 
-- Plugin discovery now uses the published dsh-plugins catalog, including bilingual descriptions, categories and exact npm coordinates. The bundled snapshot excludes shared service libraries and example entries; installation rechecks published npm versions and honors the selected package source.
+- The default plugin directory is now the Spaces community catalog in this repository, accepting packages from independent authors. Catalog cards show authors, repositories, runtime ranges and version-specific test evidence; an explicit npm-name entry supports installing packages before catalog inclusion.
+- Maintainers can prepare or explicitly publish the verified plugin archive through a manual npm workflow that reuses CI and packaging, uses npm OIDC, and verifies the published bytes and dist-tag. Ordinary pushes and catalog contributions do not publish npm packages.
+- The initial community catalog reuses dsh-plugins entries, including bilingual descriptions, categories and exact npm coordinates. The bundled snapshot excludes shared service libraries and example entries; installation rechecks published npm versions and honors the selected package source.
 - Desktop startup preferences run only on a new Desktop launch, through the serialized job queue. Web launches and confirmed service-only restarts leave child spaces stopped. State decoding accepts the preference and defaults it to off for older service responses.
 - Live model sync replaces same-named routes instead of keeping obsolete nested settings and verifies written configuration values. Diagnostic logging preserves Node's fatal rejection behavior and redacts known credential values before recording Remote failures.
 - Live plugin batches preserve completed, failed and unattempted target outcomes. Completed offline plugin operations refresh the open space's plugin inventory.

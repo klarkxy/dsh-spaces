@@ -157,7 +157,7 @@ const catalogMetaSchema = z
   })
   .strict();
 
-const catalogEntrySchema = z
+export const catalogEntrySchema = z
   .object({
     id: z.string().min(1).max(214),
     repo: z.string().min(1).max(200),
@@ -175,6 +175,16 @@ const catalogEntrySchema = z
     description: z.string().max(2000),
     summary: z.string().max(500).optional(),
     summaryEn: z.string().max(500).optional(),
+    title: z.string().max(80).optional(),
+    titleEn: z.string().max(80).optional(),
+    dshRange: z.string().max(200).optional(),
+    nodeRange: z.string().max(200).optional(),
+    tested: z.object({
+      pluginVersion: exactVersionSchema,
+      dshVersion: exactVersionSchema,
+      platform: z.string().min(1).max(80),
+      evidence: httpUrlSchema,
+    }).strict().optional(),
     category: z.string().max(80).optional(),
     tags: z.array(z.string().max(80)).max(64),
     stars: z.number().int().nonnegative(),

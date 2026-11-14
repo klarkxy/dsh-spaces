@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "package": "@klarkxy/dsh-git-commit",
+      "category": "workflow",
+      "title": {
+        "zh": "Git 提交",
+        "en": "Git Commit"
+      },
+      "summary": {
+        "zh": "在对话里提交工作区改动，由模型分组并生成 Git 提交信息。",
+        "en": "Commit workspace changes from the conversation, with the model grouping commits and generating commit messages."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-delegation",
+      "category": "workflow",
+      "title": {
+        "zh": "委派模式",
+        "en": "Delegation Mode"
+      },
+      "summary": {
+        "zh": "按会话开启委派模式：主代理负责拆解、委派和验收，子代理执行具体任务，支持多智能体协作。",
+        "en": "Per-session Delegation Mode: the main agent plans, delegates, and reviews while subagents carry out the work, enabling multi-agent orchestration."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-current-title",
+      "category": "sessions",
+      "title": {
+        "zh": "自动标题",
+        "en": "Auto Title"
+      },
+      "summary": {
+        "zh": "会话标题跟随最新任务自动更新，手动改过的名字不会被覆盖；自动重命名与人工命名两不误。",
+        "en": "Session titles follow the latest task automatically; names you set by hand stay put. Auto-rename and manual naming coexist."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-web-search-manager",
+      "category": "models",
+      "title": {
+        "zh": "网页搜索",
+        "en": "Web Search"
+      },
+      "summary": {
+        "zh": "在一个设置页管理和排序联网搜索与网页读取（抓取）服务，内置 DuckDuckGo、Exa、Tavily 等，并整合其他插件的搜索源，为模型提供 web_search 与 web_fetch。",
+        "en": "Manage and rank web search and page-reading providers (DuckDuckGo, Exa, Tavily, Brave, Bocha, Serper, Firecrawl, Perplexity, Jina, and plugin sources) in one settings page for web_search and web_fetch."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-zhihu",
+      "category": "models",
+      "title": {
+        "zh": "知乎",
+        "en": "Zhihu"
+      },
+      "summary": {
+        "zh": "知乎站内与全网搜索、热榜、Zhida 直答、知识库、问题推荐与回答摘要、内容与评论读取、创作数据与额度统计，以及草稿管理和配图上传。",
+        "en": "Search Zhihu and the web, check hot lists, Zhida AI answers, Q&A, comments, knowledge bases, creator stats, and quotas, and manage article, question, and pin drafts with image uploads."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-dev-index",
+      "category": "dev",
+      "title": {
+        "zh": "DSH 文档",
+        "en": "DSH Docs"
+      },
+      "summary": {
+        "zh": "在插件页浏览 DSH 官方开发文档；智能体获得两个只读工具检索文档与核对插件（dsh_docs、dsh_plugins）。",
+        "en": "Browse official DSH developer documentation in the Plugins page; the agent gets two read-only tools to search docs and inspect plugins across the catalog, npm, and GitHub (dsh_docs, dsh_plugins)."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-safe-auto",
+      "category": "workflow",
+      "title": {
+        "zh": "Safe Auto",
+        "en": "Safe Auto"
+      },
+      "summary": {
+        "zh": "新增「Safe Auto」审批档位：需要审批的请求交给审核模型判断，通过才放行，并记录完整的审核历史。",
+        "en": "Adds a Safe Auto approval level: a reviewer model answers approval requests one call at a time, with full review history and audit trails."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-session-manager",
+      "category": "sessions",
+      "title": {
+        "zh": "会话管理",
+        "en": "Session Manager"
+      },
+      "summary": {
+        "zh": "跨工作目录搜索和阅读 DeepSeek Harness 会话，使用临时工作区；空输入一键续写或自动继续，久离回来给出摘要与上下文压缩建议；可选择让 agent 分叉当前会话或向其他会话发送消息。",
+        "en": "Search and read DeepSeek Harness sessions across working directories, use temporary workspaces, continue with one tap or automatically when a reply stops early, recap on return with context-compaction hints, and optionally let the agent fork the current session or message other sessions."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-model-hub",
+      "category": "models",
+      "title": {
+        "zh": "子代理",
+        "en": "Subagents"
+      },
+      "summary": {
+        "zh": "配置子代理的模型与推理强度（思考强度），并在会话弹层查看最后使用的模型。",
+        "en": "Configure the model and reasoning effort for subagents, and see each one's last-used model in the conversation popup."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-font",
+      "category": "workflow",
+      "title": {
+        "zh": "字体",
+        "en": "Font"
+      },
+      "summary": {
+        "zh": "自定义 Web GUI 的界面、对话、代码与终端字体及字号，支持更换字体族与调整排版。",
+        "en": "Customize the interface, conversation, code and terminal fonts and font sizes of the Web GUI; change font families and adjust typography."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-unrestricted",
+      "category": "workflow",
+      "title": {
+        "zh": "破限",
+        "en": "Unrestricted"
+      },
+      "summary": {
+        "zh": "解除模型回答限制并交付完整成果的会话预设（Preset），只作用于选用它的会话；可能导致账号被封禁。",
+        "en": "A session preset that removes the model's answer limits and delivers complete results, only in sessions that pick it; may get your account banned."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-context-cleaner",
+      "category": "sessions",
+      "title": {
+        "zh": "上下文面板清理",
+        "en": "Context Cleaner"
+      },
+      "summary": {
+        "zh": "隐藏 dsh-context 仪表盘顶部的插件信息与推广卡片。",
+        "en": "Hides the plugin-info and promotion cards at the top of the dsh-context dashboard."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-deep-view",
+      "category": "workflow",
+      "title": {
+        "zh": "Deep View 回复卡片",
+        "en": "Deep View reply cards"
+      },
+      "summary": {
+        "zh": "在回复中展示图表、指标、表格和安全联动的本地输入；show_view 可接收已校验的用户回答。",
+        "en": "Charts, metrics, tables and safe local inputs in replies, with validated answers to show_view cards."
+      }
+    },
+    {
+      "package": "@klarkxy/dsh-model-picker",
+      "category": "models",
+      "title": {
+        "zh": "模型选择器",
+        "en": "Model picker"
+      },
+      "summary": {
+        "zh": "输入框里的模型搜索与推理档位滑杆；其他插件可复用同一选择器。",
+        "en": "Searchable model selection with a reasoning-effort slider in the composer; other plugins can reuse the same picker."
+      }
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import { resolveNpmCli } from './pack-spaces-plugin.mjs';
 import { refuseRealHome } from './lib/distribution-harness.mjs';
 
 const REPO = resolve(import.meta.dirname, '..');
-const CHECKS = ['check:test-lists', 'typecheck', 'typecheck:spaces', 'typecheck:tests', 'build',
+const CHECKS = ['check:test-lists', 'catalog:check', 'test:distribution', 'typecheck', 'typecheck:spaces', 'typecheck:tests', 'build',
   'test', 'test:spaces', 'test:workbench', 'test:workbench:recovery', 'test:llm',
   'test:blueprints', 'test:browser', 'check:plugin-package', 'test:workbench:browser'];
 

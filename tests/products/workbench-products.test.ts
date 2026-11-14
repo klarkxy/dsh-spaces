@@ -310,7 +310,7 @@ test("plugin versions reports a catalog entry without an npm package as unsuppor
   );
 });
 
-test("plugin versions reports an unknown catalog entry and the real registry failure", async () => {
+test("plugin versions rejects an unknown non-package id and reports the real registry failure", async () => {
   const dir = home();
   const service = createService(dir, {
     fetchImpl: async () => {
@@ -321,7 +321,7 @@ test("plugin versions reports an unknown catalog entry and the real registry fai
     service.read({ method: "plugin.versions", catalogId: "example/missing" }),
     (error: unknown) => {
       assert.ok(error instanceof Error);
-      assert.equal((error as { code?: string }).code, "workbench/not-found");
+      assert.equal((error as { code?: string }).code, "workbench/invalid-input");
       return true;
     },
   );
@@ -338,6 +338,22 @@ test("plugin versions reports an unknown catalog entry and the real registry fai
     failing.read({ method: "plugin.versions", catalogId: "urzeye/dsh-outline" }),
     /503/,
   );
+});
+
+test("unlisted npm packages can be queried without enrolling them in the catalog", async () => {
+  const dir = home(false);
+  const service = createService(dir, {
+    fetchImpl: async () => ({
+      ok: true, status: 200, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0),
+      json: async () => ({ name: "@community/new-plugin", versions: { "1.2.3": {} }, "dist-tags": { latest: "1.2.3" } }),
+    }),
+  });
+  const result = await service.read({ method: "plugin.versions", catalogId: "@community/new-plugin" });
+  assert.equal(result.method, "plugin.versions");
+  if (result.method !== "plugin.versions") return;
+  assert.equal(result.packageName, "@community/new-plugin");
+  assert.equal(result.latest, "1.2.3");
+  assert.equal(existsSync(join(dir, "hub", CATALOG_CACHE_FILE)), false);
 });
 
 test("the plugin versions product contract is strict", () => {

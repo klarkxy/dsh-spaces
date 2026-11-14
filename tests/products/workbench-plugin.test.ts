@@ -1588,7 +1588,13 @@ for (const failure of ["transport", "unavailable", "epoch", "crashed", "maintena
         ...identityInput(home, "notes"), supervisorTimeoutMs: 5000,
         fetch: async (input, init) => {
           if (String(input).includes("/internal/portal")) minted++;
-          return fetch(input, init);
+          // This test varies the startup observer below, not the initial HTTP
+          // discovery. Give discovery a deterministic authenticated state.
+          if (String(input).endsWith("/api/workbench/state")) {
+            assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${bearer}`);
+            return Response.json({ ok: true, value: v2State(epochRef.value) });
+          }
+          throw new Error("unexpected request before a failed startup observation");
         },
         connect: () => ({ state: async () => {
           observed++;

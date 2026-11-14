@@ -4,6 +4,11 @@
 name: Plugin distribution pack
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -27,11 +32,14 @@ jobs:
           node-version: "26.10.0"
           cache: npm
       - run: npm ci
+      - run: node scripts/prepare-ci-environment.mjs
+      - run: npm run catalog:check
+      - run: npm run catalog:verify
       - run: npm run typecheck:spaces
       - run: npm run build:spaces
       - name: Version must match the dispatch input
         env:
-          EXPECTED: ${{ github.event.inputs.version }}
+          EXPECTED: ${{ inputs.version }}
         run: node -e "const fs=require('fs'); const expected=process.env.EXPECTED; for (const path of ['package.json','packages/plugin/package.json','packages/supervisor/package.json','packages/view-bridge/package.json','packages/doctor/package.json']) { const pkg=JSON.parse(fs.readFileSync(path,'utf8')); if (pkg.version!==expected) { console.error(path,pkg.version,'!=',expected); process.exit(1) } }"
       - name: Pack preflight
         run: node scripts/pack-spaces-plugin.mjs --preflight
@@ -41,7 +49,7 @@ jobs:
         run: node scripts/pack-spaces-plugin.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: dsh-spaces-plugin-${{ github.event.inputs.version }}
+          name: dsh-spaces-plugin-${{ inputs.version }}
           path: |
             ${{ runner.temp }}/dsh-spaces-pack/*.tgz
             ${{ runner.temp }}/dsh-spaces-pack/pack-report.json

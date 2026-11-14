@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import seedJson from "./seed-plugin-catalog.json" with { type: "json" };
+import seedJson from "../../../../catalog/index.json" with { type: "json" };
 import {
   DEFAULT_PLUGIN_CATALOG_URL,
   PLUGIN_CATALOG_SCHEMA_VERSION,
@@ -14,6 +14,7 @@ import { atomicWrite } from "../atomic";
 import { assertNotRealHome } from "../home/home-guard";
 import { parseCatalogUrl } from "../home/hub-settings";
 import { parsePublishedPluginCatalog } from "./published-plugin-catalog";
+import { catalogEntrySchema } from "../../../shared/workbench-product-schemas";
 
 export const CATALOG_CACHE_FILE = "plugin-catalog.json";
 export const CATALOG_ETAG_FILE = "plugin-catalog.etag";
@@ -99,6 +100,11 @@ function parseEntry(value: unknown): PluginCatalogEntry | undefined {
     description: text(row.description) ?? "",
     summary: text(row.summary),
     summaryEn: text(row.summaryEn),
+    title: text(row.title),
+    titleEn: text(row.titleEn),
+    dshRange: text(row.dshRange),
+    nodeRange: text(row.nodeRange),
+    ...(row.tested === undefined ? {} : { tested: catalogEntrySchema.shape.tested.parse(row.tested) }),
     category: text(row.category),
     tags: strings(row.tags),
     stars: num(row.stars),

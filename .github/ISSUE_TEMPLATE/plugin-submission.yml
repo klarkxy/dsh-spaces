@@ -1,0 +1,30 @@
+name: Submit a community plugin / 提交插件
+description: Suggest a published DSH plugin from any author
+title: "[Plugin] "
+body:
+  - type: input
+    id: package
+    attributes:
+      label: npm package name / npm 包名
+      placeholder: "@author/dsh-example"
+    validations:
+      required: true
+  - type: input
+    id: repository
+    attributes:
+      label: Source repository / 源码仓库
+      placeholder: https://github.com/author/repository
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: What it does / 用途
+      description: Describe the user-facing capability and important limitations.
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Test evidence, if available / 实测信息（可选）
+      description: Exact plugin and DSH versions, platform, scenario, result and a public evidence link. Leave blank if not tested.

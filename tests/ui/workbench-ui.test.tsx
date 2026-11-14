@@ -1126,6 +1126,32 @@ test("plugin read failures keep their own reasons", async () => {
   );
 });
 
+test("community catalog cards show authors, sources and exact tested versions beside the npm entry", async () => {
+  const ctrl = controller(fakeApi({
+    product: async request => {
+      const result = await productResult(request);
+      if (result.method === "catalog") {
+        result.catalog.entries[0] = {
+          ...result.catalog.entries[0], title: "社区工具", titleEn: "Community tool", owner: "Community Author",
+          dshRange: ">=0.2.0-rc.2",
+          tested: { pluginVersion: "1.0.0", dshVersion: "0.2.2-rc.1", platform: "Windows", evidence: "https://example.com/report" },
+        };
+      }
+      return result;
+    },
+  }));
+  await ctrl.poll();
+  ctrl.openDetail("alpha");
+  await flush();
+  const html = ready(ctrl);
+  assert.ok(html.includes("社区工具"));
+  assert.ok(html.includes("Community Author"));
+  assert.ok(html.includes("已实测：1.0.0"));
+  assert.ok(html.includes('href="https://example.com/report"'));
+  assert.ok(html.includes('data-plugin-direct-install="true"'));
+  assert.ok(html.includes("按 npm 包名安装"));
+});
+
 test("status tab shows workbench log lines", async () => {
   const api = fakeApi({
     product: async (request) => {

@@ -39,6 +39,8 @@ const CATEGORY_KEYS: Record<string, WorkbenchMessageKey> = {
   sessions: "plugins.category.sessions",
   models: "plugins.category.models",
   dev: "plugins.category.dev",
+  interface: "plugins.category.ui-experience",
+  media: "plugins.category.media-image",
   "plugin-manager": "plugins.category.plugin-manager",
   "agent-orchestration": "plugins.category.agent-orchestration",
   "media-image": "plugins.category.media-image",
@@ -298,6 +300,7 @@ function PluginInstallArea({
   /** The search field the empty state points at. */
   searchRef: React.RefObject<HTMLInputElement | null>;
 }): ReactElement {
+  const [packageInput, setPackageInput] = useState("");
   const entries = ui.catalog?.entries ?? [];
   const selected = ui.pluginCatalogId.trim();
   const selectedLower = selected.toLowerCase();
@@ -378,6 +381,27 @@ function PluginInstallArea({
   return (
     <>
       <h4 className="dsh-wb-title">{t(locale, "detail.pluginsInstall")}</h4>
+      <p className="dsh-wb-muted">
+        <a href="https://github.com/klarkxy/dsh-spaces/blob/main/catalog/README.md" target="_blank" rel="noopener noreferrer">
+          {t(locale, "plugins.contribute")}
+        </a>
+      </p>
+      <details className="dsh-wb-field" data-plugin-direct-install="true">
+        <summary>{t(locale, "plugins.byPackage")}</summary>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          if (packageInput.trim()) controller.setPluginCatalog(packageInput.trim());
+        }}>
+          <label className="dsh-wb-field">
+            {t(locale, "plugins.packageName")}
+            <input value={packageInput} onChange={(event) => setPackageInput(event.target.value)}
+              placeholder="@author/dsh-example" maxLength={200} autoComplete="off" data-plugin-package-name="true" />
+          </label>
+          <button type="submit" className="dsh-wb-btn" disabled={busy || !packageInput.trim()}>
+            {t(locale, "plugins.readVersions")}
+          </button>
+        </form>
+      </details>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -450,8 +474,8 @@ function PluginInstallArea({
                 >
                   <div className="dsh-wb-space-row">
                     <span>
-                      <strong>{entry.id}</strong>
-                      {entry.packageName ? ` · ${entry.packageName}` : ""}
+                      <strong>{locale === "zh" ? entry.title || entry.id : entry.titleEn || entry.title || entry.id}</strong>
+                      {entry.packageName ? <><br /><code>{entry.packageName}</code></> : ""}
                       {installedPlugin ? (
                         <span className="dsh-wb-badge" data-space-plugin-installed={entry.id}>
                           {t(locale, "plugins.installedBadge")}
@@ -460,6 +484,17 @@ function PluginInstallArea({
                       ) : null}
                       <br />
                       <small>{summary}</small>
+                      <br />
+                      <small className="dsh-wb-muted">
+                        {t(locale, "plugins.author")}: {entry.owner}
+                        {entry.dshRange ? ` · DSH ${entry.dshRange}` : ""}
+                        {" · "}
+                        {entry.tested
+                          ? t(locale, "plugins.tested", { version: entry.tested.pluginVersion, dsh: entry.tested.dshVersion, platform: entry.tested.platform })
+                          : t(locale, "plugins.listedOnly")}
+                        {/^https:\/\//.test(entry.url) ? <> · <a href={entry.url} target="_blank" rel="noopener noreferrer">{t(locale, "plugins.source")}</a></> : null}
+                        {entry.tested && /^https:\/\//.test(entry.tested.evidence) ? <> · <a href={entry.tested.evidence} target="_blank" rel="noopener noreferrer">{t(locale, "plugins.testEvidence")}</a></> : null}
+                      </small>
                     </span>
                     {installable(entry) ? (
                       <div className="dsh-wb-actions">

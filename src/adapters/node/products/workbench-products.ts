@@ -328,20 +328,19 @@ export class WorkbenchProductService {
    */
   private async readPluginVersions(catalogId: string): Promise<WorkbenchPluginVersions> {
     const entry = this.findCatalogEntry(catalogId);
-    if (!entry) {
-      throw new WorkbenchPublicError("workbench/not-found", `The catalog has no entry ${catalogId}.`);
-    }
-    if (entry.installMethod !== "npm" || isGitSpec(entry.installSpec ?? "")) {
+    if (entry && (entry.installMethod !== "npm" || isGitSpec(entry.installSpec ?? ""))) {
       throw new WorkbenchPublicError(
         "workbench/unsupported",
         `${entry.id} is not an npm package, so it has no published version list.`,
       );
     }
-    const packageName = entry.packageName || entry.installSpec;
+    // An explicit package lookup is read-only and does not enroll it in the
+    // community directory. Installation still uses an exact previewed version.
+    const packageName = entry ? entry.packageName || entry.installSpec : catalogId;
     if (!packageName || !isBareNpmPackageName(packageName)) {
       throw new WorkbenchPublicError(
         "workbench/invalid-input",
-        `The catalog entry ${entry.id} has no npm package name.`,
+        `Use an npm package name without a URL or version: ${catalogId}.`,
       );
     }
     const published = await listNpmPackageVersions(packageName, { fetchImpl: this.ports.fetchImpl });
