@@ -11,7 +11,8 @@ import { readRegistryJson } from './lib/npm-registry.mjs';
 const PACKAGE = 'dsh-spaces';
 const REPOSITORY = 'klarkxy/dsh-spaces';
 const ROOT = resolve(import.meta.dirname, '..');
-const COMPONENTS = ['package.json', ...['plugin', 'supervisor', 'view-bridge', 'browser', 'doctor']
+// Browser is a sealed base with its own product version, not the host-plugin release version.
+const COMPONENTS = ['package.json', ...['plugin', 'supervisor', 'view-bridge', 'doctor']
   .map(name => `packages/${name}/package.json`)];
 const hash = (bytes, algorithm, encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
 

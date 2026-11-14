@@ -4,7 +4,7 @@
 
 ## 发布一次新版本
 
-1. 更新根包及 `plugin`、`supervisor`、`view-bridge`、`browser`、`doctor` 的版本号，补齐 `CHANGELOG.md` 和 `docs/releases/` 中的发布说明，提交到 `main`。
+1. 更新根包及 `plugin`、`supervisor`、`view-bridge`、`doctor` 的版本号，补齐 `CHANGELOG.md` 和 `docs/releases/` 中的发布说明，提交到 `main`。封存的 Browser base 保持自己的产品版本，由组件 manifest 和摘要校验，不随主包机械升版。
 2. 完成本地 `npm run check:all`，确认该提交的远端 CI 通过。
 3. 为该提交创建 GitHub Release，标签使用 `v<精确版本>`，例如 `v0.5.0`。正式版不要勾选 Pre-release；`v0.5.1-rc.1` 这类版本必须勾选。
 4. 发布 Release。`Publish Spaces to npm` 会在该标签提交上重新运行 CI、构建和打包，再将同次运行生成的主包归档发布到 npm。正式版使用 `latest`，预发布版使用 `next`。

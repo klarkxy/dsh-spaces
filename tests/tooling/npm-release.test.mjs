@@ -32,6 +32,7 @@ test('only a published release with a matching version, ref and prerelease statu
 });
 
 test('a stale embedded component version blocks the release before packing', () => {
+  assertComponentVersions(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version);
   const root = mkdtempSync(join(tmpdir(), 'spaces-release-versions-'));
   try {
     const files = ['package.json', ...['plugin', 'supervisor', 'view-bridge', 'browser', 'doctor']
@@ -40,9 +41,10 @@ test('a stale embedded component version blocks the release before packing', () 
       mkdirSync(join(root, file, '..'), { recursive: true });
       writeFileSync(join(root, file), JSON.stringify({ version: '0.5.0' }));
     }
-    assertComponentVersions('0.5.0', root);
     writeFileSync(join(root, 'packages/browser/package.json'), JSON.stringify({ version: '0.4.0' }));
-    assert.throws(() => assertComponentVersions('0.5.0', root), /packages\/browser\/package.json/);
+    assertComponentVersions('0.5.0', root);
+    writeFileSync(join(root, 'packages/view-bridge/package.json'), JSON.stringify({ version: '0.4.0' }));
+    assert.throws(() => assertComponentVersions('0.5.0', root), /packages\/view-bridge\/package.json/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
