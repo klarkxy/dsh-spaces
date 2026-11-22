@@ -14,15 +14,13 @@ import { installMainSpaceGuidance } from "./main-space-guidance";
 import { installMainSpaceTools } from "./main-space-tools";
 import { shareWelcomeNotice } from "./welcome-notice";
 import type { DiagnosticLogger } from "../../../../src/adapters/node/diagnostics/rotating-log";
-import { attachHostDiagnosticLogger, hostProcessDiagnosticLogger } from "../../../../src/adapters/node/diagnostics/host-log";
+import { attachHostDiagnosticLogger } from "../../../../src/adapters/node/diagnostics/host-log";
 
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 const HANDOFF_PATH = "/dsh-spaces/handoff";
 
 export function hostDiagnosticLogger(runtime: WorkbenchHostRuntime): DiagnosticLogger | undefined {
-  const identity = runtime.identity;
-  if (!identity.confirmed || !identity.home) return undefined;
-  return hostProcessDiagnosticLogger(identity.home, { allowRealHome: runtime.allowRealHome });
+  return runtime.diagnosticLogger();
 }
 
 /**

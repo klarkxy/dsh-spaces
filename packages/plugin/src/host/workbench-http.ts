@@ -146,6 +146,7 @@ export async function workbenchPost<T>(
   }
   const url = `${origin}/api/workbench/${method}`;
   let response: Response;
+  const started = Date.now();
   try {
     const init: RequestInit = {
       method: "POST",
@@ -160,8 +161,8 @@ export async function workbenchPost<T>(
     };
     if (transport?.signal) init.signal = transport.signal;
     response = await doFetch(url, init);
-  } catch {
-    throw publicError("workbench/unavailable", "The workbench request did not reach the supervisor.");
+  } catch (error) {
+    throw transportUnavailable(method, error, started);
   }
   const text = await readLimitedText(response, responseBodyLimit(method, body), transport?.signal);
   let parsed: unknown;
@@ -183,6 +184,35 @@ export async function workbenchPost<T>(
   } catch {
     throw publicError("workbench/unavailable", "The workbench response did not match the expected result.");
   }
+}
+
+const ERROR_CODE_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+
+/**
+ * Public transport cause of a rejected fetch: the first system error code in
+ * the cause chain, or the abort/timeout name. Nested messages are never used
+ * because they can carry loopback addresses or tokens.
+ */
+export function transportCause(error: unknown): string {
+  let current: unknown = error;
+  let named: string | null = null;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+    const row = current as { code?: unknown; name?: unknown; cause?: unknown; errors?: unknown };
+    if (typeof row.code === "string" && ERROR_CODE_RE.test(row.code)) return row.code;
+    if (!named && (row.name === "AbortError" || row.name === "TimeoutError")) named = row.name;
+    const first = Array.isArray(row.errors) ? row.errors[0] : undefined;
+    current = row.cause ?? first;
+  }
+  return named ?? "unknown";
+}
+
+function transportUnavailable(method: string, error: unknown, started: number): RemoteError {
+  const cause = transportCause(error);
+  const ms = Date.now() - started;
+  return publicError(
+    "workbench/unavailable",
+    `The workbench request did not reach the supervisor (method: ${method}; cause: ${cause}; after ${ms} ms).`,
+  );
 }
 
 function originOf(raw: string): string {
@@ -354,6 +384,7 @@ export async function mintSupervisorHandoff(
 ): Promise<string> {
   const origin = originOf(endpoint.origin);
   let response: Response;
+  const started = Date.now();
   try {
     response = await doFetch(`${origin}/internal/bootstrap`, {
       method: "POST",
@@ -365,8 +396,8 @@ export async function mintSupervisorHandoff(
       body: "{}",
       redirect: "error",
     });
-  } catch {
-    throw publicError("workbench/unavailable", "The workbench request did not reach the supervisor.");
+  } catch (error) {
+    throw transportUnavailable("internal/bootstrap", error, started);
   }
   const text = await readLimitedText(response, WORKBENCH_HTTP_BODY_LIMIT);
   let parsed: unknown;
@@ -387,11 +418,19 @@ export async function mintSupervisorPortal(doFetch: WorkbenchHttpFetch, endpoint
   const valid = parseSpaceHostAudience(audience);
   if (!valid) throw publicError("workbench/unsupported", "This host needs a compatible presentation adapter.");
   const origin = originOf(endpoint.origin);
-  const response = await doFetch(`${origin}/internal/portal`, {
-    method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${endpoint.bearer}`, origin },
-    body: JSON.stringify(valid), redirect: "error", signal: AbortSignal.timeout(10000),
-  });
-  if (!response.ok) throw publicError("workbench/unavailable");
+  const started = Date.now();
+  let response: Response;
+  try {
+    response = await doFetch(`${origin}/internal/portal`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${endpoint.bearer}`, origin },
+      body: JSON.stringify(valid), redirect: "error", signal: AbortSignal.timeout(10000),
+    });
+  } catch (error) {
+    throw transportUnavailable("internal/portal", error, started);
+  }
+  if (!response.ok) {
+    throw publicError("workbench/unavailable", `The supervisor rejected the presentation entry (HTTP ${response.status}).`);
+  }
   const result: unknown = JSON.parse(await readLimitedText(response, 1024));
   const path = result && typeof result === "object" ? (result as { path?: unknown }).path : undefined;
   if (typeof path !== "string" || !/^\/portal-bootstrap\/[A-Za-z0-9_-]{32}$/.test(path)) throw publicError("workbench/unavailable");

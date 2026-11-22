@@ -327,3 +327,59 @@ test("real ~/.dsh stays refused by default and works on explicit product host, b
   assert.equal(supervisorEvents.includes("supervisor.starting"), true, supervisorRun.stderr);
   assert.equal(supervisorEvents.includes("supervisor.launch-failed"), true, supervisorRun.stderr);
 });
+
+test("two logger instances sharing one source interleave on disk without creating archives", () => {
+  const dir = home();
+  const first = createDiagnosticLogger(dir, "supervisor");
+  const second = createDiagnosticLogger(dir, "supervisor");
+  for (let index = 0; index < 6; index += 1) (index % 2 ? second : first).info(`event.${index}`, "x");
+  assert.deepEqual(
+    readdirSync(diagnosticLogDirectory(dir)).filter(name => name !== "supervisor.jsonl"),
+    [],
+    "alternating instances must not rotate each other's records",
+  );
+  assert.deepEqual(readEntries(dir).map(row => row.event), ["event.0", "event.1", "event.2", "event.3", "event.4", "event.5"]);
+});
+
+test("size rotation uses the on-disk size shared between live logger instances", () => {
+  const dir = home();
+  const first = createDiagnosticLogger(dir, "supervisor", { maxFileBytes: 1200, maxArchiveBytes: 100_000 });
+  const second = createDiagnosticLogger(dir, "supervisor", { maxFileBytes: 1200, maxArchiveBytes: 100_000 });
+  first.info("one", "x".repeat(300));
+  second.info("two", "y".repeat(300));
+  assert.deepEqual(readdirSync(diagnosticLogDirectory(dir)).filter(name => name !== "supervisor.jsonl"), []);
+  // The first instance's own writes are far below the cap, but the on-disk
+  // total it shares with the second instance is not.
+  first.info("three", "z".repeat(300));
+  const archives = readdirSync(diagnosticLogDirectory(dir)).filter(name => name !== "supervisor.jsonl");
+  assert.equal(archives.length, 1);
+  second.info("four", "w".repeat(300));
+  assert.equal(readdirSync(diagnosticLogDirectory(dir)).filter(name => name !== "supervisor.jsonl").length, 1);
+  assert.deepEqual(readEntries(dir).map(row => row.event), ["three", "four"]);
+});
+
+test("an eight-day-old first record rotates exactly once and the fresh file ages anew", () => {
+  const dir = home();
+  const file = join(diagnosticLogDirectory(dir), "supervisor.jsonl");
+  mkdirSync(diagnosticLogDirectory(dir), { recursive: true });
+  const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  writeFileSync(file, `${JSON.stringify({ version: 1, at: old, level: "info", source: "supervisor", event: "old", message: "x", pid: 1 })}\n`);
+  const log = createDiagnosticLogger(dir, "supervisor");
+  log.info("new", "y");
+  assert.equal(readdirSync(diagnosticLogDirectory(dir)).filter(name => name !== "supervisor.jsonl").length, 1);
+  assert.deepEqual(readEntries(dir).map(row => row.event), ["new"]);
+  log.info("next", "z");
+  assert.equal(readdirSync(diagnosticLogDirectory(dir)).filter(name => name !== "supervisor.jsonl").length, 1, "the fresh first record must not rotate again");
+  assert.deepEqual(readEntries(dir).map(row => row.event), ["new", "next"]);
+});
+
+test("an unparseable first record falls back to the file mtime for age rotation", () => {
+  const dir = home();
+  const file = join(diagnosticLogDirectory(dir), "supervisor.jsonl");
+  mkdirSync(diagnosticLogDirectory(dir), { recursive: true });
+  writeFileSync(file, `not json\n${JSON.stringify({ version: 1, at: new Date().toISOString(), level: "info", source: "supervisor", event: "later", message: "x", pid: 1 })}\n`);
+  const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  utimesSync(file, old, old);
+  createDiagnosticLogger(dir, "supervisor").info("new", "y");
+  assert.deepEqual(readEntries(dir).map(row => row.event), ["new"], "mtime-older-than-7d active file must rotate");
+});

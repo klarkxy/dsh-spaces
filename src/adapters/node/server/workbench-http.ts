@@ -158,11 +158,15 @@ export async function startWorkbenchHttp(
   port = 0,
 ): Promise<WorkbenchHttpServer> {
   const bound = await bindInitialLoopbackHttp(
-    () =>
+    () => {
       // Authority-bound cookies from other local DSH ports share this host's Cookie header.
-      createServer({ maxHeaderSize: 64 * 1024 }, (req, res) => {
+      const server = createServer({ maxHeaderSize: 64 * 1024 }, (req, res) => {
         void handleRequest(host, req, res);
-      }),
+      });
+      // Active pollers call every 1.5–5 s; a 65 s idle close never interrupts them.
+      server.keepAliveTimeout = 65_000;
+      return server;
+    },
     port,
   );
   const origin = `http://${HOST}:${bound.port}`;

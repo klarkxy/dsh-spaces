@@ -11,6 +11,7 @@ import { PressButton } from "../../../../../src/shared/ui/motion";
 import { useServiceRestart } from "./service-restart";
 import { NativeSpaceMenu } from "./native-space-menu";
 import { nativeStartupLabel, nativeStatusText, nativeTexts } from "./native-texts";
+import { inferSpacesLocale } from "../i18n";
 import { NativeDialog } from "./native-dialog";
 import { CreationRailEntry, CreationFailureDialog } from "./creation-rail";
 
@@ -160,6 +161,7 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
             : ui.phase === "loading" ? texts.guideLoading
             : texts.guideLoading)}</FadeIn>}
         {ui.detail ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="primary" aria-label={texts.failurePrimary}>{texts.failurePrimary}{"\n"}{ui.detail}</FadeIn> : null}
+        {ui.failedAt ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="failed-at" aria-label={texts.failureTime.trimEnd()}>{texts.failureTime}{new Intl.DateTimeFormat(inferSpacesLocale() === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "medium" }).format(new Date(ui.failedAt))}</FadeIn> : null}
         {ui.cleanupDetail ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="cleanup" aria-label={texts.failureCleanup}>{texts.failureCleanup}{"\n"}{ui.cleanupDetail}</FadeIn> : null}
         {typeof ui.instanceRetained === "boolean" ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="instance" aria-label={texts.failureInstance}>{texts.failureInstance}{"\n"}{ui.instanceRetained ? texts.instanceRetainedYes : texts.instanceRetainedNo}</FadeIn> : null}
         {["failed", "service-stopped"].includes(ui.phase) && restart.action}

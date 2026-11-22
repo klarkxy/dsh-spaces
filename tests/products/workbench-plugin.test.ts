@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn as spawnChild } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { Context } from "@deepseek-ai/cordis";
-import { remoteMethods } from "@deepseek-ai/dsh-typert-protocol";
+import { remoteMethods, RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import {
   HOME_CONTROL_DIR_NAME,
   HOME_CONTROL_MANAGER_FILE,
@@ -24,6 +24,8 @@ import { resolveHostIdentity } from "../../packages/plugin/src/host/identity.ts"
 import { SpacesPlugin, injectHintScript } from "../../packages/plugin/src/host/plugin.ts";
 import { WorkbenchHostRuntime } from "../../packages/plugin/src/host/runtime.ts";
 import { createWorkbenchHttpClient, mintSupervisorHandoff } from "../../packages/plugin/src/host/workbench-http.ts";
+import { describeSupervisorFacts } from "../../packages/plugin/src/host/supervisor-attach.ts";
+import { diagnosticLogDirectory } from "../../src/adapters/node/diagnostics/rotating-log.ts";
 import { validateSnapshotRoot } from "../../packages/plugin/src/host/supervisor-pack.ts";
 import {
   COMPONENT_PAYLOAD_ARGV_FLAG,
@@ -1864,4 +1866,132 @@ test("portal Remote preserves the actual entry failure and redacts structured cr
     assert.doesNotMatch((error as Error).message, /synthetic-portal-secret/);
     return true;
   });
+});
+
+function directorySnapshot(root: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      const stat = lstatSync(path);
+      out[relative(root, path)] = stat.mtimeMs;
+      if (stat.isDirectory()) walk(path);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+test("describeSupervisorFacts reports read-only lease and endpoint facts without touching the Home", async () => {
+  const home = tempDir("dsh-facts-");
+  const readOnly = (expected: string): void => {
+    const before = directorySnapshot(home);
+    assert.equal(describeSupervisorFacts(home, false, null), expected);
+    assert.deepEqual(directorySnapshot(home), before, "describeSupervisorFacts must be read-only");
+  };
+  readOnly("No controller holds the Home lease. No supervisor endpoint is recorded.");
+  const handle = leaseWeb(home, "http://127.0.0.1:9");
+  readOnly(`Supervisor PID ${handle.owner.pid} is alive. No supervisor endpoint is recorded.`);
+  const endpoint = v2Endpoint(home, "http://127.0.0.1:9", "O".repeat(32), handle.owner.nonce);
+  writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), endpoint);
+  readOnly(`Supervisor PID ${handle.owner.pid} is alive. A supervisor endpoint is recorded.`);
+  assert.equal(
+    describeSupervisorFacts(home, false, endpoint),
+    `Supervisor PID ${handle.owner.pid} is alive. The recorded endpoint is unchanged.`,
+  );
+  assert.equal(
+    describeSupervisorFacts(home, false, { ...endpoint, serviceEpoch: "ff".repeat(32) }),
+    `Supervisor PID ${handle.owner.pid} is alive. The recorded endpoint belongs to a different service epoch.`,
+  );
+  writeFileSync(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), "{\n");
+  readOnly(`Supervisor PID ${handle.owner.pid} is alive. The recorded supervisor endpoint is unreadable.`);
+});
+
+test("describeSupervisorFacts reports ambiguous ownership and a dead recorded owner", async () => {
+  const ambiguous = tempDir("dsh-facts-ambiguous-");
+  mkdirSync(join(ambiguous, HOME_CONTROL_DIR_NAME, HOME_CONTROL_RUN_DIR_NAME), { recursive: true });
+  assert.equal(
+    describeSupervisorFacts(ambiguous, false, null),
+    "Controller ownership is incomplete or ambiguous. No supervisor endpoint is recorded.",
+  );
+
+  const home = tempDir("dsh-facts-dead-");
+  const script = join(home, "exited-owner.mts");
+  writeFileSync(script, `import { HomeLease } from ${JSON.stringify(new URL("../../src/adapters/node/home/home-lease.ts", import.meta.url).href)};
+new HomeLease(process.argv[2]).acquire("web", "http://127.0.0.1:9/");
+process.exit(17);`);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawnChild(process.execPath, ["--import", "tsx", script, home], { cwd: process.cwd(), stdio: "ignore", windowsHide: true });
+    child.once("error", reject);
+    child.once("exit", code => code === 17 ? resolve() : reject(new Error(`owner exited ${code}`)));
+  });
+  const facts = describeSupervisorFacts(home, false, null);
+  assert.match(facts, /^Supervisor PID \d+ is dead\. No supervisor endpoint is recorded\.$/);
+});
+
+test("presentationSnapshot reports the attach refusal reasons with the entry failure", async () => {
+  const home = tempDir("dsh-snap-reasons-");
+  writeProfile(home, "notes");
+  leaseWeb(home, "http://127.0.0.1:9");
+  const runtime = new WorkbenchHostRuntime({ ...identityInput(home, "notes"), supervisorTimeoutMs: 1000 });
+  await assert.rejects(
+    () => runtime.presentationSnapshot(),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(
+        error.message,
+        /The workbench entry is not available yet\. A controller holds the Home lease but no supervisor endpoint was found\./,
+      );
+      return true;
+    },
+  );
+});
+
+test("presentationSnapshot appends supervisor facts to a state transport failure", async () => {
+  const home = tempDir("dsh-snap-facts-");
+  writeProfile(home, "notes");
+  const bearer = "a".repeat(64), epochRef = { value: HEX64_A };
+  const fixture = await startFixture({ bearer, epochRef });
+  const handle = leaseWeb(home, fixture.origin);
+  epochRef.value = deriveServiceEpoch(handle.owner.nonce);
+  writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE),
+    v2Endpoint(home, fixture.origin, bearer, handle.owner.nonce));
+  try {
+    const runtime = new WorkbenchHostRuntime({
+      ...identityInput(home, "notes"), supervisorTimeoutMs: 3000,
+      connect: () => ({
+        state: async () => {
+          throw new RemoteError("workbench/unavailable", "The workbench request did not reach the supervisor (method: state; cause: ECONNRESET; after 7 ms).", {});
+        },
+      }) as never,
+    });
+    await assert.rejects(
+      () => runtime.presentationSnapshot(),
+      (error: unknown) => {
+        assert.ok(error instanceof RemoteError);
+        assert.equal(error.code, "workbench/unavailable");
+        assert.ok(error.message.startsWith("The workbench request did not reach the supervisor (method: state; cause: ECONNRESET; after 7 ms)."), error.message);
+        assert.ok(error.message.endsWith(`Supervisor PID ${handle.owner.pid} is alive. The recorded endpoint is unchanged.`), error.message);
+        return true;
+      },
+    );
+  } finally { await fixture.close(); }
+});
+
+test("a failed guide call writes a host.guide-failed diagnostic record with the remote name", async () => {
+  const home = tempDir("dsh-guide-log-");
+  writeProfile(home, "notes");
+  const runtime = new WorkbenchHostRuntime(identityInput(home, "notes"));
+  runtime.presentationSnapshot = async () => { throw new Error("fixture presentation failure Authorization: Bearer guide-secret"); };
+  const plugin = new SpacesPlugin(pluginContext(), {}, runtime);
+  await assert.rejects(() => plugin.guide.presentationSnapshot(), /fixture presentation failure/);
+  const file = join(diagnosticLogDirectory(home), "host.jsonl");
+  const rows = existsSync(file)
+    ? readFileSync(file, "utf8").trim().split("\n").map(line => JSON.parse(line) as { event?: string; level?: string; context?: { method?: string } })
+    : [];
+  const record = rows.find(row => row.event === "host.guide-failed");
+  assert.ok(record, "host.guide-failed must be recorded in host.jsonl");
+  assert.equal(record.level, "error");
+  assert.equal(record.context?.method, "presentationSnapshot");
+  assert.equal(readFileSync(file, "utf8").includes("guide-secret"), false);
 });

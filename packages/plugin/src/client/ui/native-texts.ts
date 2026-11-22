@@ -97,6 +97,18 @@ export interface NativeShellTexts {
   guestContent: string;
   desktopLaunchUnsupported: string;
   launchObservationEnded: string;
+  selectionDeadline: string;
+  selectionLoadMismatch: string;
+  guestOpenFailed: string;
+  guestInitialLoadTimeout: string;
+  guestBootstrapFailed: string;
+  guestLoadFailed: string;
+  guestProcessGone: string;
+  guestNavigatedAway: string;
+  invalidPortalAddress: string;
+  portalFailureNoDetail: string;
+  browserResultFailed: string;
+  failureTime: string;
   failurePrimary: string;
   failureCleanup: string;
   failureInstance: string;
@@ -209,6 +221,18 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     guestContent: "空间内容",
     desktopLaunchUnsupported: "无法读取启动状态，空间服务是否已启动无法确认。",
     launchObservationEnded: "启动状态已变化，本次启动观察已结束。",
+    selectionDeadline: "45 秒内未收到空间页面的选择应答。",
+    selectionLoadMismatch: "空间页面未能完成选择跳转。",
+    guestOpenFailed: "空间页面未能打开。",
+    guestInitialLoadTimeout: "空间页面的初始加载超时（15 秒）。",
+    guestBootstrapFailed: "空间服务入口未能载入空间页面。",
+    guestLoadFailed: "空间页面加载失败（{detail}）。",
+    guestProcessGone: "空间页面的渲染进程已退出（{detail}）。",
+    guestNavigatedAway: "空间页面跳转到了空间入口之外。",
+    invalidPortalAddress: "观察到无效的空间页面地址。",
+    portalFailureNoDetail: "空间页面报告了失败，但未提供原因。",
+    browserResultFailed: "空间页面的浏览器回执未能送达。",
+    failureTime: "失败时间：",
     failurePrimary: "失败原因",
     failureCleanup: "随后停止结果",
     failureInstance: "进程记录",
@@ -319,6 +343,18 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     guestContent: "Space content",
     desktopLaunchUnsupported: "Startup state is unavailable; whether the space service started could not be confirmed.",
     launchObservationEnded: "Startup state changed; launch observation ended.",
+    selectionDeadline: "The space page did not answer the selection within 45 seconds.",
+    selectionLoadMismatch: "The space page could not complete the selection navigation.",
+    guestOpenFailed: "The space page could not be opened.",
+    guestInitialLoadTimeout: "The space page's initial load timed out after 15 seconds.",
+    guestBootstrapFailed: "The Spaces entry could not be loaded into the space page.",
+    guestLoadFailed: "The space page failed to load ({detail}).",
+    guestProcessGone: "The space page's renderer exited ({detail}).",
+    guestNavigatedAway: "The space page navigated away from the Spaces entry.",
+    invalidPortalAddress: "The observed space page address was invalid.",
+    portalFailureNoDetail: "The space page reported a failure without a reason.",
+    browserResultFailed: "The space page's browser result could not be delivered.",
+    failureTime: "Failed at: ",
     failurePrimary: "Failure",
     failureCleanup: "Stop result afterwards",
     failureInstance: "Process record",

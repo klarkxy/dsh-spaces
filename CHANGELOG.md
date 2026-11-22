@@ -2,6 +2,15 @@
 
 All notable changes to DSH Spaces are recorded here. This project follows Keep a Changelog style; version ranges follow the repository's own 0.x policy.
 
+## [Unreleased]
+
+### Fixed
+
+- Managed spaces now have one 30-second cooperative shutdown window instead of five seconds. A clean exit observed after a failed stop updates the process to stopped without reporting an unrelated startup crash or rewriting the failed operation; failed service shutdowns still preserve ownership and do not retry or restart.
+- Desktop failure pages now carry the actual diagnosis: a supervisor request that never arrived reports its bounded transport cause and elapsed time, a presentation failure appends the read-only supervisor liveness and endpoint facts, renderer and load failures keep a sanitized reason, and the failure panel shows the failure time. A failed guide request is recorded in the host diagnostic log with its remote name; the failure stays terminal without reconnecting, retrying or relaunching.
+- The supervisor HTTP server allows 65 seconds of keep-alive headroom so 1.5–5 second pollers never meet a server-side idle close.
+- Diagnostic log rotation is decided from on-disk state on every write: the active file's first record time and its real size, so alternating logger instances and processes no longer leave stray one-line archives at startup and an eight-day-old first record rotates exactly once.
+
 ## [0.5.0] — GitHub Release 2026-11-14; npm pending
 
 The npm publication request was accepted, but the registry currently exposes only a temporary `0.0.0-stage` holding version. The real 0.5.0 npm version and its public-install acceptance remain pending. The GitHub Release archive is available and its download matches the approved package.

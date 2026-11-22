@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
 import {
   createWorkbenchHttpClient,
+  mintSupervisorHandoff,
+  mintSupervisorPortal,
   WORKBENCH_HTTP_BODY_LIMIT,
   WORKBENCH_PRODUCT_SHARE_BODY_LIMIT,
   workbenchPost,
@@ -429,6 +431,129 @@ test("LLM public errors pass through the Host client without leaking details", a
       assert.equal(error.message, WORKBENCH_PUBLIC_ERROR["workbench/unavailable"]);
       assert.deepEqual(error.details, {});
       assert.equal(JSON.stringify(error).includes("sk-live"), false);
+      return true;
+    },
+  );
+});
+
+test("workbench transport failures report method, transport cause and elapsed time without internals", async () => {
+  const identity = { parse: (value: unknown) => value };
+  const cause = Object.assign(new Error("connect ECONNRESET 127.0.0.1:9660 secret-token"), { code: "ECONNRESET" });
+  await assert.rejects(
+    () =>
+      workbenchPost(
+        async () => {
+          throw new TypeError("fetch failed", { cause });
+        },
+        ORIGIN,
+        BEARER,
+        "state",
+        {},
+        identity,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof RemoteError);
+      assert.equal(error.code, "workbench/unavailable");
+      assert.match(error.message, /did not reach the supervisor \(method: state; cause: ECONNRESET; after \d+ ms\)\./);
+      assert.equal(error.message.includes("secret-token"), false);
+      assert.equal(error.message.includes("9660"), false);
+      return true;
+    },
+  );
+  for (const name of ["AbortError", "TimeoutError"] as const) {
+    await assert.rejects(
+      () =>
+        workbenchPost(
+          async () => {
+            throw new DOMException("did not finish", name);
+          },
+          ORIGIN,
+          BEARER,
+          "state",
+          {},
+          identity,
+        ),
+      (error: unknown) =>
+        error instanceof RemoteError &&
+        error.code === "workbench/unavailable" &&
+        error.message.includes(`cause: ${name}`),
+    );
+  }
+  await assert.rejects(
+    () =>
+      workbenchPost(
+        async () => {
+          throw new TypeError("fetch failed", { cause: new Error("no code here") });
+        },
+        ORIGIN,
+        BEARER,
+        "state",
+        {},
+        identity,
+      ),
+    (error: unknown) =>
+      error instanceof RemoteError && error.code === "workbench/unavailable" && error.message.includes("cause: unknown"),
+  );
+  const aggregate = new AggregateError([Object.assign(new Error("refused"), { code: "ECONNREFUSED" })], "several failed");
+  await assert.rejects(
+    () =>
+      workbenchPost(
+        async () => {
+          throw new TypeError("fetch failed", { cause: aggregate });
+        },
+        ORIGIN,
+        BEARER,
+        "state",
+        {},
+        identity,
+      ),
+    (error: unknown) =>
+      error instanceof RemoteError && error.code === "workbench/unavailable" && error.message.includes("cause: ECONNREFUSED"),
+  );
+});
+
+test("internal bootstrap and portal mints report transport cause and bounded HTTP rejection", async () => {
+  const audience = { parentOrigin: "http://127.0.0.1:3090", channel: "ab".repeat(16) };
+  const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:9660 mint-secret"), { code: "ECONNREFUSED" });
+  await assert.rejects(
+    () =>
+      mintSupervisorHandoff(
+        async () => {
+          throw new TypeError("fetch failed", { cause });
+        },
+        endpoint,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof RemoteError);
+      assert.equal(error.code, "workbench/unavailable");
+      assert.match(error.message, /did not reach the supervisor \(method: internal\/bootstrap; cause: ECONNREFUSED; after \d+ ms\)\./);
+      assert.equal(error.message.includes("mint-secret"), false);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      mintSupervisorPortal(
+        async () => {
+          throw new TypeError("fetch failed", { cause });
+        },
+        endpoint,
+        audience,
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof RemoteError);
+      assert.equal(error.code, "workbench/unavailable");
+      assert.match(error.message, /did not reach the supervisor \(method: internal\/portal; cause: ECONNREFUSED; after \d+ ms\)\./);
+      assert.equal(error.message.includes("mint-secret"), false);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => mintSupervisorPortal(async () => new Response("nope", { status: 503 }), endpoint, audience),
+    (error: unknown) => {
+      assert.ok(error instanceof RemoteError);
+      assert.equal(error.code, "workbench/unavailable");
+      assert.equal(error.message, "The supervisor rejected the presentation entry (HTTP 503).");
       return true;
     },
   );

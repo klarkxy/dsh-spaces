@@ -44,7 +44,7 @@ type NativeLaunchPhase = DesktopLaunchState["phase"];
 type NativeNavigationIntent = "settings" | "create" | "detail";
 type NativeState = { phase: "loading" | NativeLaunchPhase | "ready" | "stopping" | "service-stopped" | "failed"; inventory: PortalSnapshot | null;
   selected: "current" | NativeSpaceTarget; pending: NativeSpaceTarget | null; error: string | null; detail: string | null;
-  cleanupDetail: string | null; instanceRetained: boolean | null;
+  failedAt: string | null; cleanupDetail: string | null; instanceRetained: boolean | null;
   portalFailure: PortalFailure | null; guide: boolean;
   navigationIntent: NativeNavigationIntent | null; createHandoff: boolean;
   operation: { spaceId: string; action: DesktopSpaceAction["action"] } | null; operationError: string | null;
@@ -54,7 +54,7 @@ type NativeState = { phase: "loading" | NativeLaunchPhase | "ready" | "stopping"
 
 /** One native guest, one lifetime. It has no Node API or product script execution channel. */
 export class NativeHostController {
-  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null };
+  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, failedAt: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null };
   /** Creation job ids seen queued/running this session; failed entries need it to stay visible. */
   private seenCreations = new Set<string>();
   private dismissedCreations = new Set<string>();
@@ -123,7 +123,7 @@ export class NativeHostController {
     if (!this.guideApi.stopService || this.state.phase !== "ready" || this.state.operation) throw Error(nativeTexts().serviceCannotStop);
     // End discovery before submission. Only the exact host-side operation decides
     // success; the guest disappearing during this shutdown cannot declare failure.
-    this.patch({ phase: "stopping", guide: true, pending: null, selected: "current", error: null, detail: null });
+    this.patch({ phase: "stopping", guide: true, pending: null, selected: "current", error: null, detail: null, failedAt: null });
     this.stop();
     try {
       const result = await this.guideApi.stopService(confirmationId);
@@ -305,7 +305,7 @@ export class NativeHostController {
     const diagnostics = this.launchDiagnostics(snapshot);
     this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null; this.desiredGuest = 0;
     this.patch({ phase: "service-stopped", guide: false, selected: "current", pending: null, navigationIntent: null, createHandoff: false,
-      error: null, detail: diagnostics.detail, cleanupDetail: diagnostics.cleanupDetail, instanceRetained: diagnostics.instanceRetained, inventory: null });
+      error: null, detail: diagnostics.detail, failedAt: null, cleanupDetail: diagnostics.cleanupDetail, instanceRetained: diagnostics.instanceRetained, inventory: null });
   }
   private consumeIntent() {
     const intent = this.intent;
@@ -522,13 +522,19 @@ export class NativeHostController {
     const fragment = "#select/" + requestId + "/" + target + (generation === undefined ? "" : "/" + generation);
     this.patch({ pending: target, error: null, detail: null, guide: false });
     clearTimeout(this.selectionTimer);
-    this.selectionTimer = setTimeout(() => { if (this.sequence === requestId) { this.navNote("deadline", { stage: "selection" }); this.fail(); } }, 45000);
+    this.selectionTimer = setTimeout(() => { if (this.sequence === requestId) { this.navNote("deadline", { stage: "selection" }); this.fail(nativeTexts().selectionDeadline); } }, 45000);
+    let selectRejected = false;
     void this.open().then(async () => {
       if (this.stopped || requestId !== this.sequence) return;
       this.navNote("select-load-start");
-      await this.guest!.loadURL(this.nativeUrl! + fragment);
+      try {
+        await this.guest!.loadURL(this.nativeUrl! + fragment);
+      } catch (error) {
+        selectRejected = true;
+        throw error;
+      }
       this.navNote("select-load-complete");
-    }).catch(() => {
+    }).catch((error) => {
       this.navNote("select-load-reject");
       if (this.stopped || requestId !== this.sequence || this.state.pending !== target) return;
       // Electron can reject the request URL after the page has already acknowledged
@@ -539,7 +545,9 @@ export class NativeHostController {
         // The fragment is already committed even when Electron rejects loadURL.
         // Keep waiting for its bounded acknowledgement; do not send it again.
         if (!this.stopped && this.state.pending === target &&
-          actual !== this.nativeUrl + fragment) this.fail();
+          actual !== this.nativeUrl + fragment) {
+          this.fail(selectRejected ? nativeTexts().selectionLoadMismatch : this.detailOf(error) ?? nativeTexts().guestOpenFailed);
+        }
       } catch (error) { this.fail(this.detailOf(error)); }
     });
   }
@@ -572,16 +580,16 @@ export class NativeHostController {
     const ready = new Promise<void>((resolve, reject) => {
       let settled = false;
       let initialFinished = false;
-      const finish = (error = false) => {
+      const finish = (error: Error | null = null) => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         this.lifetime.signal.removeEventListener("abort", aborted);
         element.removeEventListener("did-stop-loading", onStop);
-        error ? reject(Error()) : resolve();
+        error ? reject(error) : resolve();
       };
-      const aborted = () => finish(true);
-      const timeout = setTimeout(() => finish(true), 15000);
+      const aborted = () => finish(new Error("native guest load aborted"));
+      const timeout = setTimeout(() => finish(new Error(nativeTexts().guestInitialLoadTimeout)), 15000);
       this.lifetime.signal.addEventListener("abort", aborted, { once: true });
       // dom-ready is only an observation. Electron can settle the next loadURL
       // on this blank page's did-finish-load or did-stop-loading, so bootstrap
@@ -596,18 +604,32 @@ export class NativeHostController {
       element.addEventListener("did-stop-loading", onStop);
     });
     element.addEventListener("did-fail-load", event => {
-      const failure = event as Event & { errorCode?: number; isMainFrame?: boolean; validatedURL?: string };
+      const failure = event as Event & { errorCode?: number; errorDescription?: string; isMainFrame?: boolean; validatedURL?: string };
       try {
         this.navDiag("did-fail-load", {
           url: failure.validatedURL, isMainFrame: failure.isMainFrame, errorCode: failure.errorCode,
           ignored: failure.isMainFrame === false || failure.errorCode === -3,
         });
       } catch { /* diagnosis never changes the failure decision */ }
-      if (failure.isMainFrame !== false && failure.errorCode !== -3) this.fail();
+      if (failure.isMainFrame !== false && failure.errorCode !== -3) {
+        // The validated URL can carry credentials; only the numeric code and its description are reported.
+        const bits = [
+          typeof failure.errorCode === "number" ? String(failure.errorCode) : null,
+          typeof failure.errorDescription === "string" && failure.errorDescription ? failure.errorDescription : null,
+        ].filter((part): part is string => part !== null);
+        this.fail(nativeTexts().guestLoadFailed.replace("{detail}", bits.join(" ") || "unknown"));
+      }
     });
     element.addEventListener("did-start-navigation", event => { this.navNote("did-start-navigation", event); });
     element.addEventListener("did-frame-navigate", event => { this.navNote("did-frame-navigate", event); });
-    element.addEventListener("render-process-gone", () => this.fail());
+    element.addEventListener("render-process-gone", event => {
+      const details = (event as Event & { details?: { reason?: unknown; exitCode?: unknown } }).details;
+      const bits = [
+        typeof details?.reason === "string" && details.reason ? details.reason : null,
+        typeof details?.exitCode === "number" ? String(details.exitCode) : null,
+      ].filter((part): part is string => part !== null);
+      this.fail(nativeTexts().guestProcessGone.replace("{detail}", bits.join(", ") || "unknown"));
+    });
     element.addEventListener("did-navigate-in-page", event => { this.navNote("did-navigate-in-page", event); this.observed(); });
     this.container!.append(element); await ready;
     if (this.stopped || this.desiredGuest === 0) {
@@ -624,27 +646,27 @@ export class NativeHostController {
       await element.loadURL(target.origin + target.path + "?native=" + this.channel);
     } catch (error) {
       this.navNote("bootstrap-load-reject");
-      throw error;
+      throw new Error(nativeTexts().guestBootstrapFailed, { cause: error });
     }
     this.navNote("bootstrap-load-complete");
     if (!this.stopped && element.getURL() !== this.nativeUrl) throw Error("native channel rejected");
-    element.addEventListener("did-navigate", () => { if (!this.stopped && !element.getURL().startsWith(this.nativeUrl! + "#") && element.getURL() !== this.nativeUrl) this.fail(); });
+    element.addEventListener("did-navigate", () => { if (!this.stopped && !element.getURL().startsWith(this.nativeUrl! + "#") && element.getURL() !== this.nativeUrl) this.fail(nativeTexts().guestNavigatedAway); });
   }
   private observed(observedUrl?: string) {
     if (this.stopped || !this.guest || !this.nativeUrl) return;
     let url: URL;
     try { url = new URL(observedUrl ?? this.guest.getURL()); }
-    catch { this.fail(); return; }
-    if (url.origin + url.pathname !== this.nativeUrl || url.search || url.username || url["password"]) { this.fail(); return; }
+    catch { this.fail(nativeTexts().invalidPortalAddress); return; }
+    if (url.origin + url.pathname !== this.nativeUrl || url.search || url.username || url["password"]) { this.fail(nativeTexts().invalidPortalAddress); return; }
     if (/^#service-stop-preview\/[1-9][0-9]{0,9}$/.test(url.hash)) {
       if (this.state.phase === "ready" && this.state.selected === "@settings" && !this.state.pending && !this.state.operation)
         this.patch({ serviceStopRequest: this.state.serviceStopRequest + 1 });
       return;
     }
-    if (url.hash === "#failed") { this.fail(); return; }
+    if (url.hash === "#failed") { this.fail(nativeTexts().portalFailureNoDetail); return; }
     if (url.hash.startsWith("#failed")) {
       const failure = parseNativePortalFailureHash(url.hash);
-      this.fail(failure ? portalFailureDetail(failure) : null, failure);
+      this.fail(failure ? portalFailureDetail(failure) : nativeTexts().portalFailureNoDetail, failure);
       return;
     }
     if (url.hash.startsWith("#browser/")) {
@@ -716,7 +738,7 @@ export class NativeHostController {
     if (!fragment) return;
     const responseUrl = this.nativeUrl + fragment;
     try { await this.guest.loadURL(responseUrl); }
-    catch { if (!this.stopped && this.guest?.getURL() !== responseUrl && this.browserRequest === request.requestId) this.fail(); }
+    catch { if (!this.stopped && this.guest?.getURL() !== responseUrl && this.browserRequest === request.requestId) this.fail(nativeTexts().browserResultFailed); }
   }
   private clearNavigationIntent() {
     this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null;
@@ -732,7 +754,7 @@ export class NativeHostController {
     this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null; this.desiredGuest = 0;
     const guide = this.state.guide || this.state.selected !== "current" || this.state.pending !== null;
     this.patch({ phase: "failed", pending: null, operation: null, inventory: null, selected: "current", guide,
-      navigationIntent: null, createHandoff: false, error: nativeTexts().serviceUnavailable, detail,
+      navigationIntent: null, createHandoff: false, error: nativeTexts().serviceUnavailable, detail, failedAt: new Date().toISOString(),
       cleanupDetail: diagnostics?.cleanupDetail ?? null, instanceRetained: diagnostics?.instanceRetained ?? null, portalFailure });
     this.stop();
   }

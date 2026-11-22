@@ -12,6 +12,7 @@ import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailure
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 import { bindDshCli, invocationProfile } from "../../src/adapters/node/products/spaces-service.ts";
 import { NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
+import { nativeTexts } from "../../packages/plugin/src/client/ui/native-texts.ts";
 import { NativeBrowserHost } from "../../packages/plugin/src/client/native-browser-host.ts";
 import type { DesktopLaunchState } from "../../packages/plugin/src/types.ts";
 import { BROWSER_RELAY, BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, browserProtocolScript,
@@ -700,7 +701,8 @@ test("native failure parsing follows exact trusted native origin/path and reject
     f.observe(f.nativeUrl + suffix);
     assert.equal(f.controller.getSnapshot().phase, "failed");
     assert.equal(f.controller.getSnapshot().portalFailure, null);
-    assert.equal(f.controller.getSnapshot().detail, null);
+    assert.equal(f.controller.getSnapshot().detail, nativeTexts().portalFailureNoDetail);
+    assert.ok(f.controller.getSnapshot().failedAt);
     assert.deepEqual(f.calls, ["role", "begin", "directory", "remove", "release"]);
   }
   for (const url of ["http://127.0.0.1:3334/native/" + "a".repeat(32),
@@ -712,7 +714,7 @@ test("native failure parsing follows exact trusted native origin/path and reject
     f.observe(url + fragment);
     assert.equal(f.controller.getSnapshot().phase, "failed");
     assert.equal(f.controller.getSnapshot().portalFailure, null);
-    assert.equal(f.controller.getSnapshot().detail, null);
+    assert.equal(f.controller.getSnapshot().detail, nativeTexts().invalidPortalAddress);
     assert.doesNotMatch(JSON.stringify(f.controller.getSnapshot()), /private|grant|user:/);
     assert.deepEqual(f.calls, ["role", "begin", "directory", "remove", "release"]);
   }
@@ -910,7 +912,43 @@ test("ignored subframe and main-frame -3 stay pending, and another main-frame co
   assert.equal(controller.getSnapshot().phase, "failed");
   assert.equal(loads.length, 2);
   assert.deepEqual(released, ["diag-lease"]);
+  const failed = controller.getSnapshot();
+  assert.equal(failed.detail, nativeTexts().guestLoadFailed.replace("{detail}", "-2"));
+  for (const hidden of ["secret-token", "channel-secret", "hash-secret", "evil.example"]) assert.equal((failed.detail ?? "").includes(hidden), false, hidden);
+  assert.ok(failed.failedAt);
+  assert.ok(!Number.isNaN(Date.parse(failed.failedAt!)));
   assert.ok(navRecords(captured.lines).some(row => row.ev === "fail"));
+});
+
+test("a gone renderer reports its reason and exit code and stamps the failure time", async t => {
+  const captured = captureNavLines();
+  t.after(captured.restore);
+  const { controller, guest, released } = await openSettingsGuest(t);
+  controller.select("@settings"); await tick();
+  assert.equal(controller.getSnapshot().pending, "@settings");
+  guest.dispatchEvent(Object.assign(new Event("render-process-gone"), { details: { reason: "crashed", exitCode: 1 } }));
+  await tick();
+  const failed = controller.getSnapshot();
+  assert.equal(failed.phase, "failed");
+  assert.equal(failed.detail, nativeTexts().guestProcessGone.replace("{detail}", "crashed, 1"));
+  assert.ok(failed.failedAt);
+  assert.deepEqual(released, ["diag-lease"]);
+  assert.ok(navRecords(captured.lines).some(row => row.ev === "fail"));
+});
+
+test("the failed panel renders the failure time", async () => {
+  const React = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { NativeHostShell } = await import("../../packages/plugin/src/client/ui/native-shell.tsx");
+  const controller = new NativeHostController({} as never, {} as never);
+  Object.assign(controller, { state: { phase: "failed", selected: "current", pending: null, guide: true,
+    error: nativeTexts().serviceUnavailable, detail: "synthetic detail", failedAt: "2026-11-22T10:15:30.000Z",
+    cleanupDetail: null, instanceRetained: null, portalFailure: null, inventory: null,
+    navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null,
+    serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null } });
+  const html = renderToStaticMarkup(React.createElement(NativeHostShell, { controller }));
+  assert.match(html, /data-reason="failed-at"/);
+  assert.match(html, /Failed at|失败时间/);
 });
 
 test("the 45 second selection deadline still fails once and does not relaunch", async t => {
@@ -1078,7 +1116,7 @@ test("the native rail halo marks a space needing attention without replacing its
   const controller = new NativeHostController({} as never, {} as never);
   Object.assign(controller, { state: { phase: "ready", selected: "current", pending: null, error: null, guide: false,
     navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null,
-    serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null, detail: null, cleanupDetail: null,
+    serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null, detail: null, failedAt: null, cleanupDetail: null,
     instanceRetained: null, portalFailure: null,
     inventory: { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [
       { id: "alpha", displayName: "Alpha", status: "running", generation: 1, attention: "required" },

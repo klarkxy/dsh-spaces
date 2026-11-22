@@ -17,6 +17,7 @@ import {
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
 } from "../../../../src/adapters/node/home/supervisor-endpoint";
+import { redactPublicReason } from "../../../../src/shared/public-reason";
 
 export type LeaseVerdict = "ok" | "free" | "foreign" | "ambiguous" | "dead" | "unbound" | "mismatch";
 
@@ -73,6 +74,46 @@ export async function pingSupervisorState(
   if (state.protocolVersion !== 2) return false;
   if (state.serviceEpoch !== endpoint.serviceEpoch) return false;
   return true;
+}
+
+/**
+ * Read-only facts about the recorded Home ownership and supervisor endpoint,
+ * appended to presentation transport failures. Discovery only; it never
+ * creates, clears or mutates control records, and it never throws.
+ */
+export function describeSupervisorFacts(
+  home: string,
+  allowRealHome: boolean,
+  attached: SupervisorEndpoint | null,
+): string {
+  try {
+    const lease = new HomeLease(home, { allowRealHome });
+    const inspection = lease.inspect();
+    let leaseFact: string;
+    if (!inspection.held) {
+      leaseFact = "No controller holds the Home lease.";
+    } else if ("owner" in inspection && !inspection.handoff) {
+      leaseFact = `Supervisor PID ${inspection.owner.pid} is ${inspection.liveness}.`;
+    } else {
+      leaseFact = "Controller ownership is incomplete or ambiguous.";
+    }
+    const recorded = readEndpointFile(join(lease.home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE));
+    let endpointFact: string;
+    if ("missing" in recorded) {
+      endpointFact = "No supervisor endpoint is recorded.";
+    } else if ("invalid" in recorded) {
+      endpointFact = "The recorded supervisor endpoint is unreadable.";
+    } else if (!attached) {
+      endpointFact = "A supervisor endpoint is recorded.";
+    } else {
+      endpointFact = recorded.endpoint.serviceEpoch === attached.serviceEpoch
+        ? "The recorded endpoint is unchanged."
+        : "The recorded endpoint belongs to a different service epoch.";
+    }
+    return `${leaseFact} ${endpointFact}`;
+  } catch (error) {
+    return `Supervisor facts could not be read: ${redactPublicReason(error instanceof Error ? error.message : String(error))}`;
+  }
 }
 
 export async function attachExistingSupervisor(

@@ -26,6 +26,8 @@ export const DIAGNOSTIC_LOG_MAX_FILE_BYTES = 100 * 1024 * 1024;
 export const DIAGNOSTIC_LOG_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 export const DIAGNOSTIC_LOG_MAX_MESSAGE_CHARS = 16_000;
 export const DIAGNOSTIC_LOG_MAX_CONTEXT_CHARS = 8_000;
+/** Bounded read for the first record's timestamp; one diagnostic line never exceeds it. */
+export const DIAGNOSTIC_LOG_FIRST_RECORD_READ_BYTES = 64 * 1024;
 
 const SOURCE_RE = /^[a-z][a-z0-9-]{0,63}$/;
 const EVENT_RE = /^[a-z][a-z0-9.-]{0,127}$/;
@@ -77,9 +79,10 @@ export function createDiagnosticLogger(
 export class RotatingDiagnosticLogger implements DiagnosticLogger {
   readonly file: string;
   private lastError: string | null = null;
-  private size = 0;
-  private openedAt = 0;
-  private initialized = false;
+  /** Last on-disk size this instance observed; -1 until the first stat. */
+  private lastSize = -1;
+  /** Cached `at` of the first record in the active file (mtime when unparseable). */
+  private firstRecordAt: number | null = null;
   private writing = false;
   private sequence = 0;
   private loggedWriteFailure = false;
@@ -140,13 +143,26 @@ export class RotatingDiagnosticLogger implements DiagnosticLogger {
     this.writing = true;
     try {
       this.openManagedDirectory();
-      this.prepare(at);
-      if (this.size > 0 && (this.size + Buffer.byteLength(line) > this.maxFileBytes ||
-          at.getTime() - this.openedAt >= this.maxAgeMs)) {
+      // Rotation is decided from on-disk state on every write: several logger
+      // instances and processes append to the same file, so an in-memory
+      // counter cannot see their bytes, and a re-created file can carry a
+      // tunneled birthtime older than its actual first record.
+      const stat = this.regularFile(this.file);
+      const size = stat?.size ?? 0;
+      if (!stat) {
+        this.firstRecordAt = null;
+      } else if (this.firstRecordAt === null || size < this.lastSize) {
+        // An empty file has no first record yet; the next write reads the real one.
+        this.firstRecordAt = size > 0 ? this.firstRecordTime(stat.mtimeMs) : null;
+      }
+      this.lastSize = size;
+      const bytes = Buffer.byteLength(line);
+      const firstAt = this.firstRecordAt ?? at.getTime();
+      if (size > 0 && (size + bytes > this.maxFileBytes || at.getTime() - firstAt >= this.maxAgeMs)) {
         this.rotate(at);
       }
       appendFileSync(this.file, line, { encoding: "utf8", mode: 0o600 });
-      this.size += Buffer.byteLength(line);
+      this.lastSize += bytes;
       this.prune(at);
       this.lastError = null;
       this.loggedWriteFailure = false;
@@ -154,7 +170,6 @@ export class RotatingDiagnosticLogger implements DiagnosticLogger {
     } catch (error) {
       const detail = sanitizeDiagnosticText(error instanceof Error ? error.message : String(error), 500);
       this.lastError = `The local diagnostic log could not be written: ${detail}`;
-      this.initialized = false;
       if (!this.loggedWriteFailure) {
         this.loggedWriteFailure = true;
         try {
@@ -187,13 +202,34 @@ export class RotatingDiagnosticLogger implements DiagnosticLogger {
     return entry;
   }
 
-  private prepare(at: Date): void {
-    if (this.initialized) return;
-    this.openManagedDirectory();
-    const stat = this.regularFile(this.file);
-    this.size = stat?.size ?? 0;
-    this.openedAt = stat ? Math.min(...[stat.birthtimeMs, stat.mtimeMs].filter(value => value > 0)) : at.getTime();
-    this.initialized = true;
+  /**
+   * `at` of the first record in the active file, from a bounded read of its
+   * start. An unparseable or unreadable first record falls back to the file
+   * mtime; the birthtime is never trusted because NTFS tunneling can restore
+   * a deleted file's old birthtime on recreation.
+   */
+  private firstRecordTime(fallbackMs: number): number {
+    try {
+      const descriptor = openSync(this.file, "r");
+      try {
+        const buffer = Buffer.alloc(DIAGNOSTIC_LOG_FIRST_RECORD_READ_BYTES);
+        const read = readSync(descriptor, buffer, 0, buffer.length, 0);
+        const first = buffer.subarray(0, read).toString("utf8").split("\n", 1)[0];
+        const parsed: unknown = JSON.parse(first);
+        const at = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as { at?: unknown }).at
+          : undefined;
+        if (typeof at === "string") {
+          const time = Date.parse(at);
+          if (Number.isFinite(time)) return time;
+        }
+        return fallbackMs;
+      } finally {
+        closeSync(descriptor);
+      }
+    } catch {
+      return fallbackMs;
+    }
   }
 
   private rotate(at: Date): void {
@@ -205,12 +241,11 @@ export class RotatingDiagnosticLogger implements DiagnosticLogger {
     }
     if (lexists(archive)) throw new Error("Diagnostic log archive already exists.");
     renameSync(this.file, archive);
-    this.size = 0;
-    this.openedAt = at.getTime();
+    this.lastSize = 0;
+    this.firstRecordAt = null;
   }
 
   private prune(at: Date): void {
-    this.rotateStaleActive(at);
     const archives: Array<{ name: string; size: number; mtime: number }> = [];
     let total = 0;
     for (const name of readdirSync(this.directory)) {
@@ -233,13 +268,6 @@ export class RotatingDiagnosticLogger implements DiagnosticLogger {
     }
   }
 
-  private rotateStaleActive(at: Date): void {
-    const stat = this.regularFile(this.file);
-    if (!stat || stat.size === 0) return;
-    if (at.getTime() - stat.mtimeMs < this.maxAgeMs) return;
-    this.rotate(at);
-  }
-
   private openManagedDirectory(): void {
     if (lexists(this.home)) {
       const homeStat = lstatSync(this.home);
@@ -258,7 +286,7 @@ export class RotatingDiagnosticLogger implements DiagnosticLogger {
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Diagnostic log directory is not a real directory.");
   }
 
-  private regularFile(path: string): { size: number; birthtimeMs: number; mtimeMs: number } | undefined {
+  private regularFile(path: string): { size: number; mtimeMs: number } | undefined {
     try {
       const stat = lstatSync(path);
       if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Diagnostic log is not a regular file.");

@@ -396,3 +396,11 @@ test("native bootstrap goes directly to the authenticated portal without an open
   const ordinary = await fetch(`${origin}/bootstrap/ordinary`, { redirect: "manual" });
   assert.equal(ordinary.headers.get("location"), "/");
 });
+
+test("the supervisor HTTP server keeps 65 s of keep-alive headroom for active pollers", async () => {
+  let origin = "";
+  const started = await startWorkbenchHttp(runtime(() => origin));
+  origin = started.origin;
+  closers.push(started.close);
+  assert.equal(started.server.keepAliveTimeout, 65_000);
+});

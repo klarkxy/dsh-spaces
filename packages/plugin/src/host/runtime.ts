@@ -41,7 +41,10 @@ import {
   type StartupWatch,
   type StartupWatchEvent,
 } from "./startup-observation";
-import { attachExistingSupervisor, pingSupervisorState, type SupervisorAttachResult } from "./supervisor-attach";
+import { attachExistingSupervisor, describeSupervisorFacts, pingSupervisorState, type SupervisorAttachResult } from "./supervisor-attach";
+import { RemoteError } from "@deepseek-ai/dsh-typert-protocol";
+import type { DiagnosticLogger } from "../../../../src/adapters/node/diagnostics/rotating-log";
+import { hostProcessDiagnosticLogger } from "../../../../src/adapters/node/diagnostics/host-log";
 import {
   bootstrapSupervisor,
   defaultPayloadRoot,
@@ -113,6 +116,13 @@ export class WorkbenchHostRuntime {
     return resolveHostIdentity(this.options);
   }
 
+  /** The confirmed host's process diagnostic log; undefined before identity confirmation. */
+  diagnosticLogger(): DiagnosticLogger | undefined {
+    const identity = this.identity;
+    if (!identity.confirmed || !identity.home) return undefined;
+    return hostProcessDiagnosticLogger(identity.home, { allowRealHome: this.allowRealHome });
+  }
+
   get shouldRegisterManager(): boolean {
     return this.identity.role === "manager" && !this.identity.recoveryRequired && this.identity.confirmed;
   }
@@ -168,11 +178,24 @@ export class WorkbenchHostRuntime {
     if (this.endpoint && this.retiredByCurrentLaunch()) await this.supervisorReplaced(this.endpoint.serviceEpoch);
     if (!this.api || !this.endpoint) {
       const attached = await attachExistingSupervisor({ home: identity.home, allowRealHome: this.options.allowRealHome === true, fetch: this.options.fetch, timeoutMs: this.options.supervisorTimeoutMs });
-      if (!("endpoint" in attached)) throw new Error(ENTRY_UNAVAILABLE);
+      if (!("endpoint" in attached)) {
+        throw new Error("reasons" in attached ? [ENTRY_UNAVAILABLE, ...attached.reasons].join(" ") : ENTRY_UNAVAILABLE);
+      }
       await this.remember(attached.endpoint);
 
     }
-    return this.api!.state();
+    try {
+      return await this.api!.state();
+    } catch (error) {
+      if (error instanceof RemoteError && error.code === "workbench/unavailable") {
+        throw new RemoteError(
+          error.code,
+          `${error.message} ${describeSupervisorFacts(identity.home, this.allowRealHome, this.endpoint)}`,
+          error.details,
+        );
+      }
+      throw error;
+    }
   }
 
   private snapshotFromState(state: WorkbenchState): PortalSnapshot {
