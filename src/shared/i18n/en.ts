@@ -22,6 +22,7 @@ export const en = {
   "errors.refuseStart": "Refusing to start {name}: {reason}",
   "errors.exitedBeforeReady": "The space closed before it finished starting.",
   "errors.exitedUnexpectedly": "The space closed unexpectedly.",
+  "errors.exitedAfterStop": "The space exited with an error after its stop request failed.",
   "errors.exitedBeforeApi": "{name} closed before it was ready to open.",
   "errors.startCancelled": "Start was cancelled.",
   "errors.stopFailed": "Couldn't stop every space: {detail}.",

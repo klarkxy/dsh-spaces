@@ -582,6 +582,9 @@ const http = require("node:http");
 const port = Number(process.env.DSH_TEST_PORT);
 const mode = process.env.DSH_TEST_MODE || "ok";
 const cookieName = process.env.DSH_TEST_COOKIE_NAME || "dsh-auth-fixture";
+process.on("message", message => {
+  if (message?.type === "fixture:stop") setTimeout(() => process.exit(0), message.delay);
+});
 if (mode === "hang") { setInterval(() => {}, 1e9); }
 else {
   const token = "fixture-launch-secret";
@@ -1677,6 +1680,50 @@ test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
   await assert.rejects(() => handle.close());
   assert.equal(new HomeLease(home).inspect().held, true);
 });
+
+for (const timeout of [false, true]) {
+  test(`service shutdown ${timeout ? "keeps its failed job and lease after late exit" : "waits beyond five seconds for its manager"}`, async () => {
+    const home = tempHome();
+    let requests = 0;
+    let normalExit = false;
+    const handle = await startSupervisor(home, {
+      onNormalExit: () => { normalExit = true; },
+      processRuntime: {
+        spawn: (args, options) => spawnFixture("ok")(args, { ...options, stdio: ["ignore", "pipe", "pipe", "ipc"] }),
+        prepareHome: async () => undefined,
+        ...(timeout ? { gracefulWaitMs: 20 } : {}),
+        readyTimeoutMs: 8_000,
+        kill: async (pid, kind) => {
+          assert.equal(kind, "term");
+          requests++;
+          const child = live.find(row => row.pid === pid)!;
+          await new Promise<void>((resolve, reject) => child.send(
+            { type: "fixture:stop", delay: timeout ? 500 : 6_000 },
+            error => error ? reject(error) : resolve(),
+          ));
+        },
+      },
+    });
+    const state = await handle.runtime.state();
+    const context = { serviceEpoch: state.serviceEpoch, expectedRevision: state.revision };
+    const plan = await handle.runtime.preview({ kind: "service.shutdown" }, context);
+    await handle.runtime.submit({ kind: "plan.execute", planId: plan.id }, "slow-shutdown", context);
+    const jobFile = join(home, ".dsh-spaces-control", "jobs", "slow-shutdown.json");
+    await waitUntil(() => jobStatus(home, "slow-shutdown") === (timeout ? "failed" : "succeeded"), "durable shutdown result");
+    const saved = readFileSync(jobFile, "utf8");
+    if (timeout) {
+      await waitUntil(async () => (await handle.runtime.state()).spaces.find(row => row.id === state.managerId)?.status === "stopped", "late manager exit");
+      assert.equal(readFileSync(jobFile, "utf8"), saved);
+      assert.equal(new HomeLease(home).inspect().held, true);
+      assert.equal(normalExit, false);
+      await assert.rejects(() => handle.runtime.preview({ kind: "service.shutdown" }, context), /Stop failed/);
+    } else {
+      await waitUntil(() => normalExit, "normal exit");
+      assert.equal(new HomeLease(home).inspect().held, false);
+    }
+    assert.equal(requests, 1);
+  });
+}
 
 test("submit without context is rejected and old epoch cannot mutate", async () => {
   const home = tempHome();

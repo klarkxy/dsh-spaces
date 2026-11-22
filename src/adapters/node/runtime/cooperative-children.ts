@@ -7,6 +7,10 @@ import { PROFILE_NAME_RE } from "../../../shared/types";
 import { spawnNode } from "./dsh-cli";
 import { withoutChildObservation } from "./owned-process-record";
 
+// Allow delivery, DSH's own disposal deadline and process exit to complete.
+// This is one bounded wait, never another stop request or a forced termination.
+export const COOPERATIVE_STOP_WAIT_MS = 30_000;
+
 // Node cannot deliver a catchable SIGTERM to a Windows console-less process.
 // The inherited IPC descriptor is private to its parent; it asks DSH's own
 // registered signal handler to dispose its Cordis application normally.

@@ -59,6 +59,7 @@ interface RunningInstance {
   status: ProfileStatus;
   gen: number;
   url?: string;
+  failedStopRequestedAt?: number;
 }
 
 const DEFAULT_PORT_START = 3100;
@@ -571,6 +572,23 @@ export class ProcessManager {
       }
       const code = instance.child.exitCode;
       const signal = instance.child.signalCode;
+      if (instance.failedStopRequestedAt !== undefined) {
+        // Observe this exact child's delayed exit without replaying the stop,
+        // clearing a failed job, or releasing the Supervisor's protected lease.
+        this.diagnosticLog?.info("space.stop.exited-after-failure", "Space exited after its stop request failed. The failed operation is unchanged.", {
+          space: instance.name, exitCode: code, signal, durationMs: Date.now() - instance.failedStopRequestedAt,
+        });
+        if (code === 0 && signal === null) {
+          this.errors.delete(instance.name);
+          this.emit(instance.name, "stopped");
+        } else {
+          this.fail(instance.name, formatWorkbenchFailure({
+            spaceId: instance.name, stage: "stop", pluginAttribution: "unknown",
+            reason: t("errors.exitedAfterStop"), exitCode: code, signal,
+          }));
+        }
+        return;
+      }
       this.diagnosticLog?.fault("space.exited", "A running space exited unexpectedly.", undefined, { space: instance.name, exitCode: code, signal });
       this.fail(
         instance.name,
@@ -630,13 +648,19 @@ export class ProcessManager {
     if (child.exitCode !== null || child.signalCode !== null) return;
     const pid = child.pid;
     if (!pid) return;
+    const requestedAt = Date.now();
     await this.runtime.kill(pid, "term");
-    if (await waitForExit(child, this.runtime.gracefulWaitMs)) return;
-    await this.runtime.kill(pid, "kill");
-    if (await waitForExit(child, this.runtime.forceWaitMs)) return;
-    const message = t("errors.processStillRunning", { name: instance.name });
-    this.errors.set(instance.name, message);
-    throw new Error(message);
+    try {
+      if (await waitForExit(child, this.runtime.gracefulWaitMs)) return;
+      await this.runtime.kill(pid, "kill");
+      if (await waitForExit(child, this.runtime.forceWaitMs)) return;
+      const message = t("errors.processStillRunning", { name: instance.name });
+      this.errors.set(instance.name, message);
+      throw new Error(message);
+    } catch (error) {
+      instance.failedStopRequestedAt ??= requestedAt;
+      throw error;
+    }
   }
 
   private forgetInstance(instance: RunningInstance): void {

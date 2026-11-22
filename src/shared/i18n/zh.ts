@@ -24,6 +24,7 @@ export const zh: Messages = {
   "errors.refuseStart": "拒绝启动 {name}：{reason}",
   "errors.exitedBeforeReady": "空间在启动完成前退出。",
   "errors.exitedUnexpectedly": "空间异常退出。",
+  "errors.exitedAfterStop": "停止请求失败后，空间进程以错误状态退出。",
   "errors.exitedBeforeApi": "{name} 在就绪前退出。",
   "errors.startCancelled": "启动已取消。",
   "errors.stopFailed": "未能停止全部空间：{detail}。",

@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { atomicWrite } from "./atomic";
 import { SpaceMessageRouter } from "./message-bus/router";
-import { CooperativeChildren } from "./runtime/cooperative-children";
+import { CooperativeChildren, COOPERATIVE_STOP_WAIT_MS } from "./runtime/cooperative-children";
 import { observeMaintenanceChild, withChildObservation } from "./runtime/owned-process-record";
 import { sanitizeLogText } from "./diagnostics/diagnostics";
 import type { DiagnosticsService } from "./diagnostics/diagnostics";
@@ -1405,7 +1405,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         if (injected.kill) return injected.kill(pid, "term");
         await children.stop(pid);
       },
-      gracefulWaitMs: injected.gracefulWaitMs ?? 5_000,
+      gracefulWaitMs: injected.gracefulWaitMs ?? COOPERATIVE_STOP_WAIT_MS,
       forceWaitMs: injected.forceWaitMs ?? 50,
     };
     const manager = new ProcessManager(
