@@ -172,8 +172,10 @@ export const INSTALLABLE_PLUGIN_TIERS: readonly PluginTier[] = ["verified-npm", 
 
 export const PROTECTED_PLUGIN_PACKAGES = [
   "@dsh-spaces/browser",
+  "@dsh-spaces/view-bridge",
   "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-web-app",
+  "@klarkxy/dsh-dev-index",
 ] as const;
 
 export function inferPackageSource(locale?: string): PackageSource {

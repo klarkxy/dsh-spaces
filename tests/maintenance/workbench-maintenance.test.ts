@@ -30,6 +30,7 @@ import {
   type WorkbenchJobContext,
 } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import { ProcessTerminationError } from "../../src/adapters/node/runtime/terminate-process.ts";
+import { ControlPublicError } from "../../src/shared/control.ts";
 import { DiagnosticsService } from "../../src/adapters/node/diagnostics/diagnostics.ts";
 import { CATALOG_CACHE_FILE } from "../../src/adapters/node/products/plugin-catalog.ts";
 import { isHubPluginArchive, PLUGIN_LIBRARY_FILE, readPluginLibrary } from "../../src/adapters/node/products/plugin-library.ts";
@@ -150,6 +151,12 @@ test("manager profile, official packages, and full Spaces cannot be mutated", as
     () => maintenance.preview({ kind: "plugin.remove", spaceId: "space-coding", packageName: "@dsh-spaces/plugin" }),
     matchCode("workbench/forbidden"),
   );
+  for (const packageName of ["@dsh-spaces/view-bridge", "@klarkxy/dsh-dev-index"]) {
+    await assert.rejects(
+      () => maintenance.preview({ kind: "plugin.remove", spaceId: "space-coding", packageName }),
+      matchCode("workbench/forbidden"),
+    );
+  }
   await assert.rejects(
     () => maintenance.preview({ kind: "plugin.toggle", spaceId: "spaces-hub", pluginId: "dsh-outline", enabled: true }),
     matchCode("workbench/forbidden"),
@@ -1762,4 +1769,29 @@ test("a live plugin batch preserves completed, failed and unattempted space outc
   assert.deepEqual(partial?.steps?.map(step => step.status), ["done", "failed", "not-run"]);
   assert.deepEqual(partial?.restartRequiredSpaceIds, ["space-coding"]);
   assert.deepEqual(state.stopped, []);
+});
+
+test("a deterministic live refusal fails without latching Home maintenance; transport failures stay uncertain", async () => {
+  for (const row of [
+    { error: new ControlPublicError("control/protected", "The package x cannot be changed through the child plugin manager."), code: "workbench/unsupported", latched: false },
+    { error: new ControlPublicError("control/not-found", "No loader entry e1 was reported by the running space."), code: "workbench/not-found", latched: false },
+    { error: new ControlPublicError("control/not-running", "The space is not running."), code: "workbench/conflict", latched: false },
+    { error: new ControlPublicError("control/unavailable", "The child request failed."), code: "workbench/failed", latched: true },
+    { error: new ControlPublicError("control/failed", "The child returned a malformed response."), code: "workbench/failed", latched: true },
+  ]) {
+    const { home, maintenance, state } = harness({
+      pluginLive: async () => { throw row.error; },
+    });
+    await addNamed(home, "space-coding", "dsh-outline", "1.2.3");
+    const plan = await maintenance.preview({ kind: "plugin.remove", spaceId: "space-coding", packageName: "dsh-outline" });
+    await assert.rejects(
+      () => maintenance.execute(plan.id, jobCtx()),
+      (error: unknown) => error instanceof WorkbenchJobError && error.code === row.code,
+    );
+    assert.equal(
+      state.maintenance.at(-1) === true,
+      row.latched,
+      `${row.error.code} must ${row.latched ? "latch" : "not latch"} Home maintenance`,
+    );
+  }
 });

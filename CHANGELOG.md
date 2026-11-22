@@ -6,6 +6,9 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ### Fixed
 
+- The managed component packages `@dsh-spaces/view-bridge` and `@klarkxy/dsh-dev-index` are protected wherever plugin changes are accepted: they show as protected in the workbench plugin list, and install, remove and toggle previews refuse them before a job exists. They remain preinstalled canonical lines and can no longer reach a running space's plugin manager as a removal target.
+- A running-space plugin operation refused before any change reaches the child (protected package, invalid input, missing entry, stale identity) now fails as an ordinary job failure; it no longer latches the Home maintenance flag, which previously reported an "unfinished maintenance journal", blocked the workbench and refused the authorized Desktop service restart until a Supervisor restart.
+- Plugin batch failures headline "插件操作失败" instead of "启动失败"; space start and stop failure headlines are unchanged.
 - Main-space model sync now reads the main profile through an in-process, read-only composition of the bound host's `dsh-app-boot` layers instead of the official `--dump-config` CLI, so the Desktop `desktop` profile (refused by that CLI) syncs and its `cordis.yml` is never rewritten.
 - Creator and maintenance batch installation accepts the exact pinned GitHub subdirectory spec (`github:owner/repo#<commit>&path:/<sub>`) it generates, validated by a dedicated strict parser; on Windows it is refused for CLI builds that join arguments through a shell.
 - The blueprint runtime inspection test derives its optional-bundle expectation from the bound installation's catalog instead of a retired bundle name, and the host failure-page test scopes its detail assertion to the primary reason row.

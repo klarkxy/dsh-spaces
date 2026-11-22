@@ -123,6 +123,10 @@ test("cannot remove protected official bundles", async () => {
   const dir = home();
   writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
   assert.equal(isProtectedPlugin("@deepseek-ai/dsh-web-app"), true);
+  for (const name of ["@dsh-spaces/view-bridge", "@klarkxy/dsh-dev-index"]) {
+    assert.equal(isProtectedPlugin(name), true);
+    await assert.rejects(pluginRemove(dir, "coding", name), /official bundle|拒绝卸载/);
+  }
   await assert.rejects(pluginRemove(dir, "coding", "@deepseek-ai/dsh-web-app"), /official bundle|拒绝卸载/);
   await assert.rejects(pluginRemove(dir, "coding", "-evil"), /not allowed|不合法/);
 });

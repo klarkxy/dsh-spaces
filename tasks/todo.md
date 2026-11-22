@@ -14,6 +14,9 @@
 - [x] Workbench 不再为组件载荷包（`@dsh-spaces/view-bridge` 等 `SPACES_COMPONENT_PACKAGES`）请求 npm 版本，普通第三方插件请求保留。
 - [x] 未处理 Promise 缺口补 `.catch`：`plugin.ts` 的 `bootstrap()` 与 Supervisor 两处 `whenIdle().then(afterPlanJobSettled)`，失败仅记诊断，不重试不改状态。
 - [x] 诊断降噪：成功只读轮询（`state`/`startupStatus`/`job`）不再写 `request.started/completed` 与 `http.completed`；失败与变更请求保留；子进程 stderr 行由 `error` 改 `info` 并带 `stream:"stderr"`，异常退出仍为 `error`。
+- [x] 托管组件包 `@dsh-spaces/view-bridge` 与 `@klarkxy/dsh-dev-index` 纳入 `PROTECTED_PLUGIN_PACKAGES`：插件列表标记 protected，安装/移除/启停在预览期即拒绝，离线移除、启停别名与精确来源安装同步拒绝；此前运行中移除 dev-index 可进入执行并在子空间 pluginManager 处才失败。
+- [x] live 插件操作在变更到达子空间前被拒绝（protected/invalid-input/not-found/代次冲突等确定性 `ControlPublicError`）映射为普通任务错误码，不再被 `workbench/failed` 误当不确定副作用锁存全库维护 flag（该 flag 会连带阻止错误页手动服务重启）；`control/unavailable`/`control/failed` 仍按不确定处理。
+- [x] 插件批次失败标题由"启动失败"改为"插件操作失败"（`formatWorkbenchFailure` 新增 `verb`）；空间启停标题不变。
 
 ## 2026-11-14 推送前审查
 

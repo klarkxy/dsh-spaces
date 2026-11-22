@@ -1,14 +1,39 @@
 import { join } from "node:path";
 import { runBatch } from "../../../../shared/batch";
+import { ControlPublicError, type ControlErrorCode } from "../../../../shared/control";
 import { formatWorkbenchFailure, type WorkbenchJobResult, type WorkbenchJobStep } from "../../../../shared/workbench";
 import { applyXpEmbedCompatibility, XP_PACKAGE_NAME, XP_SUPPORTED_VERSION } from "../../diagnostics/xp-compatibility";
 import { installSpecFor, pendingBuildKeys, writeBuildPolicy } from "../../products/plugin-exact-source";
-import { WorkbenchJobAbortError, WorkbenchJobError, type WorkbenchJobContext } from "../workbench-jobs";
+import { WorkbenchJobAbortError, WorkbenchJobError, type WorkbenchJobContext, type WorkbenchJobErrorCode } from "../workbench-jobs";
 import type { MaintenanceLivePluginInput } from "../workbench-maintenance-ports";
 import { MaintenanceCore } from "./core";
 import { PluginBatchItemError, WorkbenchMaintenanceError } from "./errors";
 import { verifyPluginReadback } from "./plugin-readback";
 import type { PluginMutationExpected, ResolvedCommand } from "./types";
+
+/**
+ * Live-path refusals that are raised before any change can reach the child
+ * (protected package, invalid input, missing entry, identity conflict) are
+ * deterministic: the child never saw a mutation, so they map to ordinary job
+ * error codes instead of `workbench/failed`, which would latch the Home
+ * maintenance flag as an uncertain mutation. `control/unavailable` and
+ * `control/failed` can hide an applied remote change and stay uncertain.
+ */
+const LIVE_REFUSAL_JOB_CODES: Partial<Record<ControlErrorCode, WorkbenchJobErrorCode>> = {
+  "control/protected": "workbench/unsupported",
+  "control/unsupported": "workbench/unsupported",
+  "control/invalid-input": "workbench/invalid-input",
+  "control/not-found": "workbench/not-found",
+  "control/not-running": "workbench/conflict",
+  "control/conflict": "workbench/conflict",
+  "control/request-conflict": "workbench/conflict",
+  "control/unregistered": "workbench/conflict",
+  "control/plan-expired": "workbench/conflict",
+  "control/plan-consumed": "workbench/conflict",
+  "control/busy": "workbench/conflict",
+  "control/read-only": "workbench/unavailable",
+  "control/engine-unavailable": "workbench/unavailable",
+};
 
 /**
  * Plugin batch operations: running workspaces apply live through their own
@@ -312,6 +337,7 @@ export class MaintenancePluginBatch extends MaintenanceCore {
         packageName,
         pluginAttribution: packageName ? "known" : "unknown",
         reason,
+        verb: "插件操作失败",
       });
       ctx.message(message);
       throw new WorkbenchJobError("workbench/failed", message, {
@@ -399,14 +425,19 @@ export class MaintenancePluginBatch extends MaintenanceCore {
           packageName,
           pluginAttribution: "known",
           reason,
+          verb: "插件操作失败",
         });
         ctx.message(message);
-        throw new WorkbenchJobError("workbench/failed", message, {
-          spaceId,
-          stage,
-          packageName,
-          pluginAttribution: "known",
-        });
+        throw new WorkbenchJobError(
+          error instanceof ControlPublicError ? LIVE_REFUSAL_JOB_CODES[error.code] ?? "workbench/failed" : "workbench/failed",
+          message,
+          {
+            spaceId,
+            stage,
+            packageName,
+            pluginAttribution: "known",
+          },
+        );
       }
     }
     const pluginApplication = restartRequiredSpaceIds.length > 0 ? "restart-required" : "applied";
@@ -457,6 +488,7 @@ export class MaintenancePluginBatch extends MaintenanceCore {
         packageName,
         pluginAttribution: packageName ? "known" : "unknown",
         reason,
+        verb: "插件操作失败",
       });
       ctx.message(message);
       throw new WorkbenchJobError("workbench/failed", message, {

@@ -129,8 +129,6 @@ const ARGS_FIELDS: Record<RemoteMethod, readonly string[]> = {
 const LIVE_PROTECTED_PACKAGES = new Set<string>([
   ...PROTECTED_PLUGIN_PACKAGES,
   FULL_SPACES_PACKAGE,
-  "@dsh-spaces/view-bridge",
-  "@klarkxy/dsh-dev-index",
 ]);
 
 /** A package or any module specifier below it (subpath entries). */

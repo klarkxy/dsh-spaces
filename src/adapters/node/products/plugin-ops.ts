@@ -154,6 +154,7 @@ function pluginError(spaceId: string, spec: string, code: number, stdout: string
       pluginAttribution: "known",
       reason: t("errors.pluginAddFailed", { spec, code, detail }),
       exitCode: code,
+      verb: "插件操作失败",
     }),
   );
 }
@@ -309,6 +310,7 @@ export async function pluginRemove(dshHome: string, name: string, packageName: s
             detail: (stderr || stdout).slice(0, 800),
           }),
           exitCode: code,
+          verb: "插件操作失败",
         }),
       );
     }
