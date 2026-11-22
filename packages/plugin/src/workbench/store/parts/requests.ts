@@ -6,7 +6,7 @@
  * moves unchanged from `workbench/store.ts`.
  */
 
-import type { WorkbenchCommand, WorkbenchPlanRequest } from "../../../../../../src/shared/workbench";
+import type { WorkbenchCommand, WorkbenchJob, WorkbenchPlanRequest } from "../../../../../../src/shared/workbench";
 import type { WorkbenchMutationContext } from "../../../../../../src/shared/workbench";
 import type { WorkbenchProductObservation } from "../../../../../../src/shared/workbench-product";
 import { localizeError } from "../../i18n";
@@ -233,6 +233,8 @@ export abstract class RequestPart extends CommandPart {
         this.schedulePoll();
       } else if (job.status === "succeeded") {
         this.patch({ commandError: null });
+      } else {
+        await this.watchShutdownJob(job.id, cycle);
       }
     } catch (error) {
       if (!this.stillOpen(cycle)) return;
@@ -243,6 +245,39 @@ export abstract class RequestPart extends CommandPart {
       }
     } finally {
       if (this.stillOpen(cycle)) this.patch({ commandPending: false });
+    }
+  }
+
+  /**
+   * A queued or running shutdown job keeps its unconfirmed notice while the
+   * job is read — never resubmitted — until it settles. A read failure keeps
+   * the notice too: the service may already be gone, so the generic
+   * state-read error page would misreport the outcome.
+   */
+  private async watchShutdownJob(jobId: string, cycle: number): Promise<void> {
+    while (this.stillOpen(cycle) && this.shutdownRequested) {
+      await new Promise<void>((resolve) => {
+        this.env.setTimeout(resolve, pollDelayMs(true, this.env.hidden()));
+      });
+      if (!this.stillOpen(cycle) || !this.shutdownRequested) return;
+      let job: WorkbenchJob;
+      try {
+        job = await this.api.job(jobId);
+      } catch {
+        return;
+      }
+      if (!this.stillOpen(cycle)) return;
+      this.mergeJob(job);
+      if (!ACTIVE_JOB.has(job.status)) {
+        if (job.status === "succeeded") {
+          this.patch({ commandError: null });
+        } else {
+          this.shutdownRequested = false;
+          this.patch({ commandError: localizeError(this.ui.locale, job.error ?? { code: "workbench/failed" }) });
+          this.schedulePoll();
+        }
+        return;
+      }
     }
   }
 

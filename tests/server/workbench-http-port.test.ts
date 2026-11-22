@@ -128,7 +128,11 @@ test("a real management HTTP request shares its operationId with dispatched step
   origin = started.origin;
   closers.push(started.close);
   try {
-    const response = await fetchState(origin);
+    const response = await fetch(`${origin}/api/workbench/backups`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer test-bearer" },
+      body: "{}",
+    });
     assert.equal(response.status, 200);
     const rows = readFileSync(join(home, ".dsh-spaces-control", "logs", "supervisor.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { event?: string; context?: { operationId?: string; request?: string } });
     const dispatched = rows.find(row => row.event === "test.dispatched");
@@ -136,6 +140,35 @@ test("a real management HTTP request shares its operationId with dispatched step
     assert.ok(dispatched?.context?.operationId);
     assert.equal(http?.context?.operationId, dispatched.context?.operationId);
     assert.equal(http?.context?.request, dispatched.context?.operationId);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a polled read stays silent while its failure still logs", async () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-spaces-http-quiet-"));
+  let origin = "";
+  let fail = false;
+  const host = runtime(() => origin);
+  host.diagnosticLog = createDiagnosticLogger(home, "supervisor");
+  host.dispatch = async () => {
+    if (fail) throw new Error("not ready");
+    return { accepted: true };
+  };
+  const started = await startWorkbenchHttp(host);
+  origin = started.origin;
+  closers.push(started.close);
+  try {
+    const ok = await fetchState(origin);
+    assert.equal(ok.status, 200);
+    await ok.arrayBuffer();
+    fail = true;
+    const bad = await fetchState(origin);
+    assert.equal(bad.status, 200);
+    await bad.arrayBuffer();
+    const rows = readFileSync(join(home, ".dsh-spaces-control", "logs", "supervisor.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { event?: string });
+    assert.equal(rows.some(row => row.event === "http.completed"), false);
+    assert.equal(rows.filter(row => row.event === "http.failed").length, 1);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

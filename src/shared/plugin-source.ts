@@ -163,6 +163,28 @@ export function parsePluginSource(value: unknown): ExactPluginSource {
   return { kind: 'github', owner, repo, commit, ...(path ? { path } : {}), packageName, approvedBuilds };
 }
 
+/**
+ * The exact pnpm spec `installSpecFor` emits for a GitHub subdirectory
+ * source: `github:<owner>/<repo>#<commit>&path:/<sub>` — nothing else in the
+ * fragment (no extra `&` parameters, no `semver:`), so passing it to `dsh
+ * plugin add` cannot smuggle another resolver modifier through the argument.
+ * The no-`path` form stays inside `isSafeSpec` and is not accepted here.
+ */
+export function isExactGithubInstallSpec(spec: string): boolean {
+  const match = /^github:([^/]+)\/([^#]+)#(.+)$/.exec(spec);
+  if (!match) return false;
+  const [, owner, repo, fragment] = match;
+  if (!GITHUB_OWNER_RE.test(owner!) || !GITHUB_REPO_RE.test(repo!)) return false;
+  const exact = /^([a-f0-9]{40})&path:\/(.+)$/.exec(fragment!);
+  if (!exact) return false;
+  try {
+    parseGithubPath(exact[2]);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /** The source wire shape equivalent to a normalized row (lossless round-trip). */
 export function pluginSourceSpecOf(plugin: ExactPluginSource): PluginSourceSpec {
   if (plugin.kind === 'npm') {

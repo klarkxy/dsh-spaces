@@ -390,6 +390,17 @@ export const WORKBENCH_API_METHODS: readonly WorkbenchApiMethod[] = Object.keys(
   WORKBENCH_API,
 ) as WorkbenchApiMethod[];
 
+/**
+ * Read-only methods the Workbench re-reads on a timer. Their success lines are
+ * pure log volume, so the HTTP and dispatch layers stay silent for them while
+ * failures and every other method keep logging.
+ */
+export const WORKBENCH_QUIET_READS: ReadonlySet<WorkbenchApiMethod> = new Set([
+  "state",
+  "startupStatus",
+  "job",
+]);
+
 /** The DTO arguments of one management API method, in wire order. */
 export type WorkbenchApiArgs<K extends WorkbenchApiMethod> = (typeof WORKBENCH_API)[K] extends {
   args: infer A extends readonly unknown[];

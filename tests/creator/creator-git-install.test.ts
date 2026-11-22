@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, test } from "node:test";
-import { listProfilePlugins } from "../../src/adapters/node/products/plugin-ops.ts";
+import { listProfilePlugins, pluginAdd as productionPluginAdd } from "../../src/adapters/node/products/plugin-ops.ts";
+import { installSpecFor } from "../../src/adapters/node/products/plugin-exact-source.ts";
+import { resetDshBinCache, setSelectedDshResolver } from "../../src/adapters/node/runtime/dsh-cli.ts";
 
 /**
  * Real CLI acceptance for the creator Git path. A controlled local repository
@@ -308,4 +310,58 @@ test("one CLI Git-root add can explicitly authorize prepare without a preconfigu
   const installed = join(home, "profiles", profile, "node_modules", PACKAGE);
   assert.ok(readFileSync(join(installed, "lib/index.js"), "utf8").includes(FIXTURE_MARK));
   assert.equal(existsSync(join(installed, "build.cjs")), false);
+});
+
+test("production pluginAdd installs a github subdirectory source through the real CLI", { timeout: 300_000 }, async () => {
+  assert.ok(existsSync(TEST_BIN), `dsh CLI bin missing at ${TEST_BIN}`);
+  const root = mkdtempSync(join(tmpdir(), "dsh-spaces-creator-git-prod-"));
+  temps.push(root);
+  const home = join(root, "home");
+  mkdirSync(home, { recursive: true });
+  const repo = join(root, "repo");
+  mkdirSync(join(repo, SUBDIR), { recursive: true });
+  writeFileSync(join(repo, "package.json"), `${JSON.stringify({ private: true })}\n`);
+  const { pinned: commit, head } = initRepoTwoCommits(repo, join(repo, SUBDIR));
+  assert.notEqual(commit, head, "fixture must hold two distinct commits");
+  const profile = "space-git-prod";
+  writeProfile(home, profile);
+  const spec = installSpecFor({
+    kind: "github",
+    owner: "dsh-spaces-fixtures",
+    repo: "creator-git-fixture-8f3a2c1b",
+    commit,
+    path: SUBDIR,
+    packageName: PACKAGE,
+    approvedBuilds: [],
+  });
+  assert.match(spec, /&path:\//);
+
+  // The git URL rewrite travels on process.env: runDsh's toolchainEnv merges
+  // it into the spawned CLI's environment.
+  const fixtureEnv = childGitEnv(home, repo, root);
+  const gitKeys = ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"] as const;
+  const saved = gitKeys.map((key) => [key, process.env[key]] as const);
+  for (const key of gitKeys) process.env[key] = fixtureEnv[key]!;
+  setSelectedDshResolver(() => TEST_BIN);
+  resetDshBinCache();
+  try {
+    await productionPluginAdd(home, profile, spec);
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    setSelectedDshResolver(() => undefined);
+    resetDshBinCache();
+  }
+
+  const manifest = JSON.parse(
+    readFileSync(join(home, "profiles", profile, "package.json"), "utf8"),
+  ) as { dependencies?: Record<string, string> };
+  assert.ok(manifest.dependencies?.[PACKAGE], `dependency ${PACKAGE} was not recorded`);
+  const lockfile = readFileSync(join(home, "profiles", profile, "pnpm-lock.yaml"), "utf8");
+  assert.match(lockfile, new RegExp(`commit: ['"]?${commit}`), `lockfile lost the pinned commit:\n${lockfile.slice(0, 4000)}`);
+  assert.match(lockfile, new RegExp(`path: ['"]?/?${SUBDIR.replaceAll("/", "\/")}`), `lockfile lost the subdirectory:\n${lockfile.slice(0, 4000)}`);
+  const installedSource = readFileSync(join(home, "profiles", profile, "node_modules", PACKAGE, "index.js"), "utf8");
+  assert.ok(installedSource.includes(FIXTURE_MARK), "installed index.js is not the fixture content");
+  assert.ok(!installedSource.includes("UNPINNED"), "installed index.js came from HEAD, not the pinned commit");
 });

@@ -12,6 +12,7 @@ import {
   previewSpaceShare,
 } from "../../src/adapters/node/products/space-share.ts";
 import { PLUGIN_LIBRARY_FILE } from "../../src/adapters/node/products/plugin-library.ts";
+import { scanShareText } from "../../src/shared/share-secret-scan.ts";
 import { packZip, unpackZip } from "../../src/adapters/node/products/space-share-zip.ts";
 import type { InstalledPlugin } from "../../src/shared/types.ts";
 import { COMPONENT_PAYLOAD_PACKAGES } from "../../src/adapters/node/payload/component-payload.ts";
@@ -357,4 +358,20 @@ test("Browser shares identify the base release instead of a manual installation 
   const share = buildSpaceShare({ displayName: 'Browser', plugins: [plugin], base: 'browser', baseVersion: '0.4.0', dshVersion: '0.2.1-rc.2' });
   assert.deepEqual(share.manifest.source, { base: 'browser', baseVersion: '0.4.0', dshVersion: '0.2.1-rc.2' });
   assert.deepEqual(share.plugins, []);
+});
+
+test("secret scan accepts apiKeyEnv names but still rejects literal keys and managed refs", () => {
+  assert.deepEqual(
+    scanShareText("profiles/a/cordis.patch.yml", "config:\n  providers:\n    gw:\n      apiKeyEnv: DEEPSEEK_API_KEY\n"),
+    [],
+  );
+  for (const [text, reason] of [
+    ["config:\n  apiKey: plain-key-value\n", "apiKey field"],
+    ["config:\n  apiKeyEnv: SPACES_LLM_0123456789ABCDEF0123456789ABCDEF_R1_API_KEY\n", "managed credential reference"],
+    ["config:\n  apiKeyEnv: sk-abcdef0123456789\n", "key-like token"],
+  ] as const) {
+    const findings = scanShareText("profiles/a/cordis.patch.yml", text);
+    assert.equal(findings.length, 1, text);
+    assert.equal(findings[0]?.reason, reason);
+  }
 });

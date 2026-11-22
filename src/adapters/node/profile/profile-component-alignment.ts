@@ -12,20 +12,13 @@ import { currentDiagnosticLogger, diagnosticStep } from "../diagnostics/operatio
 type Bridge = "view-bridge";
 /** Retired bundle removed once from older spaces during alignment. */
 import { SPACES_COMPONENT_PACKAGES } from "../../../shared/plugin-spec";
+import { loadBoundAppBoot, type BoundAppBoot } from "./bound-app-boot";
 
 export const RETIRED_LLM_BRIDGE = "@dsh-spaces/llm-bridge";
 type SpacesComponent = Bridge | "browser";
 type Entry = { id?: unknown; name?: unknown; disabled?: unknown; group?: unknown; config?: unknown };
 type ObservedEntry = Entry & { inheritedDisabled: boolean; dynamicAncestry: boolean };
-type AppBoot = {
-  resolveBundleDir: (bin: string, name: string, anchor: string, profile: string) => string;
-  loadOverlayPatches: (bin: string, path: string) => unknown[];
-  loadOptionalPatches: (bin: string, path: string) => unknown[] | undefined;
-  composeEntries: (layers: unknown[][]) => Entry[];
-  getDshRuntimeVersion: () => string;
-  evaluatePluginCompatibility: (manifest: unknown, exemptions: Record<string, string[]>, runtimeVersion: string) =>
-    { requirements: Record<string, string> } | { peers: Record<string, string> } | undefined;
-};
+type AppBoot = BoundAppBoot;
 
 function entryRows(entries: Entry[], ancestry: "enabled" | "disabled" | "dynamic" = "enabled"): ObservedEntry[] {
   return entries.flatMap(row => {
@@ -46,18 +39,9 @@ function disabled(row: ObservedEntry): boolean {
 
 /** Inspect declared layers without the host's compatibility filtering or executing plugins. */
 async function declaredProfile(home: string, profile: string, bundles: string[], bin?: string) {
-  const require = bin ? createRequire(bin) : createRequire(import.meta.url);
-  const appBoot = await import(pathToFileURL(require.resolve("@deepseek-ai/dsh-app-boot")).href) as AppBoot;
-  let anchor = join(profile, "package.json");
-  if (bin) {
-    let dir = dirname(bin);
-    for (;;) {
-      const path = join(dir, "package.json");
-      if (existsSync(path) && JSON.parse(readFileSync(path, "utf8")).name === "@deepseek-ai/dsh") { anchor = path; break; }
-      if (dirname(dir) === dir) throw new Error("The bound CLI installation manifest is missing.");
-      dir = dirname(dir);
-    }
-  }
+  const bound = bin ? await loadBoundAppBoot(bin) : undefined;
+  const appBoot = bound?.appBoot ?? await import(pathToFileURL(createRequire(import.meta.url).resolve("@deepseek-ai/dsh-app-boot")).href) as AppBoot;
+  const anchor = bound?.installAnchor ?? join(profile, "package.json");
   const layers = bundles.map(name => {
     const root = appBoot.resolveBundleDir("dsh", name, anchor, profile);
     const manifestPath = join(root, "package.json");

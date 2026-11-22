@@ -12,7 +12,7 @@ import {
   WORKBENCH_BLUEPRINT_REQUEST_BODY_LIMIT,
 } from "../../../shared/workbench-blueprint";
 import { MAX_WORKBENCH_SHARE_BASE64 } from "../../../shared/workbench-product";
-import { WORKBENCH_API_METHODS, type WorkbenchApiMethod } from "../../../shared/workbench";
+import { WORKBENCH_API_METHODS, WORKBENCH_QUIET_READS, type WorkbenchApiMethod } from "../../../shared/workbench";
 
 export const WORKBENCH_API_PREFIX = "/api/workbench/";
 export { WORKBENCH_API_METHODS };
@@ -378,7 +378,9 @@ async function handleApi(
   try {
     const value = await (host.diagnosticLog ? diagnosticNested(host.diagnosticLog, () => diagnosticCorrelation(requestId, () => host.dispatch(method, payload))) : host.dispatch(method, payload));
     json(res, 200, { ok: true, value }, corsHeaders(req, host));
-    host.diagnosticLog?.debug("http.completed", "Management HTTP request completed.", { request: requestId, operationId: requestId, method, durationMs: Date.now() - started });
+    if (!WORKBENCH_QUIET_READS.has(method)) {
+      host.diagnosticLog?.debug("http.completed", "Management HTTP request completed.", { request: requestId, operationId: requestId, method, durationMs: Date.now() - started });
+    }
   } catch (error) {
     host.diagnosticLog?.error("http.failed", "Management HTTP request failed.", error, { request: requestId, operationId: requestId, method, durationMs: Date.now() - started });
     const mapped = publicError(error);

@@ -612,7 +612,7 @@ export class ProcessManager {
       const emit = (lines: string[]) => {
         for (const line of lines) {
           this.diagnosticLog?.write({
-            level: stream === "stderr" ? "error" : "debug",
+            level: stream === "stderr" ? "info" : "debug",
             event: "space.output",
             message: line.trimEnd() || "[blank output line]",
             context: { space: name, stream },

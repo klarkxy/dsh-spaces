@@ -3325,3 +3325,96 @@ test("space menu unifies space actions and child overlays stack cleanly above we
   ctrl.closeOverlay();
   assert.deepEqual(ctrl.getSnapshot().overlay, { type: "settings" });
 });
+
+test("a submitted shutdown job is read until terminal and its failure resumes polling", async () => {
+  const timers: Array<() => void> = [];
+  const jobReads: string[] = [];
+  const submissions: unknown[] = [];
+  const api = fakeApi({
+    submit: async (command, requestId) => {
+      submissions.push(command);
+      return job({ id: "job-shutdown", requestId, kind: "plan.execute", status: "queued", canCancel: true });
+    },
+    job: async (id) => {
+      jobReads.push(id);
+      return jobReads.length === 1
+        ? job({ id, kind: "plan.execute", status: "running" })
+        : job({ id, kind: "plan.execute", status: "failed", canCancel: false, error: { code: "workbench/failed", message: "Stop failed." } });
+    },
+  });
+  const ctrl = controller(api, {
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+    clearTimeout: () => {},
+  });
+  await ctrl.poll();
+  ctrl.preview({ kind: "service.shutdown" });
+  await flush();
+  assert.ok(ctrl.getSnapshot().pendingPlan);
+  ctrl.confirmPlan();
+  await flush();
+  assert.deepEqual(submissions, [{ kind: "plan.execute", planId: "plan-1" }]);
+  assert.match(ctrl.getSnapshot().commandError ?? "", /尚未确认|not been resent/);
+  for (let attempt = 0; attempt < 20 && jobReads.length < 2; attempt++) {
+    timers.pop()?.();
+    await flush();
+  }
+  assert.deepEqual(jobReads, ["job-shutdown", "job-shutdown"], "the active shutdown job is read until terminal");
+  assert.equal(submissions.length, 1, "the shutdown request is never resubmitted");
+  assert.match(ctrl.getSnapshot().commandError ?? "", /Stop failed/);
+  assert.equal(ctrl.getSnapshot().error, null);
+  const states = api.calls.filter((call) => call.method === "state").length;
+  await ctrl.poll();
+  await flush();
+  assert.equal(api.calls.filter((call) => call.method === "state").length, states + 1, "polling resumes after the failed shutdown");
+});
+
+test("a shutdown job read failure keeps the unconfirmed notice instead of the state error page", async () => {
+  const timers: Array<() => void> = [];
+  const api = fakeApi({
+    submit: async (command, requestId) => {
+      void command;
+      return job({ id: "job-shutdown", requestId, kind: "plan.execute", status: "queued", canCancel: true });
+    },
+    job: async () => { throw new Error("disconnected"); },
+  });
+  const ctrl = controller(api, {
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+    clearTimeout: () => {},
+  });
+  await ctrl.poll();
+  ctrl.preview({ kind: "service.shutdown" });
+  await flush();
+  ctrl.confirmPlan();
+  await flush();
+  const unconfirmed = ctrl.getSnapshot().commandError;
+  assert.match(unconfirmed ?? "", /尚未确认|not been resent/);
+  for (let attempt = 0; attempt < 20 && timers.length; attempt++) {
+    timers.pop()?.();
+    await flush();
+  }
+  assert.equal(ctrl.getSnapshot().error, null);
+  assert.equal(ctrl.getSnapshot().commandError, unconfirmed);
+  const states = api.calls.filter((call) => call.method === "state").length;
+  await ctrl.poll();
+  assert.equal(api.calls.filter((call) => call.method === "state").length, states, "the shutdown request still holds the poll");
+});
+
+test("installed Spaces component packages skip the published-version read", async () => {
+  const api = fakeApi({
+    plugins: async (query) => {
+      calls.push({ method: "plugins", arg: query });
+      return [
+        { id: "demo", title: "Demo", packageName: "demo-plugin", description: "A plugin", version: "1.2.3", installedIn: ["alpha"], protected: false },
+        { id: "bridge", title: "Bridge", packageName: "@dsh-spaces/view-bridge", description: "component", version: "0.0.0", installedIn: ["alpha"], protected: false },
+      ] satisfies WorkbenchPlugin[];
+    },
+  });
+  const calls: { method: string; arg?: unknown }[] = [];
+  const ctrl = controller(api);
+  await ctrl.poll();
+  ctrl.setPluginSpace("alpha");
+  await ctrl.searchPlugins("");
+  await flush();
+  const reads = api.calls.filter((call) => call.method === "product" && (call.arg as { method?: string })?.method === "plugin.versions");
+  assert.deepEqual(reads.map((call) => (call.arg as { catalogId?: string }).catalogId), ["demo-plugin"]);
+});

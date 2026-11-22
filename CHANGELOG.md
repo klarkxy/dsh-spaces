@@ -6,10 +6,20 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ### Fixed
 
+- Main-space model sync now reads the main profile through an in-process, read-only composition of the bound host's `dsh-app-boot` layers instead of the official `--dump-config` CLI, so the Desktop `desktop` profile (refused by that CLI) syncs and its `cordis.yml` is never rewritten.
+- Creator and maintenance batch installation accepts the exact pinned GitHub subdirectory spec (`github:owner/repo#<commit>&path:/<sub>`) it generates, validated by a dedicated strict parser; on Windows it is refused for CLI builds that join arguments through a shell.
+- The blueprint runtime inspection test derives its optional-bundle expectation from the bound installation's catalog instead of a retired bundle name, and the host failure-page test scopes its detail assertion to the primary reason row.
 - Managed spaces now have one 30-second cooperative shutdown window instead of five seconds. A clean exit observed after a failed stop updates the process to stopped without reporting an unrelated startup crash or rewriting the failed operation; failed service shutdowns still preserve ownership and do not retry or restart.
 - Desktop failure pages now carry the actual diagnosis: a supervisor request that never arrived reports its bounded transport cause and elapsed time, a presentation failure appends the read-only supervisor liveness and endpoint facts, renderer and load failures keep a sanitized reason, and the failure panel shows the failure time. A failed guide request is recorded in the host diagnostic log with its remote name; the failure stays terminal without reconnecting, retrying or relaunching.
 - The supervisor HTTP server allows 65 seconds of keep-alive headroom so 1.5–5 second pollers never meet a server-side idle close.
 - Diagnostic log rotation is decided from on-disk state on every write: the active file's first record time and its real size, so alternating logger instances and processes no longer leave stray one-line archives at startup and an eight-day-old first record rotates exactly once.
+- A remounted Desktop plugin instance joins the shared launch record and, once it is ready, attaches the running service so the main space registration is re-established on the same Supervisor epoch — attach only, never a second launch.
+- A failed dead-lock reclaim drops its reclaim marker, so later `unlockDead` attempts report the real lock state instead of `reclaim-in-progress` forever; held ownership still blocks acquisition.
+- Workbench shutdown confirmation reads the submitted job read-only until it is terminal: a failed or cancelled shutdown resumes normal polling with the error shown, and a read failure keeps the unconfirmed notice instead of replacing the view with the state error page.
+- Share export no longer rejects spaces that synced models: the secret scan flags literal `apiKey` values while `apiKeyEnv: <env name>` rows pass; managed credential references and `sk-` literals stay caught by their own patterns.
+- The Workbench skips npm version reads for Spaces component packages (`@dsh-spaces/view-bridge`, `@dsh-spaces/browser`, the plugin package) that ship inside the payload; ordinary installed plugins are still queried.
+- Fire-and-forget promises that could reject now log their failure: host bootstrap and the settled-plan hooks write to the host or Supervisor diagnostic log instead of surfacing as unhandled rejections.
+- Successful timer-driven read-only requests (`state`, `startupStatus`, `job`) no longer write per-request debug lines, while failed and mutating requests keep logging; child space stderr lines record at `info` with a `stream: "stderr"` context, and observed process failures stay `error`.
 
 ## [0.5.0] — GitHub Release 2026-11-14; npm pending
 

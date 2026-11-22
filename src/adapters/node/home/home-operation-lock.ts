@@ -133,6 +133,11 @@ export class HomeOperationLock implements OperationLock {
       dropReclaim(this.reclaimDir);
       return { unlocked: true, owner };
     } catch (error) {
+      try {
+        dropReclaim(this.reclaimDir);
+      } catch {
+        /* keep the original remove failure */
+      }
       return {
         unlocked: false,
         reason: "remove-failed",

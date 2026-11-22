@@ -227,7 +227,11 @@ test("confirmed Desktop schedules one background launch and stays connecting unt
   let bootstraps = 0;
   const options = runtimeOptions(home, "desktop", {
     fetch: async (input) => {
-      fetches.push(String(input));
+      const url = String(input);
+      fetches.push(url);
+      if (url.endsWith("/api/workbench/state")) {
+        return Response.json({ ok: true, value: managerState(endpoint!.serviceEpoch) });
+      }
       throw new Error("unexpected fetch");
     },
     connect: () => ({ state: async () => managerState(endpoint!.serviceEpoch) }) as never,
@@ -290,9 +294,9 @@ test("confirmed Desktop schedules one background launch and stays connecting unt
     const remounted = new CountingRuntime(options);
     try {
       new SpacesPlugin(again, {}, remounted);
-      await delay(40);
+      for (let attempt = 0; attempt < 100 && registrations.length < 2; attempt++) await delay(20);
       assert.equal(remounted.begins, 1);
-      assert.equal(registrations.length, 1);
+      assert.equal(registrations.length, 2);
       assert.equal(bootstraps, 1);
       assert.equal((await remounted.desktopLaunchState()).operationId, ready.operationId);
       assert.equal((await remounted.desktopLaunchState()).phase, "ready");
@@ -489,5 +493,78 @@ test("a rejected background begin is recorded as a safe reason and does not open
   } finally {
     logger.error = previous;
     await ctx.fiber.dispose();
+  }
+});
+
+test("a hot-reloaded plugin instance re-registers main on the same supervisor epoch", async () => {
+  const home = freshHome("rejoin-");
+  const issues: string[] = [];
+  const unregisters: string[] = [];
+  let lease: HomeControlHandle | undefined;
+  let endpoint: { origin: string; bearer: string; protocolVersion: 2; homeId: string; serviceEpoch: string } | undefined;
+  const server = createServer(async (req, res) => {
+    for await (const chunk of req) void chunk;
+    if (req.url?.endsWith("/issue")) issues.push(req.url ?? "");
+    else if (req.url?.endsWith("/unregister")) unregisters.push(req.url ?? "");
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, value: { registrationId: "desktop-main", scopes: { creator: "s".repeat(64), control: "t".repeat(64) }, serviceEpoch: endpoint!.serviceEpoch } }));
+  });
+  const port = await listen(server);
+  let bootstraps = 0;
+  const options = runtimeOptions(home, "desktop", {
+    fetch: async (input) => {
+      const url = String(input);
+      assert.equal(url.endsWith("/api/workbench/state"), true, url);
+      return Response.json({ ok: true, value: managerState(endpoint!.serviceEpoch) });
+    },
+    connect: () => ({ state: async () => managerState(endpoint!.serviceEpoch) }) as never,
+    bootstrap: async () => {
+      bootstraps += 1;
+      lease = new HomeLease(home, { allowRealHome: false }).acquire("web", `http://127.0.0.1:${port}/`);
+      writeFileSync(join(home, HOME_CONTROL_DIR_NAME, HOME_CONTROL_MANAGER_FILE), JSON.stringify({ version: 1, profileId: "spaces-hub", createdAt: "2026-11-01T00:00:00.000Z" }));
+      endpoint = {
+        origin: `http://127.0.0.1:${port}`,
+        bearer: "c".repeat(64),
+        protocolVersion: 2,
+        homeId: digestHomeIdentity(canonicalHome(home, { allowRealHome: false })),
+        serviceEpoch: deriveServiceEpoch(lease.owner.nonce),
+      };
+      writeEndpointFile(join(home, HOME_CONTROL_DIR_NAME, SUPERVISOR_ENDPOINT_FILE), endpoint);
+      return { connected: true, origin: endpoint.origin, endpoint, payloadDir: home, toolsDir: home };
+    },
+  });
+  const first = new CountingRuntime(options);
+  const ctx = new Context();
+  provideMain(ctx, home);
+  try {
+    new SpacesPlugin(ctx, {}, first);
+    const ready = await untilPhase(first, "ready");
+    assert.equal(issues.length, 1);
+    assert.equal(bootstraps, 1);
+    // The reload disposes the old instance first: its registration is retired.
+    await ctx.fiber.dispose();
+    assert.equal(unregisters.length, 1);
+
+    const again = new Context();
+    provideMain(again, home);
+    const second = new CountingRuntime(options);
+    try {
+      new SpacesPlugin(again, {}, second);
+      for (let attempt = 0; attempt < 100 && issues.length < 2; attempt++) await delay(20);
+      assert.equal(second.begins, 1);
+      assert.equal(bootstraps, 1);
+      assert.equal(issues.length, 2, "the remounted main never re-registered with the running supervisor");
+      const state = await second.desktopLaunchState();
+      assert.equal(state.operationId, ready.operationId);
+      assert.equal(state.phase, "ready");
+      assert.equal(state.serviceEpoch, ready.serviceEpoch);
+    } finally {
+      await again.fiber.dispose();
+    }
+  } finally {
+    const current = lease as HomeControlHandle | undefined;
+    current?.release();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

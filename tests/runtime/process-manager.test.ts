@@ -980,3 +980,33 @@ test("startup failure keeps both causes when cleanup fails", async () => {
     }),
   });
 });
+
+test("child stderr lines reach the diagnostic log at info with their stream", async () => {
+  const entries: Array<{ level?: string; event?: string; context?: Record<string, unknown> }> = [];
+  const sink = {
+    write: (entry: { level?: string; event?: string; context?: Record<string, unknown> }) => {
+      entries.push(entry);
+    },
+    debug: () => undefined,
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+  };
+  const from = await ephemeralPort();
+  const processes = new ProcessManager(
+    "unused-in-this-test",
+    patchWriter,
+    from,
+    from + 12,
+    runtime("flood"),
+    sink as unknown as never,
+  );
+  try {
+    await processes.start("web");
+    await delay(60);
+    const line = entries.find((entry) => entry.event === "space.output" && entry.context?.stream === "stderr");
+    assert.equal(line?.level, "info");
+  } finally {
+    await processes.stopAll().catch(() => undefined);
+  }
+});

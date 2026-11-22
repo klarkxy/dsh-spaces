@@ -17,6 +17,7 @@ import { createDiagnosticLogger, type DiagnosticLogger } from "./diagnostics/rot
 import { currentOperationDetails, diagnosticNested, diagnosticStep } from "./diagnostics/operation-log";
 import { assertNotRealHome, authorizeProductHome } from "./home/home-guard";
 import { PatchWriter, SESSION_ROW_ID, extractRoot } from "./profile/patch-writer";
+import { composeMainProfileDump } from "./profile/bound-app-boot";
 import { pluginAdd, pluginLinkDirectory, pluginRemove } from "./products/plugin-ops";
 import { ProcessManager, type KillKind, type ProcessRuntime } from "./runtime/process-manager";
 import { setSelectedDshResolver } from "./runtime/dsh-cli";
@@ -27,6 +28,7 @@ import { ProfileRegistry } from "./profile/profile-registry";
 import type { RuntimeStore } from "./runtime/runtime-store";
 import { validateComponentPayload, type ValidatedComponentPayload } from "./payload/component-payload";
 import { redactPublicReason } from "../../shared/public-reason";
+import { WORKBENCH_QUIET_READS } from "../../shared/workbench";
 import { spaceIdFromName } from "../../shared/types";
 import type { SpaceDetail } from "../../shared/spaces-control";
 import type {
@@ -518,7 +520,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       runProductCommand: (command, ctx) => this.runProductCommand(command, ctx),
       afterPlanJobSettled: jobId => {
         const jobs = this.jobs;
-        if (jobs) void jobs.whenIdle().then(() => this.supervisorPlans.afterPlanJobSettled(jobId));
+        if (jobs) void jobs.whenIdle()
+          .then(() => this.supervisorPlans.afterPlanJobSettled(jobId))
+          .catch((error: unknown) => this.diagnosticLog.error("plan.settle-failed", "The settled-plan hook failed.", error, { job: jobId }));
       },
       uiAutomation: () => this.uiAutomation,
     });
@@ -586,10 +590,18 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       mainProfile: this.mainProfile(),
       spaceId,
       dumpConfig: async (profile) => {
-        // The main profile runs the host DSH, so the host-bound CLI composes it.
-        const result = await this.toolchain.runBoundCli(["--profile", profile, "--dump-config"]);
-        if (result.code !== 0) throw new WorkbenchPublicError("workbench/failed", "The main space configuration could not be read.");
-        return result.stdout;
+        // The main profile runs the host DSH, so the bound host's app-boot
+        // composes it: the official CLI refuses the Electron-owned "desktop"
+        // profile, and its dump rewrites the profile root.
+        if (this.options.dumpConfig) return this.options.dumpConfig(profile);
+        const bin = this.toolchain.resolveCliBin();
+        if (!bin) throw new WorkbenchPublicError("workbench/incompatible");
+        try {
+          return await composeMainProfileDump({ home: this.home, profile, bin });
+        } catch (error) {
+          this.diagnosticLog.error("models.main-dump-failed", "The main space configuration could not be read.", error, { profile });
+          throw new WorkbenchPublicError("workbench/failed", "The main space configuration could not be read.");
+        }
       },
     };
   }
@@ -722,10 +734,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   async dispatch(method: WorkbenchApiMethod, payload: unknown): Promise<unknown> {
     const started = Date.now();
     const correlation = currentOperationDetails();
-    this.diagnosticLog.debug("request.started", "Workbench request accepted for dispatch.", { event: dispatchEventName(method, payload), ...correlation, request: correlation?.operationId ?? null });
+    const quiet = WORKBENCH_QUIET_READS.has(method);
+    if (!quiet) this.diagnosticLog.debug("request.started", "Workbench request accepted for dispatch.", { event: dispatchEventName(method, payload), ...correlation, request: correlation?.operationId ?? null });
     try {
       const result = await this.dispatchRequest(method, payload);
-      this.diagnosticLog.debug("request.completed", "Workbench request completed.", { event: dispatchEventName(method, payload), durationMs: Date.now() - started, ...currentOperationDetails() });
+      if (!quiet) this.diagnosticLog.debug("request.completed", "Workbench request completed.", { event: dispatchEventName(method, payload), durationMs: Date.now() - started, ...currentOperationDetails() });
       return result;
     } catch (error) {
       this.rememberDispatchFailure(method, payload, error);
@@ -947,7 +960,9 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }, planAdmission ? { affectedSpaceIds: planAdmission.affectedSpaceIds } : undefined);
     if (parsedCommand.kind === "plan.execute") {
       const jobId = job.id;
-      void this.jobs.whenIdle().then(() => this.supervisorPlans.afterPlanJobSettled(jobId));
+      void this.jobs.whenIdle()
+        .then(() => this.supervisorPlans.afterPlanJobSettled(jobId))
+        .catch((error: unknown) => this.diagnosticLog.error("plan.settle-failed", "The settled-plan hook failed.", error, { job: jobId }));
     }
     return job;
   }

@@ -7,6 +7,7 @@
  * `workbench/store.ts`.
  */
 
+import { SPACES_COMPONENT_PACKAGES } from "../../../../../../src/shared/plugin-spec";
 import type { WorkbenchPlugin } from "../../../../../../src/shared/workbench";
 import type { WorkbenchDiagnostics } from "../../../../../../src/shared/workbench-product";
 import type { WorkbenchLogEntry } from "../../../../../../src/shared/workbench-log";
@@ -110,13 +111,17 @@ export abstract class ProductPart extends JobPart {
    * Read the published versions of the plugins this space has.
    *
    * The upgrade row needs them, and the read belongs to the store: the space
-   * detail page renders whatever the store knows.
+   * detail page renders whatever the store knows. Spaces component packages
+   * ship inside the component payload and are never upgraded from npm, so
+   * their version read would only 404.
    */
   protected loadSpacePluginVersions(plugins: WorkbenchPlugin[]): void {
     const spaceId = this.ui.pluginSpaceId;
     if (!spaceId) return;
+    const payload = new Set<string>(Object.values(SPACES_COMPONENT_PACKAGES));
     for (const plugin of plugins) {
       if (!plugin.installedIn.includes(spaceId)) continue;
+      if (payload.has(plugin.packageName)) continue;
       void this.loadPluginVersions(plugin.packageName);
     }
   }

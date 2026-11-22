@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -108,11 +109,19 @@ test("builtin manifest identity and every patch path are validated without profi
 test("bound official DSH inspection exposes available OPTIONAL_BUNDLES read-only", async (t) => {
   const bin = process.env.DSH_BLUEPRINT_TEST_BIN ?? process.env.DSH_TEST_CLI_BIN ?? join(process.env.APPDATA ?? "", "npm", "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
   if (!existsSync(bin)) { t.skip("official bound DSH installation unavailable"); return; }
-  const version = JSON.parse(readFileSync(join(bin, "..", "..", "package.json"), "utf8")).version;
+  const installDir = join(bin, "..", "..");
+  const version = JSON.parse(readFileSync(join(installDir, "package.json"), "utf8")).version;
   const home = temp();
   const inspected = await inspectBlueprintRuntime({ home, bin });
   assert.equal(inspected.versions.dsh, version);
-  assert.ok(inspected.builtinLayers?.some(layer => layer.name === "@deepseek-ai/dsh-experimental-agent-team-profile"));
+  assert.ok((inspected.builtinCatalog ?? []).length > 0, "the bound installation exposes no optional bundle catalog");
+  // The catalog changes between DSH releases; the test compares inspected
+  // layers against what the bound installation itself resolves, the same
+  // node_modules probing resolveBundleDir performs from the install anchor.
+  const probe = createRequire(join(installDir, "package.json"));
+  const available = (name: string) =>
+    (probe.resolve.paths(name) ?? []).some(dir => existsSync(join(dir, name, "package.json")));
+  assert.deepEqual(inspected.builtinLayers?.map(layer => layer.name), (inspected.builtinCatalog ?? []).filter(available));
   for (const layer of inspected.builtinLayers ?? []) assert.equal(layer.version, version);
   assert.equal(existsSync(join(home, "profiles")), false);
   assert.equal(existsSync(join(home, "sessions")), false);

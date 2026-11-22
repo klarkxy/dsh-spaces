@@ -2,6 +2,19 @@
 
 > 只列当前仍需跟踪的事项。完整日期日志和已关闭条目在 [tasks/archive](archive/README.md)，不要在这里追加长日志。
 
+## 2026-11-22 审查修复批次
+
+- [x] 主空间模型同步改为经绑定宿主 `dsh-app-boot` 进程内只读合成 `--dump-config`（不写主 profile），覆盖被官方 CLI 拒绝的 `desktop` profile；真实 Desktop 待验。
+- [x] Creator/维护批安装接受 `installSpecFor` 生成的精确 GitHub 子目录 spec（`#<commit>&path:/<sub>`），新增严格专用校验器 `isExactGithubInstallSpec`，Windows 上低于 `ARGV_PRESERVING_CLI` 的旧 CLI 拒绝 `&` 形式；通用 `isSafeSpec` 未放宽。
+- [x] 两个测试修正：`portable-host-dom` 按 `data-reason="primary"` 精确断言并核对失败时间行；`blueprint-v2-runtime` 改从绑定安装的 optional-bundle catalog 派生断言，移除对已退役 bundle 名的硬编码。
+- [x] Desktop 宿主热重载：新插件实例加入既有 launch record 时等待 ready 后仅 attach（`attachJoinedLaunch`/`attachReadyService`），主空间注册在同一 Supervisor epoch 恢复，不重复 launch；attach 失败落诊断并标记 record。
+- [x] `unlockDead` 在 lock 目录删除失败时同步清理 reclaim 标记（与 `home-lease.reclaimDead` 一致），后续尝试不再永久报 `reclaim-in-progress`；锁仍按占有保持阻塞。
+- [x] Workbench 关机确认修复：submit 返回 queued/running 时继续只读 job 至 terminal；failed/cancelled 恢复普通轮询并显示错误，读取失败保留 unconfirmed 提示而非错误页。
+- [x] 分享导出扫描只拒 `apiKey` 字面量，`apiKeyEnv: <env 名>` 合法；托管引用与 `sk-` 字面量仍由各自模式拦截。
+- [x] Workbench 不再为组件载荷包（`@dsh-spaces/view-bridge` 等 `SPACES_COMPONENT_PACKAGES`）请求 npm 版本，普通第三方插件请求保留。
+- [x] 未处理 Promise 缺口补 `.catch`：`plugin.ts` 的 `bootstrap()` 与 Supervisor 两处 `whenIdle().then(afterPlanJobSettled)`，失败仅记诊断，不重试不改状态。
+- [x] 诊断降噪：成功只读轮询（`state`/`startupStatus`/`job`）不再写 `request.started/completed` 与 `http.completed`；失败与变更请求保留；子进程 stderr 行由 `error` 改 `info` 并带 `stream:"stderr"`，异常退出仍为 `error`。
+
 ## 2026-11-14 推送前审查
 
 - [x] 修正宿主状态字段、Desktop 启动范围、异常退出与密钥日志、模型路由替换、插件部分结果和界面刷新；复用 dsh-plugins 发布目录并核对 14 个 npm bundle。全量检查通过，最终补丁验证见 [审查记录](archive/review-20261114.md)；真实宿主待验事项保持下列状态。

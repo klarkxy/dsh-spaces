@@ -17,6 +17,7 @@ import { currentDiagnosticLogger } from "../diagnostics/operation-log";
 import { assertNotRealHome } from "../home/home-guard";
 import { npmPackumentUrl } from "./package-source";
 import { isBareNpmPackageName, isGitSpec, isInstallableEntry, isSafeSpec, pluginAliases } from "../../../shared/plugin";
+import { isExactGithubInstallSpec } from "../../../shared/plugin-source";
 import { lookupCatalogEntry } from "./plugin-catalog";
 import {
   archiveAbsPath,
@@ -171,7 +172,7 @@ function boundedProcessDetail(stdout: string, stderr: string): string {
 
 function addableSpec(dshHome: string, spec: string): string {
   if (isHubPluginArchive(dshHome, spec)) return spec;
-  if (isSafeSpec(spec)) return spec;
+  if (isSafeSpec(spec) || isExactGithubInstallSpec(spec)) return spec;
   throw new Error(t("errors.pluginSpecInvalid", { spec }));
 }
 
@@ -204,9 +205,24 @@ function archiveAddArgument(dshHome: string, profile: string, target: string): s
   return `"file:${spec}"`;
 }
 
+/**
+ * On Windows, a `github:…&path:/…` spec only reaches `plugin add` intact when
+ * the selected CLI preserves argv; older builds join arguments through
+ * cmd.exe, where "&" splits the command. The selected version is the only
+ * evidence — unknown means the bound runtime is current enough to check.
+ */
+function assertArgvSafeSpec(profile: string, target: string): void {
+  if (process.platform !== "win32" || !isExactGithubInstallSpec(target)) return;
+  const version = selectedCliVersion(profile);
+  if (version && semverValid(version) && semverLt(version, ARGV_PRESERVING_CLI)) {
+    throw new Error(t("errors.pluginSpecInvalid", { spec: target }));
+  }
+}
+
 export async function pluginAdd(dshHome: string, name: string, spec: string, options: { force?: boolean } = {}): Promise<void> {
   assertProfile(dshHome, name);
   const target = addableSpec(dshHome, spec);
+  assertArgvSafeSpec(name, target);
   const cliTarget = archiveAddArgument(dshHome, name, target);
   await enqueuePlugin(async () => {
     const log = currentDiagnosticLogger();

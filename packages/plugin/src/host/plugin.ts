@@ -53,7 +53,10 @@ export class SpacesPlugin {
     if (this.runtime.shouldRegisterManager) {
       this.manager = new WorkbenchManagerHost(ctx, this.runtime);
       this.spaces = new SpacesRemote(ctx, this.runtime);
-      void this.runtime.bootstrap();
+      void this.runtime.bootstrap().catch((error: unknown) => {
+        hostDiagnosticLogger(this.runtime)?.error("host.bootstrap-failed", "Manager bootstrap failed.", error);
+        ctx.logger.error(publicReason(error));
+      });
     } else {
       this.manager = null;
       this.spaces = null;

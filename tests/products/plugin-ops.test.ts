@@ -15,6 +15,8 @@ import {
   resolveInstallSpec,
 } from "../../src/adapters/node/products/plugin-ops.ts";
 import { testCatalog, writeTestCatalog } from "../fixtures/plugin-catalog.ts";
+import { installSpecFor } from "../../src/adapters/node/products/plugin-exact-source.ts";
+import { isExactGithubInstallSpec } from "../../src/shared/plugin-source.ts";
 import { resetDshBinCache, setSelectedDshResolver } from "../../src/adapters/node/runtime/dsh-cli.ts";
 import { applyAppLocale, t } from "../../src/shared/i18n/index.ts";
 import { createDiagnosticLogger } from "../../src/adapters/node/diagnostics/rotating-log.ts";
@@ -376,4 +378,75 @@ test("older Windows CLI receives one quoted profile-relative archive", async () 
       : archive;
     assert.deepEqual(argv, ["plugin", "--profile", "coding", "add", expected]);
   } finally { setSelectedDshResolver(() => undefined); resetDshBinCache(); }
+});
+
+test("isExactGithubInstallSpec accepts only the installSpecFor subdirectory form", () => {
+  const commit = "0123456789abcdef0123456789abcdef01234567";
+  const emitted = installSpecFor({
+    kind: "github",
+    owner: "deepseek-ai",
+    repo: "harness-plugins",
+    commit,
+    path: "plugins/dsh-git-fixture",
+    packageName: "dsh-git-fixture",
+    approvedBuilds: [],
+  });
+  assert.equal(emitted, `github:deepseek-ai/harness-plugins#${commit}&path:/plugins/dsh-git-fixture`);
+  assert.equal(isExactGithubInstallSpec(emitted), true);
+  for (const bad of [
+    `github:deepseek-ai/harness-plugins#${commit}&path:/plugins/dsh-git-fixture&x`,
+    `github:deepseek-ai/harness-plugins#${commit}&semver:1.2.3&path:/plugins/dsh-git-fixture`,
+    `github:deepseek-ai/harness-plugins#${commit}&path:/plugins/../escape`,
+    `github:deepseek-ai/harness-plugins#0123abc&path:/plugins/dsh-git-fixture`,
+    `github:deepseek-ai/harness-plugins#${commit.toUpperCase()}&path:/plugins/dsh-git-fixture`,
+    `github:deepseek-ai/harness-plugins#${commit}`,
+    `github:deepseek-ai/harness-plugins#${commit}&path:/plugins/dsh-git-fixture/`,
+    `github:deepseek-ai/harness-plugins#${commit}&path:relative`,
+    `github:deepseek-ai/harness-plugins#${commit}&path:/`,
+  ]) {
+    assert.equal(isExactGithubInstallSpec(bad), false, bad);
+  }
+});
+
+test("an exact github subdirectory spec reaches plugin add argv verbatim", async () => {
+  const dir = home();
+  writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
+  const capture = join(dir, "argv.json");
+  const bin = join(dir, "fake-dsh.cjs");
+  writeFileSync(bin, `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));`);
+  const spec = `github:deepseek-ai/harness-plugins#${"a".repeat(40)}&path:/plugins/dsh-git-fixture`;
+  setSelectedDshResolver(() => bin);
+  resetDshBinCache();
+  try {
+    await pluginAdd(dir, "coding", spec);
+    assert.deepEqual(
+      JSON.parse(readFileSync(capture, "utf8")),
+      ["plugin", "--profile", "coding", "add", spec],
+    );
+  } finally {
+    setSelectedDshResolver(() => undefined);
+    resetDshBinCache();
+  }
+});
+
+test("an exact github subdirectory spec is refused on argv-joining Windows CLIs", async () => {
+  const dir = home();
+  writeProfile(dir, "coding", ["@deepseek-ai/dsh-web-app"]);
+  const bin = join(dir, "lib", "bin.js");
+  mkdirSync(join(dir, "lib"), { recursive: true });
+  writeFileSync(bin, "console.log('old');\n");
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@deepseek-ai/dsh", version: "0.1.5-rc.2" }));
+  const spec = `github:deepseek-ai/harness-plugins#${"a".repeat(40)}&path:/plugins/dsh-git-fixture`;
+  setSelectedDshResolver(() => bin);
+  resetDshBinCache();
+  try {
+    if (process.platform === "win32") {
+      await assert.rejects(pluginAdd(dir, "coding", spec));
+    } else {
+      await pluginAdd(dir, "coding", spec);
+    }
+  } finally {
+    setSelectedDshResolver(() => undefined);
+    resetDshBinCache();
+  }
 });

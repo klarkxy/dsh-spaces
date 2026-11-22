@@ -761,7 +761,25 @@ export class WorkbenchHostRuntime {
     if (denied) throw new Error(denied);
     const { record, created } = joinLaunch(this.launchHomeKey());
     if (created) void this.runLaunch(record, undefined, true).catch(() => undefined);
+    else void this.attachJoinedLaunch(record).catch(() => undefined);
     return snapshotLaunch(record);
+  }
+
+  /**
+   * A remounted plugin instance joins the shared record instead of launching
+   * again: when the record settles ready and this instance has no endpoint,
+   * attach so its listeners (the main registration) are delivered. Attach
+   * only — never a second launch, never replaceLaunch.
+   */
+  private async attachJoinedLaunch(record: DesktopLaunchRecord): Promise<void> {
+    await record.done;
+    if (record.phase !== "ready" || this.endpoint) return;
+    try {
+      await this.attachReadyService();
+    } catch (error) {
+      this.diagnosticLogger()?.error("host.desktop-attach-failed", "The remounted Desktop host could not attach the running Spaces service.", error);
+      this.failRecord(record, error);
+    }
   }
 
   async desktopLaunchState(): Promise<DesktopLaunchState> {
@@ -785,6 +803,18 @@ export class WorkbenchHostRuntime {
     return canonicalHome(home, { allowRealHome: this.options.allowRealHome === true });
   }
 
+  /** Verify the recorded endpoint and deliver this instance's attach listeners. */
+  private async attachReadyService(): Promise<void> {
+    const attached = await attachExistingSupervisor({
+      home: this.identity.home!,
+      allowRealHome: this.options.allowRealHome === true,
+      fetch: this.options.fetch,
+      timeoutMs: this.options.supervisorTimeoutMs,
+    });
+    if (!("endpoint" in attached)) throw new Error(ENTRY_UNAVAILABLE);
+    await this.remember(attached.endpoint);
+  }
+
   private async initializeThroughLaunch(): Promise<WorkbenchInitializeResult> {
     const snapshot = await this.beginDesktopLaunch();
     const homeKey = this.launchHomeKey();
@@ -799,14 +829,7 @@ export class WorkbenchHostRuntime {
     }
     if (!this.endpoint) {
       try {
-        const attached = await attachExistingSupervisor({
-          home: this.identity.home!,
-          allowRealHome: this.options.allowRealHome === true,
-          fetch: this.options.fetch,
-          timeoutMs: this.options.supervisorTimeoutMs,
-        });
-        if (!("endpoint" in attached)) return this.initializeFailure([ENTRY_UNAVAILABLE]);
-        await this.remember(attached.endpoint);
+        await this.attachReadyService();
       } catch (error) {
         return this.initializeFailure([publicReason(error)]);
       }

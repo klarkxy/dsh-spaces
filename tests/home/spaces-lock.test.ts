@@ -351,7 +351,13 @@ test("unlockDead reports remove-failed and leaves ownership blocked when the loc
   assert.equal(result.unlocked, false);
   assert.equal(result.reason, "remove-failed");
   assert.equal(lock.inspect().held, true);
+  assert.equal(existsSync(lock.reclaimDir), false);
+  const inspect = lock.inspect();
+  assert.equal("reclaim" in inspect && inspect.reclaim, false);
   await assert.rejects(lock.run("after-failed-reclaim", async () => "no"), HomeLockBusyError);
+  const retry = lock.unlockDead();
+  assert.equal(retry.unlocked, false);
+  assert.equal(retry.reason, "incomplete");
 });
 
 test("release surfaces failure and leaves blocked ownership visible", async () => {

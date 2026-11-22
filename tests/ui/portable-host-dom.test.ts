@@ -93,7 +93,10 @@ test("DOM: native startup registration failure leaves main interactive and detai
   await page.getByRole("textbox", { name: "Main draft" }).fill("main draft after failure");
   await settings.click();
   await page.getByRole("alert").waitFor();
-  assert.equal(await page.locator(".dsh-host-detail").innerText(), "失败原因\nMAIN_REGISTRATION_REFUSED:404");
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="primary"]').innerText(), "失败原因\nMAIN_REGISTRATION_REFUSED:404");
+  const failedAt = page.locator('.dsh-host-detail[data-reason="failed-at"]');
+  assert.equal(await failedAt.count(), 1);
+  assert.match(await failedAt.innerText(), /^失败时间：/);
   await page.getByRole("button", { name: "返回主空间", exact: true }).click();
   await page.getByRole("textbox", { name: "Main draft" }).waitFor();
   assert.equal(await page.getByRole("textbox", { name: "Main draft" }).inputValue(), "main draft after failure");
