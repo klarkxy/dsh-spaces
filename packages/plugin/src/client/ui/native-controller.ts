@@ -2,15 +2,17 @@ import { isNativeSpaceTarget, parseNativeSpaceHash, parseNativePortalFailureHash
   parsePortalSnapshot, nativeCreateIntentHash, parseNativeCreateIntent, nativeDetailIntentHash, parseNativeDetailIntent, PORTAL_SPACE_RE,
   type NativeSpaceTarget, type PortalSnapshot, type PortalFailure, type PortalCreation } from "../../../../../src/shared/space-host";
 import { BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, type BrowserRelay } from "../../../../../src/shared/browser-guest";
-import type { DesktopSpaceAction, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
+import type { ClientFailureReport, ClientFailureStage, DesktopSpaceAction, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
 import { publicGuideDetail } from "../guide-detail";
 import { NativeBrowserHost } from "../native-browser-host";
 import { SPACES_BROWSER_SEALED } from "../../../../../src/shared/browser-sealed";
 import type { DesktopLaunchState } from "../../types";
+import { WorkbenchRemoteError } from "../workbench-remote";
 import { nativeTexts } from "./native-texts";
-import { createNavDiag } from "../../../../../src/shared/nav-diag";
+import { createNavDiag, parseNavDiag, type NavDiagRecord } from "../../../../../src/shared/nav-diag";
 
 const LAUNCH_POLL_MS = 1500;
+export const NATIVE_SELECTION_DEADLINE_MS = 90_000;
 const LAUNCH_BUSY = new Set<DesktopLaunchState["phase"]>(["discovering", "preparing", "launching", "starting", "connecting"]);
 
 /**
@@ -96,11 +98,18 @@ export class NativeHostController {
   private intent: NativeNavigationIntent | null = null;
   /** Monotonic id of the last create intent handed to the portal page. */
   private intentSequence = 0;
+  private navTrail: NavDiagRecord[] = [];
   /** First-navigation diagnosis. Calls must not change navigation. */
-  private navDiag = createNavDiag("controller");
+  private navDiag = createNavDiag("controller", row => this.recordNavDiag(row));
   private navNavigateNoted = false;
   private navOutcomeNoted = false;
-  constructor(private guideApi: WorkbenchGuideApi, private bridge: DesktopBrowserBridge) {}
+  private readonly readOnlyLaunch: boolean;
+  constructor(private guideApi: WorkbenchGuideApi, private bridge: DesktopBrowserBridge, options?: { readOnlyLaunch?: boolean }) {
+    this.readOnlyLaunch = options?.readOnlyLaunch === true;
+  }
+  get disposedBeforeTerminal(): boolean {
+    return this.stopped && this.state.phase !== "failed" && this.state.phase !== "service-stopped";
+  }
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   get supportsSpaceActions() { return !!this.guideApi.spaceAction; }
@@ -137,6 +146,39 @@ export class NativeHostController {
   previewServiceRestart = () => {
     if (!this.supportsServiceRestart || !["failed", "service-stopped"].includes(this.state.phase)) throw Error(nativeTexts().restartUnavailable);
     return this.guideApi.previewServiceRestart!();
+  };
+  get supportsSurfaceReload() { return !!this.guideApi.desktopLaunchState && !!this.guideApi.presentationSnapshot; }
+  reloadSurface = async (): Promise<NativeHostController> => {
+    if (!this.supportsSurfaceReload || this.state.phase !== "failed") throw Error(nativeTexts().surfaceReloadUnavailable);
+    try {
+      const role = await this.guideApi.role();
+      if (role.unavailable || !role.profileId) {
+        throw Error(this.reasonText(role.reasons) ?? nativeTexts().surfaceReloadFailed);
+      }
+      const launch = await this.guideApi.desktopLaunchState!();
+      if (launch.phase !== "ready") {
+        throw Error(this.launchDiagnostics(launch).detail ?? nativeTexts().surfaceReloadServiceNotReady);
+      }
+      const snapshot = parsePortalSnapshot(await this.guideApi.presentationSnapshot!());
+      if (
+        !snapshot ||
+        (launch.serviceEpoch !== null && snapshot.serviceEpoch !== launch.serviceEpoch) ||
+        (launch.managerId !== null && snapshot.managerId !== launch.managerId)
+      ) {
+        throw Error(nativeTexts().surfaceReloadFailed);
+      }
+      const manager = snapshot.managerId ? snapshot.spaces.find(row => row.id === snapshot.managerId) : undefined;
+      if (manager && manager.status !== "running") {
+        throw Error(nativeTexts().surfaceReloadServiceNotReady);
+      }
+    } catch (error) {
+      const detail = this.detailOf(error) ?? nativeTexts().surfaceReloadFailed;
+      this.reportFailure("reload-surface", detail, new Date().toISOString(), null, error);
+      throw error instanceof WorkbenchRemoteError ? new Error(detail) : error;
+    }
+    const next = new NativeHostController(this.guideApi, this.bridge, { readOnlyLaunch: true });
+    next.notify(nativeTexts().surfaceReloadedNotice);
+    return next;
   };
   restartService = async (confirmationId: string): Promise<NativeHostController> => {
     if (!this.supportsServiceRestart || !["failed", "service-stopped"].includes(this.state.phase)) throw Error(nativeTexts().restartUnavailable);
@@ -185,6 +227,12 @@ export class NativeHostController {
   };
   closeCreationFailed = (): void => { this.patch({ creationFailed: null }); };
   private detailOf(error: unknown): string | null {
+    if (error instanceof WorkbenchRemoteError && error.code === null && error.failureKind === "rpc-transport" && error.endpoint) {
+      const stateSuffix = error.connectionState
+        ? nativeTexts().hostRpcConnectionSuffix.replace("{state}", error.connectionState)
+        : "";
+      return nativeTexts().hostRpcFailed.replace("{endpoint}", error.endpoint).replace("{state}", stateSuffix);
+    }
     const detail = publicGuideDetail(error instanceof Error ? error.message : String(error ?? ""));
     return detail || null;
   }
@@ -209,13 +257,20 @@ export class NativeHostController {
     try {
       const role = await this.guideApi.role();
       if (this.stopped || generation !== this.launchGeneration) return;
-      if (role.unavailable || !role.profileId || !this.guideApi.presentationSnapshot) return this.fail(this.reasonText(role.reasons));
-      if (!this.guideApi.beginDesktopLaunch || !this.guideApi.desktopLaunchState) return this.fail(nativeTexts().desktopLaunchUnsupported);
+      if (role.unavailable || !role.profileId || !this.guideApi.presentationSnapshot) return this.fail(this.reasonText(role.reasons), null, undefined, "role");
+      if (this.readOnlyLaunch) {
+        if (!this.guideApi.desktopLaunchState) return this.fail(nativeTexts().desktopLaunchUnsupported, null, undefined, "reload-surface");
+        const snapshot = await this.guideApi.desktopLaunchState();
+        if (this.stopped || generation !== this.launchGeneration) return;
+        await this.applyLaunch(snapshot, generation);
+        return;
+      }
+      if (!this.guideApi.beginDesktopLaunch || !this.guideApi.desktopLaunchState) return this.fail(nativeTexts().desktopLaunchUnsupported, null, undefined, "launch");
       const snapshot = await this.guideApi.beginDesktopLaunch();
       if (this.stopped || generation !== this.launchGeneration) return;
       await this.applyLaunch(snapshot, generation);
     } catch (error) {
-      if (!this.stopped && generation === this.launchGeneration) this.fail(this.detailOf(error));
+      if (!this.stopped && generation === this.launchGeneration) this.fail(this.detailOf(error), null, undefined, this.readOnlyLaunch ? "reload-surface" : "launch", error);
     }
   }
   private async readDirectory() {
@@ -225,16 +280,16 @@ export class NativeHostController {
       const snapshot = parsePortalSnapshot(await this.guideApi.presentationSnapshot!());
       if (this.stopped) return;
       if (!snapshot) throw Error("presentation snapshot rejected");
-      if (this.acceptedDirectoryMismatch(snapshot)) { this.fail(nativeTexts().launchObservationEnded); return; }
+      if (this.acceptedDirectoryMismatch(snapshot)) { this.fail(nativeTexts().launchObservationEnded, null, undefined, "directory-poll"); return; }
       if (this.state.inventory && snapshot.serviceEpoch !== this.state.inventory.serviceEpoch) throw Error("presentation snapshot epoch changed");
       if (version === this.directoryVersion) this.patch({ phase: "ready", inventory: snapshot });
       this.pollTimer = setTimeout(() => { void this.readDirectory(); }, LAUNCH_POLL_MS);
-    } catch (error) { this.fail(this.detailOf(error)); }
+    } catch (error) { this.fail(this.detailOf(error), null, undefined, "directory-poll", error); }
   }
   private async applyLaunch(snapshot: DesktopLaunchState, generation: number) {
     if (this.stopped || generation !== this.launchGeneration) return;
     // A live observer reports the change and stops. A replaced generation never reaches here.
-    if (!this.acceptsLaunch(snapshot)) { this.fail(nativeTexts().launchObservationEnded); return; }
+    if (!this.acceptsLaunch(snapshot)) { this.fail(nativeTexts().launchObservationEnded, null, undefined, "launch"); return; }
     const phase = snapshot.phase;
     if (LAUNCH_BUSY.has(phase)) {
       this.patch({ phase });
@@ -252,7 +307,7 @@ export class NativeHostController {
     if (phase === "failed") { this.failLaunch(snapshot); return; }
     if (phase === "stopped") { this.finishStopped(snapshot); return; }
     if (phase === "idle") { this.patch({ phase: "idle" }); return; }
-    this.fail(nativeTexts().desktopLaunchUnsupported);
+    this.fail(nativeTexts().desktopLaunchUnsupported, null, undefined, "launch");
   }
   private acceptsLaunch(snapshot: DesktopLaunchState): boolean {
     if (snapshot.operationId) {
@@ -285,7 +340,7 @@ export class NativeHostController {
       if (this.stopped || this.launchSettled || generation !== this.launchGeneration) return;
       await this.applyLaunch(snapshot, generation);
     } catch (error) {
-      if (!this.stopped && !this.launchSettled && generation === this.launchGeneration) this.fail(this.detailOf(error));
+      if (!this.stopped && !this.launchSettled && generation === this.launchGeneration) this.fail(this.detailOf(error), null, undefined, "launch-poll", error);
     }
   }
   private launchDiagnostics(snapshot: DesktopLaunchState): { detail: string | null; cleanupDetail: string | null; instanceRetained: boolean | null } {
@@ -299,7 +354,7 @@ export class NativeHostController {
   }
   private failLaunch(snapshot: DesktopLaunchState) {
     const diagnostics = this.launchDiagnostics(snapshot);
-    this.fail(diagnostics.detail, null, diagnostics);
+    this.fail(diagnostics.detail, null, diagnostics, "launch");
   }
   private finishStopped(snapshot: DesktopLaunchState) {
     const diagnostics = this.launchDiagnostics(snapshot);
@@ -488,7 +543,7 @@ export class NativeHostController {
       if (enter && intent === this.sequence) {
         const prepared = await preparation;
         if (this.stopped || intent !== this.sequence) return;
-        if (prepared) { this.fail(this.detailOf(prepared.error)); return; }
+        if (prepared) { this.fail(this.detailOf(prepared.error), null, undefined, "guest-bootstrap", prepared.error); return; }
         this.navigate(spaceId);
       }
     } catch (error) {
@@ -522,7 +577,12 @@ export class NativeHostController {
     const fragment = "#select/" + requestId + "/" + target + (generation === undefined ? "" : "/" + generation);
     this.patch({ pending: target, error: null, detail: null, guide: false });
     clearTimeout(this.selectionTimer);
-    this.selectionTimer = setTimeout(() => { if (this.sequence === requestId) { this.navNote("deadline", { stage: "selection" }); this.fail(nativeTexts().selectionDeadline); } }, 45000);
+    this.selectionTimer = setTimeout(() => {
+      if (this.sequence === requestId) {
+        this.navNote("deadline", { stage: "selection" });
+        this.fail(this.selectionDeadlineDetail(), null, undefined, "selection-timeout");
+      }
+    }, NATIVE_SELECTION_DEADLINE_MS);
     let selectRejected = false;
     void this.open().then(async () => {
       if (this.stopped || requestId !== this.sequence) return;
@@ -546,9 +606,15 @@ export class NativeHostController {
         // Keep waiting for its bounded acknowledgement; do not send it again.
         if (!this.stopped && this.state.pending === target &&
           actual !== this.nativeUrl + fragment) {
-          this.fail(selectRejected ? nativeTexts().selectionLoadMismatch : this.detailOf(error) ?? nativeTexts().guestOpenFailed);
+          this.fail(
+            selectRejected ? nativeTexts().selectionLoadMismatch : this.detailOf(error) ?? nativeTexts().guestOpenFailed,
+            null,
+            undefined,
+            selectRejected ? "navigation" : "guest-bootstrap",
+            error,
+          );
         }
-      } catch (error) { this.fail(this.detailOf(error)); }
+      } catch (innerError) { this.fail(this.detailOf(innerError), null, undefined, "navigation", innerError); }
     });
   }
   private open(): Promise<void> {
@@ -617,18 +683,22 @@ export class NativeHostController {
           typeof failure.errorCode === "number" ? String(failure.errorCode) : null,
           typeof failure.errorDescription === "string" && failure.errorDescription ? failure.errorDescription : null,
         ].filter((part): part is string => part !== null);
-        this.fail(nativeTexts().guestLoadFailed.replace("{detail}", bits.join(" ") || "unknown"));
+        this.fail(nativeTexts().guestLoadFailed.replace("{detail}", bits.join(" ") || "unknown"), null, undefined, "guest-load");
       }
     });
     element.addEventListener("did-start-navigation", event => { this.navNote("did-start-navigation", event); });
     element.addEventListener("did-frame-navigate", event => { this.navNote("did-frame-navigate", event); });
+    element.addEventListener("console-message", event => {
+      const rec = parseNavDiag((event as Event & { message?: unknown }).message);
+      if (rec) this.recordNavDiag(rec);
+    });
     element.addEventListener("render-process-gone", event => {
       const details = (event as Event & { details?: { reason?: unknown; exitCode?: unknown } }).details;
       const bits = [
         typeof details?.reason === "string" && details.reason ? details.reason : null,
         typeof details?.exitCode === "number" ? String(details.exitCode) : null,
       ].filter((part): part is string => part !== null);
-      this.fail(nativeTexts().guestProcessGone.replace("{detail}", bits.join(", ") || "unknown"));
+      this.fail(nativeTexts().guestProcessGone.replace("{detail}", bits.join(", ") || "unknown"), null, undefined, "guest-crashed");
     });
     element.addEventListener("did-navigate-in-page", event => { this.navNote("did-navigate-in-page", event); this.observed(); });
     this.container!.append(element); await ready;
@@ -650,23 +720,23 @@ export class NativeHostController {
     }
     this.navNote("bootstrap-load-complete");
     if (!this.stopped && element.getURL() !== this.nativeUrl) throw Error("native channel rejected");
-    element.addEventListener("did-navigate", () => { if (!this.stopped && !element.getURL().startsWith(this.nativeUrl! + "#") && element.getURL() !== this.nativeUrl) this.fail(nativeTexts().guestNavigatedAway); });
+    element.addEventListener("did-navigate", () => { if (!this.stopped && !element.getURL().startsWith(this.nativeUrl! + "#") && element.getURL() !== this.nativeUrl) this.fail(nativeTexts().guestNavigatedAway, null, undefined, "guest-navigated"); });
   }
   private observed(observedUrl?: string) {
     if (this.stopped || !this.guest || !this.nativeUrl) return;
     let url: URL;
     try { url = new URL(observedUrl ?? this.guest.getURL()); }
-    catch { this.fail(nativeTexts().invalidPortalAddress); return; }
-    if (url.origin + url.pathname !== this.nativeUrl || url.search || url.username || url["password"]) { this.fail(nativeTexts().invalidPortalAddress); return; }
+    catch { this.fail(nativeTexts().invalidPortalAddress, null, undefined, "guest-navigated"); return; }
+    if (url.origin + url.pathname !== this.nativeUrl || url.search || url.username || url["password"]) { this.fail(nativeTexts().invalidPortalAddress, null, undefined, "guest-navigated"); return; }
     if (/^#service-stop-preview\/[1-9][0-9]{0,9}$/.test(url.hash)) {
       if (this.state.phase === "ready" && this.state.selected === "@settings" && !this.state.pending && !this.state.operation)
         this.patch({ serviceStopRequest: this.state.serviceStopRequest + 1 });
       return;
     }
-    if (url.hash === "#failed") { this.fail(nativeTexts().portalFailureNoDetail); return; }
+    if (url.hash === "#failed") { this.fail(nativeTexts().portalFailureNoDetail, null, undefined, "portal"); return; }
     if (url.hash.startsWith("#failed")) {
       const failure = parseNativePortalFailureHash(url.hash);
-      this.fail(failure ? portalFailureDetail(failure) : nativeTexts().portalFailureNoDetail, failure);
+      this.fail(failure ? portalFailureDetail(failure) : nativeTexts().portalFailureNoDetail, failure, undefined, "portal");
       return;
     }
     if (url.hash.startsWith("#browser/")) {
@@ -687,7 +757,9 @@ export class NativeHostController {
       this.readySpaces.delete(answer.target);
       if (row) this.failedSpaces.set(row.id, row.generation);
       this.patch({ pending: null, guide: true, error: nativeTexts().spaceViewFailed, detail: null });
-      this.navOutcome("fail", true); return;
+      this.navOutcome("fail", true);
+      this.reportFailure("selection-rejected", nativeTexts().spaceViewFailed, new Date().toISOString());
+      return;
     }
     if (row?.status === "running" && row.generation === this.navigationGeneration) { this.readySpaces.set(row.id, row.generation); this.failedSpaces.delete(row.id); }
     this.patch({ selected: answer.target, pending: null, guide: false }); this.guest.focus();
@@ -738,13 +810,64 @@ export class NativeHostController {
     if (!fragment) return;
     const responseUrl = this.nativeUrl + fragment;
     try { await this.guest.loadURL(responseUrl); }
-    catch { if (!this.stopped && this.guest?.getURL() !== responseUrl && this.browserRequest === request.requestId) this.fail(nativeTexts().browserResultFailed); }
+    catch (error) { if (!this.stopped && this.guest?.getURL() !== responseUrl && this.browserRequest === request.requestId) this.fail(nativeTexts().browserResultFailed, null, undefined, "browser-relay", error); }
   }
   private clearNavigationIntent() {
     this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null;
     if (this.state.navigationIntent || this.state.createHandoff) this.patch({ navigationIntent: null, createHandoff: false });
   }
-  private fail(detail: string | null = null, portalFailure: PortalFailure | null = null, diagnostics?: { cleanupDetail: string | null; instanceRetained: boolean | null }) {
+  private selectionDeadlineDetail(): string {
+    const ignoredEvents = new Set([
+      "did-start-navigation",
+      "did-frame-navigate",
+      "did-navigate-in-page",
+      "deadline",
+      "fail",
+      "terminal",
+      "destroyed",
+    ]);
+    const tail = this.navTrail.filter(row => !ignoredEvents.has(row.ev)).slice(-5);
+    if (tail.length === 0) return nativeTexts().selectionDeadline;
+    const stages = tail.map(row => `${row.src}:${row.ev}${row.stage ? `(${row.stage})` : ""}`).join(" -> ");
+    return nativeTexts().selectionDeadline + nativeTexts().selectionStageSuffix.replace("{stages}", stages);
+  }
+  private recordNavDiag(row: NavDiagRecord) {
+    const clean = parseNavDiag(JSON.stringify(row));
+    if (!clean) return;
+    if (this.navTrail.length >= 64) this.navTrail.shift();
+    this.navTrail.push(clean);
+  }
+  private reportFailure(
+    stage: ClientFailureStage,
+    detail: string | null,
+    failedAt: string,
+    portalFailure: PortalFailure | null = null,
+    cause?: unknown,
+  ) {
+    if (!this.guideApi.reportClientFailure) return;
+    const boundedDetail = detail ? publicGuideDetail(detail).slice(0, 500) || null : null;
+    const report: ClientFailureReport = {
+      surface: "desktop-native",
+      stage,
+      detail: boundedDetail,
+      failedAt,
+      portalFailure,
+      ...(this.navTrail.length > 0 ? { navTrail: [...this.navTrail] } : {}),
+      ...(cause instanceof WorkbenchRemoteError ? {
+        ...(cause.endpoint ? { rpcEndpoint: cause.endpoint } : {}),
+        rpcFailureKind: cause.failureKind,
+        ...(cause.connectionState ? { connectionState: cause.connectionState } : {}),
+      } : {}),
+    };
+    void this.guideApi.reportClientFailure(report).catch(() => undefined);
+  }
+  private fail(
+    detail: string | null = null,
+    portalFailure: PortalFailure | null = null,
+    diagnostics?: { cleanupDetail: string | null; instanceRetained: boolean | null },
+    stage: ClientFailureStage = "navigation",
+    cause?: unknown,
+  ) {
     if (this.stopped) return;
     this.navOutcome("fail", false);
     // Background discovery must not cover the main application. Keep the
@@ -753,9 +876,11 @@ export class NativeHostController {
     this.launchSettled = true;
     this.intent = null; this.createIntent = false; this.detailIntentSpaceId = null; this.desiredGuest = 0;
     const guide = this.state.guide || this.state.selected !== "current" || this.state.pending !== null;
+    const failedAt = new Date().toISOString();
     this.patch({ phase: "failed", pending: null, operation: null, inventory: null, selected: "current", guide,
-      navigationIntent: null, createHandoff: false, error: nativeTexts().serviceUnavailable, detail, failedAt: new Date().toISOString(),
+      navigationIntent: null, createHandoff: false, error: nativeTexts().serviceUnavailable, detail, failedAt,
       cleanupDetail: diagnostics?.cleanupDetail ?? null, instanceRetained: diagnostics?.instanceRetained ?? null, portalFailure });
+    this.reportFailure(stage, detail, failedAt, portalFailure, cause);
     this.stop();
   }
   stop = () => {

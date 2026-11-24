@@ -70,11 +70,17 @@ export function apply(ctx: Context): void {
   const guide = createWorkbenchGuideRemote(connection);
   const nativeBridge = desktopBrowserBridge();
   if (nativeBridge) {
-    const native = new NativeHostController(guide, nativeBridge);
+    let active = new NativeHostController(guide, nativeBridge);
+    ctx.effect(() => () => active.stop());
     ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
     ctx.slots.inject("shell.overlay", () => ctx.slots.register(
-      { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () =>
-        createElement(MotionRoot, null, createElement(NativeHostShell, { controller: native })),
+      { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () => {
+        if (active.disposedBeforeTerminal) active = new NativeHostController(guide, nativeBridge);
+        return createElement(MotionRoot, null, createElement(NativeHostShell, {
+          controller: active,
+          onControllerChange: (next) => { active = next; },
+        }));
+      },
     ));
     return;
   }

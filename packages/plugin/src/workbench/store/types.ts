@@ -108,6 +108,7 @@ export interface WorkbenchEnv {
   now(): number;
   handshakeTimeoutMs: number;
   startTimeoutMs: number;
+  disableAutoRestore?: boolean;
   openUrl(url: string): void;
   downloadFile(fileName: string, archiveBase64: string): void;
   writeClipboard(text: string): Promise<void>;

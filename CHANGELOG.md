@@ -4,7 +4,16 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ## [Unreleased]
 
+### Added
+
+- Desktop error pages now expose a manual frontend-only `Reload Spaces view` (`重新加载空间界面`) button whenever the failure is on the client/bridge side while `desktopLaunchState` and the running manager remain ready: it performs read-only checks (`role`, `desktopLaunchState`, `presentationSnapshot`) and mounts a fresh read-only `NativeHostController` without restarting Supervisor or any space.
+- Client surfaces (`NativeHostController`, `HostShellController`) now forward bounded, sanitized failure reports (including `stage`, `WorkbenchRemoteError` RPC transport/connection state, `portalFailure`, and up to 64 `navDiag` events) via `workbenchGuide/reportClientFailure` into `host.jsonl`, flushing once if the host WebSocket reconnects.
+
 ### Fixed
+
+- `NativeHostController` outer selection deadline now aligns to 90 seconds (covering 15s initial guest load + 35s manager readiness + 35s child selection) and appends the bounded `navDiag` reached-stage summary to `detail` on expiration.
+- Contained `WorkbenchApp` instances disable stale `localStorage` `selectedId` auto-restore (`disableAutoRestore`), and `@dsh-spaces/view-bridge` deduplicates repeated `"ready"` `postMessage` frames across DOM mutations while `connection` remains `"ready"`.
+- Desktop `shell.overlay` remounts during live `cordis.patch.yml` reloads now replace a non-terminal disposed controller instead of rendering an already-stopped instance, while preserving terminal `failed` / `service-stopped` controllers and keeping the active controller pointer synced across service restarts and surface reloads.
 
 - The managed component packages `@dsh-spaces/view-bridge` and `@klarkxy/dsh-dev-index` are protected wherever plugin changes are accepted: they show as protected in the workbench plugin list, and install, remove and toggle previews refuse them before a job exists. They remain preinstalled canonical lines and can no longer reach a running space's plugin manager as a removal target.
 - A running-space plugin operation refused before any change reaches the child (protected package, invalid input, missing entry, stale identity) now fails as an ordinary job failure; it no longer latches the Home maintenance flag, which previously reported an "unfinished maintenance journal", blocked the workbench and refused the authorized Desktop service restart until a Supervisor restart.

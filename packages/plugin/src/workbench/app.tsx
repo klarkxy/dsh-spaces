@@ -19,7 +19,10 @@ export interface WorkbenchAppProps {
  * Closing a tab does not call shutdown; that is an explicit settings action.
  */
 export function WorkbenchApp({ api, env, homeUrl, contained = false, nativeSurface = false, surfaceView }: WorkbenchAppProps): ReactElement {
-  const controller = useMemo(() => new WorkbenchController(api, env), [api, env]);
+  const controller = useMemo(
+    () => new WorkbenchController(api, contained ? { ...env, disableAutoRestore: true } : env),
+    [api, env, contained],
+  );
   const [systemPage, setSystemPage] = useState<"settings" | null>(null);
   const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   useEffect(() => {

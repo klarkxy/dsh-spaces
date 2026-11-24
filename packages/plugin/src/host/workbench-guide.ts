@@ -2,6 +2,7 @@ import { parseSpaceHostAudience, type SpaceHostAudience } from "../../../../src/
 import type { Context } from "@deepseek-ai/cordis";
 import { Remote, RemoteError, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import type {
+  ClientFailureReport,
   DesktopLaunchState,
   WorkbenchBootstrapResult,
   WorkbenchGuideRole,
@@ -12,7 +13,7 @@ import type {
 import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import { WORKBENCH_PUBLIC_ERROR } from "./remote-errors";
 import type { WorkbenchHostRuntime } from "./runtime";
-import { validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
+import { validClientFailureReport, validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
 
 /** Presentation and launch Remote; manual service restart is restricted to the confirmed Desktop. */
 export class WorkbenchGuideHost extends TypertRemoteService {
@@ -154,5 +155,13 @@ export class WorkbenchGuideHost extends TypertRemoteService {
       this.logFailure("desktopLaunchState", error);
       throw new RemoteError("workbench/unavailable", reportedOrFallback(error instanceof Error ? error.message : undefined, "The Desktop launch state is unavailable."), {});
     }
+  }
+
+  /** Record a bounded sanitized client-side failure into the host diagnostic log. */
+  @Remote("reportClientFailure")
+  async reportClientFailure(report: ClientFailureReport): Promise<{ recorded: boolean }> {
+    if (!validClientFailureReport(report)) throw new RemoteError("workbench/invalid-input", "Invalid client diagnostic report.", {});
+    try { return this.runtime.reportClientFailure(report); }
+    catch { return { recorded: false }; }
   }
 }

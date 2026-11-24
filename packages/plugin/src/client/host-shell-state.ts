@@ -1,5 +1,6 @@
 import { publicGuideDetail } from "./guide-detail";
-import type { WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
+import { WorkbenchRemoteError } from "./workbench-remote";
+import type { ClientFailureReport, WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
 import { parsePortalFailure, portalFailureDetail, parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalCreation, type PortalFailure, type PortalSnapshot } from "../../../../src/shared/space-host";
 
 export interface HostShellSnapshot {
@@ -81,6 +82,7 @@ export class HostShellController {
     this.clearTimers(); this.frame = null;
     this.patch({ phase: "failed", error, portal: null, inventory: null, pending: null,
       visible: this.ui.visible === "current" ? "current" : "guide", selected: null, detail });
+    this.reportFailure(detail, cause, this.ui.portalFailure);
     // A reported cause is authoritative; a generic directory error must not replace it.
     if (detail) return;
     // One read-only observation of the failure, never a new connection or launch.
@@ -89,6 +91,22 @@ export class HostShellController {
       const detail = publicGuideDetail(cause instanceof Error ? cause.message : String(cause));
       this.patch({ detail: detail.slice(0, 2000) || null });
     });
+  }
+  private reportFailure(detail: string | null, cause: unknown, portalFailure: PortalFailure | null): void {
+    if (!this.guide.reportClientFailure) return;
+    const report: ClientFailureReport = {
+      surface: "portable-host",
+      stage: "host-shell",
+      detail: detail ? detail.slice(0, 500) : null,
+      failedAt: new Date().toISOString(),
+      portalFailure,
+      ...(cause instanceof WorkbenchRemoteError ? {
+        ...(cause.endpoint ? { rpcEndpoint: cause.endpoint } : {}),
+        rpcFailureKind: cause.failureKind,
+        ...(cause.connectionState ? { connectionState: cause.connectionState } : {}),
+      } : {}),
+    };
+    void this.guide.reportClientFailure(report).catch(() => undefined);
   }
   private failPortal(failure: PortalFailure): void {
     this.patch({ portalFailure: failure });

@@ -30,9 +30,20 @@ const RAIL_LAYOUT_ID = "dsh-native-rail-pill";
 /** localStorage key of the remembered rail visibility. */
 const RAIL_STORAGE_KEY = "dsh-spaces.native.rail";
 
-export function NativeHostShell({ controller }: { controller: NativeHostController }): ReactElement {
+export function NativeHostShell({
+  controller,
+  onControllerChange,
+}: {
+  controller: NativeHostController;
+  onControllerChange?: (next: NativeHostController) => void;
+}): ReactElement {
   const [active, setActive] = useState(controller);
-  return <NativeHostShellView controller={active} onRestarted={setActive} />;
+  useEffect(() => { setActive(controller); }, [controller]);
+  const handleReplaced = useCallback((next: NativeHostController) => {
+    setActive(next);
+    onControllerChange?.(next);
+  }, [onControllerChange]);
+  return <NativeHostShellView controller={active} onRestarted={handleReplaced} />;
 }
 
 function NativeHostShellView({ controller, onRestarted }: { controller: NativeHostController; onRestarted: (next: NativeHostController) => void }): ReactElement {
@@ -164,6 +175,7 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
         {ui.failedAt ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="failed-at" aria-label={texts.failureTime.trimEnd()}>{texts.failureTime}{new Intl.DateTimeFormat(inferSpacesLocale() === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "medium" }).format(new Date(ui.failedAt))}</FadeIn> : null}
         {ui.cleanupDetail ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="cleanup" aria-label={texts.failureCleanup}>{texts.failureCleanup}{"\n"}{ui.cleanupDetail}</FadeIn> : null}
         {typeof ui.instanceRetained === "boolean" ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="instance" aria-label={texts.failureInstance}>{texts.failureInstance}{"\n"}{ui.instanceRetained ? texts.instanceRetainedYes : texts.instanceRetainedNo}</FadeIn> : null}
+        {ui.phase === "failed" && restart.reloadAction}
         {["failed", "service-stopped"].includes(ui.phase) && restart.action}
         <PressButton type="button" className="dsh-host-action" onClick={controller.showCurrent}>{texts.backToMain}</PressButton>
       </motion.section>

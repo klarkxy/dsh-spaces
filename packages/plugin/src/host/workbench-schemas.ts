@@ -11,6 +11,7 @@ import {
   workbenchProductResultSchema,
 } from "../../../../src/shared/workbench-product-schemas";
 import { parseLoopbackOrigin, parseRelativeEntryPath } from "../../../../src/shared/loopback";
+import { validClientFailureReport } from "../types";
 
 export {
   workbenchMutationContextSchema as mutationContextSchema,
@@ -532,6 +533,14 @@ export const overviewSchema = z
   .object({
     capabilities: capabilitiesSchema,
     spaces: z.array(spaceSummarySchema),
+  })
+  .strict();
+
+export const clientFailureReportSchema = z.unknown().refine(validClientFailureReport, "invalid client failure report");
+
+export const clientFailureRecordedSchema = z
+  .object({
+    recorded: z.boolean(),
   })
   .strict();
 

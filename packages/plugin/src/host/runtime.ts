@@ -19,7 +19,12 @@ import type {
 import { resolveHostIdentity, type HostIdentity, type HostIdentityInput } from "./identity";
 import { DesktopServiceRestart } from "./service-restart";
 import { runDesktopSpaceAction } from "./space-action";
-import { validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
+import {
+  validClientFailureReport,
+  validDesktopSpaceAction,
+  type ClientFailureReport,
+  type DesktopSpaceAction,
+} from "../types";
 import { createWorkbenchHttpClient, mintSupervisorHandoff, mintSupervisorPortal, type WorkbenchHttpClientOptions } from "./workbench-http";
 import {
   copyFailure,
@@ -91,6 +96,8 @@ export class WorkbenchHostRuntime {
   private attachmentFlightEpoch: string | null = null;
   private attachmentBusy = 0;
   private attachmentIdle: (() => void) | undefined;
+  private clientFailureWindowStart = 0;
+  private clientFailureWindowCount = 0;
   onSupervisorAttached(listener:(endpoint:SupervisorEndpoint)=>Promise<void>, stopped?: (previousEpoch: string | null) => Promise<void>):()=>void {
     this.attachedListeners.add(listener);
     if (stopped) this.stoppedListeners.add(stopped);
@@ -121,6 +128,57 @@ export class WorkbenchHostRuntime {
     const identity = this.identity;
     if (!identity.confirmed || !identity.home) return undefined;
     return hostProcessDiagnosticLogger(identity.home, { allowRealHome: this.allowRealHome });
+  }
+
+  /** Record one bounded sanitized client failure report into host.jsonl with rate limiting. */
+  reportClientFailure(report: ClientFailureReport): { recorded: boolean } {
+    if (!validClientFailureReport(report)) return { recorded: false };
+    const now = Date.now();
+    if (now - this.clientFailureWindowStart >= 60_000) {
+      this.clientFailureWindowStart = now;
+      this.clientFailureWindowCount = 0;
+    }
+    if (this.clientFailureWindowCount >= 32) return { recorded: false };
+    const logger = this.diagnosticLogger();
+    if (!logger) return { recorded: false };
+    this.clientFailureWindowCount += 1;
+    const context: Record<string, string | number | boolean | null> = {
+      surface: report.surface,
+      stage: report.stage,
+      clientFailedAt: report.failedAt,
+      ...(report.rpcEndpoint ? { rpcEndpoint: report.rpcEndpoint } : {}),
+      ...(report.rpcFailureKind ? { rpcFailureKind: report.rpcFailureKind } : {}),
+      ...(report.connectionState ? { connectionState: report.connectionState } : {}),
+      portalReason: report.portalFailure?.reason ?? null,
+      portalCode: report.portalFailure?.code ?? null,
+      portalStatus: report.portalFailure?.status ?? null,
+      navCount: report.navTrail?.length ?? 0,
+    };
+    if (report.navTrail && report.navTrail.length > 0) {
+      const tail = report.navTrail
+        .slice(-16)
+        .map((row) => {
+          const suffix =
+            row.reason ??
+            row.code ??
+            (row.status !== undefined
+              ? String(row.status)
+              : row.errorCode !== undefined
+                ? String(row.errorCode)
+                : "");
+          return `${row.src}:${row.ev}${suffix ? `(${suffix})` : ""}@${row.t}`;
+        })
+        .join(" ");
+      context.navTail = tail.slice(0, 1500);
+    }
+    const detail = report.detail ? publicReason(report.detail) : "";
+    const recorded = logger.error(
+      "host.client-failed",
+      "A Spaces client surface reported a failure.",
+      detail ? new Error(detail) : undefined,
+      context,
+    );
+    return { recorded };
   }
 
   get shouldRegisterManager(): boolean {

@@ -23,6 +23,7 @@ import type { WorkbenchProductRequest, WorkbenchProductResult } from "../../src/
 import type { PackageSource } from "../../src/shared/types.ts";
 import { WorkbenchApp } from "../../packages/plugin/src/workbench/app.tsx";
 import { JobsList, WorkbenchView } from "../../packages/plugin/src/workbench/components.tsx";
+import { attachSurfaceBridge } from "../../packages/plugin/src/workbench/surface-bridge.ts";
 import { INTERRUPTED_JOB_MESSAGE } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import {
   WorkbenchController,
@@ -3417,4 +3418,75 @@ test("installed Spaces component packages skip the published-version read", asyn
   await flush();
   const reads = api.calls.filter((call) => call.method === "product" && (call.arg as { method?: string })?.method === "plugin.versions");
   assert.deepEqual(reads.map((call) => (call.arg as { catalogId?: string }).catalogId), ["demo-plugin"]);
+});
+
+test("contained controller with disableAutoRestore keeps persisted child space from overriding surface selection", async () => {
+  const storage = memoryStorage();
+  writePersist(storage, { selectedId: "alpha", locale: "zh", theme: "dark" });
+
+  const regularApi = fakeApi();
+  const regular = controller(regularApi, { storage });
+  await regular.poll();
+  await flush();
+  assert.equal(regular.getSnapshot().pendingId, "alpha");
+  assert.equal(regularApi.calls.some((call) => call.method === "view" && call.arg === "alpha"), true);
+
+  const containedApi = fakeApi();
+  const contained = controller(containedApi, { storage, disableAutoRestore: true });
+  const handlers = new Set<(event: MessageEvent) => void>();
+  const sent: Array<Record<string, unknown>> = [];
+  const pages: Array<"settings" | null> = [];
+  const parentWindow = {
+    postMessage: (msg: unknown) => {
+      sent.push(msg as Record<string, unknown>);
+    },
+  };
+  const viewIdentity = {
+    parentOrigin: SUPERVISOR_ORIGIN,
+    serviceEpoch: EPOCH,
+    spaceId: "hub",
+    generation: 1,
+    channel: "surface-ch",
+  };
+  const detach = attachSurfaceBridge(
+    contained,
+    viewIdentity,
+    parentWindow,
+    (fn) => {
+      handlers.add(fn);
+      return () => { handlers.delete(fn); };
+    },
+    (page) => { pages.push(page); },
+  );
+  try {
+    await contained.poll();
+    await flush();
+    assert.equal(contained.getSnapshot().pendingId, null);
+    assert.equal(containedApi.calls.some((call) => call.method === "view"), false);
+    for (const handler of handlers) {
+      handler({
+        source: parentWindow,
+        origin: SUPERVISOR_ORIGIN,
+        data: {
+          source: "dsh-spaces-surface-parent",
+          type: "select",
+          requestId: 1,
+          serviceEpoch: EPOCH,
+          spaceId: "hub",
+          generation: 1,
+          channel: "surface-ch",
+          target: "@settings",
+        },
+      } as MessageEvent);
+    }
+    await flush();
+    assert.equal(contained.getSnapshot().selected, "home");
+    assert.equal(contained.getSnapshot().overlay?.type, "settings");
+    assert.equal(contained.getSnapshot().pendingId, null);
+    assert.equal(containedApi.calls.some((call) => call.method === "view"), false);
+    assert.deepEqual(pages.at(-1), "settings");
+    assert.equal(sent.some((msg) => msg.type === "selected" && msg.target === "@settings" && msg.requestId === 1), true);
+  } finally {
+    detach();
+  }
 });

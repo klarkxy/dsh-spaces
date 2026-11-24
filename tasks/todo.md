@@ -2,6 +2,13 @@
 
 > 只列当前仍需跟踪的事项。完整日期日志和已关闭条目在 [tasks/archive](archive/README.md)，不要在这里追加长日志。
 
+## 2026-11-24 Desktop 桥接诊断、热重载生命周期与仅前端重载
+
+- [x] 修复 Desktop `shell.overlay` 在 `patchReload: "live"` 重挂载后复用已释放前端控制器或回退到旧引用的问题（`disposedBeforeTerminal` + `onControllerChange`）；保留终态失败/停机状态。
+- [x] 新增 `workbenchGuide/reportClientFailure` 与 `WorkbenchRemoteError` 传输上下文（含 `hostRpcFailed` 提示与断线重连后一次性落盘），将前端 RPC 闪断、`<webview>` 崩溃/加载失败、门户 `#failed` 与有界 `navDiag` 轨迹记入 `host.jsonl`。
+- [x] 在 Desktop 错误页新增用户授权的手动仅前端“重新加载空间界面”入口（只读校验 `role`、`desktopLaunchState` 与 `presentationSnapshot` 后以只读模式重挂控制器，不启停后端或子空间）；更新 `let-it-crash.md`、`AGENTS.md`、`architecture.md`、`workbench.md`、`CHANGELOG.md`，真实 Desktop 实机表现待下一次宿主重载/故障验证。
+- [x] 对齐原生宿主外层选择超时至 `90s`（覆盖 `15s + 35s + 35s` 合法冷启动路径）并在超时详情附带最近 `navDiag` 阶段摘要；受控 `WorkbenchApp` 禁用 `localStorage` 旧空间自动恢复，并去重 `view-bridge` 重复 `"ready"` 上报。
+
 ## 2026-11-22 审查修复批次
 
 - [x] 主空间模型同步改为经绑定宿主 `dsh-app-boot` 进程内只读合成 `--dump-config`（不写主 profile），覆盖被官方 CLI 拒绝的 `desktop` profile；真实 Desktop 待验。

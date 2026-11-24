@@ -65,7 +65,7 @@ export type NavDiagEmit = ((ev: string, extra?: object) => void) & { end(): void
  * Self-contained emitter for native controller and portal injection.
  * Inner helpers stay inside this function so toString() has no module closures.
  */
-export function createNavDiag(source: string): NavDiagEmit {
+export function createNavDiag(source: string, sink?: (row: NavDiagRecord) => void): NavDiagEmit {
   var seq = 0, count = 0, live = true, lastElapsed = 0;
   var origin: number | undefined;
   var cap = 96;
@@ -157,6 +157,9 @@ export function createNavDiag(source: string): NavDiagEmit {
   }
   function write(row: any) {
     try { console.log("dsh-spaces-nav-diag " + JSON.stringify(row)); } catch (e) {}
+    if (typeof sink === "function") {
+      try { sink(row); } catch (e) {}
+    }
   }
   function read(extra: any, key: string) {
     try {

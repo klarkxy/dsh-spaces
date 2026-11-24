@@ -160,6 +160,51 @@ for (const outcome of ["success", "failed"] as const) test(`DOM: manual service 
   if (outcome === "failed") assert.equal(reads, 1, "a failed manual operation does not reconnect");
 });
 
+test("DOM: reload Spaces view recovers after transient directory failure without restarting backend service", { timeout: 60000 }, async t => {
+  const bundle = await build({ entryPoints: [resolve("tests/fixtures/portable-host/native-startup.tsx")], bundle: true, write: false, format: "iife", platform: "browser", jsx: "automatic" });
+  let reads = 0, previews = 0, restarts = 0, running = false;
+  const server = await serve(async (req, res) => {
+    if (req.url === "/client.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(bundle.outputFiles[0].text); return; }
+    if (req.url === "/directory") {
+      reads++;
+      if (!running) { res.writeHead(503); res.end("TRANSIENT_BRIDGE_ERROR"); }
+      else json(res, { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] });
+      return;
+    }
+    if (req.url === "/restart-preview") { previews++; json(res, { confirmationId: "a".repeat(64), action: "restart", expiresAt: new Date(Date.now() + 300000).toISOString(), spaces: [] }); return; }
+    if (req.url === "/restart") { restarts++; res.writeHead(500); res.end("must not restart"); return; }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end('<!doctype html><style>html,body,#root{height:100%;margin:0}#root{position:relative}main{height:100%}[data-shell-overlay]{position:absolute;inset:0;pointer-events:none}</style><div id="root"><main id="main"><textarea aria-label="Main draft"></textarea></main><div data-shell-overlay></div></div><script src="/client.js"></script>');
+  });
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage({ locale: "zh-CN" }); await page.goto(server.origin);
+  await page.getByRole("textbox", { name: "Main draft" }).fill("unsent during view reload");
+  const main = await page.locator("#main").elementHandle();
+  await page.getByRole("button", { name: "设置 · 空间服务不可用（查看详情）", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "空间服务或页面不可用" }).waitFor();
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="primary"]').innerText(), "失败原因\nTRANSIENT_BRIDGE_ERROR");
+
+  const reloadButton = page.getByRole("button", { name: "重新加载空间界面", exact: true });
+  await reloadButton.click();
+  await page.getByRole("alert").filter({ hasText: "TRANSIENT_BRIDGE_ERROR" }).waitFor();
+  await page.getByRole("button", { name: "关闭提示", exact: true }).click();
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="primary"]').innerText(), "失败原因\nTRANSIENT_BRIDGE_ERROR");
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="failed-at"]').count(), 1);
+  assert.equal(previews, 0);
+  assert.equal(restarts, 0);
+
+  running = true;
+  await reloadButton.click();
+  await page.getByRole("button", { name: "设置", exact: true }).waitFor();
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(previews, 0);
+  assert.equal(restarts, 0);
+  assert.ok(reads >= 4);
+  assert.equal(await page.getByRole("textbox", { name: "Main draft" }).inputValue(), "unsent during view reload");
+  assert.equal(await page.locator("#main").evaluate((el, original) => el === original, main), true);
+});
+
 test("DOM: host rail preserves sidebar resize geometry and dragging", { timeout: 30000 }, async t => {
   const bundle = await build({
     stdin: {

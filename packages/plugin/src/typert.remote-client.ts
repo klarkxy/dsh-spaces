@@ -8,6 +8,7 @@ import type {
   WorkbenchApiResult,
 } from "../../../src/shared/workbench";
 import type {
+  ClientFailureReport,
   DesktopLaunchState,
   WorkbenchBootstrapResult,
   WorkbenchGuideRole,
@@ -50,6 +51,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     restartService: (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     beginDesktopLaunch: () => Promise<RemoteResult<DesktopLaunchState>>;
     desktopLaunchState: () => Promise<RemoteResult<DesktopLaunchState>>;
+    reportClientFailure: (report: ClientFailureReport) => Promise<RemoteResult<{ recorded: boolean }>>;
   }
   interface TypertRemoteNamespace$spaces {
     overview: () => Promise<RemoteResult<SpacesOverview>>;
@@ -71,6 +73,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "workbenchGuide/restartService": (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     "workbenchGuide/beginDesktopLaunch": () => Promise<RemoteResult<DesktopLaunchState>>;
     "workbenchGuide/desktopLaunchState": () => Promise<RemoteResult<DesktopLaunchState>>;
+    "workbenchGuide/reportClientFailure": (report: ClientFailureReport) => Promise<RemoteResult<{ recorded: boolean }>>;
     "spaces/overview": () => Promise<RemoteResult<SpacesOverview>>;
     "spaces/detail": (id: string) => Promise<RemoteResult<SpaceDetail>>;
   }

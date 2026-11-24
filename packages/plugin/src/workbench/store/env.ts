@@ -51,6 +51,7 @@ export function createDefaultEnv(): WorkbenchEnv {
     now: () => Date.now(),
     handshakeTimeoutMs: 45_000,
     startTimeoutMs: 90_000,
+    disableAutoRestore: false,
     openUrl: defaultOpenUrl,
     downloadFile: defaultDownloadFile,
     writeClipboard: defaultWriteClipboard,

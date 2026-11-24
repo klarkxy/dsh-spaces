@@ -408,3 +408,93 @@ test("the first directory is published when epoch and manager match the launch",
   assert.equal(matched.controller.getSnapshot().inventory?.serviceEpoch, EPOCH);
   assert.equal(matched.controller.getSnapshot().inventory?.managerId, "hub");
 });
+
+test("reloadSurface reads launch state and directory without calling beginDesktopLaunch or restartService", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let directoryShouldFail = true;
+  let begins = 0, statuses = 0, directories = 0, restarts = 0, initializes = 0;
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    beginDesktopLaunch: async () => { begins++; return launchRecord("ready"); },
+    desktopLaunchState: async () => { statuses++; return launchRecord("ready"); },
+    presentationSnapshot: async () => {
+      directories++;
+      if (directoryShouldFail) throw Error("TRANSIENT_DIRECTORY_FAIL");
+      return { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "hub", displayName: "Spaces", status: "running", generation: 1 }, { id: "coding", displayName: "Coding", status: "running", generation: 2 }] };
+    },
+    initialize: async () => { initializes++; throw Error("must not initialize"); },
+    bootstrap: async () => { throw Error("must not bootstrap"); },
+    restartService: async () => { restarts++; throw Error("must not restart"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
+    returnTarget: async () => PORTAL,
+  }, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  t.after(() => controller.stop());
+  await controller.start({} as HTMLElement);
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.equal(begins, 1);
+  assert.equal(directories, 1);
+
+  directoryShouldFail = false;
+  const next = await controller.reloadSurface();
+  t.after(() => next.stop());
+  assert.notEqual(next, controller);
+  assert.equal(controller.getSnapshot().phase, "failed", "failed controller stays terminal");
+  assert.equal(next.getSnapshot().notice, nativeTexts().surfaceReloadedNotice);
+  assert.equal(begins, 1);
+  assert.equal(restarts, 0);
+  assert.equal(initializes, 0);
+
+  await next.start({} as HTMLElement);
+  assert.equal(next.getSnapshot().phase, "ready");
+  assert.equal(next.getSnapshot().inventory?.spaces.length, 2);
+  assert.equal(begins, 1, "reloadSurface never calls beginDesktopLaunch");
+  assert.equal(restarts, 0);
+  assert.equal(initializes, 0);
+  assert.ok(statuses >= 2);
+  assert.ok(directories >= 3);
+});
+
+test("reloadSurface refuses when launch is not ready, manager is not running, or directory fails", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let launchPhase: DesktopLaunchPhase = "ready";
+  let roleUnavailable = false;
+  let managerStatus = "running";
+  let directoryFail = true;
+  const reports: unknown[] = [];
+  const controller = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: roleUnavailable, reasons: roleUnavailable ? ["host-blocked"] : [] }),
+    beginDesktopLaunch: async () => launchRecord("ready"),
+    desktopLaunchState: async () => launchRecord(launchPhase),
+    presentationSnapshot: async () => {
+      if (directoryFail) throw Error("STILL_BROKEN");
+      return { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "hub", displayName: "Spaces", status: managerStatus, generation: 1 }] };
+    },
+    initialize: async () => { throw Error("must not initialize"); },
+    bootstrap: async () => { throw Error("must not bootstrap"); },
+    portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
+    returnTarget: async () => PORTAL,
+    reportClientFailure: async report => { reports.push(report); return { recorded: true }; },
+  }, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  t.after(() => controller.stop());
+  await controller.start({} as HTMLElement);
+  assert.equal(controller.getSnapshot().phase, "failed");
+
+  launchPhase = "failed";
+  await assert.rejects(() => controller.reloadSurface(), new RegExp(nativeTexts().surfaceReloadServiceNotReady));
+  launchPhase = "stopped";
+  await assert.rejects(() => controller.reloadSurface(), new RegExp(nativeTexts().surfaceReloadServiceNotReady));
+  launchPhase = "ready";
+
+  roleUnavailable = true;
+  await assert.rejects(() => controller.reloadSurface(), /host-blocked/);
+  roleUnavailable = false;
+
+  directoryFail = false;
+  managerStatus = "crashed";
+  await assert.rejects(() => controller.reloadSurface(), new RegExp(nativeTexts().surfaceReloadServiceNotReady));
+
+  directoryFail = true;
+  await assert.rejects(() => controller.reloadSurface(), /STILL_BROKEN/);
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.ok(reports.length >= 2);
+});
