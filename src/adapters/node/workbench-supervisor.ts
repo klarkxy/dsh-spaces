@@ -358,10 +358,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       stopOwned: (spaceId) => this.spaceLifecycle.stopOwned(spaceId),
       stopOwnedAll: () => this.spaceLifecycle.stopOwnedAll(),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
-      pluginLive: (input, ctx) => {
+      pluginLive: (input, ctx, options) => {
         const client = this.childRemoteClient(input.spaceId);
         if (!client) throw new WorkbenchPublicError("workbench/unavailable", "The child remote surface is unavailable.");
-        return runMaintenanceLivePlugin(client, this.home, input, ctx);
+        return runMaintenanceLivePlugin(client, this.home, input, ctx, options);
       },
       currentRuntime: () => this.toolchain.currentRuntime(),
       reinitializeManager: () => this.reinitializeManager(),

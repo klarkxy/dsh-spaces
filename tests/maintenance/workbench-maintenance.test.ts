@@ -30,6 +30,7 @@ import {
   type WorkbenchJobContext,
 } from "../../src/adapters/node/maintenance/workbench-jobs.ts";
 import { ProcessTerminationError } from "../../src/adapters/node/runtime/terminate-process.ts";
+import { ChildRemoteClient, runMaintenanceLivePlugin } from "../../src/adapters/node/supervisor/child-remote.ts";
 import { ControlPublicError } from "../../src/shared/control.ts";
 import { DiagnosticsService } from "../../src/adapters/node/diagnostics/diagnostics.ts";
 import { CATALOG_CACHE_FILE } from "../../src/adapters/node/products/plugin-catalog.ts";
@@ -1792,6 +1793,173 @@ test("a deterministic live refusal fails without latching Home maintenance; tran
       state.maintenance.at(-1) === true,
       row.latched,
       `${row.error.code} must ${row.latched ? "latch" : "not latch"} Home maintenance`,
+    );
+  }
+});
+
+test("live plugin control/not-running only avoids latching before a write RPC is dispatched; post-write exits latch Home maintenance", async () => {
+  type Scenario = {
+    name: string;
+    operation: "install" | "update" | "remove";
+    exitOnMethod: string;
+    expectedCode: "workbench/conflict" | "workbench/failed";
+    latched: boolean;
+  };
+  const scenarios: Scenario[] = [
+    {
+      name: "pre-write install listBundles not-running stays conflict",
+      operation: "install",
+      exitOnMethod: "pluginManager/listBundles:initial",
+      expectedCode: "workbench/conflict",
+      latched: false,
+    },
+    {
+      name: "pre-write installBundle not-running stays conflict",
+      operation: "install",
+      exitOnMethod: "pluginManager/installBundle",
+      expectedCode: "workbench/conflict",
+      latched: false,
+    },
+    {
+      name: "pre-write removeBundle not-running stays conflict",
+      operation: "remove",
+      exitOnMethod: "pluginManager/removeBundle",
+      expectedCode: "workbench/conflict",
+      latched: false,
+    },
+    {
+      name: "post-write waitForInstall exit latches maintenance",
+      operation: "install",
+      exitOnMethod: "pluginManager/waitForInstall",
+      expectedCode: "workbench/failed",
+      latched: true,
+    },
+    {
+      name: "post-write install readback exit latches maintenance",
+      operation: "install",
+      exitOnMethod: "pluginManager/listBundles:verify",
+      expectedCode: "workbench/failed",
+      latched: true,
+    },
+    {
+      name: "post-write update readback exit latches maintenance",
+      operation: "update",
+      exitOnMethod: "pluginManager/listBundles:verify",
+      expectedCode: "workbench/failed",
+      latched: true,
+    },
+    {
+      name: "post-write remove readback exit latches maintenance",
+      operation: "remove",
+      exitOnMethod: "pluginManager/listBundles:verify",
+      expectedCode: "workbench/failed",
+      latched: true,
+    },
+  ];
+  for (const scenario of scenarios) {
+    let childStatus: ProfileStatus = "running";
+    let bundlesCalls = 0;
+    const { home, maintenance, state } = harness({
+      pluginLive: (input, ctx, options) => {
+        const client = new ChildRemoteClient(
+          {
+            statusOf: () => childStatus,
+            generationOf: () => 1,
+            spawned: () => true,
+            urlOf: () => "http://127.0.0.1:43210/?token=live-token",
+            portOf: () => 43210,
+            currentServiceEpoch: () => "epoch-1",
+            fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+              const target = String(url);
+              if (target.includes("?token=")) {
+                return new Response(null, {
+                  status: 303,
+                  headers: {
+                    location: "/",
+                    "set-cookie": "dsh-auth-test=cookie-secret; Path=/; HttpOnly",
+                  },
+                });
+              }
+              const method = target.split("/api/")[1] ?? "";
+              const parsed = JSON.parse(String(init?.body ?? "{}")) as { rpcId?: string };
+              const reply = (value: unknown) =>
+                new Response(
+                  JSON.stringify({ type: "server-response", rpcId: parsed.rpcId, result: { ok: true, value } }),
+                  { status: 200, headers: { "content-type": "application/json" } },
+                );
+              if (method === "pluginManager/listBundles") {
+                bundlesCalls += 1;
+                if (bundlesCalls === 1 && scenario.operation === "update") {
+                  return reply([{ name: "dsh-outline", version: "1.0.0", installed: true, enabled: true, updatable: true }]);
+                }
+                if (bundlesCalls === 1 && scenario.operation === "install") {
+                  return reply([]);
+                }
+                if (bundlesCalls === 1 && scenario.exitOnMethod === "pluginManager/listBundles:initial") {
+                  childStatus = "stopped";
+                  throw new Error("should have tripped requireRunning before fetch");
+                }
+                return reply([{ name: "dsh-outline", version: "1.2.3", installed: true, enabled: true }]);
+              }
+              if (method === "pluginManager/installBundle") {
+                return reply({ changed: true, application: "applied", stage: "enable", target: "dsh-outline@1.2.3" });
+              }
+              if (method === "pluginManager/updateBundle") {
+                return reply({
+                  from: "1.0.0",
+                  to: "1.2.3",
+                  step: "install",
+                  result: { changed: true, application: "applied", stage: "install", target: "dsh-outline" },
+                });
+              }
+              if (method === "pluginManager/removeBundle") {
+                return reply({ changed: true, application: "restart-required", stage: "remove", target: "dsh-outline" });
+              }
+              if (method === "pluginManager/waitForInstall") {
+                return reply(null);
+              }
+              throw new Error(`unexpected method ${method}`);
+            }) as typeof fetch,
+          },
+          input.spaceId,
+          1,
+          "epoch-1",
+        );
+        const origCall = client.call.bind(client);
+        client.call = async (method, args, signal) => {
+          const isInitialBundles = method === "pluginManager/listBundles" && bundlesCalls === 0 && scenario.operation !== "remove";
+          const isVerifyBundles = method === "pluginManager/listBundles" && (scenario.operation === "remove" || bundlesCalls > 0);
+          if (
+            (scenario.exitOnMethod === "pluginManager/listBundles:initial" && isInitialBundles) ||
+            (scenario.exitOnMethod === "pluginManager/listBundles:verify" && isVerifyBundles) ||
+            scenario.exitOnMethod === method
+          ) {
+            childStatus = "stopped";
+          }
+          return origCall(method, args, signal);
+        };
+        return runMaintenanceLivePlugin(client, home, input, ctx, options);
+      },
+    });
+    if (scenario.operation === "remove") {
+      await addNamed(home, "space-coding", "dsh-outline", "1.2.3");
+    } else if (scenario.operation === "update") {
+      await addNamed(home, "space-coding", "dsh-outline", "1.0.0");
+    }
+    const plan = await maintenance.preview(
+      scenario.operation === "remove"
+        ? { kind: "plugin.remove", spaceId: "space-coding", packageName: "dsh-outline" }
+        : { kind: "plugin.install", spaceIds: ["space-coding"], catalogId: "urzeye/dsh-outline", version: "1.2.3" },
+    );
+    await assert.rejects(
+      () => maintenance.execute(plan.id, jobCtx()),
+      (error: unknown) => error instanceof WorkbenchJobError && error.code === scenario.expectedCode,
+      `${scenario.name}: expected ${scenario.expectedCode}`,
+    );
+    assert.equal(
+      state.maintenance.at(-1) === true,
+      scenario.latched,
+      `${scenario.name}: expected latched=${scenario.latched}`,
     );
   }
 });

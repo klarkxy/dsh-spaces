@@ -22,6 +22,7 @@ import { after, afterEach, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { build } from "esbuild";
 import { RuntimeStore, type RunProcessFn } from "../../src/adapters/node/runtime/runtime-store.ts";
+import { isForbiddenFetchPort } from "../../src/adapters/node/server/workbench-http.ts";
 import { runSnapshotWorker, SnapshotExecutor } from "../../src/adapters/node/snapshots/snapshot-executor.ts";
 import { retargetTree, SnapshotStore } from "../../src/adapters/node/snapshots/snapshot-store.ts";
 import { RESTORE_STAGE_DIR, type SnapshotRuntime } from "../../src/shared/snapshots.ts";
@@ -322,26 +323,54 @@ async function withHeartbeat(work: () => void | Promise<void>): Promise<{ during
   }
 }
 
+function isDisallowedProbePort(port: number): boolean {
+  return (port >= 3100 && port <= 3199) || (port >= 34000 && port <= 34999) || isForbiddenFetchPort(port);
+}
+
 async function listenLocal(): Promise<{ origin: string; close: () => Promise<void> }> {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // Prefer high random ports outside project ranges (3100–3199, 34000–34999) and
+  // Fetch's blocked ports, retrying on both EADDRINUSE and Windows Hyper-V/WinNAT
+  // excluded-port EACCES failures before falling back to OS-assigned listen(0).
+  for (let attempt = 0; attempt < 24; attempt++) {
     const server = createServer((_req, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("ok");
     });
-    let port: number;
     try {
-      // Keep the unexposed probe outside both project ranges (3100–3199,
-      // 34000–34999) and Fetch's blocked ports. listen(0) can repeatedly
-      // allocate inside a reserved range on Windows.
-      port = await listenPort(server, randomInt(49152, 65535));
+      const port = await listenPort(server, randomInt(49152, 65535));
+      return {
+        origin: `http://127.0.0.1:${port}`,
+        close: () => closeServer(server),
+      };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
-      continue;
+      await closeServer(server).catch(() => undefined);
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EADDRINUSE" && code !== "EACCES") throw error;
     }
-    return {
-      origin: `http://127.0.0.1:${port}`,
-      close: () => closeServer(server),
-    };
+  }
+  const held: Server[] = [];
+  try {
+    for (let attempt = 0; attempt < 16; attempt++) {
+      const server = createServer((_req, res) => {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("ok");
+      });
+      try {
+        const port = await listenPort(server, 0);
+        if (!isDisallowedProbePort(port)) {
+          return {
+            origin: `http://127.0.0.1:${port}`,
+            close: () => closeServer(server),
+          };
+        }
+        held.push(server);
+      } catch (error) {
+        await closeServer(server).catch(() => undefined);
+        throw error;
+      }
+    }
+  } finally {
+    await Promise.all(held.map((server) => closeServer(server).catch(() => undefined)));
   }
   throw new Error("could not bind a localhost probe port outside the reserved ranges");
 }
@@ -353,6 +382,7 @@ function listenPort(server: Server, port: number): Promise<number> {
       server.off("error", reject);
       const addr = server.address();
       if (!addr || typeof addr === "string") {
+        void closeServer(server).catch(() => undefined);
         reject(new Error("probe server did not bind"));
         return;
       }

@@ -458,6 +458,8 @@ test("reloadSurface refuses when launch is not ready, manager is not running, or
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let launchPhase: DesktopLaunchPhase = "ready";
   let roleUnavailable = false;
+  let managerId: string | null = "hub";
+  let includeManagerRow = true;
   let managerStatus = "running";
   let directoryFail = true;
   const reports: unknown[] = [];
@@ -467,7 +469,13 @@ test("reloadSurface refuses when launch is not ready, manager is not running, or
     desktopLaunchState: async () => launchRecord(launchPhase),
     presentationSnapshot: async () => {
       if (directoryFail) throw Error("STILL_BROKEN");
-      return { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "hub", displayName: "Spaces", status: managerStatus, generation: 1 }] };
+      return {
+        serviceEpoch: EPOCH,
+        managerId,
+        spaces: includeManagerRow
+          ? [{ id: "hub", displayName: "Spaces", status: managerStatus, generation: 1 }]
+          : [{ id: "coding", displayName: "Coding", status: "running", generation: 1 }],
+      };
     },
     initialize: async () => { throw Error("must not initialize"); },
     bootstrap: async () => { throw Error("must not bootstrap"); },
@@ -492,6 +500,15 @@ test("reloadSurface refuses when launch is not ready, manager is not running, or
   directoryFail = false;
   managerStatus = "crashed";
   await assert.rejects(() => controller.reloadSurface(), new RegExp(nativeTexts().surfaceReloadServiceNotReady));
+
+  managerStatus = "running";
+  includeManagerRow = false;
+  await assert.rejects(() => controller.reloadSurface(), new RegExp(nativeTexts().surfaceReloadServiceNotReady));
+  includeManagerRow = true;
+
+  managerId = null;
+  await assert.rejects(() => controller.reloadSurface(), new RegExp(nativeTexts().surfaceReloadFailed));
+  managerId = "hub";
 
   directoryFail = true;
   await assert.rejects(() => controller.reloadSurface(), /STILL_BROKEN/);

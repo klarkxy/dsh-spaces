@@ -110,6 +110,8 @@ export class NativeHostController {
   get disposedBeforeTerminal(): boolean {
     return this.stopped && this.state.phase !== "failed" && this.state.phase !== "service-stopped";
   }
+  recreate = (): NativeHostController =>
+    new NativeHostController(this.guideApi, this.bridge, this.readOnlyLaunch ? { readOnlyLaunch: true } : undefined);
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   get supportsSpaceActions() { return !!this.guideApi.spaceAction; }
@@ -168,7 +170,7 @@ export class NativeHostController {
         throw Error(nativeTexts().surfaceReloadFailed);
       }
       const manager = snapshot.managerId ? snapshot.spaces.find(row => row.id === snapshot.managerId) : undefined;
-      if (manager && manager.status !== "running") {
+      if (!manager || manager.status !== "running") {
         throw Error(nativeTexts().surfaceReloadServiceNotReady);
       }
     } catch (error) {

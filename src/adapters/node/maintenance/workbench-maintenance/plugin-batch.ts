@@ -398,6 +398,7 @@ export class MaintenancePluginBatch extends MaintenanceCore {
     publish();
     for (const spaceId of runningIds) {
       const step = steps[allSpaceIds.indexOf(spaceId)]!;
+      let writeDispatched = false;
       try {
         if (this.ports.statusOf(spaceId) !== "running") {
           throw new WorkbenchMaintenanceError(
@@ -405,7 +406,11 @@ export class MaintenancePluginBatch extends MaintenanceCore {
             `The workspace ${spaceId} changed state before the live plugin operation ran.`,
           );
         }
-        const res = await this.ports.pluginLive!(buildInput(spaceId), ctx);
+        const res = await this.ports.pluginLive!(buildInput(spaceId), ctx, {
+          onWriteDispatched: () => {
+            writeDispatched = true;
+          },
+        });
         step.status = "done";
         step.detail = `${spaceId}; application=${res.application}`;
         if (res.application === "restart-required") {
@@ -428,8 +433,15 @@ export class MaintenancePluginBatch extends MaintenanceCore {
           verb: "插件操作失败",
         });
         ctx.message(message);
+        // Only refusals before the write RPC reaches the child are deterministic;
+        // once a write RPC has been dispatched, any settlement or readback failure
+        // (including control/not-running if the child exits) stays workbench/failed
+        // so uncertainMaintenance latches Home maintenance protection.
+        const errorCode = !writeDispatched && error instanceof ControlPublicError
+          ? LIVE_REFUSAL_JOB_CODES[error.code] ?? "workbench/failed"
+          : "workbench/failed";
         throw new WorkbenchJobError(
-          error instanceof ControlPublicError ? LIVE_REFUSAL_JOB_CODES[error.code] ?? "workbench/failed" : "workbench/failed",
+          errorCode,
           message,
           {
             spaceId,

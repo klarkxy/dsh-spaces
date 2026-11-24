@@ -2060,6 +2060,25 @@ test("WorkbenchRemoteError carries bounded transport metadata and flushes client
 
   for (const fn of [...listeners]) fn();
   assert.equal(sent.length, 1);
+
+  // Mid-call transport drop must sample failure-time connectionState while keeping initialConnectionState.
+  let dynamicState: "connected" | "disconnected" | "connecting" = "connected";
+  const dynamicGuide = createWorkbenchGuideRemote({
+    state: { getSnapshot: () => dynamicState },
+    rpc: {
+      call: async () => {
+        dynamicState = "disconnected";
+        throw new Error("socket closed mid-call");
+      },
+    },
+  });
+  await assert.rejects(() => dynamicGuide.presentationSnapshot!(), (error: unknown) => {
+    assert.ok(error instanceof WorkbenchRemoteError);
+    assert.equal(error.failureKind, "rpc-transport");
+    assert.equal(error.connectionState, "disconnected");
+    assert.equal(error.initialConnectionState, "connected");
+    return true;
+  });
 });
 
 test("workbenchGuide/reportClientFailure writes sanitized host.client-failed entries and rate limits floods", async () => {

@@ -11,7 +11,7 @@ import { mountStaticClientStyle } from "./client-style";
 import { readViewHint } from "../../../view-bridge/src/env";
 import { CONTAINED_MANAGEMENT_PARAM } from "../../../../src/shared/space-host";
 import { HostShellController } from "./host-shell-state";
-import { desktopBrowserBridge, NativeHostController } from "./ui/native-controller";
+import { desktopBrowserBridge, NativeHostController, type DesktopBrowserBridge } from "./ui/native-controller";
 import { NativeHostShell } from "./ui/native-shell";
 import { NATIVE_HOST_CSS, NATIVE_BROWSER_CSS } from "./ui/native-styles";
 import { PortableHostShell, HostShellPanel, HOST_SHELL_CSS } from "./host-shell";
@@ -20,6 +20,7 @@ import { guideText, inferSpacesLocale, type SpacesLocale } from "./i18n";
 import { publicGuideDetail } from "./guide-detail";
 import { SpacesPanelIcon } from "./icon";
 import { registerSpacesBranding } from "./branding";
+import type { WorkbenchGuideApi } from "../types";
 import {
   createWorkbenchGuideRemote,
   createWorkbenchRemote,
@@ -70,18 +71,7 @@ export function apply(ctx: Context): void {
   const guide = createWorkbenchGuideRemote(connection);
   const nativeBridge = desktopBrowserBridge();
   if (nativeBridge) {
-    let active = new NativeHostController(guide, nativeBridge);
-    ctx.effect(() => () => active.stop());
-    ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
-    ctx.slots.inject("shell.overlay", () => ctx.slots.register(
-      { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () => {
-        if (active.disposedBeforeTerminal) active = new NativeHostController(guide, nativeBridge);
-        return createElement(MotionRoot, null, createElement(NativeHostShell, {
-          controller: active,
-          onControllerChange: (next) => { active = next; },
-        }));
-      },
-    ));
+    mountNativeHostOverlay(ctx, guide, nativeBridge);
     return;
   }
   const host = new HostShellController(guide);
@@ -107,6 +97,31 @@ export function apply(ctx: Context): void {
       createElement(MotionRoot, null, createElement(ReturnToWorkbenchPanel, { host })),
     ),
   );
+}
+
+/**
+ * Mount the native Desktop shell into `shell.overlay` with a slot-scoped
+ * controller lifetime that survives non-terminal remounts and tracks manual replacements.
+ */
+export function mountNativeHostOverlay(
+  ctx: Pick<Context, "effect" | "slots">,
+  guide: WorkbenchGuideApi,
+  nativeBridge: DesktopBrowserBridge,
+): void {
+  let active = new NativeHostController(guide, nativeBridge);
+  ctx.effect(() => () => active.stop());
+  if (typeof document !== "undefined") {
+    ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
+  }
+  ctx.slots.inject("shell.overlay", () => ctx.slots.register(
+    { name: "shell.overlay", id: "dsh-spaces-native-shell" }, () => {
+      if (active.disposedBeforeTerminal) active = new NativeHostController(guide, nativeBridge);
+      return createElement(MotionRoot, null, createElement(NativeHostShell, {
+        controller: active,
+        onControllerChange: (next) => { active = next; },
+      }));
+    },
+  ));
 }
 
 const panelStyle: CSSProperties = {

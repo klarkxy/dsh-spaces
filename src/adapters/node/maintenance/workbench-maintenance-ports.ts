@@ -23,6 +23,10 @@ export type MaintenanceLivePluginInput =
       installSpec?: string;
     };
 
+export interface MaintenanceLivePluginOptions {
+  onWriteDispatched?: () => void;
+}
+
 export interface MaintenanceLivePluginResult {
   application: 'applied' | 'restart-required';
   steps: WorkbenchJobStep[];
@@ -47,6 +51,7 @@ export interface WorkbenchMaintenancePorts {
   pluginLive?(
     input: MaintenanceLivePluginInput,
     ctx: WorkbenchJobContext,
+    options?: MaintenanceLivePluginOptions,
   ): Promise<MaintenanceLivePluginResult>;
   /** These callbacks may only stop instances whose ownership is known. No auto force-kill. */
   stopSpace(spaceId: string): Promise<void>;

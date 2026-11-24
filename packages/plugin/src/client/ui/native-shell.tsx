@@ -38,7 +38,13 @@ export function NativeHostShell({
   onControllerChange?: (next: NativeHostController) => void;
 }): ReactElement {
   const [active, setActive] = useState(controller);
-  useEffect(() => { setActive(controller); }, [controller]);
+  const propRef = useRef(controller);
+  useEffect(() => {
+    if (propRef.current !== controller) {
+      propRef.current = controller;
+      setActive(controller);
+    }
+  }, [controller]);
   const handleReplaced = useCallback((next: NativeHostController) => {
     setActive(next);
     onControllerChange?.(next);
@@ -55,11 +61,15 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
   const menuSpace = ui.inventory?.spaces.find(space => space.id === menu?.spaceId);
   const anchor = useRef<HTMLDivElement>(null), container = useRef<HTMLDivElement>(null), layout = useRef<ReturnType<typeof attachHostLayout> | null>(null);
   useEffect(() => {
+    if (controller.disposedBeforeTerminal) {
+      onRestarted(controller.recreate());
+      return;
+    }
     try { layout.current = attachHostLayout(anchor.current!); }
     catch { controller.stop(); return; }
     void controller.start(container.current!);
     return () => { controller.stop(); layout.current?.dispose(); };
-  }, [controller]);
+  }, [controller, onRestarted]);
   useEffect(() => { layout.current?.cover(ui.selected !== "current" || ui.guide); }, [ui.selected, ui.guide]);
   const [railCollapsed, setRailCollapsed] = useState(() => defaultStorage().getItem(RAIL_STORAGE_KEY) === "collapsed");
   useEffect(() => { defaultStorage().setItem(RAIL_STORAGE_KEY, railCollapsed ? "collapsed" : "expanded"); }, [railCollapsed]);

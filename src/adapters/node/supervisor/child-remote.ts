@@ -46,6 +46,7 @@ import { currentDiagnosticLogger, currentOperationDetails, diagnosticNested } fr
 import type { WorkbenchJobContext } from "../maintenance/workbench-jobs";
 import type {
   MaintenanceLivePluginInput,
+  MaintenanceLivePluginOptions,
   MaintenanceLivePluginResult,
 } from "../maintenance/workbench-maintenance-ports";
 
@@ -754,6 +755,7 @@ async function settleLiveInstall(
   approvedBuilds: readonly string[],
   signal: AbortSignal,
   steps: WorkbenchJobStep[],
+  onWriteDispatched?: () => void,
 ): Promise<RemoteChangeResult> {
   const requestId = `workbench-${randomUUID()}`;
   const options: Record<string, unknown> = {
@@ -761,8 +763,10 @@ async function settleLiveInstall(
     requestId,
     ...(approvedBuilds.length ? { approvedBuilds: [...approvedBuilds] } : {}),
   };
+  const installRaw = await client.call("pluginManager/installBundle", { spec, options }, signal);
+  onWriteDispatched?.();
   let change = asChangeResult(
-    await client.call("pluginManager/installBundle", { spec, options }, signal),
+    installRaw,
     "installBundle",
   );
   const settled = await client.call("pluginManager/waitForInstall", { requestId }, signal);
@@ -799,6 +803,7 @@ export async function runMaintenanceLivePlugin(
   home: string,
   input: MaintenanceLivePluginInput,
   ctx: WorkbenchJobContext,
+  options?: MaintenanceLivePluginOptions,
 ): Promise<MaintenanceLivePluginResult> {
   const steps: WorkbenchJobStep[] = [];
   const signal = ctx.signal;
@@ -830,6 +835,7 @@ export async function runMaintenanceLivePlugin(
           { name: packageName, version, options: { requestId } },
           signal,
         );
+        options?.onWriteDispatched?.();
         const outcome = updated as RemoteUpdateResult;
         const change = outcome?.result;
         if (!outcome || typeof outcome !== "object" || !change || typeof change !== "object") {
@@ -860,7 +866,15 @@ export async function runMaintenanceLivePlugin(
         ctx.phase("install");
         ctx.cancellable(false);
         ctx.message(`Installing ${packageName}@${version} in ${spaceId}.`);
-        const change = await settleLiveInstall(client, `${packageName}@${version}`, packageName, [], signal, steps);
+        const change = await settleLiveInstall(
+          client,
+          `${packageName}@${version}`,
+          packageName,
+          [],
+          signal,
+          steps,
+          options?.onWriteDispatched,
+        );
         application = normalizePluginApplication(change.application);
       }
       ctx.phase("verify");
@@ -890,6 +904,7 @@ export async function runMaintenanceLivePlugin(
         plugin.approvedBuilds,
         signal,
         steps,
+        options?.onWriteDispatched,
       );
       let application = normalizePluginApplication(change.application);
       ctx.phase("verify");
@@ -929,10 +944,9 @@ export async function runMaintenanceLivePlugin(
       ctx.phase("remove");
       ctx.cancellable(false);
       ctx.message(`Removing ${packageName} from ${spaceId}.`);
-      const change = asChangeResult(
-        await client.call("pluginManager/removeBundle", { name: packageName }, signal),
-        "removeBundle",
-      );
+      const removeRaw = await client.call("pluginManager/removeBundle", { name: packageName }, signal);
+      options?.onWriteDispatched?.();
+      const change = asChangeResult(removeRaw, "removeBundle");
       steps.push({
         step: "remove",
         status: change.error || change.application === "failed" || change.application === "cancelled" ? "failed" : "done",
@@ -967,10 +981,9 @@ export async function runMaintenanceLivePlugin(
         ctx.phase("toggle");
         ctx.cancellable(false);
         ctx.message(`Removing ${packageName} from ${spaceId}.`);
-        const change = asChangeResult(
-          await client.call("pluginManager/removeBundle", { name: packageName }, signal),
-          "removeBundle",
-        );
+        const removeRaw = await client.call("pluginManager/removeBundle", { name: packageName }, signal);
+        options?.onWriteDispatched?.();
+        const change = asChangeResult(removeRaw, "removeBundle");
         steps.push({
           step: "remove",
           status: change.error || change.application === "failed" || change.application === "cancelled" ? "failed" : "done",
@@ -1000,7 +1013,7 @@ export async function runMaintenanceLivePlugin(
       ctx.phase("toggle");
       ctx.cancellable(false);
       ctx.message(`Installing ${packageName} in ${spaceId}.`);
-      const change = await settleLiveInstall(client, spec, packageName, [], signal, steps);
+      const change = await settleLiveInstall(client, spec, packageName, [], signal, steps, options?.onWriteDispatched);
       const application = normalizePluginApplication(change.application);
       ctx.phase("verify");
       const bundles = await listInstalledBundles(client);

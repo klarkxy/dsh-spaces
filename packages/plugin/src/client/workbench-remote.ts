@@ -34,6 +34,7 @@ export interface WorkbenchRemoteErrorMeta {
   endpoint?: string | null;
   failureKind?: WorkbenchRemoteFailureKind;
   connectionState?: WorkbenchConnectionStateValue | null;
+  initialConnectionState?: WorkbenchConnectionStateValue | null;
 }
 
 export class WorkbenchRemoteError extends Error {
@@ -41,6 +42,7 @@ export class WorkbenchRemoteError extends Error {
   readonly endpoint: string | null;
   readonly failureKind: WorkbenchRemoteFailureKind;
   readonly connectionState: WorkbenchConnectionStateValue | null;
+  readonly initialConnectionState: WorkbenchConnectionStateValue | null;
 
   constructor(code: string | null, message: string, meta: WorkbenchRemoteErrorMeta = {}) {
     super(message);
@@ -49,6 +51,7 @@ export class WorkbenchRemoteError extends Error {
     this.endpoint = meta.endpoint ?? null;
     this.failureKind = meta.failureKind ?? "backend-error";
     this.connectionState = meta.connectionState ?? null;
+    this.initialConnectionState = meta.initialConnectionState ?? null;
   }
 }
 
@@ -92,7 +95,7 @@ async function callRemote<T>(
   signal?: AbortSignal,
   allowNull = false,
 ): Promise<T> {
-  const connectionState = readConnectionState(connection);
+  const initialConnectionState = readConnectionState(connection);
   let result;
   try {
     result = await connection.rpc.call(CHANNEL, endpoint, { args }, signal);
@@ -100,10 +103,12 @@ async function callRemote<T>(
     throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE, {
       endpoint,
       failureKind: "rpc-transport",
-      connectionState,
+      connectionState: readConnectionState(connection) ?? initialConnectionState,
+      initialConnectionState,
     });
   }
-  if (!result.ok) throw sanitizeBackendError(result.error, { endpoint, connectionState });
+  const connectionState = readConnectionState(connection) ?? initialConnectionState;
+  if (!result.ok) throw sanitizeBackendError(result.error, { endpoint, connectionState, initialConnectionState });
   if (Array.isArray(result.value)) return result.value as T;
   if (allowNull && result.value === null) return null as T;
   if (result.value === null || typeof result.value !== "object") {
@@ -111,9 +116,10 @@ async function callRemote<T>(
       endpoint,
       failureKind: "invalid-response",
       connectionState,
+      initialConnectionState,
     });
   }
-  return requireObject(result.value, { endpoint, connectionState }) as T;
+  return requireObject(result.value, { endpoint, connectionState, initialConnectionState }) as T;
 }
 
 /** The named wire payload of one management API call. */

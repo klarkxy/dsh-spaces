@@ -12,6 +12,7 @@ import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailure
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 import { bindDshCli, invocationProfile } from "../../src/adapters/node/products/spaces-service.ts";
 import { NATIVE_SELECTION_DEADLINE_MS, NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
+import { apply as applyClient } from "../../packages/plugin/src/client/index.tsx";
 import { WorkbenchRemoteError } from "../../packages/plugin/src/client/workbench-remote.ts";
 import { nativeTexts } from "../../packages/plugin/src/client/ui/native-texts.ts";
 import { NativeBrowserHost } from "../../packages/plugin/src/client/native-browser-host.ts";
@@ -1440,4 +1441,116 @@ test("NativeHostController disposedBeforeTerminal distinguishes live remount fro
   assert.equal(stopped.getSnapshot().phase, "service-stopped");
   stopped.stop();
   assert.equal(stopped.disposedBeforeTerminal, false);
+});
+
+test("apply mounts native Desktop shell with slot remount, onControllerChange, and effect disposal lifecycle", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const epoch = "a".repeat(64);
+  const restores: Array<() => void> = [];
+  const patchGlobal = (key: string, value: unknown) => {
+    const prev = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    restores.push(() => {
+      if (prev) Object.defineProperty(globalThis, key, prev);
+      else Reflect.deleteProperty(globalThis, key);
+    });
+  };
+  t.after(() => { while (restores.length) restores.pop()!(); });
+  patchGlobal("window", globalThis);
+  patchGlobal("parent", globalThis);
+  patchGlobal("location", { protocol: "dsh-app:", hostname: "app", href: "dsh-app://app/" });
+  patchGlobal("dshDesktop", {
+    protocolVersion: 1,
+    browser: { acquire: async () => ({ lease: "lease-1", partition: "isolated" }), release: async () => {} },
+  });
+
+  const cleanups: Array<() => void> = [];
+  let renderSlot: (() => unknown) | undefined;
+  let beginCalls = 0;
+  let directoryCalls = 0;
+  let directoryFail = false;
+  const rpcAnswer = async (endpoint: string) => {
+    if (endpoint === "workbenchGuide/role") {
+      return { ok: true, value: { role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] } };
+    }
+    if (endpoint === "workbenchGuide/beginDesktopLaunch") {
+      beginCalls += 1;
+      return { ok: true, value: readyLaunchRecord(epoch, "hub") };
+    }
+    if (endpoint === "workbenchGuide/desktopLaunchState") {
+      return { ok: true, value: readyLaunchRecord(epoch, "hub") };
+    }
+    if (endpoint === "workbenchGuide/presentationSnapshot") {
+      directoryCalls += 1;
+      if (directoryFail) return { ok: false, error: { code: "workbench/unavailable", message: "directory down" } };
+      return {
+        ok: true,
+        value: {
+          serviceEpoch: epoch,
+          managerId: "hub",
+          spaces: [{ id: "hub", displayName: "Spaces", status: "running", generation: 1 }],
+        },
+      };
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`);
+  };
+  applyClient({
+    get: () => ({ rpc: { call: async (_ch: string, endpoint: string) => rpcAnswer(endpoint) } }),
+    effect: (fn: () => (() => void) | void) => {
+      const cleanup = fn();
+      if (cleanup) cleanups.push(cleanup);
+    },
+    slots: {
+      inject: (_name: string, cb: () => void) => cb(),
+      register: (options: { name: string; id?: string }, render: () => unknown) => {
+        if (options.name === "shell.overlay" && options.id === "dsh-spaces-native-shell") renderSlot = render;
+        return () => undefined;
+      },
+    },
+  } as never);
+  assert.ok(renderSlot);
+
+  const shellEl1 = renderSlot!() as { props: { children: { props: { controller: NativeHostController; onControllerChange: (n: NativeHostController) => void } } } };
+  const c1 = shellEl1.props.children.props.controller;
+  const onChange1 = shellEl1.props.children.props.onControllerChange;
+  await c1.start({} as HTMLElement);
+  assert.equal(c1.getSnapshot().phase, "ready");
+  assert.equal(beginCalls, 1);
+
+  // Live unmount stops c1 -> disposedBeforeTerminal triggers fresh controller c2 on next slot render.
+  c1.stop();
+  assert.equal(c1.disposedBeforeTerminal, true);
+  const shellEl2 = renderSlot!() as typeof shellEl1;
+  const c2 = shellEl2.props.children.props.controller;
+  const onChange2 = shellEl2.props.children.props.onControllerChange;
+  assert.notEqual(c2, c1);
+
+  // Simulate terminal failure on c2, then manual reloadSurface -> c3, then hot-reload -> c4.
+  directoryFail = true;
+  await c2.start({} as HTMLElement);
+  assert.equal(c2.getSnapshot().phase, "failed");
+  assert.equal(c2.disposedBeforeTerminal, false);
+  const sameFailedEl = renderSlot!() as typeof shellEl1;
+  assert.equal(sameFailedEl.props.children.props.controller, c2, "terminal failure stays on same controller across remount");
+
+  directoryFail = false;
+  const c3 = await c2.reloadSurface();
+  onChange2(c3);
+  await c3.start({} as HTMLElement);
+  assert.equal(c3.getSnapshot().phase, "ready");
+  assert.equal(beginCalls, 2, "reloadSurface does not call beginDesktopLaunch");
+
+  // Hot-reload after manual reload stops c3 and replaces active with c4.
+  c3.stop();
+  assert.equal(c3.disposedBeforeTerminal, true);
+  const shellEl4 = renderSlot!() as typeof shellEl1;
+  const c4 = shellEl4.props.children.props.controller;
+  assert.notEqual(c4, c3);
+  await c4.start({} as HTMLElement);
+  assert.equal(c4.getSnapshot().phase, "ready");
+  assert.equal(beginCalls, 3);
+  assert.ok(directoryCalls >= 3);
+
+  for (const cleanup of cleanups) cleanup();
+  assert.equal(c4.disposedBeforeTerminal, true, "ctx.effect disposal stops the latest active controller");
 });
