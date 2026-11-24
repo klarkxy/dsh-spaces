@@ -417,12 +417,12 @@ test("every --dsw-* token used in source exists in the installed DSH client UI",
   const sdkTokens = installedClientThemeTokens();
   assert.ok(sdkTokens.has("--dsw-radius-sm"), "installed client UI did not expose --dsw-radius-sm");
   const roots = [new URL("../../src", import.meta.url), new URL("../../packages", import.meta.url)];
-  const pending = roots.map(url => url.pathname.slice(1));
+  const pending = roots.map(url => fileURLToPath(url));
   const used = new Map<string, string[]>();
   while (pending.length) {
     const dir = pending.pop()!;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = `${dir}/${entry.name}`;
+      const path = join(dir, entry.name);
       if (entry.isDirectory()) { if (entry.name !== "node_modules" && entry.name !== "lib") pending.push(path); continue; }
       if (!/\.(ts|tsx|css)$/.test(entry.name)) continue;
       for (const token of readFileSync(path, "utf8").match(/--dsw-[a-z0-9-]+/g) ?? [])

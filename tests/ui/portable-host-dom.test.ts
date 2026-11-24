@@ -160,6 +160,65 @@ for (const outcome of ["success", "failed"] as const) test(`DOM: manual service 
   if (outcome === "failed") assert.equal(reads, 1, "a failed manual operation does not reconnect");
 });
 
+test("DOM: reload Spaces view recovers after transient directory failure without restarting backend service", { timeout: 60000 }, async t => {
+  const bundle = await build({ entryPoints: [resolve("tests/fixtures/portable-host/native-startup.tsx")], bundle: true, write: false, format: "iife", platform: "browser", jsx: "automatic" });
+  let reads = 0, previews = 0, restarts = 0, running = false, missingManager = false;
+  const server = await serve(async (req, res) => {
+    if (req.url === "/client.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(bundle.outputFiles[0].text); return; }
+    if (req.url === "/directory") {
+      reads++;
+      if (!running) { res.writeHead(503); res.end("TRANSIENT_BRIDGE_ERROR"); }
+      else if (missingManager) {
+        json(res, { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] });
+      } else {
+        json(res, { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "hub", displayName: "Spaces", status: "running", generation: 1 }, { id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] });
+      }
+      return;
+    }
+    if (req.url === "/restart-preview") { previews++; json(res, { confirmationId: "a".repeat(64), action: "restart", expiresAt: new Date(Date.now() + 300000).toISOString(), spaces: [] }); return; }
+    if (req.url === "/restart") { restarts++; res.writeHead(500); res.end("must not restart"); return; }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end('<!doctype html><style>html,body,#root{height:100%;margin:0}#root{position:relative}main{height:100%}[data-shell-overlay]{position:absolute;inset:0;pointer-events:none}</style><div id="root"><main id="main"><textarea aria-label="Main draft"></textarea></main><div data-shell-overlay></div></div><script src="/client.js"></script>');
+  });
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage({ locale: "zh-CN" }); await page.goto(server.origin);
+  await page.getByRole("textbox", { name: "Main draft" }).fill("unsent during view reload");
+  const main = await page.locator("#main").elementHandle();
+  await page.getByRole("button", { name: "设置 · 空间服务不可用（查看详情）", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "空间服务或页面不可用" }).waitFor();
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="primary"]').innerText(), "失败原因\nTRANSIENT_BRIDGE_ERROR");
+
+  const reloadButton = page.getByRole("button", { name: "重新加载空间界面", exact: true });
+  await reloadButton.click();
+  await page.getByRole("alert").filter({ hasText: "TRANSIENT_BRIDGE_ERROR" }).waitFor();
+  await page.getByRole("button", { name: "关闭提示", exact: true }).click();
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="primary"]').innerText(), "失败原因\nTRANSIENT_BRIDGE_ERROR");
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="failed-at"]').count(), 1);
+  assert.equal(previews, 0);
+  assert.equal(restarts, 0);
+
+  // Snapshot lacking the managerId row in spaces must refuse surface reload and preserve the error screen.
+  running = true;
+  missingManager = true;
+  await reloadButton.click();
+  await page.getByRole("alert").filter({ hasText: "Spaces 服务当前未就绪，无法仅重新加载空间界面。" }).waitFor();
+  await page.getByRole("button", { name: "关闭提示", exact: true }).click();
+  assert.equal(await page.locator('.dsh-host-detail[data-reason="primary"]').innerText(), "失败原因\nTRANSIENT_BRIDGE_ERROR");
+  assert.equal(previews, 0);
+  assert.equal(restarts, 0);
+
+  missingManager = false;
+  await reloadButton.click();
+  await page.getByRole("button", { name: "设置", exact: true }).waitFor();
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(previews, 0);
+  assert.equal(restarts, 0);
+  assert.ok(reads >= 5);
+  assert.equal(await page.getByRole("textbox", { name: "Main draft" }).inputValue(), "unsent during view reload");
+  assert.equal(await page.locator("#main").evaluate((el, original) => el === original, main), true);
+});
+
 test("DOM: host rail preserves sidebar resize geometry and dragging", { timeout: 30000 }, async t => {
   const bundle = await build({
     stdin: {
@@ -560,4 +619,139 @@ test("DOM: Windows caption controls follow the spaces rail and main sidebar stat
   assert.equal(now.togglePosition, "static");
   assert.equal(now.menu, 48);
   await page.evaluate(() => (window as any).__disposeHostLayout());
+});
+
+test("DOM: mountNativeHostOverlay handles slot unmount/remount, same-commit key swap, terminal failure preservation, and reloadSurface -> hot-reload", { timeout: 60000 }, async t => {
+  const bundle = await build({
+    stdin: {
+      resolveDir: resolve("."),
+      loader: "tsx",
+      contents: `
+        import React, { useEffect, useState } from "react";
+        import { createRoot } from "react-dom/client";
+        import { mountNativeHostOverlay } from "./packages/plugin/src/client/index.tsx";
+        const launch = { operationId: "launch-one", phase: "ready" as const, serviceEpoch: ${JSON.stringify(EPOCH)}, managerId: "hub", reasons: [] as string[], failure: null };
+        const guide = {
+          role: async () => ({ role: "workspace" as const, profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] as string[] }),
+          beginDesktopLaunch: async () => { await fetch("/begin", { method: "POST" }); return launch; },
+          desktopLaunchState: async () => launch,
+          presentationSnapshot: async () => {
+            const response = await fetch("/directory");
+            if (!response.ok) throw Error(await response.text());
+            return response.json();
+          },
+          initialize: async () => { throw Error("unused"); },
+          bootstrap: async () => { throw Error("unused"); },
+          portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
+          returnTarget: async () => { throw Error("unused"); },
+        };
+        const bridge = { acquire: async () => { throw Error("unused"); }, release: async () => {} };
+        const cleanups: Array<() => void> = [];
+        let renderOverlay!: () => React.ReactElement;
+        mountNativeHostOverlay({
+          effect: (fn: () => (() => void) | void) => { const c = fn(); if (c) cleanups.push(c); },
+          slots: {
+            inject: (_name: string, cb: () => () => void) => cb(),
+            register: (_opts: unknown, render: () => React.ReactElement) => { renderOverlay = render; return () => undefined; },
+          },
+        } as never, guide, bridge);
+
+        let setControls!: React.Dispatch<React.SetStateAction<{ mounted: boolean; slotKey: number; tick: number }>>;
+        function HostApp() {
+          const [state, setState] = useState({ mounted: true, slotKey: 1, tick: 0 });
+          useEffect(() => { setControls = setState; }, []);
+          return state.mounted ? <React.Fragment key={state.slotKey}>{renderOverlay()}</React.Fragment> : null;
+        }
+        createRoot(document.querySelector("[data-shell-overlay]")!).render(<HostApp />);
+        (window as unknown as { __slotTest: Record<string, () => void> }).__slotTest = {
+          unmount: () => setControls(s => ({ ...s, mounted: false })),
+          remount: () => setControls(s => ({ ...s, mounted: true, slotKey: s.slotKey + 1 })),
+          swapKey: () => setControls(s => ({ ...s, slotKey: s.slotKey + 1 })),
+          rerender: () => setControls(s => ({ ...s, tick: s.tick + 1 })),
+          disposePlugin: () => { while (cleanups.length) cleanups.pop()!(); },
+        };
+      `,
+    },
+    bundle: true,
+    write: false,
+    format: "iife",
+    platform: "browser",
+    jsx: "automatic",
+  });
+  let begins = 0, failDirectory = false;
+  const server = await serve(async (req, res) => {
+    if (req.url === "/client.js") { res.writeHead(200, { "content-type": "text/javascript" }); res.end(bundle.outputFiles[0].text); return; }
+    if (req.url === "/begin") { begins += 1; json(res, { ok: true }); return; }
+    if (req.url === "/directory") {
+      if (failDirectory) { res.writeHead(503); res.end("DIRECTORY_DOWN"); return; }
+      json(res, { serviceEpoch: EPOCH, managerId: "hub", spaces: [{ id: "hub", displayName: "Spaces", status: "running", generation: 1 }, { id: "coding", displayName: "Coding", status: "stopped", generation: 0 }] });
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end('<!doctype html><style>html,body,#root{height:100%;margin:0}#root{position:relative}main{height:100%}[data-shell-overlay]{position:absolute;inset:0;pointer-events:none}</style><div id="root"><main id="main"><textarea aria-label="Main draft"></textarea></main><div data-shell-overlay></div></div><script src="/client.js"></script>');
+  });
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true }); t.after(() => browser.close());
+  const page = await browser.newPage({ locale: "zh-CN" }); await page.goto(server.origin);
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 1);
+
+  // Ordinary parent re-render with unchanged slotKey keeps the live controller and DOM node without restarting.
+  await page.evaluate(() => {
+    document.querySelector("[data-spaces-native]")?.setAttribute("data-keep-instance", "1");
+    (window as any).__slotTest.rerender();
+    (window as any).__slotTest.rerender();
+  });
+  await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  assert.equal(await page.evaluate(() => document.querySelector("[data-spaces-native]")?.getAttribute("data-keep-instance")), "1");
+  assert.equal(begins, 1, "ordinary parent re-render must not stop or restart controller");
+
+  // 1) Separate unmount -> remount replaces disposedBeforeTerminal controller.
+  await page.evaluate(() => (window as any).__slotTest.unmount());
+  await page.waitForFunction(() => document.querySelectorAll("[data-spaces-native]").length === 0);
+  await page.evaluate(() => (window as any).__slotTest.remount());
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 2);
+
+  // 2) Same-commit slot key swap renders replacement before old effect cleanup runs.
+  await page.evaluate(() => (window as any).__slotTest.swapKey());
+  await page.waitForFunction(() => document.querySelectorAll('[data-space-id="coding"]').length === 1);
+  // Wait for replacement controller created in effect recovery to finish its launch cycle.
+  const deadline = Date.now() + 5000;
+  while (begins < 3 && Date.now() < deadline) await page.waitForTimeout(25);
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 3);
+
+  // 3) Terminal failure persists across unmount/remount, then manual reloadSurface + subsequent hot-reload works.
+  failDirectory = true;
+  await page.evaluate(() => (window as any).__slotTest.unmount());
+  await page.evaluate(() => (window as any).__slotTest.remount());
+  await page.getByRole("button", { name: "设置 · 空间服务不可用（查看详情）", exact: true }).waitFor();
+  assert.equal(begins, 4);
+
+  await page.evaluate(() => (window as any).__slotTest.unmount());
+  await page.evaluate(() => (window as any).__slotTest.remount());
+  await page.getByRole("button", { name: "设置 · 空间服务不可用（查看详情）", exact: true }).waitFor();
+  assert.equal(begins, 4, "terminal failure stays on the failed controller across remount");
+
+  failDirectory = false;
+  await page.getByRole("button", { name: "设置 · 空间服务不可用（查看详情）", exact: true }).click();
+  await page.getByRole("button", { name: "重新加载空间界面", exact: true }).click();
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 4, "manual surface reload stays read-only");
+
+  // Same-commit slot key swap after manual reloadSurface invokes recreate() and resets readOnlyLaunch.
+  await page.evaluate(() => (window as any).__slotTest.swapKey());
+  const deadline2 = Date.now() + 5000;
+  while (begins < 5 && Date.now() < deadline2) await page.waitForTimeout(25);
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 5, "recreate() after reloadSurface must clear readOnlyLaunch");
+
+  // Hot-reload after manual reloadSurface stops the reloaded controller and boots a fresh one.
+  await page.evaluate(() => (window as any).__slotTest.unmount());
+  await page.evaluate(() => (window as any).__slotTest.remount());
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 6);
+
+  await page.evaluate(() => (window as any).__slotTest.disposePlugin());
 });

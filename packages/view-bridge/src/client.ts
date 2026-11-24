@@ -86,7 +86,7 @@ export function startViewBridge(
       failed = true;
     }
     if (state === "disconnected") ready = false;
-    if (last === state && state !== "ready") return;
+    if (last === state) return;
     last = state;
     postViewState(parent, view, state, message);
   };

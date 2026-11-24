@@ -45,6 +45,12 @@ export interface NativeShellTexts {
   opening: string;
   serviceOperation: string;
   serviceManual: string;
+  surfaceReload: string;
+  surfaceReloading: string;
+  surfaceReloadedNotice: string;
+  surfaceReloadUnavailable: string;
+  surfaceReloadFailed: string;
+  surfaceReloadServiceNotReady: string;
   serviceActionFailed: string;
   servicePreviewReading: string;
   serviceStopping: string;
@@ -98,6 +104,7 @@ export interface NativeShellTexts {
   desktopLaunchUnsupported: string;
   launchObservationEnded: string;
   selectionDeadline: string;
+  selectionStageSuffix: string;
   selectionLoadMismatch: string;
   guestOpenFailed: string;
   guestInitialLoadTimeout: string;
@@ -108,6 +115,8 @@ export interface NativeShellTexts {
   invalidPortalAddress: string;
   portalFailureNoDetail: string;
   browserResultFailed: string;
+  hostRpcFailed: string;
+  hostRpcConnectionSuffix: string;
   failureTime: string;
   failurePrimary: string;
   failureCleanup: string;
@@ -169,6 +178,12 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     opening: "正在打开",
     serviceOperation: "Spaces 服务操作",
     serviceManual: "手动启动 / 重启 Spaces 服务…",
+    surfaceReload: "重新加载空间界面",
+    surfaceReloading: "正在重新加载空间界面…",
+    surfaceReloadedNotice: "空间界面已重新加载。",
+    surfaceReloadUnavailable: "当前无法重新加载空间界面。",
+    surfaceReloadFailed: "重新加载空间界面失败。",
+    surfaceReloadServiceNotReady: "Spaces 服务当前未就绪，无法仅重新加载空间界面。",
     serviceActionFailed: "服务操作失败。",
     servicePreviewReading: "正在检查受影响的空间…",
     serviceStopping: "正在停止 Spaces 服务…",
@@ -221,7 +236,8 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     guestContent: "空间内容",
     desktopLaunchUnsupported: "无法读取启动状态，空间服务是否已启动无法确认。",
     launchObservationEnded: "启动状态已变化，本次启动观察已结束。",
-    selectionDeadline: "45 秒内未收到空间页面的选择应答。",
+    selectionDeadline: "90 秒内未收到空间页面的选择应答。",
+    selectionStageSuffix: "（已到达阶段：{stages}）",
     selectionLoadMismatch: "空间页面未能完成选择跳转。",
     guestOpenFailed: "空间页面未能打开。",
     guestInitialLoadTimeout: "空间页面的初始加载超时（15 秒）。",
@@ -232,6 +248,8 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     invalidPortalAddress: "观察到无效的空间页面地址。",
     portalFailureNoDetail: "空间页面报告了失败，但未提供原因。",
     browserResultFailed: "空间页面的浏览器回执未能送达。",
+    hostRpcFailed: "宿主通信中断（{endpoint}{state}）。",
+    hostRpcConnectionSuffix: "，连接状态：{state}",
     failureTime: "失败时间：",
     failurePrimary: "失败原因",
     failureCleanup: "随后停止结果",
@@ -291,6 +309,12 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     opening: "Opening",
     serviceOperation: "Spaces service operation",
     serviceManual: "Start / restart the Spaces service manually…",
+    surfaceReload: "Reload Spaces view",
+    surfaceReloading: "Reloading Spaces view…",
+    surfaceReloadedNotice: "Spaces view reloaded.",
+    surfaceReloadUnavailable: "Cannot reload the Spaces view right now.",
+    surfaceReloadFailed: "Could not reload the Spaces view.",
+    surfaceReloadServiceNotReady: "The Spaces service is not ready; cannot reload only the view.",
     serviceActionFailed: "Service operation failed.",
     servicePreviewReading: "Checking affected spaces…",
     serviceStopping: "Stopping Spaces service…",
@@ -343,7 +367,8 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     guestContent: "Space content",
     desktopLaunchUnsupported: "Startup state is unavailable; whether the space service started could not be confirmed.",
     launchObservationEnded: "Startup state changed; launch observation ended.",
-    selectionDeadline: "The space page did not answer the selection within 45 seconds.",
+    selectionDeadline: "The space page did not answer the selection within 90 seconds.",
+    selectionStageSuffix: " (Stages reached: {stages})",
     selectionLoadMismatch: "The space page could not complete the selection navigation.",
     guestOpenFailed: "The space page could not be opened.",
     guestInitialLoadTimeout: "The space page's initial load timed out after 15 seconds.",
@@ -354,6 +379,8 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     invalidPortalAddress: "The observed space page address was invalid.",
     portalFailureNoDetail: "The space page reported a failure without a reason.",
     browserResultFailed: "The space page's browser result could not be delivered.",
+    hostRpcFailed: "Host RPC interrupted ({endpoint}{state}).",
+    hostRpcConnectionSuffix: ", connection: {state}",
     failureTime: "Failed at: ",
     failurePrimary: "Failure",
     failureCleanup: "Stop result afterwards",

@@ -11,10 +11,12 @@ import { parseNativeSpaceHash, nativePortalFailureHash, parseNativePortalFailure
   type PortalFailure } from "../../src/shared/space-host.ts";
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
 import { bindDshCli, invocationProfile } from "../../src/adapters/node/products/spaces-service.ts";
-import { NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
+import { NATIVE_SELECTION_DEADLINE_MS, NativeHostController } from "../../packages/plugin/src/client/ui/native-controller.ts";
+import { apply as applyClient } from "../../packages/plugin/src/client/index.tsx";
+import { WorkbenchRemoteError } from "../../packages/plugin/src/client/workbench-remote.ts";
 import { nativeTexts } from "../../packages/plugin/src/client/ui/native-texts.ts";
 import { NativeBrowserHost } from "../../packages/plugin/src/client/native-browser-host.ts";
-import type { DesktopLaunchState } from "../../packages/plugin/src/types.ts";
+import type { ClientFailureReport, DesktopLaunchState } from "../../packages/plugin/src/types.ts";
 import { BROWSER_RELAY, BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, browserProtocolScript,
   type BrowserRelay } from "../../src/shared/browser-guest.ts";
 import { parseNavDiag } from "../../src/shared/nav-diag.ts";
@@ -951,7 +953,7 @@ test("the failed panel renders the failure time", async () => {
   assert.match(html, /Failed at|失败时间/);
 });
 
-test("the 45 second selection deadline still fails once and does not relaunch", async t => {
+test("the 90 second selection deadline still fails once and does not relaunch", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const captured = captureNavLines();
   t.after(captured.restore);
@@ -960,11 +962,12 @@ test("the 45 second selection deadline still fails once and does not relaunch", 
   controller.select("@settings"); await tick();
   assert.equal(loads.length, 2);
   assert.equal(controller.getSnapshot().pending, "@settings");
-  t.mock.timers.tick(44999); await tick();
+  t.mock.timers.tick(NATIVE_SELECTION_DEADLINE_MS - 1); await tick();
   assert.equal(controller.getSnapshot().phase, "ready");
   assert.equal(controller.getSnapshot().pending, "@settings");
   t.mock.timers.tick(1); await tick();
   assert.equal(controller.getSnapshot().phase, "failed");
+  assert.match(controller.getSnapshot().detail ?? "", /select-load-complete/);
   assert.equal(loads.length, 2);
   const deadline = navRecords(captured.lines).find(row => row.ev === "deadline");
   assert.equal(deadline?.stage, "selection");
@@ -972,11 +975,40 @@ test("the 45 second selection deadline still fails once and does not relaunch", 
   const began = calls.filter(call => call === "begin").length;
   controller.select("@settings");
   controller.openCreate();
-  t.mock.timers.tick(45000); await tick();
+  t.mock.timers.tick(NATIVE_SELECTION_DEADLINE_MS); await tick();
   assert.equal(calls.filter(call => call === "begin").length, began);
   assert.equal(calls.includes("initialize"), false);
   assert.equal(loads.length, 2);
   assert.equal(controller.getSnapshot().phase, "failed");
+});
+
+test("portal navDiag milestones appear in selectionDeadline detail when deadline expires", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const captured = captureNavLines();
+  t.after(captured.restore);
+  const { controller, guest } = await openSettingsGuest(t);
+  controller.select("@settings"); await tick();
+  for (const [seq, ev] of [
+    [1, "iframe-append"],
+    [2, "view-ready"],
+    [3, "surface-ready"],
+    [4, "select-forward"],
+  ] as const) {
+    guest.dispatchEvent(Object.assign(new Event("console-message"), {
+      message: `dsh-spaces-nav-diag ${JSON.stringify({ v: 1, src: "portal", seq, t: seq * 10, ev })}`,
+    }));
+  }
+  t.mock.timers.tick(NATIVE_SELECTION_DEADLINE_MS); await tick();
+  const failed = controller.getSnapshot();
+  assert.equal(failed.phase, "failed");
+  for (const expected of [
+    "portal:iframe-append",
+    "portal:view-ready",
+    "portal:surface-ready",
+    "portal:select-forward",
+  ]) {
+    assert.ok((failed.detail ?? "").includes(expected), `missing ${expected} in ${failed.detail}`);
+  }
 });
 
 test("a rejected bootstrap load is recorded once and still fails through the original path", async t => {
@@ -1285,4 +1317,240 @@ snapshot=${JSON.stringify({ serviceEpoch: epoch, managerId: "hub", spaces: [{ id
   } as unknown as MessageEvent);
   assert.deepEqual(openedDetails, ["alpha"]);
   detach();
+});
+
+test("NativeHostController reports RPC transport failure context and guest navDiag trail", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const reports: ClientFailureReport[] = [];
+  let failDirectory = true;
+  const epoch = "a".repeat(64);
+  const rpcController = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    presentationSnapshot: async () => {
+      if (failDirectory) {
+        throw new WorkbenchRemoteError(null, "The workbench request failed.", {
+          endpoint: "workbenchGuide/presentationSnapshot",
+          failureKind: "rpc-transport",
+          connectionState: "disconnected",
+        });
+      }
+      return { serviceEpoch: epoch, managerId: "hub", spaces: [] };
+    },
+    reportClientFailure: async (report: ClientFailureReport) => { reports.push(report); return { recorded: true }; },
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await rpcController.start({} as HTMLElement);
+  assert.equal(rpcController.getSnapshot().phase, "failed");
+  assert.match(rpcController.getSnapshot().detail ?? "", /workbenchGuide\/presentationSnapshot/);
+  assert.match(rpcController.getSnapshot().detail ?? "", /disconnected/);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0]!.surface, "desktop-native");
+  assert.equal(reports[0]!.stage, "directory-poll");
+  assert.equal(reports[0]!.rpcEndpoint, "workbenchGuide/presentationSnapshot");
+  assert.equal(reports[0]!.rpcFailureKind, "rpc-transport");
+  assert.equal(reports[0]!.connectionState, "disconnected");
+
+  failDirectory = false;
+  let guest!: EventTarget & {
+    className: string;
+    url: string;
+    setAttribute(): void;
+    remove(): void;
+    focus(): void;
+    getURL(): string;
+    loadURL(value: string): Promise<void>;
+  };
+  class Guest extends EventTarget {
+    className = "";
+    url = "about:blank";
+    setAttribute() {}
+    remove() {}
+    focus() {}
+    getURL() { return this.url; }
+    async loadURL(value: string) {
+      const parsed = new URL(value);
+      if (parsed.pathname.startsWith("/bootstrap/")) {
+        this.url = parsed.origin + "/native/" + parsed.searchParams.get("native");
+        return;
+      }
+      this.url = value;
+    }
+  }
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { createElement: () => (guest = new Guest()) },
+  });
+  t.after(() => previousDocument ? Object.defineProperty(globalThis, "document", previousDocument) : Reflect.deleteProperty(globalThis, "document"));
+  const portalReports: ClientFailureReport[] = [];
+  const portalController = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+    returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }),
+    reportClientFailure: async (report: ClientFailureReport) => { portalReports.push(report); return { recorded: true }; },
+  } as never, { acquire: async () => ({ lease: "lease-1", partition: "isolated" }), release: async () => {} });
+  await portalController.start({ append() {} } as unknown as HTMLElement);
+  portalController.select("@settings");
+  await tick();
+  guest.dispatchEvent(new Event("dom-ready"));
+  guest.dispatchEvent(new Event("did-finish-load"));
+  guest.dispatchEvent(new Event("did-stop-loading"));
+  await tick();
+  const portalDiag = 'dsh-spaces-nav-diag {"v":1,"src":"portal","seq":1,"t":12,"ev":"fail","reason":"manager-disconnected"}';
+  guest.dispatchEvent(Object.assign(new Event("console-message"), { message: portalDiag }));
+  guest.url = guest.url.split("#")[0]! + nativePortalFailureHash({ reason: "manager-disconnected" })!;
+  guest.dispatchEvent(new Event("did-navigate-in-page"));
+  await tick();
+  assert.equal(portalController.getSnapshot().phase, "failed");
+  assert.equal(portalReports.length, 1);
+  assert.equal(portalReports[0]!.stage, "portal");
+  assert.deepEqual(portalReports[0]!.portalFailure, { reason: "manager-disconnected" });
+  const trail = portalReports[0]!.navTrail ?? [];
+  assert.ok(trail.some(row => row.src === "controller" && row.ev === "user-select"));
+  assert.ok(trail.some(row => row.src === "portal" && row.ev === "fail" && row.reason === "manager-disconnected"));
+});
+
+test("NativeHostController disposedBeforeTerminal distinguishes live remount from terminal failure or stop", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const epoch = "a".repeat(64);
+  const healthy = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    ...readyLaunchApi(epoch, "hub"),
+    presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await healthy.start({} as HTMLElement);
+  assert.equal(healthy.disposedBeforeTerminal, false);
+  healthy.stop();
+  assert.equal(healthy.disposedBeforeTerminal, true);
+
+  const failed = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: true, reasons: ["blocked"] }),
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await failed.start({} as HTMLElement);
+  assert.equal(failed.getSnapshot().phase, "failed");
+  assert.equal(failed.disposedBeforeTerminal, false);
+
+  const stopped = new NativeHostController({
+    role: async () => ({ role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] }),
+    beginDesktopLaunch: async () => ({ operationId: "launch-one", phase: "stopped", serviceEpoch: epoch, managerId: "hub", reasons: [], failure: null }),
+    desktopLaunchState: async () => ({ operationId: "launch-one", phase: "stopped", serviceEpoch: epoch, managerId: "hub", reasons: [], failure: null }),
+    presentationSnapshot: async () => ({ serviceEpoch: epoch, managerId: "hub", spaces: [] }),
+  } as never, { acquire: async () => { throw Error("unused"); }, release: async () => {} });
+  await stopped.start({} as HTMLElement);
+  assert.equal(stopped.getSnapshot().phase, "service-stopped");
+  stopped.stop();
+  assert.equal(stopped.disposedBeforeTerminal, false);
+});
+
+test("apply mounts native Desktop shell with slot remount, onControllerChange, and effect disposal lifecycle", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const epoch = "a".repeat(64);
+  const restores: Array<() => void> = [];
+  const patchGlobal = (key: string, value: unknown) => {
+    const prev = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    restores.push(() => {
+      if (prev) Object.defineProperty(globalThis, key, prev);
+      else Reflect.deleteProperty(globalThis, key);
+    });
+  };
+  t.after(() => { while (restores.length) restores.pop()!(); });
+  patchGlobal("window", globalThis);
+  patchGlobal("parent", globalThis);
+  patchGlobal("location", { protocol: "dsh-app:", hostname: "app", href: "dsh-app://app/" });
+  patchGlobal("dshDesktop", {
+    protocolVersion: 1,
+    browser: { acquire: async () => ({ lease: "lease-1", partition: "isolated" }), release: async () => {} },
+  });
+
+  const cleanups: Array<() => void> = [];
+  let renderSlot: (() => unknown) | undefined;
+  let beginCalls = 0;
+  let directoryCalls = 0;
+  let directoryFail = false;
+  const rpcAnswer = async (endpoint: string) => {
+    if (endpoint === "workbenchGuide/role") {
+      return { ok: true, value: { role: "workspace", profileId: "desktop", managerId: "hub", unavailable: false, reasons: [] } };
+    }
+    if (endpoint === "workbenchGuide/beginDesktopLaunch") {
+      beginCalls += 1;
+      return { ok: true, value: readyLaunchRecord(epoch, "hub") };
+    }
+    if (endpoint === "workbenchGuide/desktopLaunchState") {
+      return { ok: true, value: readyLaunchRecord(epoch, "hub") };
+    }
+    if (endpoint === "workbenchGuide/presentationSnapshot") {
+      directoryCalls += 1;
+      if (directoryFail) return { ok: false, error: { code: "workbench/unavailable", message: "directory down" } };
+      return {
+        ok: true,
+        value: {
+          serviceEpoch: epoch,
+          managerId: "hub",
+          spaces: [{ id: "hub", displayName: "Spaces", status: "running", generation: 1 }],
+        },
+      };
+    }
+    throw new Error(`unexpected endpoint ${endpoint}`);
+  };
+  applyClient({
+    get: () => ({ rpc: { call: async (_ch: string, endpoint: string) => rpcAnswer(endpoint) } }),
+    effect: (fn: () => (() => void) | void) => {
+      const cleanup = fn();
+      if (cleanup) cleanups.push(cleanup);
+    },
+    slots: {
+      inject: (_name: string, cb: () => void) => cb(),
+      register: (options: { name: string; id?: string }, render: () => unknown) => {
+        if (options.name === "shell.overlay" && options.id === "dsh-spaces-native-shell") renderSlot = render;
+        return () => undefined;
+      },
+    },
+  } as never);
+  assert.ok(renderSlot);
+
+  const shellEl1 = renderSlot!() as { props: { children: { props: { controller: NativeHostController; onControllerChange: (n: NativeHostController) => void } } } };
+  const c1 = shellEl1.props.children.props.controller;
+  const onChange1 = shellEl1.props.children.props.onControllerChange;
+  await c1.start({} as HTMLElement);
+  assert.equal(c1.getSnapshot().phase, "ready");
+  assert.equal(beginCalls, 1);
+
+  // Live unmount stops c1 -> disposedBeforeTerminal triggers fresh controller c2 on next slot render.
+  c1.stop();
+  assert.equal(c1.disposedBeforeTerminal, true);
+  const shellEl2 = renderSlot!() as typeof shellEl1;
+  const c2 = shellEl2.props.children.props.controller;
+  const onChange2 = shellEl2.props.children.props.onControllerChange;
+  assert.notEqual(c2, c1);
+
+  // Simulate terminal failure on c2, then manual reloadSurface -> c3, then hot-reload -> c4.
+  directoryFail = true;
+  await c2.start({} as HTMLElement);
+  assert.equal(c2.getSnapshot().phase, "failed");
+  assert.equal(c2.disposedBeforeTerminal, false);
+  const sameFailedEl = renderSlot!() as typeof shellEl1;
+  assert.equal(sameFailedEl.props.children.props.controller, c2, "terminal failure stays on same controller across remount");
+
+  directoryFail = false;
+  const c3 = await c2.reloadSurface();
+  onChange2(c3);
+  await c3.start({} as HTMLElement);
+  assert.equal(c3.getSnapshot().phase, "ready");
+  assert.equal(beginCalls, 2, "reloadSurface does not call beginDesktopLaunch");
+
+  // Hot-reload after manual reload stops c3 and replaces active with c4.
+  c3.stop();
+  assert.equal(c3.disposedBeforeTerminal, true);
+  const shellEl4 = renderSlot!() as typeof shellEl1;
+  const c4 = shellEl4.props.children.props.controller;
+  assert.notEqual(c4, c3);
+  await c4.start({} as HTMLElement);
+  assert.equal(c4.getSnapshot().phase, "ready");
+  assert.equal(beginCalls, 3);
+  assert.ok(directoryCalls >= 3);
+
+  for (const cleanup of cleanups) cleanup();
+  assert.equal(c4.disposedBeforeTerminal, true, "ctx.effect disposal stops the latest active controller");
 });

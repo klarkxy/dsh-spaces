@@ -10,7 +10,7 @@ import { NativeDialog } from "./native-dialog";
 /** The Desktop owns the confirmation and survives the manager's normal shutdown. */
 export function useServiceRestart(controller: NativeHostController, onRestarted: (next: NativeHostController) => void, stopRequest = 0) {
   const [preview, setPreview] = useState<WorkbenchServiceRestartPreview | null>(null);
-  const [busy, setBusy] = useState<"preview" | "start" | "restart" | "stop" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "start" | "restart" | "stop" | "reload" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(false), inFlight = useRef(false), lastRequest = useRef(0);
   const locale = inferSpacesLocale();
@@ -30,6 +30,15 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
     catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };
+  const reload = async () => {
+    if (inFlight.current || !controller.supportsSurfaceReload) return;
+    inFlight.current = true; setBusy("reload"); setError(null); setPreview(null);
+    try {
+      const next = await controller.reloadSurface();
+      if (mounted.current) onRestarted(next);
+    } catch (cause) { failure(cause); }
+    finally { inFlight.current = false; if (mounted.current) setBusy(null); }
+  };
   useEffect(() => {
     if (stopRequest > lastRequest.current) { lastRequest.current = stopRequest; void prepare(true); }
   }, [stopRequest, controller]);
@@ -44,11 +53,13 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
     } catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };
+  const reloadAction = controller.supportsSurfaceReload
+    ? <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => void reload()}>{texts.surfaceReload}</PressButton> : null;
   const action = controller.supportsServiceRestart
     ? <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => void prepare()}>{texts.serviceManual}</PressButton> : null;
   const expiresAt = preview ? new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(preview.expiresAt)) : "";
   const dialog = (preview || busy || error) ? <NativeDialog label={texts.serviceOperation} onCancel={busy ? undefined : () => { setPreview(null); setError(null); }}>
-      {busy && <p role="status">{busy === "preview" ? texts.servicePreviewReading : busy === "stop" ? texts.serviceStopping : busy === "start" ? texts.serviceStarting : texts.serviceRestarting}</p>}
+      {busy && <p role="status">{busy === "preview" ? texts.servicePreviewReading : busy === "stop" ? texts.serviceStopping : busy === "start" ? texts.serviceStarting : busy === "reload" ? texts.surfaceReloading : texts.serviceRestarting}</p>}
       {error && <><p role="alert">{error}</p><PressButton type="button" className="dsh-host-action" onClick={() => setError(null)}>{texts.closeNotice}</PressButton></>}
       {preview && <>
         <h3>{preview.action === "stop" ? texts.serviceStopTitle : preview.action === "restart" ? texts.serviceRestartTitle : texts.serviceStartTitle}</h3>
@@ -61,5 +72,5 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
         </div>
       </>}
   </NativeDialog> : null;
-  return { action, dialog };
+  return { reloadAction, action, dialog };
 }

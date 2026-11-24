@@ -84,7 +84,7 @@ export abstract class WorkbenchCore {
     this.env = { ...createDefaultEnv(), ...env };
     this.persistEmpty = persistWasEmpty(this.env.storage);
     const persist = readPersist(this.env.storage);
-    this.restoreId = isHomeSelection(persist.selectedId) ? null : persist.selectedId;
+    this.restoreId = this.env.disableAutoRestore || isHomeSelection(persist.selectedId) ? null : persist.selectedId;
     this.blueprint = new BlueprintSession({
       product: (request) => this.api.product(request),
       submitApply: (planId, observation) => this.submitBlueprintApply(planId, observation),

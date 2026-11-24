@@ -2,6 +2,8 @@
 import type { SpaceDetail, SpacesOverview } from "../../../src/shared/spaces-control";
 import type { WorkbenchStartupFailure } from "../../../src/shared/workbench-startup";
 import type { WorkbenchApi, WorkbenchRole } from "../../../src/shared/workbench";
+import { parseNavDiag, type NavDiagRecord } from "../../../src/shared/nav-diag";
+import { parsePortalFailure, type PortalFailure } from "../../../src/shared/space-host";
 
 export type { SpaceDetail, SpacesOverview, WorkbenchApi, WorkbenchRole };
 export type { WorkbenchStartupFailure, WorkbenchStartupPhase, WorkbenchStartupStatus } from "../../../src/shared/workbench-startup";
@@ -88,6 +90,101 @@ export interface WorkbenchGuideApi {
   beginDesktopLaunch?(): Promise<DesktopLaunchState>;
   /** Read-only. Idle before the first launch; never discovers, registers, or starts. */
   desktopLaunchState?(): Promise<DesktopLaunchState>;
+  /** Best-effort sanitized failure log forwarded from a client surface to host.jsonl. */
+  reportClientFailure?(report: ClientFailureReport): Promise<{ recorded: boolean }>;
+}
+
+export const CLIENT_FAILURE_STAGES = [
+  "role",
+  "launch",
+  "launch-poll",
+  "directory-poll",
+  "portal",
+  "guest-bootstrap",
+  "guest-load",
+  "guest-crashed",
+  "guest-navigated",
+  "selection-timeout",
+  "selection-rejected",
+  "navigation",
+  "browser-relay",
+  "reload-surface",
+  "host-shell",
+] as const;
+
+export type ClientFailureStage = typeof CLIENT_FAILURE_STAGES[number];
+
+export interface ClientFailureReport {
+  surface: "desktop-native" | "portable-host";
+  stage: ClientFailureStage;
+  detail: string | null;
+  failedAt: string;
+  rpcEndpoint?: string;
+  rpcFailureKind?: "rpc-transport" | "backend-error" | "invalid-response";
+  connectionState?: "connected" | "disconnected" | "connecting";
+  portalFailure?: PortalFailure | null;
+  navTrail?: NavDiagRecord[];
+}
+
+const CLIENT_FAILURE_REPORT_KEYS = new Set([
+  "surface",
+  "stage",
+  "detail",
+  "failedAt",
+  "rpcEndpoint",
+  "rpcFailureKind",
+  "connectionState",
+  "portalFailure",
+  "navTrail",
+]);
+
+export function validClientFailureReport(value: unknown): value is ClientFailureReport {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if (Object.keys(row).some(key => !CLIENT_FAILURE_REPORT_KEYS.has(key))) return false;
+  if (row.surface !== "desktop-native" && row.surface !== "portable-host") return false;
+  if (typeof row.stage !== "string" || !CLIENT_FAILURE_STAGES.includes(row.stage as ClientFailureStage)) return false;
+  if (!(row.detail === null || (typeof row.detail === "string" && row.detail.length <= 500))) return false;
+  if (
+    typeof row.failedAt !== "string" ||
+    row.failedAt.length > 64 ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(row.failedAt)
+  ) {
+    return false;
+  }
+  if (
+    row.rpcEndpoint !== undefined &&
+    (typeof row.rpcEndpoint !== "string" || !/^(?:workbenchGuide|workbench|spaces)\/[A-Za-z]{1,40}$/.test(row.rpcEndpoint))
+  ) {
+    return false;
+  }
+  if (
+    row.rpcFailureKind !== undefined &&
+    row.rpcFailureKind !== "rpc-transport" &&
+    row.rpcFailureKind !== "backend-error" &&
+    row.rpcFailureKind !== "invalid-response"
+  ) {
+    return false;
+  }
+  if (
+    row.connectionState !== undefined &&
+    row.connectionState !== "connected" &&
+    row.connectionState !== "disconnected" &&
+    row.connectionState !== "connecting"
+  ) {
+    return false;
+  }
+  if (row.portalFailure !== undefined && row.portalFailure !== null && parsePortalFailure(row.portalFailure) === null) {
+    return false;
+  }
+  if (row.navTrail !== undefined) {
+    if (!Array.isArray(row.navTrail) || row.navTrail.length > 64) return false;
+    for (const item of row.navTrail) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+      if (parseNavDiag(JSON.stringify(item)) === null) return false;
+    }
+  }
+  return true;
 }
 
 export interface DesktopSpaceAction {

@@ -11,6 +11,7 @@ import {
   publicWorkbenchErrorMessage,
 } from "../../../../src/shared/workbench-errors";
 import type {
+  ClientFailureReport,
   DesktopLaunchState,
   WorkbenchBootstrapResult,
   WorkbenchGuideApi,
@@ -26,30 +27,63 @@ const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 
 export { KNOWN_WORKBENCH_ERROR_CODES };
 
+export type WorkbenchRemoteFailureKind = "rpc-transport" | "backend-error" | "invalid-response";
+export type WorkbenchConnectionStateValue = "connected" | "disconnected" | "connecting";
+
+export interface WorkbenchRemoteErrorMeta {
+  endpoint?: string | null;
+  failureKind?: WorkbenchRemoteFailureKind;
+  connectionState?: WorkbenchConnectionStateValue | null;
+  initialConnectionState?: WorkbenchConnectionStateValue | null;
+}
+
 export class WorkbenchRemoteError extends Error {
   readonly code: string | null;
+  readonly endpoint: string | null;
+  readonly failureKind: WorkbenchRemoteFailureKind;
+  readonly connectionState: WorkbenchConnectionStateValue | null;
+  readonly initialConnectionState: WorkbenchConnectionStateValue | null;
 
-  constructor(code: string | null, message: string) {
+  constructor(code: string | null, message: string, meta: WorkbenchRemoteErrorMeta = {}) {
     super(message);
     this.name = "WorkbenchRemoteError";
     this.code = code;
+    this.endpoint = meta.endpoint ?? null;
+    this.failureKind = meta.failureKind ?? "backend-error";
+    this.connectionState = meta.connectionState ?? null;
+    this.initialConnectionState = meta.initialConnectionState ?? null;
   }
 }
 
-export type WorkbenchConnection = Pick<ConnectionHandle, "rpc">;
+export type WorkbenchConnection = Pick<ConnectionHandle, "rpc"> & {
+  state?: {
+    getSnapshot?(): unknown;
+    subscribe?(listener: () => void): () => void;
+  };
+};
 
-function sanitizeBackendError(error: unknown): WorkbenchRemoteError {
+function readConnectionState(connection: WorkbenchConnection): WorkbenchConnectionStateValue | null {
+  try {
+    const snapshot = connection.state?.getSnapshot?.();
+    if (snapshot === "connected" || snapshot === "disconnected" || snapshot === "connecting") return snapshot;
+  } catch {
+    /* Optional diagnostic read never escapes. */
+  }
+  return null;
+}
+
+function sanitizeBackendError(error: unknown, meta: WorkbenchRemoteErrorMeta): WorkbenchRemoteError {
   if (typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string") {
     const code = (error as { code: string }).code;
     const message = publicWorkbenchErrorMessage(code, (error as { message?: unknown }).message);
-    if (message !== null) return new WorkbenchRemoteError(code, message);
+    if (message !== null) return new WorkbenchRemoteError(code, message, { ...meta, failureKind: "backend-error" });
   }
-  return new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE);
+  return new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE, { ...meta, failureKind: "backend-error" });
 }
 
-function requireObject(value: unknown): Record<string, unknown> {
+function requireObject(value: unknown, meta: WorkbenchRemoteErrorMeta): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE);
+    throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE, { ...meta, failureKind: "invalid-response" });
   }
   return value as Record<string, unknown>;
 }
@@ -61,19 +95,31 @@ async function callRemote<T>(
   signal?: AbortSignal,
   allowNull = false,
 ): Promise<T> {
+  const initialConnectionState = readConnectionState(connection);
   let result;
   try {
     result = await connection.rpc.call(CHANNEL, endpoint, { args }, signal);
   } catch {
-    throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE);
+    throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE, {
+      endpoint,
+      failureKind: "rpc-transport",
+      connectionState: readConnectionState(connection) ?? initialConnectionState,
+      initialConnectionState,
+    });
   }
-  if (!result.ok) throw sanitizeBackendError(result.error);
+  const connectionState = readConnectionState(connection) ?? initialConnectionState;
+  if (!result.ok) throw sanitizeBackendError(result.error, { endpoint, connectionState, initialConnectionState });
   if (Array.isArray(result.value)) return result.value as T;
   if (allowNull && result.value === null) return null as T;
   if (result.value === null || typeof result.value !== "object") {
-    throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE);
+    throw new WorkbenchRemoteError(null, GENERIC_ERROR_MESSAGE, {
+      endpoint,
+      failureKind: "invalid-response",
+      connectionState,
+      initialConnectionState,
+    });
   }
-  return requireObject(result.value) as T;
+  return requireObject(result.value, { endpoint, connectionState, initialConnectionState }) as T;
 }
 
 /** The named wire payload of one management API call. */
@@ -131,6 +177,42 @@ export function createWorkbenchGuideRemote(connection: WorkbenchConnection): Wor
     restartService: confirmationId => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/restartService", { confirmationId }),
     beginDesktopLaunch: () => callRemote<DesktopLaunchState>(connection, "workbenchGuide/beginDesktopLaunch", {}),
     desktopLaunchState: () => callRemote<DesktopLaunchState>(connection, "workbenchGuide/desktopLaunchState", {}),
+    reportClientFailure: async (report: ClientFailureReport) => {
+      try {
+        return await callRemote<{ recorded: boolean }>(connection, "workbenchGuide/reportClientFailure", { report });
+      } catch (error) {
+        if (
+          error instanceof WorkbenchRemoteError &&
+          error.failureKind === "rpc-transport" &&
+          readConnectionState(connection) !== "connected" &&
+          typeof connection.state?.subscribe === "function"
+        ) {
+          let done = false;
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let unsubscribe: (() => void) | undefined;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            if (timer !== undefined) clearTimeout(timer);
+            try { unsubscribe?.(); } catch { /* Ignore cleanup failure. */ }
+          };
+          const flush = () => {
+            if (done || readConnectionState(connection) !== "connected") return;
+            finish();
+            void callRemote<{ recorded: boolean }>(connection, "workbenchGuide/reportClientFailure", { report }).catch(() => undefined);
+          };
+          timer = setTimeout(finish, 15_000);
+          (timer as { unref?: () => void }).unref?.();
+          unsubscribe = connection.state.subscribe(flush);
+          if (done) {
+            try { unsubscribe(); } catch { /* Ignore cleanup failure. */ }
+          } else if (readConnectionState(connection) === "connected") {
+            flush();
+          }
+        }
+        return { recorded: false };
+      }
+    },
   };
 }
 

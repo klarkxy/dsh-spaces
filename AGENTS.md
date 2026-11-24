@@ -14,10 +14,13 @@ This repository is in maintenance state. Keep current documentation current, and
 
 DSH Spaces follows let it crash: report the actual failure, do not recover it.
 Do not add automatic retries, restarts, rollback, restore, repair, fallback,
-or interrupted-job replay. The only manual exception is the explicitly authorized
-Desktop error-page service start/restart: preview affected spaces, require
-confirmation, perform one normal owned shutdown, then one guarded launch.
-Do not replay tasks or restart child spaces. Failed shutdown, ambiguous ownership
+or interrupted-job replay. The only manual exceptions are the explicitly authorized
+Desktop error-page actions: (1) service start/restart (preview affected spaces,
+require confirmation, perform one normal owned shutdown, then one guarded launch),
+and (2) view-only reload (`重新加载空间界面`, read-only verification that the existing
+Desktop launch record, Supervisor snapshot, and manager space are ready/running,
+replacing only the failed frontend controller without starting or stopping Supervisor
+or any space). Do not replay tasks or restart child spaces. Failed shutdown, ambiguous ownership
 and interrupted maintenance remain protected; never force-kill or clear evidence.
 Keep authentication, isolation, single-writer constraints and atomic writes.
 Opening the application is a new user-requested launch. That launch may retire

@@ -5,6 +5,8 @@ import { validDesktopSpaceAction } from "./types";
 import { WORKBENCH_API, WORKBENCH_API_METHODS, type WorkbenchApiMethod } from "../../../src/shared/workbench";
 import { WORKBENCH_API_CODECS } from "./host/workbench-api";
 import {
+  clientFailureRecordedSchema,
+  clientFailureReportSchema,
   overviewSchema,
   spaceIdSchema,
   desktopLaunchStateSchema,
@@ -18,6 +20,8 @@ import {
 
 export {
   backupsResultSchema,
+  clientFailureRecordedSchema,
+  clientFailureReportSchema,
   jobIdSchema,
   overviewSchema,
   pluginsQuerySchema,
@@ -132,6 +136,7 @@ export const TYPERT = {
     invocation("workbenchGuide", "restartService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("dsh-spaces/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("workbenchGuide", "beginDesktopLaunch", guideFile, [], result("dsh-spaces/types#DesktopLaunchState", desktopLaunchStateSchema)),
     invocation("workbenchGuide", "desktopLaunchState", guideFile, [], result("dsh-spaces/types#DesktopLaunchState", desktopLaunchStateSchema)),
+    invocation("workbenchGuide", "reportClientFailure", guideFile, [param("report", clientFailureReportSchema, "dsh-spaces/types#ClientFailureReport")], result("dsh-spaces#ClientFailureRecorded", clientFailureRecordedSchema)),
     invocation("spaces", "overview", spacesFile, [], result("dsh-spaces/types#SpacesOverview", overviewSchema)),
     invocation(
       "spaces",

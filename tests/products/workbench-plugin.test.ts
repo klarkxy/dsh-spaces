@@ -360,7 +360,7 @@ test("ordinary and corrupt profiles register only the guide Remote", () => {
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.equal(plugin.manager, null);
   assert.equal(plugin.spaces, null);
-  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState", "reportClientFailure"]);
   assert.equal(plugin.guide.typertRemote.namespace, "workbenchGuide");
 });
 
@@ -381,7 +381,7 @@ test("manager profile registers manager WorkbenchApi and compatibility reads, no
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.ok(plugin.manager);
   assert.ok(plugin.spaces);
-  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState", "reportClientFailure"]);
   assert.ok(methodsOf(plugin.manager!).includes("state"));
   assert.ok(methodsOf(plugin.manager!).includes("submit"));
   assert.ok(methodsOf(plugin.manager!).includes("product"));
@@ -1272,8 +1272,12 @@ test("view-bridge ignores invalid env, has no management API, and can ready agai
   assert.equal(posted.length, 0);
   box.nodes = ["app"];
   for (const observer of observers) observer();
+  assert.equal(posted.length, 1);
   assert.equal(posted[0]?.data.state, "ready");
   assert.equal(posted[0]?.origin, "http://127.0.0.1:11");
+  for (const observer of observers) observer();
+  for (const observer of observers) observer();
+  assert.equal(posted.length, 1, "repeated DOM mutations while ready do not spam parent postMessage");
   conn = "disconnected";
   for (const listener of listeners) listener();
   assert.equal(posted[1]?.data.state, "disconnected");
@@ -1994,4 +1998,147 @@ test("a failed guide call writes a host.guide-failed diagnostic record with the 
   assert.equal(record.level, "error");
   assert.equal(record.context?.method, "presentationSnapshot");
   assert.equal(readFileSync(file, "utf8").includes("guide-secret"), false);
+});
+
+test("WorkbenchRemoteError carries bounded transport metadata and flushes client failures once on reconnect", async () => {
+  let state: "connected" | "disconnected" | "connecting" = "disconnected";
+  const listeners = new Set<() => void>();
+  const sent: Array<{ endpoint: string; report: unknown }> = [];
+  let shouldThrow = true;
+  const guide = createWorkbenchGuideRemote({
+    state: {
+      getSnapshot: () => state,
+      subscribe: (fn: () => void) => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    },
+    rpc: {
+      call: async (_channel: string, endpoint: string, body: { args?: { report?: unknown } }) => {
+        if (shouldThrow) throw new Error("C:\\Users\\admin\\.dsh\\secret-token");
+        sent.push({ endpoint, report: body.args?.report });
+        return { ok: true as const, value: { recorded: true } };
+      },
+    },
+  });
+  await assert.rejects(() => guide.presentationSnapshot!(), (error: unknown) => {
+    assert.ok(error instanceof WorkbenchRemoteError);
+    assert.equal(error.code, null);
+    assert.equal(error.message, "The workbench request failed.");
+    assert.equal(error.endpoint, "workbenchGuide/presentationSnapshot");
+    assert.equal(error.failureKind, "rpc-transport");
+    assert.equal(error.connectionState, "disconnected");
+    return true;
+  });
+
+  const report = {
+    surface: "desktop-native" as const,
+    stage: "directory-poll" as const,
+    detail: "Host RPC interrupted",
+    failedAt: "2026-11-24T02:30:00.000Z",
+    rpcEndpoint: "workbenchGuide/presentationSnapshot",
+    rpcFailureKind: "rpc-transport" as const,
+    connectionState: "disconnected" as const,
+  };
+  const immediate = await guide.reportClientFailure!(report);
+  assert.deepEqual(immediate, { recorded: false });
+  assert.equal(listeners.size, 1);
+
+  state = "connecting";
+  for (const fn of [...listeners]) fn();
+  assert.equal(sent.length, 0);
+  assert.equal(listeners.size, 1);
+
+  shouldThrow = false;
+  state = "connected";
+  for (const fn of [...listeners]) fn();
+  await Promise.resolve();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]!.endpoint, "workbenchGuide/reportClientFailure");
+  assert.deepEqual(sent[0]!.report, report);
+  assert.equal(listeners.size, 0, "one-shot diagnostic subscription unsubscribes after flushing");
+
+  for (const fn of [...listeners]) fn();
+  assert.equal(sent.length, 1);
+
+  // Mid-call transport drop must sample failure-time connectionState while keeping initialConnectionState.
+  let dynamicState: "connected" | "disconnected" | "connecting" = "connected";
+  const dynamicGuide = createWorkbenchGuideRemote({
+    state: { getSnapshot: () => dynamicState },
+    rpc: {
+      call: async () => {
+        dynamicState = "disconnected";
+        throw new Error("socket closed mid-call");
+      },
+    },
+  });
+  await assert.rejects(() => dynamicGuide.presentationSnapshot!(), (error: unknown) => {
+    assert.ok(error instanceof WorkbenchRemoteError);
+    assert.equal(error.failureKind, "rpc-transport");
+    assert.equal(error.connectionState, "disconnected");
+    assert.equal(error.initialConnectionState, "connected");
+    return true;
+  });
+});
+
+test("workbenchGuide/reportClientFailure writes sanitized host.client-failed entries and rate limits floods", async () => {
+  const home = tempDir("dsh-client-log-");
+  writeProfile(home, "notes");
+  const runtime = new WorkbenchHostRuntime(identityInput(home, "notes"));
+  const plugin = new SpacesPlugin(pluginContext(), {}, runtime);
+  await assert.rejects(
+    () => plugin.guide.reportClientFailure({ surface: "desktop-native", stage: "bad-stage" } as never),
+    (error: unknown) => error instanceof RemoteError && error.code === "workbench/invalid-input",
+  );
+  const res = await plugin.guide.reportClientFailure({
+    surface: "desktop-native",
+    stage: "portal",
+    detail: "Failed C:\\Users\\alice\\.dsh Bearer secret-token",
+    failedAt: "2026-11-24T02:30:00.000Z",
+    rpcEndpoint: "workbenchGuide/presentationSnapshot",
+    rpcFailureKind: "rpc-transport",
+    connectionState: "disconnected",
+    portalFailure: { reason: "manager-disconnected" },
+    navTrail: [
+      { v: 1, src: "controller", seq: 1, t: 0, ev: "user-select", targetKind: "settings" },
+      { v: 1, src: "portal", seq: 2, t: 15, ev: "fail", reason: "manager-disconnected" },
+    ],
+  });
+  assert.deepEqual(res, { recorded: true });
+  const file = join(diagnosticLogDirectory(home), "host.jsonl");
+  const raw = readFileSync(file, "utf8");
+  assert.equal(raw.includes("secret-token"), false);
+  assert.equal(raw.includes("Users\\alice"), false);
+  const rows = raw.trim().split("\n").map(line => JSON.parse(line) as {
+    event?: string;
+    level?: string;
+    error?: { message?: string };
+    context?: Record<string, unknown>;
+  });
+  const entry = rows.find(row => row.event === "host.client-failed");
+  assert.ok(entry);
+  assert.equal(entry.level, "error");
+  assert.equal(entry.context?.surface, "desktop-native");
+  assert.equal(entry.context?.stage, "portal");
+  assert.equal(entry.context?.rpcEndpoint, "workbenchGuide/presentationSnapshot");
+  assert.equal(entry.context?.portalReason, "manager-disconnected");
+  assert.equal(entry.context?.navCount, 2);
+  assert.match(String(entry.context?.navTail), /controller:user-select@0 portal:fail\(manager-disconnected\)@15/);
+
+  for (let i = 0; i < 31; i += 1) {
+    const next = await plugin.guide.reportClientFailure({
+      surface: "desktop-native",
+      stage: "directory-poll",
+      detail: "repeat",
+      failedAt: "2026-11-24T02:30:01.000Z",
+    });
+    assert.deepEqual(next, { recorded: true });
+  }
+  const capped = await plugin.guide.reportClientFailure({
+    surface: "desktop-native",
+    stage: "directory-poll",
+    detail: "over-limit",
+    failedAt: "2026-11-24T02:30:02.000Z",
+  });
+  assert.deepEqual(capped, { recorded: false });
 });

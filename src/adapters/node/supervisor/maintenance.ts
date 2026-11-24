@@ -10,6 +10,7 @@ import type { WorkbenchJobContext, WorkbenchJobStore } from "../maintenance/work
 import { WorkbenchMaintenance as WorkbenchMaintenanceService } from "../maintenance/workbench-maintenance";
 import type {
   MaintenanceLivePluginInput,
+  MaintenanceLivePluginOptions,
   MaintenanceLivePluginResult,
   WorkbenchMaintenancePorts,
 } from "../maintenance/workbench-maintenance-ports";
@@ -52,7 +53,11 @@ export interface SupervisorMaintenanceGateHost {
   stopOwned: (spaceId: string) => Promise<void>;
   stopOwnedAll: () => Promise<void>;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
-  pluginLive?: (input: MaintenanceLivePluginInput, ctx: WorkbenchJobContext) => Promise<MaintenanceLivePluginResult>;
+  pluginLive?: (
+    input: MaintenanceLivePluginInput,
+    ctx: WorkbenchJobContext,
+    options?: MaintenanceLivePluginOptions,
+  ) => Promise<MaintenanceLivePluginResult>;
   currentRuntime: () => SnapshotRuntime;
   reinitializeManager: () => Promise<void>;
   productObservation: () => { serviceEpoch: string; expectedRevision: string };
@@ -128,7 +133,7 @@ export class SupervisorMaintenanceGate {
       stopSpace: (spaceId) => this.host.stopOwned(spaceId),
       stopAll: () => this.host.stopOwnedAll(),
       startSpace: async (spaceId) => { await this.host.startSpace(spaceId, silentJobContext()); },
-      pluginLive: this.host.pluginLive ? (input, ctx) => this.host.pluginLive!(input, ctx) : undefined,
+      pluginLive: this.host.pluginLive ? (input, ctx, options) => this.host.pluginLive!(input, ctx, options) : undefined,
       currentRuntime: () => this.host.currentRuntime(),
       hostRuntime: () => {
         const cli = this.host.cli();

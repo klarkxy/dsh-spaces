@@ -30,13 +30,34 @@ const RAIL_LAYOUT_ID = "dsh-native-rail-pill";
 /** localStorage key of the remembered rail visibility. */
 const RAIL_STORAGE_KEY = "dsh-spaces.native.rail";
 
-export function NativeHostShell({ controller }: { controller: NativeHostController }): ReactElement {
+export function NativeHostShell({
+  controller,
+  onControllerChange,
+}: {
+  controller: NativeHostController;
+  onControllerChange?: (next: NativeHostController) => void;
+}): ReactElement {
   const [active, setActive] = useState(controller);
-  return <NativeHostShellView controller={active} onRestarted={setActive} />;
+  const propRef = useRef(controller);
+  const onControllerChangeRef = useRef(onControllerChange);
+  onControllerChangeRef.current = onControllerChange;
+  useEffect(() => {
+    if (propRef.current !== controller) {
+      propRef.current = controller;
+      setActive(controller);
+    }
+  }, [controller]);
+  const handleReplaced = useCallback((next: NativeHostController) => {
+    setActive(next);
+    onControllerChangeRef.current?.(next);
+  }, []);
+  return <NativeHostShellView controller={active} onRestarted={handleReplaced} />;
 }
 
 function NativeHostShellView({ controller, onRestarted }: { controller: NativeHostController; onRestarted: (next: NativeHostController) => void }): ReactElement {
   const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const onRestartedRef = useRef(onRestarted);
+  onRestartedRef.current = onRestarted;
   const restart = useServiceRestart(controller, onRestarted, ui.serviceStopRequest);
   const texts = nativeTexts();
   const [menu, setMenu] = useState<{ spaceId: string; x: number; y: number } | null>(null);
@@ -44,6 +65,10 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
   const menuSpace = ui.inventory?.spaces.find(space => space.id === menu?.spaceId);
   const anchor = useRef<HTMLDivElement>(null), container = useRef<HTMLDivElement>(null), layout = useRef<ReturnType<typeof attachHostLayout> | null>(null);
   useEffect(() => {
+    if (controller.disposedBeforeTerminal) {
+      onRestartedRef.current(controller.recreate());
+      return;
+    }
     try { layout.current = attachHostLayout(anchor.current!); }
     catch { controller.stop(); return; }
     void controller.start(container.current!);
@@ -164,6 +189,7 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
         {ui.failedAt ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="failed-at" aria-label={texts.failureTime.trimEnd()}>{texts.failureTime}{new Intl.DateTimeFormat(inferSpacesLocale() === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "medium" }).format(new Date(ui.failedAt))}</FadeIn> : null}
         {ui.cleanupDetail ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="cleanup" aria-label={texts.failureCleanup}>{texts.failureCleanup}{"\n"}{ui.cleanupDetail}</FadeIn> : null}
         {typeof ui.instanceRetained === "boolean" ? <FadeIn as="p" appear={false} className="dsh-host-detail" data-reason="instance" aria-label={texts.failureInstance}>{texts.failureInstance}{"\n"}{ui.instanceRetained ? texts.instanceRetainedYes : texts.instanceRetainedNo}</FadeIn> : null}
+        {ui.phase === "failed" && restart.reloadAction}
         {["failed", "service-stopped"].includes(ui.phase) && restart.action}
         <PressButton type="button" className="dsh-host-action" onClick={controller.showCurrent}>{texts.backToMain}</PressButton>
       </motion.section>

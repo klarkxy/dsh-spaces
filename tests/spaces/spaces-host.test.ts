@@ -20,7 +20,7 @@ import { HomeOperationLock } from "../../src/adapters/node/home/home-operation-l
 import { writeRegisteredSpace } from "../fixtures/space.ts";
 import { SpacesRemote } from "../../packages/plugin/src/host/spaces-service";
 import { SPACES_REMOTE_CODES, WORKBENCH_REMOTE_CODES } from "../../packages/plugin/src/host/remote-errors";
-import { TYPERT, workbenchCommandSchema } from "../../packages/plugin/src/typert.host";
+import { clientFailureReportSchema, TYPERT, workbenchCommandSchema } from "../../packages/plugin/src/typert.host";
 import { TYPERT_REMOTE } from "../../packages/plugin/src/typert.remote-client";
 
 const temps: string[] = [];
@@ -440,6 +440,7 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
       "workbenchGuide/restartService",
       "workbenchGuide/beginDesktopLaunch",
       "workbenchGuide/desktopLaunchState",
+      "workbenchGuide/reportClientFailure",
       "spaces/overview",
       "spaces/detail",
       "workbench/state",
@@ -485,4 +486,33 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
     "spaces/unavailable",
   ]);
   assert.ok(WORKBENCH_REMOTE_CODES.includes("workbench/forbidden"));
+  assert.equal(
+    clientFailureReportSchema.safeParse({
+      surface: "desktop-native",
+      stage: "directory-poll",
+      detail: "Host RPC interrupted",
+      failedAt: "2026-11-24T02:30:00.000Z",
+      rpcEndpoint: "workbenchGuide/presentationSnapshot",
+      rpcFailureKind: "rpc-transport",
+      connectionState: "disconnected",
+      portalFailure: { reason: "state-request", code: "portal/transport-failed" },
+      navTrail: [{ v: 1, src: "controller", seq: 1, t: 0, ev: "user-select", targetKind: "settings" }],
+    }).success,
+    true,
+  );
+  for (const invalid of [
+    { surface: "desktop-native", stage: "unknown-stage", detail: null, failedAt: "2026-11-24T02:30:00.000Z" },
+    { surface: "desktop-native", stage: "role", detail: "x".repeat(501), failedAt: "2026-11-24T02:30:00.000Z" },
+    { surface: "desktop-native", stage: "role", detail: null, failedAt: "2026-11-24T02:30:00.000Z", extra: true },
+    { surface: "desktop-native", stage: "role", detail: null, failedAt: "2026-11-24T02:30:00.000Z", rpcEndpoint: "http://127.0.0.1/secret" },
+    {
+      surface: "desktop-native",
+      stage: "portal",
+      detail: null,
+      failedAt: "2026-11-24T02:30:00.000Z",
+      navTrail: [{ v: 1, src: "controller", seq: 1, t: 0, ev: "user-select", url: "http://secret.example" }],
+    },
+  ]) {
+    assert.equal(clientFailureReportSchema.safeParse(invalid).success, false);
+  }
 });

@@ -47,9 +47,10 @@ export function formatWorkbenchFailure(input: {
   reason: string;
   exitCode?: number | null;
   signal?: string | null;
+  verb?: string;
 }): string {
   const lines = [
-    input.spaceId ? `空间 ${input.spaceId} ${input.stage === 'stop' ? '停止失败' : '启动失败'}` : '操作失败',
+    input.spaceId ? `空间 ${input.spaceId} ${input.verb ?? (input.stage === 'stop' ? '停止失败' : '启动失败')}` : '操作失败',
     '',
     input.stage ? `阶段：${input.stage}` : '',
     input.pluginAttribution === 'unknown'
