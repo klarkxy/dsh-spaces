@@ -475,6 +475,22 @@ function inspectNamedDir(path: string): "ok" | "missing" | "ambiguous" {
   return "ok";
 }
 
+function inspectReclaimDir(reclaimDir: string, runDir: string): HomeControlInspect | undefined {
+  try {
+    const reclaimStat = lstatSync(reclaimDir);
+    if (reclaimStat.isSymbolicLink()) {
+      return { held: true, ambiguous: true, reason: "reclaim path is a symlink", runDir };
+    }
+    if (!reclaimStat.isDirectory()) {
+      return { held: true, ambiguous: true, reason: "reclaim path is not a directory", runDir };
+    }
+    return { held: true, reclaim: true, runDir };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
+  }
+}
+
 function inspectRunLock(
   controlDir: string,
   runDir: string,
@@ -487,18 +503,8 @@ function inspectRunLock(
     return { held: true, ambiguous: true, reason: "control directory is a symlink or alias", runDir };
   }
 
-  try {
-    const reclaimStat = lstatSync(reclaimDir);
-    if (reclaimStat.isSymbolicLink()) {
-      return { held: true, ambiguous: true, reason: "reclaim path is a symlink", runDir };
-    }
-    if (!reclaimStat.isDirectory()) {
-      return { held: true, ambiguous: true, reason: "reclaim path is not a directory", runDir };
-    }
-    return { held: true, reclaim: true, runDir };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+  const reclaiming = inspectReclaimDir(reclaimDir, runDir);
+  if (reclaiming) return reclaiming;
 
   let runStat;
   try {
@@ -519,12 +525,27 @@ function inspectRunLock(
     if (!samePath(realpathSync(runDir), runDir)) {
       return { held: true, ambiguous: true, reason: "run directory is a path alias", runDir };
     }
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return inspectReclaimDir(reclaimDir, runDir) ?? { held: false, runDir };
+    }
     return { held: true, ambiguous: true, reason: "run directory is a path alias", runDir };
   }
 
   const owner = readOwnerFile(ownerFile);
-  if (owner.state === "missing") return { held: true, incomplete: true, runDir };
+  if (owner.state === "missing") {
+    const racedReclaim = inspectReclaimDir(reclaimDir, runDir);
+    if (racedReclaim) return racedReclaim;
+    try {
+      lstatSync(runDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { held: false, runDir };
+      }
+      throw error;
+    }
+    return { held: true, incomplete: true, runDir };
+  }
   if (owner.state === "symlink") {
     return { held: true, ambiguous: true, reason: "control owner file is a symlink", runDir };
   }
