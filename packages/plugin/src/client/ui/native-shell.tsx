@@ -39,6 +39,8 @@ export function NativeHostShell({
 }): ReactElement {
   const [active, setActive] = useState(controller);
   const propRef = useRef(controller);
+  const onControllerChangeRef = useRef(onControllerChange);
+  onControllerChangeRef.current = onControllerChange;
   useEffect(() => {
     if (propRef.current !== controller) {
       propRef.current = controller;
@@ -47,13 +49,15 @@ export function NativeHostShell({
   }, [controller]);
   const handleReplaced = useCallback((next: NativeHostController) => {
     setActive(next);
-    onControllerChange?.(next);
-  }, [onControllerChange]);
+    onControllerChangeRef.current?.(next);
+  }, []);
   return <NativeHostShellView controller={active} onRestarted={handleReplaced} />;
 }
 
 function NativeHostShellView({ controller, onRestarted }: { controller: NativeHostController; onRestarted: (next: NativeHostController) => void }): ReactElement {
   const ui = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const onRestartedRef = useRef(onRestarted);
+  onRestartedRef.current = onRestarted;
   const restart = useServiceRestart(controller, onRestarted, ui.serviceStopRequest);
   const texts = nativeTexts();
   const [menu, setMenu] = useState<{ spaceId: string; x: number; y: number } | null>(null);
@@ -62,14 +66,14 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
   const anchor = useRef<HTMLDivElement>(null), container = useRef<HTMLDivElement>(null), layout = useRef<ReturnType<typeof attachHostLayout> | null>(null);
   useEffect(() => {
     if (controller.disposedBeforeTerminal) {
-      onRestarted(controller.recreate());
+      onRestartedRef.current(controller.recreate());
       return;
     }
     try { layout.current = attachHostLayout(anchor.current!); }
     catch { controller.stop(); return; }
     void controller.start(container.current!);
     return () => { controller.stop(); layout.current?.dispose(); };
-  }, [controller, onRestarted]);
+  }, [controller]);
   useEffect(() => { layout.current?.cover(ui.selected !== "current" || ui.guide); }, [ui.selected, ui.guide]);
   const [railCollapsed, setRailCollapsed] = useState(() => defaultStorage().getItem(RAIL_STORAGE_KEY) === "collapsed");
   useEffect(() => { defaultStorage().setItem(RAIL_STORAGE_KEY, railCollapsed ? "collapsed" : "expanded"); }, [railCollapsed]);

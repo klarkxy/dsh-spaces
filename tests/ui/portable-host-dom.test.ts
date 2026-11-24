@@ -656,9 +656,9 @@ test("DOM: mountNativeHostOverlay handles slot unmount/remount, same-commit key 
           },
         } as never, guide, bridge);
 
-        let setControls!: React.Dispatch<React.SetStateAction<{ mounted: boolean; slotKey: number }>>;
+        let setControls!: React.Dispatch<React.SetStateAction<{ mounted: boolean; slotKey: number; tick: number }>>;
         function HostApp() {
-          const [state, setState] = useState({ mounted: true, slotKey: 1 });
+          const [state, setState] = useState({ mounted: true, slotKey: 1, tick: 0 });
           useEffect(() => { setControls = setState; }, []);
           return state.mounted ? <React.Fragment key={state.slotKey}>{renderOverlay()}</React.Fragment> : null;
         }
@@ -667,6 +667,7 @@ test("DOM: mountNativeHostOverlay handles slot unmount/remount, same-commit key 
           unmount: () => setControls(s => ({ ...s, mounted: false })),
           remount: () => setControls(s => ({ ...s, mounted: true, slotKey: s.slotKey + 1 })),
           swapKey: () => setControls(s => ({ ...s, slotKey: s.slotKey + 1 })),
+          rerender: () => setControls(s => ({ ...s, tick: s.tick + 1 })),
           disposePlugin: () => { while (cleanups.length) cleanups.pop()!(); },
         };
       `,
@@ -694,6 +695,16 @@ test("DOM: mountNativeHostOverlay handles slot unmount/remount, same-commit key 
   const page = await browser.newPage({ locale: "zh-CN" }); await page.goto(server.origin);
   await page.locator('[data-space-id="coding"]').waitFor();
   assert.equal(begins, 1);
+
+  // Ordinary parent re-render with unchanged slotKey keeps the live controller and DOM node without restarting.
+  await page.evaluate(() => {
+    document.querySelector("[data-spaces-native]")?.setAttribute("data-keep-instance", "1");
+    (window as any).__slotTest.rerender();
+    (window as any).__slotTest.rerender();
+  });
+  await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  assert.equal(await page.evaluate(() => document.querySelector("[data-spaces-native]")?.getAttribute("data-keep-instance")), "1");
+  assert.equal(begins, 1, "ordinary parent re-render must not stop or restart controller");
 
   // 1) Separate unmount -> remount replaces disposedBeforeTerminal controller.
   await page.evaluate(() => (window as any).__slotTest.unmount());
@@ -729,11 +740,18 @@ test("DOM: mountNativeHostOverlay handles slot unmount/remount, same-commit key 
   await page.locator('[data-space-id="coding"]').waitFor();
   assert.equal(begins, 4, "manual surface reload stays read-only");
 
+  // Same-commit slot key swap after manual reloadSurface invokes recreate() and resets readOnlyLaunch.
+  await page.evaluate(() => (window as any).__slotTest.swapKey());
+  const deadline2 = Date.now() + 5000;
+  while (begins < 5 && Date.now() < deadline2) await page.waitForTimeout(25);
+  await page.locator('[data-space-id="coding"]').waitFor();
+  assert.equal(begins, 5, "recreate() after reloadSurface must clear readOnlyLaunch");
+
   // Hot-reload after manual reloadSurface stops the reloaded controller and boots a fresh one.
   await page.evaluate(() => (window as any).__slotTest.unmount());
   await page.evaluate(() => (window as any).__slotTest.remount());
   await page.locator('[data-space-id="coding"]').waitFor();
-  assert.equal(begins, 5);
+  assert.equal(begins, 6);
 
   await page.evaluate(() => (window as any).__slotTest.disposePlugin());
 });

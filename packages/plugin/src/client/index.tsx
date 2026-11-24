@@ -109,6 +109,9 @@ export function mountNativeHostOverlay(
   nativeBridge: DesktopBrowserBridge,
 ): void {
   let active = new NativeHostController(guide, nativeBridge);
+  const handleControllerChange = (next: NativeHostController): void => {
+    active = next;
+  };
   ctx.effect(() => () => active.stop());
   if (typeof document !== "undefined") {
     ctx.effect(() => mountStaticClientStyle(document, "dsh-spaces", "host-shell.css", HOST_SHELL_CSS + NATIVE_HOST_CSS + NATIVE_BROWSER_CSS));
@@ -118,7 +121,7 @@ export function mountNativeHostOverlay(
       if (active.disposedBeforeTerminal) active = new NativeHostController(guide, nativeBridge);
       return createElement(MotionRoot, null, createElement(NativeHostShell, {
         controller: active,
-        onControllerChange: (next) => { active = next; },
+        onControllerChange: handleControllerChange,
       }));
     },
   ));

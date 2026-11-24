@@ -111,7 +111,7 @@ export class NativeHostController {
     return this.stopped && this.state.phase !== "failed" && this.state.phase !== "service-stopped";
   }
   recreate = (): NativeHostController =>
-    new NativeHostController(this.guideApi, this.bridge, this.readOnlyLaunch ? { readOnlyLaunch: true } : undefined);
+    new NativeHostController(this.guideApi, this.bridge);
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   getSnapshot = () => this.state;
   get supportsSpaceActions() { return !!this.guideApi.spaceAction; }
@@ -164,7 +164,8 @@ export class NativeHostController {
       const snapshot = parsePortalSnapshot(await this.guideApi.presentationSnapshot!());
       if (
         !snapshot ||
-        (launch.serviceEpoch !== null && snapshot.serviceEpoch !== launch.serviceEpoch) ||
+        !launch.serviceEpoch ||
+        snapshot.serviceEpoch !== launch.serviceEpoch ||
         (launch.managerId !== null && snapshot.managerId !== launch.managerId)
       ) {
         throw Error(nativeTexts().surfaceReloadFailed);
