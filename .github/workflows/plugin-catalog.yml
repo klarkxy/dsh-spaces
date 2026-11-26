@@ -19,12 +19,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '26.10.0'
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run build:blueprint
-      - run: npm run catalog:check
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run build:blueprint
+      - run: pnpm run catalog:check
       - run: node --import tsx --test tests/tooling/community-catalog.test.mjs
-      - run: npm run catalog:verify
+      - run: pnpm run catalog:verify

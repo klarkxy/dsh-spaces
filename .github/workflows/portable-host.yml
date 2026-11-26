@@ -33,12 +33,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci --ignore-scripts --no-audit --no-fund
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - run: npm run build:blueprint
-      - run: npm run typecheck:spaces && npm run typecheck
+      - run: pnpm run build:blueprint
+      - run: pnpm run typecheck:spaces && pnpm run typecheck
       - run: node --import tsx --test tests/native/portable-host.test.ts tests/products/workbench-plugin.test.ts tests/spaces/spaces-host.test.ts tests/ui/workbench-ui.test.tsx tests/server/workbench-http-port.test.ts

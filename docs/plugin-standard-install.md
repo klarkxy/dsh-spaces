@@ -10,7 +10,7 @@
 
 新安装默认固定官方 **`0.2.2-rc.1`**。每个空间固定一个精确 DSH 版本：已有空间首次启动时固定为其实际运行的版本，新空间默认宿主版本；切换在空间详情中发起（禁止降级，不自动建快照，不兼容的第三方插件会阻止切换；官方插件内置于所选运行时并随之变化，Spaces 不会把它们安装进 profile）。管理空间（spaces-hub）跟随宿主 CLI，低于 `0.2.0-rc.2` 的空间拒绝启动；不再使用的运行时可在设置中删除。若没有全局 dsh，可使用 `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add <完整包路径>` 安装，再用 `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1 web` 启动。
 
-现行验收命令是 `npm run validate:plugin-install`；设置 `DSH_TEST_PLUGIN_SPEC=dsh-spaces@<精确版本>` 时验证 npm 安装，使用 `github:klarkxy/dsh-spaces#<完整提交号>` 时验证 Git 根安装，否则验证预构建 tarball。0.2 迁移的历史验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/archive/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。
+现行验收命令是 `pnpm run validate:plugin-install`；设置 `DSH_TEST_PLUGIN_SPEC=dsh-spaces@<精确版本>` 时验证 npm 安装，使用 `github:klarkxy/dsh-spaces#<完整提交号>` 时验证 Git 根安装，否则验证预构建 tarball。0.2 迁移的历史验收见 [迁移记录](../tasks/archive/blueprint-migration-0.2.md)。此前安装、初始化、空间视图、重开及卸载结果见 [合并验收记录](../tasks/archive/merge-execution.md)，历史 rc.1 / rc.2 浏览器记录见 [tasks/archive/plugin-standard-install.md](../tasks/archive/plugin-standard-install.md)，均不替代当前版本验证。
 
 Git 根包和预构建插件 tarball 携带同一结构的完整组件组。Supervisor 等内部组件随主包分发，用户不需要第二个包；`@dsh-spaces/supervisor` 保持私有。
 
@@ -57,8 +57,8 @@ A space exists only when created in Spaces (directly, or from an ordinary templa
 ```powershell
 git clone https://github.com/klarkxy/dsh-spaces.git
 cd dsh-spaces
-npm ci
-npm run pack:plugin
+pnpm install --frozen-lockfile
+pnpm run pack:plugin
 dsh plugin --profile web add <打印的完整包路径>
 ```
 
@@ -66,19 +66,19 @@ dsh plugin --profile web add <打印的完整包路径>
 
 ## Local linked development
 
-仓库根目录同时支持 Git 安装和本地开发链接，使用同一 `dsh-spaces` 身份与配置层。`npm install` / `npm ci` 会执行根包的 `prepare` 构建；调试命令仍执行开发构建。
+仓库根目录同时支持 Git 安装和本地开发链接，使用同一 `dsh-spaces` 身份与配置层。`pnpm install` / `pnpm install --frozen-lockfile` 会执行根包的 `prepare` 构建；调试命令仍执行开发构建。
 
 ```powershell
-npm install
-npm run dev:web
+pnpm install
+pnpm run dev:web
 ```
 
-该命令先构建，再将仓库根目录链接到 `.sandbox/dsh-link-home` 下的独立 `spaces-dev` profile，并启动官方 Web 应用。调试 Home 保留，后续启动复用同一链接，不重新打包、重装或清空数据。只准备链接而不启动时，运行 `npm run dev:link`。可用 `DSH_SPACES_WEB_HOME` 指定另一个独立 Home，用 `DSH_TEST_BIN` 指定目标 DSH CLI 的 `lib/bin.js`。
+该命令先构建，再将仓库根目录链接到 `.sandbox/dsh-link-home` 下的独立 `spaces-dev` profile，并启动官方 Web 应用。调试 Home 保留，后续启动复用同一链接，不重新打包、重装或清空数据。只准备链接而不启动时，运行 `pnpm run dev:link`。可用 `DSH_SPACES_WEB_HOME` 指定另一个独立 Home，用 `DSH_TEST_BIN` 指定目标 DSH CLI 的 `lib/bin.js`。
 
 已有兼容 DSH CLI 时，也可从仓库根目录手动执行：
 
 ```powershell
-npm run build
+pnpm run build
 $env:DSH_HOME = Join-Path $PWD '.sandbox/dsh-manual-link-home'
 # 仅首次创建该自定义 profile；已有 profile 不重复应用模板。
 dsh --profile spaces-dev --from-default-profile web --dump-config
@@ -88,9 +88,9 @@ dsh --profile spaces-dev
 
 依赖应记录为 `link:`，并指向本仓库根目录。不要链接到仓库父目录。开发流程不写真实 `~/.dsh` 或 `profiles/web`。
 
-当宿主插件解析到本源码检出（私有根包 `dsh-spaces` 下的 `packages/plugin/lib`）时，开发检出模式自动生效，无需环境变量：Supervisor 不再暂存组件副本、不写选中指针、不打包 tarball，直接以检出内验证过的组件组启动，并向 Supervisor 传入 `--dev-checkout <root>`。此后管理器 profile 在下次 Supervisor 启动时、各子空间在下次空间启动时，分别获得 `packages/plugin`、`packages/view-bridge` 的 `link:` 安装（浏览器组件被封存，不参与）。链接生效后：客户端改动经 `npm run build`（或持续运行的 `npm run dev:watch`）由官方 dsh-client-hmr 实时呈现；空间侧服务端桥接代码需重启该空间。Supervisor 代码变更后，普通 Web 遵循显式初始化或进入工作台；官方 Desktop 需重新打开应用，或使用既有的确认式手动启动。首次从既有 tarball 安装切换到链接模式时同样如此，并需每个子空间各一次重启。已知限制：`link:` 包从检出的 `node_modules` 解析 `@deepseek-ai/*` 对等依赖，因此固定到与检出开发依赖不同 DSH 版本的子空间在开发模式下可能无法正确加载。软链接不等于热替换，运行中的服务不会自动重启。普通 Web 首次进入仍需点击 **初始化 Spaces**。官方 Desktop 开发宿主在打开应用时后台启动管理服务；同一进程里服务已停止则保持停止，重新进入面板不会再请求启动。再次打开应用，或使用已有的确认式手动服务操作，才是新的启动。
+当宿主插件解析到本源码检出（私有根包 `dsh-spaces` 下的 `packages/plugin/lib`）时，开发检出模式自动生效，无需环境变量：Supervisor 不再暂存组件副本、不写选中指针、不打包 tarball，直接以检出内验证过的组件组启动，并向 Supervisor 传入 `--dev-checkout <root>`。此后管理器 profile 在下次 Supervisor 启动时、各子空间在下次空间启动时，分别获得 `packages/plugin`、`packages/view-bridge` 的 `link:` 安装（浏览器组件被封存，不参与）。链接生效后：客户端改动经 `pnpm run build`（或持续运行的 `pnpm run dev:watch`）由官方 dsh-client-hmr 实时呈现；空间侧服务端桥接代码需重启该空间。Supervisor 代码变更后，普通 Web 遵循显式初始化或进入工作台；官方 Desktop 需重新打开应用，或使用既有的确认式手动启动。首次从既有 tarball 安装切换到链接模式时同样如此，并需每个子空间各一次重启。已知限制：`link:` 包从检出的 `node_modules` 解析 `@deepseek-ai/*` 对等依赖，因此固定到与检出开发依赖不同 DSH 版本的子空间在开发模式下可能无法正确加载。软链接不等于热替换，运行中的服务不会自动重启。普通 Web 首次进入仍需点击 **初始化 Spaces**。官方 Desktop 开发宿主在打开应用时后台启动管理服务；同一进程里服务已停止则保持停止，重新进入面板不会再请求启动。再次打开应用，或使用已有的确认式手动服务操作，才是新的启动。
 
-Git 安装后的路径位于 `node_modules` 中，不会被误判为开发检出；Supervisor 使用随包携带的组件组。根目录保持 `private`，不发布到 npm；`npm run pack:plugin` 继续提供独立 tarball。
+Git 安装后的路径位于 `node_modules` 中，不会被误判为开发检出；Supervisor 使用随包携带的组件组。根目录保持 `private`，不发布到 npm；`pnpm run pack:plugin` 继续提供独立 tarball。
 
 ## Listing vs accepted support
 

@@ -28,16 +28,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "26.10.0"
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: node scripts/prepare-ci-environment.mjs
-      - run: npm run catalog:check
-      - run: npm run catalog:verify
-      - run: npm run typecheck:spaces
-      - run: npm run build:spaces
+      - run: pnpm run catalog:check
+      - run: pnpm run catalog:verify
+      - run: pnpm run typecheck:spaces
+      - run: pnpm run build:spaces
       - name: Version must match the dispatch input
         env:
           EXPECTED: ${{ inputs.version }}

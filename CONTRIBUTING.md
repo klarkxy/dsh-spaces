@@ -26,22 +26,22 @@ Historical recovery plans, tests, and screenshots are evidence of what was built
 
 ## Workflow
 
-1. `npm install`
+1. `pnpm install`
 2. `node scripts/setup-sandbox.mjs` (once, after a global `dsh` install)
-3. `npm test` and `npm run typecheck`
-4. Isolation gate: `npm run validate:isolation`
-5. `npm run dev:web` builds and links the repository root into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. The Home and link persist between launches. Click **初始化 Spaces / Initialize Spaces** in the browser. Use `npm run dev:link` for setup without starting the host. Git installs run the root `prepare` automatically; `npm run pack:plugin` remains available for archive distribution.
+3. `pnpm test` and `pnpm run typecheck`
+4. Isolation gate: `pnpm run validate:isolation`
+5. `pnpm run dev:web` builds and links the repository root into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. The Home and link persist between launches. Click **初始化 Spaces / Initialize Spaces** in the browser. Use `pnpm run dev:link` for setup without starting the host. Git installs run the root `prepare` automatically; `pnpm run pack:plugin` remains available for archive distribution.
 
-To link manually, set `DSH_HOME` to a separate development Home, create a custom profile from the official Web template, then run `dsh plugin --profile spaces-dev add .` from the repository root after `npm run build`. See [local linked development](docs/plugin-standard-install.md#local-linked-development). Rebuild and explicitly restart the host to load changed code. For Supervisor or manager changes, also stop the service from the workbench before reopening it. There is no automatic restart or hot replacement.
+To link manually, set `DSH_HOME` to a separate development Home, create a custom profile from the official Web template, then run `dsh plugin --profile spaces-dev add .` from the repository root after `pnpm run build`. See [local linked development](docs/plugin-standard-install.md#local-linked-development). Rebuild and explicitly restart the host to load changed code. For Supervisor or manager changes, also stop the service from the workbench before reopening it. There is no automatic restart or hot replacement.
 
 ## Full local checks
 
-Run `npm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain defaults to Node 26.10.0. This runs catalog and release validation, the required list/type/build checks and product test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
+Run `pnpm run check:all` with Node 24.21+ (24.x) or Node 26. CI checks both supported lines; the managed toolchain defaults to Node 26.10.0. This runs catalog and release validation, the required list/type/build checks and product test groups, package preflight, and workbench browser tests (Playwright Chromium required). Each command runs once. Logs and `result.json` are saved under a new `.sandbox/checks-*` directory; `--output` can name a new evidence directory.
 
 The runner gives child processes a fresh temporary directory and non-real DSH Home. On Windows that directory must be outside the checkout. A workspace reader can briefly open a staging child and make the single atomic directory rename fail with `EPERM`, even when the reader permits delete sharing. `.gitignore` alone does not stop every external reader. The runner rejects an inherited repository-local TMP, including a directory alias into it, before starting checks. If needed, choose an existing external directory explicitly:
 
 ```powershell
-npm run check:all -- --temp-root "$env:LOCALAPPDATA\Temp"
+pnpm run check:all -- --temp-root "$env:LOCALAPPDATA\Temp"
 ```
 
 Use an authorized ordinary shell if the restricted shell cannot write there. Do not redirect these Windows checks to `.sandbox/tmp`, disable other applications, or add rename retries to make a run pass. Temporary fixtures and evidence are retained by the runner; individual tests still release their own resources. See [the investigation](tasks/archive/runtime-eperm-20261020.md) for the observed conflict and verification limits.
