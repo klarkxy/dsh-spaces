@@ -8,6 +8,7 @@
 - [x] 新增 `workbenchGuide/reportClientFailure` 与 `WorkbenchRemoteError` 传输上下文（含 `hostRpcFailed` 提示与断线重连后一次性落盘），将前端 RPC 闪断、`<webview>` 崩溃/加载失败、门户 `#failed` 与有界 `navDiag` 轨迹记入 `host.jsonl`。
 - [x] 在 Desktop 错误页新增用户授权的手动仅前端“重新加载空间界面”入口（只读校验 `role`、`desktopLaunchState` 与 `presentationSnapshot` 后以只读模式重挂控制器，不启停后端或子空间）；更新 `let-it-crash.md`、`AGENTS.md`、`architecture.md`、`workbench.md`、`CHANGELOG.md`，真实 Desktop 实机表现待下一次宿主重载/故障验证。
 - [x] 对齐原生宿主外层选择超时至 `90s`（覆盖 `15s + 35s + 35s` 合法冷启动路径）并在超时详情附带最近 `navDiag` 阶段摘要；受控 `WorkbenchApp` 禁用 `localStorage` 旧空间自动恢复，并去重 `view-bridge` 重复 `"ready"` 上报。
+- [x] 侧边条按空间展示运行与待处理光效：主空间（`workbenchGuide/hostActivity`）与子空间（view-bridge IPC `attention` + `working`）均只在各自侧边条按钮上绘制绿光（运行任务）或黄光（待审批/待提问，黄光优先），移除全屏与整条侧栏光条，真实 Desktop 实机表现待验证。
 
 ## 2026-11-22 审查修复批次
 

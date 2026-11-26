@@ -46,8 +46,9 @@ export const WORKBENCH_UI_TOKEN_CSS = uiTokenMixin(".dsh-workbench", {
   "--wb-ease-standard": "var(--dsh-ui-ease-standard, cubic-bezier(0.2, 0, 0, 1))",
   "--wb-ease-emphasized": "var(--dsh-ui-ease-emphasized, cubic-bezier(0.32, 0.72, 0, 1))",
   "--wb-ease-spring": "var(--dsh-ui-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1))",
-  /** Attention halo colour: distinct from the warn status pulse. */
-  "--dsh-spaces-attention": "var(--dsh-ui-accent-2, var(--wb-accent-2, #3b76e6))",
+  /** Rail activity glow colours: green while working, yellow when waiting on the user. */
+  "--dsh-spaces-working": "var(--wb-ok, var(--dsh-ui-ok, #39bf83))",
+  "--dsh-spaces-attention": "var(--wb-warn, var(--dsh-ui-warn, #d9a441))",
 });
 
 export const WORKBENCH_THEME_CSS = `

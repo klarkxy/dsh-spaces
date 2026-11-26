@@ -3,13 +3,17 @@ import { test } from "node:test";
 import {
   SPACE_ATTENTION_CHANNEL,
   attentionIdentityFromEnv,
+  composeSpaceGlow,
   parseSpaceAttentionReport,
   type SpaceAttentionTransport,
 } from "../../src/shared/space-attention.ts";
 import { SupervisorAttention } from "../../src/adapters/node/supervisor/attention.ts";
+import { SupervisorLlm } from "../../src/adapters/node/supervisor/llm.ts";
+import { LLM_ACTIVITY_CHANNEL } from "../../src/shared/llm-activity.ts";
 import { SpaceRunRegistry } from "../../src/adapters/node/supervisor/space-runs.ts";
 import { SpaceAttentionProbe, installSpaceAttention } from "../../packages/view-bridge/src/attention.ts";
 import { workbenchSpaceSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
+import { computeHostActivity, computeHostAttention, computeHostWorking, parseHostActivity } from "../../packages/plugin/src/host/host-activity.ts";
 
 const EPOCH = "ab".repeat(32);
 
@@ -23,6 +27,51 @@ test("the host workbench schema accepts the projected attention field and only i
     assert.equal(workbenchSpaceSchema.safeParse({ ...space, attention }).success, true, attention);
   }
   assert.equal(workbenchSpaceSchema.safeParse({ ...space, attention: "busy" }).success, false);
+  for (const working of ["busy", "idle", "unknown"]) {
+    assert.equal(workbenchSpaceSchema.safeParse({ ...space, working }).success, true, working);
+  }
+  assert.equal(workbenchSpaceSchema.safeParse({ ...space, working: "required" }).success, false);
+});
+
+test("composeSpaceGlow gives yellow attention priority over green working and hides green when attention is unknown", () => {
+  assert.equal(composeSpaceGlow("required", "idle"), "attention");
+  assert.equal(composeSpaceGlow("required", "busy"), "attention");
+  assert.equal(composeSpaceGlow("required", "unknown"), "attention");
+  assert.equal(composeSpaceGlow("none", "busy"), "working");
+  assert.equal(composeSpaceGlow("none", "idle"), null);
+  assert.equal(composeSpaceGlow("none", "unknown"), null);
+  assert.equal(composeSpaceGlow("unknown", "busy"), null);
+  assert.equal(composeSpaceGlow(undefined, "busy"), null);
+});
+
+test("SupervisorLlm.workingOf projects the latest child activity and degrades on stale identity", () => {
+  const runs = new SpaceRunRegistry();
+  runs.nextGeneration("alpha");
+  const llm = new SupervisorLlm({ publicStatus: () => "running", currentServiceEpoch: () => EPOCH, runs });
+  const transport = fakeTransport();
+  llm.attachChild("alpha", transport, 1, EPOCH);
+  assert.equal(llm.workingOf("alpha"), "unknown");
+  transport.emit({ type: LLM_ACTIVITY_CHANNEL, kind: "state", spaceId: "alpha", generation: 1, serviceEpoch: EPOCH, revision: 1, status: "busy" });
+  assert.equal(llm.workingOf("alpha"), "busy");
+  transport.emit({ type: LLM_ACTIVITY_CHANNEL, kind: "state", spaceId: "alpha", generation: 1, serviceEpoch: EPOCH, revision: 2, status: "idle" });
+  assert.equal(llm.workingOf("alpha"), "idle");
+  runs.nextGeneration("alpha");
+  assert.equal(llm.workingOf("alpha"), "unknown");
+});
+
+test("computeHostActivity computes attention and working independently and degrades missing services to unknown", () => {
+  const cleanSources = {
+    typertGateway: { getPendingRemoteEvents: () => [] as { event: string; agentId: unknown }[] },
+    sessions: { list: () => [{ id: "s1" }] },
+    sessionProjections: { snapshot: () => ({ values: { userQuestions: { active: [] } } }) },
+    agents: { list: () => [{ status: "running" }] },
+  };
+  assert.deepEqual(computeHostActivity(cleanSources), { attention: "none", working: "busy" });
+  assert.equal(computeHostAttention({ ...cleanSources, typertGateway: { getPendingRemoteEvents: () => [{ event: "approval/request", agentId: "s1" }] } }), "required");
+  assert.equal(computeHostWorking({ agents: { list: () => [{ status: "idle" }] } }), "idle");
+  assert.equal(computeHostWorking({}), "unknown");
+  assert.deepEqual(parseHostActivity({ attention: "none", working: "busy" }), { attention: "none", working: "busy" });
+  assert.equal(parseHostActivity({ attention: "none", working: "busy", extra: 1 }), undefined);
 });
 const identity = { spaceId: "alpha", generation: 2, serviceEpoch: EPOCH };
 

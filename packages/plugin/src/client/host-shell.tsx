@@ -12,6 +12,7 @@ import { hostTexts } from "./ui/host-texts";
 import { CreationRailEntry, CreationFailureDialog } from "./ui/creation-rail";
 import { CREATION_RING_CSS } from "../../../../src/shared/ui/creation-ring";
 import { ATTENTION_RING_CSS } from "../../../../src/shared/ui/attention-ring";
+import { composeSpaceGlow } from "../../../../src/shared/space-attention";
 
 /**
  * The additive space dock of a compatible host.
@@ -108,18 +109,22 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
   const failed = ui.error !== null || layoutError;
   return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined}>
     <HostRail label={t.title} layoutId={RAIL_LAYOUT_ID} busy={ui.pending !== null}>
-      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.current} current={ui.visible === "current"} pinned onSelect={controller.showCurrent}>
+      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={ui.hostGlow === "attention" ? `${t.current} · ${t.attention}` : ui.hostGlow === "working" ? `${t.current} · ${t.working}` : t.current} current={ui.visible === "current"} pinned glow={ui.hostGlow} onSelect={controller.showCurrent}>
         <SpaceGlyph spaceId={ui.role?.profileId ?? ""} icon={ui.inventory?.spaces.find(space => space.id === ui.role?.profileId)?.icon} />
       </HostRailButton>
       <HostRailDivider />
       <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.home} current={ui.visible === "portal" && ui.selected === null} onSelect={() => controller.select(null)}>⌂</HostRailButton>
       <HostRailList>
-        {spaces.map(space => <HostRailButton key={space.id} layoutId={RAIL_LAYOUT_ID}
-          label={space.attention === "required" ? `${space.displayName} · ${t.attention}` : space.displayName}
-          current={ui.visible === "portal" && ui.selected === space.id} status={space.status} attention={space.attention}
-          spaceId={space.id} onSelect={() => controller.select(space.id)}>
-          <SpaceGlyph spaceId={space.id} icon={space.icon} />
-        </HostRailButton>)}
+        {spaces.map(space => {
+          const glow = composeSpaceGlow(space.attention, space.working);
+          const suffix = glow === "attention" ? ` · ${t.attention}` : glow === "working" ? ` · ${t.working}` : "";
+          return <HostRailButton key={space.id} layoutId={RAIL_LAYOUT_ID}
+            label={`${space.displayName}${suffix}`}
+            current={ui.visible === "portal" && ui.selected === space.id} status={space.status} attention={space.attention} glow={glow}
+            spaceId={space.id} onSelect={() => controller.select(space.id)}>
+            <SpaceGlyph spaceId={space.id} icon={space.icon} />
+          </HostRailButton>;
+        })}
         {creations.map(creation => (
           <CreationRailEntry key={creation.jobId} creation={creation} layoutId={RAIL_LAYOUT_ID} onSelect={() => controller.openCreation(creation)} />
         ))}

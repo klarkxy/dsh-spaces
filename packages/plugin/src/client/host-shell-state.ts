@@ -2,6 +2,7 @@ import { publicGuideDetail } from "./guide-detail";
 import { WorkbenchRemoteError } from "./workbench-remote";
 import type { ClientFailureReport, WorkbenchGuideApi, WorkbenchGuideRole } from "../types";
 import { parsePortalFailure, portalFailureDetail, parsePortalSnapshot, parseSpaceHostAudience, portalMessage, PORTAL_PARENT_SOURCE, type PortalCreation, type PortalFailure, type PortalSnapshot } from "../../../../src/shared/space-host";
+import { HostActivityPoller, type HostGlow } from "./host-activity";
 
 export interface HostShellSnapshot {
   phase: "loading" | "initialize" | "start" | "connecting" | "ready" | "failed";
@@ -15,6 +16,8 @@ export interface HostShellSnapshot {
   portalFailure: PortalFailure | null;
   error: "unavailable" | "unsupported" | "stopped" | "entry" | null;
   creationFailed: PortalCreation | null;
+  /** Per-space button glow for the current native host space: green while working, yellow while needing attention. */
+  hostGlow: HostGlow;
 }
 export interface HostShellWindow { postMessage(value: unknown, origin: string): void }
 export interface HostShellEnvironment {
@@ -33,7 +36,7 @@ const browserEnv: HostShellEnvironment = {
 /** Presentation client only. It cannot submit a management command, stop a Host or change its profile. */
 export class HostShellController {
   private ui: HostShellSnapshot = { phase: "loading", role: null, inventory: null, portal: null,
-    visible: "current", selected: null, pending: null, error: null, detail: null, portalFailure: null, creationFailed: null };
+    visible: "current", selected: null, pending: null, error: null, detail: null, portalFailure: null, creationFailed: null, hostGlow: null };
   private seenCreations = new Set<string>();
   private dismissedCreations = new Set<string>();
   private listeners = new Set<() => void>();
@@ -45,7 +48,13 @@ export class HostShellController {
   private selectionTimer: ReturnType<typeof setTimeout> | null = null;
   private target: string | null = null;
   private openAfterConnect = false;
-  constructor(private guide: WorkbenchGuideApi, private env: HostShellEnvironment = browserEnv) {}
+  /** Current-space sidebar button glow; absent when the host offers no `hostActivity`. */
+  private activityPoller?: HostActivityPoller;
+  constructor(private guide: WorkbenchGuideApi, private env: HostShellEnvironment = browserEnv) {
+    const read = guide.hostActivity?.bind(guide);
+    if (read) this.activityPoller = new HostActivityPoller(read, hostGlow => this.patch({ hostGlow }),
+      { setTimeout: (handler, ms) => this.env.setTimeout(handler, ms), clearTimeout: timer => this.env.clearTimeout(timer as ReturnType<typeof setTimeout>) });
+  }
   subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
   getSnapshot = (): HostShellSnapshot => this.ui;
   private patch(patch: Partial<HostShellSnapshot>): void { this.ui = { ...this.ui, ...patch }; for (const fn of this.listeners) fn(); }
@@ -59,6 +68,7 @@ export class HostShellController {
     this.running = true;
     const epoch = ++this.epoch;
     this.patch({ phase: "loading", error: null, detail: null, portalFailure: null });
+    this.activityPoller?.start();
     void this.guide.role().then(async role => {
       if (!this.running || epoch !== this.epoch) return;
       this.patch({ role });
@@ -68,7 +78,7 @@ export class HostShellController {
       else this.patch({ phase: "initialize" });
     }).catch(cause => { if (this.running && epoch === this.epoch) this.fail("unavailable", cause); });
   };
-  stop = (): void => { this.running = false; this.epoch++; this.clearTimers(); this.frame = null; };
+  stop = (): void => { this.running = false; this.epoch++; this.clearTimers(); this.frame = null; this.activityPoller?.stop(); };
   registerFrame = (frame: HostShellWindow | null): void => { this.frame = frame; };
   private supportsTransport(): boolean {
     return !!parseSpaceHostAudience({ parentOrigin: this.env.origin(), channel: "0".repeat(32) });

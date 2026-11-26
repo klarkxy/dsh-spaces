@@ -4,7 +4,7 @@ import { compareScannedProfiles, defaultSpaceMeta } from "../../../core/domain/r
 import { redactPublicReason } from "../../../shared/public-reason";
 import type { SpaceDetail } from "../../../shared/spaces-control";
 import type { ProfileStatus } from "../../../shared/types";
-import type { SpaceAttention } from "../../../shared/space-attention";
+import type { SpaceAttention, SpaceWorking } from "../../../shared/space-attention";
 import type { WorkbenchSpace } from "../../../shared/workbench";
 import { sanitizeLogText } from "../diagnostics/diagnostics";
 import type { ProfileRegistry } from "../profile/profile-registry";
@@ -24,6 +24,8 @@ export interface SupervisorSpacesHost {
   managerId: () => string | null;
   /** Presentation-only attention read; never consulted for authority. */
   attentionOf?: (id: string) => SpaceAttention;
+  /** Presentation-only working read; never consulted for authority. */
+  workingOf?: (id: string) => SpaceWorking;
 }
 
 /**
@@ -72,6 +74,7 @@ export class SupervisorSpaces {
           generation: view?.generation ?? this.host.runs.generation(row.name),
           managed: Boolean(this.host.lifecycle.handle) && !leftover,
           attention: status === "running" ? this.host.attentionOf?.(row.name) ?? "unknown" : "unknown",
+          working: status === "running" ? this.host.workingOf?.(row.name) ?? "unknown" : "unknown",
           dshVersion: row.name === this.host.managerId() ? null : (row.meta.dshVersion ?? null),
         } satisfies WorkbenchSpace;
       });

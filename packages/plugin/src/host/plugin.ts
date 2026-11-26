@@ -15,6 +15,7 @@ import { installMainSpaceTools } from "./main-space-tools";
 import { shareWelcomeNotice } from "./welcome-notice";
 import type { DiagnosticLogger } from "../../../../src/adapters/node/diagnostics/rotating-log";
 import { attachHostDiagnosticLogger } from "../../../../src/adapters/node/diagnostics/host-log";
+import { readHostActivity } from "./host-activity";
 
 const HOST_HINT_GLOBAL = "__DSH_SPACES_HOST__";
 const HANDOFF_PATH = "/dsh-spaces/handoff";
@@ -49,7 +50,12 @@ export class SpacesPlugin {
     diagnostic?.info("host.plugin-loaded", "Spaces host plugin loaded.", { role: this.runtime.identity.role, profile: this.runtime.identity.profileId });
     if (diagnostic) ctx.effect(() => attachHostDiagnosticLogger(ctx, diagnostic));
     shareWelcomeNotice(ctx, this.runtime);
-    this.guide = new WorkbenchGuideHost(ctx, this.runtime);
+    // The native-space activity projection belongs to the trusted main host
+    // alone (the operator's own web/desktop profile). Child spaces, the
+    // manager profile and unconfirmed identities get no sampler: the guide
+    // answers unknown there instead of projecting another space's state.
+    this.guide = new WorkbenchGuideHost(ctx, this.runtime,
+      this.runtime.isTrustedMainHost ? () => readHostActivity(ctx) : undefined);
     if (this.runtime.shouldRegisterManager) {
       this.manager = new WorkbenchManagerHost(ctx, this.runtime);
       this.spaces = new SpacesRemote(ctx, this.runtime);

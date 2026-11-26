@@ -2846,12 +2846,13 @@ test("rail buttons name each space together with its status", async () => {
   assert.ok(html.includes('class="dsh-wb-status" data-status="crashed" aria-hidden="true"'));
 });
 
-test("a space needing attention gets the rail halo and a labelled hint", async () => {
+test("a space needing attention gets yellow glow and a working space gets green glow in the workbench rail", async () => {
   const ctrl = controller(fakeApi({
     state: async () => state({ spaces: [
       manager,
-      space({ id: "alpha", attention: "required" }),
-      space({ id: "gamma", displayName: "Gamma", status: "stopped", attention: "none" }),
+      space({ id: "alpha", attention: "required", working: "busy" }),
+      space({ id: "beta", displayName: "Beta", status: "running", attention: "none", working: "busy" }),
+      space({ id: "gamma", displayName: "Gamma", status: "stopped", attention: "none", working: "idle" }),
       space({ id: "delta", displayName: "Delta", status: "crashed" }),
     ] }),
   }));
@@ -2859,11 +2860,17 @@ test("a space needing attention gets the rail halo and a labelled hint", async (
   const html = ready(ctrl);
   assert.ok(html.includes('data-attention="required"'), "the attention halo is rendered");
   assert.ok(html.includes(`aria-label="alpha · ${t("zh", "app.status.running")} · ${t("zh", "app.attention")}"`));
-  const gamma = html.indexOf('data-space-id="gamma"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="gamma"') - 400), html.indexOf('data-space-id="gamma"')) : html;
-  assert.ok(!gamma.includes('data-attention="required"'), "a 'none' space has no halo");
+  const alpha = html.indexOf('data-space-id="alpha"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="alpha"') - 400), html.indexOf('data-space-id="alpha"') + 120) : html;
+  assert.ok(alpha.includes('data-glow="attention"'), "attention yellow overrides working green");
+  const beta = html.indexOf('data-space-id="beta"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="beta"') - 400), html.indexOf('data-space-id="beta"') + 120) : html;
+  assert.ok(beta.includes('data-glow="working"'), "working space gets green glow");
+  assert.ok(!beta.includes('data-attention="required"'), "working space without pending attention has no attention halo");
+  assert.ok(html.includes(`aria-label="Beta · ${t("zh", "app.status.running")} · ${t("zh", "app.working")}"`));
+  const gamma = html.indexOf('data-space-id="gamma"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="gamma"') - 400), html.indexOf('data-space-id="gamma"') + 120) : html;
+  assert.ok(!gamma.includes('data-attention="required"') && !gamma.includes('data-glow='), "an idle/stopped space has no glow");
   assert.ok(!html.includes(`Gamma · ${t("zh", "app.status.stopped")} · ${t("zh", "app.attention")}`));
-  const crashed = html.indexOf('data-space-id="delta"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="delta"') - 400), html.indexOf('data-space-id="delta"')) : html;
-  assert.ok(!crashed.includes('data-attention="required"'), "a crashed space with no report has no halo");
+  const crashed = html.indexOf('data-space-id="delta"') >= 0 ? html.slice(Math.max(0, html.indexOf('data-space-id="delta"') - 400), html.indexOf('data-space-id="delta"') + 120) : html;
+  assert.ok(!crashed.includes('data-attention="required"') && !crashed.includes('data-glow='), "a crashed space with no report has no glow");
 });
 
 test("known server preview-rejection reasons are localized", () => {

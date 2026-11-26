@@ -69,18 +69,21 @@ test("portal inventory accepts the closed attention field and rejects other valu
   const withAttention = {
     ...inventory,
     spaces: [
-      { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running", attention: "none" },
-      { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required" },
-      { id: "beta", displayName: "Beta", generation: 2, status: "stopped", attention: "unknown" },
+      { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running", attention: "none", working: "idle" },
+      { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required", working: "busy" },
+      { id: "beta", displayName: "Beta", generation: 2, status: "stopped", attention: "unknown", working: "unknown" },
     ],
   };
   assert.deepEqual(parsePortalSnapshot(withAttention), withAttention);
   for (const bad of ["busy", "error", "idle", "yes", "REQUIRED", 1, null, true]) {
     assert.equal(parsePortalSnapshot({ ...withAttention, spaces: [{ ...withAttention.spaces[0], attention: bad }] }), null, JSON.stringify(bad));
   }
+  for (const bad of ["required", "none", "running", 1, null, true]) {
+    assert.equal(parsePortalSnapshot({ ...withAttention, spaces: [{ ...withAttention.spaces[0], working: bad }] }), null, JSON.stringify(bad));
+  }
 });
 
-test("the portable rail halo marks a space needing attention", async () => {
+test("the portable rail marks each space button green when working and yellow when needing attention without full-screen glow", async () => {
   const { PortableHostShell } = await import("../../packages/plugin/src/client/host-shell.tsx");
   const React = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -89,18 +92,27 @@ test("the portable rail halo marks a space needing attention", async () => {
     ui: { phase: "ready", role: { role: "workspace", profileId: "entry", managerId: "spaces-hub", unavailable: false, reasons: [] },
       inventory: { serviceEpoch: epoch, managerId: "spaces-hub", spaces: [
         { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running" },
-        { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required" },
-        { id: "beta", displayName: "Beta", generation: 2, status: "running", attention: "none" },
+        { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required", working: "busy" },
+        { id: "beta", displayName: "Beta", generation: 2, status: "running", attention: "none", working: "busy" },
+        { id: "gamma", displayName: "Gamma", generation: 3, status: "running", attention: "none", working: "idle" },
       ] },
       portal: { src: "http://127.0.0.1:3091/portal-bootstrap/x", origin: "http://127.0.0.1:3091", channel }, visible: "portal",
-      selected: null, pending: null, detail: null, portalFailure: null, error: null, creationFailed: null },
+      selected: null, pending: null, detail: null, portalFailure: null, error: null, creationFailed: null, hostGlow: "working" },
   });
   const html = renderToStaticMarkup(React.createElement(PortableHostShell, { controller: f.controller }));
+  assert.ok(!html.includes("dsh-host-glow"), "no full-screen host glow element is rendered");
   assert.ok(html.includes('data-attention="required"'), "the portable rail shows the attention halo");
+  const pinnedButton = html.match(/<button[^>]*data-pinned="true"[^>]*>/)?.[0] ?? "";
+  assert.ok(pinnedButton.includes('data-glow="working"'), "the pinned main space button shows working green glow");
   const alphaButton = html.match(/<button[^>]*data-space-id="alpha"[^>]*>/)?.[0] ?? "";
+  assert.ok(alphaButton.includes('data-glow="attention"'), "attention yellow overrides working green on alpha");
   assert.match(alphaButton, /Alpha · (等待处理|Needs attention)/, "the attention label suffix is announced");
   const betaButton = html.match(/<button[^>]*data-space-id="beta"[^>]*>/)?.[0] ?? "";
-  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no halo");
+  assert.ok(betaButton.includes('data-glow="working"'), "a running space without pending attention shows green glow");
+  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no attention halo");
+  assert.match(betaButton, /Beta · (正在工作|Working)/, "the working label suffix is announced");
+  const gammaButton = html.match(/<button[^>]*data-space-id="gamma"[^>]*>/)?.[0] ?? "";
+  assert.ok(!gammaButton.includes("data-glow="), "an idle space has no glow");
 });
 
 test("portal grants are one-use, audience-bound, bounded and not durable", () => {

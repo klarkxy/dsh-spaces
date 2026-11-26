@@ -9,6 +9,15 @@ export const SPACE_ATTENTION_CHANNEL = "dsh-spaces:space-attention";
 export const SPACE_ATTENTION_POLL_MS = 1_000;
 
 export type SpaceAttention = "required" | "none" | "unknown";
+export type SpaceWorking = "busy" | "idle" | "unknown";
+/** Single presentation glow for a space's sidebar button: yellow (attention) > green (working) > none. */
+export type SpaceGlow = "working" | "attention" | null;
+
+export function composeSpaceGlow(attention?: SpaceAttention, working?: SpaceWorking): SpaceGlow {
+  if (attention === "required") return "attention";
+  if (attention === "none" && working === "busy") return "working";
+  return null;
+}
 export type SpaceAttentionIdentity = {
   spaceId: string;
   generation: number;

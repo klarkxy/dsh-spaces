@@ -52,8 +52,9 @@ export const HOST_UI_TOKEN_CSS = uiTokenMixin(".dsh-host-dock", {
   "--host-ease-spring": "var(--dsh-ui-ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1))",
   "--host-accent-gradient": "none",
   "--host-shimmer": "linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--host-text) 14%, transparent) 42%, transparent 64%)",
-  /** Attention halo colour: the shared accent-2 hue, distinct from the warn status pulse. */
-  "--dsh-spaces-attention": "var(--dsh-ui-accent-2, #3b76e6)",
+  /** Rail activity glow colours: green while working, yellow when waiting on the user. */
+  "--dsh-spaces-working": "var(--dsh-ui-ok, #39bf83)",
+  "--dsh-spaces-attention": "var(--dsh-ui-warn, #d9a441)",
 });
 
 /**
@@ -68,6 +69,8 @@ ${HOST_LIGHT} .dsh-host-dock {
   --dsh-ui-shadow-md: 0 4px 14px -6px rgba(16, 17, 26, 0.14);
   --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16, 17, 26, 0.20);
   --dsh-ui-glow: none;
+  --dsh-ui-ok: #2f8f52;
+  --dsh-ui-warn: #c48b13;
 }
 @media (prefers-color-scheme: light) {
   ${HOST_SYSTEM} ${HOST_NOT_DARK} .dsh-spaces,
@@ -76,6 +79,8 @@ ${HOST_LIGHT} .dsh-host-dock {
     --dsh-ui-shadow-md: 0 4px 14px -6px rgba(16, 17, 26, 0.14);
     --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16, 17, 26, 0.20);
     --dsh-ui-glow: none;
+    --dsh-ui-ok: #2f8f52;
+    --dsh-ui-warn: #c48b13;
   }
 }
 `;

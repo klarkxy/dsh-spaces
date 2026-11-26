@@ -53,7 +53,8 @@ export function parseNativeSpaceHash(hash: string): NativeSpaceNavigation | null
 }
 export interface SpaceHostAudience { parentOrigin: string; channel: string }
 export type SpaceAttentionValue = "required" | "none" | "unknown";
-export interface PortalSpace { id: string; displayName: string; status: string; generation: number; icon?: string; attention?: SpaceAttentionValue }
+export type SpaceWorkingValue = "busy" | "idle" | "unknown";
+export interface PortalSpace { id: string; displayName: string; status: string; generation: number; icon?: string; attention?: SpaceAttentionValue; working?: SpaceWorkingValue }
 /** A space being created, projected for presentation surfaces only. */
 export interface PortalCreation {
   jobId: string;
@@ -164,10 +165,13 @@ export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
   for (const item of row.spaces) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const space = item as Record<string, unknown>;
-    if (!["displayName,generation,id,status", "displayName,generation,icon,id,status",
-        "attention,displayName,generation,id,status", "attention,displayName,generation,icon,id,status"].includes(Object.keys(space).sort().join(",")) ||
+    const allowedSpaceKeys = ["id", "displayName", "status", "generation", "icon", "attention", "working"];
+    const spaceKeys = Object.keys(space);
+    if (!["id", "displayName", "status", "generation"].every(key => Object.hasOwn(space, key)) ||
+        spaceKeys.some(key => !allowedSpaceKeys.includes(key)) ||
         (space.icon !== undefined && (typeof space.icon !== "string" || !iconPattern.test(space.icon) || space.icon.length > 240_000)) ||
         (space.attention !== undefined && !["required", "none", "unknown"].includes(space.attention as string)) ||
+        (space.working !== undefined && !["busy", "idle", "unknown"].includes(space.working as string)) ||
         typeof space.id !== "string" || !spacePattern.test(space.id) || ids.has(space.id) ||
         typeof space.displayName !== "string" || space.displayName.length > 200 ||
         typeof space.status !== "string" || !["running", "starting", "stopping", "stopped", "crashed", "unknown"].includes(space.status) ||
@@ -175,7 +179,8 @@ export function parsePortalSnapshot(value: unknown): PortalSnapshot | null {
     ids.add(space.id);
     spaces.push({ id: space.id, displayName: space.displayName, status: space.status, generation: space.generation as number,
       ...(space.icon === undefined ? {} : { icon: space.icon as string }),
-      ...(space.attention === undefined ? {} : { attention: space.attention as PortalSpace["attention"] }) });
+      ...(space.attention === undefined ? {} : { attention: space.attention as PortalSpace["attention"] }),
+      ...(space.working === undefined ? {} : { working: space.working as PortalSpace["working"] }) });
   }
   const creating: PortalCreation[] = [];
   if (row.creating !== undefined) {

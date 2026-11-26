@@ -76,6 +76,7 @@ export const workbenchSpaceSchema = z
     base: z.enum(["web", "browser"]).optional(),
     baseVersion: exactVersionSchema.optional(),
     attention: z.enum(["required", "none", "unknown"]).optional(),
+    working: z.enum(["busy", "idle", "unknown"]).optional(),
   })
   .strict();
 
@@ -533,6 +534,14 @@ export const overviewSchema = z
   .object({
     capabilities: capabilitiesSchema,
     spaces: z.array(spaceSummarySchema),
+  })
+  .strict();
+
+/** Passive activity projection of the native space: closed keys, closed tri-state values. */
+export const hostActivityProjectionSchema = z
+  .object({
+    attention: z.enum(["required", "none", "unknown"]),
+    working: z.enum(["busy", "idle", "unknown"]),
   })
   .strict();
 

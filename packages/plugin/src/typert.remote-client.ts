@@ -38,6 +38,7 @@ type WorkbenchRemoteMapEntries = {
 declare module "@deepseek-ai/dsh-typert-protocol" {
   interface TypertRemoteNamespace$workbenchGuide {
     spaceActivity: (spaceId: string, serviceEpoch: string) => Promise<RemoteResult<{ activity: "idle" | "busy" | "unknown"; generation: number }>>;
+    hostActivity: () => Promise<RemoteResult<{ attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }>>;
     presentationSnapshot: () => Promise<RemoteResult<PortalSnapshot>>;
     spaceAction: (request: DesktopSpaceAction) => Promise<RemoteResult<PortalSnapshot>>;
     role: () => Promise<RemoteResult<WorkbenchGuideRole>>;
@@ -60,6 +61,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
   interface TypertRemoteNamespace$workbench extends WorkbenchRemoteNamespace {}
   interface TypertRemoteMap extends WorkbenchRemoteMapEntries {
     "workbenchGuide/spaceActivity": (spaceId: string, serviceEpoch: string) => Promise<RemoteResult<{ activity: "idle" | "busy" | "unknown"; generation: number }>>;
+    "workbenchGuide/hostActivity": () => Promise<RemoteResult<{ attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }>>;
     "workbenchGuide/presentationSnapshot": () => Promise<RemoteResult<PortalSnapshot>>;
     "workbenchGuide/spaceAction": (request: DesktopSpaceAction) => Promise<RemoteResult<PortalSnapshot>>;
     "workbenchGuide/role": () => Promise<RemoteResult<WorkbenchGuideRole>>;

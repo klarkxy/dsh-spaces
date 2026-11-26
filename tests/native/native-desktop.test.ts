@@ -1141,7 +1141,7 @@ test("native rail shows active creations and keeps seen failed ones until dismis
   controller.stop();
 });
 
-test("the native rail halo marks a space needing attention without replacing its status dot", async () => {
+test("the native rail shows per-space working green and attention yellow glow without full-screen glow or replacing status dots", async () => {
   const React = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { NativeHostShell } = await import("../../packages/plugin/src/client/ui/native-shell.tsx");
@@ -1149,18 +1149,27 @@ test("the native rail halo marks a space needing attention without replacing its
   Object.assign(controller, { state: { phase: "ready", selected: "current", pending: null, error: null, guide: false,
     navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null,
     serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null, detail: null, failedAt: null, cleanupDetail: null,
-    instanceRetained: null, portalFailure: null,
+    instanceRetained: null, portalFailure: null, hostGlow: "attention",
     inventory: { serviceEpoch: "a".repeat(64), managerId: "hub", spaces: [
-      { id: "alpha", displayName: "Alpha", status: "running", generation: 1, attention: "required" },
-      { id: "beta", displayName: "Beta", status: "running", generation: 1, attention: "none" },
+      { id: "alpha", displayName: "Alpha", status: "running", generation: 1, attention: "required", working: "busy" },
+      { id: "beta", displayName: "Beta", status: "running", generation: 1, attention: "none", working: "busy" },
+      { id: "gamma", displayName: "Gamma", status: "running", generation: 1, attention: "none", working: "idle" },
     ] } } });
   const html = renderToStaticMarkup(React.createElement(NativeHostShell, { controller }));
+  assert.ok(!html.includes("dsh-host-glow"), "no full-screen host glow element is rendered");
+  const desktopButton = html.match(/<button[^>]*data-space-id="desktop"[^>]*>/)?.[0] ?? "";
+  assert.ok(desktopButton.includes('data-glow="attention"'), "the pinned desktop main button shows its attention glow");
   const alphaButton = html.match(/<button[^>]*data-space-id="alpha"[^>]*>/)?.[0] ?? "";
   assert.ok(alphaButton.includes('data-attention="required"'), "the native rail shows the attention halo");
+  assert.ok(alphaButton.includes('data-glow="attention"'), "attention yellow overrides working green");
   assert.ok(alphaButton.includes('data-space-status="unopened"'), "the status dot stays alongside the halo");
   assert.match(html, /Alpha · (尚未打开|Not opened yet) · (等待处理|Needs attention)/, "the label carries status and the attention hint");
   const betaButton = html.match(/<button[^>]*data-space-id="beta"[^>]*>/)?.[0] ?? "";
-  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no halo");
+  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no attention halo");
+  assert.ok(betaButton.includes('data-glow="working"'), "a running space with no pending attention shows green working glow");
+  assert.match(html, /Beta · (尚未打开|Not opened yet) · (正在工作|Working)/, "the label carries status and the working hint");
+  const gammaButton = html.match(/<button[^>]*data-space-id="gamma"[^>]*>/)?.[0] ?? "";
+  assert.ok(!gammaButton.includes("data-glow="), "an idle space has no glow");
 });
 
 test("the desktop rail space menu opens settings and hands over a detail intent to open the space detail page", async () => {

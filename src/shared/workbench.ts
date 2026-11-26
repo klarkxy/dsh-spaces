@@ -78,6 +78,8 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   managed: boolean;
   /** Presentation hint only: a pending approval or question in this space. Never a status, never authority. */
   attention?: import('./space-attention').SpaceAttention;
+  /** Presentation hint only: whether an agent turn or stream is currently active in this space. */
+  working?: import('./space-attention').SpaceWorking;
   /** Exact pinned DSH runtime version; null for the manager, which follows the host CLI. */
   dshVersion: string | null;
 }

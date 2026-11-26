@@ -8,6 +8,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 - Desktop error pages now expose a manual frontend-only `Reload Spaces view` (`重新加载空间界面`) button whenever the failure is on the client/bridge side while `desktopLaunchState` and the running manager remain ready: it performs read-only checks (`role`, `desktopLaunchState`, `presentationSnapshot`) and mounts a fresh read-only `NativeHostController` without restarting Supervisor or any space.
 - Client surfaces (`NativeHostController`, `HostShellController`) now forward bounded, sanitized failure reports (including `stage`, `WorkbenchRemoteError` RPC transport/connection state, `portalFailure`, and up to 64 `navDiag` events) via `workbenchGuide/reportClientFailure` into `host.jsonl`, flushing once if the host WebSocket reconnects.
+- Each space button in the Desktop, portable host, and Workbench sidebar rails now shows its own activity glow (static green when a task is running, breathing yellow when a tool approval or `ask_user_question` card waits for the user, with yellow overriding green and unknown/idle showing no light). Main-host state comes from the read-only `workbenchGuide/hostActivity` remote on trusted main hosts, and child spaces project `working` alongside `attention` from view-bridge IPC without drawing any full-screen or rail-bar glow.
 
 ### Fixed
 
