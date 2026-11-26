@@ -12,6 +12,7 @@ import { hostTexts } from "./ui/host-texts";
 import { CreationRailEntry, CreationFailureDialog } from "./ui/creation-rail";
 import { CREATION_RING_CSS } from "../../../../src/shared/ui/creation-ring";
 import { ATTENTION_RING_CSS } from "../../../../src/shared/ui/attention-ring";
+import { HOST_ACTIVITY_GLOW_CSS } from "./ui/activity-glow";
 
 /**
  * The additive space dock of a compatible host.
@@ -75,6 +76,7 @@ iframe.dsh-host-surface { width:calc(100% - var(--dsh-spaces-rail-width,72px)); 
 .dsh-host-loading-label { white-space:nowrap; }
 ${CREATION_RING_CSS}
 ${ATTENTION_RING_CSS}
+${HOST_ACTIVITY_GLOW_CSS}
 `;
 
 /** Shared layout id of the portable selection pill. */
@@ -106,9 +108,11 @@ export function PortableHostShell({ controller }: { controller: HostShellControl
   // A guide that reports a failure is never faded: an animation must not delay
   // or soften a real error.
   const failed = ui.error !== null || layoutError;
-  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined}>
+  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-host-dock="true" data-spaces-host-phase={ui.phase} data-spaces-host-error={ui.error ?? undefined} data-host-glow={ui.hostGlow ?? undefined}>
+    <div className="dsh-host-glow" aria-hidden="true" data-glow={ui.hostGlow ?? undefined} data-surface={ui.visible === "current" ? "current" : undefined} />
+    <span className="dsh-host-glow-status" role="status" aria-live="polite">{ui.hostGlow === "attention" ? t.attention : ui.hostGlow === "working" ? t.working : ""}</span>
     <HostRail label={t.title} layoutId={RAIL_LAYOUT_ID} busy={ui.pending !== null}>
-      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={t.current} current={ui.visible === "current"} pinned onSelect={controller.showCurrent}>
+      <HostRailButton layoutId={RAIL_LAYOUT_ID} label={ui.hostGlow === "attention" ? `${t.current} · ${t.attention}` : ui.hostGlow === "working" ? `${t.current} · ${t.working}` : t.current} current={ui.visible === "current"} pinned glow={ui.hostGlow} onSelect={controller.showCurrent}>
         <SpaceGlyph spaceId={ui.role?.profileId ?? ""} icon={ui.inventory?.spaces.find(space => space.id === ui.role?.profileId)?.icon} />
       </HostRailButton>
       <HostRailDivider />

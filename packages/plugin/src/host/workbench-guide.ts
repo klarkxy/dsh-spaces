@@ -14,12 +14,19 @@ import { reportedOrFallback } from "../../../../src/shared/public-reason";
 import { WORKBENCH_PUBLIC_ERROR } from "./remote-errors";
 import type { WorkbenchHostRuntime } from "./runtime";
 import { validClientFailureReport, validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
+import type { HostActivityProjection } from "./host-activity";
 
 /** Presentation and launch Remote; manual service restart is restricted to the confirmed Desktop. */
 export class WorkbenchGuideHost extends TypertRemoteService {
   constructor(
     ctx: Context,
     private readonly runtime: WorkbenchHostRuntime,
+    /**
+     * Host-local passive activity sampler, present only on the confirmed
+     * trusted main host. Absent everywhere else: the projection is unknown,
+     * never composed from another space and never guessed.
+     */
+    private readonly activitySampler?: () => HostActivityProjection,
   ) {
     super(ctx, "workbenchGuide");
   }
@@ -62,6 +69,22 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   @Remote("role")
   async role(): Promise<WorkbenchGuideRole> {
     return this.runtime.guideRole();
+  }
+
+  /**
+   * Read-only passive activity of the native space this host process is.
+   * Boolean-grade projection only; absent samplers report unknown rather than
+   * an error so client polling has one closed shape to compose.
+   */
+  @Remote("hostActivity")
+  async hostActivity(): Promise<HostActivityProjection> {
+    if (!this.activitySampler) return { attention: "unknown", working: "unknown" };
+    try {
+      return this.activitySampler();
+    } catch (error) {
+      this.logFailure("hostActivity", error);
+      return { attention: "unknown", working: "unknown" };
+    }
   }
 
   @Remote("spaceAction")

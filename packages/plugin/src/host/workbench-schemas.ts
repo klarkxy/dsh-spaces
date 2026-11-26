@@ -536,6 +536,14 @@ export const overviewSchema = z
   })
   .strict();
 
+/** Passive activity projection of the native space: closed keys, closed tri-state values. */
+export const hostActivityProjectionSchema = z
+  .object({
+    attention: z.enum(["required", "none", "unknown"]),
+    working: z.enum(["busy", "idle", "unknown"]),
+  })
+  .strict();
+
 export const clientFailureReportSchema = z.unknown().refine(validClientFailureReport, "invalid client failure report");
 
 export const clientFailureRecordedSchema = z

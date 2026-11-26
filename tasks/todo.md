@@ -57,6 +57,8 @@
 - [ ] 最终 0.5.0 制品验收：真实 Desktop 加载后的删除/新建验收；失败空间与作业保留，不自动补配置或重放。见 [归档记录](archive/todo-2026-11.md) 2026-11-09 新空间无模型与自定义图标同屏报插件路径错误。
 - [ ] 主空间模型配置一次性同步（删除 `@dsh-spaces/llm-bridge` 与实时 LLM 委派）：原有一次性同步已完成隔离 `dsh web` 验收；批次 1 的运行中免停机同步、下一次请求生效和摘要预览仍需在真实 Desktop 与隔离实例实测，旧空间首次启动卸载退役包同样待验。
 - [ ] 空间注意光晕：三种空间栏按 `dsh-spaces:space-attention` 通道投影待审批/待提问状态；已有空间的 view-bridge 需按新组件组重新对齐才会上报（此前为 `unknown`、无光晕），真实 Desktop 尚未实测。
+- [ ] 当前原生空间状态光（分支 `feat/space-activity-glow`）：绿=施工中、黄=待审批/待提问（黄色优先），经 `workbenchGuide/hostActivity` 只读 Remote 与两壳 1.5s 轮询；真实 Chromium 截图已留 `.sandbox/host-glow-ui/`，真实 Desktop（Electron `<webview>` 切换、真实 agent 运行）尚未实测。
+- [ ] 子空间注意探针（`packages/view-bridge/src/attention.ts` 的 `SpaceAttentionProbe.compute()`）在 `userQuestions` 投影缺席或畳形时会落到 `none`（只会少亮、不会误亮）；独立跟踪，不在当前原生空间状态光这次 PR 改动。
 - [ ] 真实 Desktop EXE 与 `cordis` 会话内的 `spaces_plan` / `spaces_execute` / `spaces_ui_*` 审批端到端尚未实测。见 [归档记录](archive/todo-2026-11.md) 2026-11-09 主空间空间总控插件设计。
 - [ ] `plugin.live.*` 对真实子 DSH 进程（真实 cookie 交换 + 真实 `pluginManager`）的端到端冒烟尚未执行。见 [归档记录](archive/todo-2026-11.md) 2026-11-09 主空间空间总控插件设计。
 

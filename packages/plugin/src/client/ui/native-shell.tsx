@@ -94,7 +94,10 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
     >
       {glyph}
     </HostRailButton>
-  );  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-native="true" data-rail-collapsed={railCollapsed || undefined}>
+  );  const glowLabel = (label: string): string => ui.hostGlow === "attention" ? `${label} · ${texts.attention}` : ui.hostGlow === "working" ? `${label} · ${texts.working}` : label;
+  return <div ref={anchor} className="dsh-host-dock dsh-ui" data-spaces-native="true" data-rail-collapsed={railCollapsed || undefined} data-host-glow={ui.hostGlow ?? undefined}>
+    <div className="dsh-host-glow" aria-hidden="true" data-glow={ui.hostGlow ?? undefined} data-surface={ui.selected === "current" && !ui.guide ? "current" : undefined} />
+    <span className="dsh-host-glow-status" role="status" aria-live="polite">{ui.hostGlow === "attention" ? texts.attention : ui.hostGlow === "working" ? texts.working : ""}</span>
     <button type="button" className="dsh-native-rail-toggle" aria-label={railToggleLabel} title={railToggleLabel} aria-expanded={!railCollapsed} onClick={() => setRailCollapsed(current => !current)}>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
         <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
@@ -104,11 +107,12 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
     <HostRail label={texts.rail} layoutId={RAIL_LAYOUT_ID}>
       <HostRailButton
         layoutId={RAIL_LAYOUT_ID}
-        label={texts.desktopMain}
+        label={glowLabel(texts.desktopMain)}
         title={texts.desktopMainPinned}
         current={ui.selected === "current"}
         currentValue="page"
         pinned
+        glow={ui.hostGlow}
         spaceId="desktop"
         onSelect={controller.showCurrent}
       >

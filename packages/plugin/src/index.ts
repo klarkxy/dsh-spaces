@@ -1,5 +1,14 @@
 export { default, SpacesPlugin } from "./host/plugin";
 export { SpacesRemote, type SpacesRemoteConfig } from "./host/spaces-service";
+export {
+  computeHostActivity,
+  computeHostAttention,
+  computeHostWorking,
+  parseHostActivity,
+  readHostActivity,
+  type HostActivityProjection,
+  type HostActivitySources,
+} from "./host/host-activity";
 export { WorkbenchGuideHost } from "./host/workbench-guide";
 export { WorkbenchManagerHost } from "./host/workbench-manager";
 export { WorkbenchHostRuntime } from "./host/runtime";

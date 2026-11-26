@@ -360,7 +360,7 @@ test("ordinary and corrupt profiles register only the guide Remote", () => {
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.equal(plugin.manager, null);
   assert.equal(plugin.spaces, null);
-  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState", "reportClientFailure"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "hostActivity", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState", "reportClientFailure"]);
   assert.equal(plugin.guide.typertRemote.namespace, "workbenchGuide");
 });
 
@@ -381,7 +381,7 @@ test("manager profile registers manager WorkbenchApi and compatibility reads, no
   const plugin = new SpacesPlugin(ctx, {}, runtime);
   assert.ok(plugin.manager);
   assert.ok(plugin.spaces);
-  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState", "reportClientFailure"]);
+  assert.deepEqual(methodsOf(plugin.guide), ["previewServiceRestart", "previewServiceStop", "stopService", "restartService", "role", "hostActivity", "spaceAction", "spaceActivity", "presentationSnapshot", "bootstrap", "returnTarget", "portalTarget", "initialize", "beginDesktopLaunch", "desktopLaunchState", "reportClientFailure"]);
   assert.ok(methodsOf(plugin.manager!).includes("state"));
   assert.ok(methodsOf(plugin.manager!).includes("submit"));
   assert.ok(methodsOf(plugin.manager!).includes("product"));

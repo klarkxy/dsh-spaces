@@ -10,6 +10,7 @@ import type { DesktopLaunchState } from "../../types";
 import { WorkbenchRemoteError } from "../workbench-remote";
 import { nativeTexts } from "./native-texts";
 import { createNavDiag, parseNavDiag, type NavDiagRecord } from "../../../../../src/shared/nav-diag";
+import { HostActivityPoller, type HostGlow } from "../host-activity";
 
 const LAUNCH_POLL_MS = 1500;
 export const NATIVE_SELECTION_DEADLINE_MS = 90_000;
@@ -52,11 +53,13 @@ type NativeState = { phase: "loading" | NativeLaunchPhase | "ready" | "stopping"
   operation: { spaceId: string; action: DesktopSpaceAction["action"] } | null; operationError: string | null;
   notice: string | null; serviceStopRequest: number;
   spaceConfirmation: { request: DesktopSpaceAction; activity: "busy" | "unknown" } | null;
-  creationFailed: PortalCreation | null };
+  creationFailed: PortalCreation | null;
+  /** Static light of the current native space: green while working, yellow while it needs the user. */
+  hostGlow: HostGlow };
 
 /** One native guest, one lifetime. It has no Node API or product script execution channel. */
 export class NativeHostController {
-  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, failedAt: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null };
+  private state: NativeState = { phase: "loading", inventory: null, selected: "current", pending: null, error: null, detail: null, failedAt: null, cleanupDetail: null, instanceRetained: null, portalFailure: null, guide: false, navigationIntent: null, createHandoff: false, operation: null, operationError: null, notice: null, serviceStopRequest: 0, spaceConfirmation: null, creationFailed: null, hostGlow: null };
   /** Creation job ids seen queued/running this session; failed entries need it to stay visible. */
   private seenCreations = new Set<string>();
   private dismissedCreations = new Set<string>();
@@ -104,8 +107,12 @@ export class NativeHostController {
   private navNavigateNoted = false;
   private navOutcomeNoted = false;
   private readonly readOnlyLaunch: boolean;
+  /** Current-space activity light; absent when the host offers no `hostActivity`. */
+  private activityPoller?: HostActivityPoller;
   constructor(private guideApi: WorkbenchGuideApi, private bridge: DesktopBrowserBridge, options?: { readOnlyLaunch?: boolean }) {
     this.readOnlyLaunch = options?.readOnlyLaunch === true;
+    const read = guideApi.hostActivity?.bind(guideApi);
+    if (read) this.activityPoller = new HostActivityPoller(read, hostGlow => this.patch({ hostGlow }));
   }
   get disposedBeforeTerminal(): boolean {
     return this.stopped && this.state.phase !== "failed" && this.state.phase !== "service-stopped";
@@ -255,6 +262,7 @@ export class NativeHostController {
     if (this.started) return;
     this.started = true;
     this.container = container;
+    this.activityPoller?.start();
     if (!SPACES_BROWSER_SEALED) this.browser = new NativeBrowserHost(this.bridge, container);
     const generation = ++this.launchGeneration;
     try {
@@ -889,6 +897,7 @@ export class NativeHostController {
   stop = () => {
     if (this.stopped) return;
     this.stopped = true; this.lifetime.abort(); this.launchGeneration++; this.launchSettled = true; this.desiredGuest = 0;
+    this.activityPoller?.stop();
     this.sequence++; clearTimeout(this.pollTimer); clearTimeout(this.launchTimer); clearTimeout(this.selectionTimer);
     clearTimeout(this.noticeTimer);
     this.browserRequest = undefined; this.browser?.stop();

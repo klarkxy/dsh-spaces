@@ -58,6 +58,8 @@ Supervisor 签发有期限、单次使用并绑定父来源和通道的入口票
 
 三种空间栏在空间有待处理的工具审批或 `ask_user_question` 提问时显示一圈注意光晕。该提示只来自子空间 view bridge 沿私有 IPC 推送的只读状态（待处理/无/未知），不包含会话内容，不参与运行状态、代次或计划指纹，也不授予任何管理权；没有报告时按未知处理，不猜测。
 
+当前原生 DSH 空间（web/desktop 可信主宿主）自己还有一盏静态环境光：实际施工中为绿、有工具审批或 `ask_user_question` 待处理为黄，黄色优先。状态由只读 Remote `workbenchGuide/hostActivity` 给出两个原始字段（`attention`、`working`，均含 `unknown`），客户端以 1.5 秒节奏读取并合成唯一的光；仅可信主宿主装配采样器，子空间、manager 与身份不明一律得 `unknown`，不跨空间汇总。合成规则：`attention: required` 即为黄，即使 `working` 为 `unknown`；绿仅在 `attention: none` 且 `working: busy` 时出现；`attention` 为 `unknown`、读取失败、超时或形状不合的报告一律不发光，不保留陈旧状态。每次读取都有 5 秒可中止期限；`stop()` 会中止在途读取并立即撤光，旧代次迟到的结果不再生效，超时后仅在正常 1.5 秒节奏重新采样，不提前重试、不重连。两壳对故障的处理不同：Desktop 控制器进入终态失败时轮询随控制器停止并撤光；便携壳的 Spaces 页面失败（`failed`）不等于状态 RPC 失效，它的轮询继续，仍可显示宿主的真实状态，只有状态读取本身失败才撤光。光只画在 rail 内侧边缘、固定的“当前”按钮和宿主页面边缘，不盖原生视图，不循环动画，跟随主题、reduced-motion 与 forced-colors。
+
 ### 3.3 Desktop 管理服务的一次启动
 
 受管空间正常停止时，Supervisor 只发送一次协作停止请求，并等待最多 30 秒确认进程退出。超时仍如实失败并保留服务运行权；随后观察到同一进程以退出码 0 结束，只更新该进程为已停止并追加延迟退出记录，不改写失败作业、不解除服务保护、不再次停止或启动。延迟错误退出仍报告停止阶段失败。
@@ -136,6 +138,7 @@ Supervisor 用主空间绑定的 CLI 执行 `dsh --profile <main> --dump-config`
 | Creator channel | 主空间创建空间的 scope 调用与身份挑战 | loopback-only、无 Cookie/Origin、单注册、一次性计划 |
 | 空间总控通道 | 主空间 lifecycle/plugin/runtime/models.sync/UI 工具 | 独立 control scope、原生请求、计划指纹、运行代次校验 |
 | 空间注意通道 | 子空间 view bridge 向 Supervisor 推送注意力状态 | 私有 IPC、身份绑定、单调修订、只读布尔级投影、无凭据无会话内容 |
+| 宿主活动读取 | 当前原生空间向自己的客户端壳给出施工/待处理状态（`workbenchGuide/hostActivity`） | 只读无参 Remote、仅可信主宿主应答、`attention`/`working` 两个封闭字段、无会话内容无凭据、无管理写权、客户端每次读取 1.5 秒节奏、单次 5 秒可中止期限，失败、超时或未知即无光，无自动恢复 |
 
 通用能力平台、持久消息、广播、跨机器传输和任意 `ctx.*` 远程调用不是现行能力。
 
