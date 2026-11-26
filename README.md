@@ -73,16 +73,16 @@ Node.js 24.21+ (24.x) and 26.x are supported. New managed toolchains default to 
 ## Develop
 
 ```powershell
-npm install
+pnpm install
 node scripts/setup-sandbox.mjs
-npm run build
-npm test
-npm run dev:web
+pnpm run build
+pnpm test
+pnpm run dev:web
 ```
 
-`npm install` uses `--legacy-peer-deps` via the committed [`.npmrc`](.npmrc). `@klarkxy/dsh-dev-index` declares `@deepseek-ai/*` peers such as `>=0.2.0-rc.2`; npm's default peer gate excludes prerelease versions the range does not explicitly name, so it rejects the pinned `0.2.2-rc.1` toolchain even though the official DSH compatibility check (`includePrerelease`) accepts it. Do not replace the flag with `--force`, which would mask conflicts rather than describe this one prerelease peer contract. The runtime `dsh plugin add` flow installs into managed profiles with pnpm and is unaffected.
+The committed [`.npmrc`](.npmrc) sets `node-linker=hoisted` so `node_modules` matches official DSH profiles and `scripts/build-spaces.mjs` can stage `playwright-core` into `ui-engine` with its transitive dependencies intact (it also retains `legacy-peer-deps=true` as fallback compatibility if an external Git consumer invokes npm against `@klarkxy/dsh-dev-index` prerelease `@deepseek-ai/*` peers).
 
-Development uses an isolated Home. Never target the real `~/.dsh`, default `sessions/` / `storages/`, or `profiles/web/`. `npm run dev:link` prepares the linked development profile without starting the host. Rebuild and explicitly restart the host after changes; Supervisor changes also require a normal service shutdown and reopen.
+Development uses an isolated Home. Never target the real `~/.dsh`, default `sessions/` / `storages/`, or `profiles/web/`. `pnpm run dev:link` prepares the linked development profile without starting the host. Rebuild and explicitly restart the host after changes; Supervisor changes also require a normal service shutdown and reopen.
 
 The root Git package prepares the full plugin during installation; prebuilt archives remain available for review and distribution. npm publication and marketplace listing are separate release actions.
 
@@ -162,16 +162,16 @@ dsh web
 ## 开发
 
 ```powershell
-npm install
+pnpm install
 node scripts/setup-sandbox.mjs
-npm run build
-npm test
-npm run dev:web
+pnpm run build
+pnpm test
+pnpm run dev:web
 ```
 
-`npm install` 通过提交内的 [`.npmrc`](.npmrc) 使用 `--legacy-peer-deps`：`@klarkxy/dsh-dev-index` 声明 `>=0.2.0-rc.2` 这类 `@deepseek-ai` peer，npm 默认 peer 规则排除 range 未显式命名的 prerelease 版本，会拒绝已锁定的 `0.2.2-rc.1` 工具链，而官方 DSH 兼容检查（`includePrerelease`）接受它。不要用 `--force` 替代：那会掩盖冲突而非描述这一条预发布 peer 约束。运行时 `dsh plugin add` 在托管 profile 里走 pnpm，不受影响。
+仓库提交内的 [`.npmrc`](.npmrc) 配置了 `node-linker=hoisted`，使 `node_modules` 与官方 DSH profile 保持一致的扁平布局，确保 `scripts/build-spaces.mjs` 将 `playwright-core` 及其传递依赖完整暂存到 `ui-engine`（同时保留 `legacy-peer-deps=true`，作为外部 Git 消费者万一使用 npm 解析 `@klarkxy/dsh-dev-index` 预发布 `@deepseek-ai/*` peer 时的兼容兜底）。
 
-开发使用隔离 Home，禁止指向真实 `~/.dsh`、默认 `sessions/` / `storages/` 或 `profiles/web/`。`npm run dev:link` 只准备链接。修改后重新构建并显式重启宿主；Supervisor 变化还需正常停止服务后重新进入。
+开发使用隔离 Home，禁止指向真实 `~/.dsh`、默认 `sessions/` / `storages/` 或 `profiles/web/`。`pnpm run dev:link` 只准备链接。修改后重新构建并显式重启宿主；Supervisor 变化还需正常停止服务后重新进入。
 
 Git 根包在安装时准备完整插件；预构建归档仍可用于审阅和分发。发布 GitHub Release 后，[自动发布流程](docs/npm-publishing.md)完成检查、打包、npm 发布和公开内容核对。
 

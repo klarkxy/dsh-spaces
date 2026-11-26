@@ -1,9 +1,8 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { resolveNpmCli } from './pack-spaces-plugin.mjs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { refuseRealHome } from './lib/distribution-harness.mjs';
 
 const REPO = resolve(import.meta.dirname, '..');
@@ -36,6 +35,40 @@ export function createCheckEnvironment({ tempRoot = tmpdir(), repo = REPO, platf
   } };
 }
 
+export function resolvePnpmCommand({ nodeExe = process.execPath, env = process.env, platform = process.platform } = {}) {
+  const override = env.DSH_TEST_PNPM_CJS?.trim();
+  if (override) {
+    const resolved = resolve(override);
+    if (!existsSync(resolved)) throw new Error(`DSH_TEST_PNPM_CJS is missing: ${resolved}`);
+    return { command: nodeExe, prefixArgs: [resolved] };
+  }
+  const execPath = env.npm_execpath?.trim();
+  if (execPath) {
+    const resolved = resolve(execPath);
+    if (existsSync(resolved) && /^pnpm(?:\.(?:c?js|mjs|exe))?$/i.test(basename(resolved))) {
+      if (/\.(?:c?js|mjs)$/i.test(resolved)) return { command: nodeExe, prefixArgs: [resolved] };
+      return { command: resolved, prefixArgs: [] };
+    }
+  }
+  const found = spawnSync(platform === 'win32' ? 'where.exe' : 'which', ['pnpm'], {
+    encoding: 'utf8',
+    timeout: 10_000,
+    windowsHide: true,
+  });
+  for (const line of (found.stdout || '').split(/\r?\n/)) {
+    const loc = line.trim();
+    if (!loc) continue;
+    const cjs = join(dirname(loc), 'node_modules', 'pnpm', 'bin', 'pnpm.cjs');
+    if (existsSync(cjs)) return { command: nodeExe, prefixArgs: [resolve(cjs)] };
+    if (platform !== 'win32' || loc.toLowerCase().endsWith('.exe')) {
+      return { command: resolve(loc), prefixArgs: [] };
+    }
+  }
+  const fallback = env.APPDATA ? join(env.APPDATA, 'npm', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs') : '';
+  if (fallback && existsSync(fallback)) return { command: nodeExe, prefixArgs: [resolve(fallback)] };
+  throw new Error('pnpm not found. Put pnpm on PATH or set DSH_TEST_PNPM_CJS.');
+}
+
 export async function main(argv = process.argv.slice(2)) {
   let output, tempRoot = tmpdir();
   for (let i = 0; i < argv.length; i++) {
@@ -50,7 +83,7 @@ export async function main(argv = process.argv.slice(2)) {
     output = mkdtempSync(join(REPO, '.sandbox', 'checks-'));
   }
   const isolated = createCheckEnvironment({ tempRoot });
-  const npm = resolveNpmCli(process.execPath);
+  const pnpm = resolvePnpmCommand();
   const result = { status: 'running', output, temp: isolated.directory, checks: [] };
   const save = () => writeFileSync(join(output, 'result.json'), JSON.stringify(result, null, 2) + '\n');
   save();
@@ -61,7 +94,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`RUN ${check}`);
     let code, error;
     try {
-      const child = spawn(process.execPath, [npm, 'run', check], { cwd: REPO, env: { ...isolated.env, DSH_SPACES_BUILD_TARGET: 'distribution' },
+      const child = spawn(pnpm.command, [...pnpm.prefixArgs, 'run', check], { cwd: REPO, env: { ...isolated.env, DSH_SPACES_BUILD_TARGET: 'distribution' },
         windowsHide: true, stdio: ['ignore', fd, fd] });
       [code] = await once(child, 'close');
     } catch (cause) { code = null; error = String(cause); }

@@ -38,12 +38,12 @@ Development and tests use `.sandbox/dsh-home` or another non-real `DSH_SPACES_HO
 
 ## Verification
 
-Run `npm run check:test-lists`, `npm run typecheck`, `npm run typecheck:spaces`,
-`npm run typecheck:tests` and
-`npm run build`, then the test groups: `npm test`, `npm run test:spaces`,
-`npm run test:workbench`, `npm run test:workbench:recovery`, `npm run test:llm`,
-`npm run test:blueprints` and `npm run test:browser`.
-`test:workbench:browser` needs Playwright Chromium. `npm run check:all` runs the
+Run `pnpm run check:test-lists`, `pnpm run typecheck`, `pnpm run typecheck:spaces`,
+`pnpm run typecheck:tests` and
+`pnpm run build`, then the test groups: `pnpm test`, `pnpm run test:spaces`,
+`pnpm run test:workbench`, `pnpm run test:workbench:recovery`, `pnpm run test:llm`,
+`pnpm run test:blueprints` and `pnpm run test:browser`.
+`test:workbench:browser` needs Playwright Chromium. `pnpm run check:all` runs the
 checks above plus browser tests and package preflight, with logs and an isolated
 Home. Windows rename checks require a writable temporary directory outside the
 checkout: workspace readers can hold staging children open and cause `EPERM`.
@@ -51,5 +51,5 @@ Do not redirect Windows checks to `.sandbox/tmp`; use `--temp-root` with an
 existing external directory and an authorized ordinary process when the sandbox
 cannot write there. The runner rejects repository-local temp roots before
 starting checks and never retries a failed command. Node 24.21+ (24.x) and Node 26 are supported.
-`npm run dev:watch` builds once, then rebuilds on source changes for linked
+`pnpm run dev:watch` builds once, then rebuilds on source changes for linked
 dev-checkout profiles (no retry after a failed build).

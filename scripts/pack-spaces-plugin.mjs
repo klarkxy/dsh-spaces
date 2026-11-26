@@ -118,7 +118,7 @@ function assertDistributionLogLevel() {
     join(PLUGIN_DIR, "lib", "supervisor", "index.js"),
   ]) {
     if (!readFileSync(file, "utf8").includes('DEFAULT_DIAGNOSTIC_LOG_LEVEL = true ? "info" : "debug"')) {
-      throw new Error(`Package logging must default to info; rebuild with npm run pack:plugin: ${file}`);
+      throw new Error(`Package logging must default to info; rebuild with pnpm run pack:plugin: ${file}`);
     }
   }
 }
@@ -418,7 +418,7 @@ function preflightOnDisk() {
     if (!existsSync(join(BROWSER_DIR, rel))) missing.push(`packages/browser/${rel}`);
   }
   if (missing.length) {
-    throw new Error(`prebuilt entries missing (run npm run build:spaces from the repo root): ${missing.join(", ")}`);
+    throw new Error(`prebuilt entries missing (run pnpm run build:spaces from the repo root): ${missing.join(", ")}`);
   }
   const pluginStray = warnStrayTarballs(PLUGIN_DIR, "packages/plugin");
   const viewStray = warnStrayTarballs(VIEW_DIR, "packages/view-bridge");

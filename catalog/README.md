@@ -8,7 +8,7 @@
 
 1. 先将可安装的 DSH bundle 发布到 npm。包的 `package.json` 应声明 `dsh.bundle.patch`、公开的 `repository` 地址和支持的 `engines.dsh` / `engines.node`；共享依赖库不单独收录。
 2. Fork 本仓库，在 `catalog/plugins.json` 添加一条记录。无需改动已有作者的条目。
-3. 在仓库根目录运行 `npm ci`、`npm run catalog:build`、`npm run catalog:verify`。
+3. 在仓库根目录运行 `pnpm install --frozen-lockfile`、`pnpm run catalog:build`、`pnpm run catalog:verify`。
 4. 提交包含 `catalog/plugins.json` 和生成文件 `catalog/index.json` 的 Pull Request。维护者审核用途、来源与测试信息，通过后合并；不授予核心包的发布权限。
 
 ```json
@@ -47,6 +47,6 @@
 
 ## For plugin authors
 
-Publish your own DSH bundle on npm, add its package name, category, bilingual title and summary to `catalog/plugins.json`, then run `npm run catalog:build` and `npm run catalog:verify`. Submit both the source list and generated `catalog/index.json` in a pull request. Your repository and npm publishing permissions remain yours.
+Publish your own DSH bundle on npm, add its package name, category, bilingual title and summary to `catalog/plugins.json`, then run `pnpm run catalog:build` and `pnpm run catalog:verify`. Submit both the source list and generated `catalog/index.json` in a pull request. Your repository and npm publishing permissions remain yours.
 
 The generator reads public npm metadata without running plugin code. Listing is not a compatibility certification. Optional test evidence must identify the exact plugin version, DSH version and platform; users can also install an unlisted package by its npm name.
