@@ -1,4 +1,9 @@
-import type { SpaceAttention, SpaceWorking } from "../../../../src/shared/space-attention";
+import {
+  isHostActivityRecord,
+  userQuestionsActive,
+  type SpaceAttention,
+  type SpaceWorking,
+} from "../../../../src/shared/space-attention";
 
 /**
  * The passive activity projection of the native space this host process IS.
@@ -43,13 +48,6 @@ export interface HostActivitySources {
 
 const UNKNOWN: HostActivityProjection = { attention: "unknown", working: "unknown" };
 
-/** One question projection is well-formed only when it carries its active list. */
-function userQuestionsActive(value: unknown): readonly unknown[] | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const active = (value as { active?: unknown }).active;
-  return Array.isArray(active) ? active : undefined;
-}
-
 /**
  * Attention half: order-independent evidence aggregation.
  *
@@ -80,17 +78,27 @@ export function computeHostAttention(sources: HostActivitySources): SpaceAttenti
     !sessionProjections || typeof sessionProjections.snapshot !== "function") {
     degraded = true;
   } else {
-    for (const session of sessions.list()) {
-      let snapshot: { values?: Record<string, unknown> } | undefined;
-      try {
-        snapshot = sessionProjections.snapshot(session, ["userQuestions"]);
-      } catch {
-        degraded = true;
-        continue;
+    let list: readonly unknown[] | undefined;
+    try {
+      const raw = sessions.list();
+      if (Array.isArray(raw)) list = raw;
+      else degraded = true;
+    } catch {
+      degraded = true;
+    }
+    if (list) {
+      for (const session of list) {
+        let snapshot: { values?: Record<string, unknown> } | undefined;
+        try {
+          snapshot = sessionProjections.snapshot(session, ["userQuestions"]);
+        } catch {
+          degraded = true;
+          continue;
+        }
+        const active = userQuestionsActive(snapshot?.values?.userQuestions);
+        if (active === undefined) { degraded = true; continue; }
+        if (active.length > 0) confirmed = true;
       }
-      const active = userQuestionsActive(snapshot?.values?.userQuestions);
-      if (active === undefined) { degraded = true; continue; }
-      if (active.length > 0) confirmed = true;
     }
   }
 
@@ -107,8 +115,15 @@ export function computeHostAttention(sources: HostActivitySources): SpaceAttenti
 export function computeHostWorking(sources: HostActivitySources): SpaceWorking {
   const { agents } = sources;
   if (!agents || typeof agents.list !== "function") return "unknown";
+  let list: readonly { status?: unknown }[];
+  try {
+    list = agents.list();
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(list)) return "unknown";
   let unknown = false;
-  for (const agent of agents.list()) {
+  for (const agent of list) {
     if (agent?.status === "running") return "busy";
     if (agent?.status !== "idle") unknown = true;
   }
@@ -137,13 +152,7 @@ export function computeHostActivity(sources: HostActivitySources): HostActivityP
 
 /** Wire validation of the public projection: closed keys, closed values, no extras. */
 export function parseHostActivity(value: unknown): HostActivityProjection | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = value as Record<string, unknown>;
-  const keys = Object.keys(row);
-  if (keys.length !== 2 || !keys.includes("attention") || !keys.includes("working")) return undefined;
-  if (row.attention !== "required" && row.attention !== "none" && row.attention !== "unknown") return undefined;
-  if (row.working !== "busy" && row.working !== "idle" && row.working !== "unknown") return undefined;
-  return row as unknown as HostActivityProjection;
+  return isHostActivityRecord(value) ? { attention: value.attention, working: value.working } : undefined;
 }
 
 type CordisServiceGetter = { get?(name: string, strict?: boolean): unknown };

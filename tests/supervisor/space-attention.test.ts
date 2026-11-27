@@ -12,8 +12,10 @@ import { SupervisorLlm } from "../../src/adapters/node/supervisor/llm.ts";
 import { LLM_ACTIVITY_CHANNEL } from "../../src/shared/llm-activity.ts";
 import { SpaceRunRegistry } from "../../src/adapters/node/supervisor/space-runs.ts";
 import { SpaceAttentionProbe, installSpaceAttention } from "../../packages/view-bridge/src/attention.ts";
+import { LlmActivity } from "../../packages/view-bridge/src/activity.ts";
 import { workbenchSpaceSchema } from "../../packages/plugin/src/host/workbench-schemas.ts";
 import { computeHostActivity, computeHostAttention, computeHostWorking, parseHostActivity } from "../../packages/plugin/src/host/host-activity.ts";
+import { HostActivityPoller, composeHostGlow, parseHostActivity as parseClientHostActivity, type HostGlow } from "../../packages/plugin/src/client/host-activity.ts";
 
 const EPOCH = "ab".repeat(32);
 
@@ -269,4 +271,199 @@ test("a reattach replaces the previous session and transport listeners", () => {
   assert.equal(attention.attentionOf("alpha"), "unknown", "the detached transport cannot report");
   second.emit(report);
   assert.equal(attention.attentionOf("alpha"), "required");
+});
+
+test("child attention isolates per-channel and per-session errors and degrades missing userQuestions to unknown", () => {
+  const transport = fakeTransport();
+  const s1 = { id: "s-1" };
+  const s2 = { id: "s-2" };
+
+  // A throwing first session must not mask an active question in a later session.
+  const laterRequired = new SpaceAttentionProbe(identity, transport, () => ({
+    typertGateway: { getPendingRemoteEvents: () => [] },
+    sessions: { list: () => [s1, s2] },
+    sessionProjections: {
+      snapshot: (session) => {
+        if (session === s1) throw new Error("session 1 disposed mid-scan");
+        return { values: { userQuestions: { active: [{ callId: "q-2" }] } } };
+      },
+    },
+  }));
+  assert.equal(laterRequired.compute(), "required");
+
+  // A throwing gateway read must not mask an active session question.
+  const gatewayThrows = new SpaceAttentionProbe(identity, transport, () => ({
+    typertGateway: { getPendingRemoteEvents: () => { throw new Error("gateway read failed"); } },
+    sessions: { list: () => [s2] },
+    sessionProjections: { snapshot: () => ({ values: { userQuestions: { active: [{ callId: "q-2" }] } } }) },
+  }));
+  assert.equal(gatewayThrows.compute(), "required");
+
+  // A missing or throwing session list must not mask a confirmed gateway approval.
+  const sessionsThrows = new SpaceAttentionProbe(identity, transport, () => ({
+    typertGateway: { getPendingRemoteEvents: () => [{ event: "approval/request", agentId: "a-1" }] },
+    sessions: { list: () => { throw new Error("sessions unavailable"); } },
+    sessionProjections: { snapshot: () => ({ values: { userQuestions: { active: [] } } }) },
+  }));
+  assert.equal(sessionsThrows.compute(), "required");
+
+  // Missing or malformed userQuestions projections on live sessions degrade to unknown (never none),
+  // preventing composeSpaceGlow(attention, "busy") from lighting a false working green ring.
+  for (const badSnapshot of [
+    {},
+    { values: {} },
+    { values: { userQuestions: null } },
+    { values: { userQuestions: {} } },
+    { values: { userQuestions: { active: "not-an-array" } } },
+  ]) {
+    const probe = new SpaceAttentionProbe(identity, transport, () => ({
+      typertGateway: { getPendingRemoteEvents: () => [] },
+      sessions: { list: () => [s1] },
+      sessionProjections: { snapshot: () => badSnapshot as { values?: Record<string, unknown> } },
+    }));
+    assert.equal(probe.compute(), "unknown");
+    assert.equal(composeSpaceGlow(probe.compute(), "busy"), null);
+  }
+});
+
+test("computeHostAttention and computeHostWorking isolate thrown list reads and share closed wire validation", () => {
+  assert.equal(computeHostAttention({
+    typertGateway: { getPendingRemoteEvents: () => [{ event: "user-questions/request", agentId: "a-1" }] },
+    sessions: { list: () => { throw new Error("sessions list failed"); } },
+    sessionProjections: { snapshot: () => ({ values: { userQuestions: { active: [] } } }) },
+  }), "required");
+  const s1 = { id: "s-1" }, s2 = { id: "s-2" };
+  assert.equal(computeHostAttention({
+    typertGateway: { getPendingRemoteEvents: () => [] },
+    sessions: { list: () => [s1, s2] },
+    sessionProjections: {
+      snapshot: (session) => {
+        if (session === s1) throw new Error("first session failed");
+        return { values: { userQuestions: { active: [{ callId: "q-2" }] } } };
+      },
+    },
+  }), "required");
+  assert.equal(computeHostAttention({
+    typertGateway: { getPendingRemoteEvents: () => [] },
+    sessions: { list: () => [s1] },
+    sessionProjections: { snapshot: () => ({ values: {} }) },
+  }), "unknown");
+  assert.equal(computeHostWorking({ agents: { list: () => { throw new Error("agents failed"); } } }), "unknown");
+  assert.equal(computeHostWorking({ agents: { list: () => [{ status: "starting" }] } }), "unknown");
+
+  assert.deepEqual(parseClientHostActivity({ attention: "required", working: "idle" }), { attention: "required", working: "idle" });
+  assert.equal(composeHostGlow(parseClientHostActivity({ attention: "none", working: "busy" })), "working");
+  for (const invalid of [
+    null,
+    [],
+    {},
+    { attention: "none" },
+    { attention: "none", working: "busy", extra: true },
+    { attention: "busy", working: "busy" },
+    { attention: "none", working: "required" },
+  ]) {
+    assert.equal(parseHostActivity(invalid), undefined);
+    assert.equal(parseClientHostActivity(invalid), null);
+  }
+});
+
+test("HostActivityPoller aborts timed-out reads, clears timers on stop, and ignores stale epochs", async () => {
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  const timers = new Map<number, { fn: () => void; ms: number }>();
+  let nextTimerId = 0;
+  const fakeTimers = {
+    setTimeout: (fn: () => void, ms: number) => {
+      const id = ++nextTimerId;
+      timers.set(id, { fn, ms });
+      return id;
+    },
+    clearTimeout: (id: unknown) => { timers.delete(id as number); },
+  };
+  const applied: HostGlow[] = [];
+  const reads: { signal: AbortSignal; resolve: (value: unknown) => void; reject: (error: unknown) => void }[] = [];
+  const poller = new HostActivityPoller(
+    (signal) => new Promise((resolve, reject) => { reads.push({ signal, resolve, reject }); }),
+    (glow) => { applied.push(glow); },
+    fakeTimers,
+    1500,
+    5000,
+  );
+
+  poller.start();
+  assert.equal(poller.active, true);
+  assert.equal(reads.length, 1);
+
+  // First read resolves working -> applies "working" and schedules 1500ms interval timer.
+  reads[0].resolve({ attention: "none", working: "busy" });
+  await flush();
+  assert.deepEqual(applied, ["working"]);
+  const intervalEntry = [...timers.entries()].find(([, item]) => item.ms === 1500);
+  assert.ok(intervalEntry, "next poll interval is scheduled after settling");
+
+  // Trigger second read and let its 5000ms deadline expire -> aborts signal and resets glow to null.
+  timers.delete(intervalEntry[0]);
+  intervalEntry[1].fn();
+  assert.equal(reads.length, 2);
+  const deadlineEntry = [...timers.entries()].find(([, item]) => item.ms === 5000);
+  assert.ok(deadlineEntry, "read deadline timer is armed while read is in flight");
+  timers.delete(deadlineEntry[0]);
+  deadlineEntry[1].fn();
+  await flush();
+  assert.equal(reads[1].signal.aborted, true, "timed-out read signal is aborted");
+  assert.deepEqual(applied, ["working", null]);
+
+  // Trigger third read -> resolves "attention", then trigger fourth in-flight read and call stop().
+  const retryEntry = [...timers.entries()].find(([, item]) => item.ms === 1500)!;
+  timers.delete(retryEntry[0]);
+  retryEntry[1].fn();
+  reads[2].resolve({ attention: "required", working: "busy" });
+  await flush();
+  assert.deepEqual(applied, ["working", null, "attention"]);
+
+  const fourthEntry = [...timers.entries()].find(([, item]) => item.ms === 1500)!;
+  timers.delete(fourthEntry[0]);
+  fourthEntry[1].fn();
+  assert.equal(reads.length, 4);
+  poller.stop();
+  assert.equal(poller.active, false);
+  assert.equal(reads[3].signal.aborted, true, "stop() aborts in-flight read");
+  assert.equal(timers.size, 0, "stop() clears all interval and deadline timers");
+  assert.deepEqual(applied, ["working", null, "attention", null]);
+
+  // Late resolution from the stopped epoch cannot re-light glow or re-arm timers.
+  reads[3].resolve({ attention: "required", working: "busy" });
+  await flush();
+  assert.equal(timers.size, 0);
+  assert.deepEqual(applied, ["working", null, "attention", null]);
+});
+
+test("LlmActivity deduplicates consecutive identical state pushes while replying to observe requests", () => {
+  const transport = fakeTransport();
+  let agentList: readonly { status: "running" | "idle" }[] | undefined;
+  const activity = new LlmActivity(identity, transport, () => agentList as never);
+  assert.equal(transport.sent.length, 1);
+  assert.equal((transport.sent[0] as { status: string; kind: string }).status, "unknown");
+  activity.publish();
+  assert.equal(transport.sent.length, 1, "unchanged unknown state is not resent");
+
+  transport.emit({
+    type: LLM_ACTIVITY_CHANNEL,
+    ...identity,
+    kind: "request",
+    requestId: "obs-1",
+    operation: "observe",
+    reservationId: "res-1",
+  });
+  assert.equal(transport.sent.length, 2, "explicit observe request still receives a reply");
+  assert.equal((transport.sent[1] as { kind: string }).kind, "reply");
+
+  agentList = [{ status: "running" }];
+  activity.publish();
+  activity.publish();
+  assert.equal(transport.sent.length, 3, "unchanged busy state is not resent");
+  assert.equal((transport.sent[2] as { status: string }).status, "busy");
+
+  activity.close();
+  assert.equal(transport.sent.length, 4, "closing transitions busy back to unknown once");
+  assert.equal((transport.sent[3] as { status: string }).status, "unknown");
 });

@@ -70,7 +70,7 @@ ${HOST_LIGHT} .dsh-host-dock {
   --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16, 17, 26, 0.20);
   --dsh-ui-glow: none;
   --dsh-ui-ok: #2f8f52;
-  --dsh-ui-warn: #c48b13;
+  --dsh-ui-warn: #b87d0e;
 }
 @media (prefers-color-scheme: light) {
   ${HOST_SYSTEM} ${HOST_NOT_DARK} .dsh-spaces,
@@ -80,7 +80,7 @@ ${HOST_LIGHT} .dsh-host-dock {
     --dsh-ui-shadow-lg: 0 12px 32px -12px rgba(16, 17, 26, 0.20);
     --dsh-ui-glow: none;
     --dsh-ui-ok: #2f8f52;
-    --dsh-ui-warn: #c48b13;
+    --dsh-ui-warn: #b87d0e;
   }
 }
 `;

@@ -35,6 +35,7 @@ export class LlmActivity {
   private reservation: string | undefined;
   private closed = false;
   private reportingFailed = false;
+  private lastState: LlmActivityStatus | undefined;
   private readonly tracked = new Map<ActivityAgent, AgentActivity>();
   private claims: IdleClaim[] = [];
 
@@ -188,12 +189,15 @@ export class LlmActivity {
   private report(detail: Pick<LlmActivityReport, "kind" | "requestId" | "reserved" | "released">): void {
     if (detail.kind === "state" && this.reportingFailed) return;
     if (!this.transport.connected || !this.transport.send) return;
+    const status = this.status();
+    if (detail.kind === "state" && status === this.lastState) return;
+    this.lastState = status;
     const message: LlmActivityReport = {
       type: LLM_ACTIVITY_CHANNEL,
       ...this.identity,
       ...detail,
       revision: ++this.revision,
-      status: this.status(),
+      status,
     };
     try {
       this.transport.send(message, (error) => { if (error) this.reportingFailed = true; });

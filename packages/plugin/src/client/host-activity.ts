@@ -1,5 +1,6 @@
 import {
   composeSpaceGlow,
+  isHostActivityRecord,
   type SpaceAttention,
   type SpaceGlow,
   type SpaceWorking,
@@ -28,13 +29,7 @@ export const HOST_ACTIVITY_READ_TIMEOUT_MS = 5000;
 
 /** Strict parser: a closed shape with closed values, or `null`. */
 export function parseHostActivity(value: unknown): HostActivityReport | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const keys = Object.keys(row);
-  if (keys.length !== 2 || !keys.includes("attention") || !keys.includes("working")) return null;
-  if (row.attention !== "required" && row.attention !== "none" && row.attention !== "unknown") return null;
-  if (row.working !== "busy" && row.working !== "idle" && row.working !== "unknown") return null;
-  return { attention: row.attention, working: row.working };
+  return isHostActivityRecord(value) ? { attention: value.attention, working: value.working } : null;
 }
 
 /** Compose the single light. Yellow first; green only for a known-quiet attention. */

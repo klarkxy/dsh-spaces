@@ -35,6 +35,22 @@ function record(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
+/** One question projection is well-formed only when it carries its active list. */
+export function userQuestionsActive(value: unknown): readonly unknown[] | undefined {
+  const row = record(value);
+  return row && Array.isArray(row.active) ? row.active : undefined;
+}
+
+/** Closed `{ attention, working }` wire record validator shared by host and client parsers. */
+export function isHostActivityRecord(value: unknown): value is { attention: SpaceAttention; working: SpaceWorking } {
+  const row = record(value);
+  if (!row) return false;
+  const keys = Object.keys(row);
+  if (keys.length !== 2 || !keys.includes("attention") || !keys.includes("working")) return false;
+  return (row.attention === "required" || row.attention === "none" || row.attention === "unknown") &&
+    (row.working === "busy" || row.working === "idle" || row.working === "unknown");
+}
+
 function integer(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }

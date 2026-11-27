@@ -901,3 +901,78 @@ test("creation rail entries and failure dialog render labels, steps and actions"
   assert.match(dialog, /移除/);
   assert.doesNotMatch(dialog, /class="dsh-host-action danger"/);
 });
+
+test("HostShellController stops activityPoller, clears poll timers, and resets hostGlow on terminal fail", async () => {
+  const f = fixture();
+  let clock = 0;
+  const timers = new Map<number, () => void>();
+  const pendingReads: { signal: AbortSignal | undefined; resolve: (value: { attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }) => void }[] = [];
+  f.guide.hostActivity = (signal) => {
+    f.calls.push("hostActivity");
+    return new Promise((resolve) => { pendingReads.push({ signal, resolve }); });
+  };
+  const controller = new HostShellController(f.guide, {
+    origin: () => parentOrigin,
+    channel: () => channel,
+    setTimeout: (fn) => { timers.set(++clock, fn); return clock as never; },
+    clearTimeout: (id) => { timers.delete(id as never); },
+  });
+
+  controller.start();
+  await tick();
+  controller.registerFrame(f.frame);
+  controller.handleMessage(f.event({ type: "state", snapshot: inventory }));
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(pendingReads.length, 1);
+
+  // First hostActivity sample resolves working -> sets hostGlow to "working" and schedules next poll timer.
+  pendingReads[0].resolve({ attention: "none", working: "busy" });
+  await tick();
+  assert.equal(controller.getSnapshot().hostGlow, "working");
+  assert.equal(timers.size, 1, "next hostActivity poll timer is scheduled");
+
+  // Fire the scheduled poll timer so a second hostActivity read (with its deadline timer) is in flight.
+  const [pollTimerId, pollTimerFn] = [...timers.entries()][0];
+  timers.delete(pollTimerId);
+  pollTimerFn();
+  assert.equal(pendingReads.length, 2);
+  assert.equal(timers.size, 1, "read deadline timer is active during in-flight hostActivity");
+
+  // Entering terminal failed state aborts the in-flight read, clears all poller timers, and resets hostGlow to null.
+  controller.handleMessage(f.event({ type: "failed", failure: { reason: "manager-disconnected" } }));
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.equal(controller.getSnapshot().hostGlow, null);
+  assert.equal(pendingReads[1].signal?.aborted, true, "in-flight hostActivity signal is aborted on fail");
+  assert.equal(timers.size, 0, "no activityPoller or controller timers remain after fail");
+
+  // Late resolution cannot restore hostGlow or schedule another poll in failed state.
+  pendingReads[1].resolve({ attention: "required", working: "busy" });
+  await tick();
+  assert.equal(controller.getSnapshot().hostGlow, null);
+  assert.equal(timers.size, 0);
+  assert.equal(pendingReads.length, 2);
+  controller.stop();
+
+  // Startup failure after hostActivity already settled also resets hostGlow and stops polling.
+  const g = fixture();
+  let gClock = 0;
+  const gTimers = new Map<number, () => void>();
+  const portalGate = Promise.withResolvers<Awaited<ReturnType<typeof g.guide.portalTarget>>>();
+  g.guide.hostActivity = async () => ({ attention: "required", working: "idle" });
+  g.guide.portalTarget = () => portalGate.promise;
+  const gController = new HostShellController(g.guide, {
+    origin: () => parentOrigin,
+    channel: () => channel,
+    setTimeout: (fn) => { gTimers.set(++gClock, fn); return gClock as never; },
+    clearTimeout: (id) => { gTimers.delete(id as never); },
+  });
+  gController.start();
+  await tick();
+  assert.equal(gController.getSnapshot().hostGlow, "attention");
+  portalGate.resolve({ available: false, unavailable: true, origin: null, path: null, reasons: ["blocked"] });
+  await tick();
+  assert.equal(gController.getSnapshot().phase, "failed");
+  assert.equal(gController.getSnapshot().hostGlow, null);
+  assert.equal(gTimers.size, 0);
+  gController.stop();
+});

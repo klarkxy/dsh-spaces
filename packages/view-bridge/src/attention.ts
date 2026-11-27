@@ -3,6 +3,7 @@ import {
   SPACE_ATTENTION_CHANNEL,
   SPACE_ATTENTION_POLL_MS,
   attentionIdentityFromEnv,
+  userQuestionsActive,
   type SpaceAttention,
   type SpaceAttentionIdentity,
   type SpaceAttentionReport,
@@ -25,8 +26,9 @@ export type SpaceAttentionSources = {
  *
  * Attention is `required` only while a tool approval or an ask_user_question
  * card is pending in any Session of this space — never for errors or idle
- * turns. A missing service or a thrown read reports `unknown`; it is never
- * guessed as `none`.
+ * turns. A missing service, an unavailable `userQuestions` projection or a
+ * thrown read marks the observation degraded (`unknown` unless another channel
+ * or session already confirmed `required`); it is never guessed as `none`.
  */
 export class SpaceAttentionProbe {
   private revision = 0;
@@ -51,31 +53,81 @@ export class SpaceAttentionProbe {
     transport.on("disconnect", this.close);
   }
 
-  /** One detection sample. Throws are a degraded read, never a crash. */
+  /**
+   * One order-independent detection sample.
+   *
+   * Gateway pending approvals/questions and per-session `userQuestions`
+   * projections are scanned independently so a single failing channel or
+   * session never masks `required` confirmed elsewhere, while any missing or
+   * malformed projection degrades `none` to `unknown`.
+   */
   compute(): SpaceAttention {
+    let sources: SpaceAttentionSources;
     try {
-      const { typertGateway, sessions, sessionProjections } = this.sources();
-      if (!typertGateway || typeof typertGateway.getPendingRemoteEvents !== "function" ||
-        !sessions || typeof sessions.list !== "function" ||
-        !sessionProjections || typeof sessionProjections.snapshot !== "function") {
-        this.degraded("space attention is unknown; a required host service is missing");
-        return "unknown";
-      }
-      for (const pending of typertGateway.getPendingRemoteEvents()) {
-        if (pending?.event === "approval/request" || pending?.event === "user-questions/request") return "required";
-      }
-      for (const session of sessions.list()) {
-        const snapshot = sessionProjections.snapshot(session, ["userQuestions"]);
-        const questions = snapshot?.values?.userQuestions;
-        if (questions && typeof questions === "object" &&
-          Array.isArray((questions as { active?: unknown }).active) &&
-          (questions as { active: unknown[] }).active.length > 0) return "required";
-      }
-      return "none";
+      sources = this.sources();
     } catch (error) {
       this.degraded("space attention read failed", error);
       return "unknown";
     }
+    const { typertGateway, sessions, sessionProjections } = sources;
+    let confirmed = false;
+    let degraded = false;
+
+    if (!typertGateway || typeof typertGateway.getPendingRemoteEvents !== "function") {
+      this.degraded("space attention is unknown; a required host service is missing");
+      degraded = true;
+    } else {
+      try {
+        for (const pending of typertGateway.getPendingRemoteEvents()) {
+          if (pending?.event === "approval/request" || pending?.event === "user-questions/request") confirmed = true;
+        }
+      } catch (error) {
+        this.degraded("space attention gateway read failed", error);
+        degraded = true;
+      }
+    }
+
+    if (!sessions || typeof sessions.list !== "function" ||
+      !sessionProjections || typeof sessionProjections.snapshot !== "function") {
+      this.degraded("space attention is unknown; a required host service is missing");
+      degraded = true;
+    } else {
+      let list: readonly unknown[] | undefined;
+      try {
+        const raw = sessions.list();
+        if (Array.isArray(raw)) list = raw;
+        else {
+          this.degraded("space attention is unknown; sessions.list() did not return an array");
+          degraded = true;
+        }
+      } catch (error) {
+        this.degraded("space attention session listing failed", error);
+        degraded = true;
+      }
+      if (list) {
+        for (const session of list) {
+          let snapshot: { values?: Record<string, unknown> } | undefined;
+          try {
+            snapshot = sessionProjections.snapshot(session, ["userQuestions"]);
+          } catch (error) {
+            this.degraded("space attention read failed", error);
+            degraded = true;
+            continue;
+          }
+          const active = userQuestionsActive(snapshot?.values?.userQuestions);
+          if (active === undefined) {
+            this.degraded("space attention is unknown; userQuestions projection is unavailable");
+            degraded = true;
+            continue;
+          }
+          if (active.length > 0) confirmed = true;
+        }
+      }
+    }
+
+    if (confirmed) return "required";
+    if (degraded) return "unknown";
+    return "none";
   }
 
   private degraded = once((message: string, cause?: unknown) => this.log?.(message, cause));

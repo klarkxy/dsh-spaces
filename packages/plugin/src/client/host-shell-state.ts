@@ -89,9 +89,9 @@ export class HostShellController {
       : cause instanceof Error ? cause.message : typeof cause === "string" ? cause
       : cause && typeof cause === "object" && "message" in cause && typeof cause.message === "string" ? cause.message : "";
     const detail = publicGuideDetail(text) || null;
-    this.clearTimers(); this.frame = null;
+    this.clearTimers(); this.frame = null; this.activityPoller?.stop();
     this.patch({ phase: "failed", error, portal: null, inventory: null, pending: null,
-      visible: this.ui.visible === "current" ? "current" : "guide", selected: null, detail });
+      visible: this.ui.visible === "current" ? "current" : "guide", selected: null, detail, hostGlow: null });
     this.reportFailure(detail, cause, this.ui.portalFailure);
     // A reported cause is authoritative; a generic directory error must not replace it.
     if (detail) return;

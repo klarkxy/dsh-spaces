@@ -34,8 +34,8 @@ export const ATTENTION_RING_CSS = `
 :is(.dsh-host-rail-btn, .dsh-wb-rail-btn):is([data-glow="attention"], [data-attention="required"])::after {
   border: 2px solid var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441));
   box-shadow:
-    0 0 12px -2px color-mix(in srgb, var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441)) 55%, transparent),
-    inset 0 0 10px -2px color-mix(in srgb, var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441)) 55%, transparent);
+    0 0 12px -2px color-mix(in srgb, var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441)) 62%, transparent),
+    inset 0 0 10px -2px color-mix(in srgb, var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441)) 62%, transparent);
   animation: dsh-ui-attention-breathe 2s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
