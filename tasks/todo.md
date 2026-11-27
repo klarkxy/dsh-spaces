@@ -2,6 +2,17 @@
 
 > 只列当前仍需跟踪的事项。完整日期日志和已关闭条目在 [tasks/archive](archive/README.md)，不要在这里追加长日志。
 
+## 2026-11-27 故障范围收窄：portal 可见时 deadline 与子空间独立渲染进程
+
+背景：2026-11-27 18:38 Desktop 门户 `state-request` / `portal/request-deadline`（HTTP 200 但响应体未读完），发生在 Windows 息屏（Kernel-Power 566）后约 12 秒；Supervisor 与各空间进程均存活。
+
+- [x] Desktop Supervisor portal 的 `state`/`view` 10 秒请求期限只累计页面可见时间，隐藏 tick 不发起新的状态轮询；耗尽剩余可见预算仍按原路径终态失败，不重试。
+- [x] 前端失败报告补充有界 `visibility`（当前状态与最近变化时间），`host.client-failed` 日志上下文记录 `visibilityState`/`visibilityChangedAt`；缺失证据时记录 `null`。
+- [ ] 真实 Desktop 待验：息屏/Modern Standby 时 Electron webview 是否真的报告 hidden；下一次同类失败看 `visibilityState`/`visibilityChangedAt`。
+- [x] 在本机 Electron 44.7.0 实验中观察到同站异端口 iframe 带 `Origin-Agent-Cluster: ?1` 会进入独立渲染进程并脱离 P0 主线程；首个带头的 P3 文档导航到无头路径后仍保持独立进程。默认 sandbox 在此环境退出，实验使用 `--no-sandbox`；原始数据留在 `.sandbox/exp-oac/`。
+- [ ] 普通子空间视图首个文档改为 view-bridge 入口路由 `/__dsh-spaces/view-entry`（带 `Origin-Agent-Cluster: ?1`，再 `location.replace("/")`），使子空间页面崩溃或长任务不再拖垮 portal/manager；管理空间保持 `/`。子空间 OOPIF 崩溃目前只在该空间位置显示崩溃页，框架不感知也不留证，另需设计。真实 Desktop 待验。
+- [x] 结论：原生外层 90 秒 `selection-timeout` 保持框架级失败，不收窄到目标空间。portal 内层 35 秒选择期限已按空间返回 `selection-rejected`；外层只在 guest/portal 自身无应答时触发，归属到目标空间属于猜测。
+
 ## 2026-11-24 Desktop 桥接诊断、热重载生命周期与仅前端重载
 
 - [x] 修复 Desktop `shell.overlay` 在 `patchReload: "live"` 重挂载后复用已释放前端控制器或回退到旧引用的问题（`disposedBeforeTerminal` + `onControllerChange`）；保留终态失败/停机状态。

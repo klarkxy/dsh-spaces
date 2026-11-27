@@ -2,6 +2,8 @@
 export const PORTAL_SOURCE = "dsh-spaces-portal";
 export const PORTAL_PARENT_SOURCE = "dsh-spaces-portal-parent";
 export const CONTAINED_MANAGEMENT_PARAM = "dsh-spaces-contained";
+/** First child-origin document that requests an origin-keyed agent cluster, then replaces itself with `/`. */
+export const VIEW_ENTRY_PATH = "/__dsh-spaces/view-entry";
 export const PORTAL_CHANNEL_RE = /^[a-f0-9]{32}$/;
 export const PORTAL_SPACE_RE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 export type NativeSpaceTarget = "@settings" | string;

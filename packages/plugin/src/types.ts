@@ -126,6 +126,7 @@ export interface ClientFailureReport {
   connectionState?: "connected" | "disconnected" | "connecting";
   portalFailure?: PortalFailure | null;
   navTrail?: NavDiagRecord[];
+  visibility?: { state: "visible" | "hidden"; changedAt: string | null };
 }
 
 const CLIENT_FAILURE_REPORT_KEYS = new Set([
@@ -138,6 +139,7 @@ const CLIENT_FAILURE_REPORT_KEYS = new Set([
   "connectionState",
   "portalFailure",
   "navTrail",
+  "visibility",
 ]);
 
 export function validClientFailureReport(value: unknown): value is ClientFailureReport {
@@ -178,6 +180,22 @@ export function validClientFailureReport(value: unknown): value is ClientFailure
   }
   if (row.portalFailure !== undefined && row.portalFailure !== null && parsePortalFailure(row.portalFailure) === null) {
     return false;
+  }
+  if (row.visibility !== undefined) {
+    if (!row.visibility || typeof row.visibility !== "object" || Array.isArray(row.visibility)) return false;
+    const visibility = row.visibility as Record<string, unknown>;
+    if (Object.keys(visibility).sort().join(",") !== "changedAt,state") return false;
+    if (visibility.state !== "visible" && visibility.state !== "hidden") return false;
+    if (
+      visibility.changedAt !== null &&
+      (
+        typeof visibility.changedAt !== "string" ||
+        visibility.changedAt.length > 64 ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(visibility.changedAt)
+      )
+    ) {
+      return false;
+    }
   }
   if (row.navTrail !== undefined) {
     if (!Array.isArray(row.navTrail) || row.navTrail.length > 64) return false;

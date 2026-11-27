@@ -1358,6 +1358,7 @@ test("NativeHostController reports RPC transport failure context and guest navDi
   assert.equal(reports[0]!.rpcEndpoint, "workbenchGuide/presentationSnapshot");
   assert.equal(reports[0]!.rpcFailureKind, "rpc-transport");
   assert.equal(reports[0]!.connectionState, "disconnected");
+  assert.deepEqual(reports[0]!.visibility, { state: "visible", changedAt: null });
 
   failDirectory = false;
   let guest!: EventTarget & {
@@ -1386,10 +1387,21 @@ test("NativeHostController reports RPC transport failure context and guest navDi
     }
   }
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: { createElement: () => (guest = new Guest()) },
-  });
+  const documentListeners = new Map<string, Set<(event?: unknown) => void>>();
+  const fakeDocument = {
+    visibilityState: "visible" as "visible" | "hidden",
+    createElement: () => (guest = new Guest()),
+    addEventListener: (name: string, fn: (event?: unknown) => void) => {
+      const rows = documentListeners.get(name) ?? new Set<(event?: unknown) => void>();
+      rows.add(fn); documentListeners.set(name, rows);
+    },
+    removeEventListener: (name: string, fn: (event?: unknown) => void) => { documentListeners.get(name)?.delete(fn); },
+  };
+  const setDocumentVisibility = (state: "visible" | "hidden") => {
+    fakeDocument.visibilityState = state;
+    for (const fn of [...(documentListeners.get("visibilitychange") ?? [])]) fn();
+  };
+  Object.defineProperty(globalThis, "document", { configurable: true, value: fakeDocument });
   t.after(() => previousDocument ? Object.defineProperty(globalThis, "document", previousDocument) : Reflect.deleteProperty(globalThis, "document"));
   const portalReports: ClientFailureReport[] = [];
   const portalController = new NativeHostController({
@@ -1399,6 +1411,7 @@ test("NativeHostController reports RPC transport failure context and guest navDi
     returnTarget: async () => ({ available: true, unavailable: false, origin: "http://127.0.0.1:3333", path: "/bootstrap/" + "b".repeat(32), reasons: [] }),
     reportClientFailure: async (report: ClientFailureReport) => { portalReports.push(report); return { recorded: true }; },
   } as never, { acquire: async () => ({ lease: "lease-1", partition: "isolated" }), release: async () => {} });
+  setDocumentVisibility("hidden");
   await portalController.start({ append() {} } as unknown as HTMLElement);
   portalController.select("@settings");
   await tick();
@@ -1415,6 +1428,9 @@ test("NativeHostController reports RPC transport failure context and guest navDi
   assert.equal(portalReports.length, 1);
   assert.equal(portalReports[0]!.stage, "portal");
   assert.deepEqual(portalReports[0]!.portalFailure, { reason: "manager-disconnected" });
+  assert.equal(portalReports[0]!.visibility?.state, "hidden");
+  assert.match(portalReports[0]!.visibility?.changedAt ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/);
+  assert.equal(documentListeners.get("visibilitychange")?.size ?? 0, 0);
   const trail = portalReports[0]!.navTrail ?? [];
   assert.ok(trail.some(row => row.src === "controller" && row.ev === "user-select"));
   assert.ok(trail.some(row => row.src === "portal" && row.ev === "fail" && row.reason === "manager-disconnected"));
