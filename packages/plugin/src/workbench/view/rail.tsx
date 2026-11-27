@@ -11,6 +11,7 @@ import React, { type CSSProperties, type ReactElement, type ReactNode } from "re
 import type { WorkbenchSpace } from "../../../../../src/shared/workbench";
 import { LayoutIndicator } from "../../../../../src/shared/ui/motion";
 import { spaceCreateStep, type PortalCreation } from "../../../../../src/shared/space-host";
+import { composeSpaceGlow, type SpaceGlow } from "../../../../../src/shared/space-attention";
 import { CreationRing } from "../../../../../src/shared/ui/creation-ring";
 import { SpaceGlyph } from "../space-glyph";
 import { t, type WorkbenchLocale } from "../i18n";
@@ -50,14 +51,18 @@ export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
         />
       </RailSlot>
       <div className="dsh-wb-rail-list" role="list">
-        {spaces.map((space, index) => (
+        {spaces.map((space, index) => {
+          const glow = composeSpaceGlow(space.attention, space.working);
+          const glowSuffix = glow === "attention" ? ` · ${t(locale, "app.attention")}` : glow === "working" ? ` · ${t(locale, "app.working")}` : "";
+          return (
           <RailSlot key={space.id} active={ui.selected === space.id} delay={`${60 + index * 45}ms`}>
             <RailButton
-              label={`${space.displayName} · ${t(locale, statusKey(space.status))}${space.attention === "required" ? ` · ${t(locale, "app.attention")}` : ""}`}
+              label={`${space.displayName} · ${t(locale, statusKey(space.status))}${glowSuffix}`}
               current={ui.selected === space.id}
               pending={ui.pendingId === space.id}
               status={space.status}
               attention={space.attention}
+              glow={glow}
               icon={space.icon}
               spaceId={space.id}
               onClick={() => controller.selectSpace(space.id)}
@@ -68,7 +73,8 @@ export function Rail({ ui, controller }: WorkbenchViewProps): ReactElement {
               canMoveDown={index < spaces.length - 1}
             />
           </RailSlot>
-        ))}
+          );
+        })}
         {creations.map((creation) => (
           <RailSlot key={creation.jobId} active={false} delay={`${60 + spaces.length * 45}ms`}>
             <RailButton
@@ -119,6 +125,7 @@ function RailButton({
   pending,
   status,
   attention,
+  glow,
   icon,
   spaceId,
   onClick,
@@ -138,6 +145,7 @@ function RailButton({
   pending?: boolean;
   status?: WorkbenchSpace["status"];
   attention?: WorkbenchSpace["attention"];
+  glow?: SpaceGlow;
   icon?: string;
   spaceId?: string;
   onClick: () => void;
@@ -163,6 +171,7 @@ function RailButton({
       data-pending={pending ? "true" : undefined}
       data-space-id={spaceId}
       data-attention={attention === "required" ? "required" : undefined}
+      data-glow={glow ?? undefined}
       disabled={disabled}
       onClick={onClick}
       onContextMenu={(event) => {

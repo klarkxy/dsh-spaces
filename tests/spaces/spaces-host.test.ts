@@ -440,6 +440,7 @@ test("Typert descriptors are strict spaces remotes and Host injects loader", () 
       "workbenchGuide/restartService",
       "workbenchGuide/beginDesktopLaunch",
       "workbenchGuide/desktopLaunchState",
+      "workbenchGuide/hostActivity",
       "workbenchGuide/reportClientFailure",
       "spaces/overview",
       "spaces/detail",

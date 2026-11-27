@@ -75,6 +75,13 @@ export class SupervisorLlm {
       session.identity.serviceEpoch === this.host.currentServiceEpoch() ? session : undefined;
   }
 
+  /** Latest reported task activity for one live child space: unknown when no fresh report exists. */
+  workingOf(spaceId: string): LlmActivityStatus {
+    const session = this.currentActivity(spaceId);
+    if (!session || session.cleanupFailure) return "unknown";
+    return session.status;
+  }
+
   async observeTaskActivity(spaceId: string): Promise<LlmActivityStatus> {
     if (["stopped", "crashed"].includes(this.host.publicStatus(spaceId))) return "idle";
     const session = this.currentActivity(spaceId);

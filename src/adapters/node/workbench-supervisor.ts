@@ -271,6 +271,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       processes: () => this.processes,
       managerId: () => this.managerId,
       attentionOf: (id) => this.spaceAttention.attentionOf(id),
+      workingOf: (id) => this.llmOps.workingOf(id),
     });
     this.spaceLifecycle = new SupervisorSpaceLifecycle({
       diagnosticLog: this.diagnosticLog,

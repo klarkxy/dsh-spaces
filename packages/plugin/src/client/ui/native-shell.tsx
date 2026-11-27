@@ -14,6 +14,7 @@ import { nativeStartupLabel, nativeStatusText, nativeTexts } from "./native-text
 import { inferSpacesLocale } from "../i18n";
 import { NativeDialog } from "./native-dialog";
 import { CreationRailEntry, CreationFailureDialog } from "./creation-rail";
+import { composeSpaceGlow } from "../../../../../src/shared/space-attention";
 
 /**
  * The desktop (Electron) host shell.
@@ -104,11 +105,12 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
     <HostRail label={texts.rail} layoutId={RAIL_LAYOUT_ID}>
       <HostRailButton
         layoutId={RAIL_LAYOUT_ID}
-        label={texts.desktopMain}
-        title={texts.desktopMainPinned}
+        label={ui.hostGlow === "attention" ? `${texts.desktopMain} · ${texts.attention}` : ui.hostGlow === "working" ? `${texts.desktopMain} · ${texts.working}` : texts.desktopMain}
+        title={ui.hostGlow === "attention" ? `${texts.desktopMainPinned} · ${texts.attention}` : ui.hostGlow === "working" ? `${texts.desktopMainPinned} · ${texts.working}` : texts.desktopMainPinned}
         current={ui.selected === "current"}
         currentValue="page"
         pinned
+        glow={ui.hostGlow}
         spaceId="desktop"
         onSelect={controller.showCurrent}
       >
@@ -118,11 +120,14 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
       <HostRailList>
         {(() => { const creations = controller.visibleCreations(); const creatingIds = new Set(creations.map(c => c.spaceId));
           return <>
-        {ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== "desktop" && !creatingIds.has(s.id)).map(s => (
+        {ui.inventory?.spaces.filter(s => s.id !== ui.inventory?.managerId && s.id !== "desktop" && !creatingIds.has(s.id)).map(s => {
+          const glow = composeSpaceGlow(s.attention, s.working);
+          const glowSuffix = glow === "attention" ? ` · ${texts.attention}` : glow === "working" ? ` · ${texts.working}` : "";
+          return (
           <HostRailButton
             key={s.id}
             layoutId={RAIL_LAYOUT_ID}
-            label={`${s.displayName} · ${nativeStatusText(controller.spaceStatus(s.id), texts)}${ui.operation?.spaceId === s.id ? ` · ${texts.operating}` : ""}${s.attention === "required" ? ` · ${texts.attention}` : ""}`}
+            label={`${s.displayName} · ${nativeStatusText(controller.spaceStatus(s.id), texts)}${ui.operation?.spaceId === s.id ? ` · ${texts.operating}` : ""}${glowSuffix}`}
             current={ui.selected === s.id}
             currentValue="page"
             transitional={ui.pending === s.id}
@@ -130,6 +135,7 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
             disabled={!!ui.operation && ui.operation.spaceId !== s.id}
             status={controller.spaceStatus(s.id)}
             attention={s.attention}
+            glow={glow}
             spaceId={s.id}
             onSelect={() => controller.select(s.id)}
             onContextMenu={event => { if (railLocked) return; event.preventDefault(); setMenu({ spaceId: s.id, x: event.clientX, y: event.clientY }); }}
@@ -142,7 +148,8 @@ function NativeHostShellView({ controller, onRestarted }: { controller: NativeHo
             <SpaceGlyph spaceId={s.id} icon={s.icon} />
             <span className="dsh-native-space-status" data-status={controller.spaceStatus(s.id)} aria-hidden="true" />
           </HostRailButton>
-        ))}
+          );
+        })}
         {creations.map(creation => (
           <CreationRailEntry key={creation.jobId} creation={creation} layoutId={RAIL_LAYOUT_ID} onSelect={() => controller.openCreation(creation)} />
         ))}

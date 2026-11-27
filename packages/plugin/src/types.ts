@@ -80,6 +80,8 @@ export interface WorkbenchGuideApi {
   previewServiceRestart?(): Promise<WorkbenchServiceRestartPreview>;
   restartService?(confirmationId: string): Promise<WorkbenchBootstrapResult>;
   presentationSnapshot?(): Promise<import("../../../src/shared/space-host").PortalSnapshot>;
+  /** Read-only raw activity of the native space this client runs in; the client composes the light. The signal bounds one read. */
+  hostActivity?(signal?: AbortSignal): Promise<{ attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }>;
   /** Explicit audience-bound presentation entry; no management operations. */
   portalTarget(audience: import("../../../src/shared/space-host").SpaceHostAudience): Promise<WorkbenchReturnTarget>;
   role(): Promise<WorkbenchGuideRole>;

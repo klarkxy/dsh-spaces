@@ -69,18 +69,21 @@ test("portal inventory accepts the closed attention field and rejects other valu
   const withAttention = {
     ...inventory,
     spaces: [
-      { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running", attention: "none" },
-      { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required" },
-      { id: "beta", displayName: "Beta", generation: 2, status: "stopped", attention: "unknown" },
+      { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running", attention: "none", working: "idle" },
+      { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required", working: "busy" },
+      { id: "beta", displayName: "Beta", generation: 2, status: "stopped", attention: "unknown", working: "unknown" },
     ],
   };
   assert.deepEqual(parsePortalSnapshot(withAttention), withAttention);
   for (const bad of ["busy", "error", "idle", "yes", "REQUIRED", 1, null, true]) {
     assert.equal(parsePortalSnapshot({ ...withAttention, spaces: [{ ...withAttention.spaces[0], attention: bad }] }), null, JSON.stringify(bad));
   }
+  for (const bad of ["required", "none", "running", 1, null, true]) {
+    assert.equal(parsePortalSnapshot({ ...withAttention, spaces: [{ ...withAttention.spaces[0], working: bad }] }), null, JSON.stringify(bad));
+  }
 });
 
-test("the portable rail halo marks a space needing attention", async () => {
+test("the portable rail marks each space button green when working and yellow when needing attention without full-screen glow", async () => {
   const { PortableHostShell } = await import("../../packages/plugin/src/client/host-shell.tsx");
   const React = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -89,18 +92,27 @@ test("the portable rail halo marks a space needing attention", async () => {
     ui: { phase: "ready", role: { role: "workspace", profileId: "entry", managerId: "spaces-hub", unavailable: false, reasons: [] },
       inventory: { serviceEpoch: epoch, managerId: "spaces-hub", spaces: [
         { id: "spaces-hub", displayName: "Manager", generation: 1, status: "running" },
-        { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required" },
-        { id: "beta", displayName: "Beta", generation: 2, status: "running", attention: "none" },
+        { id: "alpha", displayName: "Alpha", generation: 1, status: "running", attention: "required", working: "busy" },
+        { id: "beta", displayName: "Beta", generation: 2, status: "running", attention: "none", working: "busy" },
+        { id: "gamma", displayName: "Gamma", generation: 3, status: "running", attention: "none", working: "idle" },
       ] },
       portal: { src: "http://127.0.0.1:3091/portal-bootstrap/x", origin: "http://127.0.0.1:3091", channel }, visible: "portal",
-      selected: null, pending: null, detail: null, portalFailure: null, error: null, creationFailed: null },
+      selected: null, pending: null, detail: null, portalFailure: null, error: null, creationFailed: null, hostGlow: "working" },
   });
   const html = renderToStaticMarkup(React.createElement(PortableHostShell, { controller: f.controller }));
+  assert.ok(!html.includes("dsh-host-glow"), "no full-screen host glow element is rendered");
   assert.ok(html.includes('data-attention="required"'), "the portable rail shows the attention halo");
+  const pinnedButton = html.match(/<button[^>]*data-pinned="true"[^>]*>/)?.[0] ?? "";
+  assert.ok(pinnedButton.includes('data-glow="working"'), "the pinned main space button shows working green glow");
   const alphaButton = html.match(/<button[^>]*data-space-id="alpha"[^>]*>/)?.[0] ?? "";
+  assert.ok(alphaButton.includes('data-glow="attention"'), "attention yellow overrides working green on alpha");
   assert.match(alphaButton, /Alpha · (等待处理|Needs attention)/, "the attention label suffix is announced");
   const betaButton = html.match(/<button[^>]*data-space-id="beta"[^>]*>/)?.[0] ?? "";
-  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no halo");
+  assert.ok(betaButton.includes('data-glow="working"'), "a running space without pending attention shows green glow");
+  assert.ok(!betaButton.includes('data-attention="required"'), "a 'none' space has no attention halo");
+  assert.match(betaButton, /Beta · (正在工作|Working)/, "the working label suffix is announced");
+  const gammaButton = html.match(/<button[^>]*data-space-id="gamma"[^>]*>/)?.[0] ?? "";
+  assert.ok(!gammaButton.includes("data-glow="), "an idle space has no glow");
 });
 
 test("portal grants are one-use, audience-bound, bounded and not durable", () => {
@@ -888,4 +900,79 @@ test("creation rail entries and failure dialog render labels, steps and actions"
   assert.match(dialog, /查看任务/);
   assert.match(dialog, /移除/);
   assert.doesNotMatch(dialog, /class="dsh-host-action danger"/);
+});
+
+test("HostShellController stops activityPoller, clears poll timers, and resets hostGlow on terminal fail", async () => {
+  const f = fixture();
+  let clock = 0;
+  const timers = new Map<number, () => void>();
+  const pendingReads: { signal: AbortSignal | undefined; resolve: (value: { attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }) => void }[] = [];
+  f.guide.hostActivity = (signal) => {
+    f.calls.push("hostActivity");
+    return new Promise((resolve) => { pendingReads.push({ signal, resolve }); });
+  };
+  const controller = new HostShellController(f.guide, {
+    origin: () => parentOrigin,
+    channel: () => channel,
+    setTimeout: (fn) => { timers.set(++clock, fn); return clock as never; },
+    clearTimeout: (id) => { timers.delete(id as never); },
+  });
+
+  controller.start();
+  await tick();
+  controller.registerFrame(f.frame);
+  controller.handleMessage(f.event({ type: "state", snapshot: inventory }));
+  assert.equal(controller.getSnapshot().phase, "ready");
+  assert.equal(pendingReads.length, 1);
+
+  // First hostActivity sample resolves working -> sets hostGlow to "working" and schedules next poll timer.
+  pendingReads[0].resolve({ attention: "none", working: "busy" });
+  await tick();
+  assert.equal(controller.getSnapshot().hostGlow, "working");
+  assert.equal(timers.size, 1, "next hostActivity poll timer is scheduled");
+
+  // Fire the scheduled poll timer so a second hostActivity read (with its deadline timer) is in flight.
+  const [pollTimerId, pollTimerFn] = [...timers.entries()][0];
+  timers.delete(pollTimerId);
+  pollTimerFn();
+  assert.equal(pendingReads.length, 2);
+  assert.equal(timers.size, 1, "read deadline timer is active during in-flight hostActivity");
+
+  // Entering terminal failed state aborts the in-flight read, clears all poller timers, and resets hostGlow to null.
+  controller.handleMessage(f.event({ type: "failed", failure: { reason: "manager-disconnected" } }));
+  assert.equal(controller.getSnapshot().phase, "failed");
+  assert.equal(controller.getSnapshot().hostGlow, null);
+  assert.equal(pendingReads[1].signal?.aborted, true, "in-flight hostActivity signal is aborted on fail");
+  assert.equal(timers.size, 0, "no activityPoller or controller timers remain after fail");
+
+  // Late resolution cannot restore hostGlow or schedule another poll in failed state.
+  pendingReads[1].resolve({ attention: "required", working: "busy" });
+  await tick();
+  assert.equal(controller.getSnapshot().hostGlow, null);
+  assert.equal(timers.size, 0);
+  assert.equal(pendingReads.length, 2);
+  controller.stop();
+
+  // Startup failure after hostActivity already settled also resets hostGlow and stops polling.
+  const g = fixture();
+  let gClock = 0;
+  const gTimers = new Map<number, () => void>();
+  const portalGate = Promise.withResolvers<Awaited<ReturnType<typeof g.guide.portalTarget>>>();
+  g.guide.hostActivity = async () => ({ attention: "required", working: "idle" });
+  g.guide.portalTarget = () => portalGate.promise;
+  const gController = new HostShellController(g.guide, {
+    origin: () => parentOrigin,
+    channel: () => channel,
+    setTimeout: (fn) => { gTimers.set(++gClock, fn); return gClock as never; },
+    clearTimeout: (id) => { gTimers.delete(id as never); },
+  });
+  gController.start();
+  await tick();
+  assert.equal(gController.getSnapshot().hostGlow, "attention");
+  portalGate.resolve({ available: false, unavailable: true, origin: null, path: null, reasons: ["blocked"] });
+  await tick();
+  assert.equal(gController.getSnapshot().phase, "failed");
+  assert.equal(gController.getSnapshot().hostGlow, null);
+  assert.equal(gTimers.size, 0);
+  gController.stop();
 });

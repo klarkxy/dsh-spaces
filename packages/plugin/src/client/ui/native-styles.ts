@@ -90,7 +90,7 @@ html[data-windows-titlebar] [data-spaces-host-rail][data-sidebar-collapsed] > di
 .dsh-native-container { overflow: hidden; display: flex; }
 .dsh-native-container[hidden] { display: none; }
 .dsh-native-guest { display: flex; width: 100%; height: 100%; border: 0; }
-.dsh-host-rail-btn > .dsh-native-space-status { position:absolute; z-index:3; right:3px; bottom:3px; box-sizing:border-box; width:11px; height:11px; border:2px solid var(--host-rail-bg,#202127); border-radius:50%; background:#939ba8; pointer-events:none; }
+.dsh-host-rail-btn > .dsh-native-space-status { position:absolute; z-index:4; right:3px; bottom:3px; box-sizing:border-box; width:11px; height:11px; border:2px solid var(--host-rail-bg,#202127); border-radius:50%; background:#939ba8; pointer-events:none; }
 .dsh-native-space-status[data-status="running"] { background:#39bf83; }
 .dsh-native-space-status[data-status="crashed"], .dsh-native-space-status[data-status="failed"] { background:#ff7878; }
 .dsh-native-space-status[data-status="starting"], .dsh-native-space-status[data-status="stopping"], .dsh-native-space-status[data-status="opening"] { background:#edb95e; }

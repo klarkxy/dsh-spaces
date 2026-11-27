@@ -1,33 +1,53 @@
 /**
- * The shared "needs attention" halo for space rail entries.
+ * Per-space sidebar activity & attention glow for space rail buttons.
  *
- * A soft breathing ring drawn INSIDE the button bounds: every rail button
- * locks `overflow: hidden`, so an outer glow would be clipped anyway. The ring
- * reads `--dsh-spaces-attention` for its colour so each surface picks its own
- * accent without duplicating the animation.
+ * Scoped strictly to rail buttons (`.dsh-host-rail-btn` and `.dsh-wb-rail-btn`)
+ * and drawn INSIDE the button bounds (`overflow: hidden` clips outer glow):
  *
- * It marks a pending approval or question, never an error and never a status:
- * the existing status dot and the warn "starting" pulse stay untouched.
+ * - Green (`data-glow="working"`): the space is actively running a task and has
+ *   no pending approval/question. Static ring.
+ * - Yellow (`data-glow="attention"` or `data-attention="required"`): the space
+ *   needs user intervention (pending tool approval or `ask_user_question`).
+ *   Always overrides green and breathes softly.
+ *
+ * The status dot sits at `z-index: 4`, above this ring (`z-index: 3`), which in
+ * turn sits above the full-bleed space icon (`z-index: 1`) and selection pill.
  */
 export const ATTENTION_RING_CSS = `
 @keyframes dsh-ui-attention-breathe {
-  0%, 100% { opacity: 0.55; }
+  0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
-[data-attention="required"]::after {
+:is(.dsh-host-rail-btn, .dsh-wb-rail-btn):is([data-glow="working"], [data-glow="attention"], [data-attention="required"])::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 3;
   pointer-events: none;
   border-radius: inherit;
-  border: 2px solid var(--dsh-spaces-attention, #8b5cf6);
+}
+:is(.dsh-host-rail-btn, .dsh-wb-rail-btn)[data-glow="working"]:not([data-attention="required"]):not([data-glow="attention"])::after {
+  border: 2px solid var(--dsh-spaces-working, var(--dsh-ui-ok, #39bf83));
   box-shadow:
-    0 0 12px -2px color-mix(in srgb, var(--dsh-spaces-attention, #8b5cf6) 55%, transparent),
-    inset 0 0 8px -4px color-mix(in srgb, var(--dsh-spaces-attention, #8b5cf6) 45%, transparent);
+    inset 0 0 10px -2px color-mix(in srgb, var(--dsh-spaces-working, var(--dsh-ui-ok, #39bf83)) 55%, transparent);
+}
+:is(.dsh-host-rail-btn, .dsh-wb-rail-btn):is([data-glow="attention"], [data-attention="required"])::after {
+  border: 2px solid var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441));
+  box-shadow:
+    0 0 12px -2px color-mix(in srgb, var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441)) 62%, transparent),
+    inset 0 0 10px -2px color-mix(in srgb, var(--dsh-spaces-attention, var(--dsh-ui-warn, #d9a441)) 62%, transparent);
   animation: dsh-ui-attention-breathe 2s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  [data-attention="required"]::after { animation: none; }
+  :is(.dsh-host-rail-btn, .dsh-wb-rail-btn):is([data-glow="attention"], [data-attention="required"])::after { animation: none; }
+}
+@media (forced-colors: active) {
+  :is(.dsh-host-rail-btn, .dsh-wb-rail-btn):is([data-glow="working"], [data-glow="attention"], [data-attention="required"])::after {
+    border-color: Highlight;
+    box-shadow: none;
+  }
+  :is(.dsh-host-rail-btn, .dsh-wb-rail-btn)[data-glow="working"]:not([data-attention="required"]):not([data-glow="attention"])::after {
+    border-style: dashed;
+  }
 }
 `;

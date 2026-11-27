@@ -20,6 +20,8 @@ export interface NativeShellTexts {
   operating: string;
   /** Label suffix while a space waits on an approval or a question. */
   attention: string;
+  /** Label suffix while a space is running a task. */
+  working: string;
   settings: string;
   settingsStopped: string;
   settingsUnavailable: string;
@@ -153,6 +155,7 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     newSpace: "新建空间",
     operating: "操作中",
     attention: "等待处理",
+    working: "正在工作",
     settings: "设置",
     settingsStopped: "设置 · Spaces 服务已停止",
     settingsUnavailable: "设置 · 空间服务不可用（查看详情）",
@@ -284,6 +287,7 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     newSpace: "New space",
     operating: "busy",
     attention: "Needs attention",
+    working: "Working",
     settings: "Settings",
     settingsStopped: "Settings · Spaces service stopped",
     settingsUnavailable: "Settings · space service unavailable (details)",

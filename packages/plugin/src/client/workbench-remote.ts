@@ -164,6 +164,7 @@ export function createWorkbenchRemote(connection: WorkbenchConnection): Workbenc
 export function createWorkbenchGuideRemote(connection: WorkbenchConnection): WorkbenchGuideApi {
   return {
     presentationSnapshot: () => callRemote<import("../../../../src/shared/space-host").PortalSnapshot>(connection, "workbenchGuide/presentationSnapshot", {}),
+    hostActivity: signal => callRemote<{ attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }>(connection, "workbenchGuide/hostActivity", {}, signal),
     spaceActivity: (spaceId, serviceEpoch) => callRemote<{ activity: "idle" | "busy" | "unknown"; generation: number }>(connection, "workbenchGuide/spaceActivity", { spaceId, serviceEpoch }),
     spaceAction: request => callRemote<import("../../../../src/shared/space-host").PortalSnapshot>(connection, "workbenchGuide/spaceAction", { request }),
     role: () => callRemote<WorkbenchGuideRole>(connection, "workbenchGuide/role", {}),

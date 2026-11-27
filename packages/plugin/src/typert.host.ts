@@ -7,6 +7,7 @@ import { WORKBENCH_API_CODECS } from "./host/workbench-api";
 import {
   clientFailureRecordedSchema,
   clientFailureReportSchema,
+  hostActivityProjectionSchema,
   overviewSchema,
   spaceIdSchema,
   desktopLaunchStateSchema,
@@ -136,6 +137,7 @@ export const TYPERT = {
     invocation("workbenchGuide", "restartService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("dsh-spaces/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("workbenchGuide", "beginDesktopLaunch", guideFile, [], result("dsh-spaces/types#DesktopLaunchState", desktopLaunchStateSchema)),
     invocation("workbenchGuide", "desktopLaunchState", guideFile, [], result("dsh-spaces/types#DesktopLaunchState", desktopLaunchStateSchema)),
+    invocation("workbenchGuide", "hostActivity", guideFile, [], result("dsh-spaces#HostActivityProjection", hostActivityProjectionSchema)),
     invocation("workbenchGuide", "reportClientFailure", guideFile, [param("report", clientFailureReportSchema, "dsh-spaces/types#ClientFailureReport")], result("dsh-spaces#ClientFailureRecorded", clientFailureRecordedSchema)),
     invocation("spaces", "overview", spacesFile, [], result("dsh-spaces/types#SpacesOverview", overviewSchema)),
     invocation(
