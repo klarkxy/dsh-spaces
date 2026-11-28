@@ -105,13 +105,37 @@ const fail = (reason, diagnostic = {}) => {
   send("failed", { failure: { reason,
     ...(failureCodes.includes(diagnostic.code) ? { code: diagnostic.code } : {}),
     ...(Number.isInteger(diagnostic.status) && diagnostic.status >= 100 && diagnostic.status <= 599 ? { status: diagnostic.status } : {}) } });
-  stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove();
+  stopped = true; removeRefreshVisibilityListener(); lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove();
 };
 class RequestFailure extends Error {
   constructor(diagnostic) { super("Portal request failed"); this.diagnostic = diagnostic; }
 }
 async function api(method, payload) {
-  const deadline = AbortSignal.timeout(10000);
+  const deadline = new AbortController();
+  let remaining = 10000, startedAt = 0, deadlineTimer;
+  const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+  const now = () => typeof performance !== "undefined" && performance && typeof performance.now === "function" ? performance.now() : Date.now();
+  const clearDeadline = () => {
+    if (deadlineTimer !== undefined) {
+      clearTimeout(deadlineTimer);
+      deadlineTimer = undefined;
+    }
+  };
+  const startDeadline = () => {
+    if (deadline.signal.aborted || hidden() || deadlineTimer !== undefined) return;
+    startedAt = now();
+    deadlineTimer = setTimeout(() => { deadlineTimer = undefined; deadline.abort(); }, remaining);
+  };
+  const pauseDeadline = () => {
+    if (deadlineTimer === undefined) return;
+    clearTimeout(deadlineTimer);
+    deadlineTimer = undefined;
+    remaining = Math.max(0, remaining - Math.max(0, now() - startedAt));
+    if (remaining <= 0) deadline.abort();
+  };
+  const visibilityChanged = () => { if (hidden()) pauseDeadline(); else startDeadline(); };
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") document.addEventListener("visibilitychange", visibilityChanged);
+  startDeadline();
   let status;
   const diag = (method === "state" || method === "view") && !diagApi.has(method);
   if (diag) { diagApi.add(method); navEmit("api-request", { stage: method }); }
@@ -119,7 +143,7 @@ async function api(method, payload) {
   const response = await fetch("/api/workbench/" + method, {
     method: "POST", credentials: "include", redirect: "error",
     headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
-    signal: AbortSignal.any([lifetime.signal, deadline])
+    signal: AbortSignal.any([lifetime.signal, deadline.signal])
   });
   status = response.status;
   if (!response.body) throw new RequestFailure({ status, ...(response.ok ? { code: "portal/response-invalid" } : {}) });
@@ -149,13 +173,17 @@ async function api(method, payload) {
   } catch (error) {
     if (diag) navEmit("api-result", error instanceof RequestFailure
       ? { stage: method, ok: false, status: error.diagnostic && error.diagnostic.status, code: error.diagnostic && error.diagnostic.code }
-      : { stage: method, ok: false, ...(status === undefined ? {} : { status }), code: deadline.aborted ? "portal/request-deadline" : "portal/transport-failed" });
+      : { stage: method, ok: false, ...(status === undefined ? {} : { status }), code: deadline.signal.aborted ? "portal/request-deadline" : "portal/transport-failed" });
     if (error instanceof RequestFailure) throw error;
     throw new RequestFailure({ ...(status === undefined ? {} : { status }),
-      code: deadline.aborted ? "portal/request-deadline" : "portal/transport-failed" });
+      code: deadline.signal.aborted ? "portal/request-deadline" : "portal/transport-failed" });
+  } finally {
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") document.removeEventListener("visibilitychange", visibilityChanged);
+    clearDeadline();
   }
 }
 async function refresh() {
+  if (snapshot !== null && typeof document !== "undefined" && document.visibilityState === "hidden") return;
   if (stopped || reading) return;
   reading = true;
   try {
@@ -360,8 +388,15 @@ function forwardDetailIntent(detailIntent) {
     serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
     channel: managerView.channel }, audience.managerOrigin);
 }
+function refreshWhenVisible() {
+  if (typeof document !== "undefined" && document.visibilityState !== "hidden") void refresh();
+}
+function removeRefreshVisibilityListener() {
+  if (typeof document !== "undefined" && typeof document.removeEventListener === "function") document.removeEventListener("visibilitychange", refreshWhenVisible);
+}
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") document.addEventListener("visibilitychange", refreshWhenVisible);
 if (native) window.addEventListener("hashchange", nativeSelection);
-window.addEventListener("pagehide", () => { navEmit("terminal"); navEnd(); stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
+window.addEventListener("pagehide", () => { navEmit("terminal"); navEnd(); stopped = true; removeRefreshVisibilityListener(); lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
 void refresh();
 timer = setInterval(() => { void refresh(); }, 1500);
 </script></body></html>`;

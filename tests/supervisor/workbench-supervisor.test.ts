@@ -46,6 +46,7 @@ import type { PatchWriter } from "../../src/adapters/node/profile/patch-writer.t
 import type { ProcessRuntime } from "../../src/adapters/node/runtime/process-manager.ts";
 import { writeComponentPayloadManifest, COMPONENT_PAYLOAD_PACKAGES, type ValidatedComponentPayload } from "../../src/adapters/node/payload/component-payload.ts";
 import type { WorkbenchPlan, WorkbenchPlanRequest } from "../../src/shared/workbench.ts";
+import { VIEW_ENTRY_PATH } from "../../src/shared/space-host.ts";
 
 const temps: string[] = [];
 const live: ChildProcess[] = [];
@@ -902,6 +903,41 @@ test("workspace origin cannot call management APIs; host bearer can", async () =
   const viaBody = (await viaHost.json()) as { ok: boolean };
   assert.equal(viaHost.status, 200);
   assert.equal(viaBody.ok, true);
+});
+
+test("viewEntry sends ordinary children through the origin-cluster entry and keeps the manager at root", async () => {
+  const epoch = "ab".repeat(32);
+  const managerOrigin = "http://127.0.0.1:34001";
+  const childOrigin = "http://127.0.0.1:34002";
+  const views = new Map([
+    ["spaces-hub", { spaceId: "spaces-hub", generation: 2, serviceEpoch: epoch, origin: managerOrigin }],
+    ["space-alpha", { spaceId: "space-alpha", generation: 1, serviceEpoch: epoch, origin: childOrigin }],
+  ]);
+  const runtime = Object.create(WorkbenchSupervisorRuntime.prototype) as WorkbenchSupervisorRuntime;
+  Object.assign(runtime, {
+    managerId: "spaces-hub",
+    stateModel: { currentServiceEpoch: () => epoch },
+    runs: { views, unmanaged: new Set<string>() },
+    processes: {
+      statusOf: () => "running",
+      urlOf: (id: string) => `${id === "spaces-hub" ? managerOrigin : childOrigin}/?token=launch-secret`,
+      portOf: (id: string) => id === "spaces-hub" ? 34001 : 34002,
+    },
+    fetchImpl: async (launch: string) => new Response(null, {
+      status: 303,
+      headers: {
+        location: "/",
+        "set-cookie": `${expectedAuthCookieName(new URL(launch).host)}=session; Path=/; HttpOnly; SameSite=Strict`,
+      },
+    }),
+  });
+
+  const child = await runtime.viewEntry("space-alpha", "1", epoch);
+  assert.equal("status" in child, false);
+  if (!("status" in child)) assert.equal(child.location, `${childOrigin}${VIEW_ENTRY_PATH}`);
+  const manager = await runtime.viewEntry("spaces-hub", "2", epoch);
+  assert.equal("status" in manager, false);
+  if (!("status" in manager)) assert.equal(manager.location, `${managerOrigin}/`);
 });
 
 test("role/identity guard does not overwrite an ordinary profile reserved as manager", async () => {
