@@ -3155,3 +3155,72 @@ test("CLI parses, serializes and validates --resume-mode", () => {
   assert.deepEqual(supervisorCliArgs(parsed).slice(-2), ["--resume-mode", "policy-only"]);
   assert.throws(() => parseSupervisorArgs(["--home", home, "--bin", bin, "--resume-mode", "sometimes"]), /Resume mode/);
 });
+
+test("clean-stop capture preserves ledger spaces whose one-shot resume never started", () => {
+  const capture = (WorkbenchSupervisorRuntime.prototype as unknown as {
+    captureCleanStopSpaces: () => string[];
+  }).captureCleanStopSpaces;
+  const captured = capture.call({
+    cleanStopEligible: true,
+    managerId: "spaces-hub",
+    cleanStopUntriedSpaceIds: new Set(["space-beta", "space-deleted", "web", "space-unmanaged"]),
+    spaceInventory: {
+      ownedSpaceIds: () => ["space-alpha", "space-beta", "space-unmanaged", "web"],
+      statusOf: (id: string) => id === "space-alpha" || id === "space-unmanaged" ? "running" : "stopped",
+    },
+    runs: { unmanaged: new Set(["space-unmanaged"]) },
+  });
+  assert.deepEqual(captured, ["space-alpha", "space-beta"]);
+});
+
+test("clean-stop resume stops submitting ledger starts once run rights begin releasing", async () => {
+  const alpha = "space-race-alpha";
+  const beta = "space-race-beta";
+  const lifecycle = {
+    closed: false,
+    sealing: false,
+    relinquishKind: null as string | null,
+    handle: { owner: true },
+    admitSubmission() {
+      if (this.closed || this.sealing || this.relinquishKind) throw new Error("releasing");
+    },
+  };
+  const untried = new Set([alpha, beta]);
+  const submitted: string[] = [];
+  const started: string[] = [];
+  const row = (id: string) => ({ id, startWithDesktop: false, isHost: false, managed: true });
+  const jobs = {
+    submit: async (command: { spaceId: string }, requestId: string, handler: (ctx: object) => Promise<unknown>) => {
+      submitted.push(command.spaceId);
+      await handler({});
+      return { id: requestId };
+    },
+    whenIdle: async () => { lifecycle.sealing = true; },
+    job: () => ({ status: "succeeded" }),
+  };
+  const fake = {
+    options: {},
+    resumeMode: "running-and-policy",
+    cleanStopResumeRecord: { runningSpaceIds: [alpha, beta] },
+    cleanStopUntriedSpaceIds: untried,
+    autoResumeProjection: undefined,
+    managerId: "spaces-hub",
+    runs: { unmanaged: new Set<string>() },
+    lifecycle,
+    jobs,
+    spaceInventory: {
+      listSpaces: () => [row(alpha), row(beta)],
+      publicStatus: () => "stopped",
+    },
+    spaceLifecycle: {
+      startSpace: async (spaceId: string) => { started.push(spaceId); return { spaceId }; },
+    },
+    diagnosticLog: { error: () => undefined },
+  };
+  await (WorkbenchSupervisorRuntime.prototype as unknown as {
+    resumeSpaces: () => Promise<void>;
+  }).resumeSpaces.call(fake);
+  assert.deepEqual(submitted, [alpha]);
+  assert.deepEqual(started, [alpha]);
+  assert.deepEqual([...untried], [beta]);
+});

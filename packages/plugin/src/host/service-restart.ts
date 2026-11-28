@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { lstatSync } from "../../../../src/shared/node/filesystem";
 import { HomeLease, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home/home-lease";
+import { parseHomeSettingsFile, readSettingsRecord } from "../../../../src/adapters/node/products/workbench-products";
 import type { ResumeSpacesMode } from "../../../../src/shared/types";
 import type { WorkbenchApi, WorkbenchPlan } from "../../../../src/shared/workbench";
 import type { WorkbenchBootstrapResult, WorkbenchServiceRestartPreview } from "../types";
@@ -33,6 +34,16 @@ export class DesktopServiceRestart {
   private readonly key: string;
   constructor(private readonly options: ServiceRestartOptions) { this.key = resolve(options.home); }
 
+  private defaultResumeMode(): ResumeSpacesMode {
+    try {
+      const { raw, missing } = readSettingsRecord(this.options.home);
+      if (missing) return "running-and-policy";
+      return parseHomeSettingsFile(raw).settings.restoreRunningSpacesOnLaunch ? "running-and-policy" : "policy-only";
+    } catch {
+      return "policy-only";
+    }
+  }
+
   async preview(stopOnly = false): Promise<WorkbenchServiceRestartPreview> {
     this.options.assertDesktop();
     if (active.has(this.key)) throw Error("A manual service restart is already in progress.");
@@ -57,12 +68,13 @@ export class DesktopServiceRestart {
     if (!Number.isFinite(expires) || expires <= Date.now()) throw Error("The restart confirmation expired.");
     const id = randomBytes(32).toString("hex");
     this.confirmation = { id, expires, discovery, plan, stopOnly };
-    return { confirmationId: id, expiresAt: new Date(expires).toISOString(), action: stopOnly ? "stop" : plan ? "restart" : "start", spaces };
+    return { confirmationId: id, expiresAt: new Date(expires).toISOString(), action: stopOnly ? "stop" : plan ? "restart" : "start", defaultResumeMode: this.defaultResumeMode(), spaces };
   }
 
-  async execute(confirmationId: string, stopOnly = false, resumeMode: ResumeSpacesMode = "running-and-policy"): Promise<WorkbenchBootstrapResult> {
+  async execute(confirmationId: string, stopOnly = false, resumeMode?: ResumeSpacesMode): Promise<WorkbenchBootstrapResult> {
     this.options.assertDesktop();
-    if (!["running-and-policy", "policy-only", "none"].includes(resumeMode)) throw Error("The service resume mode is invalid.");
+    if (resumeMode !== undefined && !["running-and-policy", "policy-only", "none"].includes(resumeMode)) throw Error("The service resume mode is invalid.");
+    const mode = resumeMode ?? this.defaultResumeMode();
     const confirmed = this.confirmation;
     if (!confirmed || confirmed.stopOnly !== stopOnly || confirmed.id !== confirmationId || confirmed.expires <= Date.now()) throw Error("The service confirmation is invalid or expired.");
     if (active.has(this.key)) throw Error("A manual service restart is already in progress.");
@@ -90,7 +102,7 @@ export class DesktopServiceRestart {
       }
       this.options.assertDesktop();
       if (stopOnly) return { ok: true, connected: false, unavailable: false, origin: null, reasons: [] };
-      return await this.options.launch(previousEpoch, missing, resumeMode);
+      return await this.options.launch(previousEpoch, missing, mode);
     } finally { active.delete(this.key); }
   }
 

@@ -56,6 +56,7 @@ export const serviceRestartPreviewSchema = z.object({
   confirmationId: hex64Schema,
   expiresAt: isoDateSchema,
   action: z.enum(["start", "restart", "stop"]),
+  defaultResumeMode: z.enum(["running-and-policy", "policy-only", "none"]),
   spaces: z.array(z.object({ id: spaceIdSchema, displayName: z.string().max(500), running: z.boolean(), busy: z.boolean() }).strict()).max(1000),
 }).strict();
 

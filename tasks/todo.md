@@ -4,7 +4,7 @@
 
 ## 2026-11-27 正常停机恢复与 Creator 死宿主回收
 
-- [x] 按用户授权修订 `AGENTS.md`、`let-it-crash.md` 与 `architecture.md`：正常停机账本 `clean-stop-spaces.json`（全部停止成功才写、非维护启动读后即删、默认按 `restoreRunningSpacesOnLaunch` 串行各启动一次）、手动服务启动/重启三种恢复方式与忙碌告警、Creator 注册仅在旧身份端点拒绝连接或 nonce 证明失败时回收。代码与隔离自动化验证完成（test、test:workbench、typecheck、build），真实 Desktop/Web 待验。
+- [x] 按用户授权修订 `AGENTS.md`、`let-it-crash.md` 与 `architecture.md`：正常停机账本 `clean-stop-spaces.json`（全部停止成功才写、非维护启动读后即删、默认按 `restoreRunningSpacesOnLaunch` 串行各启动一次）、手动服务启动/重启三种恢复方式与忙碌告警、Creator 注册仅在旧身份端点拒绝连接或 nonce 证明失败时回收。审查补充已闭环注册退役共享清理、停机恢复竞态、公开错误脱敏和手动重启默认恢复模式；Windows 并发 reclaim 不可安全检查按 ambiguous 失败关闭。代码与隔离自动化验证完成（test、test:workbench、typecheck、build），真实 Desktop/Web 待验。
 - [ ] Desktop 退出后保持后台服务（`desktopExitBehavior: keep-alive`）未纳入本批，另行决定。
 
 ## 2026-11-27 仓库 pnpm 迁移

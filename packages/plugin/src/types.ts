@@ -232,5 +232,6 @@ export interface WorkbenchServiceRestartPreview {
   confirmationId: string;
   expiresAt: string;
   action: "start" | "restart" | "stop";
+  defaultResumeMode: ResumeSpacesMode;
   spaces: { id: string; displayName: string; running: boolean; busy: boolean }[];
 }

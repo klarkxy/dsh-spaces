@@ -73,7 +73,7 @@ const en = {
   "app.status.unknown": "Unknown",
   "app.attention": "Needs attention",
   "app.working": "Working",
-  "autoResume.active": "Resuming spaces {completed}/{total}…",
+  "autoResume.active": "Resuming spaces {completed}/{total}…{name}",
   "autoResume.failed": "These spaces failed to resume: {names}",
   "autoResume.error": "Spaces were not resumed from the clean-stop record: {error}",
   "home.blueprints": "Space templates",

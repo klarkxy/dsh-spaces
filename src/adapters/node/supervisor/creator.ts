@@ -112,6 +112,8 @@ export interface SupervisorCreatorPorts {
   installedRuntimeBin(version: string): string | undefined;
   /** Optional space start for `startAfterCreate`; wired to the real lifecycle in production. */
   startSpace?(spaceId: string, ctx: WorkbenchJobContext): Promise<WorkbenchJob["result"]>;
+  /** Shared-channel cleanup after one registration is retired or reclaimed. */
+  onRegistrationRetired?(registrationId: string): void;
   pluginAdd(home: string, profile: string, spec: string): Promise<void>;
   observeChildWork<T>(action: () => T): T;
   setActiveJob(id: string | undefined): void;
@@ -249,12 +251,16 @@ export class SupervisorCreator {
       const verdict = await this.probePrevious(previous);
       this.ports.assertOwner();
       if (this.closed) throw new CreatorPublicError("creator/unavailable");
-      if (this.registration !== previous || verdict !== "dead") {
+      const current = this.registration;
+      if (current === previous) {
+        if (verdict !== "dead") {
+          throw new CreatorPublicError("creator/conflict", "A creator registration is already active for this service epoch.");
+        }
+        this.retireRegistration(previous);
+        reclaimedPrevious = previous;
+      } else if (current !== undefined) {
         throw new CreatorPublicError("creator/conflict", "A creator registration is already active for this service epoch.");
       }
-      this.registration = undefined;
-      this.plans.clear();
-      reclaimedPrevious = previous;
     }
     const creatorScope = randomBytes(32).toString("hex");
     const controlScope = randomBytes(32).toString("hex");
@@ -295,7 +301,7 @@ export class SupervisorCreator {
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      return "dead";
+      return response.status >= 400 && response.status < 500 ? "dead" : "unknown";
     }
     let proof: Record<string, unknown>;
     try {
@@ -317,8 +323,7 @@ export class SupervisorCreator {
     if (!registration || registration.registrationId !== registrationId) {
       throw new CreatorPublicError("creator/unregistered");
     }
-    this.registration = undefined;
-    this.plans.clear();
+    this.retireRegistration(registration);
     this.ports.diagnosticLog?.info("creator.unregistered", "The main-space registration was retired.", { registration: registrationId });
     return { unregistered: true };
   }
@@ -695,10 +700,18 @@ export class SupervisorCreator {
     this.plans.clear();
   }
 
-  /** Run rights dropped: the epoch-bound registration and previews die with it. */
-  retireRegistration(): void {
-    this.registration = undefined;
-    this.plans.clear();
+  /** Run rights dropped or one dead/unregistered main retired: shared state dies with it. */
+  retireRegistration(registration: MainChannelRegistration | undefined = this.registration): void {
+    if (!registration) return;
+    if (this.registration === registration) this.registration = undefined;
+    for (const [id, plan] of this.plans) {
+      if (plan.registrationId === registration.registrationId) this.plans.delete(id);
+    }
+    try {
+      this.ports.onRegistrationRetired?.(registration.registrationId);
+    } catch (error) {
+      this.ports.diagnosticLog?.error("creator.retire-cleanup-failed", "Shared registration cleanup failed after retirement.", error, { registration: registration.registrationId });
+    }
   }
 
   /**

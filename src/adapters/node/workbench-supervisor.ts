@@ -229,6 +229,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly stateModel: SupervisorState;
   private cleanStopEligible = false;
   private cleanStopResumeRecord: CleanStopSpacesRecord | null = null;
+  private readonly cleanStopUntriedSpaceIds = new Set<string>();
   private resumeMode: ResumeSpacesMode = "policy-only";
   private autoResumeProjection: WorkbenchAutoResume | undefined;
   private readonly maintenanceGate: SupervisorMaintenanceGate;
@@ -487,6 +488,13 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       },
       observeChildWork: action => this.observeChildWork(action),
       setActiveJob: id => { this.lifecycle.activeJobId = id; },
+      onRegistrationRetired: registrationId => {
+        this.control?.retireRegistration();
+        if (this.uiAutomation) {
+          void this.uiAutomation.retireRegistration(registrationId)
+            .catch((error: unknown) => this.diagnosticLog.error("creator.ui-retire-failed", "UI sessions for a retired main registration could not all be released.", error, { registration: registrationId }));
+        }
+      },
     });
     this.control = new SupervisorControl({
       creator: this.creator,
@@ -1261,23 +1269,29 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ...(error ? { error } : {}),
     };
     this.autoResumeProjection = projection;
+    const releasingRunRights = (): boolean =>
+      this.lifecycle.closed || this.lifecycle.sealing || Boolean(this.lifecycle.relinquishKind) || !this.lifecycle.handle || !this.jobs;
     for (const space of targets) {
+      if (releasingRunRights()) break;
       projection.inProgressSpaceId = space.id;
       let failed = false;
       try {
         const jobs = this.jobs!;
         const job = await jobs.submit({ kind: "space.start", spaceId: space.id }, `auto-resume-${randomBytes(12).toString("hex")}`, async (ctx) => {
-          this.lifecycle.assertWritable();
+          this.lifecycle.admitSubmission();
+          this.cleanStopUntriedSpaceIds.delete(space.id);
           const current = this.spaceInventory.publicStatus(space.id);
           if (current !== "stopped" && current !== "crashed") return;
           return this.spaceLifecycle.startSpace(space.id, ctx);
         });
         await jobs.whenIdle();
+        if (releasingRunRights()) break;
         failed = jobs.job(job.id).status === "failed";
         if (failed) {
           this.diagnosticLog.error("auto-resume.space-failed", "A space selected for automatic resume did not start.", undefined, { space: space.id });
         }
       } catch (cause) {
+        if (releasingRunRights()) break;
         failed = true;
         this.diagnosticLog.error("auto-resume.space-failed", "A space selected for automatic resume did not start.", cause, { space: space.id });
       }
@@ -1293,7 +1307,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     try {
       this.cleanStopResumeRecord = consumeCleanStopSpaces(this.controlDir);
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
+      const raw = error instanceof Error ? error.message : String(error);
+      errors.push(redactPublicReason(sanitizeLogText(raw), 240) || "The clean-stop ledger could not be read.");
       this.diagnosticLog.error("auto-resume.ledger-rejected", "The clean-stop ledger was rejected and left unchanged.", error);
     }
     if (this.options.resumeMode) {
@@ -1304,22 +1319,36 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
         const parsed = missing ? undefined : parseHomeSettingsFile(raw);
         this.resumeMode = (parsed?.settings.restoreRunningSpacesOnLaunch ?? true) ? "running-and-policy" : "policy-only";
       } catch (error) {
-        errors.push(error instanceof Error ? error.message : String(error));
+        const raw = error instanceof Error ? error.message : String(error);
+        errors.push(redactPublicReason(sanitizeLogText(raw), 240) || "Home settings could not be read.");
         this.diagnosticLog.error("auto-resume.settings-failed", "Home settings could not be read for automatic resume.", error);
       }
     }
+    this.cleanStopUntriedSpaceIds.clear();
+    if (this.resumeMode === "running-and-policy" && this.cleanStopResumeRecord) {
+      for (const id of this.cleanStopResumeRecord.runningSpaceIds) this.cleanStopUntriedSpaceIds.add(id);
+    }
     if (errors.length) {
-      this.autoResumeProjection = { active: false, total: 0, completed: 0, failedSpaceIds: [], error: errors.join("; ") };
+      this.autoResumeProjection = {
+        active: false,
+        total: 0,
+        completed: 0,
+        failedSpaceIds: [],
+        error: redactPublicReason(errors.join("; "), 500) || "Automatic resume could not be prepared.",
+      };
     }
   }
 
   private captureCleanStopSpaces(): string[] {
     if (!this.cleanStopEligible) return [];
     const managerId = this.managerId;
-    return this.spaceInventory.ownedSpaceIds().filter((id) =>
+    const owned = this.spaceInventory.ownedSpaceIds();
+    const ordinary = (id: string): boolean =>
       id !== managerId && id !== "web" && id !== "desktop" &&
-      !this.runs.unmanaged.has(id) && this.spaceInventory.statusOf(id) === "running",
-    );
+      owned.includes(id) && !this.runs.unmanaged.has(id);
+    const running = owned.filter((id) => ordinary(id) && this.spaceInventory.statusOf(id) === "running");
+    const untried = [...this.cleanStopUntriedSpaceIds].filter((id) => ordinary(id) && !running.includes(id));
+    return [...running, ...untried];
   }
 
   private writeCleanStopLedger(reason: CleanStopSpacesRecord["reason"], runningSpaceIds: string[]): void {

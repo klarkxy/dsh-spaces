@@ -62,7 +62,7 @@ test("manual restart previews real affected spaces, performs one normal shutdown
   const f = fixture(t), restart = f.operation();
   const preview = await restart.preview();
   assert.deepEqual(preview.spaces.map(s => [s.id, s.running, s.busy]), [["spaces-hub", true, false], ["coding", true, true]]);
-  assert.equal(preview.action, "restart"); assert.deepEqual(f.counts(), { starts: 0, stops: 0, plans: 1 });
+  assert.equal(preview.action, "restart"); assert.equal(preview.defaultResumeMode, "running-and-policy"); assert.deepEqual(f.counts(), { starts: 0, stops: 0, plans: 1 });
   assert.equal(JSON.stringify(preview).includes(f.endpoint.bearer), false);
   assert.equal((await restart.execute(preview.confirmationId)).ok, true);
   assert.deepEqual(f.resumeModes(), ["running-and-policy"]);
@@ -77,6 +77,16 @@ test("missing service needs explicit confirmation and launches only once", async
   assert.equal(f.counts().starts, 0);
   await restart.execute(preview.confirmationId);
   assert.deepEqual(f.counts(), { starts: 1, stops: 0, plans: 0 });
+});
+
+test("the restart preview default follows restoreRunningSpacesOnLaunch", async t => {
+  const f = fixture(t, false), restart = f.operation();
+  mkdirSync(join(f.home, "hub"), { recursive: true });
+  writeFileSync(join(f.home, "hub", "settings.json"), JSON.stringify({ restoreRunningSpacesOnLaunch: false }));
+  const preview = await restart.preview();
+  assert.equal(preview.defaultResumeMode, "policy-only");
+  await restart.execute(preview.confirmationId);
+  assert.deepEqual(f.resumeModes(), ["policy-only"]);
 });
 
 for (const change of ["owner", "revision", "expired", "invalid", "refused"] as const) {

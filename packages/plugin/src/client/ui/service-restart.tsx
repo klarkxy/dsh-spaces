@@ -28,7 +28,13 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
   const prepare = async (stop = false) => {
     if (inFlight.current) return;
     inFlight.current = true; setBusy("preview"); setError(null); setPreview(null);
-    try { const value = await (stop ? controller.previewServiceStop() : controller.previewServiceRestart()); if (mounted.current) setPreview(value); }
+    try {
+      const value = await (stop ? controller.previewServiceStop() : controller.previewServiceRestart());
+      if (mounted.current) {
+        setPreview(value);
+        setResumeMode(value.defaultResumeMode);
+      }
+    }
     catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };

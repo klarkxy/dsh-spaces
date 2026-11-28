@@ -200,7 +200,7 @@ export class NativeHostController {
     next.notify(nativeTexts().surfaceReloadedNotice);
     return next;
   };
-  restartService = async (confirmationId: string, resumeMode: ResumeSpacesMode = "running-and-policy"): Promise<NativeHostController> => {
+  restartService = async (confirmationId: string, resumeMode?: ResumeSpacesMode): Promise<NativeHostController> => {
     if (!this.supportsServiceRestart || !["failed", "service-stopped"].includes(this.state.phase)) throw Error(nativeTexts().restartUnavailable);
     const result = await this.guideApi.restartService!(confirmationId, resumeMode);
     if (!result.ok || !result.connected) throw Error(this.reasonText(result.reasons) ?? nativeTexts().restartFailed);

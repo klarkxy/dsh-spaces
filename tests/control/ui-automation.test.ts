@@ -546,3 +546,17 @@ test("closeAll releases contexts and the browser", async () => {
   await assert.rejects(() => fx.manager.open(REG, "space-alpha"), (error: unknown) =>
     error instanceof ControlPublicError && error.code === "control/unavailable");
 });
+
+test("retiring a registration releases only its sessions and blocks reopening", async () => {
+  const fx = makeManager();
+  const first = await fx.manager.open("reg-retire", "space-alpha");
+  await fx.manager.open("reg-live", "space-beta");
+  await fx.manager.retireRegistration("reg-retire");
+  assert.equal(fx.contexts[0]!.closed, true);
+  assert.equal(fx.contexts[1]!.closed, false);
+  assert.equal(fx.manager.sessionCount(), 1);
+  await assert.rejects(() => fx.manager.snapshot("reg-retire", { uiSessionId: first.uiSessionId }),
+    (error: unknown) => error instanceof ControlPublicError && error.code === "control/not-found");
+  await assert.rejects(() => fx.manager.open("reg-retire", "space-gamma"),
+    (error: unknown) => error instanceof ControlPublicError && error.code === "control/unavailable");
+});
