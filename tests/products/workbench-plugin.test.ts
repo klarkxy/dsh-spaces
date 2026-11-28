@@ -23,6 +23,7 @@ import { COMPATIBLE_DSH_CLI_VERSION } from "../../src/adapters/node/products/spa
 import { resolveHostIdentity } from "../../packages/plugin/src/host/identity.ts";
 import { SpacesPlugin, injectHintScript } from "../../packages/plugin/src/host/plugin.ts";
 import { WorkbenchHostRuntime } from "../../packages/plugin/src/host/runtime.ts";
+import { validClientFailureReport } from "../../packages/plugin/src/types.ts";
 import { createWorkbenchHttpClient, mintSupervisorHandoff } from "../../packages/plugin/src/host/workbench-http.ts";
 import { describeSupervisorFacts } from "../../packages/plugin/src/host/supervisor-attach.ts";
 import { diagnosticLogDirectory } from "../../src/adapters/node/diagnostics/rotating-log.ts";
@@ -67,7 +68,8 @@ import { homeViewUrl, isHomeView } from "../../packages/plugin/src/client/home-v
 import { GUIDE_COPY } from "../../packages/plugin/src/client/i18n.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { apply as applyViewHost, parseViewEnv } from "../../packages/view-bridge/src/index.ts";
+import { apply as applyViewHost, handleViewEntryRequest, parseViewEnv, VIEW_ENTRY_PATH as VIEW_BRIDGE_ENTRY_PATH } from "../../packages/view-bridge/src/index.ts";
+import { VIEW_ENTRY_PATH as SHARED_VIEW_ENTRY_PATH } from "../../src/shared/space-host.ts";
 import { startViewBridge, type BootWatch } from "../../packages/view-bridge/src/client.ts";
 import { PARENT_PING_SOURCE, acceptParentMessage, postViewState } from "../../packages/view-bridge/src/handshake.ts";
 
@@ -1321,6 +1323,98 @@ test("view-bridge ignores invalid env, has no management API, and can ready agai
   assert.ok(!JSON.stringify(posted).includes("token"));
 });
 
+test("view-bridge registers its exact origin-cluster entry only for a valid view environment", () => {
+  assert.equal(VIEW_BRIDGE_ENTRY_PATH, SHARED_VIEW_ENTRY_PATH);
+  const validEnv = {
+    DSH_SPACES_VIEW_PARENT_ORIGIN: "http://127.0.0.1:11",
+    DSH_SPACES_VIEW_ID: "notes",
+    DSH_SPACES_VIEW_GENERATION: "3",
+    DSH_SPACES_VIEW_CHANNEL: "chan-1",
+    DSH_SPACES_VIEW_SERVICE_EPOCH: HEX64_A,
+  };
+  const installContext = (webServer: unknown) => {
+    const effectCleanups: Array<() => void> = [];
+    const ctx = {
+      get: (name: string) => name === "webServer" ? webServer : undefined,
+      effect: (fn: () => () => void) => { effectCleanups.push(fn()); },
+    };
+    return { ctx, effectCleanups };
+  };
+
+  const routes: Array<{ kind: string; path: string; handler: unknown }> = [];
+  let disposed = 0;
+  const registered = installContext({
+    register(route: { kind: string; path: string; handler: unknown }) {
+      routes.push(route);
+      return () => { disposed += 1; };
+    },
+  });
+  assert.ok(applyViewHost(registered.ctx as never, {}, validEnv));
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0]!.kind, "exact");
+  assert.equal(routes[0]!.path, SHARED_VIEW_ENTRY_PATH);
+  assert.equal(routes[0]!.handler, handleViewEntryRequest);
+  assert.equal(registered.effectCleanups.length, 1);
+  registered.effectCleanups[0]!();
+  assert.equal(disposed, 1);
+
+  const invalid = installContext({
+    register() { throw new Error("must not register"); },
+  });
+  assert.equal(applyViewHost(invalid.ctx as never, {}, {}), null);
+  assert.equal(invalid.effectCleanups.length, 0);
+
+  let taps = 0;
+  const withoutRegister = installContext({
+    tapIndex() { taps += 1; return () => undefined; },
+  });
+  assert.ok(applyViewHost(withoutRegister.ctx as never, {}, validEnv));
+  assert.equal(taps, 1);
+});
+
+test("view-bridge origin-cluster entry is static, method-closed and never reflects the query", () => {
+  const capture = () => {
+    const captured: { status: number; headers: Record<string, string>; body: string } = { status: 0, headers: {}, body: "" };
+    const res = {
+      writeHead(status: number, headers: Record<string, string>) {
+        captured.status = status;
+        captured.headers = headers;
+        return res;
+      },
+      end(body?: string) {
+        captured.body = body ?? "";
+        return res;
+      },
+    };
+    return { captured, res };
+  };
+  const invoke = (method: string, url = SHARED_VIEW_ENTRY_PATH) => {
+    const { captured, res } = capture();
+    handleViewEntryRequest({ method, url } as never, res as never);
+    return captured;
+  };
+
+  const get = invoke("GET", `${SHARED_VIEW_ENTRY_PATH}?x=<script>`);
+  assert.equal(get.status, 200);
+  assert.equal(get.headers["content-type"], "text/html; charset=utf-8");
+  assert.equal(get.headers["cache-control"], "no-store");
+  assert.equal(get.headers["referrer-policy"], "no-referrer");
+  assert.equal(get.headers["origin-agent-cluster"], "?1");
+  assert.equal(get.headers["content-security-policy"], "default-src 'none'; script-src 'unsafe-inline'");
+  assert.equal(get.body.includes('location.replace("/")'), true);
+  assert.equal(get.body.includes("x=<script>"), false);
+
+  const head = invoke("HEAD");
+  assert.equal(head.status, 200);
+  assert.equal(head.headers["origin-agent-cluster"], "?1");
+  assert.equal(head.body, "");
+
+  const post = invoke("POST");
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.allow, "GET, HEAD");
+  assert.equal(post.body, "");
+});
+
 test("ordinary profile does not cold-start a second controller", async () => {
   const home = tempDir("dsh-wb-ordinary-boot-");
   writeProfile(home, "notes");
@@ -2081,6 +2175,29 @@ test("WorkbenchRemoteError carries bounded transport metadata and flushes client
   });
 });
 
+test("client failure report visibility evidence is closed and timestamped", () => {
+  const base = { surface: "desktop-native" as const, stage: "portal" as const, detail: null, failedAt: "2026-11-24T02:30:00.000Z" };
+  assert.equal(validClientFailureReport(base), true);
+  for (const visibility of [
+    { state: "visible" as const, changedAt: null },
+    { state: "hidden" as const, changedAt: "2026-11-24T02:29:59.123Z" },
+    { state: "visible" as const, changedAt: "2026-11-24T08:29:59+06:00" },
+  ]) assert.equal(validClientFailureReport({ ...base, visibility }), true, JSON.stringify(visibility));
+  for (const visibility of [
+    null,
+    [],
+    "hidden",
+    {},
+    { state: "visible" },
+    { changedAt: null },
+    { state: "visible", changedAt: null, extra: true },
+    { state: "prerender", changedAt: null },
+    { state: "hidden", changedAt: "yesterday" },
+    { state: "hidden", changedAt: "2026-11-24T02:29:59" },
+    { state: "hidden", changedAt: 0 },
+  ]) assert.equal(validClientFailureReport({ ...base, visibility }), false, JSON.stringify(visibility));
+});
+
 test("workbenchGuide/reportClientFailure writes sanitized host.client-failed entries and rate limits floods", async () => {
   const home = tempDir("dsh-client-log-");
   writeProfile(home, "notes");
@@ -2099,6 +2216,7 @@ test("workbenchGuide/reportClientFailure writes sanitized host.client-failed ent
     rpcFailureKind: "rpc-transport",
     connectionState: "disconnected",
     portalFailure: { reason: "manager-disconnected" },
+    visibility: { state: "hidden", changedAt: "2026-11-24T02:29:59.000Z" },
     navTrail: [
       { v: 1, src: "controller", seq: 1, t: 0, ev: "user-select", targetKind: "settings" },
       { v: 1, src: "portal", seq: 2, t: 15, ev: "fail", reason: "manager-disconnected" },
@@ -2122,10 +2240,28 @@ test("workbenchGuide/reportClientFailure writes sanitized host.client-failed ent
   assert.equal(entry.context?.stage, "portal");
   assert.equal(entry.context?.rpcEndpoint, "workbenchGuide/presentationSnapshot");
   assert.equal(entry.context?.portalReason, "manager-disconnected");
+  assert.equal(entry.context?.visibilityState, "hidden");
+  assert.equal(entry.context?.visibilityChangedAt, "2026-11-24T02:29:59.000Z");
   assert.equal(entry.context?.navCount, 2);
   assert.match(String(entry.context?.navTail), /controller:user-select@0 portal:fail\(manager-disconnected\)@15/);
 
-  for (let i = 0; i < 31; i += 1) {
+  const withoutVisibility = await plugin.guide.reportClientFailure({
+    surface: "desktop-native",
+    stage: "directory-poll",
+    detail: "no visibility evidence",
+    failedAt: "2026-11-24T02:30:00.500Z",
+  });
+  assert.deepEqual(withoutVisibility, { recorded: true });
+  const rowsWithPlain = readFileSync(file, "utf8").trim().split("\n").map(line => JSON.parse(line) as {
+    event?: string;
+    context?: Record<string, unknown>;
+  });
+  const plainEntry = rowsWithPlain.find(row => row.event === "host.client-failed" && row.context?.clientFailedAt === "2026-11-24T02:30:00.500Z");
+  assert.ok(plainEntry);
+  assert.equal(plainEntry.context?.visibilityState, null);
+  assert.equal(plainEntry.context?.visibilityChangedAt, null);
+
+  for (let i = 0; i < 30; i += 1) {
     const next = await plugin.guide.reportClientFailure({
       surface: "desktop-native",
       stage: "directory-poll",

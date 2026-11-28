@@ -89,7 +89,7 @@ export function checkCatalog(source, catalog) {
   if (catalog?.meta?.schemaVersion !== 1 || catalog.meta.contentHash !== sourceHash(source) ||
       !Number.isFinite(Date.parse(catalog.meta.generatedAt)) || catalog.meta.count !== source.plugins.length ||
       !Array.isArray(catalog.entries) || catalog.entries.length !== source.plugins.length) {
-    throw new Error('Generated catalog is stale or malformed; run npm run catalog:build');
+    throw new Error('Generated catalog is stale or malformed; run pnpm run catalog:build');
   }
   source.plugins.forEach((row, index) => {
     const entry = catalogEntrySchema.parse(catalog.entries[index]);

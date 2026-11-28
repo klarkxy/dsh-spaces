@@ -160,6 +160,9 @@ export function toolchainEnv(extra: Record<string, string | undefined> = {}): No
     npm_config_ignore_workspace_root_check: extra.npm_config_ignore_workspace_root_check ?? "true",
   };
   if (process.platform === "win32") env.Path = path;
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === "npm_config_node_linker") delete env[key];
+  }
   delete env.ELECTRON_RUN_AS_NODE;
   return env;
 }

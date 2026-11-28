@@ -9,6 +9,7 @@ import { bindInitialLoopbackHttp, startWorkbenchHttp, type WorkbenchHttpRuntime 
 import { expectedAuthCookieName } from "../../src/adapters/node/server/workbench-http.ts";
 import { mintSupervisorPortal } from "../../packages/plugin/src/host/workbench-http.ts";
 import { renderPortalPage } from "../../src/adapters/node/server/workbench-portal.ts";
+import { handleViewEntryRequest, VIEW_ENTRY_PATH } from "../../packages/view-bridge/src/index.ts";
 
 const EPOCH = "aa".repeat(32), REVISION = "bb".repeat(32);
 async function serve(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) {
@@ -316,6 +317,7 @@ test("DOM: stale rail and adjacent clicks enter once while preserving native DOM
   const hint=(id:string) => ({parentOrigin:id==="spaces-hub"?supervisorOrigin:managerOrigin,spaceId:id,generation:1,channel:`ch-${id}-1`,serviceEpoch:EPOCH});
   const html=(role:string,id?:string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>html,body,#root{margin:0;width:100%;height:100%;box-sizing:border-box}#root{position:relative}#native{height:100%;padding:20px;box-sizing:border-box}[data-shell-overlay]{position:absolute;inset:0;pointer-events:none}</style></head><body><div id="root">${role==="parent"?'<main id="native"><h1>Original application</h1><textarea aria-label="Original draft"></textarea></main><div data-shell-overlay></div>':'<div data-dsh-boot>Loading</div>'}</div><script>window.__PORTABLE_FIXTURE__=${JSON.stringify({role})};${id?'window.__DSH_SPACES_VIEW__='+JSON.stringify(hint(id))+';':''}</script><script src="/client.js"></script></body></html>`;
   const client = async(role:string,id:string,req:IncomingMessage,res:ServerResponse) => {
+    if(new URL(req.url??"/","http://127.0.0.1").pathname===VIEW_ENTRY_PATH){handleViewEntryRequest(req,res);return;}
     if(req.url==="/client.js"){res.writeHead(200,{"content-type":"text/javascript"});res.end(js);return;}
     if(req.url?.startsWith("/fixture-api/")){
       const method=req.url.slice("/fixture-api/".length),payload=await body(req);calls.push("manager:"+method);
@@ -331,7 +333,7 @@ test("DOM: stale rail and adjacent clicks enter once while preserving native DOM
   const runtime:WorkbenchHttpRuntime={cookieName:()=>"operator",sessionCookie:()=>"fixture-session",sessionEquals:v=>v==="fixture-session",hostBearerEquals:v=>v==="fixture-bearer",consumeBootstrapToken:()=>false,
     supervisorOrigin:()=>supervisorOrigin,managerOrigin:()=>managerOrigin,isWorkspaceOrigin:origin=>origin===childOrigin,
     dispatch:async(method,payload)=>{calls.push("supervisor:"+method);if(method==="state")return state;if(method==="view")return view((payload as {spaceId:string}).spaceId);throw Error("Writes not supported");},entryPage:()=>"",mintHandoff:()=>"",
-    viewEntry:async(id,generation,epoch)=>{if(!["spaces-hub","alpha"].includes(id)||generation!=="1"||epoch!==EPOCH)return{status:403,message:"stale"};const origin=view(id).origin;return{setCookies:[`${expectedAuthCookieName(new URL(origin).host)}=fixture-child; Path=/; HttpOnly; SameSite=Strict`],location:origin+"/"};},
+    viewEntry:async(id,generation,epoch)=>{if(!["spaces-hub","alpha"].includes(id)||generation!=="1"||epoch!==EPOCH)return{status:403,message:"stale"};const origin=view(id).origin;return{setCookies:[`${expectedAuthCookieName(new URL(origin).host)}=fixture-child; Path=/; HttpOnly; SameSite=Strict`],location:origin+(id==="spaces-hub"?"/":VIEW_ENTRY_PATH)};},
   };
   const supervisor=await startWorkbenchHttp(runtime);supervisorOrigin=supervisor.origin;t.after(()=>supervisor.close());
   const parent=await serve(async(req,res)=>{

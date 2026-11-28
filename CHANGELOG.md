@@ -4,17 +4,23 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ## [Unreleased]
 
+### Changed
+
+- Repository development and CI now use pnpm 10.29.2 with `pnpm-lock.yaml` / `pnpm-workspace.yaml`; published plugin package contents are unchanged.
+
 ### Added
 
 - Clean-stop resume: a normal Supervisor shutdown in which every owned space stopped records the running ordinary spaces in `.dsh-spaces-control/clean-stop-spaces.json`; the next launch outside maintenance reads and deletes it once and, by default (`restoreRunningSpacesOnLaunch`, Settings → General), starts each listed space once in a serial `auto-resume-*` job. Crashes and failed shutdowns write nothing, a damaged ledger is kept and reported, and failed starts are not retried. Progress and failures appear in the Workbench status strip (`WorkbenchState.autoResume`).
 - The confirmed Desktop service start/restart now offers a resume mode (resume running spaces, startup settings only, or service only) and highlights spaces that are currently running a task before they are interrupted.
 - A new main host can replace a Creator registration left behind by a killed host: only when the old loopback identity listener refuses the connection or fails a fresh nonce proof; a timeout or a valid proof still returns `creator/conflict`.
 - Desktop error pages now expose a manual frontend-only `Reload Spaces view` (`重新加载空间界面`) button whenever the failure is on the client/bridge side while `desktopLaunchState` and the running manager remain ready: it performs read-only checks (`role`, `desktopLaunchState`, `presentationSnapshot`) and mounts a fresh read-only `NativeHostController` without restarting Supervisor or any space.
-- Client surfaces (`NativeHostController`, `HostShellController`) now forward bounded, sanitized failure reports (including `stage`, `WorkbenchRemoteError` RPC transport/connection state, `portalFailure`, and up to 64 `navDiag` events) via `workbenchGuide/reportClientFailure` into `host.jsonl`, flushing once if the host WebSocket reconnects.
+- Client surfaces (`NativeHostController`, `HostShellController`) now forward bounded, sanitized failure reports (including `stage`, `WorkbenchRemoteError` RPC transport/connection state, `portalFailure`, and up to 64 `navDiag` events) via `workbenchGuide/reportClientFailure` into `host.jsonl`, flushing once if the host WebSocket reconnects. Desktop native reports also carry the document visibility state and its last change time.
 - Each space button in the Desktop, portable host, and Workbench sidebar rails now shows its own activity glow (static green when a task is running, breathing yellow when a tool approval or `ask_user_question` card waits for the user, with yellow overriding green and unknown/idle showing no light). Main-host state comes from the read-only `workbenchGuide/hostActivity` remote on trusted main hosts, and child spaces project `working` alongside `attention` from view-bridge IPC without drawing any full-screen or rail-bar glow.
 
 ### Fixed
 
+- Supervisor portal `state` and `view` requests now count only page-visible time toward their 10-second deadline. The first state handshake is still sent when the tab starts hidden, hidden interval ticks after the first snapshot do not start new state polls, and becoming visible resumes normal polling; exhausting the remaining visible budget still fails terminally without retry.
+- Ordinary child space views now enter through the view-bridge route `/__dsh-spaces/view-entry`, which sends `Origin-Agent-Cluster: ?1` and replaces itself with `/`, so each child space gets its own renderer process instead of sharing one with the portal and manager. A child page crash or long main-thread task no longer takes down the whole Spaces surface. The manager keeps its existing `/` entry.
 - `NativeHostController` outer selection deadline now aligns to 90 seconds (covering 15s initial guest load + 35s manager readiness + 35s child selection) and appends the bounded `navDiag` reached-stage summary to `detail` on expiration.
 - Contained `WorkbenchApp` instances disable stale `localStorage` `selectedId` auto-restore (`disableAutoRestore`), and `@dsh-spaces/view-bridge` deduplicates repeated `"ready"` `postMessage` frames across DOM mutations while `connection` remains `"ready"`.
 - Desktop `shell.overlay` remounts during live `cordis.patch.yml` reloads now replace a non-terminal disposed controller instead of rendering an already-stopped instance, while preserving terminal `failed` / `service-stopped` controllers and keeping the active controller pointer synced across service restarts and surface reloads.

@@ -110,10 +110,19 @@ export class NativeHostController {
   private readonly readOnlyLaunch: boolean;
   /** Current-space sidebar button glow; absent when the host offers no `hostActivity`. */
   private activityPoller?: HostActivityPoller;
+  private visibilityChangedAt: string | null = null;
+  private visibilityDocument?: Document;
+  private visibilityListener?: () => void;
   constructor(private guideApi: WorkbenchGuideApi, private bridge: DesktopBrowserBridge, options?: { readOnlyLaunch?: boolean }) {
     this.readOnlyLaunch = options?.readOnlyLaunch === true;
     const read = guideApi.hostActivity?.bind(guideApi);
     if (read) this.activityPoller = new HostActivityPoller(read, hostGlow => this.patch({ hostGlow }));
+    const visibilityDocument = typeof document === "undefined" ? undefined : document;
+    if (visibilityDocument && typeof visibilityDocument.addEventListener === "function") {
+      this.visibilityDocument = visibilityDocument;
+      this.visibilityListener = () => { this.visibilityChangedAt = new Date().toISOString(); };
+      visibilityDocument.addEventListener("visibilitychange", this.visibilityListener);
+    }
   }
   get disposedBeforeTerminal(): boolean {
     return this.stopped && this.state.phase !== "failed" && this.state.phase !== "service-stopped";
@@ -864,6 +873,10 @@ export class NativeHostController {
       detail: boundedDetail,
       failedAt,
       portalFailure,
+      visibility: {
+        state: this.visibilityDocument?.visibilityState === "hidden" ? "hidden" : "visible",
+        changedAt: this.visibilityChangedAt,
+      },
       ...(this.navTrail.length > 0 ? { navTrail: [...this.navTrail] } : {}),
       ...(cause instanceof WorkbenchRemoteError ? {
         ...(cause.endpoint ? { rpcEndpoint: cause.endpoint } : {}),
@@ -899,6 +912,10 @@ export class NativeHostController {
     if (this.stopped) return;
     this.stopped = true; this.lifetime.abort(); this.launchGeneration++; this.launchSettled = true; this.desiredGuest = 0;
     this.activityPoller?.stop();
+    if (this.visibilityDocument && this.visibilityListener && typeof this.visibilityDocument.removeEventListener === "function") {
+      this.visibilityDocument.removeEventListener("visibilitychange", this.visibilityListener);
+    }
+    this.visibilityDocument = undefined; this.visibilityListener = undefined; this.visibilityChangedAt = null;
     this.sequence++; clearTimeout(this.pollTimer); clearTimeout(this.launchTimer); clearTimeout(this.selectionTimer);
     clearTimeout(this.noticeTimer);
     this.browserRequest = undefined; this.browser?.stop();

@@ -153,6 +153,8 @@ export class WorkbenchHostRuntime {
       portalReason: report.portalFailure?.reason ?? null,
       portalCode: report.portalFailure?.code ?? null,
       portalStatus: report.portalFailure?.status ?? null,
+      visibilityState: report.visibility?.state ?? null,
+      visibilityChangedAt: report.visibility?.changedAt ?? null,
       navCount: report.navTrail?.length ?? 0,
     };
     if (report.navTrail && report.navTrail.length > 0) {

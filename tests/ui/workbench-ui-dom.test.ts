@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import * as esbuild from "esbuild";
 import type { Page } from "playwright";
 import { bindInitialLoopbackHttp } from "../../src/adapters/node/server/workbench-http.ts";
+import { handleViewEntryRequest, VIEW_ENTRY_PATH } from "../../packages/view-bridge/src/index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
@@ -28,7 +29,8 @@ function routeView(
     return true;
   }
   const id = url.pathname.slice("/view/".length).split("/")[0] ?? "";
-  res.writeHead(302, { location: `${childUrl}/${id}` });
+  assert.ok(id);
+  res.writeHead(302, { location: `${childUrl}${VIEW_ENTRY_PATH}` });
   res.end();
   return true;
 }
@@ -63,13 +65,24 @@ async function listen(handler: (req: IncomingMessage, res: ServerResponse) => vo
   };
 }
 
+async function listenChildView(childHtml: string) {
+  return listen((req, res) => {
+    if (new URL(req.url ?? "/", "http://127.0.0.1").pathname === VIEW_ENTRY_PATH) {
+      handleViewEntryRequest(req, res);
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(childHtml);
+  });
+}
+
 test("DOM: native settings creation entry is clickable and reveals its space", { timeout: 120_000 }, async (t) => {
   const bundled = await esbuild.build({
     absWorkingDir: root, entryPoints: [join(audit, "host.tsx")], bundle: true,
     write: false, format: "iife", platform: "browser", jsx: "automatic",
   });
   const childHtml = readFileSync(join(audit, "child.html"), "utf8");
-  const child = await listen((_req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end(childHtml); });
+  const child = await listenChildView(childHtml);
   t.after(() => child.close());
   let supervisorUrl = "";
   const supervisor = await listen((req, res) => {
@@ -145,10 +158,7 @@ test("DOM: home navigation keeps the same iframe node and textarea draft", { tim
   const hostJs = bundled.outputFiles[0]?.text ?? "";
   const childHtml = readFileSync(join(audit, "child.html"), "utf8");
 
-  const child = await listen((_req, res) => {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(childHtml);
-  });
+  const child = await listenChildView(childHtml);
   t.after(() => child.close());
 
   let supervisorUrl = "";
@@ -255,10 +265,7 @@ test("DOM: settings, templates, share and plugin navigation use the product API"
   const hostJs = bundled.outputFiles[0]?.text ?? "";
   const childHtml = readFileSync(join(audit, "child.html"), "utf8");
 
-  const child = await listen((_req, res) => {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(childHtml);
-  });
+  const child = await listenChildView(childHtml);
   t.after(() => child.close());
 
   let supervisorUrl = "";
@@ -398,10 +405,7 @@ test("DOM: space details and runtime tab preview DSH version plans", { timeout: 
   const hostJs = bundled.outputFiles[0]?.text ?? "";
   const childHtml = readFileSync(join(audit, "child.html"), "utf8");
 
-  const child = await listen((_req, res) => {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(childHtml);
-  });
+  const child = await listenChildView(childHtml);
   t.after(() => child.close());
 
   let supervisorUrl = "";
@@ -527,7 +531,7 @@ test("DOM: dialogs trap and restore focus, names validate live, the menu answers
     write: false, format: "iife", platform: "browser", jsx: "automatic",
   });
   const childHtml = readFileSync(join(audit, "child.html"), "utf8");
-  const child = await listen((_req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end(childHtml); });
+  const child = await listenChildView(childHtml);
   t.after(() => child.close());
   let supervisorUrl = "";
   const supervisor = await listen((req, res) => {
