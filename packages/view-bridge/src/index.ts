@@ -1,12 +1,33 @@
 import { SpaceMessageBus } from "./message-bus";
 import { SpaceMessages } from "./message-service";
 import type { Context } from "@deepseek-ai/cordis";
-import { injectViewHintScript, parseViewEnv, VIEW_HINT_GLOBAL, type ViewHandshakeConfig } from "./env";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { injectViewHintScript, parseViewEnv, VIEW_ENTRY_PATH, VIEW_HINT_GLOBAL, type ViewHandshakeConfig } from "./env";
 import { installSpaceAttention } from "./attention";
 import { installLlmActivity } from "./activity";
 
 export const name = "dsh-spaces-view-bridge";
 export const inject = ["webServer"];
+
+const VIEW_ENTRY_HTML = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>space</title><script>location.replace("/")</script></head><body></body></html>';
+const VIEW_ENTRY_HEADERS = {
+  "content-type": "text/html; charset=utf-8",
+  "cache-control": "no-store",
+  "referrer-policy": "no-referrer",
+  "origin-agent-cluster": "?1",
+  "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'",
+} as const;
+
+export function handleViewEntryRequest(req: IncomingMessage, res: ServerResponse): void {
+  if (req.method === "GET" || req.method === "HEAD") {
+    res.writeHead(200, VIEW_ENTRY_HEADERS);
+    if (req.method === "GET") res.end(VIEW_ENTRY_HTML);
+    else res.end();
+    return;
+  }
+  res.writeHead(405, { allow: "GET, HEAD" });
+  res.end();
+}
 
 /**
  * Independent Host half. Does not import Spaces or workbench management.
@@ -34,10 +55,22 @@ export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = 
   const getter = (ctx as { get?(name: string, strict?: boolean): unknown }).get;
   const webServer = (
     typeof getter === "function" ? getter.call(ctx, "webServer", false) : undefined
-  ) as { tapIndex?(transform: (html: string) => string): () => void } | undefined;
+  ) as {
+    tapIndex?(transform: (html: string) => string): () => void;
+    register?(route: {
+      kind: "exact";
+      path: string;
+      handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
+    }): () => void;
+  } | undefined;
+  const effect = (ctx as { effect?(fn: () => () => void): () => void }).effect;
   if (webServer && typeof webServer.tapIndex === "function") {
-    const effect = (ctx as { effect?(fn: () => () => void): () => void }).effect;
     const install = () => webServer.tapIndex!((html) => injectViewHintScript(html, view));
+    if (typeof effect === "function") effect.call(ctx, install);
+    else install();
+  }
+  if (webServer && typeof webServer.register === "function") {
+    const install = () => webServer.register!({ kind: "exact", path: VIEW_ENTRY_PATH, handler: handleViewEntryRequest });
     if (typeof effect === "function") effect.call(ctx, install);
     else install();
   }
@@ -46,6 +79,7 @@ export function apply(ctx: Context, _config?: unknown, env: NodeJS.ProcessEnv = 
 
 export {
   VIEW_ENV,
+  VIEW_ENTRY_PATH,
   VIEW_HINT_GLOBAL,
   injectViewHintScript,
   parseViewEnv,

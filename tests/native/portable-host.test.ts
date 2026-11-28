@@ -584,34 +584,57 @@ test("guide details redact complete authentication headers",async()=>{
  assert.doesNotMatch(publicGuideDetail("Cookie: sid=synthetic-one; remember=synthetic-two"),/synthetic-/);
 });
 
-function portalFixture() {
+function portalFixture(options: { visibility?: "visible" | "hidden" } = {}) {
   const origin = "http://127.0.0.1:3088", managerOrigin = "http://127.0.0.1:3091";
   let state: unknown = { ...inventory, protocolVersion: 2, availability: "ready",
     spaces: inventory.spaces.map(row => ({ ...row, hasWebApp: true })) };
   const view = { spaceId: "spaces-hub", generation: 1, serviceEpoch: epoch, origin: managerOrigin,
     entryOrigin: origin, entryPath: "/view/spaces-hub/1", channel: "manager-channel" };
   const sent: any[] = [], forwarded: any[] = [], requests: string[] = [];
-  const timers = new Map<number, { fn: () => void; ms: number }>();
+  type TimerRow = { id: number; fn: () => void; ms: number; due: number; interval: boolean };
+  const timers = new Map<number, TimerRow>();
   const listeners = new Map<string, (event: any) => void>();
-  let clock = 0, removed = 0, response: (() => Response | Promise<Response>) | null = null;
+  const documentListeners = new Map<string, Set<(event: any) => void>>();
+  let clock = 0, removed = 0, now = 0, response: (() => Response | Promise<Response>) | null = null;
   const frame = { contentWindow: { postMessage: (message: unknown) => forwarded.push(message) },
     addEventListener() {}, remove: () => removed++ };
   const parent = { postMessage: (message: unknown) => sent.push(message) };
-  const deadline = new AbortController();
+  const document = {
+    visibilityState: options.visibility ?? "visible" as "visible" | "hidden",
+    createElement: () => frame,
+    body: { append() {} },
+    getElementById: () => ({ remove() {} }),
+    addEventListener: (name: string, fn: (event: any) => void) => {
+      const rows = documentListeners.get(name) ?? new Set<(event: any) => void>();
+      rows.add(fn); documentListeners.set(name, rows);
+    },
+    removeEventListener: (name: string, fn: (event: any) => void) => { documentListeners.get(name)?.delete(fn); },
+  };
+  const schedule = (fn: () => void, ms: number, interval: boolean) => {
+    const id = ++clock;
+    timers.set(id, { id, fn, ms, due: now + ms, interval });
+    return id;
+  };
   const script = renderPortalPage(audience, managerOrigin).match(/<script>([\s\S]*)<\/script>/)![1];
   new Script(script).runInNewContext({
     parent, window: { addEventListener: (name: string, fn: (event: any) => void) => listeners.set(name, fn) },
-    location: { origin }, document: { createElement: () => frame, body: { append() {} }, getElementById: () => ({ remove() {} }) },
-    AbortController, AbortSignal: { any: AbortSignal.any, timeout: () => deadline.signal }, TextDecoder,
-    fetch: async (path: string, options: RequestInit) => {
+    location: { origin }, document,
+    AbortController, AbortSignal, TextDecoder,
+    performance: { now: () => now },
+    fetch: (path: string, options: RequestInit) => new Promise<Response>((resolve, reject) => {
       requests.push(path);
-      if (response) return response();
-      if (options.signal?.aborted) throw new Error("private aborted request");
-      return Response.json({ ok: true, value: path.endsWith("/state") ? state : view });
-    },
-    setInterval: (fn: () => void, ms: number) => { timers.set(++clock, { fn, ms }); return clock; },
+      const aborted = () => reject(new Error("private aborted request"));
+      if (options.signal?.aborted) { aborted(); return; }
+      options.signal?.addEventListener("abort", aborted, { once: true });
+      void Promise.resolve().then(async () => {
+        try {
+          resolve(response ? await response() : Response.json({ ok: true, value: path.endsWith("/state") ? state : view }));
+        } catch (error) { reject(error); }
+      });
+    }),
+    setInterval: (fn: () => void, ms: number) => schedule(fn, ms, true),
     clearInterval: (id: number) => timers.delete(id),
-    setTimeout: (fn: () => void, ms: number) => { timers.set(++clock, { fn, ms }); return clock; },
+    setTimeout: (fn: () => void, ms: number) => schedule(fn, ms, false),
     clearTimeout: (id: number) => timers.delete(id),
   });
   const message = (data: object, overrides: object = {}) => listeners.get("message")!({
@@ -620,8 +643,36 @@ function portalFixture() {
   });
   const select = (spaceId = "alpha", requestId = 1) => listeners.get("message")!({ source: parent, origin: parentOrigin,
     data: { source: "dsh-spaces-portal-parent", channel, type: "select", requestId, spaceId } });
-  const refresh = async () => { [...timers.values()].find(timer => timer.ms === 1500)?.fn(); await tick(); };
-  return { sent, forwarded, requests, timers, frame, view, message, select, refresh, deadline,
+  const flush = async () => { for (let index = 0; index < 6; index += 1) await tick(); };
+  const triggerRefresh = () => {
+    const timer = [...timers.values()].find(row => row.interval && row.ms === 1500);
+    if (!timer) return;
+    timer.due = now + timer.ms;
+    timer.fn();
+  };
+  const refresh = async () => { triggerRefresh(); await flush(); };
+  const advance = (ms: number) => {
+    now += ms;
+    for (;;) {
+      const timer = [...timers.values()].filter(row => row.due <= now).sort((a, b) => a.due - b.due || a.id - b.id)[0];
+      if (!timer) break;
+      if (timer.interval) timer.due += timer.ms * Math.max(1, Math.floor((now - timer.due) / timer.ms) + 1);
+      else timers.delete(timer.id);
+      timer.fn();
+    }
+  };
+  const fireTimeout = (ms?: number) => {
+    const timer = [...timers.values()].find(row => !row.interval && (ms === undefined || row.ms === ms));
+    assert.ok(timer, `timeout ${ms ?? "any"}`);
+    timers.delete(timer.id);
+    timer.fn();
+  };
+  const setVisibility = (visibilityState: "visible" | "hidden") => {
+    if (document.visibilityState === visibilityState) return;
+    document.visibilityState = visibilityState;
+    for (const fn of [...(documentListeners.get("visibilitychange") ?? [])]) fn({});
+  };
+  return { sent, forwarded, requests, timers, frame, view, message, select, refresh, triggerRefresh, flush, advance, fireTimeout, setVisibility,
     removed: () => removed, setState: (next: unknown) => { state = next; }, state: () => state as any,
     setResponse: (next: (() => Response | Promise<Response>) | null) => { response = next; } };
 }
@@ -693,8 +744,9 @@ test("rendered portal distinguishes state HTTP, transport, deadline, malformed a
   ];
   for (const item of cases) {
     const p = portalFixture(); await tick();
-    if (item.name === "deadline") p.deadline.abort();
-    p.setResponse(item.response); await p.refresh();
+    p.setResponse(item.response);
+    if (item.name === "deadline") { p.triggerRefresh(); p.fireTimeout(10000); await p.flush(); }
+    else await p.refresh();
     const failures = p.sent.filter(message => message.type === "failed");
     assert.equal(failures.length, 1, item.name);
     assert.deepEqual(JSON.parse(JSON.stringify(failures[0].failure)), { reason: item.reason,
@@ -703,6 +755,58 @@ test("rendered portal distinguishes state HTTP, transport, deadline, malformed a
     const count = p.requests.length; await p.refresh(); p.select();
     assert.equal(p.requests.length, count); assert.equal(p.timers.size, 0);
   }
+});
+
+test("portal sends the first state handshake while hidden, pauses later polls, and refreshes when visible again", async () => {
+  const p = portalFixture({ visibility: "hidden" }); await p.flush();
+  const stateRequests = () => p.requests.filter(path => path.endsWith("/state")).length;
+  assert.equal(stateRequests(), 1, "the first state handshake is not skipped");
+  p.triggerRefresh(); await p.flush();
+  assert.equal(stateRequests(), 1, "periodic polling pauses once a snapshot exists");
+  p.setVisibility("visible"); await p.flush();
+  assert.equal(stateRequests(), 2, "becoming visible resumes polling exactly once");
+  assert.equal(p.sent.some(message => message.type === "failed"), false);
+});
+
+test("portal request deadline pauses while hidden and a response inside the remaining visible budget succeeds", async () => {
+  const p = portalFixture(); await p.flush();
+  let resolveResponse!: (response: Response) => void;
+  const pending = new Promise<Response>(resolve => { resolveResponse = resolve; });
+  p.setResponse(() => pending);
+  const count = p.requests.length;
+  p.triggerRefresh();
+  assert.equal(p.requests.length, count + 1);
+  p.advance(2000);
+  p.setVisibility("hidden");
+  assert.equal([...p.timers.values()].some(row => !row.interval), false);
+  p.advance(11000);
+  assert.equal(p.requests.length, count + 1, "hidden interval ticks do not start another state request");
+  p.setVisibility("visible");
+  const deadline = [...p.timers.values()].find(row => !row.interval);
+  assert.equal(deadline?.ms, 8000);
+  p.advance(1000);
+  resolveResponse(Response.json({ ok: true, value: p.state() }));
+  await p.flush();
+  assert.equal(p.sent.some(message => message.type === "failed"), false);
+  assert.equal(p.sent.filter(message => message.type === "state").length, 2);
+  assert.equal([...p.timers.values()].some(row => !row.interval), false);
+});
+
+test("portal request deadline counts only visible time before failing terminally", async () => {
+  const p = portalFixture(); await p.flush();
+  p.setResponse(() => new Promise<Response>(() => {}));
+  p.triggerRefresh();
+  p.advance(3000);
+  p.setVisibility("hidden");
+  p.advance(5000);
+  p.setVisibility("visible");
+  const deadline = [...p.timers.values()].find(row => !row.interval);
+  assert.equal(deadline?.ms, 7000);
+  p.advance(7000);
+  await p.flush();
+  const failures = p.sent.filter(message => message.type === "failed");
+  assert.equal(failures.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(failures[0].failure)), { reason: "state-request", code: "portal/request-deadline" });
 });
 
 test("rendered portal distinguishes epoch, generation, manager stop, view errors and readiness deadline", async () => {

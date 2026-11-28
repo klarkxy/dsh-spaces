@@ -1,3 +1,4 @@
+import { VIEW_ENTRY_PATH } from "../../shared/space-host";
 import { SpaceBaseCreation } from './supervisor/base-creation';
 import { profileBase } from './profile/space-base';
 import { lstatSync } from "../../shared/node/filesystem";
@@ -863,7 +864,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     if (!named.length) {
       return { status: 502, message: "The child authentication exchange failed." };
     }
-    const location = `${view.origin}/`;
+    const location = id === this.managerId ? `${view.origin}/` : `${view.origin}${VIEW_ENTRY_PATH}`;
     if (/[?&]token=/i.test(location) || named.some((row) => /token=/i.test(row.split(";", 1)[0] ?? ""))) {
       return { status: 502, message: "The child authentication exchange failed." };
     }

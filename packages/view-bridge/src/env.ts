@@ -9,6 +9,7 @@ export const VIEW_ENV = {
 } as const;
 
 export const VIEW_HINT_GLOBAL = "__DSH_SPACES_VIEW__";
+export const VIEW_ENTRY_PATH = "/__dsh-spaces/view-entry";
 
 const SERVICE_EPOCH_RE = /^[a-f0-9]{64}$/;
 
