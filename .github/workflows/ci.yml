@@ -22,7 +22,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: pnpm
       - run: node scripts/prepare-ci-environment.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm run catalog:check
@@ -79,7 +78,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "26"
-          cache: pnpm
       - run: node scripts/prepare-ci-environment.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build:spaces

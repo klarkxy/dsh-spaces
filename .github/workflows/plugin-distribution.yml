@@ -32,7 +32,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "26.10.0"
-          cache: pnpm
       - run: node scripts/prepare-ci-environment.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm run catalog:check
