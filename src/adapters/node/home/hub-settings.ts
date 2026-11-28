@@ -58,6 +58,7 @@ export function readSettings(dshHome: string): HubSettings {
       locale: parseLocale(parsed.locale),
       theme: parseTheme(parsed.theme),
       catalogUrl: parseCatalogUrl(parsed.catalogUrl),
+      restoreRunningSpacesOnLaunch: parsed.restoreRunningSpacesOnLaunch !== false,
     };
   } catch {
     return { ...DEFAULT_HUB_SETTINGS };
@@ -79,6 +80,7 @@ export function writeSettings(dshHome: string, settings: HubSettings): HubSettin
     locale: parseLocale(settings.locale),
     theme: parseTheme(settings.theme),
     catalogUrl: parseCatalogUrl(settings.catalogUrl),
+    restoreRunningSpacesOnLaunch: settings.restoreRunningSpacesOnLaunch !== false,
   };
   atomicWrite(settingsPath(dshHome), `${JSON.stringify(next, null, 2)}\n`);
   return next;

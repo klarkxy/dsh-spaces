@@ -6,7 +6,7 @@ export interface HostChannel {
 }
 
 export interface SupervisorStopTarget {
-  close(): Promise<void>;
+  close(reason?: "host-exit" | "signal"): Promise<void>;
 }
 
 export interface LifetimeDeps {
@@ -44,7 +44,7 @@ export function bindSupervisorLifetime(input: {
     void handle.then(async (target) => {
       if (signal === "host-exit") {
         try {
-          await target.close();
+          await target.close("host-exit");
           report((reporter) => reporter.recordNormalStop({ exit: 0, signal: "host-exit" }));
           deps.exit(0);
         } catch (error) {
@@ -53,7 +53,7 @@ export function bindSupervisorLifetime(input: {
         return;
       }
       try {
-        await target.close();
+        await target.close("signal");
         report((reporter) => reporter.recordNormalStop({ exit: 0, signal }));
         deps.exit(0);
       } catch (error) {

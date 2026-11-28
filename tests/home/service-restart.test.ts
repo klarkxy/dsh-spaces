@@ -29,8 +29,10 @@ function fixture(t: TestContext, live = true) {
     availability: "ready", role: "manager", managerId: "spaces-hub", owner: { kind: "web", since: new Date().toISOString() },
     writable: true, mode: "verified-full", dshVersion: COMPATIBLE_DSH_CLI_VERSION, maintenance: false, reasons: [], jobs: [],
     spaces: ["spaces-hub", "coding"].map(id => ({ id, displayName: id === "coding" ? "Coding" : "Manager", isHost: id === "spaces-hub",
-      hasWebApp: true, icon: "", status: "running", generation: 1, managed: true, dshVersion: null, startWithDesktop: false })) };
+      hasWebApp: true, icon: "", status: "running", generation: 1, managed: true, dshVersion: null, startWithDesktop: false,
+      ...(id === "coding" ? { working: "busy" as const } : {}) })) };
   let starts = 0, stops = 0, plans = 0, status = "succeeded", refuseSubmit = false, release = true;
+  const resumeModes: unknown[] = [];
   const saved = join(home, ".dsh-spaces-control", "jobs", "shutdown-job.json");
   const api = { state: async () => state,
     preview: async () => ({ id: "shutdown-plan-" + ++plans, kind: "service.shutdown", title: "shutdown", scope: "controller",
@@ -47,10 +49,10 @@ function fixture(t: TestContext, live = true) {
   } as unknown as WorkbenchApi;
   const fetchState = async () => new Response(JSON.stringify({ ok: true, value: state }), { headers: { "content-type": "application/json" } });
   const operation = () => new DesktopServiceRestart({ home, allowRealHome: false, assertDesktop() {}, fetch: fetchState, connect: () => api, timeoutMs: 50,
-    launch: async (epoch) => { starts++; assert.equal(owner.inspect().held, false); if (live) assert.equal(epoch, endpoint.serviceEpoch);
+    launch: async (epoch, _missing, resumeMode) => { starts++; resumeModes.push(resumeMode); assert.equal(owner.inspect().held, false); if (live) assert.equal(epoch, endpoint.serviceEpoch);
       return { ok: true, connected: true, unavailable: false, origin: "http://127.0.0.1:34568", reasons: [] }; } });
   return { home, endpoint, endpointFile, state, api, fetchState, operation, saved,
-    counts: () => ({ starts, stops, plans }), setStatus(value: string) { status = value; }, keepLease() { release = false; },
+    counts: () => ({ starts, stops, plans }), resumeModes: () => resumeModes.slice(), setStatus(value: string) { status = value; }, keepLease() { release = false; },
     refuse() { refuseSubmit = true; }, replaceOwner() { handle!.release(); handle = owner.acquire("web", endpoint.origin + "/");
       endpoint.serviceEpoch = deriveServiceEpoch(handle.owner.nonce); state.serviceEpoch = endpoint.serviceEpoch; writeEndpointFile(endpointFile, endpoint); },
   };
@@ -59,10 +61,11 @@ function fixture(t: TestContext, live = true) {
 test("manual restart previews real affected spaces, performs one normal shutdown and never replays confirmation", async t => {
   const f = fixture(t), restart = f.operation();
   const preview = await restart.preview();
-  assert.deepEqual(preview.spaces.map(s => [s.id, s.running]), [["spaces-hub", true], ["coding", true]]);
+  assert.deepEqual(preview.spaces.map(s => [s.id, s.running, s.busy]), [["spaces-hub", true, false], ["coding", true, true]]);
   assert.equal(preview.action, "restart"); assert.deepEqual(f.counts(), { starts: 0, stops: 0, plans: 1 });
   assert.equal(JSON.stringify(preview).includes(f.endpoint.bearer), false);
   assert.equal((await restart.execute(preview.confirmationId)).ok, true);
+  assert.deepEqual(f.resumeModes(), ["running-and-policy"]);
   assert.equal(JSON.parse(readFileSync(f.saved, "utf8")).status, "succeeded");
   await assert.rejects(restart.execute(preview.confirmationId), /invalid or expired/);
   assert.deepEqual(f.counts(), { starts: 1, stops: 1, plans: 1 });
@@ -220,6 +223,14 @@ test("explicit stop confirms durable completion without starting a replacement s
   assert.equal(result.ok, true); assert.equal(result.connected, false);
   assert.deepEqual(f.counts(), { starts: 0, stops: 1, plans: 1 });
   await assert.rejects(operation.execute(preview.confirmationId, true), /invalid or expired/);
+});
+
+test("manual restart passes a chosen resume mode and rejects an invalid mode", async t => {
+  const f = fixture(t), restart = f.operation(), preview = await restart.preview();
+  assert.equal((await restart.execute(preview.confirmationId, false, "policy-only")).ok, true);
+  assert.deepEqual(f.resumeModes(), ["policy-only"]);
+  await assert.rejects(restart.execute("x", false, "sometimes" as never), /resume mode is invalid/);
+  assert.equal(f.counts().starts, 1);
 });
 
 test("welcome notice sharing only preserves an actual version acknowledgement", t => {

@@ -8,6 +8,7 @@ import type {
   WorkbenchRuntime as WorkbenchRuntimeDto,
   WorkbenchSnapshot,
 } from "../../../shared/workbench";
+import type { ResumeSpacesMode } from "../../../shared/types";
 import type { PidAliveFn } from "../home/home-lease";
 import type { ProcessRuntime } from "../runtime/process-manager";
 import type { PatchWriter } from "../profile/patch-writer";
@@ -50,8 +51,10 @@ export interface WorkbenchSupervisorOptions {
   jobsInject?: WorkbenchJobsInject;
   runtimeRoot?: string;
   allowRealHome?: boolean;
-  /** Only a new Desktop opening opts into saved per-space startup preferences. */
+  /** Desktop-origin launch: saved per-space startup preferences apply. */
   startDesktopSpaces?: boolean;
+  /** Explicit one-shot resume selection; absent means the Home setting decides ledger use. */
+  resumeMode?: ResumeSpacesMode;
   portStart?: number;
   portEnd?: number;
   now?: () => Date;
@@ -80,7 +83,7 @@ export interface WorkbenchSupervisorHandle {
   runtime: WorkbenchSupervisorRuntime;
   origin: string;
   bootstrapUrl: string;
-  close(): Promise<void>;
+  close(reason?: "host-exit" | "signal"): Promise<void>;
 }
 
 export interface ChildView {

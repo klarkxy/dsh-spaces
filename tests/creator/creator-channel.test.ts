@@ -907,3 +907,88 @@ test("a registration bound to the previous epoch loses every scoped op and its p
   const staleExecute = await call(fx, "createExecute", scope, { planId: (preview.body.value as CreatorPlan).id, requestId: "req-turn" });
   assert.equal(staleExecute.status, 401);
 });
+
+async function listenRaw(port: number, handler: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void): Promise<Server> {
+  const server = createServer(handler);
+  await new Promise<void>((accept, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => { server.off("error", reject); accept(); });
+  });
+  listeners.push(server);
+  return server;
+}
+
+test("a closed previous identity listener allows a dead-host reclaim", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  const events: string[] = [];
+  (fx.ports as { diagnosticLog?: unknown }).diagnosticLog = {
+    info: (event: string) => events.push(event),
+    error: () => undefined,
+  };
+  await serve(fx);
+  const firstListener = await startIdentityServer({ home, profile: "web" });
+  const first = await issue(fx, firstListener);
+  await firstListener.close();
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const second = await issue(fx, secondListener);
+  assert.notEqual(second.registrationId, first.registrationId);
+  const stale = await call(fx, "context", first.scopes.creator!, {});
+  assert.equal(stale.status, 401);
+  assert.equal(events.includes("creator.reclaimed-dead-host"), true);
+});
+
+test("a live previous identity listener keeps the registration conflict", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const firstListener = await startIdentityServer({ home, profile: "web" });
+  await issue(fx, firstListener);
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const denied = await call(fx, "issue", HOST_BEARER, {
+    origin: secondListener.origin,
+    bearer: secondListener.bearer,
+    home: fx.home,
+    profile: "web",
+  });
+  assert.equal(denied.body.error?.code, "creator/conflict");
+});
+
+test("a previous origin that rejects the old bearer is reclaimed as dead", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const firstListener = await startIdentityServer({ home, profile: "web" });
+  const first = await issue(fx, firstListener);
+  const port = Number(new URL(firstListener.origin).port);
+  await firstListener.close();
+  await listenRaw(port, (_req, res) => { res.writeHead(401); res.end(); });
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const second = await issue(fx, secondListener);
+  assert.notEqual(second.registrationId, first.registrationId);
+});
+
+test("a hanging previous identity probe remains a conflict", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const firstListener = await startIdentityServer({ home, profile: "web" });
+  await issue(fx, firstListener);
+  const port = Number(new URL(firstListener.origin).port);
+  await firstListener.close();
+  await listenRaw(port, () => undefined);
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const started = Date.now();
+  const denied = await call(fx, "issue", HOST_BEARER, {
+    origin: secondListener.origin,
+    bearer: secondListener.bearer,
+    home: fx.home,
+    profile: "web",
+  });
+  assert.equal(denied.body.error?.code, "creator/conflict");
+  assert.ok(Date.now() - started >= 1_400, "the hung probe must wait for its bounded timeout");
+});

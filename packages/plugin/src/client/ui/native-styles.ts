@@ -16,6 +16,7 @@ export const NATIVE_HOST_CSS = `
 .dsh-native-confirm-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
 .dsh-native-confirm .dsh-host-action.danger{border-color:var(--host-danger,#d1242f);color:var(--host-danger,#d1242f)}
 .dsh-native-confirm .dsh-host-action.danger:hover:not(:disabled){background:color-mix(in srgb,var(--host-danger,#d1242f) 12%,transparent)}
+.dsh-native-warning{color:var(--dsw-alias-state-warn-primary,var(--dsh-ui-warn,#d9a441))}
 .dsh-native-operation-notice{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 110px);padding:12px 18px;border-radius:12px;z-index:1200;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#1f2328);box-shadow:0 4px 20px #0002;border:1px solid var(--dsw-alias-border-l3,#ddd)}
 [data-windows-titlebar] .dsh-host-dock[data-spaces-native] { --dsh-frame-top-clearance: var(--dsh-windows-titlebar-height); }
 html[data-windows-titlebar] body:has(.dsh-host-dock[data-spaces-native]) {

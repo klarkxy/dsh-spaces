@@ -1,5 +1,7 @@
 /** Public plugin Remote DTOs. Browser-safe: no paths, tokens, cookies or commands. */
 import type { SpaceDetail, SpacesOverview } from "../../../src/shared/spaces-control";
+import type { ResumeSpacesMode } from "../../../src/shared/types";
+export type { ResumeSpacesMode } from "../../../src/shared/types";
 import type { WorkbenchStartupFailure } from "../../../src/shared/workbench-startup";
 import type { WorkbenchApi, WorkbenchRole } from "../../../src/shared/workbench";
 import { parseNavDiag, type NavDiagRecord } from "../../../src/shared/nav-diag";
@@ -78,7 +80,7 @@ export interface WorkbenchGuideApi {
   spaceAction?(request: DesktopSpaceAction): Promise<import("../../../src/shared/space-host").PortalSnapshot>;
   /** Desktop-only, explicit preview and confirmation; never called by discovery. */
   previewServiceRestart?(): Promise<WorkbenchServiceRestartPreview>;
-  restartService?(confirmationId: string): Promise<WorkbenchBootstrapResult>;
+  restartService?(confirmationId: string, resumeMode?: ResumeSpacesMode): Promise<WorkbenchBootstrapResult>;
   presentationSnapshot?(): Promise<import("../../../src/shared/space-host").PortalSnapshot>;
   /** Read-only raw activity of the native space this client runs in; the client composes the light. The signal bounds one read. */
   hostActivity?(signal?: AbortSignal): Promise<{ attention: "required" | "none" | "unknown"; working: "busy" | "idle" | "unknown" }>;
@@ -212,5 +214,5 @@ export interface WorkbenchServiceRestartPreview {
   confirmationId: string;
   expiresAt: string;
   action: "start" | "restart" | "stop";
-  spaces: { id: string; displayName: string; running: boolean }[];
+  spaces: { id: string; displayName: string; running: boolean; busy: boolean }[];
 }

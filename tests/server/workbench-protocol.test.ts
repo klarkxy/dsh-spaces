@@ -29,6 +29,7 @@ const settings: WorkbenchHomeSettings = {
   portEnd: 3199,
   packageSource: "official",
   catalogUrl: "",
+  restoreRunningSpacesOnLaunch: true,
 };
 
 const space = (id: string, generation = 1): WorkbenchRevisionSpace => ({
@@ -210,13 +211,13 @@ test("mutation context rejects missing extra or malformed fields", () => {
 test("product command schema is closed and rejects paths, credentials, and tags", () => {
   const valid = parseWorkbenchProductCommand({
     kind: "settings.update",
-    settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+    settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
   });
   assert.equal(valid.kind, "settings.update");
   assert.throws(() =>
     parseWorkbenchProductCommand({
       kind: "settings.update",
-      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
       extra: true,
     }),
   );

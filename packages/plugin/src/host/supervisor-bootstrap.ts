@@ -30,6 +30,7 @@ import {
   SUPERVISOR_ENDPOINT_FILE,
   type SupervisorEndpoint,
 } from "../../../../src/adapters/node/home/supervisor-endpoint";
+import type { ResumeSpacesMode } from "../../../../src/shared/types";
 import type { WorkbenchHttpFetch } from "./workbench-http";
 
 export { SUPERVISOR_ENDPOINT_FILE, readEndpointFile, writeEndpointFile } from "../../../../src/adapters/node/home/supervisor-endpoint";
@@ -52,6 +53,7 @@ export const SUPERVISOR_CLI_FLAGS = {
   snapshotWorker: "--snapshot-worker",
   snapshotRoot: "--snapshot-root",
   exitWithHost: "--exit-with-host",
+  resumeMode: "--resume-mode",
 } as const;
 
 /** Literal argv flag until primary SUPERVISOR_CLI_FLAGS / parseSupervisorArgs integration. */
@@ -98,6 +100,7 @@ export interface SupervisorBootstrapOptions {
   allowColdStart?: boolean;
   exitWithHost?: boolean;
   startDesktopSpaces?: boolean;
+  resumeMode?: ResumeSpacesMode;
   timeoutMs?: number;
   pollMs?: number;
   fetch?: WorkbenchHttpFetch;
@@ -342,6 +345,7 @@ export async function bootstrapSupervisor(
         selected.payloadRootLib,
       ];
       if (snapshotRoot) childArgv.push(SUPERVISOR_CLI_FLAGS.snapshotRoot, snapshotRoot);
+      if (options.resumeMode) childArgv.push(SUPERVISOR_CLI_FLAGS.resumeMode, options.resumeMode);
 
       const observation: { failure?: string; diagnosticFile: string } = { diagnosticFile };
       let spawned: ChildProcess | void;

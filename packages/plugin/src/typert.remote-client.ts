@@ -1,3 +1,4 @@
+import type { ResumeSpacesMode } from "../../../src/shared/types";
 import type { PortalSnapshot, SpaceHostAudience } from "../../../src/shared/space-host";
 import type { DesktopSpaceAction } from "./types";
 import type { RemoteResult, TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
@@ -49,7 +50,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     previewServiceRestart: () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
     previewServiceStop: () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
     stopService: (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
-    restartService: (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
+    restartService: (confirmationId: string, resumeMode?: ResumeSpacesMode) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     beginDesktopLaunch: () => Promise<RemoteResult<DesktopLaunchState>>;
     desktopLaunchState: () => Promise<RemoteResult<DesktopLaunchState>>;
     reportClientFailure: (report: ClientFailureReport) => Promise<RemoteResult<{ recorded: boolean }>>;
@@ -72,7 +73,7 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
     "workbenchGuide/previewServiceRestart": () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
     "workbenchGuide/previewServiceStop": () => Promise<RemoteResult<WorkbenchServiceRestartPreview>>;
     "workbenchGuide/stopService": (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
-    "workbenchGuide/restartService": (confirmationId: string) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
+    "workbenchGuide/restartService": (confirmationId: string, resumeMode?: ResumeSpacesMode) => Promise<RemoteResult<WorkbenchBootstrapResult>>;
     "workbenchGuide/beginDesktopLaunch": () => Promise<RemoteResult<DesktopLaunchState>>;
     "workbenchGuide/desktopLaunchState": () => Promise<RemoteResult<DesktopLaunchState>>;
     "workbenchGuide/reportClientFailure": (report: ClientFailureReport) => Promise<RemoteResult<{ recorded: boolean }>>;

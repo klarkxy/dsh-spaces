@@ -317,6 +317,10 @@ test("missing endpoint without a lease does not write Home business state", asyn
 test("schemas accept v2 state and reject recovery or takeover commands", () => {
   const epoch = "ab".repeat(32);
   assert.equal(workbenchStateSchema.safeParse(v2State(epoch)).success, true);
+  assert.equal(workbenchStateSchema.safeParse({
+    ...v2State(epoch),
+    autoResume: { active: false, total: 1, completed: 1, failedSpaceIds: ["space-alpha"] },
+  }).success, true);
   assert.equal(workbenchStateSchema.safeParse({ ...v2State(epoch), recoveryRequired: false }).success, false);
   assert.equal(workbenchCommandSchema.safeParse({ kind: "controller.acquire" }).success, false);
   assert.equal(workbenchCommandSchema.safeParse({ kind: "recovery.resume" }).success, false);

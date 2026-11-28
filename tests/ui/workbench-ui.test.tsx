@@ -180,7 +180,7 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
   if (request.method === "settings") {
     return {
       method: "settings",
-      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
       clientDefaults: { locale: "zh", theme: "dark" },
       observation: OBSERVATION,
     };
@@ -2302,7 +2302,7 @@ test("repeat submit of the same pending intent reuses requestId and does not res
 });
 
 test("settings.update success then later dirty edit is not overwritten by polling the same terminal job", async () => {
-  const saved = { portStart: 3100, portEnd: 3199, packageSource: "official" as PackageSource, catalogUrl: "" };
+  const saved = { portStart: 3100, portEnd: 3199, packageSource: "official" as PackageSource, catalogUrl: "", restoreRunningSpacesOnLaunch: true };
   let settingsReads = 0;
   let jobs: WorkbenchJob[] = [];
   const api = fakeApi({
@@ -2388,7 +2388,7 @@ test("edits made while settings.update is pending are kept when the old save suc
       result: {
         product: {
           kind: "settings.update",
-          settings: { portStart: 4100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+          settings: { portStart: 4100, portEnd: 3199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
         },
       },
     }),
@@ -2415,7 +2415,7 @@ test("stop() drops in-flight state and product responses", async () => {
   stateGate.resolve(state({ reasons: ["late-state"] }));
   settingsGate.resolve({
     method: "settings",
-    settings: { portStart: 4100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+    settings: { portStart: 4100, portEnd: 3199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
     clientDefaults: { locale: "zh", theme: "dark" },
     observation: OBSERVATION,
   });
@@ -2883,6 +2883,55 @@ test("known server preview-rejection reasons are localized", () => {
   assert.ok(english.includes(t("en", "error.targetChanged")));
 });
 
+test("auto-resume status is compact, localized, actionable and quiet when absent", async () => {
+  const activeApi = fakeApi({
+    state: async () => state({
+      autoResume: { active: true, total: 2, completed: 1, inProgressSpaceId: "alpha", failedSpaceIds: [] },
+    }),
+  });
+  const activeCtrl = controller(activeApi);
+  await activeCtrl.poll();
+  const activeHtml = ready(activeCtrl);
+  assert.ok(activeHtml.includes('data-auto-resume="true"'));
+  assert.ok(activeHtml.includes("正在恢复空间 1/2…Alpha"));
+  activeCtrl.setLocale("en");
+  assert.ok(ready(activeCtrl).includes("Resuming spaces 1/2…"));
+
+  const failedApi = fakeApi({
+    state: async () => state({
+      autoResume: { active: false, total: 2, completed: 2, failedSpaceIds: ["alpha", "missing-x"] },
+    }),
+  });
+  const failedCtrl = controller(failedApi);
+  await failedCtrl.poll();
+  const failedHtml = ready(failedCtrl);
+  assert.ok(failedHtml.includes("以下空间恢复启动失败："));
+  assert.ok(failedHtml.includes('data-auto-resume-space="alpha"'));
+  assert.ok(failedHtml.includes(">Alpha</button>"));
+  assert.ok(failedHtml.includes(">missing-x</button>"), "a deleted space falls back to its id");
+
+  const errorApi = fakeApi({
+    state: async () => state({
+      autoResume: { active: false, total: 0, completed: 0, failedSpaceIds: [], error: "ledger bad" },
+    }),
+  });
+  const errorCtrl = controller(errorApi);
+  await errorCtrl.poll();
+  assert.ok(ready(errorCtrl).includes("未按正常停机记录恢复空间：ledger bad"));
+
+  const quietCtrl = controller();
+  await quietCtrl.poll();
+  assert.ok(!ready(quietCtrl).includes('data-auto-resume="true"'));
+  const doneApi = fakeApi({
+    state: async () => state({
+      autoResume: { active: false, total: 1, completed: 1, failedSpaceIds: [] },
+    }),
+  });
+  const doneCtrl = controller(doneApi);
+  await doneCtrl.poll();
+  assert.ok(!ready(doneCtrl).includes('data-auto-resume="true"'));
+});
+
 test("active jobs are announced in the global status with kind, phase and message", async () => {
   const api = fakeApi({
     state: async () => state({
@@ -3242,6 +3291,7 @@ test("settings UX: sources live in general, dirty tracks actual changes, quick p
   assert.ok(generalHtml.includes('data-settings-section="all"'));
   assert.ok(generalHtml.includes(t("zh", "settings.packageSource")));
   assert.ok(generalHtml.includes(t("zh", "settings.catalogUrl")));
+  assert.ok(generalHtml.includes(t("zh", "settings.restoreRunningSpacesOnLaunch")));
   assert.ok(generalHtml.includes(t("zh", "settings.portStart")), "ports live in unified general -> advanced");
   assert.ok(generalHtml.includes(t("zh", "settings.portEnd")), "ports live in unified general -> advanced");
   assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false);
@@ -3251,6 +3301,14 @@ test("settings UX: sources live in general, dirty tracks actual changes, quick p
   assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
   ctrl.setHomeSettings({ packageSource: "official" });
   assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false, "reverting back to saved settings clears dirty");
+  ctrl.setHomeSettings({ restoreRunningSpacesOnLaunch: false });
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, true);
+  ctrl.saveHomeSettings();
+  await flush();
+  const settingsSubmit = api.calls.find((call) => call.method === "submit" && (call.arg as { command?: { kind?: string } }).command?.kind === "settings.update");
+  assert.equal((settingsSubmit?.arg as { command: Extract<WorkbenchCommand, { kind: "settings.update" }> }).command.settings.restoreRunningSpacesOnLaunch, false);
+  ctrl.setHomeSettings({ restoreRunningSpacesOnLaunch: true });
+  assert.equal(ctrl.getSnapshot().settingsDraft?.dirty, false, "reverting the restore checkbox clears dirty");
 
   // Alpha does not show cleanup; Beta has misinstalled dsh-spaces and shows cleanup.
   ctrl.openDetail("alpha");

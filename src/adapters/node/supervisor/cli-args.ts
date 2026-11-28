@@ -1,5 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { WorkbenchPublicError } from "./errors";
+import type { ResumeSpacesMode } from "../../../shared/types";
 import type { SupervisorCliOptions } from "./types";
 
 export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
@@ -25,6 +26,12 @@ export function parseSupervisorArgs(argv: string[]): SupervisorCliOptions {
   if (flags.allowRealHome === "1") options.allowRealHome = true;
   if (flags.exitWithHost === "1") options.exitWithHost = true;
   if (flags.startDesktopSpaces === "1") options.startDesktopSpaces = true;
+  if (flags["resume-mode"]) {
+    if (!["running-and-policy", "policy-only", "none"].includes(flags["resume-mode"])) {
+      throw new WorkbenchPublicError("workbench/invalid-input", "Resume mode must be running-and-policy, policy-only, or none.");
+    }
+    options.resumeMode = flags["resume-mode"] as ResumeSpacesMode;
+  }
   if (flags.node) options.nodeExe = requirePath(flags.node, "--node");
   if (flags.port) {
     const port = Number(flags.port);
@@ -58,6 +65,7 @@ export function supervisorCliArgs(options: SupervisorCliOptions): string[] {
   if (options.allowRealHome) args.push("--allow-real-home");
   if (options.exitWithHost) args.push("--exit-with-host");
   if (options.startDesktopSpaces) args.push("--start-desktop-spaces");
+  if (options.resumeMode) args.push("--resume-mode", options.resumeMode);
   if (options.nodeExe) args.push("--node", options.nodeExe);
   if (options.port !== undefined) args.push("--port", String(options.port));
   if (options.controlToolRoot) args.push("--control-tool-root", options.controlToolRoot);
@@ -88,6 +96,7 @@ function flagName(token: string): string | undefined {
     "--snapshot-root": "snapshot-root",
     "--component-payload": "component-payload",
     "--dev-checkout": "dev-checkout",
+    "--resume-mode": "resume-mode",
   };
   return names[token];
 }

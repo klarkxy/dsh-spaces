@@ -29,10 +29,11 @@ import type { RuntimeStore } from "./runtime/runtime-store";
 import { validateComponentPayload, type ValidatedComponentPayload } from "./payload/component-payload";
 import { redactPublicReason } from "../../shared/public-reason";
 import { WORKBENCH_QUIET_READS } from "../../shared/workbench";
-import { spaceIdFromName } from "../../shared/types";
+import { spaceIdFromName, type ResumeSpacesMode } from "../../shared/types";
 import type { SpaceDetail } from "../../shared/spaces-control";
 import type {
   WorkbenchApi,
+  WorkbenchAutoResume,
   WorkbenchBackup,
   WorkbenchCommand,
   WorkbenchJob,
@@ -57,7 +58,7 @@ import type {
 } from "../../shared/workbench-product";
 import { parseWorkbenchProductCommand, parseWorkbenchProductRequest } from "../../shared/workbench-product-schemas";
 import { WORKBENCH_PROTOCOL_VERSION, digestHomeIdentity, parseMutationContext } from "./server/workbench-protocol";
-import { WorkbenchProductService } from "./products/workbench-products";
+import { parseHomeSettingsFile, readSettingsRecord, WorkbenchProductService } from "./products/workbench-products";
 import { listSpaceTemplates } from "./products/space-templates";
 import {
   composeBlueprintRuntime,
@@ -115,6 +116,7 @@ import {
 } from "./supervisor/payload";
 import { inspectManagerInstall, publicPluginVersion } from "./supervisor/profile-probe";
 import { SupervisorPlans } from "./supervisor/plans";
+import { consumeCleanStopSpaces, writeCleanStopSpaces, type CleanStopSpacesRecord } from "./supervisor/clean-stop-ledger";
 import { SupervisorSpaceCommands } from "./supervisor/space-commands";
 import { SupervisorSpaceLifecycle } from "./supervisor/space-lifecycle";
 import { SpaceRunRegistry } from "./supervisor/space-runs";
@@ -224,6 +226,10 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
   private readonly bases: SpaceBaseCreation;
   private readonly spaceCommands: SupervisorSpaceCommands;
   private readonly stateModel: SupervisorState;
+  private cleanStopEligible = false;
+  private cleanStopResumeRecord: CleanStopSpacesRecord | null = null;
+  private resumeMode: ResumeSpacesMode = "policy-only";
+  private autoResumeProjection: WorkbenchAutoResume | undefined;
   private readonly maintenanceGate: SupervisorMaintenanceGate;
   private readonly toolchain: SupervisorToolchain;
   constructor(options: WorkbenchSupervisorOptions, selectedPayload?: ValidatedComponentPayload) {
@@ -329,6 +335,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       hasMaintenanceEvidence: () => this.maintenanceGate.hasMaintenanceEvidence(),
       homeSettings: () => this.homeSettings,
       setHomeSettings: (settings) => { this.homeSettings = settings; },
+      autoResume: () => this.autoResumeProjection,
     });
     this.maintenanceGate = new SupervisorMaintenanceGate({
       home: this.home,
@@ -408,6 +415,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       ownedSpaceIds: () => this.spaceInventory.ownedSpaceIds(),
       stopOwned: (spaceId) => this.spaceLifecycle.stopOwned(spaceId),
       stopOwnedAll: () => this.spaceLifecycle.stopOwnedAll(),
+      captureCleanStop: () => this.captureCleanStopSpaces(),
+      writeCleanStop: (reason, ids) => this.writeCleanStopLedger(reason, ids),
       startSpace: (spaceId, ctx) => this.spaceLifecycle.startSpace(spaceId, ctx),
       mainProfile: () => this.mainProfile(),
       prepareModelSync: (spaceId) => this.prepareModelSync(spaceId),
@@ -706,10 +715,11 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     this.diagnosticLog.info("supervisor.initialization", "Supervisor writable initialization completed.", { blocked: this.lifecycle.blocked });
   }
 
-  async close(): Promise<void> {
+  async close(reason: "host-exit" | "signal" = "signal"): Promise<void> {
     if (this.lifecycle.closed) return;
     this.diagnosticLog.info("supervisor.stopping", "Supervisor shutdown began.");
     this.lifecycle.sealing = true;
+    let cleanStopIds: string[] = [];
     try {
       await this.creator.close();
       await this.control.close();
@@ -717,6 +727,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       // failures inside are already bounded by the manager.
       await this.uiAutomation.closeAll();
       if (this.jobs) await this.jobs.whenIdle();
+      cleanStopIds = this.captureCleanStopSpaces();
       await this.spaceLifecycle.stopOwnedAll();
       this.messageBus.close();
     } catch (error) {
@@ -726,6 +737,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.diagnosticLog.fault("supervisor.stop-failed", "Supervisor shutdown failed; run rights and failure evidence are preserved.", error);
       throw error instanceof Error ? error : new Error(STOP_NOT_FORCED);
     }
+    this.writeCleanStopLedger(reason, cleanStopIds);
     this.dropWritable();
     this.lifecycle.closed = true;
     await this.httpClose?.();
@@ -1116,6 +1128,8 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       this.startup.fail(reasons[0] ?? "The start failed.", "maintenance", { reasons });
       return;
     }
+    this.cleanStopEligible = true;
+    this.prepareCleanStopResume();
     if (this.managerInstall === "ordinary") {
       this.lifecycle.blocked = true;
       this.lifecycle.reasons = [
@@ -1198,7 +1212,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
       try {
         await this.spaceLifecycle.startSpace(identity.profileId, silentJobContext());
         this.startup.ready();
-        if (this.options.startDesktopSpaces) await this.startDesktopSpaces();
+        await this.resumeSpaces();
       } catch (error) {
         this.diagnosticLog.error("manager.start-failed", "The management space did not become ready.", error, { space: identity.profileId });
         this.lifecycle.blocked = true;
@@ -1216,34 +1230,109 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
     }
   }
 
-  /** One start for each ordinary space that chose to start with Desktop. */
-  private async startDesktopSpaces(): Promise<void> {
+  /** One serial start for each ordinary space selected by the launch resume mode. */
+  private async resumeSpaces(): Promise<void> {
     let spaces: WorkbenchSpace[];
     try {
       spaces = this.spaceInventory.listSpaces();
     } catch (error) {
-      this.diagnosticLog.error("desktop-start.inventory-failed", "Desktop space startup could not read the space inventory.", error);
+      this.diagnosticLog.error("auto-resume.inventory-failed", "Automatic space resume could not read the space inventory.", error);
       return;
     }
-    for (const space of spaces) {
-      if (!space.startWithDesktop || space.isHost || !space.managed) continue;
+    const policy = new Set(this.options.startDesktopSpaces ? spaces.filter((space) => space.startWithDesktop).map((space) => space.id) : []);
+    const registered = new Set(spaces.map((space) => space.id));
+    const ledger = new Set(this.resumeMode === "running-and-policy"
+      ? (this.cleanStopResumeRecord?.runningSpaceIds ?? []).filter((id) => registered.has(id))
+      : []);
+    const targets = this.resumeMode === "none" ? [] : spaces.filter((space) => {
+      if (!policy.has(space.id) && !ledger.has(space.id)) return false;
+      if (space.isHost || !space.managed || space.id === this.managerId || space.id === "web" || space.id === "desktop" || this.runs.unmanaged.has(space.id)) return false;
       const status = this.spaceInventory.publicStatus(space.id);
-      if (status !== "stopped" && status !== "crashed") continue;
+      return status === "stopped" || status === "crashed";
+    });
+    const error = this.autoResumeProjection?.error;
+    if (!targets.length && !error) return;
+    const projection: WorkbenchAutoResume = {
+      active: targets.length > 0,
+      total: targets.length,
+      completed: 0,
+      failedSpaceIds: [],
+      ...(error ? { error } : {}),
+    };
+    this.autoResumeProjection = projection;
+    for (const space of targets) {
+      projection.inProgressSpaceId = space.id;
+      let failed = false;
       try {
         const jobs = this.jobs!;
-        const job = await jobs.submit({ kind: "space.start", spaceId: space.id }, `desktop-start-${randomBytes(12).toString("hex")}`, async (ctx) => {
+        const job = await jobs.submit({ kind: "space.start", spaceId: space.id }, `auto-resume-${randomBytes(12).toString("hex")}`, async (ctx) => {
           this.lifecycle.assertWritable();
           const current = this.spaceInventory.publicStatus(space.id);
           if (current !== "stopped" && current !== "crashed") return;
           return this.spaceLifecycle.startSpace(space.id, ctx);
         });
         await jobs.whenIdle();
-        if (jobs.job(job.id).status === "failed") {
-          this.diagnosticLog.error("desktop-start.space-failed", "A space selected to start with Desktop did not start.", undefined, { space: space.id });
+        failed = jobs.job(job.id).status === "failed";
+        if (failed) {
+          this.diagnosticLog.error("auto-resume.space-failed", "A space selected for automatic resume did not start.", undefined, { space: space.id });
         }
-      } catch (error) {
-        this.diagnosticLog.error("desktop-start.space-failed", "A space selected to start with Desktop did not start.", error, { space: space.id });
+      } catch (cause) {
+        failed = true;
+        this.diagnosticLog.error("auto-resume.space-failed", "A space selected for automatic resume did not start.", cause, { space: space.id });
       }
+      if (failed) projection.failedSpaceIds.push(space.id);
+      projection.completed += 1;
+    }
+    delete projection.inProgressSpaceId;
+    projection.active = false;
+  }
+
+  private prepareCleanStopResume(): void {
+    const errors: string[] = [];
+    try {
+      this.cleanStopResumeRecord = consumeCleanStopSpaces(this.controlDir);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      this.diagnosticLog.error("auto-resume.ledger-rejected", "The clean-stop ledger was rejected and left unchanged.", error);
+    }
+    if (this.options.resumeMode) {
+      this.resumeMode = this.options.resumeMode;
+    } else {
+      try {
+        const { raw, missing } = readSettingsRecord(this.home);
+        const parsed = missing ? undefined : parseHomeSettingsFile(raw);
+        this.resumeMode = (parsed?.settings.restoreRunningSpacesOnLaunch ?? true) ? "running-and-policy" : "policy-only";
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+        this.diagnosticLog.error("auto-resume.settings-failed", "Home settings could not be read for automatic resume.", error);
+      }
+    }
+    if (errors.length) {
+      this.autoResumeProjection = { active: false, total: 0, completed: 0, failedSpaceIds: [], error: errors.join("; ") };
+    }
+  }
+
+  private captureCleanStopSpaces(): string[] {
+    if (!this.cleanStopEligible) return [];
+    const managerId = this.managerId;
+    return this.spaceInventory.ownedSpaceIds().filter((id) =>
+      id !== managerId && id !== "web" && id !== "desktop" &&
+      !this.runs.unmanaged.has(id) && this.spaceInventory.statusOf(id) === "running",
+    );
+  }
+
+  private writeCleanStopLedger(reason: CleanStopSpacesRecord["reason"], runningSpaceIds: string[]): void {
+    if (!this.cleanStopEligible) return;
+    try {
+      writeCleanStopSpaces(this.controlDir, {
+        schemaVersion: 1,
+        previousServiceEpoch: this.stateModel.currentServiceEpoch(),
+        reason,
+        recordedAt: this.now().toISOString(),
+        runningSpaceIds,
+      });
+    } catch (error) {
+      this.diagnosticLog.error("clean-stop.write-failed", "The clean-stop ledger could not be written; shutdown continues unchanged.", error);
     }
   }
 
@@ -1609,6 +1698,7 @@ export class WorkbenchSupervisorRuntime implements WorkbenchHttpRuntime, Workben
           portEnd: settings.portEnd,
           packageSource: settings.packageSource,
           catalogUrl: settings.catalogUrl,
+          restoreRunningSpacesOnLaunch: settings.restoreRunningSpacesOnLaunch,
         };
         setPackageSource(settings.packageSource);
         this.processes?.setPortRange(settings.portStart, settings.portEnd);
@@ -1683,6 +1773,6 @@ export async function createWorkbenchSupervisor(
     runtime,
     origin: http.origin,
     bootstrapUrl: runtime.bootstrapUrl(),
-    close: () => runtime.close(),
+    close: (reason?: "host-exit" | "signal") => runtime.close(reason),
   };
 }

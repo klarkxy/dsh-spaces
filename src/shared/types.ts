@@ -1,5 +1,8 @@
 export type ProfileStatus = "stopped" | "starting" | "stopping" | "running" | "crashed";
 
+/** How a new service launch selects one-shot child-space starts. */
+export type ResumeSpacesMode = "running-and-policy" | "policy-only" | "none";
+
 export interface SpaceMeta {
   base?: 'web' | 'browser';
   baseVersion?: string;
@@ -47,6 +50,8 @@ export interface HubSettings {
   theme: ThemePreference;
   /** Empty means the built-in jsDelivr catalog URL. */
   catalogUrl: string;
+  /** Start spaces recorded by the last clean-stop ledger on a new service launch. */
+  restoreRunningSpacesOnLaunch: boolean;
 }
 
 export type PluginTier = "verified-npm" | "verified-git" | "likely-plugin" | "related";
@@ -161,6 +166,7 @@ export const DEFAULT_HUB_SETTINGS: HubSettings = {
   locale: "system",
   theme: "system",
   catalogUrl: "",
+  restoreRunningSpacesOnLaunch: true,
 };
 
 export const DEFAULT_PLUGIN_CATALOG_URL =

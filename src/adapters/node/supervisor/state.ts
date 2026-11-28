@@ -1,5 +1,5 @@
 import type { WorkbenchHomeSettings } from "../../../shared/workbench-product";
-import type { WorkbenchMutationContext, WorkbenchSpace, WorkbenchState } from "../../../shared/workbench";
+import type { WorkbenchAutoResume, WorkbenchMutationContext, WorkbenchSpace, WorkbenchState } from "../../../shared/workbench";
 import type { HomeLease } from "../home/home-lease";
 import { readSettings } from "../home/hub-settings";
 import type { HomeOperationLock } from "../home/home-operation-lock";
@@ -34,6 +34,7 @@ export interface SupervisorStateHost {
   hasMaintenanceEvidence: () => boolean;
   homeSettings: () => WorkbenchHomeSettings | undefined;
   setHomeSettings: (settings: WorkbenchHomeSettings) => void;
+  autoResume: () => WorkbenchAutoResume | undefined;
 }
 
 /**
@@ -59,6 +60,7 @@ export class SupervisorState {
       managed: Boolean(lifecycle.handle) && !this.host.runs.unmanaged.has(row.id),
     })) : this.host.listSpaces();
     const service = this.host.spaces();
+    const autoResume = this.host.autoResume();
     return {
       protocolVersion: WORKBENCH_PROTOCOL_VERSION,
       serviceEpoch: this.currentServiceEpoch(),
@@ -74,6 +76,7 @@ export class SupervisorState {
       reasons: [...lifecycle.reasons],
       spaces,
       jobs: this.host.jobs()?.list() ?? [],
+      ...(autoResume ? { autoResume: { ...autoResume, failedSpaceIds: [...autoResume.failedSpaceIds] } } : {}),
     };
   }
 
@@ -90,6 +93,7 @@ export class SupervisorState {
       portEnd: raw.portEnd,
       packageSource: raw.packageSource,
       catalogUrl: raw.catalogUrl,
+      restoreRunningSpacesOnLaunch: raw.restoreRunningSpacesOnLaunch,
     };
     this.host.setHomeSettings(settings);
     return settings;

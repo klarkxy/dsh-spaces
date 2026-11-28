@@ -84,6 +84,15 @@ export interface WorkbenchSpace extends Omit<SpaceSummary, 'status'> {
   dshVersion: string | null;
 }
 
+export interface WorkbenchAutoResume {
+  active: boolean;
+  total: number;
+  completed: number;
+  inProgressSpaceId?: string;
+  failedSpaceIds: string[];
+  error?: string;
+}
+
 export interface WorkbenchState {
   protocolVersion: WorkbenchProtocolVersion;
   serviceEpoch: string;
@@ -100,6 +109,7 @@ export interface WorkbenchState {
   reasons: string[];
   spaces: WorkbenchSpace[];
   jobs: WorkbenchJob[];
+  autoResume?: WorkbenchAutoResume;
 }
 
 export interface WorkbenchView {

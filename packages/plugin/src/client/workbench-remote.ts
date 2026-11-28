@@ -175,7 +175,7 @@ export function createWorkbenchGuideRemote(connection: WorkbenchConnection): Wor
     previewServiceRestart: () => callRemote<import("../types").WorkbenchServiceRestartPreview>(connection, "workbenchGuide/previewServiceRestart", {}),
     previewServiceStop: () => callRemote<import("../types").WorkbenchServiceRestartPreview>(connection, "workbenchGuide/previewServiceStop", {}),
     stopService: confirmationId => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/stopService", { confirmationId }),
-    restartService: confirmationId => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/restartService", { confirmationId }),
+    restartService: (confirmationId, resumeMode) => callRemote<WorkbenchBootstrapResult>(connection, "workbenchGuide/restartService", { confirmationId, ...(resumeMode ? { resumeMode } : {}) }),
     beginDesktopLaunch: () => callRemote<DesktopLaunchState>(connection, "workbenchGuide/beginDesktopLaunch", {}),
     desktopLaunchState: () => callRemote<DesktopLaunchState>(connection, "workbenchGuide/desktopLaunchState", {}),
     reportClientFailure: async (report: ClientFailureReport) => {

@@ -585,7 +585,7 @@ test("confirmed manual launch is the only path that replaces a stopped record", 
       request.progress?.("prepare");
       request.progress?.("launch");
       const handle = new HomeLease(home, { allowRealHome: false }).acquire("web", "http://127.0.0.1:18471/");
-      assert.equal(request.startDesktopSpaces, bootstraps === 1, "only opening Desktop starts selected child spaces; manual service launches do not");
+      assert.equal(request.startDesktopSpaces, true, "Desktop opening and the default manual service restart both enable startup policy");
       lease = handle;
       endpoint = {
         origin: "http://127.0.0.1:18471", bearer: "c".repeat(64), protocolVersion: 2,

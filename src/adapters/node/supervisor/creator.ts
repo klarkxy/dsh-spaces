@@ -56,15 +56,21 @@ const ISSUE_OPS = new Set<CreatorOperation>(["issue", "unregister"]);
 
 /**
  * One live main registration. The Creator and Control channels mint one
- * scope each; only digests are retained and neither scope ever reaches
- * logs, jobs or durable state.
+ * scope each; only scope digests are retained and neither scope ever reaches
+ * logs, jobs or durable state. The loopback identity bearer is memory-only
+ * for dead-host proof and is never logged or persisted.
  */
+export const RECLAIM_PROBE_TIMEOUT_MS = 1_500;
+
 export interface MainChannelRegistration {
   registrationId: string;
   profile: string;
   serviceEpoch: string;
   creatorScopeDigest: Buffer;
   controlScopeDigest: Buffer;
+  /** In-memory-only loopback proof credentials; never logged or persisted. */
+  identityOrigin: string;
+  identityBearer: string;
 }
 
 interface StoredCreatorPlan {
@@ -237,8 +243,18 @@ export class SupervisorCreator {
     // challenge: the lease or a concurrent registration may have changed.
     this.ports.assertOwner();
     if (this.closed) throw new CreatorPublicError("creator/unavailable");
+    let reclaimedPrevious: MainChannelRegistration | undefined;
     if (this.registration) {
-      throw new CreatorPublicError("creator/conflict", "A creator registration is already active for this service epoch.");
+      const previous = this.registration;
+      const verdict = await this.probePrevious(previous);
+      this.ports.assertOwner();
+      if (this.closed) throw new CreatorPublicError("creator/unavailable");
+      if (this.registration !== previous || verdict !== "dead") {
+        throw new CreatorPublicError("creator/conflict", "A creator registration is already active for this service epoch.");
+      }
+      this.registration = undefined;
+      this.plans.clear();
+      reclaimedPrevious = previous;
     }
     const creatorScope = randomBytes(32).toString("hex");
     const controlScope = randomBytes(32).toString("hex");
@@ -248,10 +264,50 @@ export class SupervisorCreator {
       serviceEpoch: this.ports.currentServiceEpoch(),
       creatorScopeDigest: scopeDigest(creatorScope),
       controlScopeDigest: scopeDigest(controlScope),
+      identityOrigin: origin,
+      identityBearer: input.bearer,
     };
     this.registration = registration;
     this.ports.diagnosticLog?.info("creator.registered", "The main space registered its Creator and Control channels.", { main: input.profile, registration: registration.registrationId });
+    if (reclaimedPrevious) {
+      this.ports.diagnosticLog?.info("creator.reclaimed-dead-host", "A dead main registration was reclaimed after its loopback identity proof failed.", {
+        previousRegistration: reclaimedPrevious.registrationId,
+        registration: registration.registrationId,
+      });
+    }
     return { registrationId: registration.registrationId, scopes: { creator: creatorScope, control: controlScope }, serviceEpoch: registration.serviceEpoch };
+  }
+
+  /** Probe the previous main identity. Only refusal or a failed fresh-nonce proof is dead. */
+  private async probePrevious(previous: MainChannelRegistration): Promise<"dead" | "alive" | "unknown"> {
+    const nonce = randomBytes(24).toString("hex");
+    let response: Response;
+    try {
+      response = await this.ports.fetch(`${previous.identityOrigin}/identity`, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(RECLAIM_PROBE_TIMEOUT_MS),
+        headers: { authorization: `Bearer ${previous.identityBearer}`, "content-type": "application/json", connection: "close" },
+        body: JSON.stringify({ nonce }),
+      });
+    } catch (error) {
+      return hasConnectionRefused(error) ? "dead" : "unknown";
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return "dead";
+    }
+    let proof: Record<string, unknown>;
+    try {
+      proof = (await response.json()) as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof SyntaxError) return "dead";
+      return "unknown";
+    } finally {
+      await response.body?.cancel().catch(() => undefined);
+    }
+    const record = proof && typeof proof === "object" && !Array.isArray(proof) ? proof : {};
+    return record.nonce === nonce && record.home === this.ports.home && record.profile === previous.profile ? "alive" : "dead";
   }
 
   /** Explicitly retire the live registration; matching id is mandatory. */
@@ -765,4 +821,10 @@ export class SupervisorCreator {
 }
 
 
-
+function hasConnectionRefused(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const row = error as { code?: unknown; cause?: unknown; errors?: unknown };
+  if (row.code === "ECONNREFUSED") return true;
+  if (Array.isArray(row.errors) && row.errors.some(hasConnectionRefused)) return true;
+  return hasConnectionRefused(row.cause);
+}

@@ -64,7 +64,7 @@ function productResult(request: WorkbenchProductRequest): WorkbenchProductResult
   if (request.method === "settings") {
     return {
       method: "settings",
-      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "" },
+      settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
       clientDefaults: { locale: "zh", theme: "system" },
       observation: OBSERVATION,
     };

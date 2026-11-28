@@ -48,11 +48,12 @@ export {
 
 const source = (file: string) => ({ file, line: 1, column: 1 });
 
-function param(name: string, schema: z.ZodType, typeSymbol: string) {
+function param(name: string, schema: z.ZodType, typeSymbol: string, acceptsUndefined = false) {
   return {
     name,
     wire: name,
     source: "json" as const,
+    ...(acceptsUndefined ? { acceptsUndefined: true as const } : {}),
     codec: {
       mode: "strict" as const,
       typeSymbol,
@@ -88,6 +89,7 @@ function invocation(
   };
 }
 
+const resumeModeSchema = z.enum(["running-and-policy", "policy-only", "none"]);
 const guideFile = "packages/plugin/src/host/workbench-guide.ts";
 const managerFile = "packages/plugin/src/host/workbench-manager.ts";
 const spacesFile = "packages/plugin/src/host/spaces-service.ts";
@@ -134,7 +136,7 @@ export const TYPERT = {
     invocation("workbenchGuide", "previewServiceRestart", guideFile, [], result("dsh-spaces/types#WorkbenchServiceRestartPreview", serviceRestartPreviewSchema)),
     invocation("workbenchGuide", "previewServiceStop", guideFile, [], result("dsh-spaces/types#WorkbenchServiceRestartPreview", serviceRestartPreviewSchema)),
     invocation("workbenchGuide", "stopService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("dsh-spaces/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
-    invocation("workbenchGuide", "restartService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string")], result("dsh-spaces/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
+    invocation("workbenchGuide", "restartService", guideFile, [param("confirmationId", z.string().regex(/^[a-f0-9]{64}$/), "string"), param("resumeMode", resumeModeSchema, "dsh-spaces/types#ResumeSpacesMode", true)], result("dsh-spaces/types#WorkbenchBootstrapResult", workbenchBootstrapResultSchema)),
     invocation("workbenchGuide", "beginDesktopLaunch", guideFile, [], result("dsh-spaces/types#DesktopLaunchState", desktopLaunchStateSchema)),
     invocation("workbenchGuide", "desktopLaunchState", guideFile, [], result("dsh-spaces/types#DesktopLaunchState", desktopLaunchStateSchema)),
     invocation("workbenchGuide", "hostActivity", guideFile, [], result("dsh-spaces#HostActivityProjection", hostActivityProjectionSchema)),

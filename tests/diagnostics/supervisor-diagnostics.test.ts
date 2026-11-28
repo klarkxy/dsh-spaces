@@ -495,11 +495,11 @@ test("supervisor CLI binds diagnostics before main and does not restart on failu
   const hostExitStart = lifetimeBody.indexOf(`signal === "host-exit"`);
   const hostExitEnd = lifetimeBody.indexOf("return;", hostExitStart);
   const hostExitBranch = lifetimeBody.slice(hostExitStart, hostExitEnd);
-  const hostCloseAt = hostExitBranch.indexOf("await target.close()");
+  const hostCloseAt = hostExitBranch.indexOf("await target.close(\"host-exit\")");
   assert.ok(hostCloseAt >= 0);
   assert.ok(hostExitBranch.indexOf("recordNormalStop") > hostCloseAt);
   const signalBranch = lifetimeBody.slice(hostExitEnd + "return;".length);
-  const signalCloseAt = signalBranch.indexOf("await target.close()");
+  const signalCloseAt = signalBranch.indexOf("await target.close(\"signal\")");
   assert.ok(signalCloseAt >= 0);
   assert.ok(signalBranch.indexOf("recordNormalStop") > signalCloseAt);
   assert.equal(/setInterval|setTimeout|restart\(/.test(lifetimeSource), false);

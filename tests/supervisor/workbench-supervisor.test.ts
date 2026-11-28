@@ -41,6 +41,7 @@ import {
   WORKBENCH_HTTP_BODY_LIMIT,
   type WorkbenchHttpRuntime,
 } from "../../src/adapters/node/server/workbench-http.ts";
+import { CLEAN_STOP_SPACES_FILE } from "../../src/adapters/node/supervisor/clean-stop-ledger.ts";
 import { WorkbenchMaintenance as WorkbenchMaintenanceService } from "../../src/adapters/node/maintenance/workbench-maintenance.ts";
 import type { PatchWriter } from "../../src/adapters/node/profile/patch-writer.ts";
 import type { ProcessRuntime } from "../../src/adapters/node/runtime/process-manager.ts";
@@ -1679,6 +1680,7 @@ test("ROOT: failed child shutdown preserves exclusive run rights", async () => {
   await waitUntil(async () => (await handle.runtime.job("root-start")).status === "succeeded", "root start");
   await assert.rejects(() => handle.close());
   assert.equal(new HomeLease(home).inspect().held, true);
+  assert.equal(existsSync(join(home, ".dsh-spaces-control", CLEAN_STOP_SPACES_FILE)), false);
 });
 
 for (const timeout of [false, true]) {
@@ -2916,4 +2918,204 @@ test("an ordinary service launch leaves Desktop-selected spaces stopped", async 
   writeFileSync(path, JSON.stringify(registry));
   const handle = await startSupervisor(home);
   assert.equal((await handle.runtime.state()).spaces.find(space => space.id === id)?.status, "stopped");
+});
+
+function seedCleanStopLedger(home: string, runningSpaceIds: string[], reason = "signal"): void {
+  const controlDir = join(home, ".dsh-spaces-control");
+  mkdirSync(controlDir, { recursive: true });
+  writeFileSync(join(controlDir, CLEAN_STOP_SPACES_FILE), JSON.stringify({
+    schemaVersion: 1,
+    previousServiceEpoch: "a".repeat(64),
+    reason,
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    runningSpaceIds,
+  }));
+}
+
+function readCleanStopLedger(home: string): { reason?: string; runningSpaceIds?: string[] } | null {
+  const path = join(home, ".dsh-spaces-control", CLEAN_STOP_SPACES_FILE);
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
+}
+
+async function startOrdinary(handle: WorkbenchSupervisorHandle, spaceId: string, requestId: string): Promise<void> {
+  const state = await handle.runtime.state();
+  await handle.runtime.submit({ kind: "space.start", spaceId }, requestId, {
+    serviceEpoch: state.serviceEpoch,
+    expectedRevision: state.revision,
+  });
+  await waitUntil(async () => (await handle.runtime.job(requestId)).status === "succeeded", `${requestId} completion`);
+}
+
+test("clean close records exactly the running ordinary spaces with the close reason", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "close-alpha", { name: "space-close-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  const beta = writeSpace(home, "close-beta", { name: "space-close-beta" }, { dshVersion: "0.2.0-rc.2" });
+  const stopped = writeSpace(home, "close-stopped", { name: "space-close-stopped" }, { dshVersion: "0.2.0-rc.2" });
+  const handle = await startSupervisor(home);
+  await startOrdinary(handle, alpha, "close-start-alpha");
+  await startOrdinary(handle, beta, "close-start-beta");
+  await handle.close();
+  const ledger = readCleanStopLedger(home);
+  assert.equal(ledger?.reason, "signal");
+  assert.deepEqual(ledger?.runningSpaceIds, [alpha, beta]);
+  assert.equal(ledger?.runningSpaceIds?.includes(stopped), false);
+});
+
+test("host-exit close records the host-exit clean-stop reason", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "host-exit-alpha", { name: "space-host-exit-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  const handle = await startSupervisor(home);
+  await startOrdinary(handle, alpha, "host-exit-start-alpha");
+  await handle.close("host-exit");
+  const ledger = readCleanStopLedger(home);
+  assert.equal(ledger?.reason, "host-exit");
+  assert.deepEqual(ledger?.runningSpaceIds, [alpha]);
+});
+
+test("successful service.shutdown records a service-shutdown clean-stop ledger", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "shutdown-alpha", { name: "space-shutdown-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  let normalExit = false;
+  const handle = await startSupervisor(home, { onNormalExit: () => { normalExit = true; } });
+  await startOrdinary(handle, alpha, "shutdown-start-alpha");
+  const state = await handle.runtime.state();
+  const context = { serviceEpoch: state.serviceEpoch, expectedRevision: state.revision };
+  const plan = await handle.runtime.preview({ kind: "service.shutdown" }, context);
+  await handle.runtime.submit({ kind: "plan.execute", planId: plan.id }, "clean-service-shutdown", context);
+  await waitUntil(() => normalExit, "service shutdown normal exit");
+  const ledger = readCleanStopLedger(home);
+  assert.equal(ledger?.reason, "service-shutdown");
+  assert.deepEqual(ledger?.runningSpaceIds, [alpha]);
+});
+
+test("a preseeded clean-stop ledger resumes registered running spaces once and is consumed", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "resume-alpha", { name: "space-resume-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  seedCleanStopLedger(home, [alpha, "space-deleted-x"]);
+  const handle = await startSupervisor(home);
+  const state = await handle.runtime.state();
+  assert.equal(state.spaces.find((space) => space.id === alpha)?.status, "running");
+  assert.equal(existsSync(join(home, ".dsh-spaces-control", CLEAN_STOP_SPACES_FILE)), false);
+  assert.deepEqual(state.autoResume, { active: false, total: 1, completed: 1, failedSpaceIds: [] });
+  assert.equal(state.jobs.some((job) => job.requestId.startsWith("auto-resume-")), true);
+});
+
+test("restoreRunningSpacesOnLaunch false ignores but consumes the clean-stop ledger", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "setting-alpha", { name: "space-setting-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  seedCleanStopLedger(home, [alpha]);
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(join(home, "hub", "settings.json"), JSON.stringify({ restoreRunningSpacesOnLaunch: false }));
+  const handle = await startSupervisor(home);
+  const state = await handle.runtime.state();
+  assert.equal(state.spaces.find((space) => space.id === alpha)?.status, "stopped");
+  assert.equal(existsSync(join(home, ".dsh-spaces-control", CLEAN_STOP_SPACES_FILE)), false);
+});
+
+test("resume mode none starts nothing and consumes the clean-stop ledger", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "none-alpha", { name: "space-none-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  seedCleanStopLedger(home, [alpha]);
+  const handle = await startSupervisor(home, { resumeMode: "none" });
+  const state = await handle.runtime.state();
+  assert.equal(state.spaces.find((space) => space.id === alpha)?.status, "stopped");
+  assert.equal(existsSync(join(home, ".dsh-spaces-control", CLEAN_STOP_SPACES_FILE)), false);
+});
+
+test("running-and-policy dedupes startup targets in registry order and records one failure", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "combo-alpha", { name: "space-combo-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  const beta = writeSpace(home, "combo-beta", { name: "space-combo-beta" }, { dshVersion: "0.2.0-rc.2" });
+  const failing = writeSpace(home, "combo-failing", { name: "space-combo-failing" }, { dshVersion: "0.2.0-rc.2" });
+  const registryPath = join(home, "hub", "spaces.json");
+  const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+  registry.meta[beta].startWithDesktop = true;
+  writeFileSync(registryPath, JSON.stringify(registry));
+  seedCleanStopLedger(home, [alpha, failing, beta]);
+  let failingStarts = 0;
+  const startOrder: string[] = [];
+  const handle = await startSupervisor(home, {
+    startDesktopSpaces: true,
+    resumeMode: "running-and-policy",
+    processRuntime: {
+      spawn: (args: string[], options: SpawnOptions = {}) => {
+        const profile = String(args[args.indexOf("--profile") + 1] ?? "");
+        if ([alpha, beta, failing].includes(profile)) startOrder.push(profile);
+        if (profile === failing) {
+          failingStarts += 1;
+          const child = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(1), 20)"], options);
+          live.push(child);
+          return child;
+        }
+        return spawnFixture("ok")(args, options);
+      },
+      prepareHome: async () => undefined,
+      gracefulWaitMs: 40,
+      forceWaitMs: 20,
+      readyTimeoutMs: 1_000,
+      fetchTimeoutMs: 1_000,
+      pollMs: 40,
+      kill: async () => undefined,
+    },
+  });
+  const state = await handle.runtime.state();
+  assert.equal(state.spaces.find((space) => space.id === alpha)?.status, "running");
+  assert.equal(state.spaces.find((space) => space.id === beta)?.status, "running");
+  assert.equal(state.spaces.find((space) => space.id === failing)?.status, "crashed");
+  assert.equal(failingStarts, 1);
+  assert.deepEqual(startOrder, [alpha, beta, failing]);
+  assert.deepEqual(state.autoResume, { active: false, total: 3, completed: 3, failedSpaceIds: [failing] });
+});
+
+test("a corrupt clean-stop ledger is preserved and reported without ledger resume", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "corrupt-alpha", { name: "space-corrupt-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  const controlDir = join(home, ".dsh-spaces-control");
+  mkdirSync(controlDir, { recursive: true });
+  const path = join(controlDir, CLEAN_STOP_SPACES_FILE);
+  writeFileSync(path, "{corrupt");
+  mkdirSync(join(home, "hub"), { recursive: true });
+  writeFileSync(join(home, "hub", "settings.json"), JSON.stringify({ restoreRunningSpacesOnLaunch: "yes" }));
+  const handle = await startSupervisor(home);
+  const state = await handle.runtime.state();
+  assert.equal(state.spaces.find((space) => space.id === alpha)?.status, "stopped");
+  assert.equal(readFileSync(path, "utf8"), "{corrupt");
+  const error = state.autoResume?.error ?? "";
+  assert.match(error, /JSON is invalid/);
+  assert.match(error, /restoreRunningSpacesOnLaunch is invalid/);
+  assert.ok(error.indexOf("JSON is invalid") < error.indexOf("restoreRunningSpacesOnLaunch is invalid"), "the ledger rejection stays before the settings failure");
+});
+
+test("maintenance evidence leaves the clean-stop ledger completely untouched", async () => {
+  const home = tempHome();
+  const alpha = writeSpace(home, "maintenance-alpha", { name: "space-maintenance-alpha" }, { dshVersion: "0.2.0-rc.2" });
+  const instances = join(home, ".dsh-spaces-control", "instances");
+  mkdirSync(instances, { recursive: true });
+  writeFileSync(join(instances, `${alpha}.json`), JSON.stringify({
+    version: 1,
+    spaceId: alpha,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    port: 34567,
+    generation: 0,
+    origin: "http://127.0.0.1:34567",
+  }));
+  seedCleanStopLedger(home, [alpha]);
+  const path = join(home, ".dsh-spaces-control", CLEAN_STOP_SPACES_FILE);
+  const before = readFileSync(path, "utf8");
+  const handle = await startSupervisor(home);
+  const state = await handle.runtime.state();
+  assert.equal(state.availability, "limited");
+  assert.equal(state.reasons.some((reason) => reason.includes("Leftover processes")), true);
+  assert.equal(readFileSync(path, "utf8"), before);
+  assert.equal(state.spaces.find((space) => space.id === alpha)?.status, "unknown");
+});
+
+test("CLI parses, serializes and validates --resume-mode", () => {
+  const home = tempHome();
+  const bin = writeFakeCli(home);
+  const parsed = parseSupervisorArgs(["--home", home, "--bin", bin, "--resume-mode", "policy-only"]);
+  assert.equal(parsed.resumeMode, "policy-only");
+  assert.deepEqual(supervisorCliArgs(parsed).slice(-2), ["--resume-mode", "policy-only"]);
+  assert.throws(() => parseSupervisorArgs(["--home", home, "--bin", bin, "--resume-mode", "sometimes"]), /Resume mode/);
 });

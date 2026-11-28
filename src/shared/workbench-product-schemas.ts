@@ -104,6 +104,7 @@ const homeSettingsSchema = z
     portEnd: z.number().int().min(1024).max(65535),
     packageSource: z.enum(["china", "official"]),
     catalogUrl: optionalHttpUrlSchema,
+    restoreRunningSpacesOnLaunch: z.boolean(),
   })
   .strict()
   .refine((value) => value.portEnd >= value.portStart, "portEnd must be >= portStart");
