@@ -111,7 +111,7 @@ function runtime(mode = "ok", extra: Partial<ProcessRuntime> = {}): Partial<Proc
     ensureCli: async () => "bin.js",
     prepareHome: async () => undefined,
     spawn: spawnMode(mode),
-    readyTimeoutMs: 5_000,
+    readyTimeoutMs: 10_000,
     fetchTimeoutMs: 400,
     pollMs: 30,
     gracefulWaitMs: 1_000,

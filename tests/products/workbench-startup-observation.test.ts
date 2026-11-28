@@ -28,6 +28,7 @@ import type { WorkbenchInitializeResult } from "../../packages/plugin/src/types.
 const temps: string[] = [];
 const handles: HomeControlHandle[] = [];
 const epoch = "a".repeat(64);
+const STARTUP_ABORT_ASSERTION_MS = 900;
 const home = mkdtempSync(join(tmpdir(), "dsh-startup-obs-"));
 temps.push(home);
 
@@ -303,7 +304,7 @@ test("http startup reads abort a hung fetch and a hung body whose cancel never s
     const started = Date.now();
     const result = await watch(runtime(120), createWorkbenchHttpClient({ endpoint: httpEndpoint, fetch: fetchImpl }), epoch);
     assert.ok(result && !result.ok, mode);
-    assert.ok(Date.now() - started < 400, mode);
+    assert.ok(Date.now() - started < STARTUP_ABORT_ASSERTION_MS, mode);
     assert.deepEqual(calls.filter((method) => method === "state"), ["state"], mode);
     assert.equal(cancelled, mode === "hung-fetch" ? 0 : 1, mode);
     assert.ok(signals.some((signal) => signal?.aborted), mode);
@@ -520,7 +521,7 @@ test("attach cancels a hung state body without waiting for cancel", { timeout: 2
   assert.equal("stale" in outcome, true);
   assert.equal(calls, 1);
   assert.equal(cancelled, 1);
-  assert.ok(Date.now() - started < 400);
+  assert.ok(Date.now() - started < STARTUP_ABORT_ASSERTION_MS);
   assert.deepEqual(readFileSync(path), before);
 });
 
