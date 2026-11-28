@@ -275,7 +275,9 @@ function inspectLock(lockDir: string, ownerFile: string, reclaimDir: string): Ho
     }
     return { held: true, reclaim: true, lockDir };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      return { held: true, ambiguous: true, reason: "reclaim path could not be inspected safely", lockDir };
+    }
   }
 
   let lockStat;

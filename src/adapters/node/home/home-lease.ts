@@ -486,7 +486,9 @@ function inspectReclaimDir(reclaimDir: string, runDir: string): HomeControlInspe
     }
     return { held: true, reclaim: true, runDir };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      return { held: true, ambiguous: true, reason: "reclaim path could not be inspected safely", runDir };
+    }
     return undefined;
   }
 }
