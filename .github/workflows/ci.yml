@@ -23,8 +23,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - run: node scripts/prepare-ci-environment.mjs
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run catalog:check
       - run: pnpm run test:catalog
       - run: pnpm run test:release
@@ -80,8 +80,8 @@ jobs:
         with:
           node-version: "26"
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - run: node scripts/prepare-ci-environment.mjs
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run build:spaces
       - run: pnpm exec playwright install chromium
       - name: Workbench browser

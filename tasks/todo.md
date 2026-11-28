@@ -2,6 +2,10 @@
 
 > 只列当前仍需跟踪的事项。完整日期日志和已关闭条目在 [tasks/archive](archive/README.md)，不要在这里追加长日志。
 
+## 2026-11-27 仓库 pnpm 迁移
+
+- [x] 仓库开发、CI 与打包预检迁移到 pnpm 10.29.2；蓝图包使用 workspace 链接，Windows CI 在 install 前规范化 TEMP，npm 子进程不继承 pnpm 的 node-linker。
+
 ## 2026-11-24 Desktop 桥接诊断、热重载生命周期与仅前端重载
 
 - [x] 修复 Desktop `shell.overlay` 在 `patchReload: "live"` 重挂载后复用已释放前端控制器或回退到旧引用的问题（`disposedBeforeTerminal` + `onControllerChange`）；保留终态失败/停机状态。

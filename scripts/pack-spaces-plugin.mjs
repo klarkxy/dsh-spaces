@@ -205,6 +205,14 @@ function resolveNpmCli(nodeExe) {
   throw new Error("npm-cli.js not found. Use a Node install that ships npm, or put npm on PATH.");
 }
 
+function withoutNpmNodeLinker(env) {
+  const clean = { ...env };
+  for (const key of Object.keys(clean)) {
+    if (key.toLowerCase() === "npm_config_node_linker") delete clean[key];
+  }
+  return clean;
+}
+
 function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun, env = process.env }) {
   const args = [
     npmCli,
@@ -222,7 +230,7 @@ function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun, env = process.e
     timeout: PACK_MS,
     windowsHide: true,
     env: {
-      ...env,
+      ...withoutNpmNodeLinker(env),
       npm_config_ignore_scripts: "true",
       npm_config_offline: "true",
       npm_config_fund: "false",

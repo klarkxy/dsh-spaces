@@ -18,6 +18,10 @@ on:
       - 'tests/products/workbench-plugin.test.ts'
       - 'tests/fixtures/portable-host/**'
       - 'scripts/verify-plugin-standard-install.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
       - '.github/workflows/portable-host.yml'
 permissions:
   contents: read

@@ -119,6 +119,24 @@ test("standalone runtime installs include required peers despite inherited devel
   assert.ok(install?.args.includes("--include=peer"));
 });
 
+test("standalone runtime npm install strips an inherited pnpm node linker setting", async (t) => {
+  const lower = process.env.npm_config_node_linker;
+  const upper = process.env.NPM_CONFIG_NODE_LINKER;
+  process.env.npm_config_node_linker = "isolated";
+  process.env.NPM_CONFIG_NODE_LINKER = "hoisted";
+  t.after(() => {
+    if (lower === undefined) delete process.env.npm_config_node_linker;
+    else process.env.npm_config_node_linker = lower;
+    if (upper === undefined) delete process.env.NPM_CONFIG_NODE_LINKER;
+    else process.env.NPM_CONFIG_NODE_LINKER = upper;
+  });
+  const commands: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
+  const { runtime } = store({ run: mockRun({ commands }) });
+  await runtime.install("0.2.2-rc.1");
+  const install = commands.find(command => command.args.includes("install"));
+  assert.equal(Object.keys(install?.env ?? {}).filter(key => key.toLowerCase() === "npm_config_node_linker").length, 0);
+});
+
 test("runtime publication reports the first rename failure without retry or publishing a result", async (t) => {
   const failure = Object.assign(new Error("runtime destination busy"), { code: "EBUSY" });
   let attempts = 0;

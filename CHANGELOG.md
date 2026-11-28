@@ -4,6 +4,10 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ## [Unreleased]
 
+### Changed
+
+- Repository development and CI now use pnpm 10.29.2 with `pnpm-lock.yaml` / `pnpm-workspace.yaml`; published plugin package contents are unchanged.
+
 ### Added
 
 - Desktop error pages now expose a manual frontend-only `Reload Spaces view` (`重新加载空间界面`) button whenever the failure is on the client/bridge side while `desktopLaunchState` and the running manager remain ready: it performs read-only checks (`role`, `desktopLaunchState`, `presentationSnapshot`) and mounts a fresh read-only `NativeHostController` without restarting Supervisor or any space.
