@@ -2,6 +2,7 @@ import { isNativeSpaceTarget, parseNativeSpaceHash, parseNativePortalFailureHash
   parsePortalSnapshot, nativeCreateIntentHash, parseNativeCreateIntent, nativeDetailIntentHash, parseNativeDetailIntent, PORTAL_SPACE_RE,
   type NativeSpaceTarget, type PortalSnapshot, type PortalFailure, type PortalCreation } from "../../../../../src/shared/space-host";
 import { BROWSER_RESULT, nativeBrowserFragment, parseNativeBrowserFragment, type BrowserRelay } from "../../../../../src/shared/browser-guest";
+import type { ResumeSpacesMode } from "../../../../../src/shared/types";
 import type { ClientFailureReport, ClientFailureStage, DesktopSpaceAction, WorkbenchGuideApi, WorkbenchReturnTarget } from "../../types";
 import { publicGuideDetail } from "../guide-detail";
 import { NativeBrowserHost } from "../native-browser-host";
@@ -199,9 +200,9 @@ export class NativeHostController {
     next.notify(nativeTexts().surfaceReloadedNotice);
     return next;
   };
-  restartService = async (confirmationId: string): Promise<NativeHostController> => {
+  restartService = async (confirmationId: string, resumeMode?: ResumeSpacesMode): Promise<NativeHostController> => {
     if (!this.supportsServiceRestart || !["failed", "service-stopped"].includes(this.state.phase)) throw Error(nativeTexts().restartUnavailable);
-    const result = await this.guideApi.restartService!(confirmationId);
+    const result = await this.guideApi.restartService!(confirmationId, resumeMode);
     if (!result.ok || !result.connected) throw Error(this.reasonText(result.reasons) ?? nativeTexts().restartFailed);
     // The failed controller stays terminal. A confirmed new service gets a new
     // controller, so old async responses and guest events cannot affect it.

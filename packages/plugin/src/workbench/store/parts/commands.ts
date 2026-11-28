@@ -184,7 +184,8 @@ export abstract class CommandPart extends OverlayPart {
       settings.portStart !== saved.portStart ||
       settings.portEnd !== saved.portEnd ||
       settings.packageSource !== saved.packageSource ||
-      settings.catalogUrl !== saved.catalogUrl;
+      settings.catalogUrl !== saved.catalogUrl ||
+      settings.restoreRunningSpacesOnLaunch !== saved.restoreRunningSpacesOnLaunch;
     this.patch({
       settingsDraft: {
         settings,

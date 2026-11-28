@@ -16,11 +16,20 @@ DSH Spaces follows let it crash: report the actual failure, do not recover it.
 Do not add automatic retries, restarts, rollback, restore, repair, fallback,
 or interrupted-job replay. The only manual exceptions are the explicitly authorized
 Desktop error-page actions: (1) service start/restart (preview affected spaces,
-require confirmation, perform one normal owned shutdown, then one guarded launch),
+require confirmation, perform one normal owned shutdown, then one guarded launch
+that starts each space selected by the confirmed resume mode once),
 and (2) view-only reload (`重新加载空间界面`, read-only verification that the existing
 Desktop launch record, Supervisor snapshot, and manager space are ready/running,
 replacing only the failed frontend controller without starting or stopping Supervisor
-or any space). Do not replay tasks or restart child spaces. Failed shutdown, ambiguous ownership
+or any space). Clean-stop resume (authorized 2026-11-27): only a normal shutdown in which
+every owned space stopped successfully writes `.dsh-spaces-control/clean-stop-spaces.json`;
+the next launch outside maintenance reads and deletes it once and, unless the resume mode
+or the `restoreRunningSpacesOnLaunch` Home setting excludes it, starts each listed space
+once. Crashes, kills and failed shutdowns never write it; a damaged ledger is kept and reported.
+Creator reclaim (authorized 2026-11-27): a new main host may replace the epoch's Creator
+registration only after the old host's loopback identity listener refuses the connection or
+fails a fresh nonce proof; a timeout or a valid proof keeps `creator/conflict`.
+Do not replay tasks or restart child spaces outside these one-shot starts. Failed shutdown, ambiguous ownership
 and interrupted maintenance remain protected; never force-kill or clear evidence.
 Keep authentication, isolation, single-writer constraints and atomic writes.
 Opening the application is a new user-requested launch. That launch may retire

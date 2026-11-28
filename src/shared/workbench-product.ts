@@ -28,6 +28,7 @@ export interface WorkbenchHomeSettings {
   portEnd: number;
   packageSource: PackageSource;
   catalogUrl: string;
+  restoreRunningSpacesOnLaunch: boolean;
 }
 
 export interface WorkbenchLibraryItem {

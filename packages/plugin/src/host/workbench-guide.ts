@@ -15,6 +15,7 @@ import { WORKBENCH_PUBLIC_ERROR } from "./remote-errors";
 import type { WorkbenchHostRuntime } from "./runtime";
 import { validClientFailureReport, validDesktopSpaceAction, type DesktopSpaceAction } from "../types";
 import type { HostActivityProjection } from "./host-activity";
+import type { ResumeSpacesMode } from "../../../../src/shared/types";
 
 /** Presentation and launch Remote; manual service restart is restricted to the confirmed Desktop. */
 export class WorkbenchGuideHost extends TypertRemoteService {
@@ -60,9 +61,10 @@ export class WorkbenchGuideHost extends TypertRemoteService {
   }
 
   @Remote("restartService")
-  async restartService(confirmationId: string): Promise<WorkbenchBootstrapResult> {
+  async restartService(confirmationId: string, resumeMode?: ResumeSpacesMode): Promise<WorkbenchBootstrapResult> {
     if (typeof confirmationId !== "string" || !/^[a-f0-9]{64}$/.test(confirmationId)) throw new RemoteError("workbench/invalid-input", "A valid restart confirmation is required.", {});
-    try { return await this.runtime.restartService(confirmationId); }
+    if (resumeMode !== undefined && !["running-and-policy", "policy-only", "none"].includes(resumeMode)) throw new RemoteError("workbench/invalid-input", "A valid service resume mode is required.", {});
+    try { return await this.runtime.restartService(confirmationId, resumeMode); }
     catch (error) { this.logFailure("restartService", error); throw new RemoteError("workbench/unavailable", reportedOrFallback(error instanceof Error ? error.message : undefined, "The manual service restart failed."), {}); }
   }
 

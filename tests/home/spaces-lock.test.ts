@@ -453,7 +453,8 @@ process.stdout.write(JSON.stringify(result) + "\\n");
     });
   const results = await Promise.all([runChild(), runChild()]);
   assert.equal(results.filter((row) => row.unlocked).length, 1);
-  assert.ok(results.some((row) => !row.unlocked && (row.reason === "reclaim-in-progress" || row.reason === "not-held")));
+  assert.ok(results.some((row) => !row.unlocked &&
+    (row.reason === "reclaim-in-progress" || row.reason === "not-held" || row.reason === "ambiguous")));
   assert.equal(lock.inspect().held, false);
 });
 

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -11,6 +10,14 @@ import { CooperativeChildren, COOPERATIVE_STOP_WAIT_MS } from "../../src/adapter
 import { ProcessManager } from "../../src/adapters/node/runtime/process-manager.ts";
 import type { PatchWriter } from "../../src/adapters/node/profile/patch-writer.ts";
 
+let nextPortStart = 32_100;
+
+function portStartBlock(): number {
+  const start = nextPortStart;
+  nextPortStart += 20;
+  return start;
+}
+
 async function fixture(t: TestContext, options: { delay: number; wait?: number; code?: number; rejectStop?: boolean }) {
   const home = mkdtempSync(join(tmpdir(), "spaces-stop-regression-"));
   const logger = new RotatingDiagnosticLogger(home, "supervisor");
@@ -18,17 +25,14 @@ async function fixture(t: TestContext, options: { delay: number; wait?: number; 
   const spawned: ChildProcess[] = [];
   const requests: string[] = [];
   const statuses: string[] = [];
-  const listener = createServer();
-  listener.listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const port = (listener.address() as { port: number }).port;
-  await new Promise<void>(resolve => listener.close(() => resolve()));
-  const manager = new ProcessManager(home, { verify: async () => {} } as unknown as PatchWriter, port, port, {
+  const portStart = portStartBlock();
+  const manager = new ProcessManager(home, { verify: async () => {} } as unknown as PatchWriter, portStart, portStart + 12, {
     ensureCli: async () => "fixture",
     prepareHome: async () => {},
     gracefulWaitMs: options.wait ?? COOPERATIVE_STOP_WAIT_MS,
     readyTimeoutMs: 8_000,
-    spawn: (_args, spawnOptions) => {
+    spawn: (args, spawnOptions) => {
+      const port = args[args.indexOf("--port") + 1];
       const child = children.spawn(["-e", `
         const http = require('node:http');
         process.on('SIGTERM', () => setTimeout(() => process.exit(${options.code ?? 0}), ${options.delay}));

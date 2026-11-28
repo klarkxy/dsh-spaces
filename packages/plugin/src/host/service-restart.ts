@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { lstatSync } from "../../../../src/shared/node/filesystem";
 import { HomeLease, HOME_CONTROL_DIR_NAME } from "../../../../src/adapters/node/home/home-lease";
+import { parseHomeSettingsFile, readSettingsRecord } from "../../../../src/adapters/node/products/workbench-products";
+import type { ResumeSpacesMode } from "../../../../src/shared/types";
 import type { WorkbenchApi, WorkbenchPlan } from "../../../../src/shared/workbench";
 import type { WorkbenchBootstrapResult, WorkbenchServiceRestartPreview } from "../types";
 import { attachExistingSupervisor, type SupervisorAttachResult } from "./supervisor-attach";
@@ -22,7 +24,7 @@ export interface ServiceRestartOptions {
   fetch?: WorkbenchHttpClientOptions["fetch"];
   connect?: (options: WorkbenchHttpClientOptions) => WorkbenchApi;
   /** Called only after the old shutdown is durably successful and ownership is released. */
-  launch(previousEpoch: string | null, discovery: Missing): Promise<WorkbenchBootstrapResult>;
+  launch(previousEpoch: string | null, discovery: Missing, resumeMode: ResumeSpacesMode): Promise<WorkbenchBootstrapResult>;
   timeoutMs?: number;
 }
 
@@ -31,6 +33,16 @@ export class DesktopServiceRestart {
   private confirmation?: Confirmation;
   private readonly key: string;
   constructor(private readonly options: ServiceRestartOptions) { this.key = resolve(options.home); }
+
+  private defaultResumeMode(): ResumeSpacesMode {
+    try {
+      const { raw, missing } = readSettingsRecord(this.options.home);
+      if (missing) return "running-and-policy";
+      return parseHomeSettingsFile(raw).settings.restoreRunningSpacesOnLaunch ? "running-and-policy" : "policy-only";
+    } catch {
+      return "policy-only";
+    }
+  }
 
   async preview(stopOnly = false): Promise<WorkbenchServiceRestartPreview> {
     this.options.assertDesktop();
@@ -50,17 +62,19 @@ export class DesktopServiceRestart {
       plan = await api.preview({ kind: "service.shutdown" }, { serviceEpoch: state.serviceEpoch, expectedRevision: state.revision });
       if (plan.kind !== "service.shutdown" || plan.serviceEpoch !== state.serviceEpoch || plan.stateRevision !== state.revision) throw Error(CHANGED);
       spaces = plan.affectedSpaceIds.map(id => ({ id, displayName: state.spaces.find(row => row.id === id)?.displayName ?? id,
-        running: plan!.runningSpaceIds.includes(id) }));
+        running: plan!.runningSpaceIds.includes(id), busy: state.spaces.find(row => row.id === id)?.working === "busy" }));
     }
     const expires = Math.min(Date.now() + 5 * 60_000, plan ? Date.parse(plan.expiresAt) : Infinity);
     if (!Number.isFinite(expires) || expires <= Date.now()) throw Error("The restart confirmation expired.");
     const id = randomBytes(32).toString("hex");
     this.confirmation = { id, expires, discovery, plan, stopOnly };
-    return { confirmationId: id, expiresAt: new Date(expires).toISOString(), action: stopOnly ? "stop" : plan ? "restart" : "start", spaces };
+    return { confirmationId: id, expiresAt: new Date(expires).toISOString(), action: stopOnly ? "stop" : plan ? "restart" : "start", defaultResumeMode: this.defaultResumeMode(), spaces };
   }
 
-  async execute(confirmationId: string, stopOnly = false): Promise<WorkbenchBootstrapResult> {
+  async execute(confirmationId: string, stopOnly = false, resumeMode?: ResumeSpacesMode): Promise<WorkbenchBootstrapResult> {
     this.options.assertDesktop();
+    if (resumeMode !== undefined && !["running-and-policy", "policy-only", "none"].includes(resumeMode)) throw Error("The service resume mode is invalid.");
+    const mode = resumeMode ?? this.defaultResumeMode();
     const confirmed = this.confirmation;
     if (!confirmed || confirmed.stopOnly !== stopOnly || confirmed.id !== confirmationId || confirmed.expires <= Date.now()) throw Error("The service confirmation is invalid or expired.");
     if (active.has(this.key)) throw Error("A manual service restart is already in progress.");
@@ -88,7 +102,7 @@ export class DesktopServiceRestart {
       }
       this.options.assertDesktop();
       if (stopOnly) return { ok: true, connected: false, unavailable: false, origin: null, reasons: [] };
-      return await this.options.launch(previousEpoch, missing);
+      return await this.options.launch(previousEpoch, missing, mode);
     } finally { active.delete(this.key); }
   }
 

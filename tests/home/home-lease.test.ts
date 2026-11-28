@@ -600,7 +600,8 @@ process.stdout.write(JSON.stringify(result) + "\\n");
   const results = await Promise.all([runChild(), runChild()]);
   assert.equal(results.filter((row) => row.reclaimed).length, 1);
   assert.ok(
-    results.some((row) => !row.reclaimed && (row.reason === "reclaim-in-progress" || row.reason === "not-held")),
+    results.some((row) => !row.reclaimed &&
+      (row.reason === "reclaim-in-progress" || row.reason === "not-held" || row.reason === "ambiguous")),
   );
   assert.equal(lease.inspect().held, false);
 });

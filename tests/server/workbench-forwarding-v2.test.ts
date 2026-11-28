@@ -86,7 +86,7 @@ test("submit and preview POST bodies carry parsed context; product is forwarded"
             ok: true,
             value: {
               method: "settings",
-              settings: { portStart: 1024, portEnd: 2048, packageSource: "official", catalogUrl: "" },
+              settings: { portStart: 1024, portEnd: 2048, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
               clientDefaults: { locale: "system", theme: "system" },
               observation: context,
             },
@@ -174,7 +174,7 @@ test("missing context and unknown recovery commands are rejected without filling
 test("failed job result.product is preserved", async () => {
   const product = {
     kind: "settings.update" as const,
-    settings: { portStart: 1024, portEnd: 2048, packageSource: "official" as const, catalogUrl: "" },
+    settings: { portStart: 1024, portEnd: 2048, packageSource: "official" as const, catalogUrl: "", restoreRunningSpacesOnLaunch: true },
   };
   const api = createWorkbenchHttpClient({
     endpoint,

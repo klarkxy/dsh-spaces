@@ -5,6 +5,7 @@ import type { Context } from "@deepseek-ai/cordis";
 import { canonicalHome } from "../../../../src/adapters/node/home/home-operation-lock";
 import { bindDshCli, isCompatibleDshCliVersion } from "../../../../src/adapters/node/products/spaces-service";
 import { publicReason } from "../../../../src/adapters/node/runtime/start-failure";
+import type { ResumeSpacesMode } from "../../../../src/shared/types";
 import type { WorkbenchStartupFailure } from "../../../../src/shared/workbench-startup";
 import type { WorkbenchApi, WorkbenchState } from "../../../../src/shared/workbench";
 import { WORKBENCH_ENTRY_UNAVAILABLE } from "../../../../src/shared/workbench-errors";
@@ -643,7 +644,7 @@ export class WorkbenchHostRuntime {
     };
   }
 
-  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult, record?: DesktopLaunchRecord, startDesktopSpaces = false): Promise<WorkbenchBootstrapResult> {
+  private async connectSupervisor(allowColdStart: boolean, priorDiscovery?: SupervisorAttachResult, record?: DesktopLaunchRecord, launchOptions: { startDesktopSpaces?: boolean; resumeMode?: ResumeSpacesMode } = {}): Promise<WorkbenchBootstrapResult> {
     const home = this.identity.home;
     if (!home) {
       return {
@@ -685,7 +686,8 @@ export class WorkbenchHostRuntime {
       snapshotRoot: this.snapshotRoot,
       allowRealHome: this.options.allowRealHome === true,
       allowColdStart,
-      startDesktopSpaces,
+      startDesktopSpaces: launchOptions.startDesktopSpaces === true,
+      resumeMode: launchOptions.resumeMode,
       exitWithHost:
         this.identity.confirmed &&
         !this.identity.recoveryRequired &&
@@ -779,11 +781,11 @@ export class WorkbenchHostRuntime {
     } finally { this.restarting = false; }
   }
 
-  async restartService(confirmationId: string): Promise<WorkbenchBootstrapResult> {
+  async restartService(confirmationId: string, resumeMode?: ResumeSpacesMode): Promise<WorkbenchBootstrapResult> {
     this.assertNotRestarting();
     const operation = this.restartOperation();
     this.restarting = true;
-    try { return await operation.execute(confirmationId); }
+    try { return await operation.execute(confirmationId, false, resumeMode); }
     finally { this.restarting = false; }
   }
 
@@ -805,10 +807,10 @@ export class WorkbenchHostRuntime {
     return this.serviceRestart ??= new DesktopServiceRestart({
       home: this.identity.home!, allowRealHome: this.options.allowRealHome === true,
       assertDesktop, connect: this.options.connect, fetch: this.options.fetch, timeoutMs: this.options.supervisorTimeoutMs,
-      launch: async (previousEpoch, missing) => {
+      launch: async (previousEpoch, missing, resumeMode) => {
         await this.supervisorReplaced(previousEpoch);
         const record = replaceLaunch(this.launchHomeKey());
-        const result = await this.runLaunch(record, missing);
+        const result = await this.runLaunch(record, missing, { startDesktopSpaces: resumeMode !== "none", resumeMode });
         if (result.connected && (this.endpoint as SupervisorEndpoint | null)?.serviceEpoch === previousEpoch) throw new Error("The previous service is still active.");
         return result;
       },
@@ -820,7 +822,7 @@ export class WorkbenchHostRuntime {
     const denied = this.desktopIdentityRejection();
     if (denied) throw new Error(denied);
     const { record, created } = joinLaunch(this.launchHomeKey());
-    if (created) void this.runLaunch(record, undefined, true).catch(() => undefined);
+    if (created) void this.runLaunch(record, undefined, { startDesktopSpaces: true }).catch(() => undefined);
     else void this.attachJoinedLaunch(record).catch(() => undefined);
     return snapshotLaunch(record);
   }
@@ -898,9 +900,9 @@ export class WorkbenchHostRuntime {
     return this.finishInitialize(current.managerId ?? this.currentManagerId());
   }
 
-  private async runLaunch(record: DesktopLaunchRecord, priorDiscovery?: SupervisorAttachResult, startDesktopSpaces = false): Promise<WorkbenchBootstrapResult> {
+  private async runLaunch(record: DesktopLaunchRecord, priorDiscovery?: SupervisorAttachResult, launchOptions: { startDesktopSpaces?: boolean; resumeMode?: ResumeSpacesMode } = {}): Promise<WorkbenchBootstrapResult> {
     try {
-      const result = await this.connectSupervisor(true, priorDiscovery, record, startDesktopSpaces);
+      const result = await this.connectSupervisor(true, priorDiscovery, record, launchOptions);
       if (!result.connected) this.failRecord(record, result.reasons);
       return result;
     } catch (error) {

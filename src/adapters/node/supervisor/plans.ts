@@ -48,6 +48,8 @@ export interface SupervisorPlansHost {
   ownedSpaceIds: () => string[];
   stopOwned: (spaceId: string) => Promise<void>;
   stopOwnedAll: () => Promise<void>;
+  captureCleanStop: () => string[];
+  writeCleanStop: (reason: "service-shutdown", runningSpaceIds: string[]) => void;
   startSpace: (spaceId: string, ctx: WorkbenchJobContext) => Promise<WorkbenchJob["result"]>;
   /** Verified main profile of this epoch; throws when the main space is not connected. */
   mainProfile: () => string;
@@ -77,6 +79,7 @@ export interface SupervisorPlansHost {
 export class SupervisorPlans {
   readonly plans = new Map<string, StoredPlan>();
   private stoppedShutdownJobId: string | null = null;
+  private pendingCleanStopIds: string[] | null = null;
 
   constructor(private readonly host: SupervisorPlansHost) {}
 
@@ -174,6 +177,7 @@ export class SupervisorPlans {
         this.host.lifecycle.relinquishKind = stored.request.kind;
         this.host.lifecycle.relinquishJobId = this.host.lifecycle.activeJobId;
         this.stoppedShutdownJobId = null;
+        this.pendingCleanStopIds = null;
       }
       return this.executeLocal(stored, ctx);
     }
@@ -305,7 +309,9 @@ export class SupervisorPlans {
       case "service.shutdown": {
         ctx.phase("stopping-children");
         this.host.lifecycle.sealing = true;
+        let cleanStopIds: string[] = [];
         try {
+          cleanStopIds = this.host.captureCleanStop();
           await this.host.stopOwnedAll();
         } catch (error) {
           this.host.lifecycle.sealing = false;
@@ -313,6 +319,7 @@ export class SupervisorPlans {
           this.host.lifecycle.maintenanceBlocked = true;
           throw error;
         }
+        this.pendingCleanStopIds = cleanStopIds;
         this.stoppedShutdownJobId = this.host.lifecycle.relinquishJobId;
         ctx.phase("finalizing");
         return;
@@ -346,6 +353,10 @@ export class SupervisorPlans {
     if (!kind) return;
     this.host.lifecycle.endRelinquish();
     this.host.messageBus.close();
+    if (kind === "service.shutdown") {
+      this.host.writeCleanStop("service-shutdown", this.pendingCleanStopIds ?? []);
+      this.pendingCleanStopIds = null;
+    }
     this.host.dropWritable();
     if (kind === "service.shutdown") {
       this.host.lifecycle.sealing = true;

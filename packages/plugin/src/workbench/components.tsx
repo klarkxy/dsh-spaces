@@ -64,7 +64,7 @@ export function WorkbenchView({ ui, controller, homeUrl, contained = false, nati
 
           {visibleSystemPage !== "settings" && <CreatedNotice ui={ui} controller={controller} />}
           <WorkspaceChrome ui={ui} controller={controller} />
-          {!settingsModal && visibleSystemPage !== "settings" && <div className="dsh-wb-global-status"><StatusBanners ui={ui} /></div>}
+          {!settingsModal && visibleSystemPage !== "settings" && <div className="dsh-wb-global-status"><StatusBanners ui={ui} controller={controller} /></div>}
         </div>
         <Overlays ui={ui} controller={controller} systemPage={visibleSystemPage} requestServiceStop={requestServiceStop} />
       </div>

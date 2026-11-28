@@ -273,6 +273,7 @@ export class WorkbenchProductService {
           portEnd: DEFAULT_HUB_SETTINGS.portEnd,
           packageSource: DEFAULT_HUB_SETTINGS.packageSource,
           catalogUrl: DEFAULT_HUB_SETTINGS.catalogUrl,
+          restoreRunningSpacesOnLaunch: DEFAULT_HUB_SETTINGS.restoreRunningSpacesOnLaunch,
         },
         clientDefaults: { locale: DEFAULT_HUB_SETTINGS.locale, theme: DEFAULT_HUB_SETTINGS.theme },
       };
@@ -412,6 +413,7 @@ export class WorkbenchProductService {
     merged.portEnd = next.portEnd;
     merged.packageSource = next.packageSource;
     merged.catalogUrl = next.catalogUrl;
+    merged.restoreRunningSpacesOnLaunch = next.restoreRunningSpacesOnLaunch;
     atomicWrite(settingsPath(this.ports.home), `${JSON.stringify(merged, null, 2)}\n`);
     this.ports.settingsChanged?.(next);
     const outcome: WorkbenchProductOutcome = { kind: "settings.update", settings: next };
@@ -761,7 +763,7 @@ function assertLibraryTarball(tarball: string, index: number): void {
   assertShareSecretFree([{ name: "plugin-library.tarball", data: tarball }]);
 }
 
-function readSettingsRecord(home: string): { raw: Record<string, unknown>; missing: boolean } {
+export function readSettingsRecord(home: string): { raw: Record<string, unknown>; missing: boolean } {
   const path = settingsPath(home);
   if (!existsSync(path)) return { raw: {}, missing: true };
   let text: string;
@@ -785,7 +787,7 @@ function readSettingsRecord(home: string): { raw: Record<string, unknown>; missi
   }
 }
 
-function parseHomeSettingsFile(raw: Record<string, unknown>): {
+export function parseHomeSettingsFile(raw: Record<string, unknown>): {
   settings: WorkbenchHomeSettings;
   clientDefaults: { locale: LocalePreference; theme: ThemePreference };
 } {
@@ -797,6 +799,7 @@ function parseHomeSettingsFile(raw: Record<string, unknown>): {
     portEnd,
     packageSource: optionalSettingsField(raw, "packageSource", requirePackageSource, DEFAULT_HUB_SETTINGS.packageSource),
     catalogUrl: optionalSettingsField(raw, "catalogUrl", requireCatalogUrl, DEFAULT_HUB_SETTINGS.catalogUrl),
+    restoreRunningSpacesOnLaunch: optionalSettingsField(raw, "restoreRunningSpacesOnLaunch", requireBoolean, DEFAULT_HUB_SETTINGS.restoreRunningSpacesOnLaunch),
   };
   return {
     settings,
@@ -822,6 +825,13 @@ function requireExactPort(value: unknown, field: string): number {
     throw new Error(`Home settings ${field} is invalid. Original bytes were left unchanged.`);
   }
   if (value < 1024 || value > 65535) throw new Error(t("errors.portBounds"));
+  return value;
+}
+
+function requireBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(`Home settings ${field} is invalid. Original bytes were left unchanged.`);
+  }
   return value;
 }
 
@@ -855,6 +865,7 @@ function validateHomeSettings(settings: WorkbenchHomeSettings): WorkbenchHomeSet
     portEnd,
     packageSource: requirePackageSource(settings.packageSource, "packageSource"),
     catalogUrl: requireCatalogUrl(settings.catalogUrl),
+    restoreRunningSpacesOnLaunch: requireBoolean(settings.restoreRunningSpacesOnLaunch, "restoreRunningSpacesOnLaunch"),
   };
 }
 

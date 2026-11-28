@@ -334,7 +334,7 @@ test("a confirmed manual restart returns a new controller for the supplied recor
     bootstrap: async () => { throw Error("must not bootstrap"); },
     portalTarget: async () => ({ available: false, unavailable: false, origin: null, path: null, reasons: [] }),
     returnTarget: async () => ({ ...PORTAL }),
-    previewServiceRestart: async () => ({ confirmationId: "confirm-1", expiresAt: "2099-01-01T00:00:00.000Z", action: "restart" as const, spaces: [] }),
+    previewServiceRestart: async () => ({ confirmationId: "confirm-1", expiresAt: "2099-01-01T00:00:00.000Z", action: "restart" as const, defaultResumeMode: "running-and-policy" as const, spaces: [] }),
     restartService: async (confirmationId: string) => {
       assert.equal(confirmationId, "confirm-1");
       return { ok: true, connected: true, unavailable: false, origin: null, reasons: [] };

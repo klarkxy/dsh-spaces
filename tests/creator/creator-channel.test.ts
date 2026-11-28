@@ -251,17 +251,29 @@ interface IdentityServer {
   close(): Promise<void>;
 }
 
-async function startIdentityServer(expected: { home: string; profile: string; wrong?: { home?: string; profile?: string } }): Promise<IdentityServer> {
+interface IdentityControl {
+  bearer?: string;
+  mode?: "proof" | "hold" | "status";
+  status?: number;
+  release?: () => void;
+}
+
+async function startIdentityServer(expected: { home: string; profile: string; wrong?: { home?: string; profile?: string } }, control: IdentityControl = {}): Promise<IdentityServer> {
   const bearer = "c".repeat(64);
   const server = createServer((req, res) => {
     const fail = (status: number) => { res.writeHead(status); res.end(); };
-    if (req.method !== "POST" || req.headers.authorization !== `Bearer ${bearer}`) return fail(401);
+    if (req.method !== "POST" || req.headers.authorization !== `Bearer ${control.bearer ?? bearer}`) return fail(401);
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
     req.on("end", () => {
       try {
         const input = JSON.parse(Buffer.concat(chunks).toString()) as { nonce?: unknown };
         if (req.url !== "/identity") return fail(404);
+        if (control.mode === "hold") {
+          control.release = () => { res.writeHead(control.status ?? 500); res.end(); };
+          return;
+        }
+        if (control.mode === "status") return fail(control.status ?? 500);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({
           nonce: input.nonce,
@@ -906,4 +918,139 @@ test("a registration bound to the previous epoch loses every scoped op and its p
   assert.equal(staleContext.status, 401);
   const staleExecute = await call(fx, "createExecute", scope, { planId: (preview.body.value as CreatorPlan).id, requestId: "req-turn" });
   assert.equal(staleExecute.status, 401);
+});
+
+test("a closed previous identity listener allows a dead-host reclaim", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  const events: string[] = [];
+  (fx.ports as { diagnosticLog?: unknown }).diagnosticLog = {
+    info: (event: string) => events.push(event),
+    error: () => undefined,
+  };
+  await serve(fx);
+  const firstListener = await startIdentityServer({ home, profile: "web" });
+  const first = await issue(fx, firstListener);
+  await firstListener.close();
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const second = await issue(fx, secondListener);
+  assert.notEqual(second.registrationId, first.registrationId);
+  const stale = await call(fx, "context", first.scopes.creator!, {});
+  assert.equal(stale.status, 401);
+  assert.equal(events.includes("creator.reclaimed-dead-host"), true);
+});
+
+test("a live previous identity listener keeps the registration conflict", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const firstListener = await startIdentityServer({ home, profile: "web" });
+  await issue(fx, firstListener);
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const denied = await call(fx, "issue", HOST_BEARER, {
+    origin: secondListener.origin,
+    bearer: secondListener.bearer,
+    home: fx.home,
+    profile: "web",
+  });
+  assert.equal(denied.body.error?.code, "creator/conflict");
+});
+
+test("a previous origin that rejects the old bearer is reclaimed as dead", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const control: IdentityControl = {};
+  const firstListener = await startIdentityServer({ home, profile: "web" }, control);
+  const first = await issue(fx, firstListener);
+  control.bearer = "d".repeat(64);
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const second = await issue(fx, secondListener);
+  assert.notEqual(second.registrationId, first.registrationId);
+});
+
+test("a hanging previous identity probe remains a conflict", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const control: IdentityControl = {};
+  const firstListener = await startIdentityServer({ home, profile: "web" }, control);
+  await issue(fx, firstListener);
+  control.mode = "hold";
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const started = Date.now();
+  const denied = await call(fx, "issue", HOST_BEARER, {
+    origin: secondListener.origin,
+    bearer: secondListener.bearer,
+    home: fx.home,
+    profile: "web",
+  });
+  assert.equal(denied.body.error?.code, "creator/conflict");
+  assert.ok(Date.now() - started >= 1_400, "the hung probe must wait for its bounded timeout");
+});
+
+test("unregister retires shared registration state through the cleanup hook", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const listener = await startIdentityServer({ home, profile: "web" });
+  const issued = await issue(fx, listener);
+  const retired: string[] = [];
+  fx.ports.onRegistrationRetired = (registrationId) => retired.push(registrationId);
+  const result = await call(fx, "unregister", HOST_BEARER, { registrationId: issued.registrationId });
+  assert.equal(result.body.ok, true, JSON.stringify(result.body));
+  assert.deepEqual(retired, [issued.registrationId]);
+});
+
+test("an unregister during the previous-host probe does not become a false conflict", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const control: IdentityControl = { status: 500 };
+  const firstListener = await startIdentityServer({ home, profile: "web" }, control);
+  const first = await issue(fx, firstListener);
+  control.mode = "hold";
+  let probeSeen = false;
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const secondPromise = call(fx, "issue", HOST_BEARER, {
+    origin: secondListener.origin,
+    bearer: secondListener.bearer,
+    home: fx.home,
+    profile: "web",
+  });
+  for (let i = 0; i < 100 && !control.release; i += 1) await delay(10);
+  probeSeen = Boolean(control.release);
+  assert.equal(probeSeen, true, "the reclaim probe reached the previous identity listener");
+  const unregistered = await call(fx, "unregister", HOST_BEARER, { registrationId: first.registrationId });
+  assert.equal(unregistered.body.ok, true, JSON.stringify(unregistered.body));
+  control.release!();
+  const second = await secondPromise;
+  assert.equal(second.body.ok, true, JSON.stringify(second.body));
+  assert.notEqual((second.body.value as CreatorIssueResult).registrationId, first.registrationId);
+});
+
+test("a previous identity server error remains a conflict instead of a reclaim", async () => {
+  const home = tempHome();
+  writeProfile(home, "web");
+  const fx = makePorts(home);
+  await serve(fx);
+  const control: IdentityControl = {};
+  const firstListener = await startIdentityServer({ home, profile: "web" }, control);
+  await issue(fx, firstListener);
+  control.mode = "status";
+  control.status = 500;
+  const secondListener = await startIdentityServer({ home, profile: "web" });
+  const denied = await call(fx, "issue", HOST_BEARER, {
+    origin: secondListener.origin,
+    bearer: secondListener.bearer,
+    home: fx.home,
+    profile: "web",
+  });
+  assert.equal(denied.body.error?.code, "creator/conflict");
 });

@@ -192,6 +192,7 @@ test("settings read returns client defaults and update preserves locale, theme, 
       theme: "dark",
       packageSource: "official",
       catalogUrl: "",
+      restoreRunningSpacesOnLaunch: true,
     })}\n`,
   );
   const changed: WorkbenchHomeSettings[] = [];
@@ -205,7 +206,7 @@ test("settings read returns client defaults and update preserves locale, theme, 
   await service.execute(
     {
       kind: "settings.update",
-      settings: { portStart: 4100, portEnd: 4199, packageSource: "china", catalogUrl: "https://example.com/c.json" },
+      settings: { portStart: 4100, portEnd: 4199, packageSource: "china", catalogUrl: "https://example.com/c.json", restoreRunningSpacesOnLaunch: false },
     },
     ctx,
   );
@@ -216,7 +217,20 @@ test("settings read returns client defaults and update preserves locale, theme, 
   assert.equal(stored.theme, "dark");
   assert.equal(stored.quitBehavior, "keep");
   assert.equal(stored.extraFlag, true);
+  assert.equal(stored.restoreRunningSpacesOnLaunch, false);
   assert.deepEqual(changed[0]?.catalogUrl, "https://example.com/c.json");
+  assert.equal(changed[0]?.restoreRunningSpacesOnLaunch, false);
+});
+
+
+test("restoreRunningSpacesOnLaunch has a boolean type in settings files", async () => {
+  const dir = home();
+  const path = join(dir, "hub", "settings.json");
+  const original = JSON.stringify({ restoreRunningSpacesOnLaunch: "yes" });
+  writeFileSync(path, original);
+  const service = createService(dir);
+  await assert.rejects(service.read({ method: "settings" }), /restoreRunningSpacesOnLaunch is invalid/);
+  assert.equal(readFileSync(path, "utf8"), original);
 });
 
 test("catalog read uses seed when cache is missing and does not write", async () => {
@@ -805,7 +819,7 @@ test("http catalog URLs are rejected instead of being coerced empty", async () =
     service.execute(
       {
         kind: "settings.update",
-        settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "http://example.com/c.json" },
+        settings: { portStart: 3100, portEnd: 3199, packageSource: "official", catalogUrl: "http://example.com/c.json", restoreRunningSpacesOnLaunch: true },
       },
       ctx,
     ),
@@ -826,7 +840,7 @@ test("present invalid settings fields are rejected and original bytes stay", asy
     service.execute(
       {
         kind: "settings.update",
-        settings: { portStart: 4100, portEnd: 4199, packageSource: "official", catalogUrl: "" },
+        settings: { portStart: 4100, portEnd: 4199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
       },
       ctx,
     ),
@@ -849,7 +863,7 @@ test("legacy settings with only unknown fields keep defaults and extra keys", as
   await service.execute(
     {
       kind: "settings.update",
-      settings: { portStart: 4100, portEnd: 4199, packageSource: "official", catalogUrl: "" },
+      settings: { portStart: 4100, portEnd: 4199, packageSource: "official", catalogUrl: "", restoreRunningSpacesOnLaunch: true },
     },
     ctx,
   );

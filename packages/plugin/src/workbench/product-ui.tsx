@@ -128,6 +128,15 @@ export function HomeSettingsFields({
                   onChange={(event) => controller.setHomeSettings({ catalogUrl: event.target.value })}
                 />
               </label>
+              <label className="dsh-wb-field">
+                {t(locale, "settings.restoreRunningSpacesOnLaunch")}
+                <input
+                  type="checkbox"
+                  checked={draft.settings.restoreRunningSpacesOnLaunch}
+                  disabled={!writable}
+                  onChange={(event) => controller.setHomeSettings({ restoreRunningSpacesOnLaunch: event.target.checked })}
+                />
+              </label>
             </>
           ) : null}
           {showPorts ? (

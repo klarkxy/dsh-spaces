@@ -90,6 +90,7 @@ export function computeWorkbenchRevision(input: WorkbenchRevisionInput): string 
       packageSource: input.settings.packageSource,
       portEnd: input.settings.portEnd,
       portStart: input.settings.portStart,
+      restoreRunningSpacesOnLaunch: input.settings.restoreRunningSpacesOnLaunch,
     },
     spaces,
   };

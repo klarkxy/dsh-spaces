@@ -55,7 +55,7 @@ export function ManagementContent({ ui, controller, requestServiceStop }: Workbe
  * here. Only the global state and a failure without a known origin stay in
  * this banner.
  */
-export function StatusBanners({ ui }: { ui: WorkbenchViewProps["ui"] }): ReactElement | null {
+export function StatusBanners({ ui, controller }: { ui: WorkbenchViewProps["ui"]; controller?: WorkbenchController }): ReactElement | null {
   const locale = ui.locale;
   const state = ui.state;
   return (
@@ -66,6 +66,7 @@ export function StatusBanners({ ui }: { ui: WorkbenchViewProps["ui"] }): ReactEl
         </p>
       )}
       {state?.maintenance && <p className="dsh-wb-notice">{t(locale, "app.maintenance")}</p>}
+      {state ? <AutoResumeStatus ui={ui} controller={controller} /> : null}
       {state?.availability === "unavailable" && (
         <p className="dsh-wb-alert" role="alert">
           {t(locale, "home.availability.unavailable")}
@@ -93,6 +94,40 @@ export function StatusBanners({ ui }: { ui: WorkbenchViewProps["ui"] }): ReactEl
       ))}
     </>
   );
+}
+
+function AutoResumeStatus({ ui, controller }: { ui: WorkbenchViewProps["ui"]; controller?: WorkbenchController }): ReactElement | null {
+  const state = ui.state;
+  const resume = state?.autoResume;
+  if (!state || !resume) return null;
+  const locale = ui.locale;
+  const nameOf = (id: string) => state.spaces.find((space) => space.id === id)?.displayName || id;
+  const parts: React.ReactNode[] = [];
+  if (resume.active) {
+    parts.push(t(locale, "autoResume.active", {
+      completed: String(resume.completed),
+      total: String(resume.total),
+      name: resume.inProgressSpaceId ? nameOf(resume.inProgressSpaceId) : "",
+    }));
+  }
+  if (!resume.active && resume.failedSpaceIds.length) {
+    if (!controller) {
+      parts.push(t(locale, "autoResume.failed", { names: resume.failedSpaceIds.map(nameOf).join(locale === "zh" ? "、" : ", ") }));
+    } else {
+      parts.push(<span key="failed">
+        {t(locale, "autoResume.failed", { names: "" })}
+        {resume.failedSpaceIds.map((id, index) => <span key={id}>
+          {index ? (locale === "zh" ? "、" : ", ") : ""}
+          <button type="button" className="dsh-wb-btn" data-auto-resume-space={id} onClick={() => controller.openDetail(id)}>{nameOf(id)}</button>
+        </span>)}
+      </span>);
+    }
+  }
+  if (resume.error) parts.push(t(locale, "autoResume.error", { error: resume.error }));
+  if (!parts.length) return null;
+  return <p className="dsh-wb-notice" role="status" data-auto-resume="true">
+    {parts.map((part, index) => <span key={index}>{index ? " " : ""}{part}</span>)}
+  </p>;
 }
 
 type MaintenanceSubTab = "overview" | "snapshots" | "runtime" | "advanced";

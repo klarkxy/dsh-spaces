@@ -153,6 +153,19 @@ async function untilPhase(runtime: WorkbenchHostRuntime, phase: DesktopLaunchSta
   throw new Error(`launch stayed ${last?.phase}: ${JSON.stringify(last)}`);
 }
 
+test("guide restart carries an optional validated resume mode", () => {
+  const host = TYPERT.invocations.find((row) => row.namespace === "workbenchGuide" && row.method === "restartService");
+  assert.ok(host);
+  assert.equal(host.parameters.length, 2);
+  assert.equal(host.parameters[1].name, "resumeMode");
+  assert.equal(host.parameters[1].acceptsUndefined, true);
+  const codec = host.parameters[1].codec.create();
+  assert.equal(codec.safeParse("running-and-policy").success, true);
+  assert.equal(codec.safeParse("policy-only").success, true);
+  assert.equal(codec.safeParse("none").success, true);
+  assert.equal(codec.safeParse("everything").success, false);
+});
+
 test("guide launch methods are no-arg and share one strict result shape", async () => {
   const names = ["beginDesktopLaunch", "desktopLaunchState"] as const;
   for (const name of names) {

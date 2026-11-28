@@ -70,6 +70,7 @@ h3.dsh-wb-title, h4.dsh-wb-title { font-size: 14px; line-height: 22px; font-weig
   line-height: 20px;
 }
 .dsh-wb-row, .dsh-wb-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dsh-wb-notice [data-auto-resume-space] { min-height: 22px; padding: 0 6px; }
 .dsh-wb-empty {
   display: flex;
   flex-direction: column;

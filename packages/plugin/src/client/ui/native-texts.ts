@@ -67,6 +67,11 @@ export interface NativeShellTexts {
   serviceStartBody: string;
   serviceSpaceRunning: string;
   serviceSpaceManaged: string;
+  serviceSpaceBusyWarning: string;
+  serviceResumeModeLabel: string;
+  serviceResumeRunning: string;
+  serviceResumePolicyOnly: string;
+  serviceResumeNone: string;
   serviceConfirmDetails: string;
   serviceConfirmValid: string;
   serviceStopConfirm: string;
@@ -198,9 +203,14 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     serviceStartTitle: "启动 Spaces 服务？",
     serviceStopBody: "将停止服务及以下空间，运行中的任务会中断。",
     serviceRestartBody: "将重启服务并停止以下空间，运行中的任务会中断。",
-    serviceStartBody: "将启动 Spaces 服务，各子空间保持停止。",
+    serviceStartBody: "将启动 Spaces 服务；下方选择的恢复模式决定子空间是否启动。",
     serviceSpaceRunning: "运行中，将停止",
     serviceSpaceManaged: "已停止",
+    serviceSpaceBusyWarning: "正在执行任务，重启会中断",
+    serviceResumeModeLabel: "启动后恢复",
+    serviceResumeRunning: "恢复运行中的空间",
+    serviceResumePolicyOnly: "仅按启动设置",
+    serviceResumeNone: "不恢复（只启动管理服务）",
     serviceConfirmDetails: "查看确认信息",
     serviceConfirmValid: "有效期至 {time}；空间状态变化后需重新确认。",
     serviceStopConfirm: "停止服务",
@@ -330,9 +340,14 @@ const texts: Record<SpacesLocale, NativeShellTexts> = {
     serviceStartTitle: "Start the Spaces service?",
     serviceStopBody: "Stops the service and the spaces below. Running tasks will be interrupted.",
     serviceRestartBody: "Restarts the service and stops the spaces below. Running tasks will be interrupted.",
-    serviceStartBody: "Starts the Spaces service. Child spaces stay stopped.",
+    serviceStartBody: "Starts the Spaces service; the resume selection below decides whether child spaces start.",
     serviceSpaceRunning: "running, will stop",
     serviceSpaceManaged: "stopped",
+    serviceSpaceBusyWarning: "A task is running; restarting will interrupt it",
+    serviceResumeModeLabel: "After startup",
+    serviceResumeRunning: "Resume running spaces",
+    serviceResumePolicyOnly: "Startup settings only",
+    serviceResumeNone: "Do not resume (service only)",
     serviceConfirmDetails: "Confirmation details",
     serviceConfirmValid: "Valid until {time}; reconfirm if space state changes.",
     serviceStopConfirm: "Stop service",

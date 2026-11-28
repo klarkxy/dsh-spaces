@@ -56,7 +56,8 @@ export const serviceRestartPreviewSchema = z.object({
   confirmationId: hex64Schema,
   expiresAt: isoDateSchema,
   action: z.enum(["start", "restart", "stop"]),
-  spaces: z.array(z.object({ id: spaceIdSchema, displayName: z.string().max(500), running: z.boolean() }).strict()).max(1000),
+  defaultResumeMode: z.enum(["running-and-policy", "policy-only", "none"]),
+  spaces: z.array(z.object({ id: spaceIdSchema, displayName: z.string().max(500), running: z.boolean(), busy: z.boolean() }).strict()).max(1000),
 }).strict();
 
 export const workbenchRoleSchema = z.enum(["manager", "workspace", "uninitialized"]);
@@ -210,6 +211,17 @@ export const desktopLaunchStateSchema = z
   })
   .strict();
 
+export const workbenchAutoResumeSchema = z
+  .object({
+    active: z.boolean(),
+    total: z.number().int().nonnegative().max(256),
+    completed: z.number().int().nonnegative().max(256),
+    inProgressSpaceId: spaceIdSchema.optional(),
+    failedSpaceIds: z.array(spaceIdSchema).max(256),
+    error: z.string().max(500).optional(),
+  })
+  .strict();
+
 export const workbenchStateSchema = z
   .object({
     protocolVersion: z.literal(2),
@@ -232,6 +244,7 @@ export const workbenchStateSchema = z
     reasons: reasonsSchema,
     spaces: z.array(workbenchSpaceSchema).max(256),
     jobs: z.array(workbenchJobSchema).max(256),
+    autoResume: workbenchAutoResumeSchema.optional(),
   })
   .strict();
 

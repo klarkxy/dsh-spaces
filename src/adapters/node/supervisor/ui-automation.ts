@@ -126,6 +126,7 @@ interface StoredSession {
 export class UiAutomationManager {
   private readonly sessions = new Map<string, StoredSession>();
   private readonly bySpace = new Map<string, string>();
+  private readonly retiredRegistrationIds = new Set<string>();
   /**
    * One-shot engine probe + launch shared by every concurrent caller: the
    * promise is created once and never replaced, so a failure is terminal
@@ -264,6 +265,9 @@ export class UiAutomationManager {
    * injected into the isolated context — the launch URL is never navigated.
    */
   async open(registrationId: string, spaceId: string): Promise<ControlUiOpenResult> {
+    if (this.retiredRegistrationIds.has(registrationId)) {
+      throw new ControlPublicError("control/unavailable", "The control registration is not active.");
+    }
     const id = this.requireTargetSpace(spaceId);
     const generation = this.ports.generationOf(id);
     const serviceEpoch = this.ports.currentServiceEpoch();
@@ -349,6 +353,10 @@ export class UiAutomationManager {
     };
     page.on("close", onGone);
     page.on("crash", onGone);
+    if (this.retiredRegistrationIds.has(registrationId)) {
+      await context.close().catch(() => undefined);
+      throw new ControlPublicError("control/unavailable", "The control registration is not active.");
+    }
     this.sessions.set(session.id, session);
     this.bySpace.set(id, session.id);
     this.touch(session);
@@ -542,6 +550,14 @@ export class UiAutomationManager {
     this.markDead(session, "control/not-running",
       "The space stopped or restarted; the UI session is no longer authorized.");
     void session.context.close().catch(() => undefined);
+  }
+
+  /** Retire one main registration and release every UI session it opened. */
+  async retireRegistration(registrationId: string): Promise<void> {
+    this.retiredRegistrationIds.add(registrationId);
+    for (const session of [...this.sessions.values()]) {
+      if (session.registrationId === registrationId) await this.release(session);
+    }
   }
 
   /** Supervisor shutdown: release the browser and every session. */

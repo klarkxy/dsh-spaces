@@ -208,6 +208,8 @@ function makeFixture(home: string, options: { running?: string[]; starting?: str
       fixture.mutable.stopping.delete(id);
     },
     stopOwnedAll: async () => undefined,
+    captureCleanStop: () => [],
+    writeCleanStop: () => {},
     startSpace: async (id) => {
       fixture.modelSyncCalls.push(`start:${id}`);
       fixture.mutable.running.add(id);

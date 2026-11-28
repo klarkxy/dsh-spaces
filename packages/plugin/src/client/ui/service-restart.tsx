@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { ResumeSpacesMode } from "../../../../../src/shared/types";
 import type { WorkbenchServiceRestartPreview } from "../../types";
 import { publicGuideDetail } from "../guide-detail";
 import { inferSpacesLocale } from "../i18n";
@@ -12,12 +13,13 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
   const [preview, setPreview] = useState<WorkbenchServiceRestartPreview | null>(null);
   const [busy, setBusy] = useState<"preview" | "start" | "restart" | "stop" | "reload" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resumeMode, setResumeMode] = useState<ResumeSpacesMode>("running-and-policy");
   const mounted = useRef(false), inFlight = useRef(false), lastRequest = useRef(0);
   const locale = inferSpacesLocale();
   const texts = nativeTexts(locale);
   useEffect(() => {
     mounted.current = true;
-    setPreview(null); setBusy(null); setError(null); lastRequest.current = 0;
+    setPreview(null); setBusy(null); setError(null); setResumeMode("running-and-policy"); lastRequest.current = 0;
     return () => { mounted.current = false; };
   }, [controller]);
   const failure = (cause: unknown) => {
@@ -26,7 +28,13 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
   const prepare = async (stop = false) => {
     if (inFlight.current) return;
     inFlight.current = true; setBusy("preview"); setError(null); setPreview(null);
-    try { const value = await (stop ? controller.previewServiceStop() : controller.previewServiceRestart()); if (mounted.current) setPreview(value); }
+    try {
+      const value = await (stop ? controller.previewServiceStop() : controller.previewServiceRestart());
+      if (mounted.current) {
+        setPreview(value);
+        setResumeMode(value.defaultResumeMode);
+      }
+    }
     catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };
@@ -49,7 +57,7 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
     setPreview(null);
     try {
       if (action === "stop") await controller.stopService(confirmationId);
-      else { const next = await controller.restartService(confirmationId); if (mounted.current) onRestarted(next); }
+      else { const next = await controller.restartService(confirmationId, resumeMode); if (mounted.current) onRestarted(next); }
     } catch (cause) { failure(cause); }
     finally { inFlight.current = false; if (mounted.current) setBusy(null); }
   };
@@ -64,7 +72,17 @@ export function useServiceRestart(controller: NativeHostController, onRestarted:
       {preview && <>
         <h3>{preview.action === "stop" ? texts.serviceStopTitle : preview.action === "restart" ? texts.serviceRestartTitle : texts.serviceStartTitle}</h3>
         <p>{preview.action === "stop" ? texts.serviceStopBody : preview.action === "restart" ? texts.serviceRestartBody : texts.serviceStartBody}</p>
-        {preview.spaces.length > 0 && <ul>{preview.spaces.map(space => <li key={space.id}>{space.displayName}{space.running ? ` · ${texts.serviceSpaceRunning}` : ` · ${texts.serviceSpaceManaged}`}</li>)}</ul>}
+        {preview.spaces.length > 0 && <ul>{preview.spaces.map(space => <li key={space.id} data-busy={space.busy ? "true" : undefined} className={space.busy ? "dsh-native-warning" : undefined}>
+          {space.displayName}{space.running ? ` · ${texts.serviceSpaceRunning}` : ` · ${texts.serviceSpaceManaged}`}
+          {space.busy ? <div role="note">{texts.serviceSpaceBusyWarning}</div> : null}
+        </li>)}</ul>}
+        {preview.action !== "stop" ? <fieldset>
+          <legend>{texts.serviceResumeModeLabel}</legend>
+          {(["running-and-policy", "policy-only", "none"] as const).map(mode => <label key={mode}>
+            <input type="radio" name="dsh-service-resume-mode" checked={resumeMode === mode} disabled={!!busy} onChange={() => setResumeMode(mode)} />
+            {mode === "running-and-policy" ? texts.serviceResumeRunning : mode === "policy-only" ? texts.serviceResumePolicyOnly : texts.serviceResumeNone}
+          </label>)}
+        </fieldset> : null}
         <details><summary>{texts.serviceConfirmDetails}</summary><p>{texts.serviceConfirmValid.replace("{time}", expiresAt)}</p></details>
         <div className="dsh-native-confirm-actions">
           <PressButton type="button" className="dsh-host-action" disabled={!!busy} onClick={() => setPreview(null)}>{texts.cancel}</PressButton>
