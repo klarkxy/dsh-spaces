@@ -584,7 +584,7 @@ test("guide details redact complete authentication headers",async()=>{
  assert.doesNotMatch(publicGuideDetail("Cookie: sid=synthetic-one; remember=synthetic-two"),/synthetic-/);
 });
 
-function portalFixture() {
+function portalFixture(options: { visibility?: "visible" | "hidden" } = {}) {
   const origin = "http://127.0.0.1:3088", managerOrigin = "http://127.0.0.1:3091";
   let state: unknown = { ...inventory, protocolVersion: 2, availability: "ready",
     spaces: inventory.spaces.map(row => ({ ...row, hasWebApp: true })) };
@@ -600,7 +600,7 @@ function portalFixture() {
     addEventListener() {}, remove: () => removed++ };
   const parent = { postMessage: (message: unknown) => sent.push(message) };
   const document = {
-    visibilityState: "visible" as "visible" | "hidden",
+    visibilityState: options.visibility ?? "visible" as "visible" | "hidden",
     createElement: () => frame,
     body: { append() {} },
     getElementById: () => ({ remove() {} }),
@@ -757,16 +757,14 @@ test("rendered portal distinguishes state HTTP, transport, deadline, malformed a
   }
 });
 
-test("portal does not start state polls while hidden and polls again on a later visible tick", async () => {
-  const p = portalFixture(); await p.flush();
+test("portal sends the first state handshake while hidden, pauses later polls, and refreshes when visible again", async () => {
+  const p = portalFixture({ visibility: "hidden" }); await p.flush();
   const stateRequests = () => p.requests.filter(path => path.endsWith("/state")).length;
-  assert.equal(stateRequests(), 1);
-  p.setVisibility("hidden");
+  assert.equal(stateRequests(), 1, "the first state handshake is not skipped");
   p.triggerRefresh(); await p.flush();
-  assert.equal(stateRequests(), 1);
-  p.setVisibility("visible");
-  p.triggerRefresh(); await p.flush();
-  assert.equal(stateRequests(), 2);
+  assert.equal(stateRequests(), 1, "periodic polling pauses once a snapshot exists");
+  p.setVisibility("visible"); await p.flush();
+  assert.equal(stateRequests(), 2, "becoming visible resumes polling exactly once");
   assert.equal(p.sent.some(message => message.type === "failed"), false);
 });
 

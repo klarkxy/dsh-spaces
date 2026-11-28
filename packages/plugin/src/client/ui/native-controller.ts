@@ -914,7 +914,7 @@ export class NativeHostController {
     if (this.visibilityDocument && this.visibilityListener && typeof this.visibilityDocument.removeEventListener === "function") {
       this.visibilityDocument.removeEventListener("visibilitychange", this.visibilityListener);
     }
-    this.visibilityDocument = undefined; this.visibilityListener = undefined;
+    this.visibilityDocument = undefined; this.visibilityListener = undefined; this.visibilityChangedAt = null;
     this.sequence++; clearTimeout(this.pollTimer); clearTimeout(this.launchTimer); clearTimeout(this.selectionTimer);
     clearTimeout(this.noticeTimer);
     this.browserRequest = undefined; this.browser?.stop();

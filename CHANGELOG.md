@@ -12,7 +12,7 @@ All notable changes to DSH Spaces are recorded here. This project follows Keep a
 
 ### Fixed
 
-- Supervisor portal `state` and `view` requests now count only page-visible time toward their 10-second deadline, and hidden interval ticks do not start new state polls; exhausting the remaining visible budget still fails terminally without retry.
+- Supervisor portal `state` and `view` requests now count only page-visible time toward their 10-second deadline. The first state handshake is still sent when the tab starts hidden, hidden interval ticks after the first snapshot do not start new state polls, and becoming visible resumes normal polling; exhausting the remaining visible budget still fails terminally without retry.
 - Ordinary child space views now enter through the view-bridge route `/__dsh-spaces/view-entry`, which sends `Origin-Agent-Cluster: ?1` and replaces itself with `/`, so each child space gets its own renderer process instead of sharing one with the portal and manager. A child page crash or long main-thread task no longer takes down the whole Spaces surface. The manager keeps its existing `/` entry.
 - `NativeHostController` outer selection deadline now aligns to 90 seconds (covering 15s initial guest load + 35s manager readiness + 35s child selection) and appends the bounded `navDiag` reached-stage summary to `detail` on expiration.
 - Contained `WorkbenchApp` instances disable stale `localStorage` `selectedId` auto-restore (`disableAutoRestore`), and `@dsh-spaces/view-bridge` deduplicates repeated `"ready"` `postMessage` frames across DOM mutations while `connection` remains `"ready"`.

@@ -1431,6 +1431,9 @@ test("NativeHostController reports RPC transport failure context and guest navDi
   assert.equal(portalReports[0]!.visibility?.state, "hidden");
   assert.match(portalReports[0]!.visibility?.changedAt ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/);
   assert.equal(documentListeners.get("visibilitychange")?.size ?? 0, 0);
+  await assert.rejects(() => portalController.reloadSurface());
+  assert.equal(portalReports.length, 2);
+  assert.deepEqual(portalReports[1]!.visibility, { state: "visible", changedAt: null });
   const trail = portalReports[0]!.navTrail ?? [];
   assert.ok(trail.some(row => row.src === "controller" && row.ev === "user-select"));
   assert.ok(trail.some(row => row.src === "portal" && row.ev === "fail" && row.reason === "manager-disconnected"));

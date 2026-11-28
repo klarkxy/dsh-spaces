@@ -105,7 +105,7 @@ const fail = (reason, diagnostic = {}) => {
   send("failed", { failure: { reason,
     ...(failureCodes.includes(diagnostic.code) ? { code: diagnostic.code } : {}),
     ...(Number.isInteger(diagnostic.status) && diagnostic.status >= 100 && diagnostic.status <= 599 ? { status: diagnostic.status } : {}) } });
-  stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove();
+  stopped = true; removeRefreshVisibilityListener(); lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); if (frame) frame.remove();
 };
 class RequestFailure extends Error {
   constructor(diagnostic) { super("Portal request failed"); this.diagnostic = diagnostic; }
@@ -183,7 +183,7 @@ async function api(method, payload) {
   }
 }
 async function refresh() {
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  if (snapshot !== null && typeof document !== "undefined" && document.visibilityState === "hidden") return;
   if (stopped || reading) return;
   reading = true;
   try {
@@ -388,8 +388,15 @@ function forwardDetailIntent(detailIntent) {
     serviceEpoch: managerView.serviceEpoch, spaceId: managerView.spaceId, generation: managerView.generation,
     channel: managerView.channel }, audience.managerOrigin);
 }
+function refreshWhenVisible() {
+  if (typeof document !== "undefined" && document.visibilityState !== "hidden") void refresh();
+}
+function removeRefreshVisibilityListener() {
+  if (typeof document !== "undefined" && typeof document.removeEventListener === "function") document.removeEventListener("visibilitychange", refreshWhenVisible);
+}
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") document.addEventListener("visibilitychange", refreshWhenVisible);
 if (native) window.addEventListener("hashchange", nativeSelection);
-window.addEventListener("pagehide", () => { navEmit("terminal"); navEnd(); stopped = true; lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
+window.addEventListener("pagehide", () => { navEmit("terminal"); navEnd(); stopped = true; removeRefreshVisibilityListener(); lifetime.abort(); clearInterval(timer); clearTimeout(selectionTimer); clearTimeout(readyTimer); });
 void refresh();
 timer = setInterval(() => { void refresh(); }, 1500);
 </script></body></html>`;
