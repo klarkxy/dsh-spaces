@@ -131,7 +131,7 @@ Spaces 在 `<DSH_HOME>/.dsh-spaces-control/logs/` 写入本地 JSONL 诊断日�
 
 日志不记录原始 HTTP 请求正文、聊天载荷、Cookie、bootstrap token、API Key 或本机绝对路径。CLI 失败保留经过脱敏和长度限制的输出；模型同步只记录路由/凭据名称、数量和校验结果。`http.request` 的 `request` 与 `operationId` 相同，可与后续 `request.*`、`job.*` 和阶段事件对照。
 
-级别固定为 `debug`（定位细节）、`info`（关键状态）、`error`（已观察到的失败）、`fault`（未捕获异常、异常退出或停机失败）。源码开发与测试默认保留全部四级；`npm run pack:plugin` 生成的发布包默认只保留 `info`、`error` 和 `fault`，调试子空间普通输出也不会进入发布包日志。
+级别固定为 `debug`（定位细节）、`info`（关键状态）、`error`（已观察到的失败）、`fault`（未捕获异常、异常退出或停机失败）。源码开发与测试默认保留全部四级；`pnpm run pack:plugin` 生成的发布包默认只保留 `info`、`error` 和 `fault`，调试子空间普通输出也不会进入发布包日志。
 
 当前文件超过 100 MiB，或从创建时起超过 7 天，在下一条日志前滚动为带 UTC 时间戳的归档。归档在写入时清理：保留最近 7 天，且每个日志源的归档总量最多 100 MiB（当前活动文件另计）。归档不会自动上传。日志写入失败只向标准错误说明，不重试、不改变原操作结果，也不触发恢复或重启。
 

@@ -118,7 +118,7 @@ function assertDistributionLogLevel() {
     join(PLUGIN_DIR, "lib", "supervisor", "index.js"),
   ]) {
     if (!readFileSync(file, "utf8").includes('DEFAULT_DIAGNOSTIC_LOG_LEVEL = true ? "info" : "debug"')) {
-      throw new Error(`Package logging must default to info; rebuild with npm run pack:plugin: ${file}`);
+      throw new Error(`Package logging must default to info; rebuild with pnpm run pack:plugin: ${file}`);
     }
   }
 }
@@ -205,6 +205,14 @@ function resolveNpmCli(nodeExe) {
   throw new Error("npm-cli.js not found. Use a Node install that ships npm, or put npm on PATH.");
 }
 
+function withoutNpmNodeLinker(env) {
+  const clean = { ...env };
+  for (const key of Object.keys(clean)) {
+    if (key.toLowerCase() === "npm_config_node_linker") delete clean[key];
+  }
+  return clean;
+}
+
 function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun, env = process.env }) {
   const args = [
     npmCli,
@@ -222,7 +230,7 @@ function runNpmPack(nodeExe, npmCli, packageDir, dest, { dryRun, env = process.e
     timeout: PACK_MS,
     windowsHide: true,
     env: {
-      ...env,
+      ...withoutNpmNodeLinker(env),
       npm_config_ignore_scripts: "true",
       npm_config_offline: "true",
       npm_config_fund: "false",
@@ -418,7 +426,7 @@ function preflightOnDisk() {
     if (!existsSync(join(BROWSER_DIR, rel))) missing.push(`packages/browser/${rel}`);
   }
   if (missing.length) {
-    throw new Error(`prebuilt entries missing (run npm run build:spaces from the repo root): ${missing.join(", ")}`);
+    throw new Error(`prebuilt entries missing (run pnpm run build:spaces from the repo root): ${missing.join(", ")}`);
   }
   const pluginStray = warnStrayTarballs(PLUGIN_DIR, "packages/plugin");
   const viewStray = warnStrayTarballs(VIEW_DIR, "packages/view-bridge");

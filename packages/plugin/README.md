@@ -26,9 +26,9 @@ dsh web
 
 The root package prepares the build during Git installation. Approve this plugin's build script if the host requests it; users do not need a local checkout or a manually built archive. In the ordinary DSH sidebar choose **工作台 / Workbench**, then **初始化 Spaces / Initialize Spaces**.
 
-No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1` in place of `dsh`. A prebuilt local archive from `npm run pack:plugin` remains an alternative. Keep the CLI's default `autoInstallPeers: false`: its shared SDK is supplied by the runtime, and installing another copy can split Cordis service identity.
+No global CLI is required if you use `pnpm dlx @deepseek-ai/dsh@0.2.2-rc.1` in place of `dsh`. A prebuilt local archive from `pnpm run pack:plugin` remains an alternative. Keep the CLI's default `autoInstallPeers: false`: its shared SDK is supplied by the runtime, and installing another copy can split Cordis service identity.
 
-For development, `npm run dev:web` builds and links the checkout into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. Existing development data stays; `npm run dev:link` only prepares the link. See [local linked development](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md#local-linked-development).
+For development, `pnpm run dev:web` builds and links the checkout into the custom `spaces-dev` profile at `.sandbox/dsh-link-home`, then starts the official Web app. Existing development data stays; `pnpm run dev:link` only prepares the link. See [local linked development](https://github.com/klarkxy/dsh-spaces/blob/main/docs/plugin-standard-install.md#local-linked-development).
 
 初始化使用当前 DSH Home。上面的安装步骤和初始化点击针对普通 Web：普通页面保持原有界面，只有用户点击初始化后才创建管理空间和启动监督程序；失败会显示原因，该次请求结束，下次打开不会自动补装或续接。再次进入时点击“进入工作台”。只需在一个已有 Web profile 安装完整入口，工作台新建的空间自动使用轻量 view-bridge。
 

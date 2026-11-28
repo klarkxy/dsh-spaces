@@ -2,6 +2,7 @@
   "name": "dsh-spaces",
   "version": "0.5.0",
   "private": true,
+  "packageManager": "pnpm@10.29.2",
   "license": "MIT",
   "description": "Spaces for DeepSeek Harness — switch DSH workspaces like Discord servers.",
   "repository": {
@@ -86,14 +87,14 @@
     "dev:link": "node scripts/dev-dsh-web.mjs --link-only",
     "dev:watch": "node scripts/dev-watch.mjs",
     "dev:web": "node scripts/dev-dsh-web.mjs",
-    "build": "npm run build:spaces",
+    "build": "pnpm run build:spaces",
     "build:spaces": "node scripts/build-spaces.mjs",
     "typecheck:spaces": "tsc --noEmit -p tsconfig.spaces.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "test:spaces": "tsx --test tests/spaces/spaces-core.test.ts tests/home/spaces-lock.test.ts tests/spaces/spaces-host.test.ts tests/maintenance/spaces-doctor.test.ts tests/products/compatible-dsh-cli.test.ts tests/profile/profile-settings.test.ts tests/profile/profile-component-alignment.test.ts tests/profile/profile-02-transition.test.ts tests/payload/component-cli-02.test.ts",
     "test:browser": "node --import tsx --test tests/native/browser-space.test.ts tests/native/browser-space-bus.test.ts tests/native/browser-base.test.ts",
     "test:llm": "tsx --test tests/llm/live-model-sync.test.ts tests/llm/main-model-sync.test.ts tests/llm/main-profile-dump.test.ts",
-    "test:blueprints": "npm run test:blueprint-plugin && tsx --test tests/blueprint/blueprint-codec.test.ts tests/blueprint/blueprint-domain.test.ts tests/blueprint/blueprint-package.test.ts tests/blueprint/blueprint-runtime.test.ts tests/blueprint/blueprint-v2-runtime.test.ts tests/blueprint/blueprint-v2-workbench.test.ts tests/blueprint/workbench-blueprint-contract.test.ts tests/blueprint/workbench-blueprint-file.test.ts tests/blueprint/workbench-blueprint-lifecycle.test.ts tests/blueprint/workbench-blueprint-store.test.ts tests/blueprint/workbench-blueprint.test.ts tests/blueprint/workbench-templates-ui.test.tsx tests/server/workbench-entry-clipboard.test.ts",
+    "test:blueprints": "pnpm run test:blueprint-plugin && tsx --test tests/blueprint/blueprint-codec.test.ts tests/blueprint/blueprint-domain.test.ts tests/blueprint/blueprint-package.test.ts tests/blueprint/blueprint-runtime.test.ts tests/blueprint/blueprint-v2-runtime.test.ts tests/blueprint/blueprint-v2-workbench.test.ts tests/blueprint/workbench-blueprint-contract.test.ts tests/blueprint/workbench-blueprint-file.test.ts tests/blueprint/workbench-blueprint-lifecycle.test.ts tests/blueprint/workbench-blueprint-store.test.ts tests/blueprint/workbench-blueprint.test.ts tests/blueprint/workbench-templates-ui.test.tsx tests/server/workbench-entry-clipboard.test.ts",
     "test:workbench": "tsx --test tests/message-bus/space-message-bus.test.ts tests/message-bus/space-message-supervisor.test.ts tests/home/home-lease.test.ts tests/maintenance/workbench-jobs.test.ts tests/maintenance/workbench-log.test.ts tests/supervisor/workbench-supervisor.test.ts tests/supervisor/startup-status.test.ts tests/supervisor/startup-early-failure.test.ts tests/maintenance/workbench-maintenance.test.ts tests/ui/workbench-ui.test.tsx tests/ui/space-switch.test.ts tests/products/workbench-plugin.test.ts tests/maintenance/q-let-it-crash.test.ts tests/maintenance/sample-plugins.test.ts tests/server/workbench-protocol.test.ts tests/server/workbench-endpoint-v2.test.ts tests/server/workbench-forwarding-v2.test.ts tests/products/workbench-startup-api.test.ts tests/products/workbench-startup-observation.test.ts tests/products/desktop-launch.test.ts tests/products/desktop-launch-plugin.test.ts tests/products/workbench-products.test.ts tests/products/space-recipe.test.ts tests/products/main-space-creator.test.ts tests/products/main-space-control.test.ts tests/products/dev-index-preinstall.test.ts tests/creator/creator-channel.test.ts tests/creator/creator-protocol.test.ts tests/creator/creator-git-install.test.ts tests/control/control-channel.test.ts tests/control/control-plan-ops.test.ts tests/control/ui-automation.test.ts tests/control/ui-engine-loader.test.ts tests/control/child-remote.test.ts tests/control/plugin-live-plan.test.ts tests/control/space-import-plan.test.ts tests/payload/component-payload.test.ts tests/payload/component-selection.test.ts tests/payload/dev-checkout.test.ts tests/payload/dev-checkout-bundled-deps.test.ts tests/products/supervisor-pack.test.ts tests/runtime/runtime-installation.test.ts tests/server/workbench-http-port.test.ts tests/supervisor/supervisor-reopen.test.ts tests/supervisor/supervisor-lifetime.test.ts tests/supervisor/host-exit-ipc.test.ts tests/supervisor/space-attention.test.ts tests/diagnostics/supervisor-diagnostics.test.ts tests/payload/component-cli.test.ts tests/native/native-desktop.test.ts tests/native/nav-diag.test.ts tests/native/nav-diag-portal.test.ts tests/native/native-desktop-startup.test.ts tests/home/service-restart.test.ts tests/native/portable-host.test.ts",
     "test:workbench:browser": "tsx --test tests/ui/workbench-ui-dom.test.ts tests/ui/fit-icon-browser.test.ts tests/ui/portable-host-dom.test.ts tests/ui/native-background-startup-dom.test.ts tests/control/ui-automation-browser.test.ts",
     "test:workbench:recovery": "tsx --test tests/maintenance/workbench-doctor.test.ts tests/runtime/cooperative-children.test.ts tests/maintenance/maintenance-responsiveness.test.ts tests/diagnostics/xp-compatibility.test.ts",
@@ -109,8 +110,8 @@
     "validate:lifecycle": "node scripts/verify-lifecycle.mjs",
     "validate:a8": "node --import tsx scripts/verify-a8.mjs",
     "setup:sandbox": "node scripts/setup-sandbox.mjs",
-    "build:blueprint": "npm run build --workspace @klarkxy/dsh-blueprint",
-    "test:blueprint-plugin": "npm test --workspace @klarkxy/dsh-blueprint",
+    "build:blueprint": "pnpm --filter @klarkxy/dsh-blueprint run build",
+    "test:blueprint-plugin": "pnpm --filter @klarkxy/dsh-blueprint test",
     "catalog:build": "node --import tsx scripts/plugin-catalog.mjs build",
     "catalog:check": "node --import tsx scripts/plugin-catalog.mjs check",
     "catalog:verify": "node --import tsx scripts/plugin-catalog.mjs verify",
@@ -121,7 +122,7 @@
     "@klarkxy/dsh-dev-index": "0.2.8"
   },
   "devDependencies": {
-    "@klarkxy/dsh-blueprint": "file:packages/blueprint",
+    "@klarkxy/dsh-blueprint": "workspace:*",
     "js-yaml": "^4.2.0",
     "semver": "7.7.2",
     "tar": "7.5.22",
@@ -176,9 +177,6 @@
     "typescript": "^5.9.2",
     "zod": "4.4.3"
   },
-  "workspaces": [
-    "packages/blueprint"
-  ],
   "engines": {
     "node": ">=24.21.0 <25.0.0 || >=26.0.0 <27.0.0"
   }

@@ -2,6 +2,10 @@
 
 > 只列当前仍需跟踪的事项。完整日期日志和已关闭条目在 [tasks/archive](archive/README.md)，不要在这里追加长日志。
 
+## 2026-11-27 仓库 pnpm 迁移
+
+- [x] 仓库开发、CI 与打包预检迁移到 pnpm 10.29.2；蓝图包使用 workspace 链接，Windows CI 在 install 前规范化 TEMP，npm 子进程不继承 pnpm 的 node-linker。
+
 ## 2026-11-27 故障范围收窄：portal 可见时 deadline 与子空间独立渲染进程
 
 背景：2026-11-27 18:38 Desktop 门户 `state-request` / `portal/request-deadline`（HTTP 200 但响应体未读完），发生在 Windows 息屏（Kernel-Power 566）后约 12 秒；Supervisor 与各空间进程均存活。

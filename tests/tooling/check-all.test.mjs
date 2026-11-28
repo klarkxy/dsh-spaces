@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { assertCheckTempRoot, createCheckEnvironment } from '../../scripts/check-all.mjs';
+import { assertCheckTempRoot, createCheckEnvironment, resolvePnpmCommand } from '../../scripts/check-all.mjs';
 
 const fixtures = [];
 function fixture() {
@@ -53,4 +53,19 @@ test('external temp creates fresh isolated Home and temp variables without mutat
   assert.equal(first.env.pnpm_config_cache_dir, join(first.directory, 'pnpm-cache'));
   assert.equal(first.env.DSH_TEST_CALLER_ENV, 'caller-value');
   assert.deepEqual(env, { DSH_TEST_CALLER_ENV: 'caller-value', DSH_HOME: 'caller-home' });
+});
+
+test('resolvePnpmCommand resolves DSH_TEST_PNPM_CJS and npm_execpath pnpm.cjs', () => {
+  const { base } = fixture();
+  const pnpmCjs = join(base, 'pnpm.cjs');
+  writeFileSync(pnpmCjs, '// pnpm\n');
+  assert.deepEqual(resolvePnpmCommand({ nodeExe: 'node-bin', env: { DSH_TEST_PNPM_CJS: pnpmCjs } }), {
+    command: 'node-bin',
+    prefixArgs: [resolve(pnpmCjs)],
+  });
+  assert.deepEqual(resolvePnpmCommand({ nodeExe: 'node-bin', env: { npm_execpath: pnpmCjs } }), {
+    command: 'node-bin',
+    prefixArgs: [resolve(pnpmCjs)],
+  });
+  assert.throws(() => resolvePnpmCommand({ nodeExe: 'node-bin', env: { DSH_TEST_PNPM_CJS: join(base, 'missing.cjs') } }), /DSH_TEST_PNPM_CJS is missing/);
 });
